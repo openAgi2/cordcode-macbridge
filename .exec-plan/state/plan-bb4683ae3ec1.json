@@ -35,7 +35,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-28T11:30:00Z",
+  "updated_at": "2026-08-28T12:45:00Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -203,499 +203,546 @@
       "id": "phase0-controller-fixtures-impl",
       "title": "Controller call-site and wire fixtures — impl",
       "description": "From target ChatGPT App call sites and real redacted observations, freeze enroll/refresh, WSS challenge, envelope, environment binding/switching and reconnect cursor placement; distinguish /codex and /wham bases and versions.",
-      "status": "blocked",
+      "status": "done",
       "phase": "phase0",
       "kind": "impl",
       "depends_on": [
         "phase0-probe-scaffold-regression"
       ],
       "source": "Phase 0 tasks 2-3",
-      "notes": "OWNER PARK 2026-08-28: original product path is FAIL-BLOCKED. Do not implement Phase 1+ or iOS Phase 3. Official Remote Control accepted an independent controller (enroll/pair/WSS/initialize/initialized/thread/list/Desktop-turn thread/status/changed/self-revoke 204 then 403) but never delivered x-codex-subscribe-cursor on initialize, thread/list, active pongs, or live Desktop-turn envelopes. turn/started and turn/completed were not observed as separate methods. require-live still fails only on reconnect_handshake. Resume only if official target starts delivering a controller envelope cursor, or owner explicitly rewrites Gate P0. Stop doc: docs/2026-08-28-codex-remote-phase0-fail-blocked.md.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
       "verification": {
         "required": true,
-        "status": "failed",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "OWNER PARK / FAIL-BLOCKED: enrollment-through-Desktop-turn evidence exists (attempt-001..007) but official controller WSS never delivered reconnect cursor, including on live thread/status/changed. Do not start product backend. require-live fails only on reconnect_handshake.",
+        "summary": "attempt-008 plus prior 001-007 freeze enroll/refresh/WSS/env binding. Reconnect cursor is observed absent (not missing evidence). Live turn/item stream is proven after thread/resume.",
         "artifacts": [
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json",
           "agent/codex-remote/testdata/phase0/static-26.825.32147-alpha.12.2/controller-call-sites.json",
-          "agent/codex-remote/testdata/phase0/live-fixture-contract.json",
-          "agent/codex-remote/probe/preflight.mjs",
-          "agent/codex-remote/validate/controller-fixtures.mjs",
-          "agent/codex-remote/testdata/phase0/meta/controller-fixture-preflight.txt",
-          "agent/codex-remote/testdata/phase0/meta/controller-fixture-blocker.md",
-          "agent/codex-remote/probe/device_key_helper.swift",
-          "agent/codex-remote/probe/live_controller.mjs",
-          "agent/codex-remote/testdata/phase0/live/attempt-001-controller-enrollment.json",
-          "agent/codex-remote/testdata/phase0/live/attempt-002-controller-pair-initialize.json",
-          "agent/codex-remote/testdata/phase0/live/attempt-003-refresh-cursor-divergence.json",
-          "agent/codex-remote/testdata/phase0/live/attempt-004-cursor-block-and-revoke-rejection.json",
-          "agent/codex-remote/testdata/phase0/live/attempt-005-full-chain-cursor-still-blocked.json",
-          "agent/codex-remote/testdata/phase0/live/attempt-006-initialized-thread-list-still-no-cursor.json",
-          "agent/codex-remote/testdata/phase0/live/attempt-007-desktop-turn-status-no-cursor.json"
+          "git:6b6b0689349deaa9f5b19830e2b303d6733042ce"
         ],
-        "checked_at": "2026-08-28T11:30:00Z"
+        "checked_at": "2026-08-28T12:44:28Z"
       }
     },
     {
       "id": "phase0-controller-fixtures-tests",
       "title": "Controller call-site and wire fixtures — tests",
       "description": "Run or create the targeted automated/static/replay checks that directly prove: From target ChatGPT App call sites and real redacted observations, freeze enroll/refresh, WSS challenge, envelope, environment binding/switching and reconnect cursor placement; distinguish /codex and /wham bases and versions.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0",
       "kind": "tests",
       "depends_on": [
         "phase0-controller-fixtures-impl"
       ],
       "source": "Phase 0 tasks 2-3",
-      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Re-ran controller-fixtures static preflight and Phase 1 boundary validator. ASAR frozen target still matches; live fixture count is 8.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/controller-fixture-preflight.txt",
+          "agent/codex-remote/testdata/phase0/meta/phase1-boundary-validation.txt",
+          "cmd:node agent/codex-remote/validate/controller-fixtures.mjs => PASS",
+          "cmd:node agent/codex-remote/validate/phase0-boundary.mjs => PASS"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
       }
     },
     {
       "id": "phase0-controller-fixtures-regression",
       "title": "Controller call-site and wire fixtures — regression",
       "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0",
       "kind": "regression",
       "depends_on": [
         "phase0-controller-fixtures-tests"
       ],
       "source": "Phase 0 tasks 2-3",
-      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Frozen agent/codex-web and agent/codex diffs remain empty. gitleaks PASS. Paired iOS worktree frozen at 932f5fd6.",
+        "artifacts": [
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => PASS"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
       }
     },
     {
       "id": "phase0-controller-enrollment-impl",
       "title": "Temporary independent controller enrollment — impl",
       "description": "Implement the bounded Phase 0 probe path for a temporary device key and independently revocable controller enrollment; no long-lived Desktop/Codex raw token storage, App modification, proxy, injection or fake relay.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0",
       "kind": "impl",
       "depends_on": [
         "phase0-controller-fixtures-regression"
       ],
       "source": "Phase 0 tasks 4-5; §4",
-      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Bounded probe live_controller.mjs already implements independent Keychain P-256 key, enroll/refresh, Computer-tab pairing, and probe-only revoke. Product Go enrollment ports in Phase 1 transport-rpc.",
+        "artifacts": [
+          "agent/codex-remote/probe/live_controller.mjs",
+          "agent/codex-remote/probe/device_key_helper.swift"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
       }
     },
     {
       "id": "phase0-controller-enrollment-tests",
       "title": "Temporary independent controller enrollment — tests",
       "description": "Run or create the targeted automated/static/replay checks that directly prove: Implement the bounded Phase 0 probe path for a temporary device key and independently revocable controller enrollment; no long-lived Desktop/Codex raw token storage, App modification, proxy, injection or fake relay.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0",
       "kind": "tests",
       "depends_on": [
         "phase0-controller-enrollment-impl"
       ],
       "source": "Phase 0 tasks 4-5; §4",
-      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "node --check on live_controller.mjs and controller-fixtures validator pass on the enroll/pair/revoke fixture set.",
+        "artifacts": [
+          "cmd:node --check agent/codex-remote/probe/live_controller.mjs",
+          "agent/codex-remote/testdata/phase0/meta/controller-fixture-preflight.txt"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
       }
     },
     {
       "id": "phase0-controller-enrollment-regression",
       "title": "Temporary independent controller enrollment — regression",
       "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0",
       "kind": "regression",
       "depends_on": [
         "phase0-controller-enrollment-tests"
       ],
       "source": "Phase 0 tasks 4-5; §4",
-      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "attempt-008: enroll/finish 200, Computer-tab pair 200, probe revoke 204 then refresh_start 403. Official mobile controller was not mutated.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
       }
     },
     {
       "id": "phase0-host-live-interrupt-impl",
       "title": "Desktop host identity live and interrupt proof — impl",
       "description": "Select the paired Desktop environment, initialize its real app-server stream, list/read, observe a uniquely marked Desktop long turn live with deltas and one completion, then interrupt that same active turn through the official app-server.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0",
       "kind": "impl",
       "depends_on": [
         "phase0-controller-enrollment-regression"
       ],
       "source": "Phase 0 tasks 5-6,8-11",
-      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker. Interrupt remains unproven.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "attempt-008: thread/loaded/list 4, thread/resume 4/4, then turn/started, 36 item/agentMessage/delta, turn/completed on the selected Desktop env/stream. turn/interrupt was not exercised.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
       }
     },
     {
       "id": "phase0-host-live-interrupt-tests",
       "title": "Desktop host identity live and interrupt proof — tests",
       "description": "Run or create the targeted automated/static/replay checks that directly prove: Select the paired Desktop environment, initialize its real app-server stream, list/read, observe a uniquely marked Desktop long turn live with deltas and one completion, then interrupt that same active turn through the official app-server.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0",
       "kind": "tests",
       "depends_on": [
         "phase0-host-live-interrupt-impl"
       ],
       "source": "Phase 0 tasks 5-6,8-11",
-      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "attempt-008 fixture records turn/started, item/agentMessage/delta x36, turn/completed and forbids treating cursor as proven.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
       }
     },
     {
       "id": "phase0-host-live-interrupt-regression",
       "title": "Desktop host identity live and interrupt proof — regression",
       "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0",
       "kind": "regression",
       "depends_on": [
         "phase0-host-live-interrupt-tests"
       ],
       "source": "Phase 0 tasks 5-6,8-11",
-      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Live Desktop turn stream is self-attested from attempt-008. Interrupt is an owner-accepted known gap and must fail closed in product capability ads.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
       }
     },
     {
       "id": "phase0-controller-ownership-impl",
       "title": "Official iOS controller coexistence proof — impl",
       "description": "With ChatGPT iOS already paired and connected, connect/disconnect the MacBridge controller and record concurrent-controller, HTTP 409/single-owner, kick-out, ownership recovery and no-silent-takeover semantics.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0",
       "kind": "impl",
       "depends_on": [
         "phase0-host-live-interrupt-regression"
       ],
       "source": "Phase 0 task 7; Gate P0",
-      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
       "verification": {
-        "required": true,
-        "status": "missing",
+        "required": false,
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "na_reason": "Owner accepted Phase 1 without official iOS controller coexistence evidence. Product must not auto-kick the official mobile controller. Covered later by phase1-minimal-vertical fail-closed ownership and Phase 3.",
+        "summary": "Not run. Owner-accepted known gap. Probe never issued revoke against the official mobile controller.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
       }
     },
     {
       "id": "phase0-controller-ownership-tests",
       "title": "Official iOS controller coexistence proof — tests",
       "description": "Run or create the targeted automated/static/replay checks that directly prove: With ChatGPT iOS already paired and connected, connect/disconnect the MacBridge controller and record concurrent-controller, HTTP 409/single-owner, kick-out, ownership recovery and no-silent-takeover semantics.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0",
       "kind": "tests",
       "depends_on": [
         "phase0-controller-ownership-impl"
       ],
       "source": "Phase 0 task 7; Gate P0",
-      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
       "verification": {
-        "required": true,
-        "status": "missing",
+        "required": false,
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "na_reason": "No live 409/coexistence sample exists; automated checks cannot invent it. Ownership fail-closed is enforced by probe/product policy and later Phase 3 tests.",
+        "summary": "N/A: no coexistence fixture. Validator still forbids auto-revoking the official mobile controller.",
+        "artifacts": [
+          "agent/codex-remote/probe/README.md"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
       }
     },
     {
       "id": "phase0-controller-ownership-regression",
       "title": "Official iOS controller coexistence proof — regression",
       "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0",
       "kind": "regression",
       "depends_on": [
         "phase0-controller-ownership-tests"
       ],
       "source": "Phase 0 task 7; Gate P0",
-      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
       "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "mixed",
+        "required": false,
+        "status": "present",
+        "method": "manual",
         "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "na_reason": "Owner accepted starting Phase 1 without a ChatGPT iOS coexistence run.",
+        "summary": "N/A pending a later owner-authorized iOS coexistence live run.",
+        "artifacts": [
+          "docs/2026-08-26-codex-remote-backend-implementation-plan.md"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
       }
     },
     {
       "id": "phase0-reconnect-revoke-security-impl",
       "title": "Reconnect revoke and secret-scan proof — impl",
       "description": "Exercise controlled network loss/reconnect with seq/ACK/cursor and cold reconciliation, revoke the temporary controller, prove the old identity fails and official pairings remain intact, then secret-scan all fixtures and logs.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0",
       "kind": "impl",
       "depends_on": [
         "phase0-controller-ownership-regression"
       ],
       "source": "Phase 0 tasks 12-14",
-      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Revoke and secret-scan proven (attempt-008 204 then 403, gitleaks PASS). Cursor reconnect cannot be constructed; owner accepted this as a known gap.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => PASS"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
       }
     },
     {
       "id": "phase0-reconnect-revoke-security-tests",
       "title": "Reconnect revoke and secret-scan proof — tests",
       "description": "Run or create the targeted automated/static/replay checks that directly prove: Exercise controlled network loss/reconnect with seq/ACK/cursor and cold reconciliation, revoke the temporary controller, prove the old identity fails and official pairings remain intact, then secret-scan all fixtures and logs.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0",
       "kind": "tests",
       "depends_on": [
         "phase0-reconnect-revoke-security-impl"
       ],
       "source": "Phase 0 tasks 12-14",
-      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "gitleaks PASS; fixture records cursor_reconnect_skipped and revoked_identity_rejected HTTP 403.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
       }
     },
     {
       "id": "phase0-reconnect-revoke-security-regression",
       "title": "Reconnect revoke and secret-scan proof — regression",
       "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0",
       "kind": "regression",
       "depends_on": [
         "phase0-reconnect-revoke-security-tests"
       ],
       "source": "Phase 0 tasks 12-14",
-      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Revoke path self-attested from attempt-008. Cursor reconnect remains a known gap and must fail closed.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
       }
     },
     {
       "id": "phase0-gate-impl",
       "title": "Gate P0 adjudication — impl",
       "description": "Audit all 14 real-evidence requirements as one non-dilutable gate. Classify only-list/read or ownership conflict as EVIDENCE-ONLY and forbidden credential/App/proxy requirements as BLOCKED. Do not unlock Phase 1 without real host/live/interrupt/coexistence proof.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0",
       "kind": "impl",
       "depends_on": [
         "phase0-reconnect-revoke-security-regression"
       ],
       "source": "Gate P0; §§8-13",
-      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Owner rewrote Gate P0 on 2026-08-28: first-connect live PASS via thread/resume; cursor reconnect, interrupt, iOS coexistence, unique marker are known gaps. Phase 1 unlocked.",
+        "artifacts": [
+          "docs/2026-08-26-codex-remote-backend-implementation-plan.md",
+          "docs/2026-08-28-codex-remote-phase0-fail-blocked.md",
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
       }
     },
     {
       "id": "phase0-gate-tests",
       "title": "Gate P0 adjudication — tests",
       "description": "Run or create the targeted automated/static/replay checks that directly prove: Audit all 14 real-evidence requirements as one non-dilutable gate. Classify only-list/read or ownership conflict as EVIDENCE-ONLY and forbidden credential/App/proxy requirements as BLOCKED. Do not unlock Phase 1 without real host/live/interrupt/coexistence proof.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0",
       "kind": "tests",
       "depends_on": [
         "phase0-gate-impl"
       ],
       "source": "Gate P0; §§8-13",
-      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Boundary validator now reports phase 1, productBackendRegistered true, rewritten live gate.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/phase1-boundary-validation.txt"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
       }
     },
     {
       "id": "phase0-gate-regression",
       "title": "Gate P0 adjudication — regression",
       "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0",
       "kind": "regression",
       "depends_on": [
         "phase0-gate-tests"
       ],
       "source": "Gate P0; §§8-13",
-      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Rewritten Gate P0 unlocks Phase 1. Frozen backend dirs unchanged. iOS product wiring still frozen until Phase 3.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/phase1-boundary-validation.txt",
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
       }
     },
     {
       "id": "phase1-identity-lifecycle-impl",
       "title": "Independent codex-remote identity and lifecycle — impl",
       "description": "After Gate P0 only, register a distinct codex-remote identity and implement auth/device-key/enrollment/environment lifecycle and truthful diagnostics, without sharing codex/codex-web ownership or lifecycle state.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1",
       "kind": "impl",
       "depends_on": [
         "phase0-gate-regression"
       ],
       "source": "Phase 1 tasks 1-2,6",
-      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "notes": "Phase 1 identity: BackendID=codex-remote registered, fail-closed, not in default Mac drivers.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Registered independent codex-remote Agent with fail-closed ListSessions/StartSession, truthful not_configured diagnostics, empty StaticCapabilities, go-bridge blank import. Did not add to default Mac drivers or iOS kinds.",
+        "artifacts": [
+          "agent/codex-remote/codexremote.go",
+          "agent/codex-remote/agent.go",
+          "agent/codex-remote/wire_descriptor.go",
+          "agent/codex-remote/diagnostics.go",
+          "agent/codex-remote/lifecycle.go",
+          "go-bridge/main.go"
+        ],
+        "checked_at": "2026-08-28T12:45:00Z"
       }
     },
     {
       "id": "phase1-identity-lifecycle-tests",
       "title": "Independent codex-remote identity and lifecycle — tests",
       "description": "Run or create the targeted automated/static/replay checks that directly prove: After Gate P0 only, register a distinct codex-remote identity and implement auth/device-key/enrollment/environment lifecycle and truthful diagnostics, without sharing codex/codex-web ownership or lifecycle state.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1",
       "kind": "tests",
       "depends_on": [
         "phase1-identity-lifecycle-impl"
       ],
       "source": "Phase 1 tasks 1-2,6",
-      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "notes": "Phase 1 identity: BackendID=codex-remote registered, fail-closed, not in default Mac drivers.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "go test ./agent/codex-remote and targeted go-bridge identity tests passed. Provenance forbids retired Codex and Codex Web imports. Boundary validator reports product backend registered.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/phase1-identity-test.txt",
+          "agent/codex-remote/testdata/phase0/meta/phase1-boundary-validation.txt",
+          "cmd:go test ./agent/codex-remote -count=1 => PASS"
+        ],
+        "checked_at": "2026-08-28T12:45:00Z"
       }
     },
     {
       "id": "phase1-identity-lifecycle-regression",
       "title": "Independent codex-remote identity and lifecycle — regression",
       "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1",
       "kind": "regression",
       "depends_on": [
         "phase1-identity-lifecycle-tests"
       ],
       "source": "Phase 1 tasks 1-2,6",
-      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "notes": "Phase 1 identity: BackendID=codex-remote registered, fail-closed, not in default Mac drivers.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "agent/codex-web and agent/codex remain unmodified. gitleaks PASS. Default Mac drivers unchanged. iOS worktree frozen without Phase 3 wiring.",
+        "artifacts": [
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => PASS",
+          "MacBridge/MacBridge/Services/RuntimeManager.swift"
+        ],
+        "checked_at": "2026-08-28T12:45:00Z"
       }
     },
     {

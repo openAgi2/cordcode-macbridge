@@ -1,7 +1,7 @@
 # codex-remote Backend 实施方案（ChatGPT Desktop Remote Control 接力）
 
 - 日期：2026-08-26
-- 状态：**2026-08-28 Phase 0 Gate FAIL-BLOCKED。按原门禁停止产品 backend / iOS 接线。不得把本方案当可实施队列继续 `start`。**
+- 状态：**2026-08-28 Owner 改写 Gate P0：接受无 cursor 的首连 live 流，进入 Phase 1。cursor 断线续传 / interrupt / 官方 iOS controller 共存仍是已知缺口，产品路径 fail-closed，不得广告为已完成。**
 - 停工说明：[2026-08-28-codex-remote-phase0-fail-blocked.md](2026-08-28-codex-remote-phase0-fail-blocked.md)
 - 目标仓库：`cordcode-macbridge`，后续涉及 `cordcode-ios`
 - 相关既有方案：[2026-08-21-codex-web-backend-design.md](2026-08-21-codex-web-backend-design.md)
@@ -583,22 +583,27 @@ controller，判 `EVIDENCE-ONLY` 并重新裁决产品语义，不得把“先�
 读取并长期冒用 Desktop 原始 token、修改 App 包或代理全部 ChatGPT 流量，判 `BLOCKED`，重新打开
 认证/宿主设计。
 
-> [!CAUTION]
-> **2026-08-28 实测结案（FAIL-BLOCKED）。** 冻结目标 ChatGPT Desktop `26.825.32147` /
-> Codex `0.150.0-alpha.12.2` 上，独立 controller 的 enrollment、电脑标签配对、WSS、
-> `initialize`/`initialized`、`thread/list`、Desktop 发消息后的 `thread/status/changed`、
-> 探针自 revoke（204→403）均已取证。官方 **从未** 在 controller WSS envelope 上交付
-> reconnect `cursor`（含 initialize、thread/list、active pong、Desktop-turn live 帧），
-> 因此任务 3/12 的 `x-codex-subscribe-cursor` 无法真实构造；任务 10 也未观察到
-> `turn/started` / item delta / `turn/completed`。Owner 确认按本门禁停止。后续 agent
-> **不得进入 Phase 1–5**，不得注册 backend、不得接 iOS，除非官方 target 真的给出
-> cursor，或 owner 明确改写本 Gate。证据见
-> [2026-08-28-codex-remote-phase0-fail-blocked.md](2026-08-28-codex-remote-phase0-fail-blocked.md)
-> 与 `agent/codex-remote/testdata/phase0/live/attempt-001`…`attempt-007`。
+> [!IMPORTANT]
+> **2026-08-28 Owner 改写 Gate P0。** 冻结目标 ChatGPT Desktop `26.825.32147` /
+> Codex `0.150.0-alpha.12.2`。attempt-008 证明：独立 controller 在
+> `thread/resume(excludeTurns)` 之后能收到 Desktop 当前线程的 `turn/started`、
+> `item/agentMessage/delta`、`turn/completed`。官方 **仍然不** 在 controller WSS
+> envelope 上交付 reconnect `cursor`。Owner 明确开始 Phase 1，接受无 cursor 的
+> 首连 live 流，并把下列项列为已知缺口（产品 fail-closed，不得广告）：
+>
+> - 任务 6 唯一标记 thread（partial：env/stream 已绑定，未盖探针标记）
+> - 任务 7 官方 iOS controller 共存 / HTTP 409
+> - 任务 11 `turn/interrupt`
+> - 任务 12 seq/ACK/cursor 重连
+>
+> 证据见 [2026-08-28-codex-remote-phase0-fail-blocked.md](2026-08-28-codex-remote-phase0-fail-blocked.md)
+> 与 `agent/codex-remote/testdata/phase0/live/attempt-001`…`attempt-008`。
+> 不得合入 `main`，不得提前做 Phase 3 iOS 接线，除非后续任务明确开始。
 
 ### Phase 1：codex-remote 骨架与最小 app-server Transport
 
-> 2026-08-28：Phase 0 Gate 未过，本节不得实施。
+> 2026-08-28：Owner 已改写 Gate P0，本节可实施。已知缺口见上，不得在 diagnostics
+> 或 capability 中广告 interrupt / cursor 重连 / iOS 共存。
 
 1. 从空目录注册独立 backend identity；
 2. 实现 auth/device key/enrollment/environment/controller WSS；

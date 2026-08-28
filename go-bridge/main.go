@@ -20,6 +20,7 @@ import (
 	// Register cc-connect agents via init()
 	_ "github.com/openAgi2/cordcode-macbridge/agent/claudecode"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/codex"
+	_ "github.com/openAgi2/cordcode-macbridge/agent/codex-remote"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/codex-web"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/dsh"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/dsh-web"

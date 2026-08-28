@@ -1,5 +1,15 @@
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
 
+## 2026-08-28 Codex Remote Phase 1 已开始（identity）
+
+Owner 改写 Gate P0 后开工。`agent/codex-remote` 注册独立 `BackendID=codex-remote`，
+ListSessions/StartSession fail-closed（`not_configured`），capability 为空，未加入
+Mac 默认 drivers，也未接 iOS。go-bridge `main.go` 已 blank-import。禁止 import
+退役 Codex / 共享 daemon 的 Codex Web backend。
+
+下一单元：`phase1-transport-rpc`（controller WSS + app-server Transport + 最小
+rpc.go）。已知缺口仍 fail-closed：cursor 重连、interrupt、官方 iOS 共存。
+
 ## 2026-08-28 Codex Remote：thread/resume 后 live turn 流通了
 
 Owner 授权「不要再等 cursor，对 Desktop 当前 thread 发 `thread/resume`」。attempt-008

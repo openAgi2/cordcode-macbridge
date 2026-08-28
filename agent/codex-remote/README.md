@@ -1,6 +1,6 @@
 # codex-remote Phase 0 evidence probe
 
-Status: **Phase 0 only.** Live turn stream proven after `thread/resume` (attempt-008). Cursor reconnect still unproven. **product backend not registered.** Original cursor **Gate P0 not passed.** Do not continue Phase 1 until the owner explicitly reopens it.
+Status: **Phase 1 in progress.** Live turn stream proven after `thread/resume` (attempt-008). Owner rewrote Gate P0 to accept first-connect live without cursor. **product backend registered** as `codex-remote`. Cursor reconnect, interrupt and official iOS controller coexistence remain known gaps and must fail closed. Original cursor-only **Gate P0 not passed**; the rewritten first-connect live gate is what unlocked Phase 1.
 
 Stop / resume document: `docs/2026-08-28-codex-remote-phase0-fail-blocked.md`.
 
@@ -38,7 +38,7 @@ Standalone app-server, fake relay, rollout/JSONL/SQLite/file tail, same-account 
 | 13 | Revoke this controller; old identity fails and official pairings remain intact | LIVE PARTIAL: probe-only DELETE 204 then refresh/start 403; Desktop “Unknown computer” disappears after revoke as designed |
 | 14 | Secret scan all fixtures and logs | LIVE artifacts scanned; `gitleaks` PASS |
 
-Owner-authorized resume-live-stream question is **PASS**. Original cursor-reconnect Gate remains **FAIL-BLOCKED**. Do not treat remaining UNVERIFIED rows, or this live stream, as a reason to start the product backend without an explicit Phase 1 go-ahead.
+Owner-authorized resume-live-stream question is **PASS**. Original cursor-reconnect Gate remains a known gap. Owner started Phase 1 on 2026-08-28. Do not advertise interrupt, cursor reconnect, or official iOS controller coexistence. Do not merge to `main`.
 
 The following requirements are `BLOCKED`:
 

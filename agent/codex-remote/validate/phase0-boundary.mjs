@@ -10,7 +10,7 @@ const repoRoot = path.resolve(path.dirname(scriptPath), "../../..");
 const remoteRoot = path.join(repoRoot, "agent/codex-remote");
 const frozenStart = "224a632e032aea913c78223b7d2231ffa78f39db";
 const pairedIOS = "/Users/jacklee/Projects/cordcode-ios-codex-remote";
-const pairedIOSCommit = "d0762cb9a05997b615ef4589f39afad8f4b4db04";
+const pairedIOSCommit = "932f5fd61fc029aa63db333e3cb6d2eb6889ea38";
 
 function fail(message) {
   throw new Error(message);
@@ -38,16 +38,18 @@ function walk(directory) {
 }
 
 const allowedTopLevel = new Set(["README.md", "probe", "testdata", "validate"]);
+const allowedTopLevelFile = (name) =>
+  allowedTopLevel.has(name) || /\.(go|mod|sum)$/u.test(name);
 for (const entry of readdirSync(remoteRoot)) {
-  if (!allowedTopLevel.has(entry)) {
-    fail(`Phase 0 top-level entry is not allowed: ${entry}`);
+  if (!allowedTopLevelFile(entry)) {
+    fail(`codex-remote top-level entry is not allowed: ${entry}`);
   }
 }
 
 const readme = readFileSync(path.join(remoteRoot, "README.md"), "utf8");
 for (const required of [
-  "Phase 0 only",
-  "product backend not registered",
+  "Phase 1 in progress",
+  "product backend registered",
   "Gate P0 not passed",
   "ChatGPT Desktop private app-server",
   "independently enrolled MacBridge controller",
@@ -65,13 +67,17 @@ for (let gateRow = 1; gateRow <= 14; gateRow += 1) {
 
 const codeExtensions = new Set([".go", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".swift", ".rs", ".sh"]);
 const forbiddenCodePatterns = [
-  ["core.RegisterAgent", /core\.RegisterAgent/u],
-  ["legacy codex import", /(?:github\.com\/[^"'\s]+\/)?agent\/codex(?:["'\s]|$)/u],
-  ["codex-web import", /(?:github\.com\/[^"'\s]+\/)?agent\/codex-web(?:["'\s]|$)/u],
-  ["runtime driver registration", /register(?:ed)?Drivers?.*codex-remote/iu],
+  ["legacy codex import", /github\.com\/openAgi2\/cordcode-macbridge\/agent\/codex(?:\/|")/u],
+  ["codex-web import", /github\.com\/openAgi2\/cordcode-macbridge\/agent\/codex-web(?:\/|")/u],
 ];
 for (const file of walk(remoteRoot)) {
-  if (!file.startsWith(path.join(remoteRoot, "probe")) || !codeExtensions.has(path.extname(file))) {
+  if (!codeExtensions.has(path.extname(file))) {
+    continue;
+  }
+  if (file.startsWith(path.join(remoteRoot, "probe")) && /core\.RegisterAgent/u.test(readFileSync(file, "utf8"))) {
+    fail(`core.RegisterAgent found in probe ${path.relative(repoRoot, file)}`);
+  }
+  if (/_test\.(go|js|mjs|ts)$/u.test(file)) {
     continue;
   }
   const contents = readFileSync(file, "utf8");
@@ -108,9 +114,9 @@ console.log(
   JSON.stringify(
     {
       result: "PASS",
-      phase: 0,
-      productBackendRegistered: false,
-      gateP0Passed: false,
+      phase: 1,
+      productBackendRegistered: true,
+      gateP0Passed: "first-connect-live-with-known-gaps",
       allowedTopLevel: [...allowedTopLevel].sort(),
       frozenBackendDiff: "clean",
       pairedIOS: "frozen-clean",
