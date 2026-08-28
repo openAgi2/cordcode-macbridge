@@ -35,7 +35,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-28T09:33:04Z",
+  "updated_at": "2026-08-28T09:35:43Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -203,21 +203,21 @@
       "id": "phase0-controller-fixtures-impl",
       "title": "Controller call-site and wire fixtures — impl",
       "description": "From target ChatGPT App call sites and real redacted observations, freeze enroll/refresh, WSS challenge, envelope, environment binding/switching and reconnect cursor placement; distinguish /codex and /wham bases and versions.",
-      "status": "blocked",
+      "status": "in_progress",
       "phase": "phase0",
       "kind": "impl",
       "depends_on": [
         "phase0-probe-scaffold-regression"
       ],
       "source": "Phase 0 tasks 2-3",
-      "notes": "EVIDENCE-ONLY: exact target call sites, live redaction contract, device-key addon ABI and non-mutating auth/OAuth preflight are frozen and pass. BLOCKED on owner authorization for real account token use, PKCE step-up, temporary device key, enrollment/WSS/revoke traffic and ChatGPT iOS coexistence observation; no full backend or iOS product wiring before Gate P0.",
+      "notes": "Owner authorized the bounded real-account Phase 0 probe at 2026-08-28T09:35:43Z and attested ChatGPT iOS is connected to the current Mac. Exact target call sites, live redaction contract, device-key addon ABI and non-mutating auth/OAuth preflight are frozen. No full backend or iOS product wiring before Gate P0.",
       "verification": {
         "required": true,
-        "status": "failed",
+        "status": "missing",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "Automatic static and non-mutating preparation passed, but --require-live fails at the intended boundary because no real redacted controller fixture exists. The item cannot be marked implemented without owner-authorized live account/controller evidence.",
+        "summary": "Owner authorization resolved the external blocker; real capture is now in progress and remains unproven until redacted artifacts validate.",
         "artifacts": [
           "agent/codex-remote/testdata/phase0/static-26.825.32147-alpha.12.2/controller-call-sites.json",
           "agent/codex-remote/testdata/phase0/live-fixture-contract.json",
@@ -226,7 +226,7 @@
           "agent/codex-remote/testdata/phase0/meta/controller-fixture-preflight.txt",
           "agent/codex-remote/testdata/phase0/meta/controller-fixture-blocker.md"
         ],
-        "checked_at": "2026-08-28T09:33:04Z"
+        "checked_at": "2026-08-28T09:35:43Z"
       }
     },
     {

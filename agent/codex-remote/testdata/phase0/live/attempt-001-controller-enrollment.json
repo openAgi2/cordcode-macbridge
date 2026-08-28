@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "classification": "LIVE-REDACTED-OBSERVATION-PARTIAL",
+  "gate_effect": "evidence-only",
+  "target": {
+    "chatgpt_desktop_version": "26.825.32147",
+    "chatgpt_bundle_version": "7303",
+    "embedded_codex_version": "codex-cli 0.150.0-alpha.12.2",
+    "controller_protocol_version": 3
+  },
+  "metadata": {
+    "captured_at": "2026-08-28T09:35:43Z",
+    "capture_purpose": "Prove independent controller enrollment and discover the first real environment-binding boundary while ChatGPT iOS remains connected.",
+    "source_classification": "target binary plus official live service",
+    "operator_attestation": "Owner authorized the bounded real-account probe and attested ChatGPT iOS was connected to the current Mac before the attempt.",
+    "redaction_procedure": "Kept all credentials, codes, signatures, raw identifiers and raw bodies in process memory; retained only status codes, field names, counts, pseudonyms and cleanup outcomes.",
+    "secret_scan_command": "gitleaks dir --redact --config .gitleaks.toml .",
+    "secret_scan_result": "PASS: no leaks found after fixture and probe write",
+    "cleanup_result": "Probe controller DELETE returned HTTP 204 and the independently created key was deleted successfully."
+  },
+  "observations": [
+    {
+      "kind": "auth_helper",
+      "result": "pass",
+      "detail": "Embedded official app-server returned ChatGPT auth to probe memory only; no credential was printed or persisted."
+    },
+    {
+      "kind": "enroll_start",
+      "http_status": 200,
+      "response_fields": ["account_user_id", "client_id", "device_key_challenge"],
+      "challenge_fields": ["account_user_id", "audience", "challenge_expires_at", "challenge_id", "challenge_token", "client_id", "device_identity_hash", "nonce", "purpose", "target_origin", "target_path", "type"]
+    },
+    {
+      "kind": "device_key_addon",
+      "result": "blocked",
+      "detail": "The target ChatGPT addon loaded but external invocation could not add either Secure Enclave or fallback material to its entitled keychain context; OSStatus -34018."
+    },
+    {
+      "kind": "device_key_lifecycle",
+      "result": "pass-with-policy-gap",
+      "algorithm": "ecdsa_p256_sha256",
+      "protection_class": "os_protected_nonextractable",
+      "spki_bytes": 91,
+      "create": true,
+      "sign": true,
+      "delete": true,
+      "detail": "An independently signed Phase 0 helper used a permanent nonextractable login-Keychain P-256 key. Secure Enclave remained unavailable in this helper context."
+    },
+    {
+      "kind": "step_up",
+      "result": "pass",
+      "callback_port": 1455,
+      "scopes": ["codex.remote_control.enroll"],
+      "freshness_validated": true
+    },
+    {
+      "kind": "enroll_finish",
+      "http_status": 200,
+      "response_fields": ["account_user_id", "client_id", "expires_at", "remote_control_token", "scopes"],
+      "scopes": ["remote_control_controller_websocket"]
+    },
+    {
+      "kind": "client_environment_list",
+      "http_status": 200,
+      "count": 0,
+      "result": "pairing-required"
+    },
+    {
+      "kind": "account_environment_list",
+      "http_status": 200,
+      "count": 1,
+      "items": [
+        {
+          "environment": "env_desktop",
+          "online": true,
+          "busy": false,
+          "os": "Mac OS",
+          "client_type": "CODEX_DESKTOP_APP",
+          "app_server_version": "0.150.0-alpha.12.2"
+        }
+      ]
+    },
+    {
+      "kind": "revoke",
+      "http_status": 204,
+      "controller": "client_probe"
+    },
+    {
+      "kind": "cleanup",
+      "controller_revoked": true,
+      "device_key_deleted": true,
+      "official_mobile_controller_mutated": false
+    }
+  ],
+  "adjudication": {
+    "result": "EVIDENCE-ONLY",
+    "first_divergence": "A newly enrolled controller has zero client-specific environments even though the account-level list contains one online Desktop environment.",
+    "required_next_evidence": "Owner must generate a fresh manual pairing code in ChatGPT Desktop so the newly enrolled probe controller can call the official pair endpoint. A code must be entered directly into the running probe and must never be sent in chat or committed."
+  }
+}

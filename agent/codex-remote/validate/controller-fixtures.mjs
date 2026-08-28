@@ -129,7 +129,21 @@ for (const file of liveFiles) {
 const mode = process.argv.includes("--require-live") ? "require-live" : "static-preflight";
 if (mode === "require-live") {
   expect(liveFiles.length > 0, "real redacted live fixture is missing");
-  fail("live fixture semantic validation is not enabled until a real capture defines its exact shape");
+  const liveFixtures = liveFiles.filter((file) => path.extname(file) === ".json").map((file) => ({
+    file,
+    value: JSON.parse(readFileSync(file, "utf8")),
+  }));
+  expect(liveFixtures.length > 0, "real redacted JSON fixture is missing");
+  const observedKinds = new Set();
+  for (const { file, value } of liveFixtures) {
+    expect(value.classification.startsWith("LIVE-REDACTED-OBSERVATION"), `${path.relative(repoRoot, file)} classification invalid`);
+    for (const field of liveContract.required_metadata_fields) {
+      expect(value.metadata?.[field] != null, `${path.relative(repoRoot, file)} missing metadata.${field}`);
+    }
+    for (const observation of value.observations ?? []) observedKinds.add(observation.kind);
+  }
+  const missingKinds = liveContract.required_observation_kinds.filter((kind) => !observedKinds.has(kind));
+  expect(missingKinds.length === 0, `live fixture is incomplete; missing observation kinds: ${missingKinds.join(", ")}`);
 }
 
 console.log(
