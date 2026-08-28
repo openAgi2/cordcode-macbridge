@@ -180,7 +180,10 @@ func (h *Handlers) codexDiscoveryHintFingerprint(ctx context.Context, agent core
 	if err != nil {
 		return "", err
 	}
-	wire := filterCodexCatalogSessions(sessionsToWire(infos))
+	wire := sessionsToWire(infos)
+	if usesCodexWorkspaceCatalog(agent) {
+		wire = filterCodexCatalogSessions(wire)
+	}
 	// 只用顺序+id：语义指纹（含 updatedAt）会在流式 turn 中随每个 delta 变化，
 	// 让长任务执行期间每 3s 误触发一次全量刷新（2026-08-23 真机风暴）。
 	return listOrderFingerprint(wire), nil
@@ -311,7 +314,7 @@ func (h *Handlers) discoveryFingerprint(ctx context.Context, id string, agent co
 	defer cancel()
 	// 能力断言而非 Name()=="codex"：codex-web 与 codex 共用同一 thread/list 富
 	// catalog seam（P0-4），discovery fingerprint 与 list_sessions 天然同源。
-	if _, ok := agent.(codexThreadLister); ok {
+	if usesCodexWorkspaceCatalog(agent) {
 		wire, rawCount, err := h.codexVisibleMembershipCounts(listCtx, id, "")
 		if err != nil {
 			return "", 0, 0, err

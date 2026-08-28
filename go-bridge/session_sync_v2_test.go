@@ -84,6 +84,23 @@ func TestSessionSyncV2CapabilityScopedToMigratedBackend(t *testing.T) {
 	}
 }
 
+func TestCodexRemoteJoinsSessionSyncV2(t *testing.T) {
+	if !backendSupportsProjectionHydrate("codex-remote") {
+		t.Fatal("codex-remote must hydrate from official thread/read")
+	}
+	backends := []AgentProviderDescriptor{
+		{ID: "codex-remote", Kind: "codex-remote"},
+		{ID: "copilot", Kind: "copilot"},
+	}
+	advertiseSessionSyncV2Backend(backends)
+	if len(backends[0].Capabilities) != 1 || backends[0].Capabilities[0] != "session_sync_v2" {
+		t.Fatalf("codex-remote capabilities=%v", backends[0].Capabilities)
+	}
+	if len(backends[1].Capabilities) != 0 {
+		t.Fatalf("copilot must stay unmigrated, got %v", backends[1].Capabilities)
+	}
+}
+
 func TestProjectionLifecycleWireErrorRoundTrip(t *testing.T) {
 	retryable := true
 	retryAfter := int64(250)

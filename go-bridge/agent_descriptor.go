@@ -232,6 +232,8 @@ func detectAgentStatus(id string, agent core.Agent, codexBackendMode string, cfg
 		// 官方 app-server 客户端：可用性 = 生命周期探针镜像（源/版本/官方失败原文）；
 		// 探测本身由首次目录/历史请求触发，descriptor 只读镜像（设计 §9.1 第 8 条）。
 		return detectInstanceStatusProber("codex-web", agent)
+	case "codex-remote":
+		return detectInstanceStatusProber("codex-remote", agent)
 	default:
 		return AgentStatusAvailable, ""
 	}

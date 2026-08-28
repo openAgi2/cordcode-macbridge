@@ -333,7 +333,8 @@ func advertiseSessionSyncV2Backend(backends []AgentProviderDescriptor) {
 			id == "grokbuild" || kind == "grokbuild" ||
 			id == "deepseek" || kind == "deepseek" ||
 			id == "dsh-web" || kind == "deepseek-web" ||
-			id == "codex-web" || kind == "codex-web" {
+			id == "codex-web" || kind == "codex-web" ||
+			id == "codex-remote" || kind == "codex-remote" {
 			backends[i].Capabilities = appendUniqueCapability(
 				backends[i].Capabilities,
 				"session_sync_v2",

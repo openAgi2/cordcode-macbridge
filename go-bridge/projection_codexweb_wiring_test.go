@@ -57,6 +57,40 @@ func (f *fakeCodexWebTurnScopedAgent) GetRichSessionHistory(ctx context.Context,
 	return nil, nil
 }
 
+type fakeCodexRemoteTurnScopedAgent struct {
+	fakeCodexWebTurnScopedAgent
+}
+
+func (f *fakeCodexRemoteTurnScopedAgent) Name() string { return "codex-remote" }
+
+func TestCodexRemoteProduceHydrateRangeUsesThreadRead(t *testing.T) {
+	handlers := NewHandlers()
+	agent := &fakeCodexRemoteTurnScopedAgent{fakeCodexWebTurnScopedAgent: fakeCodexWebTurnScopedAgent{
+		turns: []core.TurnScopedHistoryTurn{{
+			TurnID: "turn-desktop-1", Status: "completed",
+			UserItemID: "item-u1", UserText: "hello desktop",
+			Parts: []map[string]any{
+				{"type": "text", "content": "hi from desktop", "itemId": "item-a1"},
+			},
+		}},
+	}}
+	handlers.RegisterAgent("codex-remote", agent)
+	var events []projectionHydrateEvent
+	emit := func(ev projectionHydrateEvent) bool {
+		events = append(events, ev)
+		return true
+	}
+	if err := handlers.produceProjectionHydrateRange(context.Background(), "codex-remote", "th-1", "", 0, 0, SessionProjection{}, emit); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) < 2 {
+		t.Fatalf("codex-remote pathless hydrate must not no-op; events=%d", len(events))
+	}
+	if events[0].Event != "user_message" || events[0].Data["text"] != "hello desktop" {
+		t.Fatalf("user = %+v", events[0])
+	}
+}
+
 func TestCodexWebHydrateSourceIsPathless(t *testing.T) {
 	handlers := NewHandlers()
 	handlers.RegisterAgent("codex-web", &fakeCodexWebTurnScopedAgent{})

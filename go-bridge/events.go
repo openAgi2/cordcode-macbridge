@@ -14,6 +14,9 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		payload := map[string]interface{}{
 			"delta": ev.Content,
 		}
+		if ev.TurnID != "" {
+			payload["turnId"] = ev.TurnID
+		}
 		if ev.ItemID != "" {
 			payload["itemId"] = ev.ItemID
 		} else if ev.TurnID != "" {

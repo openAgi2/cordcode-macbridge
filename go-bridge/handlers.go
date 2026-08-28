@@ -3128,6 +3128,10 @@ func sharedDaemonCodexBackend(backendID string, codexBackendMode string) bool {
 	switch backendID {
 	case "codex-web":
 		return true
+	case "codex-remote":
+		// Desktop holds the private app-server writer. Close() only drops our
+		// listener; interrupt must wait for official turn/completed.
+		return true
 	case "codex":
 		return normalizeCodexBackend(codexBackendMode) == "app_server"
 	default:
@@ -3390,7 +3394,7 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 	// negotiation. Claude intentionally keeps its declared v1-shaped compatibility cursor.
 	// Capability 断言而非 Name()=="codex"：codex-web 与 codex 共用 thread/list 富 catalog
 	// seam（P0-4），Mac 新建 session 时两端的 list_sessions / discovery 同源同新。
-	if _, ok := agent.(codexThreadLister); ok {
+	if usesCodexWorkspaceCatalog(agent) {
 		h.codexHandleListSessions(conn, msg, agent)
 		return
 	}
