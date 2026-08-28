@@ -314,7 +314,7 @@ function runControllerWSS({ token, accountID, controllerToken, controllerExpires
       ...(subscribeCursor == null ? {} : { "x-codex-subscribe-cursor": subscribeCursor }),
     });
     const ws = new WebSocket(websocketURL, { headers: requestHeaders, handshakeTimeout: 10_000, perMessageDeflate: false });
-    const timeout = setTimeout(() => { ws.terminate(); reject(new Error("controller WSS timeout")); }, 60_000);
+    let timeout = setTimeout(() => { ws.terminate(); reject(new Error("controller WSS timeout")); }, 60_000);
     let challengeComplete = false;
     let initializeResultFields = null;
     let pingSent = false;
@@ -322,13 +322,22 @@ function runControllerWSS({ token, accountID, controllerToken, controllerExpires
     let cursorlessPongs = 0;
     let settled = false;
     let observedCursor = subscribeCursor;
+    let keepAlive = null;
+    let turnWait = null;
+    const liveRpc = [];
     const finish = (result) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      if (keepAlive != null) clearInterval(keepAlive);
+      if (turnWait != null) clearTimeout(turnWait);
       ws.once("close", () => resolve(result));
       ws.close(1000);
       setTimeout(() => ws.terminate(), 2_000).unref();
+    };
+    const armTimeout = (ms) => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => { ws.terminate(); reject(new Error("controller WSS timeout")); }, ms);
     };
     const sendClientMessage = (method, message) => {
       const seqID = nextClientSeq;
@@ -348,7 +357,7 @@ function runControllerWSS({ token, accountID, controllerToken, controllerExpires
       if (message.cursor == null || settled) return false;
       observedCursor = message.cursor;
       observe("cursor_observed", { on: message.type ?? "unknown_wss", seq_id: message.seq_id ?? null, cursor_chars: String(message.cursor).length });
-      finish({ streamID, cursor: message.cursor, initializeResultFields });
+      finish({ streamID, cursor: message.cursor, initializeResultFields, liveRpc: [...new Set(liveRpc)] });
       return true;
     };
     ws.on("open", () => observe(subscribeCursor == null ? "websocket_handshake" : "reconnect_handshake", { status: "open", protocol_version: 3, cursor_header_present: subscribeCursor != null }));
@@ -391,6 +400,13 @@ function runControllerWSS({ token, accountID, controllerToken, controllerExpires
           pagination_cursor_present: result.cursor != null,
         });
       }
+      if (initialize && message.type === "server_message") {
+        const method = typeof message.message?.method === "string" ? message.message.method : null;
+        if (method != null && method !== "initialize") {
+          liveRpc.push(method);
+          observe("live_rpc", { method, has_params: message.message?.params != null, envelope_cursor: message.cursor != null });
+        }
+      }
       if (message.type === "pong") {
         if (message.status !== "active") {
           clearTimeout(timeout); ws.terminate(); reject(new Error("pong status mismatch")); return;
@@ -401,8 +417,19 @@ function runControllerWSS({ token, accountID, controllerToken, controllerExpires
             setTimeout(sendPing, 1_000);
             return;
           }
+          if (turnWait == null) {
+            observe("awaiting_desktop_turn", { timeout_ms: 180_000 });
+            keepAlive = setInterval(() => { if (!settled) sendPing(); }, 10_000);
+            turnWait = setTimeout(() => {
+              observe("desktop_turn_wait_elapsed", { live_rpc_methods: [...new Set(liveRpc)] });
+              finish({ streamID, cursor: observedCursor, initializeResultFields, liveRpc: [...new Set(liveRpc)] });
+            }, 180_000);
+            armTimeout(200_000);
+            return;
+          }
+          return;
         }
-        finish({ streamID, cursor: observedCursor, initializeResultFields });
+        finish({ streamID, cursor: observedCursor, initializeResultFields, liveRpc: [...new Set(liveRpc)] });
       }
     });
   });
@@ -413,7 +440,7 @@ async function openControllerWSS(options) {
   const first = await runControllerWSS({ ...options, streamID, initialize: true });
   if (first.initializeResultFields == null) fail("initial controller stream proof incomplete");
   if (first.cursor == null) {
-    observe("reconnect_blocked", { reason: "no_cursor_after_initialized_thread_list_and_three_active_pongs", cursor_header_present: false });
+    observe("reconnect_blocked", { reason: "no_cursor_after_initialized_thread_list_pongs_and_desktop_turn_wait", cursor_header_present: false, live_rpc_methods: first.liveRpc ?? [] });
     return { streamID, cursor: null, initializeResultFields: first.initializeResultFields, reconnectStatus: "blocked-no-cursor" };
   }
   const reconnected = await runControllerWSS({ ...options, streamID, subscribeCursor: first.cursor, initialize: false });

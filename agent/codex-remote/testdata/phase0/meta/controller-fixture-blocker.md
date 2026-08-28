@@ -17,7 +17,8 @@ What is proven on the official path:
 - current Mac ChatGPT Desktop environment binding (`CODEX_DESKTOP_APP`, online)
 - WSS challenge/proof and ordinary app-server initialize
 - `initialized` notification and `thread/list` (5 items) on the same live stream (attempt-006)
-- three bounded active pongs with no envelope cursor, including after thread/list
+- a ChatGPT Desktop turn while the probe stayed connected produced live `thread/status/changed` (attempt-007); no envelope cursor; `turn/started` / `turn/completed` not observed as separate methods
+- three bounded active pongs with no envelope cursor, including after thread/list and live Desktop-turn traffic
 - probe-only revoke HTTP 204 and post-revoke refresh_start HTTP 403
 - probe-key deletion and unaided process exit
 

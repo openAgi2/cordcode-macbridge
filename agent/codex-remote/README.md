@@ -30,7 +30,7 @@ Standalone app-server, fake relay, rollout/JSONL/SQLite/file tail, same-account 
 | 7 | Test coexistence with the official ChatGPT iOS controller, including 409/kick/recovery | UNVERIFIED |
 | 8 | WSS app-server `initialize` / `initialized` | LIVE: attempt-006 sent both on the selected Desktop stream |
 | 9 | Real `thread/list` / `thread/read` | LIVE PARTIAL: attempt-006 `thread/list` returned 5 items; `thread/read` still unverified |
-| 10 | Real live `turn/started` + multiple deltas + one completion | UNVERIFIED |
+| 10 | Real live `turn/started` + multiple deltas + one completion | LIVE PARTIAL: attempt-007 saw Desktop-turn `thread/status/changed` (8) on the selected stream; `turn/started` / item delta / `turn/completed` not observed; no envelope cursor |
 | 11 | Interrupt the same active turn and observe one official terminal state | UNVERIFIED |
 | 12 | Network loss/reconnect with seq/ACK/cursor and cold reconciliation | UNVERIFIED |
 | 13 | Revoke this controller; old identity fails and official pairings remain intact | UNVERIFIED |

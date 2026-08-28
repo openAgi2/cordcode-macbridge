@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "classification": "LIVE-REDACTED-OBSERVATION-BLOCKED",
+  "gate_effect": "evidence-only",
+  "target": {
+    "chatgpt_desktop_version": "26.825.32147",
+    "chatgpt_bundle_version": "7303",
+    "embedded_codex_version": "codex-cli 0.150.0-alpha.12.2",
+    "controller_protocol_version": 3
+  },
+  "metadata": {
+    "captured_at": "2026-08-28T11:22:00Z",
+    "capture_purpose": "Keep the independent controller WSS open after initialize/initialized/thread/list and observe a real ChatGPT Desktop turn on the same environment, including whether reconnect cursor appears on those live envelopes.",
+    "source_classification": "target binary plus official live service",
+    "operator_attestation": "Owner completed fresh step-up and Computer-tab pairing through the localhost form, then sent a test message from ChatGPT Desktop while the probe was still connected.",
+    "redaction_procedure": "Removed credentials, pairing material, signatures, raw identifiers, host names, thread titles, user/assistant content and response bodies; retained method names, counts, field sets, routing comparisons and cleanup outcomes.",
+    "secret_scan_command": "gitleaks dir --redact --config .gitleaks.toml .",
+    "secret_scan_result": "PASS: no leaks found after fixture and probe write",
+    "cleanup_result": "After the bounded desktop-turn wait the probe revoked only client_probe with HTTP 204, observed post-revoke refresh_start HTTP 403, deleted probe_key, and self-exited with code 1."
+  },
+  "observations": [
+    {
+      "kind": "enroll_finish",
+      "http_status": 200
+    },
+    {
+      "kind": "controller_pair",
+      "http_status": 200
+    },
+    {
+      "kind": "environment_selected",
+      "environment": "env_desktop",
+      "online": true,
+      "client_type": "CODEX_DESKTOP_APP"
+    },
+    {
+      "kind": "websocket_handshake",
+      "status": "open",
+      "protocol_version": 3,
+      "cursor_header_present": false
+    },
+    {
+      "kind": "client_message",
+      "methods": ["initialize", "initialized", "thread/list"]
+    },
+    {
+      "kind": "thread_list",
+      "error": false,
+      "data_count": 5,
+      "envelope_cursor_present": false
+    },
+    {
+      "kind": "live_rpc",
+      "methods": ["remoteControl/status/changed", "thread/status/changed"],
+      "thread_status_changed_count": 8,
+      "envelope_cursor_present": false,
+      "missing_methods": ["turn/started", "turn/completed"]
+    },
+    {
+      "kind": "pong",
+      "status": "active",
+      "cursor_present": false
+    },
+    {
+      "kind": "reconnect_blocked",
+      "reason": "No WSS envelope cursor after initialize, thread/list, live thread/status/changed from a Desktop turn, and subsequent active pongs.",
+      "cursor_header_present": false
+    },
+    {
+      "kind": "revoke",
+      "http_status": 204,
+      "controller": "client_probe"
+    },
+    {
+      "kind": "revoked_identity_rejected",
+      "operation": "refresh_start",
+      "http_status": 403,
+      "result": "rejected"
+    },
+    {
+      "kind": "cleanup",
+      "controller_revoked": true,
+      "device_key_deleted": true,
+      "probe_self_exited": true,
+      "exit_code": 1,
+      "official_mobile_controller_mutated": false
+    }
+  ],
+  "semantic_assertions": {
+    "all_rest_and_websocket_origins_are_official_allowlisted_origins": true,
+    "selected_environment_is_the_current_desktop": true,
+    "environment_binding_is_observed_not_inferred": true,
+    "cursor_delivery_location_is_observed_not_inferred": false,
+    "controller_identity_is_independent_and_revocable": true,
+    "cleanup_targets_only_the_probe_controller": true,
+    "official_mobile_controller_is_never_automatically_disconnected_or_revoked": false
+  },
+  "adjudication": {
+    "result": "BLOCKED",
+    "proven": "A ChatGPT Desktop turn while the probe remained connected produced live thread/status/changed notifications on the selected env/stream. Envelope cursor remained absent. Separate turn/started and turn/completed methods were not observed.",
+    "blocking_condition": "x-codex-subscribe-cursor still cannot be populated from real WSS envelopes, including Desktop-turn live traffic.",
+    "forbidden_inference": "thread/status/changed must not be treated as turn/started/delta/completed, and must not be treated as reconnect cursor evidence.",
+    "phase0_gate": "FAIL-BLOCKED"
+  }
+}

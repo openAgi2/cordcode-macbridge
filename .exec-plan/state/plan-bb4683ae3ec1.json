@@ -35,7 +35,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-28T11:09:00Z",
+  "updated_at": "2026-08-28T11:22:00Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -232,9 +232,10 @@
           "agent/codex-remote/testdata/phase0/live/attempt-003-refresh-cursor-divergence.json",
           "agent/codex-remote/testdata/phase0/live/attempt-004-cursor-block-and-revoke-rejection.json",
           "agent/codex-remote/testdata/phase0/live/attempt-005-full-chain-cursor-still-blocked.json",
-          "agent/codex-remote/testdata/phase0/live/attempt-006-initialized-thread-list-still-no-cursor.json"
+          "agent/codex-remote/testdata/phase0/live/attempt-006-initialized-thread-list-still-no-cursor.json",
+          "agent/codex-remote/testdata/phase0/live/attempt-007-desktop-turn-status-no-cursor.json"
         ],
-        "checked_at": "2026-08-28T11:09:00Z"
+        "checked_at": "2026-08-28T11:22:00Z"
       }
     },
     {
