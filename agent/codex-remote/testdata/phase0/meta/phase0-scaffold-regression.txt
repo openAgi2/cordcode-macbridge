@@ -1,0 +1,12 @@
+checked_at=2026-08-28T09:22:00Z
+result=PASS
+phase0_boundary_validator=PASS
+source_baseline_validator=PASS
+git_diff_worktree_agent_codex_web_and_agent_codex=PASS
+git_diff_from_frozen_start_agent_codex_web_and_agent_codex=PASS
+paired_ios_frozen_commit_and_clean_status=PASS
+gitleaks_agent_codex_remote=no leaks found
+probe_register_agent_or_init_scan=PASS
+git_diff_check=PASS
+product_backend_registered=false
+gate_p0_passed=false

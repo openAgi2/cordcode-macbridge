@@ -35,7 +35,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-28T08:46:00Z",
+  "updated_at": "2026-08-28T09:22:00Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -150,7 +150,7 @@
       "id": "phase0-probe-scaffold-tests",
       "title": "Phase 0 isolated probe scaffold — tests",
       "description": "Run or create the targeted automated/static/replay checks that directly prove: Create only agent/codex-remote/{README.md,probe/,testdata/phase0/,validate/}; document Phase-0-only status, timeouts, redaction and revoke cleanup; do not register a backend or import old lifecycle/ownership code.",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase0",
       "kind": "tests",
       "depends_on": [
@@ -160,20 +160,24 @@
       "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "The replayable Phase 0 boundary validator confirms the only top-level entries are README/probe/testdata/validate, all 14 Gate rows are present, no probe code registers or imports legacy backends, frozen backend delivery/worktree diffs are clean, and the paired iOS worktree remains frozen and clean. It explicitly reports productBackendRegistered=false and gateP0Passed=false.",
+        "artifacts": [
+          "agent/codex-remote/validate/phase0-boundary.mjs",
+          "agent/codex-remote/testdata/phase0/meta/phase0-boundary-validation.txt",
+          "git:1d411040bc622f0faf0387f3a23e7c428e08b511"
+        ],
+        "checked_at": "2026-08-28T09:21:08Z"
       }
     },
     {
       "id": "phase0-probe-scaffold-regression",
       "title": "Phase 0 isolated probe scaffold — regression",
       "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "phase0",
       "kind": "regression",
       "depends_on": [
