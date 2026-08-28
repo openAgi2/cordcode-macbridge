@@ -861,6 +861,11 @@ type transcriptHistoryEnvelope struct {
 	IsVisibleInTranscriptOnly bool                       `json:"isVisibleInTranscriptOnly"`
 	CompactMetadata           *transcriptCompactMetadata `json:"compactMetadata"`
 	ToolUseResult             json.RawMessage            `json:"toolUseResult"`
+	Origin                    *transcriptMessageOrigin   `json:"origin"`
+}
+
+type transcriptMessageOrigin struct {
+	Kind string `json:"kind"`
 }
 
 type transcriptCompactMetadata struct {
@@ -1337,6 +1342,13 @@ func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHisto
 		if raw.Message == nil {
 			continue
 		}
+		// Claude Code injects background-task completion as a synthetic user row with
+		// origin.kind=task-notification. It is control-plane input for the model, not a
+		// user-authored chat bubble. Filter by the structured origin marker (never by the
+		// XML-looking body) so legitimate user text remains untouched.
+		if raw.Type == "user" && raw.Origin != nil && IsTaskNotificationOrigin(raw.Origin.Kind) {
+			continue
+		}
 
 		blocks := decodeTranscriptContentBlocks(raw.Message.Content)
 		if isClaudeResumeMetaUser(raw, blocks) {
@@ -1538,6 +1550,12 @@ var (
 )
 
 const commandArgsPreviewLimit = 120
+
+// IsTaskNotificationOrigin reports Claude Code's structured background-task completion
+// injection. Callers must use the origin field rather than matching the message body.
+func IsTaskNotificationOrigin(kind string) bool {
+	return kind == "task-notification"
+}
 
 // normalizeClaudeUserText converts Claude CLI slash-command injection into a
 // compact, user-readable form, and drops protocol-only echoes entirely:

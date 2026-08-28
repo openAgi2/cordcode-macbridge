@@ -8,6 +8,7 @@
 
 ## [Unreleased]
 
+- **修复：iPhone 打开正在执行的 Claude Code 会话时不再显示内部 `<task-notification>` XML**：Claude Code 的后台命令完成后会写入带 `origin.kind=task-notification` 的 synthetic user row；此前 projection/history 把它当作用户消息同步，导致任务 ID、临时输出路径和内部标签出现在聊天页。现按结构化 origin 将其作为 control-plane row 消费：source cursor 与后续执行连续性保持不变，但不生成可见用户气泡；普通用户输入即使包含相似 XML 文本也不受影响。
 - **修复：Claude 任务在跑时「重启共享 Codex 服务」按钮被误禁用（2026-08-28 真机反馈）**：管理状态里的活跃 turn 计数是全局（所有 backend 合计），Mac 端却直接当作 codex 专属计数——任一 backend（如 Claude）有任务就禁用 codex 重启按钮、预检也拒绝。现 status 增加 per-backend 活跃 turn / pending 交互明细（可选新增键，旧版 runtime 仍可解码并保守回退全局计数），重启门控只数 codex / codex-web 自己的活动；全局计数继续服务于跨 backend 的 quiesce 排空语义，不受影响。
 - **修复：空闲的 Claude 会话从手机续聊被误报「该会话记录的进程仍在运行」（2026-08-28 真机反馈）**：发送前检查此前把「Claude 桌面端进程开着该会话」当作占用；现区分为「进程活着」与「transcript 证明在跑任务」两级——只有后者才拦截（错误文案相应改为「该会话正在另一个客户端中执行任务」），Claude 桌面开着但空闲的会话可正常串行追加新 turn。会话列表的运行中判定同源收紧为 transcript 证明。
 - **改进：DeepSeek Harness 执行中显示具体命令行（2026-08-28 真机反馈）**：工具事件此前不带人类可读摘要，iOS 运行状态条与活动行只能显示笼统的「正在执行工具」。现工具事件摘要与冷启动 hydration 同源（bash/git 命令行、读写文件路径、搜索 pattern 等，按 rune 安全截断 80 字），执行中与历史渲染一致。

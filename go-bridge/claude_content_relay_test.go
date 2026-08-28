@@ -1,11 +1,67 @@
 package gobridge
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestClaudeTaskNotificationSyntheticUserIsControlPlaneOnly(t *testing.T) {
+	content := `{"type":"user","uuid":"u-root","message":{"role":"user","content":"watch CI"}}` + "\n" +
+		`{"type":"assistant","uuid":"a-final","parentUuid":"u-root","message":{"id":"a-final","role":"assistant","content":[{"type":"text","text":"watching"}],"stop_reason":"end_turn"}}` + "\n" +
+		`{"type":"queue-operation","operation":"enqueue","content":"<task-notification>queued</task-notification>"}` + "\n" +
+		`{"type":"user","uuid":"u-task","parentUuid":"a-final","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\n<task-id>task-1</task-id>\n<status>completed</status>\n</task-notification>"}}` + "\n" +
+		`{"type":"assistant","uuid":"a-followup","parentUuid":"u-task","message":{"id":"a-followup","role":"assistant","content":[{"type":"text","text":"CI finished"}],"stop_reason":"end_turn"}}` + "\n"
+
+	// Live scanner must consume the physical row so the source cursor stays contiguous, but
+	// must not admit it into the projection transaction.
+	scan, err := scanCompleteClaudeRelayEntriesFromReader(strings.NewReader(content), 0, &claudeRelayScanState{})
+	if err != nil || scan.Poison != nil {
+		t.Fatalf("scan: poison=%+v err=%v", scan.Poison, err)
+	}
+	if scan.ConsumedBytes != int64(len(content)) {
+		t.Fatalf("consumed = %d, want %d", scan.ConsumedBytes, len(content))
+	}
+	if len(scan.Records) != 5 || scan.Records[2].Admitted || scan.Records[3].Admitted {
+		t.Fatalf("control rows admitted: %+v", scan.Records)
+	}
+	if len(scan.Entries) != 3 {
+		t.Fatalf("entries = %d, want 3 visible content rows", len(scan.Entries))
+	}
+
+	// Cold hydrate uses a separate range scanner; freeze the same structured-origin policy there.
+	path := t.TempDir() + "/session.jsonl"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var events []projectionHydrateEvent
+	if err := streamClaudeTranscriptProjectionEvents(context.Background(), path, func(event projectionHydrateEvent) bool {
+		events = append(events, event)
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	userMessages := 0
+	for _, event := range events {
+		if event.Event == "user_message" {
+			userMessages++
+		}
+		if text, _ := event.Data["text"].(string); strings.Contains(text, "task-notification") {
+			t.Fatalf("task notification leaked into projection event: %+v", event)
+		}
+		if delta, _ := event.Data["delta"].(string); strings.Contains(delta, "task-notification") {
+			t.Fatalf("task notification leaked into projection delta: %+v", event)
+		}
+	}
+	if userMessages != 1 {
+		t.Fatalf("user_message count = %d, want only real user prompt; events=%+v", userMessages, events)
+	}
+	if len(events) < 4 || events[len(events)-2].Event != "text_delta" || events[len(events)-2].Data["itemId"] != "u-root" {
+		t.Fatalf("follow-up lost prior visible turn continuity: %+v", events)
+	}
+}
 
 // TestScanClaudeRelayEntriesFromReaderExtractsBlocks：扫描返回所有 meaningful 记录，
 // assistant 的 content block（thinking/text/tool_use）可由 claudeRelayContentBlocks 提取。

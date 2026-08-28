@@ -190,6 +190,9 @@ func scanClaudeSessionMeta(path, projectDir, sessionID string) (claudeSessionMet
 		if entry.Message == nil {
 			continue
 		}
+		if entry.Type == "user" && entry.Origin != nil && IsTaskNotificationOrigin(entry.Origin.Kind) {
+			continue
+		}
 		blocks := decodeTranscriptContentBlocks(entry.Message.Content)
 		if isClaudeResumeMetaUser(entry, blocks) {
 			skipNextResumeNoResponse = true
