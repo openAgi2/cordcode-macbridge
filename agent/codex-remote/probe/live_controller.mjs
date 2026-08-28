@@ -101,6 +101,7 @@ function loadAuthToken() {
           child.stdin.end();
           child.stdout.destroy();
           child.kill();
+          child.unref();
           if (message.result?.authMethod !== "chatgpt" || typeof token !== "string") reject(new Error("ChatGPT auth unavailable"));
           else resolve(token);
         }
@@ -138,6 +139,18 @@ function signPayload(binary, keyID, payload) {
   const bytes = signingBytes(payload);
   const signed = keyCall(binary, { op: "sign", keyId: keyID, payloadBase64: bytes.toString("base64") });
   return { algorithm: signed.algorithm, signatureDerBase64: signed.signatureDerBase64, signedPayloadBase64: bytes.toString("base64") };
+}
+
+function enrollmentProof({ challenge, clientID, key, helperBinary, expectedPath, requireDeviceIdentityHash }) {
+  const identityObject = { algorithm: key.algorithm, keyId: key.keyId, protectionClass: key.protectionClass, publicKeySpkiDerBase64: key.publicKeySpkiDerBase64 };
+  const identityHash = createHash("sha256").update(JSON.stringify(identityObject)).digest("base64url");
+  if (challenge.purpose !== "remote_control_client_enrollment" || challenge.audience !== "remote_control_client_enrollment" || challenge.client_id !== clientID || challenge.target_origin !== "https://chatgpt.com" || challenge.target_path !== expectedPath) fail("enrollment challenge mismatch");
+  if (requireDeviceIdentityHash && challenge.device_identity_hash == null) fail("refresh challenge device identity hash missing");
+  const challengeIdentityHash = challenge.device_identity_hash ?? identityHash;
+  if (challengeIdentityHash !== identityHash) fail("enrollment challenge identity mismatch");
+  const payload = { accountUserId: challenge.account_user_id, audience: "remote_control_client_enrollment", challengeExpiresAt: challenge.challenge_expires_at, challengeId: challenge.challenge_id, clientId: challenge.client_id, deviceIdentitySha256Base64url: challengeIdentityHash, nonce: challenge.nonce, targetOrigin: challenge.target_origin, targetPath: challenge.target_path, type: "remoteControlClientEnrollment" };
+  const signed = signPayload(helperBinary, key.keyId, payload);
+  return { challenge_token: challenge.challenge_token, key_id: key.keyId, signature_der_base64: signed.signatureDerBase64, signed_payload_base64: signed.signedPayloadBase64, algorithm: signed.algorithm };
 }
 
 async function stepUp(accountID) {
@@ -195,7 +208,7 @@ async function collectManualPairingCode() {
         const url = new URL(request.url ?? "/", `http://localhost:${port}`);
         if (request.method === "GET" && url.pathname === "/pair" && url.searchParams.get("state") === formToken) {
           response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
-          response.end(`<!doctype html><meta charset="utf-8"><title>Phase 0 controller pairing</title><meta name="referrer" content="no-referrer"><style>body{font:16px system-ui;max-width:42rem;margin:4rem auto;padding:0 1rem}input,button{font:inherit;padding:.7rem}input{width:24rem;max-width:90%}</style><h1>Phase 0 controller pairing</h1><p>在 ChatGPT Desktop 生成新的手动配对码，仅在此本机页面输入。不要发送到聊天。</p><form method="post" action="/pair?state=${formToken}" autocomplete="off"><input type="password" name="code" required autofocus autocomplete="off" maxlength="256"><button type="submit">Pair</button></form>`);
+          response.end(`<!doctype html><meta charset="utf-8"><title>Phase 0 controller pairing</title><meta name="referrer" content="no-referrer"><style>body{font:16px system-ui;max-width:42rem;margin:4rem auto;padding:0 1rem}input,button{font:inherit;padding:.7rem}input{width:24rem;max-width:90%}</style><h1>Phase 0 controller pairing</h1><p>在 ChatGPT Desktop 的“控制这台 Mac”授权页切换到“电脑”，刷新生成新配对码，仅在此本机页面输入。不要发送到聊天。</p><form method="post" action="/pair?state=${formToken}" autocomplete="off"><input type="password" name="code" required autofocus autocomplete="off" maxlength="256"><button type="submit">Pair</button></form>`);
           return;
         }
         if (request.method === "POST" && url.pathname === "/pair" && url.searchParams.get("state") === formToken) {
@@ -260,6 +273,12 @@ async function pairedEnvironments(token, accountID, clientID) {
   fail("paired controller still has no environments");
 }
 
+async function revokeProbeController(token, accountID, clientID) {
+  const response = await fetch(`${base}/wham/remote/control/clients/${encodeURIComponent(clientID)}`, { method: "DELETE", headers: headers(token, accountID), redirect: "error", signal: AbortSignal.timeout(15_000) });
+  await response.arrayBuffer();
+  return response;
+}
+
 async function selectEnvironment(items) {
   const safe = items.map((item, index) => ({ index: index + 1, display_name: item.display_name ?? item.name ?? "unnamed", host_name: item.host_name ?? null, online: item.online, busy: item.busy, os: item.os, client_type: item.client_type, app_server_version: item.app_server_version }));
   console.log(JSON.stringify({ environments: safe }, null, 2));
@@ -272,17 +291,29 @@ async function selectEnvironment(items) {
   } finally { terminal.close(); }
 }
 
-function openControllerWSS({ token, accountID, controllerToken, controllerExpiresAt, clientID, key, helperBinary, environment }) {
+function runControllerWSS({ token, accountID, controllerToken, controllerExpiresAt, clientID, key, helperBinary, environment, streamID, subscribeCursor = null, initialize }) {
   return new Promise((resolve, reject) => {
-    const streamID = randomUUID();
     const requestHeaders = headers(token, accountID, {
       "x-codex-client-id": clientID,
       "x-codex-protocol-version": "3",
       "x-codex-client-session-token": `Bearer ${controllerToken}`,
+      ...(subscribeCursor == null ? {} : { "x-codex-subscribe-cursor": subscribeCursor }),
     });
     const ws = new WebSocket(websocketURL, { headers: requestHeaders, handshakeTimeout: 10_000, perMessageDeflate: false });
     const timeout = setTimeout(() => { ws.terminate(); reject(new Error("controller WSS timeout")); }, 30_000);
     let challengeComplete = false;
+    let initializeResultFields = null;
+    let pingSent = false;
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      ws.once("close", () => resolve(result));
+      ws.close(1000);
+      setTimeout(() => ws.terminate(), 2_000).unref();
+    };
+    ws.on("open", () => observe(subscribeCursor == null ? "websocket_handshake" : "reconnect_handshake", { status: "open", protocol_version: 3, cursor_header_present: subscribeCursor != null }));
     ws.on("error", (error) => { clearTimeout(timeout); reject(new Error(`controller WSS error: ${error.message}`)); });
     ws.on("message", (data) => {
       let message;
@@ -294,21 +325,43 @@ function openControllerWSS({ token, accountID, controllerToken, controllerExpire
         }
         const proof = signPayload(helperBinary, key.keyId, { accountUserId: message.accountUserId, audience: message.audience, clientId: message.clientId, nonce: message.nonce, scopes: message.scopes, sessionId: message.sessionId, targetOrigin: message.targetOrigin, targetPath: message.targetPath, tokenExpiresAt: message.tokenExpiresAt, tokenSha256Base64url: message.tokenSha256Base64url, type: "remoteControlClientConnection" });
         ws.send(JSON.stringify({ type: "device_key_proof", keyId: key.keyId, signatureDerBase64: proof.signatureDerBase64, signedPayloadBase64: proof.signedPayloadBase64, algorithm: proof.algorithm }));
+        observe("device_key_proof", { algorithm: proof.algorithm, key: "probe_key", signature_encoding: "der_base64", signed_payload_encoding: "base64" });
         challengeComplete = true;
         observe("device_key_challenge", { fields: Object.keys(message).sort(), target_origin: message.targetOrigin, target_path: message.targetPath, scopes: message.scopes });
-        ws.send(JSON.stringify({ type: "client_message", client_id: clientID, env_id: environment.env_id, stream_id: streamID, seq_id: 1, skip_history: false, message: { id: 1, method: "initialize", params: { clientInfo: { name: "codex_remote_phase0_probe", title: "CordCode Phase 0 Probe", version: "0" }, capabilities: { experimentalApi: true } } } }));
-        observe("client_message", { method: "initialize", env: "env_selected", stream: "stream_primary", seq_id: 1 });
+        if (initialize) {
+          ws.send(JSON.stringify({ type: "client_message", client_id: clientID, env_id: environment.env_id, stream_id: streamID, seq_id: 1, skip_history: false, message: { id: 1, method: "initialize", params: { clientInfo: { name: "codex_remote_phase0_probe", title: "CordCode Phase 0 Probe", version: "0" }, capabilities: { experimentalApi: true } } } }));
+          observe("client_message", { method: "initialize", env: "env_selected", stream: "stream_primary", seq_id: 1 });
+        } else {
+          ws.send(JSON.stringify({ type: "ping", client_id: clientID, env_id: environment.env_id, stream_id: streamID, seq_id: 3, state: "foreground", skip_history: true }));
+          pingSent = true;
+          observe("ping", { env: "env_selected", stream: "stream_primary", seq_id: 3, reconnect: true });
+        }
         return;
       }
       const safe = { type: message.type, fields: Object.keys(message).sort(), env_matches: message.env_id === environment.env_id, stream_matches: message.stream_id === streamID, seq_id: message.seq_id, has_cursor: message.cursor != null };
       observe(message.type ?? "unknown_wss", safe);
-      if (message.type === "server_message" && message.message?.id === 1) {
-        clearTimeout(timeout);
-        ws.close(1000);
-        resolve({ streamID, cursor: message.cursor ?? null, initializeResultFields: Object.keys(message.message.result ?? {}).sort() });
+      if (initialize && message.type === "server_message" && message.message?.id === 1 && !pingSent) {
+        initializeResultFields = Object.keys(message.message.result ?? {}).sort();
+        ws.send(JSON.stringify({ type: "ping", client_id: clientID, env_id: environment.env_id, stream_id: streamID, seq_id: 2, state: "foreground", skip_history: true }));
+        pingSent = true;
+        observe("ping", { env: "env_selected", stream: "stream_primary", seq_id: 2, reconnect: false });
+      }
+      if (message.type === "pong") {
+        if (message.status !== "active" || message.cursor == null) {
+          clearTimeout(timeout); ws.terminate(); reject(new Error("pong status or cursor mismatch")); return;
+        }
+        finish({ streamID, cursor: message.cursor, initializeResultFields });
       }
     });
   });
+}
+
+async function openControllerWSS(options) {
+  const streamID = randomUUID();
+  const first = await runControllerWSS({ ...options, streamID, initialize: true });
+  if (first.initializeResultFields == null || first.cursor == null) fail("initial controller stream proof incomplete");
+  const reconnected = await runControllerWSS({ ...options, streamID, subscribeCursor: first.cursor, initialize: false });
+  return { streamID, cursor: reconnected.cursor, initializeResultFields: first.initializeResultFields };
 }
 
 const startedAt = Date.now();
@@ -319,6 +372,7 @@ let clientID = null;
 let key = null;
 let helper = null;
 let cleanupStatus = null;
+let controllerRevoked = false;
 
 try {
   helper = compileKeyHelper();
@@ -339,17 +393,21 @@ try {
   const stepScopes = [...new Set([...(stepClaims.scope?.split(/\s+/u) ?? []), ...(stepClaims.scp ?? [])].filter(Boolean))];
   if (stepScopes.length !== 1 || stepScopes[0] !== scope || Math.floor(Date.now() / 1000) - stepClaims.iat > 300 || Date.now() - stepClaims.pwd_auth_time > 300_000) fail("step-up token validation failed");
   observe("step_up_validated", { scopes: stepScopes, fresh: true });
-  const identityObject = { algorithm: key.algorithm, keyId: key.keyId, protectionClass: key.protectionClass, publicKeySpkiDerBase64: key.publicKeySpkiDerBase64 };
-  const identityHash = createHash("sha256").update(JSON.stringify(identityObject)).digest("base64url");
-  const enrollmentPayload = { accountUserId: challenge.account_user_id, audience: "remote_control_client_enrollment", challengeExpiresAt: challenge.challenge_expires_at, challengeId: challenge.challenge_id, clientId: challenge.client_id, deviceIdentitySha256Base64url: challenge.device_identity_hash ?? identityHash, nonce: challenge.nonce, targetOrigin: challenge.target_origin, targetPath: challenge.target_path, type: "remoteControlClientEnrollment" };
-  if (enrollmentPayload.deviceIdentitySha256Base64url !== identityHash || challenge.target_origin !== "https://chatgpt.com" || challenge.target_path !== "/backend-api/codex/remote/control/client/enroll/finish") fail("enrollment challenge mismatch");
-  const signed = signPayload(helper.binary, key.keyId, enrollmentPayload);
-  const finish = await jsonRequest(token, accountID, "POST", "/codex/remote/control/client/enroll/finish", { client_id: clientID, step_up_token: stepUpToken, device_identity: { key_id: key.keyId, public_key_spki_der_base64: key.publicKeySpkiDerBase64, algorithm: key.algorithm, protection_class: key.protectionClass }, device_key_proof: { challenge_token: challenge.challenge_token, key_id: key.keyId, signature_der_base64: signed.signatureDerBase64, signed_payload_base64: signed.signedPayloadBase64, algorithm: signed.algorithm } });
+  const finish = await jsonRequest(token, accountID, "POST", "/codex/remote/control/client/enroll/finish", { client_id: clientID, step_up_token: stepUpToken, device_identity: { key_id: key.keyId, public_key_spki_der_base64: key.publicKeySpkiDerBase64, algorithm: key.algorithm, protection_class: key.protectionClass }, device_key_proof: enrollmentProof({ challenge, clientID, key, helperBinary: helper.binary, expectedPath: "/backend-api/codex/remote/control/client/enroll/finish", requireDeviceIdentityHash: false }) });
   controllerToken = finish.body?.remote_control_token;
-  const expiresAt = Math.floor(Date.parse(finish.body?.expires_at) / 1000);
+  let expiresAt = Math.floor(Date.parse(finish.body?.expires_at) / 1000);
   if (typeof controllerToken !== "string" || !Number.isFinite(expiresAt) || JSON.stringify(finish.body?.scopes) !== JSON.stringify([controllerScope])) fail("enroll/finish schema mismatch");
   observe("enroll_finish", { status: finish.status, response_fields: Object.keys(finish.body).sort(), scopes: finish.body.scopes, expires_at_present: true });
   stepUpToken = null;
+  const refreshStart = await jsonRequest(token, accountID, "POST", "/codex/remote/control/client/refresh/start", { client_id: clientID });
+  const refreshChallenge = refreshStart.body?.device_key_challenge;
+  if (refreshStart.body?.client_id !== clientID || refreshChallenge == null) fail("refresh/start schema mismatch");
+  observe("refresh_start", { status: refreshStart.status, response_fields: Object.keys(refreshStart.body).sort(), challenge_fields: Object.keys(refreshChallenge).sort(), device_identity_hash_present: refreshChallenge.device_identity_hash != null });
+  const refreshFinish = await jsonRequest(token, accountID, "POST", "/codex/remote/control/client/refresh/finish", { client_id: clientID, device_key_proof: enrollmentProof({ challenge: refreshChallenge, clientID, key, helperBinary: helper.binary, expectedPath: "/backend-api/codex/remote/control/client/refresh/finish", requireDeviceIdentityHash: true }) });
+  controllerToken = refreshFinish.body?.remote_control_token;
+  expiresAt = Math.floor(Date.parse(refreshFinish.body?.expires_at) / 1000);
+  if (refreshFinish.body?.client_id !== clientID || typeof controllerToken !== "string" || !Number.isFinite(expiresAt) || JSON.stringify(refreshFinish.body?.scopes) !== JSON.stringify([controllerScope])) fail("refresh/finish schema mismatch");
+  observe("refresh_finish", { status: refreshFinish.status, response_fields: Object.keys(refreshFinish.body).sort(), scopes: refreshFinish.body.scopes, expires_at_present: true });
   const environments = await pairedEnvironments(token, accountID, clientID);
   const items = environments.body?.items;
   if (!Array.isArray(items) || items.length === 0) fail("no paired environments returned");
@@ -357,17 +415,28 @@ try {
   observe("environment_selected", { env: "env_selected", selected_index: selected.index + 1, online: selected.environment.online, client_type: selected.environment.client_type, os: selected.environment.os });
   const wssResult = await openControllerWSS({ token, accountID, controllerToken, controllerExpiresAt: expiresAt, clientID, key, helperBinary: helper.binary, environment: selected.environment });
   observe("initialize_complete", { result_fields: wssResult.initializeResultFields, cursor_present: wssResult.cursor != null });
+  const revoke = await revokeProbeController(token, accountID, clientID);
+  cleanupStatus = revoke.status;
+  if (!revoke.ok) fail(`probe controller revoke failed with HTTP ${revoke.status}`);
+  controllerRevoked = true;
+  observe("revoke", { status: revoke.status, ok: true, controller: "client_probe" });
+  try {
+    await jsonRequest(token, accountID, "POST", "/codex/remote/control/client/refresh/start", { client_id: clientID });
+    fail("revoked controller identity was accepted");
+  } catch (error) {
+    if (![401, 403, 404].includes(error.status)) throw error;
+    observe("revoked_identity_rejected", { operation: "refresh_start", http_status: error.status, result: "rejected" });
+  }
   console.log(`REDACTED_FIXTURE=${JSON.stringify({ schema_version: 1, classification: "LIVE-REDACTED-OBSERVATION", target: { chatgpt_desktop_version: "26.825.32147", embedded_codex_version: "codex-cli 0.150.0-alpha.12.2", controller_protocol_version: 3 }, timeline })}`);
 } catch (error) {
   observe("probe_failed", { error: error.message, http_status: error.status ?? null, body_bytes: error.bodyBytes ?? null, body_sha256: error.bodySha256 ?? null });
   process.exitCode = 1;
 } finally {
-  if (clientID != null && token != null) {
+  if (!controllerRevoked && clientID != null && token != null) {
     try {
       const identity = authIdentity(token);
-      const response = await fetch(`${base}/wham/remote/control/clients/${encodeURIComponent(clientID)}`, { method: "DELETE", headers: headers(token, identity.accountId), redirect: "error", signal: AbortSignal.timeout(15_000) });
+      const response = await revokeProbeController(token, identity.accountId, clientID);
       cleanupStatus = response.status;
-      await response.arrayBuffer();
       observe("controller_cleanup", { status: response.status, ok: response.ok });
     } catch (error) { observe("controller_cleanup_failed", { error: error.message }); }
   }

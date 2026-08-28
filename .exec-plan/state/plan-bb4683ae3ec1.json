@@ -35,7 +35,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-28T09:35:43Z",
+  "updated_at": "2026-08-28T09:59:19Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -210,23 +210,27 @@
         "phase0-probe-scaffold-regression"
       ],
       "source": "Phase 0 tasks 2-3",
-      "notes": "Owner authorized the bounded real-account Phase 0 probe at 2026-08-28T09:35:43Z and attested ChatGPT iOS is connected to the current Mac. Exact target call sites, live redaction contract, device-key addon ABI and non-mutating auth/OAuth preflight are frozen. No full backend or iOS product wiring before Gate P0.",
+      "notes": "Owner authorized the bounded real-account Phase 0 probe and attested ChatGPT iOS was connected before capture. Real enrollment, Computer-tab manual pairing, independent controller WSS challenge/proof, environment binding, ACK and ordinary app-server initialize now have redacted evidence. This todo remains in progress: refresh, pong, reconnect cursor placement and revoked-identity rejection are still missing; post-connect iOS coexistence is not yet attested. No full backend or iOS product wiring before Gate P0.",
       "verification": {
         "required": true,
         "status": "missing",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "Owner authorization resolved the external blocker; real capture is now in progress and remains unproven until redacted artifacts validate.",
+        "summary": "Partial real capture validates enrollment through paired Desktop app-server initialize and deterministic cleanup. The require-live validator honestly fails on refresh_start, refresh_finish, pong, reconnect_handshake and revoked_identity_rejected, so implementation proof is still missing.",
         "artifacts": [
           "agent/codex-remote/testdata/phase0/static-26.825.32147-alpha.12.2/controller-call-sites.json",
           "agent/codex-remote/testdata/phase0/live-fixture-contract.json",
           "agent/codex-remote/probe/preflight.mjs",
           "agent/codex-remote/validate/controller-fixtures.mjs",
           "agent/codex-remote/testdata/phase0/meta/controller-fixture-preflight.txt",
-          "agent/codex-remote/testdata/phase0/meta/controller-fixture-blocker.md"
+          "agent/codex-remote/testdata/phase0/meta/controller-fixture-blocker.md",
+          "agent/codex-remote/probe/device_key_helper.swift",
+          "agent/codex-remote/probe/live_controller.mjs",
+          "agent/codex-remote/testdata/phase0/live/attempt-001-controller-enrollment.json",
+          "agent/codex-remote/testdata/phase0/live/attempt-002-controller-pair-initialize.json"
         ],
-        "checked_at": "2026-08-28T09:35:43Z"
+        "checked_at": "2026-08-28T09:59:19Z"
       }
     },
     {
