@@ -35,7 +35,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-28T08:43:00Z",
+  "updated_at": "2026-08-28T08:44:00Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -95,7 +95,7 @@
       "id": "phase0-source-baseline-regression",
       "title": "Phase 0 source and binary provenance — regression",
       "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase0",
       "kind": "regression",
       "depends_on": [
@@ -105,20 +105,23 @@
       "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Verified both the current worktree and frozen-start delivery diff leave agent/codex-web and agent/codex unchanged, the paired iOS worktree remains at the frozen clean commit, Phase 0 contains no Go product backend files, the static validator replays, and gitleaks plus targeted token/device-key scans find no leaks. This evidence is intentionally non-gating for the real controller chain.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/source-baseline-regression.txt",
+          "git:29d20d03f1629d39f60b20e63b5b1970715da41a"
+        ],
+        "checked_at": "2026-08-28T08:43:10Z"
       }
     },
     {
       "id": "phase0-probe-scaffold-impl",
       "title": "Phase 0 isolated probe scaffold — impl",
       "description": "Create only agent/codex-remote/{README.md,probe/,testdata/phase0/,validate/}; document Phase-0-only status, timeouts, redaction and revoke cleanup; do not register a backend or import old lifecycle/ownership code.",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "phase0",
       "kind": "impl",
       "depends_on": [
