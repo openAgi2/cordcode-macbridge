@@ -35,7 +35,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-28T10:13:10Z",
+  "updated_at": "2026-08-28T11:09:00Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -210,14 +210,14 @@
         "phase0-probe-scaffold-regression"
       ],
       "source": "Phase 0 tasks 2-3",
-      "notes": "External blocker after two cursor-focused live attempts: enrollment, Computer-tab pairing, refresh, independent controller WSS challenge/proof, environment binding, ACK, ordinary app-server initialize, active pong, explicit revoke and post-revoke HTTP 403 are proven. The target delivered no cursor in initialize messages or three bounded active pongs, so x-codex-subscribe-cursor reconnect cannot be exercised without fabrication. require-live now fails only on reconnect_handshake. Post-connect iOS coexistence remains separately unproven. No full backend or iOS product wiring before Gate P0.",
+      "notes": "External blocker after three cursor-focused live attempts (003-005): enrollment, Computer-tab pairing, refresh, independent controller WSS challenge/proof, environment binding, ACK, ordinary app-server initialize, active pong, explicit revoke and post-revoke HTTP 403 are proven. Attempt-005 replayed the full chain on the frozen target and again got no cursor in initialize messages or three bounded active pongs; the probe self-exited with code 1 after cleanup. x-codex-subscribe-cursor reconnect cannot be exercised without fabrication. require-live still fails only on reconnect_handshake. Post-connect iOS coexistence remains separately unproven. No full backend or iOS product wiring before Gate P0.",
       "verification": {
         "required": true,
         "status": "failed",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "BLOCKED: real enrollment-through-revoke evidence is present, including revoked-identity HTTP 403, but two cursor-focused attempts produced no cursor and therefore no real reconnect handshake. The require-live validator fails only on reconnect_handshake.",
+        "summary": "BLOCKED: real enrollment-through-revoke evidence is present, including revoked-identity HTTP 403, but three cursor-focused attempts (003-005) produced no cursor and therefore no real reconnect handshake. Attempt-005 is a full-chain replay that also confirmed unaided probe exit. The require-live validator fails only on reconnect_handshake.",
         "artifacts": [
           "agent/codex-remote/testdata/phase0/static-26.825.32147-alpha.12.2/controller-call-sites.json",
           "agent/codex-remote/testdata/phase0/live-fixture-contract.json",
@@ -230,9 +230,11 @@
           "agent/codex-remote/testdata/phase0/live/attempt-001-controller-enrollment.json",
           "agent/codex-remote/testdata/phase0/live/attempt-002-controller-pair-initialize.json",
           "agent/codex-remote/testdata/phase0/live/attempt-003-refresh-cursor-divergence.json",
-          "agent/codex-remote/testdata/phase0/live/attempt-004-cursor-block-and-revoke-rejection.json"
+          "agent/codex-remote/testdata/phase0/live/attempt-004-cursor-block-and-revoke-rejection.json",
+          "agent/codex-remote/testdata/phase0/live/attempt-005-full-chain-cursor-still-blocked.json",
+          "agent/codex-remote/testdata/phase0/live/attempt-006-initialized-thread-list-still-no-cursor.json"
         ],
-        "checked_at": "2026-08-28T10:13:10Z"
+        "checked_at": "2026-08-28T11:09:00Z"
       }
     },
     {

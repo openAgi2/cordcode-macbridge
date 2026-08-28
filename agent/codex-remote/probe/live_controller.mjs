@@ -29,6 +29,20 @@ function fail(message) {
   throw new Error(message);
 }
 
+function withTimeout(promise, ms, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+function closeLocalServer(server) {
+  return new Promise((resolve) => {
+    const drop = setTimeout(() => server.closeAllConnections(), 2_000);
+    drop.unref();
+    server.close(() => { clearTimeout(drop); resolve(); });
+  });
+}
+
 function jwtClaims(token) {
   const parts = token.split(".");
   if (parts.length < 2) fail("malformed JWT");
@@ -81,7 +95,7 @@ function loadAuthToken() {
     let buffer = "";
     let initialized = false;
     const timeout = setTimeout(() => { child.kill(); reject(new Error("auth helper timeout")); }, 15_000);
-    child.on("error", reject);
+    child.on("error", (error) => { clearTimeout(timeout); reject(error); });
     child.stdout.on("data", (chunk) => {
       buffer += chunk;
       for (;;) {
@@ -189,12 +203,12 @@ async function stepUp(accountID) {
   observe("step_up_browser_opened", { callback_port: server.address().port });
   spawnSync("/usr/bin/open", [authorize.toString()], { stdio: "ignore" });
   try {
-    const { code } = await Promise.race([codePromise, new Promise((_, reject) => setTimeout(() => reject(new Error("step-up timeout")), 600_000))]);
+    const { code } = await withTimeout(codePromise, 600_000, "step-up timeout");
     const response = await fetch("https://auth.openai.com/oauth/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirectURI, client_id: oauthClientID, code_verifier: verifier }), signal: AbortSignal.timeout(15_000) });
     const parsed = await response.json();
     if (!response.ok || typeof parsed.access_token !== "string") fail(`step-up exchange failed with HTTP ${response.status}`);
     return parsed.access_token;
-  } finally { await new Promise((resolve) => server.close(resolve)); }
+  } finally { await closeLocalServer(server); }
 }
 
 async function collectManualPairingCode() {
@@ -241,9 +255,9 @@ async function collectManualPairingCode() {
   observe("pairing_input_opened", { input_port: server.address().port, transport: "localhost_one_time_form" });
   spawnSync("/usr/bin/open", [inputURL], { stdio: "ignore" });
   try {
-    return await Promise.race([codePromise, new Promise((_, reject) => setTimeout(() => reject(new Error("pairing input timeout")), 600_000))]);
+    return await withTimeout(codePromise, 600_000, "pairing input timeout");
   } finally {
-    await new Promise((resolve) => server.close(resolve));
+    await closeLocalServer(server);
   }
 }
 
@@ -300,13 +314,14 @@ function runControllerWSS({ token, accountID, controllerToken, controllerExpires
       ...(subscribeCursor == null ? {} : { "x-codex-subscribe-cursor": subscribeCursor }),
     });
     const ws = new WebSocket(websocketURL, { headers: requestHeaders, handshakeTimeout: 10_000, perMessageDeflate: false });
-    const timeout = setTimeout(() => { ws.terminate(); reject(new Error("controller WSS timeout")); }, 30_000);
+    const timeout = setTimeout(() => { ws.terminate(); reject(new Error("controller WSS timeout")); }, 60_000);
     let challengeComplete = false;
     let initializeResultFields = null;
     let pingSent = false;
-    let nextPingSeq = initialize ? 2 : 5;
+    let nextClientSeq = initialize ? 1 : 5;
     let cursorlessPongs = 0;
     let settled = false;
+    let observedCursor = subscribeCursor;
     const finish = (result) => {
       if (settled) return;
       settled = true;
@@ -315,12 +330,26 @@ function runControllerWSS({ token, accountID, controllerToken, controllerExpires
       ws.close(1000);
       setTimeout(() => ws.terminate(), 2_000).unref();
     };
+    const sendClientMessage = (method, message) => {
+      const seqID = nextClientSeq;
+      nextClientSeq += 1;
+      ws.send(JSON.stringify({ type: "client_message", client_id: clientID, env_id: environment.env_id, stream_id: streamID, seq_id: seqID, skip_history: false, message }));
+      observe("client_message", { method, env: "env_selected", stream: "stream_primary", seq_id: seqID });
+      return seqID;
+    };
     const sendPing = () => {
-      const seqID = nextPingSeq;
-      nextPingSeq += 1;
+      const seqID = nextClientSeq;
+      nextClientSeq += 1;
       ws.send(JSON.stringify({ type: "ping", client_id: clientID, env_id: environment.env_id, stream_id: streamID, seq_id: seqID, state: "foreground", skip_history: true }));
       pingSent = true;
       observe("ping", { env: "env_selected", stream: "stream_primary", seq_id: seqID, reconnect: !initialize });
+    };
+    const takeEnvelopeCursor = (message) => {
+      if (message.cursor == null || settled) return false;
+      observedCursor = message.cursor;
+      observe("cursor_observed", { on: message.type ?? "unknown_wss", seq_id: message.seq_id ?? null, cursor_chars: String(message.cursor).length });
+      finish({ streamID, cursor: message.cursor, initializeResultFields });
+      return true;
     };
     ws.on("open", () => observe(subscribeCursor == null ? "websocket_handshake" : "reconnect_handshake", { status: "open", protocol_version: 3, cursor_header_present: subscribeCursor != null }));
     ws.on("error", (error) => { clearTimeout(timeout); reject(new Error(`controller WSS error: ${error.message}`)); });
@@ -338,8 +367,7 @@ function runControllerWSS({ token, accountID, controllerToken, controllerExpires
         challengeComplete = true;
         observe("device_key_challenge", { fields: Object.keys(message).sort(), target_origin: message.targetOrigin, target_path: message.targetPath, scopes: message.scopes });
         if (initialize) {
-          ws.send(JSON.stringify({ type: "client_message", client_id: clientID, env_id: environment.env_id, stream_id: streamID, seq_id: 1, skip_history: false, message: { id: 1, method: "initialize", params: { clientInfo: { name: "codex_remote_phase0_probe", title: "CordCode Phase 0 Probe", version: "0" }, capabilities: { experimentalApi: true } } } }));
-          observe("client_message", { method: "initialize", env: "env_selected", stream: "stream_primary", seq_id: 1 });
+          sendClientMessage("initialize", { id: 1, method: "initialize", params: { clientInfo: { name: "codex_remote_phase0_probe", title: "CordCode Phase 0 Probe", version: "0" }, capabilities: { experimentalApi: true } } });
         } else {
           sendPing();
         }
@@ -347,22 +375,34 @@ function runControllerWSS({ token, accountID, controllerToken, controllerExpires
       }
       const safe = { type: message.type, fields: Object.keys(message).sort(), env_matches: message.env_id === environment.env_id, stream_matches: message.stream_id === streamID, seq_id: message.seq_id, has_cursor: message.cursor != null };
       observe(message.type ?? "unknown_wss", safe);
-      if (initialize && message.type === "server_message" && message.message?.id === 1 && !pingSent) {
+      if (takeEnvelopeCursor(message)) return;
+      if (initialize && message.type === "server_message" && message.message?.id === 1 && initializeResultFields == null) {
         initializeResultFields = Object.keys(message.message.result ?? {}).sort();
+        sendClientMessage("initialized", { method: "initialized", params: {} });
+        sendClientMessage("thread/list", { id: 2, method: "thread/list", params: { limit: 5 } });
         sendPing();
+      }
+      if (initialize && message.type === "server_message" && message.message?.id === 2) {
+        const result = message.message.result ?? {};
+        observe("thread_list", {
+          error: message.message.error != null,
+          result_fields: Object.keys(result).sort(),
+          data_count: Array.isArray(result.data) ? result.data.length : null,
+          pagination_cursor_present: result.cursor != null,
+        });
       }
       if (message.type === "pong") {
         if (message.status !== "active") {
           clearTimeout(timeout); ws.terminate(); reject(new Error("pong status mismatch")); return;
         }
-        if (initialize && message.cursor == null) {
+        if (initialize && observedCursor == null) {
           cursorlessPongs += 1;
           if (cursorlessPongs < 3) {
             setTimeout(sendPing, 1_000);
             return;
           }
         }
-        finish({ streamID, cursor: message.cursor ?? subscribeCursor, initializeResultFields });
+        finish({ streamID, cursor: observedCursor, initializeResultFields });
       }
     });
   });
@@ -373,7 +413,7 @@ async function openControllerWSS(options) {
   const first = await runControllerWSS({ ...options, streamID, initialize: true });
   if (first.initializeResultFields == null) fail("initial controller stream proof incomplete");
   if (first.cursor == null) {
-    observe("reconnect_blocked", { reason: "no_cursor_after_three_active_pongs", cursor_header_present: false });
+    observe("reconnect_blocked", { reason: "no_cursor_after_initialized_thread_list_and_three_active_pongs", cursor_header_present: false });
     return { streamID, cursor: null, initializeResultFields: first.initializeResultFields, reconnectStatus: "blocked-no-cursor" };
   }
   const reconnected = await runControllerWSS({ ...options, streamID, subscribeCursor: first.cursor, initialize: false });

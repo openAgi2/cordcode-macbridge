@@ -1,0 +1,191 @@
+{
+  "schema_version": 1,
+  "classification": "LIVE-REDACTED-OBSERVATION-BLOCKED",
+  "gate_effect": "evidence-only",
+  "target": {
+    "chatgpt_desktop_version": "26.825.32147",
+    "chatgpt_bundle_version": "7303",
+    "embedded_codex_version": "codex-cli 0.150.0-alpha.12.2",
+    "controller_protocol_version": 3
+  },
+  "metadata": {
+    "captured_at": "2026-08-28T10:44:23Z",
+    "capture_purpose": "Replay the full independent-controller chain on the frozen target after owner-authorized agent-driven live run; bound cursor acquisition to three active pongs; prove explicit probe-only revoke and post-revoke rejection; confirm the probe process exits by itself after cleanup.",
+    "source_classification": "target binary plus official live service",
+    "operator_attestation": "Owner authorized this round's agent-driven probe, completed fresh step-up in the auto-opened browser, and entered a fresh Computer-tab pairing code only through the localhost form. The selected environment was the current Mac ChatGPT Desktop host. The agent auto-selected that environment from the redacted type/os/online fields.",
+    "redaction_procedure": "Removed credentials, pairing material, QR data, signatures, raw identifiers, host names and response bodies; retained bounded counts, status codes, field sets, routing comparisons, relative timing and cleanup outcomes.",
+    "secret_scan_command": "gitleaks dir --redact --config .gitleaks.toml .",
+    "secret_scan_result": "PASS: no leaks found after fixture and probe write",
+    "cleanup_result": "The probe explicitly revoked only client_probe with HTTP 204, observed post-revoke refresh_start HTTP 403, deleted probe_key, closed localhost listeners, and exited with code 1 without operator interrupt. No official mobile-controller mutation was issued."
+  },
+  "observations": [
+    {
+      "kind": "auth_helper",
+      "result": "pass",
+      "detail": "Embedded official app-server returned ChatGPT auth to probe memory only; no credential was printed or persisted."
+    },
+    {
+      "kind": "enroll_start",
+      "http_status": 200,
+      "response_fields": ["account_user_id", "client_id", "device_key_challenge"],
+      "challenge_fields": ["account_user_id", "audience", "challenge_expires_at", "challenge_id", "challenge_token", "client_id", "device_identity_hash", "nonce", "purpose", "target_origin", "target_path", "type"]
+    },
+    {
+      "kind": "device_key_lifecycle",
+      "result": "pass-with-policy-gap",
+      "algorithm": "ecdsa_p256_sha256",
+      "protection_class": "os_protected_nonextractable",
+      "spki_bytes": 91,
+      "create": true,
+      "sign": true,
+      "delete": true,
+      "detail": "Independently signed Phase 0 helper used a nonextractable login-Keychain P-256 key. Secure Enclave remained unavailable in this helper context."
+    },
+    {
+      "kind": "step_up",
+      "result": "pass",
+      "scopes": ["codex.remote_control.enroll"],
+      "fresh": true,
+      "callback_port": 1455
+    },
+    {
+      "kind": "enroll_finish",
+      "http_status": 200,
+      "response_fields": ["account_user_id", "client_id", "expires_at", "remote_control_token", "scopes"],
+      "scopes": ["remote_control_controller_websocket"]
+    },
+    {
+      "kind": "refresh_start",
+      "http_status": 200,
+      "device_identity_hash_present": true
+    },
+    {
+      "kind": "refresh_finish",
+      "http_status": 200,
+      "scopes": ["remote_control_controller_websocket"]
+    },
+    {
+      "kind": "environment_list",
+      "stage": "before_pair",
+      "http_status": 200,
+      "count": 0,
+      "result": "pairing-required",
+      "response_fields": ["cursor", "items"]
+    },
+    {
+      "kind": "controller_pair",
+      "http_status": 200,
+      "result": "claimed-current-desktop",
+      "transport": "localhost_one_time_form"
+    },
+    {
+      "kind": "environment_list",
+      "stage": "after_pair",
+      "http_status": 200,
+      "count": 1,
+      "environment": "env_desktop",
+      "online": true,
+      "busy": false,
+      "os": "Mac OS",
+      "client_type": "CODEX_DESKTOP_APP",
+      "app_server_version": "0.150.0-alpha.12.2",
+      "poll_attempt": 1
+    },
+    {
+      "kind": "environment_selected",
+      "environment": "env_desktop",
+      "selected_index": 1,
+      "online": true,
+      "client_type": "CODEX_DESKTOP_APP"
+    },
+    {
+      "kind": "websocket_handshake",
+      "status": "open",
+      "protocol_version": 3,
+      "cursor_header_present": false
+    },
+    {
+      "kind": "device_key_challenge",
+      "target_origin": "https://chatgpt.com",
+      "target_path": "/backend-api/codex/remote/control/client",
+      "scopes": ["remote_control_controller_websocket"]
+    },
+    {
+      "kind": "device_key_proof",
+      "algorithm": "ecdsa_p256_sha256",
+      "key": "probe_key"
+    },
+    {
+      "kind": "client_message",
+      "method": "initialize",
+      "environment": "env_desktop",
+      "stream": "stream_primary",
+      "seq_id": 1
+    },
+    {
+      "kind": "ack",
+      "client_seq_ids": [1, 2, 3, 4],
+      "environment_matches": true,
+      "stream_matches": true
+    },
+    {
+      "kind": "server_message",
+      "server_seq_ids": [1, 2],
+      "environment_matches": true,
+      "stream_matches": true,
+      "cursor_present": false,
+      "initialize_result_fields": ["codexHome", "platformFamily", "platformOs", "userAgent"]
+    },
+    {
+      "kind": "pong",
+      "bounded_count": 3,
+      "statuses": ["active", "active", "active"],
+      "server_seq_ids": [3, 4, 5],
+      "environment_matches": true,
+      "stream_matches": true,
+      "cursor_present": false,
+      "fields": ["client_id", "env_id", "seq_id", "status", "stream_id", "type"]
+    },
+    {
+      "kind": "reconnect_blocked",
+      "reason": "No cursor was delivered by initialize server messages or three active pongs; x-codex-subscribe-cursor cannot be populated from real evidence.",
+      "cursor_header_present": false
+    },
+    {
+      "kind": "revoke",
+      "http_status": 204,
+      "controller": "client_probe"
+    },
+    {
+      "kind": "revoked_identity_rejected",
+      "operation": "refresh_start",
+      "http_status": 403,
+      "result": "rejected"
+    },
+    {
+      "kind": "cleanup",
+      "controller_revoked": true,
+      "device_key_deleted": true,
+      "probe_self_exited": true,
+      "exit_code": 1,
+      "operator_interrupt": false,
+      "official_mobile_controller_mutated": false
+    }
+  ],
+  "semantic_assertions": {
+    "all_rest_and_websocket_origins_are_official_allowlisted_origins": true,
+    "selected_environment_is_the_current_desktop": true,
+    "environment_binding_is_observed_not_inferred": true,
+    "cursor_delivery_location_is_observed_not_inferred": false,
+    "controller_identity_is_independent_and_revocable": true,
+    "cleanup_targets_only_the_probe_controller": true,
+    "official_mobile_controller_is_never_automatically_disconnected_or_revoked": false
+  },
+  "adjudication": {
+    "result": "BLOCKED",
+    "proven": "A single owner-authorized run reproduced enrollment, Computer-tab pairing, refresh, selected Desktop binding, signed WSS challenge, ordinary app-server initialize, three active pongs without cursor, explicit revoke, revoked-identity HTTP 403, probe-key deletion and unaided process exit.",
+    "blocking_condition": "The target host/service again delivered no cursor in any initial server message or three bounded active pongs, so real cursor-header reconnect cannot be exercised.",
+    "forbidden_inference": "Static optional cursor schema, HTTP environment-list pagination field named cursor, and target call sites must not be promoted to live reconnect evidence.",
+    "phase0_gate": "FAIL-BLOCKED"
+  }
+}
