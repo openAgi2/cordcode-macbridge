@@ -1,0 +1,22 @@
+{
+  "_comment": "Sanitized REAL dsh-web host.describe capture (dsh web 0.0.1, live 2026-08-28, G4 provenance pin). version is the API-level identifier kept verbatim (the pin this fixture guards); provider/model and home are owner-config values replaced with fixtures; cwd/attachedSessions/canOpenPath verbatim shape.",
+  "dshWebVersion": "0.0.1",
+  "request": {
+    "method": "host.describe",
+    "payload": {}
+  },
+  "response": {
+    "result": {
+      "ok": true,
+      "value": {
+        "version": "0.0.1",
+        "cwd": "/",
+        "provider": "fixture-provider",
+        "model": "fixture-model",
+        "attachedSessions": 6,
+        "home": "/Users/fixture",
+        "canOpenPath": true
+      }
+    }
+  }
+}

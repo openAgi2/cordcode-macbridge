@@ -192,6 +192,22 @@ private struct ManagementJSONObject {
         guard case let .bool(value) = try value(key) else { throw ManagementCodecError.invalidType(key) }
         return value
     }
+
+    /// 可选的 `{"<backendID>": <uint32>}` 映射；键缺失返回 nil，值非法则抛错。
+    func optionalUint32Map(_ key: String) throws -> [String: UInt32]? {
+        guard let entry = values[key] else { return nil }
+        guard case let .object(pairs) = entry else { throw ManagementCodecError.invalidType(key) }
+        var out: [String: UInt32] = [:]
+        for (backend, rawValue) in pairs {
+            guard case let .number(raw) = rawValue, !raw.isEmpty,
+                  raw.utf8.allSatisfy({ $0 >= 0x30 && $0 <= 0x39 }),
+                  let parsed = UInt64(raw), parsed <= UInt64(UInt32.max) else {
+                throw ManagementCodecError.invalidInteger("\(key).\(backend)")
+            }
+            out[backend] = UInt32(parsed)
+        }
+        return out
+    }
 }
 
 struct ManagementRuntimeIdentity: Equatable, Sendable, Codable {
@@ -212,6 +228,21 @@ struct ManagementActivity: Equatable, Sendable {
     let bridgeOwnedActiveTurns: UInt32
     let pendingInteractions: UInt32
     let admissionState: AdmissionState
+    /// Per-backend breakdown；旧 runtime 未提供时为 nil（门控退回全局计数，保持保守）。
+    let bridgeOwnedActiveTurnsByBackend: [String: UInt32]?
+    let pendingInteractionsByBackend: [String: UInt32]?
+
+    /// 「重启共享 Codex 服务」只影响 codex/codex-web：门控只看这两个 backend 的
+    /// 活跃 turn，不被 claude 等其它 backend 的任务误禁用（owner 2026-08-28）。
+    var codexScopedActiveTurns: UInt32 {
+        guard let byBackend = bridgeOwnedActiveTurnsByBackend else { return bridgeOwnedActiveTurns }
+        return (byBackend["codex"] ?? 0) + (byBackend["codex-web"] ?? 0)
+    }
+
+    var codexScopedPendingInteractions: UInt32 {
+        guard let byBackend = pendingInteractionsByBackend else { return pendingInteractions }
+        return (byBackend["codex"] ?? 0) + (byBackend["codex-web"] ?? 0)
+    }
 }
 
 enum ManagementQuiesceStatus: Equatable, Sendable {
@@ -265,15 +296,24 @@ enum ManagementStatusCodec {
             stuckWorkers: try healthObject.uint32("stuckWorkers"),
             restartRecommended: try healthObject.bool("restartRecommended")
         )
-        let activityObject = try ManagementJSONObject(
-            try root.value("activity"), exactKeys: ["bridgeOwnedActiveTurns", "pendingInteractions", "admissionState"]
-        )
+        // byBackend 两个键是可选新增（旧 runtime 不带）；present 才进 exactKeys，
+        // 保证旧 runtime 的 status 仍能严格解码。
+        let activityValue = try root.value("activity")
+        var activityKeys: Set<String> = ["bridgeOwnedActiveTurns", "pendingInteractions", "admissionState"]
+        if case let .object(activityPairs) = activityValue {
+            for key in activityPairs.map(\.0) where key == "bridgeOwnedActiveTurnsByBackend" || key == "pendingInteractionsByBackend" {
+                activityKeys.insert(key)
+            }
+        }
+        let activityObject = try ManagementJSONObject(activityValue, exactKeys: activityKeys)
         guard let admissionState = ManagementActivity.AdmissionState(rawValue: try activityObject.string("admissionState")) else {
             throw ManagementCodecError.invalidValue("activity.admissionState")
         }
         let activity = ManagementActivity(
             bridgeOwnedActiveTurns: try activityObject.uint32("bridgeOwnedActiveTurns"),
-            pendingInteractions: try activityObject.uint32("pendingInteractions"), admissionState: admissionState
+            pendingInteractions: try activityObject.uint32("pendingInteractions"), admissionState: admissionState,
+            bridgeOwnedActiveTurnsByBackend: try activityObject.optionalUint32Map("bridgeOwnedActiveTurnsByBackend"),
+            pendingInteractionsByBackend: try activityObject.optionalUint32Map("pendingInteractionsByBackend")
         )
         let quiesce = try decodeQuiesceStatus(try root.value("quiesce"))
         return ManagementStatus(

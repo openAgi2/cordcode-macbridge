@@ -634,10 +634,15 @@ func (c *sessionCodec) applyToolCall(env *sessionEventWire) ([]core.Event, error
 		return nil, resetf("tool/call (seq %d) arguments disagree with accumulated deltas", env.Seq)
 	}
 	c.toolCallNames[d.CallID] = d.Name
+	// ToolInput 契约是 "human-readable summary"（core/message.go）：直传原始
+	// JSON 会让 iOS running-status ticker 与活动行的 detail 变成
+	// `{"command": ...}`，且被 ticker 的 sanitizer 打回通用「正在执行工具」
+	// （owner 2026-08-28）。与 history.go hydration 的 toolStepTitle 同源，
+	// 保证冷/热渲染一致。
 	return append(pre, core.Event{
 		Type:      core.EventToolUse,
 		ToolName:  d.Name,
-		ToolInput: d.Arguments,
+		ToolInput: toolStepTitle(d.Name, []byte(d.Arguments)),
 		RequestID: d.CallID,
 		ItemID:    d.CallID,
 		TurnID:    c.activeTurnID,

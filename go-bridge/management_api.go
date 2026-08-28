@@ -378,11 +378,16 @@ func (s *ManagementServer) handleStatus(w http.ResponseWriter, _ *http.Request) 
 			"stuckWorkers":       poolStatus.stuckWorkers,
 			"restartRecommended": snapshot.Health != admission.HealthHealthy,
 		}
-		result["activity"] = map[string]interface{}{
+		activity := map[string]interface{}{
 			"bridgeOwnedActiveTurns": snapshot.BridgeOwnedActiveTurns,
 			"pendingInteractions":    snapshot.PendingInteractions,
 			"admissionState":         snapshot.State.String(),
 		}
+		if s.cfg.Handlers != nil {
+			activity["bridgeOwnedActiveTurnsByBackend"] = s.cfg.Handlers.bridgeOwnedActiveTurnsByBackend()
+			activity["pendingInteractionsByBackend"] = s.cfg.Handlers.pendingInteractionCountByBackend()
+		}
+		result["activity"] = activity
 		quiesce := map[string]interface{}{"state": "none"}
 		if snapshot.HasOperation && snapshot.State == admission.StateQuiescing {
 			quiesce = map[string]interface{}{

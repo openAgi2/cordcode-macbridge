@@ -190,6 +190,43 @@ func TestMgmtV1StatusIsAdditiveAndLevelTriggered(t *testing.T) {
 	}
 }
 
+// Owner 2026-08-28: claude 任务在跑时 codex 重启按钮被误禁用——全局
+// bridgeOwnedActiveTurns 被当成 codexWebActiveTurns。status 增加 per-backend
+// breakdown，让 Mac 端只按 codex/codex-web 门控。
+func TestMgmtV1StatusActivityByBackendScopesTurnsPerBackend(t *testing.T) {
+	srv := newV1TestMgmtServer()
+	h := srv.cfg.Handlers
+	h.RegisterAgent("claude", &fakeAgent{name: "claudecode"})
+	h.sessions.put("s-claude", "claude", "", &fakeAgentSession{id: "s-claude", events: make(chan core.Event)})
+	if !h.admitBridgeTurn("s-claude") {
+		t.Fatal("admitBridgeTurn failed")
+	}
+
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, authRequest(http.MethodGet, "/internal/status"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	activity := body["activity"].(map[string]interface{})
+	if activity["bridgeOwnedActiveTurns"] != float64(1) {
+		t.Fatalf("global turns=%#v, want 1", activity["bridgeOwnedActiveTurns"])
+	}
+	byBackend := activity["bridgeOwnedActiveTurnsByBackend"].(map[string]interface{})
+	if byBackend["claude"] != float64(1) {
+		t.Fatalf("byBackend=%#v, want claude:1", byBackend)
+	}
+	if _, ok := byBackend["codex"]; ok {
+		t.Fatalf("byBackend=%#v, codex should be absent (no codex turn)", byBackend)
+	}
+	if _, ok := activity["pendingInteractionsByBackend"]; !ok {
+		t.Fatal("pendingInteractionsByBackend missing from activity")
+	}
+}
+
 func TestMgmtV1QuiesceCommitAndAbortHandlers(t *testing.T) {
 	const opA = "ffeeddccbbaa99887766554433221100"
 	const opB = "112233445566778899aabbccddeeff00"

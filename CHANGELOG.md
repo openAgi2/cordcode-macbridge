@@ -8,6 +8,9 @@
 
 ## [Unreleased]
 
+- **修复：Claude 任务在跑时「重启共享 Codex 服务」按钮被误禁用（2026-08-28 真机反馈）**：管理状态里的活跃 turn 计数是全局（所有 backend 合计），Mac 端却直接当作 codex 专属计数——任一 backend（如 Claude）有任务就禁用 codex 重启按钮、预检也拒绝。现 status 增加 per-backend 活跃 turn / pending 交互明细（可选新增键，旧版 runtime 仍可解码并保守回退全局计数），重启门控只数 codex / codex-web 自己的活动；全局计数继续服务于跨 backend 的 quiesce 排空语义，不受影响。
+- **修复：空闲的 Claude 会话从手机续聊被误报「该会话记录的进程仍在运行」（2026-08-28 真机反馈）**：发送前检查此前把「Claude 桌面端进程开着该会话」当作占用；现区分为「进程活着」与「transcript 证明在跑任务」两级——只有后者才拦截（错误文案相应改为「该会话正在另一个客户端中执行任务」），Claude 桌面开着但空闲的会话可正常串行追加新 turn。会话列表的运行中判定同源收紧为 transcript 证明。
+- **改进：DeepSeek Harness 执行中显示具体命令行（2026-08-28 真机反馈）**：工具事件此前不带人类可读摘要，iOS 运行状态条与活动行只能显示笼统的「正在执行工具」。现工具事件摘要与冷启动 hydration 同源（bash/git 命令行、读写文件路径、搜索 pattern 等，按 rune 安全截断 80 字），执行中与历史渲染一致。
 - **降低 DeepSeek Harness 长回复的 projection patch 负载**：投影 reducer 此前在每个几十字节的 `text_delta` 上同时重发不断增长的完整 assistant turn，令累计 Relay/JSON/iOS apply 成本呈二次方增长。现首个内容 patch 仍携带可挂载的 turn shell，后续正文增量只发 `partOps`，单帧大小不再随累计正文增长，权威完整 projection 保持不变。真机复测证明该优化不是“时间线中途清空”的完整根因；最终定位为 iOS message-web 在流式正文跨 6000 字时热切换 Virtuoso unit 拓扑，修复归属 iOS 配套分支。
 - **修复：停止生效后 iOS 不再卡「执行中」，且第一次点停止即生效**：此前停止共享 daemon 上运行中的 turn 时，若第一次请求被官方以过期 turnID 拒绝（同一会话又被另一客户端发起新 turn，本地记录的 turn 身份没随事件流更新），bridge 会删除本地会话并关闭事件监听——agent relay 从此读不到官方帧但永不退出（运行标记残留并挡住被动观察泵），官方 `turn/completed`（interrupted）无人摄入 Kernel，iOS 按钮永久「执行中」、Mac 列表只剩「待执行」占位。现共享 daemon 上中断后的会话与 relay 保留至官方收口；turn 身份改以中央泵观测流为准（事件驱动更新）；会话关闭时 relay 正常退出、官方后续帧交给被动泵，并对共享 daemon 不再合成「通道关闭」伪终态。
 - **修复：iOS 发送长任务时流式正文逐段重复（如「第二个笑话」显示成「第二第二个个笑话笑话」）**：同一官方 text_delta 被两条管线各投递一次（session route 中继 + 被动观察泵），两拷贝在批处理器内合并成一份双倍增量写入 Projection Kernel，iOS 按投影逐段叠加后出现字词级重复。现按审计-008 单一摄入所有者收敛：中继会话由 relayEvents 单点摄入，被动泵只补「无中继但有观察兴趣」的会话（codex-web 外部 turn 仍需它兜底，判据是中继运行状态而非「是否有订阅者」）。Mac 端 kernel 文本从此为严格增量，iOS 无需改动。

@@ -898,17 +898,24 @@ type RunningSessionLister interface {
 // Live is identity-verified: true only when PID is alive AND the live process
 // still matches the recorded session (executable is Claude, cwd matches), so a
 // reused PID cannot resurrect a stale session as live.
+// Executing is transcript-proven (same rule as RunningSessionLister): true only
+// when the session's transcript shows an in-flight turn. A live-but-idle
+// external client (e.g. Claude Desktop holding the session open) has
+// Live=true, Executing=false — send preflights must block on Executing, not on
+// Live (owner 2026-08-28: live-but-idle sessions were wrongly refused).
 type LiveSessionProcess struct {
 	SessionID string
 	PID       int
 	Live      bool
+	Executing bool
 }
 
 // LiveSessionLister is the live-only counterpart to RunningSessionLister.
 // LiveSessionProcess reports PID liveness AND process identity (executable +
-// cwd), without transcript inspection and without executing-state
-// classification. IsProcessAlive reports PID liveness only and is meant for
-// cheap per-tick rechecks of a PID already identity-verified at relay start.
+// cwd), plus a transcript-proven Executing flag (false when unprovable — the
+// same fail-open-idle default as RunningSessionLister). IsProcessAlive reports
+// PID liveness only and is meant for cheap per-tick rechecks of a PID already
+// identity-verified at relay start.
 type LiveSessionLister interface {
 	LiveSessionProcess(ctx context.Context, sessionID string) (LiveSessionProcess, error)
 	IsProcessAlive(ctx context.Context, pid int) bool

@@ -438,9 +438,11 @@ The v1 and v2 paths MUST NOT be mixed for the same interaction, and v2 MUST NOT 
 - `resolve_user_input` is the backend-neutral bridge RPC for answering/rejecting a v2
   interaction. Payload: `{ interactionId, clientActionId, action: "answer"|"reject",
   answers?: [{ questionId, values: [{ kind: "option"|"text", optionId?, text? }] }] }`. MacBridge
-  routes it to the backend-specific `UserInputResponder` (Codex app-server JSON-RPC
-  `resolveUserInput`/`interrupt`, or Claude `control_response` allow with `updatedInput.answers` /
-  deny). It returns `{ interactionId, outcome: "accepted"|"already_resolved"|"in_progress",
+  routes it to the backend-specific `UserInputResponder` (the retired legacy Codex backend used
+  app-server JSON-RPC `resolveUserInput`/`interrupt`; the current `codex-web` backend replies to
+  the original server request via `RespondServerRequest` with an `answers` payload — see its
+  backend section; Claude uses `control_response` allow with `updatedInput.answers` / deny). It
+  returns `{ interactionId, outcome: "accepted"|"already_resolved"|"in_progress",
   currentStatus, headRev }` or a
   `UserInputError{ code, message }` (`interaction_not_found`, `invalid_answer_shape`,
   `backend_response_failed`, `session_not_active`). `outcome/currentStatus` acknowledges the action
@@ -451,8 +453,12 @@ The v1 and v2 paths MUST NOT be mixed for the same interaction, and v2 MUST NOT 
   real Other/custom-result path; `multiSelect` maps to `single`/`multiple`; empty
   options are malformed (not normalized to text); each question is `required=true`, `isSecret=false`;
   duplicate question text within one interaction is `invalid_backend_request` (it cannot be an
-  unambiguous `answers` map key). Codex has no verified reject path (`canReject=false`); Claude has
-  a real deny `control_response` (`canReject=true`).
+  unambiguous `answers` map key). Reject capability is per-interaction projected state, not a
+  backend constant: the retired legacy Codex backend had no verified reject path
+  (`canReject=false`); Claude has a real deny `control_response` (`canReject=true`); the current
+  `codex-web` backend also projects `canReject=true` (see its backend section). Clients render
+  skip/reject strictly from the projected `canRespond`/`canReject` flags, never from backend-id
+  hardcodes.
 - Projection Kernel (design §10): one `user_input` part per `interactionId`, upserted in place
   (never a second "answered" card); `execution.phase=requires_action` while any active-turn
   `user_input` part is `pending`; resolved updates the part in place and reverts phase per active
@@ -689,8 +695,12 @@ Wire behavior:
   because the agent implements the session-level responder used for externally originated turns.
 - Official `item/tool/requestUserInput` batches project through `structured_user_input_v1`.
   Each question contains two or three official options; the official `isOther` option is the free
-  text path. Answers return as the official question-id-to-answer map. The backend has no verified
-  reject response, so `canReject=false` and reject attempts fail closed.
+  text path. Answers return as the official question-id-to-answer map. The official wire has no
+  separate reject verb: skip is answered upstream as an empty `answers` response
+  (`ToolRequestUserInputResponse{answers:{}}`; the official client-error fallback is also empty
+  answers — app-server `bespoke_event_handling.rs`). The adapter therefore projects
+  `canReject=true` and maps `resolve_user_input action:"reject"` onto that empty-answers skip
+  (2026-08-25 parity with the Mac panel skip action).
 - Models and supported reasoning efforts come from the official model catalog. Provider
   configuration is read-only unless an official write surface is separately proven; legacy Codex
   provider allowlists, default `xhigh`, rollout history, and permission-mode catalogs are not
@@ -738,11 +748,25 @@ Wire behavior:
 - `list_projects` serves the official workspace registry (`workspace.list`) as
   quick-pick directory suggestions; `list_directory` stays on the bridge-generic local
   filesystem browser shared by every backend.
+- `list_agents` maps the official agent-preset catalog (`GET /agent` presets) into
+  `BackendAgentInfo` (name/displayName/description/isDefault); `set_agent_preset`
+  records a PENDING preset without `sessionId` (it rides the NEXT created session —
+  the draft-card flow) or switches the live session when `sessionId` is given
+  (`SelectAgentPreset`). There is no dedicated capability string for the agent
+  surface: clients gate on backend kind + non-empty catalog.
+- `list_permission_modes` / `set_permission_mode` are implemented via the official
+  permission-preset surface (`read-only` / `workspace-write` / `danger-full-access`,
+  localized names included): `set_permission_mode` emits a broadcast
+  `permission_mode_changed {mode, appliesTo}` so every client watching the session —
+  including the ones that did not make the switch — can follow. Switches made INSIDE
+  the official dsh web UI (slash `/permission`) are transcript-only on the host stream
+  (command/run rows, no discrete host event) and therefore emit nothing; clients
+  re-sync those on the next `list_permission_modes` fetch.
+  The `permission_mode` capability derives from the ModeSwitcher interface.
 - Not supported in phase 1 (existing generic `not_supported` paths; iOS hides the
   entries): `delete_session`, git surface (`get_git_context` / PR suite /
   `commit_and_push` / branch / worktree), diff suite, `fetch_todos`, `get_usage`,
-  memory files, `list_permission_modes`/`set_permission_mode`, `list_agents`,
-  `compress_context`, `share_session`. `rename_session` works on the RPC level; the
+  memory files, `compress_context`, `share_session`. `rename_session` works on the RPC level; the
   iOS rename/archive entries follow the `session_mutation` convention (hidden until
   archive lands, identical to codex/opencode today).
 - `run_diagnostics` reports the instance source (external probe hit / managed spawn,
@@ -1433,7 +1457,7 @@ Part fields (all lowerCamelCase, optional unless noted):
 | `status: string` | `pending` \| `answered` \| `rejected` \| `auto_resolved` \| `unavailable` \| `failed`. |
 | `questions` | Canonical question array (see Semantic Notes §Structured user input v2). Absent on `resolved`. |
 | `canRespond: boolean` | Whether the client may answer (`false` for `failed`/`unavailable`). |
-| `canReject: boolean` | Whether the client may reject (Claude `true`, Codex `false`). |
+| `canReject: boolean` | Whether the client may reject this interaction (projected per backend/interaction — e.g. Claude `true`; current `codex-web` `true` via empty-answers skip; retired legacy Codex `false`). |
 | `expiresAt?: number` | epoch-ms display hint; clients MUST NOT use a local timer to flip status. |
 | `resolvedAt?: number` | epoch-ms when the interaction reached a terminal status. |
 | `resolutionSource?: string` | `ios` \| `mac` \| `other_client` \| `backend`. |
