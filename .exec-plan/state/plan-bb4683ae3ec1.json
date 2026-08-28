@@ -35,13 +35,13 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-28T08:35:00Z",
+  "updated_at": "2026-08-28T08:40:00Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
       "title": "Phase 0 source and binary provenance — impl",
       "description": "Re-run and archive the dual-repository source manifest; freeze ChatGPT Desktop/App, embedded Codex, upstream tag/peeled commit/HEAD distance and target-version diff; index official host/server/protocol sources and both controller path families without asserting unsampled controller shapes.",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase0",
       "kind": "impl",
       "depends_on": [],
@@ -49,20 +49,24 @@
       "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Archived the dual-worktree P0 manifest, preserved-plan commit, current ChatGPT 26.825.32147 / embedded Codex alpha.12.2 hashes, upstream tag and 97-commit distance, official host source index, and target-ASAR /codex plus /wham controller call-site index. Explicitly classified all controller findings as static-only and non-gating.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/source-baseline.md",
+          "agent/codex-remote/testdata/phase0/meta/source-baseline.json",
+          "git:4ae201b2db485394d623c86d7ee178061147c932"
+        ],
+        "checked_at": "2026-08-28T08:39:11Z"
       }
     },
     {
       "id": "phase0-source-baseline-tests",
       "title": "Phase 0 source and binary provenance — tests",
       "description": "Run or create the targeted automated/static/replay checks that directly prove: Re-run and archive the dual-repository source manifest; freeze ChatGPT Desktop/App, embedded Codex, upstream tag/peeled commit/HEAD distance and target-version diff; index official host/server/protocol sources and both controller path families without asserting unsampled controller shapes.",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "phase0",
       "kind": "tests",
       "depends_on": [

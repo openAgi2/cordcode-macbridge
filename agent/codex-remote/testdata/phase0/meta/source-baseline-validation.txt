@@ -1,0 +1,16 @@
+command=node agent/codex-remote/validate/source-baseline.mjs
+checked_at=2026-08-28T08:42:00Z
+exit_code=0
+wall_time_seconds=1.573569875
+result=PASS
+classification=STATIC-SOURCE-BASELINE-ONLY
+gate_effect=does-not-pass-phase0
+chatgpt_version=26.825.32147
+embedded_codex_version=codex-cli 0.150.0-alpha.12.2
+controller_protocol_version=3
+checked_bundle=.vite/build/main-BvHpyFqC.js
+checked_bundle=.vite/build/src-4lLVrYxe.js
+checked_bundle=webview/assets/app-initial-DJrCTPoN.js
+note=Static/source baseline verified; real relay/controller Gate P0 remains unproven.
+
+repair_history=The first validator run failed because the test collapsed a dynamic endpoint template into a nonexistent literal /clients/environments path. The validator was corrected to verify literal segments around placeholders and then re-run successfully. No product code or evidence claim was changed to force a pass.
