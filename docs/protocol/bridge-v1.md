@@ -748,11 +748,22 @@ Wire behavior:
 - `list_projects` serves the official workspace registry (`workspace.list`) as
   quick-pick directory suggestions; `list_directory` stays on the bridge-generic local
   filesystem browser shared by every backend.
+- `list_agents` maps the official agent-preset catalog (`GET /agent` presets) into
+  `BackendAgentInfo` (name/displayName/description/isDefault); `set_agent_preset`
+  records a PENDING preset without `sessionId` (it rides the NEXT created session —
+  the draft-card flow) or switches the live session when `sessionId` is given
+  (`SelectAgentPreset`). There is no dedicated capability string for the agent
+  surface: clients gate on backend kind + non-empty catalog.
+- `list_permission_modes` / `set_permission_mode` are implemented via the official
+  permission-preset surface (`read-only` / `workspace-write` / `danger-full-access`,
+  localized names included): `set_permission_mode` emits
+  `permission_mode_changed {mode, appliesTo}` — including switches made by another
+  client (official web UI / slash command) — so every connected UI can follow.
+  The `permission_mode` capability derives from the ModeSwitcher interface.
 - Not supported in phase 1 (existing generic `not_supported` paths; iOS hides the
   entries): `delete_session`, git surface (`get_git_context` / PR suite /
   `commit_and_push` / branch / worktree), diff suite, `fetch_todos`, `get_usage`,
-  memory files, `list_permission_modes`/`set_permission_mode`, `list_agents`,
-  `compress_context`, `share_session`. `rename_session` works on the RPC level; the
+  memory files, `compress_context`, `share_session`. `rename_session` works on the RPC level; the
   iOS rename/archive entries follow the `session_mutation` convention (hidden until
   archive lands, identical to codex/opencode today).
 - `run_diagnostics` reports the instance source (external probe hit / managed spawn,
