@@ -1,8 +1,12 @@
 # Controller fixture blocker
 
-Status: **EVIDENCE-ONLY / FAIL-BLOCKED**
+Status: **FAIL-BLOCKED (2026-08-28). Stop product implementation.**
 
-Static preparation for the frozen target still passes. Live redacted observations now exist through attempt-001…005. The remaining Gate P0 hole is not missing enrollment, pairing, initialize, revoke or cleanup; it is the absence of a real `x-codex-subscribe-cursor` value.
+Owner parked this path under the original Gate P0. See
+`docs/2026-08-28-codex-remote-phase0-fail-blocked.md`.
+
+Do not register a backend. Do not copy `agent/codex-web`. Do not start iOS Phase 3.
+Do not synthesize a cursor. Repeating ping/pong live runs will not pass the Gate.
 
 Frozen target still matches:
 
@@ -10,21 +14,24 @@ Frozen target still matches:
 - embedded Codex `codex-cli 0.150.0-alpha.12.2`
 - controller protocol v3
 
-What is proven on the official path:
+Proven on the official path (attempt-001…007):
 
 - independent enroll start/finish and refresh
 - Computer-tab pairing via localhost one-time form
 - current Mac ChatGPT Desktop environment binding (`CODEX_DESKTOP_APP`, online)
-- WSS challenge/proof and ordinary app-server initialize
-- `initialized` notification and `thread/list` (5 items) on the same live stream (attempt-006)
-- a ChatGPT Desktop turn while the probe stayed connected produced live `thread/status/changed` (attempt-007); no envelope cursor; `turn/started` / `turn/completed` not observed as separate methods
-- three bounded active pongs with no envelope cursor, including after thread/list and live Desktop-turn traffic
+- WSS challenge/proof, `initialize`, `initialized`, `thread/list` (5 items)
+- Desktop turn while the probe stayed connected: live `thread/status/changed` (8), env/stream match
 - probe-only revoke HTTP 204 and post-revoke refresh_start HTTP 403
-- probe-key deletion and unaided process exit
+- unaided probe process exit after cleanup
 
-What remains blocked:
+Blocked:
 
-- `reconnect_handshake` / `x-codex-subscribe-cursor` (absent on initialize, thread/list and pongs)
-- `thread/read`, Desktop live turn, interrupt, and official iOS coexistence / single-owner semantics
+- `reconnect_handshake` / `x-codex-subscribe-cursor` — absent on initialize, thread/list, active pongs **and** Desktop-turn live envelopes
+- `turn/started` / item delta / `turn/completed` as separate methods
+- official iOS controller post-connect coexistence / single-owner / HTTP 409
 
-`--require-live` is expected to fail only on `reconnect_handshake`. Do not synthesize a cursor. Do not start product backend registration, `agent/codex-web` / `agent/codex` edits, or iOS Phase 3 wiring while Gate P0 is `FAIL-BLOCKED`.
+`--require-live` is expected to fail only on `reconnect_handshake`. REST pagination
+`cursor` / `nextCursor` / `backwardsCursor` are not reconnect evidence.
+
+Resume only if the official target starts delivering a controller envelope cursor,
+or the owner explicitly rewrites Gate P0.

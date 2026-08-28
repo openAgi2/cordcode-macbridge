@@ -1,5 +1,28 @@
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
 
+## 2026-08-28 Codex Remote Phase 0 FAIL-BLOCKED：按原门禁此路不通
+
+后续 agent **禁止**把 `codex-remote` 当产品 backend 继续写，也禁止再从 ping/pong 重查
+「官方会不会给 cursor」。Owner 已确认停工，未授权合入 `main`。
+
+结案文档：`docs/2026-08-28-codex-remote-phase0-fail-blocked.md`。
+队列：`.exec-plan/state/plan-bb4683ae3ec1.json` 的
+`phase0-controller-fixtures-impl` 保持 `blocked`；resume=`none`。
+
+已证明（attempt-001…007，目标 ChatGPT Desktop `26.825.32147` / Codex
+`0.150.0-alpha.12.2`）：独立 controller enrollment、电脑标签配对、WSS challenge、
+`initialize`/`initialized`、`thread/list`、Desktop 发消息时的
+`thread/status/changed`、探针自 revoke 204→403。
+
+未证明且不得伪造：WSS envelope 上的 reconnect `cursor` /
+`x-codex-subscribe-cursor`（initialize、thread/list、active pong、Desktop-turn
+live 帧全部没有）；也没有观察到独立的 `turn/started` / item delta /
+`turn/completed`。Host 开源 remote_control 是 Desktop 出站角色，不能当 controller
+客户端抄。
+
+恢复条件只有两个：官方 target 真的给出 controller cursor，或 owner 明确改 Gate P0。
+否则不得注册 backend、不得动 `agent/codex-web`/`agent/codex`、不得进 iOS Phase 3。
+
 ## 2026-08-28 Claude 后台任务完成通知泄漏为 iOS 用户气泡
 
 现象：Mac 端 Claude Code 在执行后台 Bash task 时，iOS 中途打开同一 session 后出现完整

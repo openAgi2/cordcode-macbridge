@@ -1,8 +1,10 @@
 # codex-remote Phase 0 evidence probe
 
-Status: **Phase 0 only — product backend not registered — Gate P0 not passed**.
+Status: **FAIL-BLOCKED (2026-08-28). Product backend must not be registered. Do not continue Phase 1.**
 
-This directory is the sole implementation location for the codex-remote plan. During Phase 0 it contains only bounded evidence probes, redacted fixtures, metadata and validators. It must not expose a bridge backend, modify ChatGPT Desktop, alter Codex configuration, or connect the iOS product surface.
+Stop document: `docs/2026-08-28-codex-remote-phase0-fail-blocked.md`.
+
+This directory is the sole implementation location for the codex-remote plan. It currently contains only bounded evidence probes, redacted fixtures, metadata and validators. Official Remote Control accepted an independent controller, but never delivered a controller reconnect cursor. Future agents must not expose a bridge backend, copy `agent/codex-web`, modify ChatGPT Desktop, or connect the iOS product surface unless the owner rewrites Gate P0 or a new live run actually observes `x-codex-subscribe-cursor`.
 
 ## Required real chain
 
@@ -23,20 +25,20 @@ Standalone app-server, fake relay, rollout/JSONL/SQLite/file tail, same-account 
 |---|---|---|
 | 1 | Freeze current Desktop/App/embedded Codex/upstream source and version drift | STATIC SOURCE BASELINE VERIFIED; binary behavior fixture still pending |
 | 2 | Index host/server and both `/codex` plus `/wham` controller call-site families | STATIC CALL SITES VERIFIED; resolved origins and live shapes pending |
-| 3 | Real redacted enroll/refresh, WSS challenge/envelope, environment binding and cursor fixtures | EVIDENCE-ONLY: exact static contract/preflight pass; real fixture blocked on owner authorization |
-| 4 | Temporary device key and independently revocable controller enrollment | UNVERIFIED |
-| 5 | List paired environments and explicitly select the current Desktop | UNVERIFIED |
-| 6 | Prove a uniquely marked thread/turn belongs to that Desktop's private app-server | UNVERIFIED |
-| 7 | Test coexistence with the official ChatGPT iOS controller, including 409/kick/recovery | UNVERIFIED |
-| 8 | WSS app-server `initialize` / `initialized` | LIVE: attempt-006 sent both on the selected Desktop stream |
-| 9 | Real `thread/list` / `thread/read` | LIVE PARTIAL: attempt-006 `thread/list` returned 5 items; `thread/read` still unverified |
-| 10 | Real live `turn/started` + multiple deltas + one completion | LIVE PARTIAL: attempt-007 saw Desktop-turn `thread/status/changed` (8) on the selected stream; `turn/started` / item delta / `turn/completed` not observed; no envelope cursor |
+| 3 | Real redacted enroll/refresh, WSS challenge/envelope, environment binding and cursor fixtures | LIVE PARTIAL then FAIL-BLOCKED: enroll/refresh/WSS/env binding proven; reconnect cursor never delivered |
+| 4 | Temporary device key and independently revocable controller enrollment | LIVE: probe key create/sign/delete + enroll; self-revoke 204 |
+| 5 | List paired environments and explicitly select the current Desktop | LIVE: Computer-tab pair then select `CODEX_DESKTOP_APP` |
+| 6 | Prove a uniquely marked thread/turn belongs to that Desktop's private app-server | LIVE PARTIAL: Desktop turn while probe connected produced `thread/status/changed` on the selected env/stream; not a unique marked thread/turn identity proof |
+| 7 | Test coexistence with the official ChatGPT iOS controller, including 409/kick/recovery | UNVERIFIED; probe never auto-revoked the iOS controller |
+| 8 | WSS app-server `initialize` / `initialized` | LIVE: attempt-006/007 |
+| 9 | Real `thread/list` / `thread/read` | LIVE PARTIAL: `thread/list` 5 items; `thread/read` unverified |
+| 10 | Real live `turn/started` + multiple deltas + one completion | LIVE PARTIAL / FAIL: attempt-007 `thread/status/changed` ×8; `turn/started` / delta / `turn/completed` not observed |
 | 11 | Interrupt the same active turn and observe one official terminal state | UNVERIFIED |
-| 12 | Network loss/reconnect with seq/ACK/cursor and cold reconciliation | UNVERIFIED |
-| 13 | Revoke this controller; old identity fails and official pairings remain intact | UNVERIFIED |
-| 14 | Secret scan all fixtures and logs | PARTIAL: current static artifacts pass; live artifacts pending |
+| 12 | Network loss/reconnect with seq/ACK/cursor and cold reconciliation | FAIL-BLOCKED: no controller reconnect cursor on any observed envelope |
+| 13 | Revoke this controller; old identity fails and official pairings remain intact | LIVE PARTIAL: probe-only DELETE 204 then refresh/start 403; Desktop “Unknown computer” disappears after revoke as designed |
+| 14 | Secret scan all fixtures and logs | LIVE artifacts scanned; `gitleaks` PASS |
 
-Gate P0 passes only when all 14 rows have real, versioned evidence. List/read without live/interrupt is `EVIDENCE-ONLY`. Silent takeover of ChatGPT iOS is `EVIDENCE-ONLY` pending product adjudication.
+Gate P0 is **FAIL-BLOCKED**. Do not treat remaining UNVERIFIED rows as a reason to start the product backend. The blocking hole is missing `x-codex-subscribe-cursor`, not missing enrollment.
 
 The following requirements are `BLOCKED`:
 

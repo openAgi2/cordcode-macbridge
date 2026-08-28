@@ -35,7 +35,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-28T11:22:00Z",
+  "updated_at": "2026-08-28T11:30:00Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -210,14 +210,14 @@
         "phase0-probe-scaffold-regression"
       ],
       "source": "Phase 0 tasks 2-3",
-      "notes": "External blocker after three cursor-focused live attempts (003-005): enrollment, Computer-tab pairing, refresh, independent controller WSS challenge/proof, environment binding, ACK, ordinary app-server initialize, active pong, explicit revoke and post-revoke HTTP 403 are proven. Attempt-005 replayed the full chain on the frozen target and again got no cursor in initialize messages or three bounded active pongs; the probe self-exited with code 1 after cleanup. x-codex-subscribe-cursor reconnect cannot be exercised without fabrication. require-live still fails only on reconnect_handshake. Post-connect iOS coexistence remains separately unproven. No full backend or iOS product wiring before Gate P0.",
+      "notes": "OWNER PARK 2026-08-28: original product path is FAIL-BLOCKED. Do not implement Phase 1+ or iOS Phase 3. Official Remote Control accepted an independent controller (enroll/pair/WSS/initialize/initialized/thread/list/Desktop-turn thread/status/changed/self-revoke 204 then 403) but never delivered x-codex-subscribe-cursor on initialize, thread/list, active pongs, or live Desktop-turn envelopes. turn/started and turn/completed were not observed as separate methods. require-live still fails only on reconnect_handshake. Resume only if official target starts delivering a controller envelope cursor, or owner explicitly rewrites Gate P0. Stop doc: docs/2026-08-28-codex-remote-phase0-fail-blocked.md.",
       "verification": {
         "required": true,
         "status": "failed",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "BLOCKED: real enrollment-through-revoke evidence is present, including revoked-identity HTTP 403, but three cursor-focused attempts (003-005) produced no cursor and therefore no real reconnect handshake. Attempt-005 is a full-chain replay that also confirmed unaided probe exit. The require-live validator fails only on reconnect_handshake.",
+        "summary": "OWNER PARK / FAIL-BLOCKED: enrollment-through-Desktop-turn evidence exists (attempt-001..007) but official controller WSS never delivered reconnect cursor, including on live thread/status/changed. Do not start product backend. require-live fails only on reconnect_handshake.",
         "artifacts": [
           "agent/codex-remote/testdata/phase0/static-26.825.32147-alpha.12.2/controller-call-sites.json",
           "agent/codex-remote/testdata/phase0/live-fixture-contract.json",
@@ -235,7 +235,7 @@
           "agent/codex-remote/testdata/phase0/live/attempt-006-initialized-thread-list-still-no-cursor.json",
           "agent/codex-remote/testdata/phase0/live/attempt-007-desktop-turn-status-no-cursor.json"
         ],
-        "checked_at": "2026-08-28T11:22:00Z"
+        "checked_at": "2026-08-28T11:30:00Z"
       }
     },
     {

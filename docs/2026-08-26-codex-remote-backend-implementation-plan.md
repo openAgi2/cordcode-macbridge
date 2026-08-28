@@ -1,7 +1,8 @@
 # codex-remote Backend 实施方案（ChatGPT Desktop Remote Control 接力）
 
 - 日期：2026-08-26
-- 状态：**第二轮 audit-plan 通过，可进入 Phase 0；先证据探针，后产品接线**
+- 状态：**2026-08-28 Phase 0 Gate FAIL-BLOCKED。按原门禁停止产品 backend / iOS 接线。不得把本方案当可实施队列继续 `start`。**
+- 停工说明：[2026-08-28-codex-remote-phase0-fail-blocked.md](2026-08-28-codex-remote-phase0-fail-blocked.md)
 - 目标仓库：`cordcode-macbridge`，后续涉及 `cordcode-ios`
 - 相关既有方案：[2026-08-21-codex-web-backend-design.md](2026-08-21-codex-web-backend-design.md)
 - 评审报告：[2026-08-26-codex-remote-backend-implementation-plan-audit.md](2026-08-26-codex-remote-backend-implementation-plan-audit.md)
@@ -582,7 +583,22 @@ controller，判 `EVIDENCE-ONLY` 并重新裁决产品语义，不得把“先�
 读取并长期冒用 Desktop 原始 token、修改 App 包或代理全部 ChatGPT 流量，判 `BLOCKED`，重新打开
 认证/宿主设计。
 
+> [!CAUTION]
+> **2026-08-28 实测结案（FAIL-BLOCKED）。** 冻结目标 ChatGPT Desktop `26.825.32147` /
+> Codex `0.150.0-alpha.12.2` 上，独立 controller 的 enrollment、电脑标签配对、WSS、
+> `initialize`/`initialized`、`thread/list`、Desktop 发消息后的 `thread/status/changed`、
+> 探针自 revoke（204→403）均已取证。官方 **从未** 在 controller WSS envelope 上交付
+> reconnect `cursor`（含 initialize、thread/list、active pong、Desktop-turn live 帧），
+> 因此任务 3/12 的 `x-codex-subscribe-cursor` 无法真实构造；任务 10 也未观察到
+> `turn/started` / item delta / `turn/completed`。Owner 确认按本门禁停止。后续 agent
+> **不得进入 Phase 1–5**，不得注册 backend、不得接 iOS，除非官方 target 真的给出
+> cursor，或 owner 明确改写本 Gate。证据见
+> [2026-08-28-codex-remote-phase0-fail-blocked.md](2026-08-28-codex-remote-phase0-fail-blocked.md)
+> 与 `agent/codex-remote/testdata/phase0/live/attempt-001`…`attempt-007`。
+
 ### Phase 1：codex-remote 骨架与最小 app-server Transport
+
+> 2026-08-28：Phase 0 Gate 未过，本节不得实施。
 
 1. 从空目录注册独立 backend identity；
 2. 实现 auth/device key/enrollment/environment/controller WSS；
@@ -749,6 +765,7 @@ Gate P3 PASS：owner 按一次性测试矩阵验证 Desktop ↔ iPhone 双向实
 
 在 Phase 0 认证与真实 live/interrupt Gate 通过之前，本计划只能标记“研究中”，不得用历史可读、
 fake relay、共享 store 或独立 standalone app-server冒充 Desktop Remote 接力已经实现。
+2026-08-28 起本计划标记为 **FAIL-BLOCKED / 按原门禁停工**，不是“研究中可继续实施”。
 
 ## 14. audit-plan 评审意见处置记录
 

@@ -1,5 +1,7 @@
 # Probe entry-point rules
 
+Status: **FAIL-BLOCKED (2026-08-28).** Official Remote Control accepted these probes as an independent controller, but never delivered `x-codex-subscribe-cursor`. Do not turn this directory into a product backend. Stop document: `docs/2026-08-28-codex-remote-phase0-fail-blocked.md`.
+
 This directory contains non-product Phase 0 controller probes only. It does not register a MacBridge backend.
 
 Every future executable added here must document:
