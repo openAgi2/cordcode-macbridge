@@ -8,6 +8,12 @@
 
 ## [Unreleased]
 
+- **修复：Codex Desktop 配对一次即可跨重启使用**：此前配对成功时还没把 Desktop 环境写进状态，本地文件被静默跳过，重启后又变「未配置」。现配对成功即写入 Link 数据目录（0600）；下次启动刷新官方 controller token 并自动接回 Desktop，不必再填电脑配对码。恢复完成后管理状态会刷新成「就绪」；数据面断开后自动重连。Desktop 没开时保持已配对、等它上线。只有官方判定撤销才要求重新配对。
+- **修复：iPhone 打开 Codex Desktop 会话显示「还没有消息」**：会话投影把该后端当成空源，1ms 内提交了 0 条 turn。现按官方 `thread/read` 的 turn 身份冷拉历史。
+- **修复：iPhone 在 Codex Desktop 发消息能到 Mac App，但手机停在「正在生成」**：该后端未加入会话投影，iPhone 看不到 Desktop 的实时回复。现 Mac 用官方 `thread/read` 冷基线并广告 `session_sync_v2`，live 文本进入投影。模型目录仍未广告，输入条不弹出空模型面板。
+- **改进：Codex Desktop 补齐 Mac 会话目录、历史和中断**：目录走官方 `thread/list`（分页、按工作区 cwd），历史走 `thread/read(includeTurns)`，停止走 `turn/interrupt`（含观察会话）。这条路径不套用 Codex Web 的 workspace-root 缓存过滤。iPhone 接线仍等这层在 Mac 上可测后再做。
+- **修复：Codex Desktop 打开会话不再报不支持历史**：配对后的 Remote Control 数据面补上官方 `thread/read(includeTurns)` 冷基线（用户/助手正文；未取样的工具类型跳过），iPhone 点开会话可加载已有对话。模型目录仍未广告，输入条不再弹出空的「后端未提供」模型面板。
+- **新功能：AI 工具新增「Codex Desktop」配对入口**：在 CordCode Link 的 AI 工具列表中出现独立的 Codex Desktop 行；未配对时显示「未配置」和「配对」。点配对后走 ChatGPT 浏览器授权，再在本机窗口填入 Desktop「控制这台 Mac → 电脑」配对码（不要把码发到聊天里）。配对成功后该行变为就绪。iPhone 产品面尚未接线。
 - **安全：依赖与工具链漏洞清零（govulncheck 全绿）**：web push 依赖 webpush-go v1.3.0 间接引入的 golang-jwt v3.2.2 存在头解析内存放大漏洞（GO-2025-3553），升级到 v1.4.0（改用 golang-jwt/v5 v5.2.1，推送行为不变）；Go toolchain 升至 go1.26.6，修复 go-bridge 与 relay-server 共 13 处可达的标准库 CVE（crypto/tls、encoding/asn1、net/http、net/url 等）。升级后两模块 `govulncheck` 均 0 受影响漏洞。
 - **修复：iPhone 打开正在执行的 Claude Code 会话时不再显示内部 `<task-notification>` XML**：Claude Code 的后台命令完成后会写入带 `origin.kind=task-notification` 的 synthetic user row；此前 projection/history 把它当作用户消息同步，导致任务 ID、临时输出路径和内部标签出现在聊天页。现按结构化 origin 将其作为 control-plane row 消费：source cursor 与后续执行连续性保持不变，但不生成可见用户气泡；普通用户输入即使包含相似 XML 文本也不受影响。
 - **修复：Claude 任务在跑时「重启共享 Codex 服务」按钮被误禁用（2026-08-28 真机反馈）**：管理状态里的活跃 turn 计数是全局（所有 backend 合计），Mac 端却直接当作 codex 专属计数——任一 backend（如 Claude）有任务就禁用 codex 重启按钮、预检也拒绝。现 status 增加 per-backend 活跃 turn / pending 交互明细（可选新增键，旧版 runtime 仍可解码并保守回退全局计数），重启门控只数 codex / codex-web 自己的活动；全局计数继续服务于跨 backend 的 quiesce 排空语义，不受影响。

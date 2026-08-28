@@ -97,7 +97,7 @@
 
 **`backends[].capabilities`** 只暴露当前 build 中可实际调用的方法能力；未来 phase 的预留能力在 feature gate 打开前不得提前 advertise。
 
-**`backends[].kind`** 使用冻结枚举：`claude_code` | `opencode` | `codex` | `codex-web` | `copilot` | `unified_bridge`
+**`backends[].kind`** 使用冻结枚举：`claude_code` | `opencode` | `codex` | `codex-web` | `codex-remote` | `copilot` | `unified_bridge`
 
 ---
 
