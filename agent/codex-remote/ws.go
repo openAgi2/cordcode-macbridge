@@ -291,14 +291,30 @@ func (p *PairingController) activateStream(ctx context.Context, conn FrameConn, 
 	return nil
 }
 
+const (
+	pingInterval    = 10 * time.Second
+	streamIdleLimit = 60 * time.Second
+)
+
+// streamHealthCheck reports why the stream looks dead: inbound silence beyond
+// the idle limit (missed pongs and no traffic) or a failed ping write. nil
+// means healthy. The caller owns failing the stream.
+func streamHealthCheck(cl *Client, stream *Stream) error {
+	if cl.IsClosed() {
+		return nil
+	}
+	if idle := stream.IdleFor(); idle > streamIdleLimit {
+		return fmt.Errorf("codex-remote: stream idle %s without inbound traffic", idle.Truncate(time.Second))
+	}
+	return stream.Ping()
+}
+
 func keepStreamAlive(cl *Client, stream *Stream) {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(pingInterval)
 	defer ticker.Stop()
 	for range ticker.C {
-		if cl.IsClosed() {
-			return
-		}
-		if err := stream.Ping(); err != nil {
+		if err := streamHealthCheck(cl, stream); err != nil {
+			slog.Warn("codex-remote keepalive failing stream", "error", err)
 			stream.fail(err)
 			return
 		}

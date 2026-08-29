@@ -100,10 +100,24 @@ func NewClient(t Transport, epoch ConnectionEpoch) *Client {
 
 func (c *Client) Epoch() ConnectionEpoch { return c.epoch }
 
+// IsClosed must cover both local Close and read-loop death. A transport that
+// died remotely leaves c.closed unset; supervision (watchBinding,
+// keepStreamAlive) reconnects only when this flips, so reporting a dead
+// client as open strands the backend until process restart (真机
+// 2026-08-29 09:14：stream closed 80 分钟无重连).
 func (c *Client) IsClosed() bool {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.closed
+	closed := c.closed
+	c.mu.Unlock()
+	if closed {
+		return true
+	}
+	select {
+	case <-c.done:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *Client) Notifications() <-chan Notification { return c.notifications }

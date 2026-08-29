@@ -137,3 +137,69 @@ func TestStreamRecordsCursorWithoutUsingItAsJSONRPC(t *testing.T) {
 		t.Fatalf("cursor = %q", stream.RecordedCursor())
 	}
 }
+
+// IdleFor 以最后一个入站封包（含 pong）计时；写入死连接照样成功，只有入站
+// 静默能证明假活。真机 2026-08-29 08:34–09:14 ping 写成功但流已死 40 分钟。
+func TestStreamIdleForTracksInbound(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_probe")
+	defer stream.Close()
+	if idle := stream.IdleFor(); idle > time.Second {
+		t.Fatalf("fresh stream idle = %s", idle)
+	}
+
+	stream.mu.Lock()
+	stream.lastRecv = time.Now().Add(-time.Hour)
+	stream.mu.Unlock()
+	if idle := stream.IdleFor(); idle < 59*time.Minute {
+		t.Fatalf("idle = %s, want ~1h", idle)
+	}
+
+	_ = hostConn.Write(Envelope{Type: typePong, ClientID: "client_probe", EnvID: "env_desktop", StreamID: "stream_probe"})
+	deadline := time.After(2 * time.Second)
+	for {
+		if idle := stream.IdleFor(); idle < time.Second {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("inbound pong must reset the idle clock")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+// pong status 非 active 表示中继存活但 Desktop 端点已消失：流必须判死，
+// 否则 RPC 请求全部超时却无人重连（真机 2026-08-29 10:34 pong=unknown）。
+func TestStreamFailsOnDetachedPong(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	defer hostConn.Close()
+	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_probe")
+
+	_ = hostConn.Write(Envelope{Type: typePong, ClientID: "client_probe", EnvID: "env_desktop", StreamID: "stream_probe", Status: "unknown"})
+	deadline := time.After(2 * time.Second)
+	for {
+		if err := stream.Send([]byte("{}")); err != nil {
+			return // stream is dead as required
+		}
+		select {
+		case <-deadline:
+			t.Fatal("pong status=unknown must fail the stream")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+// active/空 pong 是健康信号，不得判死。
+func TestStreamSurvivesActivePong(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	defer hostConn.Close()
+	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_probe")
+	defer stream.Close()
+
+	_ = hostConn.Write(Envelope{Type: typePong, ClientID: "client_probe", EnvID: "env_desktop", StreamID: "stream_probe", Status: "active"})
+	time.Sleep(100 * time.Millisecond)
+	if err := stream.Send([]byte("{}")); err != nil {
+		t.Fatalf("active pong must not fail the stream: %v", err)
+	}
+}

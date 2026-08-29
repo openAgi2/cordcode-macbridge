@@ -139,3 +139,23 @@ func TestControllerWSURLRewritesHTTPTestBase(t *testing.T) {
 		t.Fatalf("url = %s", got)
 	}
 }
+
+func TestStreamHealthCheck(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	defer hostConn.Close()
+	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_probe")
+	defer stream.Close()
+	cl := NewClient(stream, 1)
+	defer cl.Close()
+
+	if err := streamHealthCheck(cl, stream); err != nil {
+		t.Fatalf("healthy stream check: %v", err)
+	}
+
+	stream.mu.Lock()
+	stream.lastRecv = time.Now().Add(-2 * streamIdleLimit)
+	stream.mu.Unlock()
+	if err := streamHealthCheck(cl, stream); err == nil {
+		t.Fatal("silent stream beyond the idle limit must fail health check; ping writes alone cannot detect it")
+	}
+}

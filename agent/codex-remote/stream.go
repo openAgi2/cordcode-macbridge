@@ -3,8 +3,8 @@ package codexremote
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"sync"
+	"time"
 )
 
 // FrameConn is one controller WSS (or a test double) that reads/writes envelopes.
@@ -27,6 +27,7 @@ type Stream struct {
 	cursor   string
 	closed   bool
 	closeErr error
+	lastRecv time.Time
 	inbound  chan []byte
 	done     chan struct{}
 
@@ -49,6 +50,7 @@ func NewStream(conn FrameConn, clientID, envID, streamID string) *Stream {
 		clientID: clientID,
 		envID:    envID,
 		streamID: streamID,
+		lastRecv: time.Now(),
 		inbound:  make(chan []byte, 64),
 		done:     make(chan struct{}),
 		assembly: map[uint64]*chunkAssembly{},
@@ -185,6 +187,15 @@ func (s *Stream) RecordedCursor() string {
 	return s.cursor
 }
 
+// IdleFor returns time since the last inbound envelope (pongs count). Writes
+// into a silently-dropped TCP connection still succeed, so inbound silence is
+// the only reliable hang signal (真机 2026-08-29 08:34–09:14 假活 40 分钟).
+func (s *Stream) IdleFor() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return time.Since(s.lastRecv)
+}
+
 func (s *Stream) fail(err error) {
 	s.mu.Lock()
 	if s.closed {
@@ -208,6 +219,9 @@ func (s *Stream) readLoop() {
 			s.fail(err)
 			return
 		}
+		s.mu.Lock()
+		s.lastRecv = time.Now()
+		s.mu.Unlock()
 		if err := env.routingOK(s.clientID, s.envID, s.streamID); err != nil {
 			s.fail(err)
 			return
@@ -221,8 +235,12 @@ func (s *Stream) readLoop() {
 		case typeAck:
 			continue
 		case typePong:
+			// 非 active 的 pong 表示中继还在、但目标端（ChatGPT Desktop）已
+			// 消失：流对 RPC 已不可用，必须判死交给重连。真机 2026-08-29：
+			// Desktop 退出后 pong=unknown，流却保持"存活"。
 			if env.Status != "" && env.Status != "active" {
-				slog.Warn("codex-remote pairing pong", "status", env.Status)
+				s.fail(fmt.Errorf("codex-remote: pong status %q: remote endpoint detached", env.Status))
+				return
 			}
 			continue
 		case typeServerMessage:

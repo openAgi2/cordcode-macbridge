@@ -106,3 +106,25 @@ func TestRPCNotificationTurnStarted(t *testing.T) {
 		t.Fatal("timeout waiting for notification")
 	}
 }
+
+// 远端断线（非本地 Close）后 readLoop 死亡必须让 IsClosed() 翻转为 true：
+// watchBinding/keepStreamAlive 只认这个信号触发重连。真机 2026-08-29 09:14
+// 起流已死但 IsClosed 恒 false，80 分钟无重连，iOS 投影全部超时。
+func TestClientIsClosedAfterRemoteDeath(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_probe")
+	cl := NewClient(stream, 1)
+	if cl.IsClosed() {
+		t.Fatal("fresh client must not report closed")
+	}
+	_ = hostConn.Close()
+	deadline := time.After(2 * time.Second)
+	for !cl.IsClosed() {
+		select {
+		case <-deadline:
+			t.Fatal("IsClosed must flip after remote hang-up; supervision reconnects on this signal")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	_ = cl.Close()
+}
