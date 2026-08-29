@@ -212,6 +212,7 @@ func (a *Agent) restorePersistedPairing() {
 		return
 	}
 	if _, err := os.Stat(p.storePath); err == nil {
+		backoff := newReconnectBackoff()
 		for {
 			a.mu.Lock()
 			stopped := a.stopped
@@ -237,17 +238,16 @@ func (a *Agent) restorePersistedPairing() {
 				msg = "请打开 ChatGPT Desktop"
 			}
 			p.markOffline(msg)
-			slog.Warn("codex-remote pairing restore waiting")
-			timer := time.NewTimer(15 * time.Second)
-			select {
-			case <-timer.C:
-			}
+			retryIn := backoff.Next()
+			slog.Warn("codex-remote pairing restore waiting", "retryIn", retryIn)
+			a.sleepInterruptible(retryIn)
 		}
 	}
 	a.watchBinding()
 }
 
 func (a *Agent) watchBinding() {
+	backoff := newReconnectBackoff()
 	for {
 		a.mu.Lock()
 		stopped := a.stopped
@@ -273,13 +273,14 @@ func (a *Agent) watchBinding() {
 			}
 		}
 		if a.pairing == nil || !a.pairing.hasPersistedIdentity() {
-			time.Sleep(2 * time.Second)
+			a.sleepInterruptible(2 * time.Second)
 			continue
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		err := a.pairing.restoreOnce(ctx)
 		cancel()
 		if err == nil {
+			backoff.Reset()
 			continue
 		}
 		if errors.Is(err, errPairingRevoked) {
@@ -288,6 +289,8 @@ func (a *Agent) watchBinding() {
 			return
 		}
 		a.pairing.markOffline("已配对，等待 ChatGPT Desktop")
-		time.Sleep(15 * time.Second)
+		retryIn := backoff.Next()
+		slog.Warn("codex-remote pairing reconnect waiting", "retryIn", retryIn)
+		a.sleepInterruptible(retryIn)
 	}
 }
