@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
@@ -19,8 +21,19 @@ type remoteSession struct {
 }
 
 func (s *remoteSession) Send(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
+	return s.SendWithOptions(prompt, images, files, core.PromptOptions{})
+}
+
+func (s *remoteSession) SendWithOptions(prompt string, images []core.ImageAttachment, files []core.FileAttachment, opts core.PromptOptions) error {
 	if len(images) != 0 || len(files) != 0 {
 		return fmt.Errorf("codex-remote: image/file turn input is not sampled by the Remote app-server (fail closed)")
+	}
+	if opts.Agent != "" || opts.Variant != "" {
+		return fmt.Errorf("codex-remote: official turn/start does not support agent/variant overrides")
+	}
+	model, effort, err := s.agent.validateTurnSelection(opts)
+	if err != nil {
+		return err
 	}
 	s.agent.mu.Lock()
 	cl := s.agent.client
@@ -31,6 +44,12 @@ func (s *remoteSession) Send(prompt string, images []core.ImageAttachment, files
 	params := map[string]any{
 		"threadId": s.threadID,
 		"input":    []map[string]any{{"type": "text", "text": prompt}},
+	}
+	if model != "" {
+		params["model"] = model
+	}
+	if effort != "" {
+		params["effort"] = effort
 	}
 	_, rpcErr, err := cl.Request("turn/start", params)
 	if err != nil {
@@ -129,11 +148,29 @@ func (a *Agent) BindClient(cl *Client) {
 	if a.listeners == nil {
 		a.listeners = map[string]map[chan core.Event]struct{}{}
 	}
+	a.attached = map[string]*Client{}
+	observed := make([]string, 0, len(a.listeners))
+	for threadID := range a.listeners {
+		observed = append(observed, threadID)
+	}
 	a.mu.Unlock()
 	if old != nil && old != cl {
 		_ = old.Close()
 	}
 	a.startPump(cl)
+	// A Remote envelope has no replay cursor. Re-establish official app-server
+	// thread subscriptions on the new connection; thread/resume is the source
+	// operation that atomically subscribes for subsequent updates.
+	for _, threadID := range observed {
+		threadID := threadID
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if err := a.attachLiveThreadOn(ctx, cl, threadID); err != nil {
+				slog.Warn("codex-remote failed to restore thread subscription", "thread", threadID, "error", err)
+			}
+		}()
+	}
 }
 
 // startPump mirrors the official app-server-client worker invariant: unread
@@ -257,6 +294,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	if cl == nil {
 		return nil, ErrNotConfigured
 	}
+	ch := make(chan core.Event, 64)
 	if sessionID == "" {
 		raw, rpcErr, err := cl.RequestContext(ctx, "thread/start", map[string]any{"cwd": a.workDir})
 		if err != nil {
@@ -269,29 +307,132 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 			Thread struct {
 				ID string `json:"id"`
 			} `json:"thread"`
+			Model           string  `json:"model"`
+			ModelProvider   string  `json:"modelProvider"`
+			ReasoningEffort *string `json:"reasoningEffort"`
 		}
 		if err := json.Unmarshal(raw, &res); err != nil {
 			return nil, err
 		}
 		sessionID = res.Thread.ID
+		a.rememberSessionSelection(sessionID, res.ModelProvider, res.Model, res.ReasoningEffort)
+		a.addListener(sessionID, ch)
 	} else {
-		_, rpcErr, err := cl.RequestContext(ctx, "thread/resume", map[string]any{
-			"threadId":     sessionID,
-			"excludeTurns": true,
-		})
-		if err != nil {
+		// Register before thread/resume. The app-server subscribes atomically
+		// during resume and may deliver the first external notification as soon
+		// as its response is emitted; registering afterward leaves a race where
+		// the central pump receives and drops that first frame.
+		a.addListener(sessionID, ch)
+		if err := a.attachLiveThreadOn(ctx, cl, sessionID); err != nil {
+			a.dropListener(sessionID, ch)
 			return nil, err
 		}
-		if rpcErr != nil {
-			return nil, rpcErr
-		}
 	}
-	ch := make(chan core.Event, 64)
-	a.addListener(sessionID, ch)
 	return &remoteSession{agent: a, threadID: sessionID, events: ch, alive: true}, nil
 }
 
+// AttachLiveThread implements the same official subscription step used by
+// Codex's app-server session client. Repeated observation lease renewals are
+// idempotent for one Remote connection; BindClient clears the epoch-local set.
+func (a *Agent) AttachLiveThread(ctx context.Context, threadID string) error {
+	a.mu.Lock()
+	cl := a.client
+	a.mu.Unlock()
+	if cl == nil {
+		return ErrNotConfigured
+	}
+	return a.attachLiveThreadOn(ctx, cl, threadID)
+}
+
+func (a *Agent) attachLiveThreadOn(ctx context.Context, cl *Client, threadID string) error {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" || cl == nil {
+		return ErrNotConfigured
+	}
+	// Observation lease renewal and projection hydration may race for the same
+	// thread. Serialize the check+resume transaction so the Remote app-server
+	// sees one official subscription request per connection epoch.
+	a.attachMu.Lock()
+	defer a.attachMu.Unlock()
+	a.mu.Lock()
+	if a.client != cl {
+		a.mu.Unlock()
+		return ErrNotConfigured
+	}
+	if a.attached[threadID] == cl {
+		a.mu.Unlock()
+		return nil
+	}
+	a.mu.Unlock()
+	raw, rpcErr, err := cl.RequestContext(ctx, "thread/resume", map[string]any{
+		"threadId":     threadID,
+		"excludeTurns": true,
+	})
+	if err != nil {
+		return err
+	}
+	if rpcErr != nil {
+		return rpcErr
+	}
+	var response struct {
+		Model           string  `json:"model"`
+		ModelProvider   string  `json:"modelProvider"`
+		ReasoningEffort *string `json:"reasoningEffort"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return fmt.Errorf("codex-remote: thread/resume decode: %w", err)
+	}
+	a.mu.Lock()
+	if a.client == cl {
+		if a.attached == nil {
+			a.attached = map[string]*Client{}
+		}
+		a.attached[threadID] = cl
+		if a.sessionSelections == nil {
+			a.sessionSelections = map[string]core.SessionModelSelection{}
+		}
+		selection := core.SessionModelSelection{
+			Provider: strings.TrimSpace(response.ModelProvider),
+			Model:    strings.TrimSpace(response.Model),
+		}
+		if response.ReasoningEffort != nil {
+			selection.ReasoningEffort = strings.TrimSpace(*response.ReasoningEffort)
+		}
+		if selection.Model != "" {
+			a.sessionSelections[threadID] = selection
+		}
+	}
+	a.mu.Unlock()
+	return nil
+}
+
+func (a *Agent) rememberSessionSelection(threadID, provider, model string, effort *string) {
+	selection := core.SessionModelSelection{Provider: strings.TrimSpace(provider), Model: strings.TrimSpace(model)}
+	if effort != nil {
+		selection.ReasoningEffort = strings.TrimSpace(*effort)
+	}
+	if threadID == "" || selection.Model == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.sessionSelections == nil {
+		a.sessionSelections = map[string]core.SessionModelSelection{}
+	}
+	a.sessionSelections[threadID] = selection
+}
+
+func (a *Agent) AttachProjectionLiveSession(ctx context.Context, threadID string) (core.AgentSession, error) {
+	return a.StartSession(ctx, threadID)
+}
+
+func (a *Agent) UsesPromptOptions() bool { return true }
+
 var (
-	_ core.TurnCanceler       = (*remoteSession)(nil)
-	_ core.ThreadTurnCanceler = (*Agent)(nil)
+	_ core.TurnCanceler                  = (*remoteSession)(nil)
+	_ core.PromptOptionsSender           = (*remoteSession)(nil)
+	_ core.ThreadTurnCanceler            = (*Agent)(nil)
+	_ core.ThreadLiveAttacher            = (*Agent)(nil)
+	_ core.ProjectionLiveSessionAttacher = (*Agent)(nil)
+	_ core.PromptOptionsAgent            = (*Agent)(nil)
 )

@@ -846,6 +846,15 @@ type ThreadLiveAttacher interface {
 	AttachLiveThread(ctx context.Context, threadID string) error
 }
 
+// ProjectionLiveSessionAttacher is optional for broadcast transports whose
+// central event pump only fans a thread's events into a registered
+// AgentSession listener. Projection-only opens use it to create that listener
+// without waiting for the first send_message. Implementations must attach to
+// the real upstream thread; a synthetic or polling session is not allowed.
+type ProjectionLiveSessionAttacher interface {
+	AttachProjectionLiveSession(ctx context.Context, threadID string) (AgentSession, error)
+}
+
 // CatalogRefreshSignaler is an optional interface for backends that can detect
 // catalog-affecting changes the moment they happen (e.g. dsh-web's host
 // WebSocket stream) instead of waiting for the discovery watcher's polling

@@ -275,6 +275,29 @@ func (h *Handlers) startProjectionLiveRelay(
 	h.mu.Lock()
 	sess, hasSess := h.getSession(sessionID)
 	h.mu.Unlock()
+	if (!hasSess || sess == nil) && sessionID != "" {
+		if attacher, ok := agent.(core.ProjectionLiveSessionAttacher); ok {
+			newSession, err := attacher.AttachProjectionLiveSession(h.ctx, sessionID)
+			if err != nil {
+				slog.Warn("go-bridge: projection live session attach failed",
+					"backendID", backendID, "sessionID", sessionID, "error", err)
+			} else if newSession != nil {
+				// Double-checked ownership: concurrent projection opens must share
+				// one upstream listener and one relay.
+				h.mu.Lock()
+				existing, exists := h.getSession(sessionID)
+				if exists && existing != nil {
+					sess, hasSess = existing, true
+					h.mu.Unlock()
+					_ = newSession.Close()
+				} else {
+					h.putSessionWithMeta(sessionID, backendID, directory, newSession)
+					sess, hasSess = newSession, true
+					h.mu.Unlock()
+				}
+			}
+		}
+	}
 	if hasSess && sess != nil {
 		h.startRelayIfNotRunning(sessionID, sess, conn, backendID)
 	} else {

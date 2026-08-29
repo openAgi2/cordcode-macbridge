@@ -32,8 +32,8 @@ physical-device result.
 | `SessionLifecycleDiagnosticPhase.swift`, `ServerViewModel.swift`, `SelectionSheets.swift` | included | Pairing/offline/protocol diagnostics and unsupported interaction copy remain truthful. |
 | `ChatViewModelSessionSyncV2Tests.swift`, `BridgeTransportTests.swift`, `CCCodeBridgePhase2Tests.swift`, `AgentRuntimeStatusTests.swift` | included | Tests cover kind decoding, independent identity, SSV2 routing, and Codex runtime presentation. |
 | `serverCreationCases` | intentionally excludes | Remote is paired by CordCode Link/Desktop enrollment; iOS must not fabricate a second creation flow. |
-| `ServerSettingsView.swift` reasoning toggle | intentionally excludes | The Remote descriptor does not advertise `model_switch` or reasoning selection. |
-| `ModelManagementService.swift` Codex-Web provider/order branches | intentionally excludes | Those branches are official Codex-Web catalog semantics; Remote has no catalog capability. |
+| `ServerSettingsView.swift` reasoning toggle | intentionally excludes | The composer model configuration uses the live per-model effort rows; there is still no standalone permission-mode toggle for Remote. |
+| `ModelManagementService.swift` Codex-Web provider/order branches | intentionally excludes | Remote uses the official `model/list` rows directly and does not inherit Codex-Web provider/config assumptions. |
 | permission-mode/approval/question menus | intentionally excludes | Remote does not advertise a resolver or structured-input capability; the product remains fail-closed. |
 | legacy Codex history polling or daemon/path assumptions | intentionally excludes | Remote history comes from the app-server `thread/read` projection through the bridge. |
 | generic cache/storage code | intentionally excludes | `BackendServerIdentity.cacheScopeKey` already includes backend kind, endpoint, and username. |

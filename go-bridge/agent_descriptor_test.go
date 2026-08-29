@@ -234,12 +234,12 @@ func TestCodexRemoteDescriptorOnlyAdvertisesImplementedCapabilities(t *testing.T
 	if d.ID != "codex-remote" || d.Kind != "codex-remote" || d.DisplayName != "Codex Desktop" {
 		t.Fatalf("codex-remote identity = %+v", d)
 	}
-	for _, capability := range []string{"session_state", "session_history"} {
+	for _, capability := range []string{"session_state", "session_history", "model_switch"} {
 		if !descriptorHasCapability(d.Capabilities, capability) {
 			t.Errorf("codex-remote missing implemented capability %q: %v", capability, d.Capabilities)
 		}
 	}
-	for _, capability := range []string{"model_switch", "permission_resolve", "structured_user_input_v1", "session_mutation", "session_delete", "session_pagination", "compression", "question_reply"} {
+	for _, capability := range []string{"permission_resolve", "structured_user_input_v1", "session_mutation", "session_delete", "session_pagination", "compression", "question_reply"} {
 		if descriptorHasCapability(d.Capabilities, capability) {
 			t.Errorf("codex-remote must fail closed for unsampled capability %q: %v", capability, d.Capabilities)
 		}

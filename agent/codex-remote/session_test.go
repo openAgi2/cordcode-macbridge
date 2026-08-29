@@ -165,6 +165,44 @@ deltas:
 	}
 }
 
+func TestProjectionAttachReceivesDesktopTurnBeforeAnySend(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	stream := NewStream(clientConn, "client_projection", "env_desktop", "stream_projection")
+	defer stream.Close()
+	startEnvelopePeer(t, hostConn, func(_ int64, method string, _ json.RawMessage) (any, *RPCError) {
+		if method == "thread/resume" {
+			return map[string]any{"thread": map[string]any{"id": "thread_projection"}}, nil
+		}
+		return nil, &RPCError{Code: -32601, Message: method}
+	})
+	cl := NewClient(stream, 1)
+	defer cl.Close()
+	agent := New(nil)
+	agent.BindClient(cl)
+	sess, err := agent.AttachProjectionLiveSession(context.Background(), "thread_projection")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	seq := uint64(1)
+	payload := json.RawMessage(`{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thread_projection","turn":{"id":"turn_external"}}}`)
+	if err := hostConn.Write(Envelope{
+		Type: typeServerMessage, ClientID: "client_projection", EnvID: "env_desktop",
+		StreamID: "stream_projection", SeqID: &seq, Message: payload,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-sess.Events():
+		if event.Type != core.EventTurnStarted || event.ThreadID != "thread_projection" || event.TurnID != "turn_external" {
+			t.Fatalf("external event = %+v", event)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("projection attachment did not deliver Desktop turn before an iOS send")
+	}
+}
+
 // Official codex app-server-client keeps its local event queue unbounded so
 // unread events cannot hide a foreground response. Phase 1 rejects unsupported
 // server requests, but must still drain them before the bounded channel fills.
@@ -239,12 +277,32 @@ func TestBindClientStartsEventPumpForReplacementEpoch(t *testing.T) {
 	cl2 := NewClient(NewStream(client2, "client_probe", "env_desktop", "stream_2"), 2)
 	defer cl2.Close()
 	defer host1.Close()
+	resumed := make(chan string, 1)
+	startEnvelopePeer(t, host2, func(_ int64, method string, params json.RawMessage) (any, *RPCError) {
+		if method != "thread/resume" {
+			return nil, &RPCError{Code: -32601, Message: method}
+		}
+		var request struct {
+			ThreadID string `json:"threadId"`
+		}
+		_ = json.Unmarshal(params, &request)
+		resumed <- request.ThreadID
+		return map[string]any{"thread": map[string]any{"id": request.ThreadID}}, nil
+	})
 
 	agent := New(nil)
 	agent.BindClient(cl1)
 	events := make(chan core.Event, 1)
 	agent.addListener("thread_probe", events)
 	agent.BindClient(cl2)
+	select {
+	case threadID := <-resumed:
+		if threadID != "thread_probe" {
+			t.Fatalf("replacement epoch resumed %q", threadID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("replacement Client did not re-resume the observed thread")
+	}
 
 	seq := uint64(1)
 	payload, _ := json.Marshal(map[string]any{

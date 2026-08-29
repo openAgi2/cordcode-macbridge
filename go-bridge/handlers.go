@@ -1802,7 +1802,7 @@ func modelProviderForAgent(agent core.Agent, raw string) (id, provider, provider
 			return id, active.Name, active.Name
 		}
 	}
-	if agent.Name() == "codex" {
+	if agent.Name() == "codex" || agent.Name() == "codex-remote" {
 		return id, "openai", "openai"
 	}
 	// claudecode 后端的所有模型都经 claude CLI，属 claude provider。显式标 "claude"，
@@ -2953,13 +2953,13 @@ func (h *Handlers) sendSessionEventWithPushIntentPreview(sessionID, backendID, e
 	dir := h.sessions.directoryForSession(sessionID)
 	h.mu.Unlock()
 	h.publishEvent(LogicalEvent{
-		SessionID: sessionID,
-		BackendID: backendID,
-		Event:     eventName,
-		Data:      data,
-		Directory: dir,
-		Broadcast: true,
-		Offline:   IsDurableMilestone(eventName),
+		SessionID:  sessionID,
+		BackendID:  backendID,
+		Event:      eventName,
+		Data:       data,
+		Directory:  dir,
+		Broadcast:  true,
+		Offline:    IsDurableMilestone(eventName),
 		PushIntent: pushIntentForRelayTerminal(h.projectionKernel, backendID, sessionID, eventName, data, h.webPushTitles.get(backendID, sessionID), previewOverride),
 	})
 }

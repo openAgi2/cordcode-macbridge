@@ -3,9 +3,9 @@ package codexremote
 import "github.com/openAgi2/cordcode-macbridge/core"
 
 // WireDescriptor keeps Remote-specific static capability claims empty. The
-// transport now delivers live turn/item events and history, but no target
-// Remote payload has yet frozen model mutation or server-request interaction
-// shapes, so those capabilities remain fail-closed in bridge derivation.
+// transport delivers live turn/item events and history. Dynamic interface
+// capabilities (including the official model/list adapter) are derived by the
+// bridge; unsupported server-request interactions remain fail-closed.
 func (a *Agent) WireDescriptor() *core.WireDescriptor {
 	return &core.WireDescriptor{
 		Kind:                        WireKind,
