@@ -35,7 +35,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-29T06:43:00Z",
+  "updated_at": "2026-08-29T06:45:46Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -1039,7 +1039,7 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
         "summary": "Remote package race tests pass, including schema-variant history mapping, official status/notLoaded semantics, authoritative activity probing, full live item/turn codec, retry/usage/plan events, malformed completion fail-closed, text steer, and unsampled attachment rejection. Repeated focused replay also passes.",
         "artifacts": [
@@ -1047,9 +1047,10 @@
           "agent/codex-remote/codec_test.go",
           "agent/codex-remote/session_test.go",
           "cmd:go test -race ./agent/codex-remote -count=1 -timeout 120s => PASS",
-          "cmd:go test -race ./agent/codex-remote -run 'TestRemote(History|Codec|Session|IsSession)' -count=5 -timeout 120s => PASS"
+          "cmd:go test -race ./agent/codex-remote -run 'TestRemote(History|Codec|Session|IsSession)' -count=5 -timeout 120s => PASS",
+          "agent/codex-remote/testdata/audit/2026-08-29-phase2-phase4-rerun.txt"
         ],
-        "checked_at": "2026-08-29T06:13:00Z"
+        "checked_at": "2026-08-29T06:45:46Z"
       }
     },
     {
@@ -1123,16 +1124,17 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
         "summary": "Race-tested the Remote live codec and control boundary. Tests cover official turn/item identity, tool results, retry/plan/usage notifications, malformed completion drop, text steer request shape, attachment fail-closed behavior, replacement event pumps, unsupported server-request rejection with original id, and foreground RPC under request backlog.",
         "artifacts": [
           "agent/codex-remote/codec_test.go",
           "agent/codex-remote/session_test.go",
           "cmd:go test -race ./agent/codex-remote -count=1 -timeout 120s => PASS",
-          "cmd:go test -race ./agent/codex-remote -run 'Test(ServerRequestBacklogDoesNotBlockRPCResponse|UnsupportedRemoteServerRequestIsRejectedByOriginalID|RemoteSessionSteerUsesOfficialTurnIdentity|RemoteCodec)' -count=10 -timeout 120s => PASS"
+          "cmd:go test -race ./agent/codex-remote -run 'Test(ServerRequestBacklogDoesNotBlockRPCResponse|UnsupportedRemoteServerRequestIsRejectedByOriginalID|RemoteSessionSteerUsesOfficialTurnIdentity|RemoteCodec)' -count=10 -timeout 120s => PASS",
+          "agent/codex-remote/testdata/audit/2026-08-29-phase2-phase4-rerun.txt"
         ],
-        "checked_at": "2026-08-29T06:20:00Z"
+        "checked_at": "2026-08-29T06:45:46Z"
       }
     },
     {
@@ -1207,15 +1209,16 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
         "summary": "Targeted race tests pass for Remote and go-bridge capability wiring. The descriptor test proves the positive session state/history set and the negative unsampled model, interaction, mutation, pagination, compression and question set.",
         "artifacts": [
           "go-bridge/agent_descriptor_test.go",
           "cmd:go test -race ./go-bridge -run 'TestCodexRemoteDescriptorOnlyAdvertisesImplementedCapabilities|TestCodexWebDescriptorUsesIndependentIdentityAndTruthfulCapabilities|TestBackendListMatchesBuildAgentDescriptorCapabilities' -count=5 -timeout 180s => PASS",
-          "cmd:go test -race ./agent/codex-remote -count=1 -timeout 120s => PASS"
+          "cmd:go test -race ./agent/codex-remote -count=1 -timeout 120s => PASS",
+          "agent/codex-remote/testdata/audit/2026-08-29-phase2-phase4-rerun.txt"
         ],
-        "checked_at": "2026-08-29T06:30:00Z"
+        "checked_at": "2026-08-29T06:45:46Z"
       }
     },
     {
@@ -1290,16 +1293,17 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
         "summary": "P2 gate checks pass under race detection for the full Remote package and focused bridge descriptor/catalog/projection/SSV2/pairing suites; legacy backend diff and Remote secret scan also pass.",
         "artifacts": [
           "cmd:go test -race ./agent/codex-remote -count=1 -timeout 120s => PASS",
           "cmd:go test -race ./go-bridge -run 'TestCodexRemoteDescriptorOnlyAdvertisesImplementedCapabilities|Test(CodexRemoteListSessionsSkipsWorkspaceCatalog|HandleGetSessionProjectionRunningCodexSessionWithinBudget|HandleGetSessionProjectionRunningCodexSessionTranscriptFallback|MgmtCodexRemotePairingRoutes|CodexRemoteProduceHydrateRangeUsesThreadRead|CodexRemoteJoinsSessionSyncV2)$' -count=3 -timeout 180s => PASS",
           "cmd:git diff --exit-code -- agent/codex-web agent/codex => PASS",
-          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => PASS"
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => PASS",
+          "agent/codex-remote/testdata/audit/2026-08-29-phase2-phase4-rerun.txt"
         ],
-        "checked_at": "2026-08-29T06:36:00Z"
+        "checked_at": "2026-08-29T06:45:46Z"
       }
     },
     {
