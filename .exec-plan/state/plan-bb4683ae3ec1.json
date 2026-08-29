@@ -35,7 +35,7 @@
     "last_generated_at": "2026-08-29T09:58:06Z",
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-29T14:41:00Z",
+  "updated_at": "2026-08-29T14:47:00Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -2671,7 +2671,7 @@
       "id": "phase5-session-mutation-review-fix-regression",
       "title": "Close Codex Desktop session mutation regression — review fix regression",
       "description": "review-fix-for:phase5-gate-regression. Build and install the repaired runtime, then require owner physical-device proof that rename, archive, and delete persist and the session list reflects authoritative Desktop state.",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "phase5",
       "kind": "regression",
       "depends_on": [
@@ -2685,9 +2685,15 @@
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "Pending owner physical-device regression.",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Automated regression and deployment are complete; the installed runtime advertises the implemented mutation interfaces and is ready/online. Owner physical-device confirmation of rename, archive, and delete persistence remains required.",
+        "artifacts": [
+          "git:4a0db630f9b0",
+          "cmd:go test ./go-bridge -count=1 -timeout 180s => PASS (68.605s)",
+          "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED",
+          "runtime:/Applications/CordCodeLink.app PID 62174 TCP 8777 commit 4a0db630f9b0",
+          "cmd:authenticated management status => phase ready; online true; clientType CODEX_DESKTOP_APP"
+        ],
+        "checked_at": "2026-08-29T14:47:00Z"
       }
     },
     {
