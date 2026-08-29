@@ -84,6 +84,9 @@ func logProjectionResponseMetrics(
 	startedAt time.Time,
 	projection *SessionProjection,
 ) {
+	if !projectionDiagnosticsEnabled() {
+		return
+	}
 	response := map[string]interface{}{
 		"type":      "result",
 		"requestId": msg.RequestID,

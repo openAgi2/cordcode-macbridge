@@ -27,7 +27,7 @@ func TestProjectionRPCTraceCorrelatesReceiveHydrateAndEnqueue(t *testing.T) {
 
 	var logs bytes.Buffer
 	previousLogger := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	defer slog.SetDefault(previousLogger)
 
 	params, err := json.Marshal(map[string]interface{}{
