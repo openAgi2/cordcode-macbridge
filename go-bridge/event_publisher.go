@@ -10,12 +10,13 @@ import (
 )
 
 const (
-	eventOutboundQueueCapacity = 2048
-	recoveryPendingMaxEvents   = 1000
-	recoveryPendingMaxBytes    = 2 << 20
-	recoveryPendingTimeout     = 30 * time.Second
-	projectionFenceMaxPatches  = 128
-	projectionFenceMaxBytes    = 2 << 20
+	eventOutboundQueueCapacity        = 2048
+	recoveryPendingMaxEvents          = 1000
+	recoveryPendingMaxBytes           = 2 << 20
+	recoveryPendingTimeout            = 30 * time.Second
+	projectionFenceMaxPatches         = 128
+	projectionFenceMaxBytes           = 2 << 20
+	projectionNoObserverDropThreshold = 256 << 10
 )
 
 type BridgeSessionCutMap map[string]map[string]BridgeSessionCut
@@ -652,7 +653,7 @@ func projectionInvalidateEvent(bridgeEpoch, backendID, sessionID string) EventMe
 // path; it reuses sinks + broadcaster, adding no new transport (design §6.2, N8).
 func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID string, patch ProjectionPatch) {
 	if p.broadcaster == nil || len(p.syncV2) == 0 {
-		slog.Info("go-bridge: [K4Patch] drop",
+		slog.Debug("go-bridge: [K4Patch] drop",
 			"sessionPrefix", projectionSessionLogPrefix(sessionID),
 			"reason", "no_v2_conns", "syncRev", patch.SyncRev,
 		)
@@ -660,7 +661,7 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 	}
 	targets := p.broadcaster.Targets(backendID, sessionID, "")
 	if len(targets) == 0 {
-		slog.Info("go-bridge: [K4Patch] drop",
+		slog.Debug("go-bridge: [K4Patch] drop",
 			"sessionPrefix", projectionSessionLogPrefix(sessionID),
 			"reason", "no_targets", "syncRev", patch.SyncRev,
 		)
@@ -767,6 +768,30 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 			)
 		}
 	}
+}
+
+// hasProjectionPatchTargetLocked reports whether a live projection patch has
+// at least one eligible v2 observer. Caller must hold p.mu. It intentionally
+// uses the same broadcaster/observation gates as delivery, so a session with no
+// eligible observer can discard its pending patch and retain only authoritative
+// reducer state until the next snapshot pull.
+func (p *EventPublisher) hasProjectionPatchTargetLocked(backendID, sessionID string) bool {
+	if p == nil || p.broadcaster == nil || len(p.syncV2) == 0 {
+		return false
+	}
+	for _, conn := range p.broadcaster.Targets(backendID, sessionID, "") {
+		if !p.syncV2[conn] {
+			continue
+		}
+		if p.observation != nil {
+			if device := conn.AuthedDevice(); device != nil &&
+				!p.observation.ShouldSendEvent(device.DeviceID, backendID, sessionID, "projection_patch") {
+				continue
+			}
+		}
+		return true
+	}
+	return false
 }
 
 type eventPublishMode uint8
@@ -1008,8 +1033,14 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 	// observation, then retry delivery once for this stamped event (projection
 	// already applied; do not re-Apply). Fixes mid-turn candidateTargets=0 after
 	// path thrash while the device still has an open transport.
-	if enqueued == 0 && len(overflowed) == 0 && (len(targets) == 0 || len(rawEligible) > 0) && !logical.Offline &&
-		p.rebindTargets != nil && logical.BackendID != "" && logical.SessionID != "" {
+	canRebind := p.rebindTargets != nil && logical.BackendID != "" && logical.SessionID != ""
+	if canRebind && p.broadcaster != nil && !p.broadcaster.HasConnections() {
+		// There is no live connection to recover. Skipping the callback avoids
+		// scanning the device registry once per token while an external turn is
+		// still producing events with every client offline.
+		canRebind = false
+	}
+	if enqueued == 0 && len(overflowed) == 0 && (len(targets) == 0 || len(rawEligible) > 0) && !logical.Offline && canRebind {
 		rebind := p.rebindTargets
 		p.mu.Unlock()
 		n := rebind(logical.BackendID, logical.SessionID)
@@ -1073,8 +1104,19 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 	// Phase 1 flushes per-event for live correctness; timed coalesce remains an optional
 	// bandwidth optimization (design §2.3 / §10 item 3).
 	if projectionApplied && p.projection != nil && logical.BackendID != "" && logical.SessionID != "" {
-		patch, flushOk := p.projection.FlushPatch(logical.BackendID, logical.SessionID)
-		if flushOk {
+		noObserver := !p.hasProjectionPatchTargetLocked(logical.BackendID, logical.SessionID)
+		if noObserver && p.projection.PendingPatchExceeds(logical.BackendID, logical.SessionID, projectionNoObserverDropThreshold) {
+			// No v2 observer can receive a live patch. Keep the reducer's
+			// authoritative state, but discard only the unsent delta accumulator;
+			// a later get_session_projection supplies the complete current state.
+			if p.projection.DropPendingPatch(logical.BackendID, logical.SessionID) {
+				slog.Debug("go-bridge: [K4Patch] discard_without_observer",
+					"sessionPrefix", projectionSessionLogPrefix(logical.SessionID),
+					"event", logical.Event,
+					"syncRev", p.projection.LastAppliedRev(logical.BackendID, logical.SessionID),
+				)
+			}
+		} else if patch, flushOk := p.projection.FlushPatch(logical.BackendID, logical.SessionID); flushOk {
 			p.recordProjectionPatchLocked(logical.BackendID, logical.SessionID, patch)
 			slog.Info("go-bridge: [K4Patch] flush",
 				"sessionPrefix", projectionSessionLogPrefix(logical.SessionID),
@@ -1087,12 +1129,6 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 			// Always deliver live projection patches from PublishLogical. Offline only
 			// controls raw durable mailbox routing below, not the projection SoT stream.
 			p.deliverProjectionPatchLocked(logical.BackendID, logical.SessionID, patch)
-		} else {
-			slog.Info("go-bridge: [K4Patch] flush_empty_after_apply",
-				"sessionPrefix", projectionSessionLogPrefix(logical.SessionID),
-				"event", logical.Event,
-				"kernelMode", p.kernel != nil,
-			)
 		}
 	}
 
@@ -1103,7 +1139,7 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 	if enqueued == 0 && len(overflowed) == 0 {
 		switch logical.Event {
 		case "text_delta", "reasoning_delta", "turn_started", "turn_completed", "tool_started", "tool_finished":
-			slog.Warn("event-publisher: live event has zero online targets",
+			slog.Debug("event-publisher: live event has zero online targets",
 				"event", logical.Event,
 				"backendID", logical.BackendID,
 				"sessionID", logical.SessionID,

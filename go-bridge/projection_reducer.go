@@ -36,6 +36,10 @@ type projectionSession struct {
 	projection     SessionProjection
 	lastAppliedRev int // highest committed input PerSessionSeq (idempotency guard)
 	lastFlushedRev int // highest rev emitted in a patch (delta base for next patch)
+	// largePatchObserved is a monotonic hint for the current active turn. Once a
+	// whole-turn upsert crossed the no-observer threshold, subsequent tool/input
+	// events can skip another full-turn walk until a new turn starts.
+	largePatchObserved bool
 
 	// pending deltas accumulated since lastFlushedRev; cleared by FlushPatch.
 	textAppends map[string][]string         // assistant messageId -> delta chunks (append_text)
@@ -59,14 +63,15 @@ func cloneProjectionSessionState(source *projectionSession) *projectionSession {
 		return nil
 	}
 	cloned := &projectionSession{
-		projection:     cloneSessionProjection(source.projection),
-		lastAppliedRev: source.lastAppliedRev,
-		lastFlushedRev: source.lastFlushedRev,
-		textAppends:    make(map[string][]string, len(source.textAppends)),
-		thinking:       make(map[string]string, len(source.thinking)),
-		tools:          make(map[string]ProjectionPart, len(source.tools)),
-		upsertTurns:    make(map[string]TurnProjection, len(source.upsertTurns)),
-		userInputs:     make(map[string]userInputPending, len(source.userInputs)),
+		projection:         cloneSessionProjection(source.projection),
+		lastAppliedRev:     source.lastAppliedRev,
+		lastFlushedRev:     source.lastFlushedRev,
+		largePatchObserved: source.largePatchObserved,
+		textAppends:        make(map[string][]string, len(source.textAppends)),
+		thinking:           make(map[string]string, len(source.thinking)),
+		tools:              make(map[string]ProjectionPart, len(source.tools)),
+		upsertTurns:        make(map[string]TurnProjection, len(source.upsertTurns)),
+		userInputs:         make(map[string]userInputPending, len(source.userInputs)),
 	}
 	for key, chunks := range source.textAppends {
 		cloned.textAppends[key] = append([]string(nil), chunks...)
@@ -582,6 +587,9 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		turnID := dataString(data, "turnId")
 		if turnID == "" {
 			return // no source-proven turnId; skip identityless lifecycle frames
+		}
+		if activeTurnID := ps.projection.Execution.ActiveTurnID; activeTurnID != "" && activeTurnID != turnID {
+			ps.largePatchObserved = false
 		}
 		// No commit / no flush-buffer writes on turn_started: at this point the turn has no
 		// user/assistant content yet. Publishing a skeleton projection (rev advances while the
@@ -1445,6 +1453,191 @@ func (r *ProjectionReducer) FlushPatch(backendID, sessionID string) (ProjectionP
 	ps.execution = nil
 	ps.lastFlushedRev = headRev
 	return patch, true
+}
+
+// DropPendingPatch advances the patch fence to the authoritative head without
+// constructing or journaling a patch. It is used when no session_sync_v2
+// observer can receive the live delta: the reducer snapshot remains the source
+// of truth, and a later observer must pull that snapshot before resuming live
+// patches. Clearing the pending accumulator here is important for long-running
+// turns with no clients; otherwise every token would keep accumulating copies
+// of patch data that can never be delivered.
+func (r *ProjectionReducer) DropPendingPatch(backendID, sessionID string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ps := r.sessions[projectionSessionKey(backendID, sessionID)]
+	if ps == nil {
+		return false
+	}
+	headRev := ps.projection.SyncRev
+	if headRev == ps.lastFlushedRev && len(ps.textAppends) == 0 && len(ps.thinking) == 0 &&
+		len(ps.tools) == 0 && len(ps.upsertTurns) == 0 && len(ps.userInputs) == 0 && ps.execution == nil {
+		return false
+	}
+	ps.textAppends = make(map[string][]string)
+	ps.thinking = make(map[string]string)
+	ps.tools = make(map[string]ProjectionPart)
+	ps.upsertTurns = make(map[string]TurnProjection)
+	ps.userInputs = make(map[string]userInputPending)
+	ps.execution = nil
+	ps.lastFlushedRev = headRev
+	return true
+}
+
+// PendingPatchExceeds reports whether the next patch would carry a large whole
+// turn snapshot. It deliberately inspects only pending tool/input/turn upserts:
+// text and reasoning deltas are already compact append/set operations, while
+// those upserts cause FlushPatch to deep-copy the complete active turn. The
+// bounded estimate lets the publisher avoid that copy when nobody can receive
+// the patch; callers may then serve a full authoritative snapshot on reconnect.
+func (r *ProjectionReducer) PendingPatchExceeds(backendID, sessionID string, limit int) bool {
+	if r == nil || limit <= 0 {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ps := r.sessions[projectionSessionKey(backendID, sessionID)]
+	if ps == nil || (len(ps.tools) == 0 && len(ps.userInputs) == 0 && len(ps.upsertTurns) == 0) {
+		return false
+	}
+	if ps.largePatchObserved {
+		return true
+	}
+	for _, turn := range ps.upsertTurns {
+		if projectionTurnExceeds(&turn, limit) {
+			ps.largePatchObserved = true
+			return true
+		}
+	}
+	if len(ps.tools) > 0 {
+		if turn := ps.turnByID(ps.projection.Execution.ActiveTurnID); turn != nil && projectionTurnExceeds(turn, limit) {
+			ps.largePatchObserved = true
+			return true
+		}
+	}
+	for _, pending := range ps.userInputs {
+		if turn := ps.turnByID(pending.turnID); turn != nil && projectionTurnExceeds(turn, limit) {
+			ps.largePatchObserved = true
+			return true
+		}
+	}
+	return false
+}
+
+// projectionTurnExceeds is a bounded, allocation-free size estimate for the
+// JSON-like values carried by projection parts. It is intentionally conservative
+// about unknown scalar types (they are not expanded), and stops as soon as the
+// configured budget is exhausted.
+func projectionTurnExceeds(turn *TurnProjection, limit int) bool {
+	if turn == nil {
+		return false
+	}
+	budget := limit
+	consume := func(value string) bool {
+		budget -= len(value)
+		return budget <= 0
+	}
+	var consumePart func(ProjectionPart) bool
+	consumePart = func(part ProjectionPart) bool {
+		if consume(part.Type) || consume(part.Text) || consume(part.Presentation) ||
+			consume(part.ItemID) || consume(part.ToolName) || consume(part.ToolStatus) ||
+			consume(part.Title) || consume(part.Path) || consume(part.Kind) ||
+			consume(part.Diff) || consume(part.MovePath) || consume(part.AgentID) ||
+			consume(part.ParentAgentID) || consume(part.SpawnToolUseID) ||
+			consume(part.SubagentType) || consume(part.SubagentStatus) ||
+			consume(part.SubagentError) || consume(part.SubagentDiagnostic) ||
+			consume(part.UserInputInteractionID) || consume(part.UserInputStatus) ||
+			consume(part.UserInputResolutionSource) || consume(part.UserInputDiagnosticCode) {
+			return true
+		}
+		for _, nested := range part.SubagentBlocks {
+			if consumePart(nested) {
+				return true
+			}
+		}
+		if projectionValueExceeds(part.ToolInput, &budget) ||
+			projectionValueExceeds(part.ToolResult, &budget) ||
+			projectionValueExceeds(part.Matches, &budget) ||
+			projectionValueExceeds(part.FileChanges, &budget) ||
+			projectionValueExceeds(part.UserInputQuestions, &budget) {
+			return true
+		}
+		for _, action := range part.PermissionActions {
+			if consume(action) {
+				return true
+			}
+		}
+		for _, pattern := range part.PermissionPatterns {
+			if consume(pattern) {
+				return true
+			}
+		}
+		return budget <= 0
+	}
+	consumeMessage := func(message *MessageProjection) bool {
+		if message == nil {
+			return false
+		}
+		if consume(message.ID) || consume(message.ClientID) || consume(message.Role) {
+			return true
+		}
+		for _, part := range message.Parts {
+			if consumePart(part) {
+				return true
+			}
+		}
+		return false
+	}
+	if consume(turn.TurnID) || consume(turn.Status) || consumeMessage(turn.User) ||
+		consumeMessage(turn.Assistant) || consumeMessage(turn.System) {
+		return true
+	}
+	return budget <= 0
+}
+
+// projectionValueExceeds walks the JSON-compatible containers used by tool and
+// structured-input payloads without marshaling or allocating a second copy.
+func projectionValueExceeds(value interface{}, budget *int) bool {
+	if value == nil || budget == nil || *budget <= 0 {
+		return budget != nil && *budget <= 0
+	}
+	switch typed := value.(type) {
+	case string:
+		*budget -= len(typed)
+	case []byte:
+		*budget -= len(typed)
+	case []interface{}:
+		for _, item := range typed {
+			if projectionValueExceeds(item, budget) {
+				return true
+			}
+		}
+	case []string:
+		for _, item := range typed {
+			*budget -= len(item)
+			if *budget <= 0 {
+				return true
+			}
+		}
+	case map[string]interface{}:
+		for key, item := range typed {
+			*budget -= len(key)
+			if *budget <= 0 || projectionValueExceeds(item, budget) {
+				return true
+			}
+		}
+	case map[string]string:
+		for key, item := range typed {
+			*budget -= len(key) + len(item)
+			if *budget <= 0 {
+				return true
+			}
+		}
+	}
+	return *budget <= 0
 }
 
 // LastAppliedRev exposes the current head syncRev (for diagnostics / RPC headRev).

@@ -1,6 +1,7 @@
 package gobridge
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -108,5 +109,44 @@ func TestCoalesceControlEventOrdersWithContent(t *testing.T) {
 	proj, _ := r.Snapshot("codex", "s1")
 	if proj.Execution.Phase != "idle" {
 		t.Fatalf("execution phase = %q, want idle", proj.Execution.Phase)
+	}
+}
+
+// When no v2 observer is online, live projection state remains authoritative but
+// its unsent patch accumulator must not grow for the duration of a turn. A later
+// observer receives the current snapshot, then starts a fresh delta base.
+func TestDropPendingPatchWithoutObserverRetainsSnapshot(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "before"}))
+	if !r.DropPendingPatch("codex", "s1") {
+		t.Fatal("expected pending patch to be discarded")
+	}
+	if _, ok := r.FlushPatch("codex", "s1"); ok {
+		t.Fatal("discarded patch must not be emitted later")
+	}
+	projection, ok := r.Snapshot("codex", "s1")
+	if !ok || projection.SyncRev != 1 {
+		t.Fatalf("authoritative snapshot = %+v ok=%v", projection, ok)
+	}
+
+	r.Apply(ev(3, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "after"}))
+	patch, ok := r.FlushPatch("codex", "s1")
+	if !ok || patch.BaseRev != 1 || patch.SyncRev != 2 {
+		t.Fatalf("fresh patch after discard = %+v ok=%v", patch, ok)
+	}
+	if len(patch.PartOps) != 1 || patch.PartOps[0].Text != "after" {
+		t.Fatalf("fresh patch contains stale content: %+v", patch.PartOps)
+	}
+}
+
+func TestPendingPatchExceedsDetectsLargeToolTurn(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s-large", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex", "s-large", "tool_started", map[string]interface{}{
+		"itemId": "call-1", "toolResult": strings.Repeat("x", 1024),
+	}))
+	if !r.PendingPatchExceeds("codex", "s-large", 512) {
+		t.Fatal("large pending tool turn should exceed the no-observer threshold")
 	}
 }

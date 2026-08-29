@@ -548,12 +548,19 @@ func (h *Handlers) rebindLiveTargetsForSession(backendID, sessionID string) int 
 		if h.broadcaster != nil {
 			hasSub = h.broadcaster.HasSessionSubscriber(backendID, sessionID)
 		}
-		slog.Warn("go-bridge: rebind live targets found zero conns",
-			"backendID", backendID,
-			"sessionID", sessionID,
-			"registryDevices", deviceN,
-			"hasSessionSubscriber", hasSub,
-		)
+		if deviceN > 0 || hasSub {
+			slog.Warn("go-bridge: rebind live targets found zero conns",
+				"backendID", backendID,
+				"sessionID", sessionID,
+				"registryDevices", deviceN,
+				"hasSessionSubscriber", hasSub,
+			)
+		} else {
+			slog.Debug("go-bridge: rebind skipped; no live device connections",
+				"backendID", backendID,
+				"sessionID", sessionID,
+			)
+		}
 	}
 	return rebound
 }

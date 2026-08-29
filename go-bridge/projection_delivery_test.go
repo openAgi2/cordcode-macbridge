@@ -1,6 +1,7 @@
 package gobridge
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -90,6 +91,23 @@ func TestProjectionPatchDeliveredToV2ConnOnly(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 	if got := len(projectionPatchFrames(legacy.snapshot())); got != 0 {
 		t.Fatalf("legacy conn received %d projection_patch frames (must be 0)", got)
+	}
+}
+
+func TestPublishLogicalDropsPatchWhenNoV2Observer(t *testing.T) {
+	broadcaster := NewBroadcaster()
+	ep := NewEventPublisher("epoch-no-v2", broadcaster)
+	ep.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s-no-v2", Event: "turn_started", Data: map[string]interface{}{"turnId": "T1"}, Broadcast: true})
+	ep.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s-no-v2", Event: "tool_started", Data: map[string]interface{}{
+		"itemId": "call-1", "toolResult": strings.Repeat("x", 300<<10),
+	}, Broadcast: true})
+
+	if _, ok := ep.projection.FlushPatch("codex", "s-no-v2"); ok {
+		t.Fatal("publisher must discard pending patch when no v2 observer exists")
+	}
+	projection, ok := ep.projection.Snapshot("codex", "s-no-v2")
+	if !ok || projection.SyncRev != 1 || len(projection.Turns) != 1 {
+		t.Fatalf("authoritative projection lost after discard: %+v ok=%v", projection, ok)
 	}
 }
 
