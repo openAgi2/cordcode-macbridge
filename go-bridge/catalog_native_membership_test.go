@@ -139,6 +139,32 @@ func TestListSemanticFingerprintCoversFrozenTupleAndIgnoresPresentation(t *testi
 	}
 }
 
+func TestRemoteCatalogFingerprintIgnoresLiveRecencyChurn(t *testing.T) {
+	base := []map[string]interface{}{
+		{"id": "remote-a", "updatedAtMillis": int64(2), "title": "A", "directory": "/tmp/workspace", "projectId": "p"},
+		{"id": "remote-b", "updatedAtMillis": int64(1), "title": "B", "directory": "/tmp/workspace", "projectId": "p"},
+	}
+	fingerprint := remoteCatalogFingerprint(base)
+	recency := []map[string]interface{}{mapsClone(base[0]), mapsClone(base[1])}
+	recency[0]["updatedAtMillis"] = int64(999)
+	recency[1]["updatedAtMillis"] = int64(1000)
+	if got := remoteCatalogFingerprint(recency); got != fingerprint {
+		t.Fatalf("live recency churn changed Remote catalog fingerprint: got %q want %q", got, fingerprint)
+	}
+	for name, mutate := range map[string]func([]map[string]interface{}){
+		"title":      func(m []map[string]interface{}) { m[0]["title"] = "renamed" },
+		"directory":  func(m []map[string]interface{}) { m[0]["directory"] = "/tmp/other" },
+		"order":      func(m []map[string]interface{}) { m[0], m[1] = m[1], m[0] },
+		"membership": func(m []map[string]interface{}) { m[1]["id"] = "remote-c" },
+	} {
+		copyMaps := []map[string]interface{}{mapsClone(base[0]), mapsClone(base[1])}
+		mutate(copyMaps)
+		if got := remoteCatalogFingerprint(copyMaps); got == fingerprint {
+			t.Fatalf("%s mutation did not rotate Remote catalog fingerprint", name)
+		}
+	}
+}
+
 func mapsClone(input map[string]interface{}) map[string]interface{} {
 	out := make(map[string]interface{}, len(input))
 	for key, value := range input {

@@ -8,6 +8,7 @@
 
 ## [Unreleased]
 
+- **进一步降低 Codex Desktop runtime CPU**：head probe 超时现在进入独立指数退避；Remote 目录指纹忽略流式回合不断变化的 recency 时间戳，仅由会改变会话行的标题、目录、项目和成员变化触发目录事件，避免后台探测和流式事件互相放大。
 - **修复：Codex Desktop 会话操作即时可见、标题一致，并消除目录轮询高 CPU**：Remote 目录发现改用官方 thread 生命周期通知触发，失败的全量刷新按独立指数退避，不再被同一旧 head 自激；安全探测降频并按官方最大页长拉取。iPhone 新建会话的标题会通过官方 thread/name/set 持久化并以 thread/read 回读，Mac/iPhone 不再分别显示 cwd 与 basename；重命名/归档响应直接携带权威 session，客户端无需再发一次慢回拉。
 - **修复：Codex Desktop 配对一次即可跨重启使用**：此前配对成功时还没把 Desktop 环境写进状态，本地文件被静默跳过，重启后又变「未配置」。现配对成功即写入 Link 数据目录（0600）；下次启动刷新官方 controller token 并自动接回 Desktop，不必再填电脑配对码。恢复完成后管理状态会刷新成「就绪」；数据面断开后自动重连。Desktop 没开时保持已配对、等它上线。只有官方判定撤销才要求重新配对。
 - **修复：iPhone 打开 Codex Desktop 会话显示「还没有消息」**：会话投影把该后端当成空源，1ms 内提交了 0 条 turn。现按官方 `thread/read` 的 turn 身份冷拉历史。

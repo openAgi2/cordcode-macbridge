@@ -112,6 +112,7 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 	seen := map[string]string{}
 	_, isCodexCatalog := agent.(codexThreadHeadLister)
 	retry := catalogDiscoveryRetry{base: codexDiscoveryRetryBase, max: codexDiscoveryRetryMax}
+	probeRetry := catalogDiscoveryRetry{base: codexDiscoveryRetryBase, max: codexDiscoveryRetryMax}
 	if !h.snapshotBackendSession(ctx, seen, true, id, agent) && isCodexCatalog {
 		retry.fail(time.Now())
 	}
@@ -188,13 +189,27 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 				authoritativeRefresh("grok-fast-poll")
 				continue
 			}
+			if isCodexCatalog && !retry.ready(time.Now()) {
+				continue
+			}
+			if isCodexCatalog && !probeRetry.ready(time.Now()) {
+				continue
+			}
 			probeStarted := time.Now()
 			current, err := h.codexDiscoveryHintFingerprint(ctx, agent)
 			probeDuration := time.Since(probeStarted)
 			if err != nil {
 				slog.Warn("go-bridge: Codex discovery head probe error (no full refresh)",
-					"durationMs", probeDuration.Milliseconds(), "error", err.Error())
+					"backend", id, "durationMs", probeDuration.Milliseconds(), "error", err.Error())
+				if isCodexCatalog {
+					delay := probeRetry.fail(time.Now())
+					slog.Warn("go-bridge: Codex discovery head probe backed off",
+						"backend", id, "retryDelay", delay.String())
+				}
 				continue
+			}
+			if isCodexCatalog {
+				probeRetry.succeed()
 			}
 			if !hintSeeded {
 				hintSeen = current
@@ -208,7 +223,7 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 				continue
 			}
 			slog.Info("go-bridge: Codex discovery head changed; running authoritative full refresh",
-				"headProbeDurationMs", probeDuration.Milliseconds())
+				"backend", id, "headProbeDurationMs", probeDuration.Milliseconds())
 			if authoritativeRefresh("head-change") {
 				hintSeen = current
 			}
@@ -399,6 +414,13 @@ func (h *Handlers) discoveryFingerprint(ctx context.Context, id string, agent co
 			return "", 0, 0, err
 		}
 		return listSemanticFingerprint(wire), len(wire), rawCount, nil
+	}
+	if agent.Name() == "codex-remote" {
+		infos, err := agent.ListSessions(listCtx)
+		if err != nil {
+			return "", 0, 0, err
+		}
+		return remoteCatalogFingerprint(sessionsToWire(infos)), len(infos), len(infos), nil
 	}
 	if agent.Name() == "grokbuild" {
 		wire, _, err := h.grokVisibleMembership(listCtx, id)

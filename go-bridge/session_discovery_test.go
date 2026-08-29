@@ -321,8 +321,12 @@ func TestSessionDiscoveryBlockedBackendDoesNotStarveCodex(t *testing.T) {
 func TestSessionDiscoveryCodexHeadHintTriggersAuthoritativeRefresh(t *testing.T) {
 	previousInterval := sessionDiscoveryInterval
 	previousHintInterval := codexDiscoveryHintInterval
+	previousRetryBase := codexDiscoveryRetryBase
+	previousRetryMax := codexDiscoveryRetryMax
 	sessionDiscoveryInterval = time.Hour
 	codexDiscoveryHintInterval = 10 * time.Millisecond
+	codexDiscoveryRetryBase = 5 * time.Millisecond
+	codexDiscoveryRetryMax = 20 * time.Millisecond
 	withCodexRootsDisabled(t)
 
 	state := &discoveryHintState{
@@ -363,6 +367,8 @@ func TestSessionDiscoveryCodexHeadHintTriggersAuthoritativeRefresh(t *testing.T)
 		}
 		sessionDiscoveryInterval = previousInterval
 		codexDiscoveryHintInterval = previousHintInterval
+		codexDiscoveryRetryBase = previousRetryBase
+		codexDiscoveryRetryMax = previousRetryMax
 	})
 
 	select {
@@ -503,8 +509,12 @@ func TestSessionDiscoveryCodexFailedFullRefreshBacksOffAndResets(t *testing.T) {
 func TestSessionDiscoveryHintArmsForCodexWebBackend(t *testing.T) {
 	previousInterval := sessionDiscoveryInterval
 	previousHintInterval := codexDiscoveryHintInterval
+	previousRetryBase := codexDiscoveryRetryBase
+	previousRetryMax := codexDiscoveryRetryMax
 	sessionDiscoveryInterval = time.Hour
 	codexDiscoveryHintInterval = 10 * time.Millisecond
+	codexDiscoveryRetryBase = 5 * time.Millisecond
+	codexDiscoveryRetryMax = 20 * time.Millisecond
 	withCodexRootsDisabled(t)
 
 	state := &discoveryHintState{
@@ -545,6 +555,8 @@ func TestSessionDiscoveryHintArmsForCodexWebBackend(t *testing.T) {
 		}
 		sessionDiscoveryInterval = previousInterval
 		codexDiscoveryHintInterval = previousHintInterval
+		codexDiscoveryRetryBase = previousRetryBase
+		codexDiscoveryRetryMax = previousRetryMax
 	})
 
 	select {
@@ -570,6 +582,60 @@ func TestSessionDiscoveryHintArmsForCodexWebBackend(t *testing.T) {
 	state.mu.Unlock()
 	if fullAfterChange != 2 {
 		t.Fatalf("head change full fetches=%d, want seed + one authoritative refresh", fullAfterChange)
+	}
+}
+
+func TestSessionDiscoveryCodexHeadProbeErrorsBackOff(t *testing.T) {
+	previousInterval := sessionDiscoveryInterval
+	previousHintInterval := codexDiscoveryHintInterval
+	previousRetryBase := codexDiscoveryRetryBase
+	previousRetryMax := codexDiscoveryRetryMax
+	sessionDiscoveryInterval = time.Hour
+	codexDiscoveryHintInterval = 10 * time.Millisecond
+	codexDiscoveryRetryBase = 50 * time.Millisecond
+	codexDiscoveryRetryMax = 100 * time.Millisecond
+	withCodexRootsDisabled(t)
+
+	state := &discoveryHintState{
+		headErrors: 100,
+		headSeeded: make(chan struct{}),
+		workspace:  t.TempDir(),
+	}
+	base := &fakeCodexCatalogAgent{fakeAgent: &fakeAgent{name: "codex-remote"}}
+	base.fetchFn = func(context.Context, string) ([]core.AgentSessionInfo, error) {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		state.fullCalls++
+		return []core.AgentSessionInfo{{ID: "s1", Summary: "one", Directory: state.workspace}}, nil
+	}
+	agent := &discoveryHintCodexAgent{fakeCodexCatalogAgent: base, state: state}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex-remote", agent)
+	serverConn, _, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex-remote", SessionID: "list-view"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handlers.runBackendSessionDiscovery(ctx, "codex-remote", agent, time.Hour, codexDiscoveryHintInterval, time.Hour)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+		sessionDiscoveryInterval = previousInterval
+		codexDiscoveryHintInterval = previousHintInterval
+		codexDiscoveryRetryBase = previousRetryBase
+		codexDiscoveryRetryMax = previousRetryMax
+	})
+
+	time.Sleep(130 * time.Millisecond)
+	state.mu.Lock()
+	headCalls := state.headCalls
+	state.mu.Unlock()
+	if headCalls < 1 || headCalls > 3 {
+		t.Fatalf("head probe errors made %d calls in 130ms, want bounded 1..3 with retry backoff", headCalls)
 	}
 }
 
