@@ -228,10 +228,19 @@ func (p *PairingController) bindLive(ctx context.Context, env *remoteEnv) error 
 	ctrlToken := p.state.ctrlToken
 	ctrlExp := p.state.ctrlExp
 	clientID := p.state.clientID
+	streamID := p.state.streamID
 	key := p.state.key
 	p.mu.Unlock()
 	if token == "" || accountID == "" || ctrlToken == "" || clientID == "" || env == nil || env.EnvID == "" {
 		return fmt.Errorf("pairing state incomplete")
+	}
+	if streamID == "" {
+		// 首次绑定或重新配对后：生成并固化，此后跨重连复用（见
+		// persistedPairing.StreamID 注释）。
+		streamID = randomStreamID()
+		p.mu.Lock()
+		p.state.streamID = streamID
+		p.mu.Unlock()
 	}
 	conn, err := dialControllerWS(ctx, token, accountID, ctrlToken, clientID)
 	if err != nil {
@@ -241,7 +250,7 @@ func (p *PairingController) bindLive(ctx context.Context, env *remoteEnv) error 
 		_ = conn.Close()
 		return err
 	}
-	if err := p.activateStream(ctx, &wsFrameConn{conn: conn}, clientID, env.EnvID); err != nil {
+	if err := p.activateStream(ctx, &wsFrameConn{conn: conn}, clientID, env.EnvID, streamID); err != nil {
 		slog.Warn("codex-remote pairing initialize failed")
 		return err
 	}
@@ -259,8 +268,8 @@ func (p *PairingController) bindLive(ctx context.Context, env *remoteEnv) error 
 	return nil
 }
 
-func (p *PairingController) activateStream(ctx context.Context, conn FrameConn, clientID, envID string) error {
-	stream := NewStream(conn, clientID, envID, randomStreamID())
+func (p *PairingController) activateStream(ctx context.Context, conn FrameConn, clientID, envID, streamID string) error {
+	stream := NewStream(conn, clientID, envID, streamID)
 	p.agent.mu.Lock()
 	p.agent.connEpoch++
 	epoch := p.agent.connEpoch

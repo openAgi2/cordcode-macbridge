@@ -203,3 +203,57 @@ func TestStreamSurvivesActivePong(t *testing.T) {
 		t.Fatalf("active pong must not fail the stream: %v", err)
 	}
 }
+
+// 重连后 host 仍按旧会话的 stream_id 推送（真机 2026-08-29 12:30
+// gotStreamID=旧值）：client_id/env_id 均匹配时必须接受并继续投递，
+// 不得判死流引发重连风暴。
+func TestStreamAcceptsStaleStreamIDOfSameClientEnv(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	defer hostConn.Close()
+	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_new")
+	defer stream.Close()
+
+	seq := uint64(1)
+	_ = hostConn.Write(Envelope{
+		Type:     typeServerMessage,
+		ClientID: "client_probe", EnvID: "env_desktop", StreamID: "stream_old",
+		SeqID:  &seq,
+		Message: json.RawMessage(`{"jsonrpc":"2.0","method":"turn/started","params":{}}`),
+	})
+	payload, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("stale-stream envelope must be delivered, got error: %v", err)
+	}
+	if !strings.Contains(string(payload), "turn/started") {
+		t.Fatalf("payload = %s", payload)
+	}
+	if err := stream.Send([]byte("{}")); err != nil {
+		t.Fatalf("stream must stay alive after stale envelope: %v", err)
+	}
+}
+
+// client_id 或 env_id 不匹配的封包仍须判死流（外来流量不得混入）。
+func TestStreamStillFailsOnForeignRouting(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	defer hostConn.Close()
+	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_new")
+
+	seq := uint64(1)
+	_ = hostConn.Write(Envelope{
+		Type:     typeServerMessage,
+		ClientID: "client_other", EnvID: "env_desktop", StreamID: "stream_other",
+		SeqID:  &seq,
+		Message: json.RawMessage(`{}`),
+	})
+	deadline := time.After(2 * time.Second)
+	for {
+		if err := stream.Send([]byte("{}")); err != nil {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("foreign client_id must fail the stream")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}

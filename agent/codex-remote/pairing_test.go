@@ -66,7 +66,7 @@ func TestPairingStartAndSubmitCode(t *testing.T) {
 			}
 			return map[string]any{}, nil
 		})
-		if err := agent.pairing.activateStream(ctx, clientConn, "client_probe", env.EnvID); err != nil {
+		if err := agent.pairing.activateStream(ctx, clientConn, "client_probe", env.EnvID, "stream_probe"); err != nil {
 			return err
 		}
 		t.Cleanup(func() {
@@ -148,6 +148,7 @@ func TestPersistedPairingRoundTrip(t *testing.T) {
 	agent.pairing.keys = keys
 	agent.pairing.mu.Lock()
 	agent.pairing.state.clientID = "client_probe"
+	agent.pairing.state.streamID = "stream_stable"
 	agent.pairing.state.ctrlToken = "ctrl"
 	agent.pairing.state.ctrlExp = "2099-01-01T00:00:00Z"
 	agent.pairing.state.key = key
@@ -166,6 +167,9 @@ func TestPersistedPairingRoundTrip(t *testing.T) {
 	}
 	if rec.CtrlToken != "ctrl" {
 		t.Fatal("token missing from store")
+	}
+	if rec.StreamID != "stream_stable" {
+		t.Fatalf("streamId = %q, want persisted for reconnect reuse", rec.StreamID)
 	}
 }
 
@@ -307,7 +311,7 @@ func stubBind(t *testing.T, agent *Agent) {
 			}
 			return map[string]any{}, nil
 		})
-		if err := agent.pairing.activateStream(ctx, clientConn, "client_probe", env.EnvID); err != nil {
+		if err := agent.pairing.activateStream(ctx, clientConn, "client_probe", env.EnvID, "stream_probe"); err != nil {
 			return err
 		}
 		t.Cleanup(func() {

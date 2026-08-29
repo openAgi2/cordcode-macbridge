@@ -51,6 +51,7 @@ type pairState struct {
 	token     string
 	accountID string
 	clientID  string
+	streamID  string
 	ctrlToken string
 	ctrlExp   string
 	key       *deviceKey
@@ -216,6 +217,9 @@ func (p *PairingController) Start(ctx context.Context, token, accountID string) 
 	p.state.clientID = start.ClientID
 	p.state.key = key
 	p.state.startRaw = startRaw
+	// 新 enrollment = 新控制器身份：旧 stream_id 属于旧会话，必须轮换，
+	// 由 bindLive 在绑定时重新生成。
+	p.state.streamID = ""
 	p.mu.Unlock()
 	if p.stepUpToken != "" {
 		if err := p.enrollFinish(ctx, startRaw); err != nil {

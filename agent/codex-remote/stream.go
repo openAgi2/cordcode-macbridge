@@ -3,6 +3,7 @@ package codexremote
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -28,8 +29,12 @@ type Stream struct {
 	closed   bool
 	closeErr error
 	lastRecv time.Time
-	inbound  chan []byte
-	done     chan struct{}
+	// staleStreams 记录同 client+env 下见过的历史 stream_id：重连换 id 后
+	// host 仍按旧会话路由推送（真机 2026-08-29 12:30），client_id 已验证
+	// 属于本机，按本机历史会话接受而非判死流。
+	staleStreams map[string]struct{}
+	inbound      chan []byte
+	done         chan struct{}
 
 	asmMu    sync.Mutex
 	assembly map[uint64]*chunkAssembly
@@ -208,6 +213,33 @@ func (s *Stream) fail(err error) {
 	_ = s.conn.Close()
 }
 
+// ownStaleStream 判断路由失败是否仅为本客户端的历史 stream_id 漂移：
+// client_id 与 env_id 都非空且完全匹配时，这条连接上的封包只可能来自
+// 本机此前（重连前）的会话，按本机历史会话接受。
+func (s *Stream) ownStaleStream(env Envelope) bool {
+	return env.StreamID != "" && env.StreamID != s.streamID &&
+		env.ClientID != "" && env.ClientID == s.clientID &&
+		env.EnvID != "" && env.EnvID == s.envID
+}
+
+// acceptStaleStreamID 记录并放行历史 stream_id，每个 id 只告警一次。
+func (s *Stream) acceptStaleStreamID(id string, reason error) {
+	s.mu.Lock()
+	if s.staleStreams == nil {
+		s.staleStreams = map[string]struct{}{}
+	}
+	_, seen := s.staleStreams[id]
+	if !seen && len(s.staleStreams) < 16 {
+		s.staleStreams[id] = struct{}{}
+	}
+	want := s.streamID
+	s.mu.Unlock()
+	if !seen {
+		slog.Warn("codex-remote stream accepting stale stream_id",
+			"gotStreamID", id, "wantStreamID", want, "reason", reason.Error())
+	}
+}
+
 func (s *Stream) readLoop() {
 	defer func() {
 		close(s.inbound)
@@ -223,8 +255,18 @@ func (s *Stream) readLoop() {
 		s.lastRecv = time.Now()
 		s.mu.Unlock()
 		if err := env.routingOK(s.clientID, s.envID, s.streamID); err != nil {
-			s.fail(err)
-			return
+			if s.ownStaleStream(env) {
+				s.acceptStaleStreamID(env.StreamID, err)
+			} else {
+				slog.Warn("codex-remote stream routing mismatch; failing stream",
+					"error", err.Error(),
+					"envelopeType", env.Type,
+					"gotClientID", env.ClientID, "wantClientID", s.clientID,
+					"gotEnvID", env.EnvID, "wantEnvID", s.envID,
+					"gotStreamID", env.StreamID, "wantStreamID", s.streamID)
+				s.fail(err)
+				return
+			}
 		}
 		if env.Cursor != nil && *env.Cursor != "" {
 			s.mu.Lock()
