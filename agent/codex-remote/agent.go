@@ -64,6 +64,21 @@ func New(opts map[string]any) *Agent {
 
 func (a *Agent) Name() string { return BackendID }
 
+// SetWorkDir implements core.WorkDirSwitcher. The bridge calls it before
+// create_session/send_message; StartSession snapshots the value into the
+// official thread/start cwd parameter.
+func (a *Agent) SetWorkDir(dir string) {
+	a.mu.Lock()
+	a.workDir = dir
+	a.mu.Unlock()
+}
+
+func (a *Agent) GetWorkDir() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.workDir
+}
+
 // StartSession is in session.go; ListSessions/FetchThreadList are in catalog.go.
 // Unbound agents still return ErrNotConfigured.
 

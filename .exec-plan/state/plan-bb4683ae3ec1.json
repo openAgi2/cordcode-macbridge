@@ -35,7 +35,7 @@
     "last_generated_at": "2026-08-29T09:58:06Z",
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-29T09:58:06Z",
+  "updated_at": "2026-08-29T14:41:00Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -2153,14 +2153,14 @@
         "phase5-gate-tests"
       ],
       "source": "Phase 5",
-      "notes": "AUDIT INVALIDATED 2026-08-29: owner device regression proved session-open does not subscribe the Remote app-server thread and model catalog/selection is absent. Keep blocked until both review-fix regression todos are proven; review-fix-for:phase5-gate-regression.",
+      "notes": "AUDIT INVALIDATED 2026-08-29. The live-subscription and model-selection review fixes are now owner-verified, but the next device regression exposed missing official session mutation RPCs and missing selected-project cwd propagation. Keep blocked until both new review-fix regression chains are proven; review-fix-for:phase5-gate-regression.",
       "verification": {
         "required": true,
         "status": "failed",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "Owner device regression invalidated Gate P5: opening a codex-remote session hydrates history and subscribes the Bridge connection but does not call official thread/resume or create an Agent listener, so later Desktop turns are dropped until iOS sends once. The backend also exposes no official model/list catalog or turn/start model selection.",
+        "summary": "Owner verified the previous live-subscription and model/effort repairs on a physical iPhone. Gate P5 remains blocked because codex-remote still does not implement official thread/name/set, thread/archive, or thread/delete, and it does not implement WorkDirSwitcher so create_session's selected project directory never reaches thread/start.cwd.",
         "artifacts": [
           "agent/codex-remote/testdata/phase5/gate-p5.md",
           "agent/codex-remote/testdata/phase5/validation.txt",
@@ -2169,11 +2169,14 @@
           "runtime:/Applications/CordCodeLink.app PID 41727 TCP 8777 commit ca9c223e47df",
           "cmd:authenticated management status => runtime ready; codex-remote ready/online",
           "owner-device:open session without sending, then Desktop send => iOS did not update",
-          "runtime-log:get_session_projection/list_models observed; no thread/resume admission",
+          "owner-device:2026-08-29 bidirectional iOS↔Mac send/sync and turn handoff => PASS",
+          "owner-device:2026-08-29 Codex Desktop model catalog and effort controls visible on iOS => PASS",
+          "owner-device:2026-08-29 rename/archive/delete => not_supported",
+          "owner-device:2026-08-29 new session under selected project => incorrectly cataloged under jacklee",
           "upstream:/Users/jacklee/Projects/codex/codex-rs/app-server/src/thread_state.rs:61"
         ],
-        "checked_at": "2026-08-29T08:52:38Z",
-        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server/src/thread_state.rs:61; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/model.rs:53; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/turn.rs:152"
+        "checked_at": "2026-08-29T14:18:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:532; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:537; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:566; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs:62"
       }
     },
     {
@@ -2240,7 +2243,7 @@
       "id": "phase5-session-open-live-subscription-review-fix-regression",
       "title": "Attach Remote live subscription when a session is opened — review fix regression",
       "description": "review-fix-for:phase5-gate-regression. Build/install the repaired Mac app and require owner-device verification: open a session without sending, send from Codex Desktop, and observe the user turn and reply on iOS without reopening or polling fallback.",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase5",
       "kind": "regression",
       "depends_on": [
@@ -2250,11 +2253,11 @@
       "notes": "review-fix-for:phase5-gate-regression",
     "verification": {
       "required": true,
-      "status": "missing",
+      "status": "present",
       "method": "mixed",
       "attestation": "self-attested",
       "na_reason": null,
-      "summary": "Local implementation and Release install are complete; the required owner-device open-only Desktop-turn check remains unexecuted. iOS signed install is blocked by the local Xcode account/provisioning state.",
+      "summary": "Owner verified on a physical iPhone that an opened Codex Desktop session supports bidirectional send/sync and cross-device turn handoff in both directions, including Desktop-originated updates without requiring an iOS-first send.",
       "artifacts": [
         "git:2de5189a8bfd",
         "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED",
@@ -2262,9 +2265,9 @@
         "cmd:management status => runtime ready; codex-remote ready/online; relay connected",
         "cmd:./scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05 => blocked: Xcode No Accounts / missing provisioning profiles",
         "cmd:unsigned iOS xcodebuild build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO => BUILD SUCCEEDED",
-        "owner-device:open session without sending, then Desktop send => pending"
+        "owner-device:2026-08-29 bidirectional iOS↔Mac send/sync and turn handoff => PASS"
       ],
-      "checked_at": "2026-08-29T09:53:00Z",
+      "checked_at": "2026-08-29T14:04:30Z",
         "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server/src/thread_state.rs:61"
       }
     },
@@ -2332,7 +2335,7 @@
       "id": "phase5-model-catalog-selection-review-fix-regression",
       "title": "Expose official Remote model catalog and per-turn selection — review fix regression",
       "description": "review-fix-for:phase5-gate-regression. Build/install and require owner-device verification that Codex Desktop mode shows the official model choices and a selected model is honored on a real iOS-started turn.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "regression",
       "depends_on": [
@@ -2342,20 +2345,21 @@
       "notes": "review-fix-for:phase5-gate-regression",
     "verification": {
       "required": true,
-      "status": "missing",
+      "status": "present",
       "method": "mixed",
       "attestation": "self-attested",
       "na_reason": null,
-      "summary": "Mac Release is installed and the iOS source compiles unsigned; the required owner-device model-picker and selected model/effort turn check is still pending because signed iOS installation is blocked by Xcode account/provisioning state.",
+      "summary": "Owner verified on a physical iPhone that Codex Desktop mode now exposes the live model catalog and reasoning-effort choices while bidirectional turns continue to stream and synchronize correctly.",
       "artifacts": [
         "git:2de5189a8bfd",
         "git-ios:ed60f99",
         "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED",
         "cmd:unsigned iOS xcodebuild build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO => BUILD SUCCEEDED",
         "cmd:./scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05 => blocked: Xcode No Accounts / missing provisioning profiles",
-        "owner-device:Codex Desktop model menu and selected model/effort honored on iOS => pending"
+        "owner-device:2026-08-29 Codex Desktop model catalog and effort controls visible on iOS => PASS",
+        "owner-device:2026-08-29 signed CordCode iOS installation restored => PASS"
       ],
-      "checked_at": "2026-08-29T09:53:00Z",
+      "checked_at": "2026-08-29T14:04:30Z",
         "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/model.rs:53; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/turn.rs:152"
       }
     },
@@ -2604,6 +2608,168 @@
           "git:0cc2467edc87"
         ],
         "checked_at": "2026-08-29T05:52:00Z"
+      }
+    },
+    {
+      "id": "phase5-session-mutation-review-fix-impl",
+      "title": "Implement official Codex Desktop session mutations — review fix impl",
+      "description": "review-fix-for:phase5-gate-regression. Implement core.SessionRenamer, SessionArchiver, and SessionDeleter on codex-remote using official thread/name/set, thread/archive, and thread/delete. Rename/archive must re-read authoritative thread metadata; deletion must accept only a valid official object acknowledgement.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-gate-tests"
+      ],
+      "source": "2026-08-29 owner physical-device regression and upstream Codex app-server protocol",
+      "notes": "review-fix-for:phase5-gate-regression; reuse the proven codex-web official-RPC pattern without importing or coupling the adapters.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "codex-remote now implements the existing Bridge mutation interfaces with official thread/name/set, thread/archive, and thread/delete RPCs; rename/archive return only a subsequent authoritative thread/read row and delete clears only derived model-selection state after official acknowledgement.",
+        "artifacts": [
+          "agent/codex-remote/mutations.go",
+          "agent/codex-remote/history.go",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs"
+        ],
+        "checked_at": "2026-08-29T14:31:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:532; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:537; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:566"
+      }
+    },
+    {
+      "id": "phase5-session-mutation-review-fix-tests",
+      "title": "Verify official Codex Desktop session mutations — review fix tests",
+      "description": "review-fix-for:phase5-gate-regression. Prove exact official parameter shapes, authoritative post-mutation thread/read, RPC and transport error propagation, interface-derived capabilities, and bridge rename/archive/delete responses.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-session-mutation-review-fix-impl"
+      ],
+      "source": "2026-08-29 owner physical-device regression and upstream Codex app-server protocol",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Loopback app-server tests pin exact mutation method/parameter shapes, authoritative read-after-write ordering, official RPC error propagation, all four implemented interfaces, and production-derived Bridge capability advertisement.",
+        "artifacts": [
+          "agent/codex-remote/mutations_test.go",
+          "go-bridge/codex_remote_mutation_capabilities_test.go",
+          "cmd:go test ./agent/codex-remote -count=1 -timeout 120s => PASS",
+          "cmd:go test ./go-bridge -run TestCodexRemoteAdvertisesMutationAndWorkDirCapabilities|TestHandleRenameSessionReturnsUpdatedSession|TestHandleArchiveSessionReturnsArchivedSession -count=1 -timeout 120s => PASS",
+          "cmd:go test -race ./agent/codex-remote -count=1 -timeout 120s => PASS"
+        ],
+        "checked_at": "2026-08-29T14:33:00Z"
+      }
+    },
+    {
+      "id": "phase5-session-mutation-review-fix-regression",
+      "title": "Close Codex Desktop session mutation regression — review fix regression",
+      "description": "review-fix-for:phase5-gate-regression. Build and install the repaired runtime, then require owner physical-device proof that rename, archive, and delete persist and the session list reflects authoritative Desktop state.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-session-mutation-review-fix-tests"
+      ],
+      "source": "2026-08-29 owner physical-device regression",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Pending owner physical-device regression.",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase5-new-session-project-directory-review-fix-impl",
+      "title": "Propagate selected project directory into Codex Desktop thread/start — review fix impl",
+      "description": "review-fix-for:phase5-gate-regression. Implement core.WorkDirSwitcher on codex-remote so create_session and send_message directory selection reaches official thread/start.cwd, and keep catalog directory truth sourced from the resulting official thread row.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-gate-tests"
+      ],
+      "source": "2026-08-29 owner physical-device regression and upstream Codex ThreadStartParams",
+      "notes": "review-fix-for:phase5-gate-regression; iOS already sends the selected directory, so repair the missing Mac adapter interface rather than adding an iOS fallback.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "codex-remote now implements core.WorkDirSwitcher and atomically snapshots the Bridge-selected directory with the bound client before serializing official thread/start.cwd. The iOS directory-carrying path remains unchanged and no home-directory fallback was added.",
+        "artifacts": [
+          "agent/codex-remote/agent.go",
+          "agent/codex-remote/session.go",
+          "go-bridge/handlers.go",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs"
+        ],
+        "checked_at": "2026-08-29T14:34:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs:62; /Users/jacklee/Projects/codex/codex-rs/app-server/src/request_processors/thread_processor.rs:1110"
+      }
+    },
+    {
+      "id": "phase5-new-session-project-directory-review-fix-tests",
+      "title": "Verify selected project directory propagation — review fix tests",
+      "description": "review-fix-for:phase5-gate-regression. Prove Bridge create_session/send_message directory switching and exact thread/start cwd serialization, including concurrent work-dir access and official catalog directory mapping.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-new-session-project-directory-review-fix-impl"
+      ],
+      "source": "2026-08-29 owner physical-device regression and upstream Codex ThreadStartParams",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "The selected-work-dir loopback test proves core.WorkDirSwitcher updates the adapter and exact official thread/start serialization contains only cwd=/Projects/selected. Race testing covers concurrent adapter access; the full Bridge suite verifies production capability descriptors after replacing the obsolete negative assertion.",
+        "artifacts": [
+          "agent/codex-remote/mutations_test.go",
+          "go-bridge/agent_descriptor_test.go",
+          "go-bridge/codex_remote_mutation_capabilities_test.go",
+          "cmd:go test -race ./agent/codex-remote -count=1 -timeout 120s => PASS",
+          "cmd:go test ./go-bridge -count=1 -timeout 180s => PASS (68.605s)",
+          "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED"
+        ],
+        "checked_at": "2026-08-29T14:41:00Z"
+      }
+    },
+    {
+      "id": "phase5-new-session-project-directory-review-fix-regression",
+      "title": "Close new-session project directory regression — review fix regression",
+      "description": "review-fix-for:phase5-gate-regression. Build and install the repaired runtime, then require owner physical-device proof that a session created with + inside a project is cataloged under that project rather than the user home directory.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-new-session-project-directory-review-fix-tests"
+      ],
+      "source": "2026-08-29 owner physical-device regression",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Pending owner physical-device regression.",
+        "artifacts": [],
+        "checked_at": null
       }
     }
   ]

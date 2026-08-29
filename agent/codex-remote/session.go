@@ -290,13 +290,14 @@ func (a *Agent) CancelTurnForThread(ctx context.Context, threadID string) error 
 func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentSession, error) {
 	a.mu.Lock()
 	cl := a.client
+	workDir := a.workDir
 	a.mu.Unlock()
 	if cl == nil {
 		return nil, ErrNotConfigured
 	}
 	ch := make(chan core.Event, 64)
 	if sessionID == "" {
-		raw, rpcErr, err := cl.RequestContext(ctx, "thread/start", map[string]any{"cwd": a.workDir})
+		raw, rpcErr, err := cl.RequestContext(ctx, "thread/start", map[string]any{"cwd": workDir})
 		if err != nil {
 			return nil, err
 		}
