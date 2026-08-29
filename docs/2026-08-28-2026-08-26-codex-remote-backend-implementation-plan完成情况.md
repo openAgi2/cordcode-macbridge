@@ -5,16 +5,16 @@
 - Plan: `docs/2026-08-26-codex-remote-backend-implementation-plan.md`
 - Canonical State File: `/Users/jacklee/Projects/cordcode-macbridge-codex-remote/.exec-plan/state/plan-bb4683ae3ec1.json`
 - Legacy State File: `none`
-- Completion Report Verdict: `proved-complete`
-- Queue Summary: `87/87 todos done; 84 required todos proven, 3 justified n/a; 30 re-verified and 57 self-attested proof records`
-- Related Commits: Mac `94000a9..ca9c223` (delivery head `ca9c223e47df`); iOS `7667a80d`
-- Generated At: `2026-08-29T08:05:30Z`
+- Completion Report Verdict: `audit-invalidated`
+- Queue Summary: `90/93 todos done; phase5-gate-regression blocked; session-open review-fix regression in progress; model-catalog review-fix regression pending`
+- Related Commits: Mac `2de5189a8bfd`; iOS `ed60f99`
+- Generated At: `2026-08-29T09:48:00Z`
 
 ## 1. Overall Verdict (总体结论)
 
-计划队列已全部收口：87/87 todo 为 `done`，所有 required todo 均有结构化证据，三个 Phase 0 官方 iOS controller 共存项按 owner 裁决保留为具体、fail-closed 的 justified n/a。Phase 0–4 完成独立 `codex-remote` 产品链，Phase 5 在 owner 授权和稳定观察窗后只抽取了被证明重复的 transport-neutral RPC 核心。
+先前的 `proved-complete` 结论已失效。owner 真机回归证明两个产品缺口：只打开现有 session 时，Bridge 虽完成 projection hydrate，却没有用官方 `thread/resume` 把 Remote app-server connection 原子订阅到后续 thread 更新；同时 `codex-remote` 没有实现官方 `model/list` 与 per-turn model selection。
 
-30 条自动化/可重放证据在审计中重跑为 `re-verified`；实现、真实服务观察、owner 真机 E2E 和发布运行态等 57 条记录为 `self-attested`。这不是独立第三方审计结论。
+本轮已完成两个 review-fix 的实现与自动化证明：projection-only open 会创建真实 listener，重连按新 connection epoch 重新 `thread/resume`，模型目录按官方 `model/list` 分页读取并把选择透传到 `turn/start`。`phase5-gate-regression` 仍为 blocked；在 owner 真机回归和 iOS 签名安装完成前，不恢复完成结论。
 
 ## 2. Phase Completion Matrix (阶段完成矩阵)
 
@@ -25,7 +25,7 @@
 | Phase 2 | `proven-done` | `proven-done` | `proven-done` | `proven-done` | 4 re-verified / 8 self-attested |
 | Phase 3 | `proven-done` | `proven-done` | `proven-done` | `proven-done` | 4 re-verified / 8 self-attested |
 | Phase 4 | `proven-done` | `proven-done` | `proven-done` | `proven-done` | 3 re-verified / 6 self-attested |
-| Phase 5 | `proven-done` | `proven-done` | `proven-done` | `proven-done` | 3 re-verified / 6 self-attested |
+| Phase 5 | `pending`（review-fix impl/tests done） | `pending` | `blocked` | `blocked` | implementation/tests pass; owner device regression still required |
 
 ### 2.1 Upstream Anchors (上游锚点) — port/parity plans 必填
 
@@ -42,10 +42,10 @@
 
 ## 3. Key File Changes (关键文件变更)
 
-- `agent/codex-remote/`: 新增独立 Remote controller、pairing、envelope/stream、RPC、session/history/event、交互、重连与诊断实现。
+- `agent/codex-remote/`: 新增独立 Remote controller、pairing、envelope/stream、RPC、session/history/event、交互、重连与诊断实现；新增 projection live attachment、官方 model/list catalog、per-turn model/effort framing。
 - `go-bridge/`: 注册 `codex-remote`，接入管理 API、session projection、拓扑/健康度和独立 capability 描述。
 - `MacBridge/CordCodeLink/`: 新增 Codex Desktop 配对与状态产品入口。
-- `/Users/jacklee/Projects/cordcode-ios-codex-remote/OpenCodeiOS/`: 接入独立 `codex-remote` kind、会话/流式投影、输入归属与 Codex runtime presentation。
+- `/Users/jacklee/Projects/cordcode-ios-codex-remote/OpenCodeiOS/`: 接入独立 `codex-remote` kind、会话/流式投影、输入归属与 Codex runtime presentation；Codex Desktop 选择的 reasoning effort 现在随发送请求透传。
 - `agent/codex-appserver/rpc/`: Phase 5 新增 transport-neutral RPC 相关性、事件分发、framing、取消清理与有界关闭核心。
 - `agent/codex-web/rpc.go`、`agent/codex-remote/rpc.go`: 保留 backend API 和不同的 close/error policy，改为共享核心的薄适配器。
 - `agent/codex-remote/testdata/phase0..phase5/`: 保存真实 fixture、来源、gate、回归与发布证据。
@@ -53,27 +53,31 @@
 ## 4. Verification Evidence (验证证据)
 
 ### 4.1 Automated tests
-- Commands: `go test -race ./agent/codex-appserver/... ./agent/codex-web ./agent/codex-remote -count=1 -timeout 240s`; focused `go-bridge` Remote/topology/projection race suite; `go test ./... -count=1 -timeout 300s`; Phase 5 authorization/boundary/iOS source validators; repeated RPC/reconnect/server-request stress suites。
-- Result: 全部 PASS；Release `xcodebuild` 通过并输出 `** BUILD SUCCEEDED **`。
+- Commands: `go test ./... -count=1 -timeout 300s` (PASS); `go test -race ./agent/codex-remote -count=1` (PASS); focused `go-bridge` projection/capability tests (PASS); `go vet ./...` (PASS); `git diff --check` (PASS)。
+- Release: `./scripts/build-unsigned-release.sh` (PASS, `** BUILD SUCCEEDED **`, runtime commit `2de5189a8bfd`).
+- Additional check: `go test -race ./go-bridge -count=1` remains blocked by a pre-existing global fast-relay poll-interval race in `claude_file_relay_test.go`/`handlers_relay.go`; it is unrelated to this Remote change and was not modified.
 - Attestation: `re-verified`
 - Main test files: `agent/codex-appserver/rpc/client_test.go`, `agent/codex-remote/*_test.go`, `agent/codex-web/*_test.go`, `go-bridge/*codex_remote*_test.go`, `go-bridge/*projection*_test.go`
 - Artifact paths: `agent/codex-remote/testdata/phase5/validation.txt`, `agent/codex-remote/testdata/phase2/validation.txt`, `agent/codex-remote/testdata/phase4/validation.txt`
 
 ### 4.2 Regression evidence
-- Device / replay / benchmark / manual validation: owner 确认 iPhone ↔ Codex Desktop 双向会话投影和发消息/回复同步；最终安装前有约 53 分钟稳定观察窗；提交 `ca9c223e47df` 的 Release 覆盖安装后，PID 41727 从 `/Applications/CordCodeLink.app` 监听 8777，management 状态为 runtime `ready`、Remote `ready/online`，51.8 秒启动窗无 2 秒死亡或重连风暴。
-- Attestation: `self-attested`（owner 真机结果与执行 agent 的真实运行态观察）
-- Artifact paths: `agent/codex-remote/testdata/phase5/authorization-audit.md`, `agent/codex-remote/testdata/phase5/gate-p5.md`, `agent/codex-remote/testdata/phase5/validation.txt`, `agent/codex-remote/testdata/phase0/live/`
+- Mac Release 已覆盖安装：`/Applications/CordCodeLink.app` 当前 runtime PID `39406`，监听 TCP `8777`；management status 为 runtime `ready`、Remote `ready/online`，relay connected。旧 app 已可恢复地移至 `/tmp/CordCodeLink.previous.FlCjMj`。
+- iOS 修改已提交 `ed60f99`；已按真机要求执行 `./scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05`，真实安装被 Xcode `No Accounts`/缺少 `org.openagi.cordcode` 与 `org.openagi.cordcode.share` provisioning profiles 阻断；随后 `CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO xcodebuild build ...` 通过（`BUILD SUCCEEDED`）。
+- Owner device verification is still required: open-only session must receive a Desktop-originated turn, and the model menu must show the live catalog and honor a selected model/effort.
+- Attestation: `self-attested` for local build/install; owner device behavior remains unverified.
+- Artifact paths: `agent/codex-remote/testdata/phase5/authorization-audit.md`, `agent/codex-remote/testdata/phase5/gate-p5.md`, `agent/codex-remote/testdata/phase5/validation.txt`, `agent/codex-remote/models_test.go`, `go-bridge/projection_live_session_attach_test.go`.
 
 ### 4.3 Audit downgrade summary
-- Downgraded todos: `none`（本轮最终内部审计无 unresolved downgrade）。
-- Why they were downgraded: `n/a`。Phase 0 的三条 controller coexistence 记录不是 downgrade，而是 owner 已接受且带明确 fail-closed 条件的 `required:false` justified n/a。
+- Downgraded todos: `phase5-gate-regression` → `blocked`; added review-fix regression todos remain unproven until owner verification.
+- Why they were downgraded: owner 真机复现“仅打开 session 后 Desktop 新回合不推送到 iOS”；源码与日志同时证明 projection-open 未建立官方 thread listener。另有 `list_models` 请求，但 backend 不实现 `ModelSwitcher`，因此模型选择器为空。修复已按官方 `thread/resume`、`model/list`、`turn/start` 路径落地；Remote envelope 没有可复用的 replay cursor，不是该缺口的直接根因。官方锚点为 `app-server/src/thread_state.rs:61`、`app-server-protocol/src/protocol/v2/model.rs:53` 与 `protocol/v2/turn.rs:152`。
 
 ## 5. Remaining Risks / Non-blocking Warnings (剩余风险 / 非阻塞警告)
 
 - 官方 ChatGPT iOS controller 与 MacBridge controller 的 concurrent-owner/HTTP 409/kick-out 真实矩阵仍未单独执行；产品保持不自动 revoke、不宣称该项已证明。
 - 本轮未运行 UI test、snapshot test、simulator automation 或真机自动点击；owner 报告的双向 E2E 属 self-attested。
-- 最终安装后的观察窗约 52 秒；更长稳定性由安装前同一修复链的约 53 分钟窗口支撑。若绑定后约 2 秒死亡，应按 `stream_id` 风暴复发处理。
-- iOS Phase 5 无源码改动，因此未触发新的 iPhone 安装；iOS 工作树保持干净，当前交付提交为 `7667a80d`。
+- 最终安装后的本地观察窗仍较短；若绑定后约 2 秒死亡，应按 `stream_id` 风暴复发处理。
+- 当前 runtime 每分钟仍记录一次 `codex-remote: request thread/list canceled: context deadline exceeded` 的 discovery warning；不影响 pairing status，但需在 owner session-list 回归中确认是否为 Desktop app-server 的实际响应边界。
+- iOS 工作树已在 `ed60f99` 清洁；真机安装待 Xcode 账号与 provisioning profiles 恢复后重跑。
 
 ## 6. Audit Focus (建议审核重点)
 

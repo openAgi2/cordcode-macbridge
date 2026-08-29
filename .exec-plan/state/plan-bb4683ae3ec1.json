@@ -31,11 +31,11 @@
   },
   "reports": {
     "completion_report_path": "docs/2026-08-28-2026-08-26-codex-remote-backend-implementation-plan完成情况.md",
-    "completion_report_status": "current",
-    "last_generated_at": "2026-08-29T08:05:30Z",
-    "based_on_queue_hash": "65b2188455ba"
+    "completion_report_status": "invalidated",
+    "last_generated_at": "2026-08-29T09:48:13Z",
+    "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-29T08:05:30Z",
+  "updated_at": "2026-08-29T09:48:13Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -2146,31 +2146,217 @@
       "id": "phase5-gate-regression",
       "title": "Gate P5 adjudication — regression",
       "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
-      "status": "done",
+      "status": "blocked",
       "phase": "phase5",
       "kind": "regression",
       "depends_on": [
         "phase5-gate-tests"
       ],
       "source": "Phase 5",
-      "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
+      "notes": "AUDIT INVALIDATED 2026-08-29: owner device regression proved session-open does not subscribe the Remote app-server thread and model catalog/selection is absent. Keep blocked until both review-fix regression todos are proven; review-fix-for:phase5-gate-regression.",
       "verification": {
         "required": true,
-        "status": "present",
+        "status": "failed",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "Release build succeeded at commit ca9c223e47df, was recoverably coverage-installed to /Applications, and launched PID 41727 from the installed bundle on TCP 8777. Authenticated management checks reported runtime ready and codex-remote ready/online; the 51.8-second post-install window showed one normal bind/restore and no 2-second death, stale-stream loop or reconnect storm.",
+        "summary": "Owner device regression invalidated Gate P5: opening a codex-remote session hydrates history and subscribes the Bridge connection but does not call official thread/resume or create an Agent listener, so later Desktop turns are dropped until iOS sends once. The backend also exposes no official model/list catalog or turn/start model selection.",
         "artifacts": [
           "agent/codex-remote/testdata/phase5/gate-p5.md",
           "agent/codex-remote/testdata/phase5/validation.txt",
           "git:ca9c223e47df",
           "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED",
           "runtime:/Applications/CordCodeLink.app PID 41727 TCP 8777 commit ca9c223e47df",
-          "cmd:authenticated management status => runtime ready; codex-remote ready/online"
+          "cmd:authenticated management status => runtime ready; codex-remote ready/online",
+          "owner-device:open session without sending, then Desktop send => iOS did not update",
+          "runtime-log:get_session_projection/list_models observed; no thread/resume admission",
+          "upstream:/Users/jacklee/Projects/codex/codex-rs/app-server/src/thread_state.rs:61"
         ],
-        "checked_at": "2026-08-29T08:04:00Z",
-        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs:216; /Users/jacklee/Projects/codex/codex-rs/app-server-client/src/lib.rs:333"
+        "checked_at": "2026-08-29T08:52:38Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server/src/thread_state.rs:61; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/model.rs:53; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/turn.rs:152"
+      }
+    },
+    {
+      "id": "phase5-session-open-live-subscription-review-fix-impl",
+      "title": "Attach Remote live subscription when a session is opened — review fix impl",
+      "description": "review-fix-for:phase5-gate-regression. When get_session_projection opens an existing codex-remote thread, use the official thread/resume path to atomically subscribe the app-server connection and register a backend listener before relying on projection push. Keep the attachment idempotent and connection-epoch owned; do not use cursor, polling, transcript fallback or a fake live source.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-gate-tests"
+      ],
+      "source": "Owner device regression 2026-08-29; official thread_state.rs ThreadListenerCommand",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+            "summary": "Projection-only open now creates one real codex-remote AgentSession listener before hydration, thread/resume is idempotent per Client epoch, the listener is registered before resume to close the first-frame race, and BindClient re-resumes observed threads after reconnect. No cursor, polling, transcript fallback, or synthetic events were added.",
+            "artifacts": [
+              "git:2de5189a8bfd",
+              "core/interfaces.go:ProjectionLiveSessionAttacher",
+              "agent/codex-remote/session.go:AttachLiveThread/AttachProjectionLiveSession",
+              "go-bridge/handlers_projection.go:startProjectionLiveRelay"
+            ],
+            "checked_at": "2026-08-29T09:48:13Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server/src/thread_state.rs:61; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs:335"
+      }
+    },
+    {
+      "id": "phase5-session-open-live-subscription-review-fix-tests",
+      "title": "Attach Remote live subscription when a session is opened — review fix tests",
+      "description": "review-fix-for:phase5-gate-regression. Prove projection-open attaches exactly one official Remote session listener, Desktop-originated events flow before any iOS send, repeated opens are idempotent, and reconnect replaces stale epoch attachment without duplicate delivery.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-session-open-live-subscription-review-fix-impl"
+      ],
+      "source": "Owner device regression 2026-08-29",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+            "summary": "Targeted tests prove cold projection open attaches once, warm pulls reuse the listener, Desktop-originated events arrive before any iOS send, replacement Client epochs re-resume the observed thread, and the codex-remote race suite passes.",
+            "artifacts": [
+              "go-bridge/projection_live_session_attach_test.go",
+              "agent/codex-remote/session_test.go:TestProjectionAttachReceivesDesktopTurnBeforeAnySend",
+              "agent/codex-remote/session_test.go:TestBindClientStartsEventPumpForReplacementEpoch",
+              "cmd:go test ./... -count=1 -timeout 300s => PASS",
+              "cmd:go test -race ./agent/codex-remote -count=1 => PASS",
+              "cmd:go test ./go-bridge -run Test(ProjectionOpenAttachesLiveSessionBeforeFirstSend|CodexRemoteDescriptorOnlyAdvertisesImplementedCapabilities) -count=1 => PASS"
+            ],
+            "checked_at": "2026-08-29T09:48:13Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server/src/thread_state.rs:61"
+      }
+    },
+    {
+      "id": "phase5-session-open-live-subscription-review-fix-regression",
+      "title": "Attach Remote live subscription when a session is opened — review fix regression",
+      "description": "review-fix-for:phase5-gate-regression. Build/install the repaired Mac app and require owner-device verification: open a session without sending, send from Codex Desktop, and observe the user turn and reply on iOS without reopening or polling fallback.",
+      "status": "in_progress",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-session-open-live-subscription-review-fix-tests"
+      ],
+      "source": "Owner device regression 2026-08-29",
+      "notes": "review-fix-for:phase5-gate-regression",
+    "verification": {
+      "required": true,
+      "status": "missing",
+      "method": "mixed",
+      "attestation": "self-attested",
+      "na_reason": null,
+      "summary": "Local implementation and Release install are complete; the required owner-device open-only Desktop-turn check remains unexecuted. iOS signed install is blocked by the local Xcode account/provisioning state.",
+      "artifacts": [
+        "git:2de5189a8bfd",
+        "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED",
+        "runtime:/Applications/CordCodeLink.app PID 39406 TCP 8777 commit 2de5189a8bfd",
+        "cmd:management status => runtime ready; codex-remote ready/online; relay connected",
+        "cmd:./scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05 => blocked: Xcode No Accounts / missing provisioning profiles",
+        "cmd:unsigned iOS xcodebuild build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO => BUILD SUCCEEDED",
+        "owner-device:open session without sending, then Desktop send => pending"
+      ],
+      "checked_at": "2026-08-29T09:48:13Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server/src/thread_state.rs:61"
+      }
+    },
+    {
+      "id": "phase5-model-catalog-selection-review-fix-impl",
+      "title": "Expose official Remote model catalog and per-turn selection — review fix impl",
+      "description": "review-fix-for:phase5-gate-regression. Implement model/list pagination and typed mapping from the official app-server response, expose ModelSwitcher/effort catalog truth to Bridge, and pass the selected model/effort through official thread/resume or turn/start fields without inventing defaults or cached catalogs.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-gate-tests"
+      ],
+      "source": "Owner device regression 2026-08-29; official model.rs and turn.rs",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+            "summary": "codex-remote now maps the live official model/list pages, exposes per-model reasoning efforts and default/current selection, restores per-thread model truth from thread/resume, and sends user choices atomically in turn/start model/effort fields. Catalog failures remain empty and logged; there is no built-in or cached fallback.",
+            "artifacts": [
+              "git:2de5189a8bfd",
+              "agent/codex-remote/models.go",
+              "agent/codex-remote/session.go:SendWithOptions",
+              "go-bridge/backend_capabilities.go",
+          "upstream:/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/model.rs",
+          "upstream:/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/turn.rs"
+        ],
+            "checked_at": "2026-08-29T09:48:13Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:1038; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/model.rs:53; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/turn.rs:152"
+      }
+    },
+    {
+      "id": "phase5-model-catalog-selection-review-fix-tests",
+      "title": "Expose official Remote model catalog and per-turn selection — review fix tests",
+      "description": "review-fix-for:phase5-gate-regression. Prove multi-page model/list mapping, default/current selection, per-model reasoning efforts, error preservation, and selected model/effort framing on turn/start with official response fixtures.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-model-catalog-selection-review-fix-impl"
+      ],
+      "source": "Owner device regression 2026-08-29",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+            "summary": "Targeted tests cover two-page official catalog mapping, hidden-row exclusion, default model, per-model efforts, repeated-cursor rejection, thread/resume current selection, and exact turn/start model/effort framing.",
+            "artifacts": [
+              "agent/codex-remote/models_test.go",
+              "cmd:go test ./... -count=1 -timeout 300s => PASS",
+              "cmd:go test -race ./agent/codex-remote -count=1 => PASS",
+              "cmd:go vet ./... => PASS"
+            ],
+            "checked_at": "2026-08-29T09:48:13Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/model.rs:53; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/turn.rs:152"
+      }
+    },
+    {
+      "id": "phase5-model-catalog-selection-review-fix-regression",
+      "title": "Expose official Remote model catalog and per-turn selection — review fix regression",
+      "description": "review-fix-for:phase5-gate-regression. Build/install and require owner-device verification that Codex Desktop mode shows the official model choices and a selected model is honored on a real iOS-started turn.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-model-catalog-selection-review-fix-tests"
+      ],
+      "source": "Owner device regression 2026-08-29",
+      "notes": "review-fix-for:phase5-gate-regression",
+    "verification": {
+      "required": true,
+      "status": "missing",
+      "method": "mixed",
+      "attestation": "self-attested",
+      "na_reason": null,
+      "summary": "Mac Release is installed and the iOS source compiles unsigned; the required owner-device model-picker and selected model/effort turn check is still pending because signed iOS installation is blocked by Xcode account/provisioning state.",
+      "artifacts": [
+        "git:2de5189a8bfd",
+        "git-ios:ed60f99",
+        "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED",
+        "cmd:unsigned iOS xcodebuild build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO => BUILD SUCCEEDED",
+        "cmd:./scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05 => blocked: Xcode No Accounts / missing provisioning profiles",
+        "owner-device:Codex Desktop model menu and selected model/effort honored on iOS => pending"
+      ],
+      "checked_at": "2026-08-29T09:48:13Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/model.rs:53; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/turn.rs:152"
       }
     },
     {
