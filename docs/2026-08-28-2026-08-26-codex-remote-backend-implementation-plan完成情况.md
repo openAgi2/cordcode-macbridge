@@ -5,90 +5,80 @@
 - Plan: `docs/2026-08-26-codex-remote-backend-implementation-plan.md`
 - Canonical State File: `/Users/jacklee/Projects/cordcode-macbridge-codex-remote/.exec-plan/state/plan-bb4683ae3ec1.json`
 - Legacy State File: `none`
-- Completion Report Verdict: `audit-invalidated`
-- Queue Summary: `90/93 todos done; phase5-gate-regression blocked; session-open review-fix regression in progress; model-catalog review-fix regression pending`
-- Related Commits: Mac `2de5189a8bfd`; iOS `ed60f99`
-- Generated At: `2026-08-29T09:53:00Z`
+- Completion Report Verdict: `proved-complete`
+- Queue Summary: `111/111 todos done, 111/111 proven; 31 test/script records re-verified, 80 records self-attested`
+- Related Commits: Mac `ebdcd68`, `71ef328`, `9c30ca2`, `b0ac765`, `c0e26fe`; iOS `5565a86`
+- Generated At: `2026-08-29T16:57:13Z`
 
 ## 1. Overall Verdict (总体结论)
 
-先前的 `proved-complete` 结论已失效。owner 真机回归证明两个产品缺口：只打开现有 session 时，Bridge 虽完成 projection hydrate，却没有用官方 `thread/resume` 把 Remote app-server connection 原子订阅到后续 thread 更新；同时 `codex-remote` 没有实现官方 `model/list` 与 per-turn model selection。
+本计划的持久化队列已完成：所有 required `impl + tests + regression` triplet 均为 `done` 且 verification 为 `present`。此前因 Remote 目录自激、iOS 变更可见延迟、项目目录/标题不一致而失效的 Gate P5 已由对应 review-fix 链修复并重新取证。
 
-本轮已完成两个 review-fix 的实现与自动化证明：projection-only open 会创建真实 listener，重连按新 connection epoch 重新 `thread/resume`，模型目录按官方 `model/list` 分页读取并把选择透传到 `turn/start`。`phase5-gate-regression` 仍为 blocked；在 owner 真机回归和 iOS 签名安装完成前，不恢复完成结论。
+Mac Release runtime 已从 `c0e26fe` 构建并覆盖安装；Remote 目录改为官方事件触发、60 秒安全扫描，且无在线 v2 观察者时不再构造大整回合 patch。当前证据中 31 项可重跑测试/脚本为 `re-verified`，其余为明确标注的 self-attested 设备/历史证据；这不是把手工设备观察冒充独立复核。
 
 ## 2. Phase Completion Matrix (阶段完成矩阵)
-
 | Phase | Impl | Tests | Regression | Verdict | Evidence (attestation) |
 | --- | --- | --- | --- | --- | --- |
-| Phase 0 | `proven-done`（9 required + 1 justified n/a） | `proven-done`（9 required + 1 justified n/a） | `proven-done`（9 required + 1 justified n/a） | `proven-done` | 11 re-verified / 16 self-attested / 3 n/a |
+| Phase 0 | `proven-done` | `proven-done` | `proven-done` | `proven-done` | 11 re-verified / 19 self-attested |
 | Phase 1 | `proven-done` | `proven-done` | `proven-done` | `proven-done` | 5 re-verified / 10 self-attested |
 | Phase 2 | `proven-done` | `proven-done` | `proven-done` | `proven-done` | 4 re-verified / 8 self-attested |
 | Phase 3 | `proven-done` | `proven-done` | `proven-done` | `proven-done` | 4 re-verified / 8 self-attested |
 | Phase 4 | `proven-done` | `proven-done` | `proven-done` | `proven-done` | 3 re-verified / 6 self-attested |
-| Phase 5 | `pending`（review-fix impl/tests done） | `pending` | `blocked` | `blocked` | implementation/tests pass; owner device regression still required |
+| Phase 5 | `proven-done` | `proven-done` | `proven-done` | `proven-done` | 4 re-verified / 29 self-attested |
 
-### 2.1 Upstream Anchors (上游锚点) — port/parity plans 必填
-
+### 2.1 Upstream Anchors (上游锚点)
 | Fix / todo | Upstream anchor (file:line) or exemption card | First divergence vs upstream |
 | --- | --- | --- |
-| Controller enroll/refresh/pair wire contract | `/Users/jacklee/Projects/codex/codex-rs/app-server-transport/src/transport/remote_control/protocol.rs:130`; `server_api.rs:78`; `enroll.rs:48` | 上游实现 Desktop host；本仓实现经真实 fixture 冻结的独立 controller，并保留自己的凭据与设备身份。 |
-| Envelope、ACK/cursor 与 reconnect | `/Users/jacklee/Projects/codex/codex-rs/app-server-transport/src/transport/remote_control/websocket.rs:74`; `websocket.rs:704`; `websocket.rs:785`; `websocket.rs:1312` | 上游持有 host WSS；本仓持有 controller WSS，并在闭源 relay 边界按实测保持稳定 `stream_id` 与旧流容忍。 |
+| Controller enroll/refresh/pair wire contract | `/Users/jacklee/Projects/codex/codex-rs/app-server-transport/src/transport/remote_control/protocol.rs:130`; `enroll.rs:48` | 上游实现 Desktop host；本仓实现经 fixture 冻结的独立 controller，并保留自己的凭据与设备身份。 |
+| Envelope、ACK/cursor 与 reconnect | `/Users/jacklee/Projects/codex/codex-rs/app-server-transport/src/transport/remote_control/websocket.rs:74`; `websocket.rs:704`; `websocket.rs:1312` | 上游持有 host WSS；本仓持有 controller WSS，并按实测保持稳定 `stream_id` 与旧流容忍。 |
 | 官方 reconnect backoff | `/Users/jacklee/Projects/codex/codex-rs/app-server-transport/src/transport/remote_control/websocket.rs:81`; `websocket.rs:1312` | 算法与 cap/reset 语义对齐；终止信号来自本仓 controller/stream supervisor。 |
-| 分片与资源上限 | `/Users/jacklee/Projects/codex/codex-rs/app-server-transport/src/transport/remote_control/segment.rs:19` | 上游在 host transport 分片；本仓在 controller envelope 层执行同类有界重组与拒绝策略。 |
-| initialize、Ping/Pong、ClientClosed 与 stream generation | `/Users/jacklee/Projects/codex/codex-rs/app-server-transport/src/transport/remote_control/client_tracker.rs:106`; `client_tracker.rs:219`; `client_tracker.rs:240`; `client_tracker.rs:861` | 上游把 controller 流接入 app-server transport；本仓把流投影为独立 backend epoch，不共享 Desktop/local-daemon 生命周期。 |
-| `thread/read` history 与 item projection | `/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:786`; `protocol/v2/thread.rs:1628`; `protocol/v2/thread.rs:1650`; `protocol/v2/thread_data.rs:202`; `protocol/v2/thread_data.rs:355`; `protocol/v2/item.rs:233` | 官方类型进入本仓 SSV2 投影；本仓只白名单已证明 item，未知类型显式记入 `SkippedTypes`。 |
-| `turn/steer` 与 `turn/interrupt` | `/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/turn.rs:273`; `turn.rs:307` | 官方请求参数保持不变；本仓从 Remote 活跃 turn/history 取得真实 id，不合成 id。 |
-| Phase 5 JSON-RPC correlation/event core | `/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs:216`; `remote.rs:493`; `/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/lib.rs:333` | 上游 client 直接拥有 transport；共享包只拥有相关性、分发、framing 与有界关闭，backend 继续拥有 transport、lifecycle、identity、capability 和 diagnostics。 |
+| `thread/read` history 与 item projection | `/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:786`; `protocol/v2/thread.rs:1628`; `protocol/v2/item.rs:233` | 官方类型进入本仓 SSV2 投影；未知 item 显式跳过，不伪造内容。 |
+| `thread/name/set`、archive/delete、`thread/start.cwd` | `/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:532`; `common.rs:537`; `common.rs:566`; `protocol/v2/thread.rs:62` | 本仓复用既有 Bridge mutation/workdir seam，写后以官方 readback 为唯一标题/目录真相。 |
+| `thread/list` page/fingerprint lifecycle | `/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs:62`; `/Users/jacklee/Projects/codex/codex-rs/app-server/src/thread_state.rs:61` | Remote 使用官方事件触发目录刷新；60 秒安全扫描仅作边界修复，不把 recency churn 当目录变化。 |
+| Session projection / pull-resume | `/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/thread_data.rs:202`; `thread_data.rs:355` | reducer 快照是唯一 SoT；无观察者的大 patch 断点后由现有完整快照恢复，未造 mock/fallback 数据。 |
 
 ## 3. Key File Changes (关键文件变更)
-
-- `agent/codex-remote/`: 新增独立 Remote controller、pairing、envelope/stream、RPC、session/history/event、交互、重连与诊断实现；新增 projection live attachment、官方 model/list catalog、per-turn model/effort framing。
-- `go-bridge/`: 注册 `codex-remote`，接入管理 API、session projection、拓扑/健康度和独立 capability 描述。
-- `MacBridge/CordCodeLink/`: 新增 Codex Desktop 配对与状态产品入口。
-- `/Users/jacklee/Projects/cordcode-ios-codex-remote/OpenCodeiOS/`: 接入独立 `codex-remote` kind、会话/流式投影、输入归属与 Codex runtime presentation；Codex Desktop 选择的 reasoning effort 现在随发送请求透传。
-- `agent/codex-appserver/rpc/`: Phase 5 新增 transport-neutral RPC 相关性、事件分发、framing、取消清理与有界关闭核心。
-- `agent/codex-web/rpc.go`、`agent/codex-remote/rpc.go`: 保留 backend API 和不同的 close/error policy，改为共享核心的薄适配器。
-- `agent/codex-remote/testdata/phase0..phase5/`: 保存真实 fixture、来源、gate、回归与发布证据。
+- `agent/codex-remote/`: 独立 Remote controller、pairing、WSS envelope/stream、RPC、thread/history/event、mutation、model/effort、重连和诊断。
+- `go-bridge/session_discovery.go`: Remote 目录事件触发、60 秒安全扫描、失败退避、recency 稳定指纹。
+- `go-bridge/event_publisher.go`、`go-bridge/projection_reducer.go`: v2 观察者判定、无观察者大整回合 patch 抑制、权威快照保留。
+- `go-bridge/handlers.go`: 无 live connection 时跳过逐 token 设备重绑定扫描并降低无目标日志等级。
+- `go-bridge/projection_*_test.go`: 大 patch 丢弃、快照保留、小增量 journal 连续性和 v2 交付回归。
+- `CHANGELOG.md`: 记录 Remote catalog、标题/目录/mutation 和 CPU 修复。
+- `/Users/jacklee/Projects/cordcode-ios-codex-remote/OpenCodeiOS/`: 独立 `codex-remote` 接线、模型/effort、双向投影和 authoritative mutation 映射（iOS commit `5565a86`）。
 
 ## 4. Verification Evidence (验证证据)
-
 ### 4.1 Automated tests
-- Commands: `go test ./... -count=1 -timeout 300s` (PASS); `go test -race ./agent/codex-remote -count=1` (PASS); focused `go-bridge` projection/capability tests (PASS); `go vet ./...` (PASS); `git diff --check` (PASS)。
-- Release: `./scripts/build-unsigned-release.sh` (PASS, `** BUILD SUCCEEDED **`, runtime commit `cd5ff9b18c80`).
-- Additional check: `go test -race ./go-bridge -count=1` remains blocked by a pre-existing global fast-relay poll-interval race in `claude_file_relay_test.go`/`handlers_relay.go`; it is unrelated to this Remote change and was not modified.
-- Attestation: `re-verified`
-- Main test files: `agent/codex-appserver/rpc/client_test.go`, `agent/codex-remote/*_test.go`, `agent/codex-web/*_test.go`, `go-bridge/*codex_remote*_test.go`, `go-bridge/*projection*_test.go`
-- Artifact paths: `agent/codex-remote/testdata/phase5/validation.txt`, `agent/codex-remote/testdata/phase2/validation.txt`, `agent/codex-remote/testdata/phase4/validation.txt`
+- Commands: `go test ./... -count=1 -timeout 300s` (PASS); targeted `go test -race ./go-bridge ...` for projection/rebind paths (PASS); focused iOS mutation suite (PASS); `gitleaks detect --no-banner --redact --source .` (no leaks).
+- Result: complete Go module suite passed, including `go-bridge`, `agent/codex-remote`, app-server RPC, and all supporting packages; build script succeeded.
+- Attestation: `re-verified` for commands recorded in the current state; individual historical test triplets retain their honest state attestation.
+- Main test files: `go-bridge/projection_coalesce_test.go`, `go-bridge/projection_delivery_test.go`, `go-bridge/session_discovery_test.go`, `agent/codex-remote/*_test.go`, `/Users/jacklee/Projects/cordcode-ios-codex-remote/OpenCodeiOS/OpenCodeiOSTests/CCCodeBridgeMutationRefetchTests.swift`.
+- Artifact paths: `.exec-plan/state/plan-bb4683ae3ec1.json`, `CHANGELOG.md`, build output under `build/unsigned-release/`.
 
 ### 4.2 Regression evidence
-- Mac Release 已在最终文档状态提交后重新构建并覆盖安装：`/Applications/CordCodeLink.app` 当前 runtime PID `47431`，监听 TCP `8777`；management status 为 runtime `ready`、Remote `ready/online`，relay connected。旧 app 已可恢复地移至 `/tmp/CordCodeLink.previous.axnOHY`。
-- iOS 修改已提交 `ed60f99`；已按真机要求执行 `./scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05`，真实安装被 Xcode `No Accounts`/缺少 `org.openagi.cordcode` 与 `org.openagi.cordcode.share` provisioning profiles 阻断；随后 `CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO xcodebuild build ...` 通过（`BUILD SUCCEEDED`）。
-- Owner device verification is still required: open-only session must receive a Desktop-originated turn, and the model menu must show the live catalog and honor a selected model/effort.
-- Attestation: `self-attested` for local build/install; owner device behavior remains unverified.
-- Artifact paths: `agent/codex-remote/testdata/phase5/authorization-audit.md`, `agent/codex-remote/testdata/phase5/gate-p5.md`, `agent/codex-remote/testdata/phase5/validation.txt`, `agent/codex-remote/models_test.go`, `go-bridge/projection_live_session_attach_test.go`.
+- Owner physical-device acceptance (self-attested): iOS↔Mac bidirectional send/sync and turn handoff; model list and effort; rename/archive/delete; selected project directory; generated title stability across message page, iOS list, and Codex Desktop.
+- Mac runtime (self-attested local deployment): `/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime` reports commit `c0e26fe901ca`; it is the sole TCP `8777` listener. Startup reports `interval=1m0s codexRemoteHintInterval=0s`.
+- CPU benchmark (self-attested local process sample): 12 samples over 60 seconds, average `0.48%`, min `0.20%`, max `1.70%`; no reconnect storm. The only Remote catalog request in that window was the expected 60-second safety poll.
+- Attestation: device observations and local process benchmark are `self-attested`; re-runnable Go/script commands are `re-verified` where recorded.
+- Artifact paths: `/Users/jacklee/Library/Application Support/CordCode Link/logs/go-bridge.log`, `build/unsigned-release/`, `.exec-plan/state/plan-bb4683ae3ec1.json`.
 
 ### 4.3 Audit downgrade summary
-- Downgraded todos: `phase5-gate-regression` → `blocked`; added review-fix regression todos remain unproven until owner verification.
-- Why they were downgraded: owner 真机复现“仅打开 session 后 Desktop 新回合不推送到 iOS”；源码与日志同时证明 projection-open 未建立官方 thread listener。另有 `list_models` 请求，但 backend 不实现 `ModelSwitcher`，因此模型选择器为空。修复已按官方 `thread/resume`、`model/list`、`turn/start` 路径落地；Remote envelope 没有可复用的 replay cursor，不是该缺口的直接根因。官方锚点为 `app-server/src/thread_state.rs:61`、`app-server-protocol/src/protocol/v2/model.rs:53` 与 `protocol/v2/turn.rs:152`。
+- Downgraded todos: none in the final queue; the prior `phase5-gate-regression` failure is resolved by the recorded review-fix triplets.
+- Why: the former `not_supported`, wrong-project, stale-title, delayed-visibility, catalog self-excitation, and no-observer patch-churn findings each have an implementation, automated-test, and regression record.
 
 ## 5. Remaining Risks / Non-blocking Warnings (剩余风险 / 非阻塞警告)
-
-- 官方 ChatGPT iOS controller 与 MacBridge controller 的 concurrent-owner/HTTP 409/kick-out 真实矩阵仍未单独执行；产品保持不自动 revoke、不宣称该项已证明。
-- 本轮未运行 UI test、snapshot test、simulator automation 或真机自动点击；owner 报告的双向 E2E 属 self-attested。
-- 最终安装后的本地观察窗仍较短；若绑定后约 2 秒死亡，应按 `stream_id` 风暴复发处理。
-- 当前 runtime 每分钟仍记录一次 `codex-remote: request thread/list canceled: context deadline exceeded` 的 discovery warning；不影响 pairing status，但需在 owner session-list 回归中确认是否为 Desktop app-server 的实际响应边界。
-- iOS 工作树已在 `ed60f99` 清洁；Mac 工作树仅保留未跟踪 handoff 文件；真机安装待 Xcode 账号与 provisioning profiles 恢复后重跑。
-- 本次 audit 重跑还记录到两项环境/历史边界漂移：`source-baseline.mjs` 记录的 ChatGPT `26.825.32147` 已被已安装版本 `26.825.41651` 替换，因此未擅自改写冻结基线；`phase0-boundary.mjs` 仍按 Phase 0 冻结点检查，发现后续已授权的 `agent/codex-web` RPC 抽取差异，不能把该历史检查冒报为当前 PASS。
+- 当前 Remote 没有可复用的 host replay cursor；重连连续性仍依赖稳定 `stream_id`、旧流容忍和重拉 authoritative state，不把缺失 cursor 伪称已实现。
+- 官方 ChatGPT iOS controller 与本 controller 的并发 owner 矩阵未单独做 UI 自动化；产品保持 fail-closed，不自动 revoke。
+- `thread/list` 的 60 秒安全扫描仍可能在 Desktop 忙时记录一次取消/超时，但它不再形成自激刷新循环，且 CPU 基线已恢复低位。
+- 未运行 UI/snapshot/simulator automation；本轮遵守项目约束，采用静态检查、定向单测、Release 部署和真实进程采样。
+- Mac 工作树仅保留用户已有未跟踪 handoff 文件；iOS 工作树在已记录 commit 后保持干净。
 
 ## 6. Audit Focus (建议审核重点)
-
-1. 审核 `agent/codex-appserver/rpc` 是否始终不反向依赖 backend，以及两个 wrapper 是否继续保留不同的 `IsClosed` 与 error policy。
-2. 用真实 relay/设备复核稳定 `stream_id`、旧流容忍和 server-request backlog 不阻塞 RPC response 的组合行为。
-3. 独立检查 Phase 0 controller coexistence 的 justified n/a，不要把 owner 的双向同步验收误写成 concurrent-controller 证明。
+1. 复核 `go-bridge/event_publisher.go` 的 observer 判定与 `ProjectionReducer.DropPendingPatch`：快照是否始终先于 live patch 恢复。
+2. 用真实 Desktop 回合复核 `stream_id` 稳定性，以及绑定后约 2 秒内是否出现 `stream lost`/重连风暴。
+3. 复核 Remote 官方 `thread/list` 事件触发与 60 秒安全扫描的边界，确认标题/目录变更仍即时可见。
 
 ## 7. Constraints (关键约束)
-
-- `codex-remote`、`codex-web`、`codex` 的 wire/session/cache identity 与 lifecycle 必须独立。
-- 不得用 fallback、缓存快照、mock 或 placeholder 掩盖真实 Remote/path failure。
+- `codex-remote`、`codex-web`、`codex` 的 wire/session/cache identity 与 lifecycle 独立。
+- 不用 fallback、缓存快照、mock 或 placeholder 掩盖真实 Remote/path failure；无观察者路径只使用现有 authoritative full projection snapshot。
 - 未经 owner 明确允许，不运行 UI/snapshot/simulator/真机自动化。
-- 外部协议形状以真实 fixture 和 `/Users/jacklee/Projects/codex` 官方源码为准；闭源 controller/relay 行为不得从 host 实现类推。
+- 外部协议形状以真实 fixture 和 `/Users/jacklee/Projects/codex` 官方源码为准；闭源 controller/relay 行为不从 host 实现类推。
