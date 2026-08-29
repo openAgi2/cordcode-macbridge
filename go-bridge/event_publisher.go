@@ -17,6 +17,10 @@ const (
 	projectionFenceMaxPatches         = 128
 	projectionFenceMaxBytes           = 2 << 20
 	projectionNoObserverDropThreshold = 256 << 10
+	// A failed rebind cannot become more useful on the next token. Keep a
+	// short retry window so path-thrash recovery remains responsive without
+	// turning a long stream into a registry scan/logging loop.
+	rebindAttemptCooldown = time.Second
 )
 
 type BridgeSessionCutMap map[string]map[string]BridgeSessionCut
@@ -119,17 +123,19 @@ func (s *eventOutboundSink) run() {
 			projProbe := false
 			probeRev := 0
 			probeMarshalErr := ""
-			if em, ok := frame.value.(EventMessage); ok && em.Event == "projection_patch" {
-				projProbe = true
-				if patch, perr := em.Data.(ProjectionPatch); perr {
-					probeRev = patch.SyncRev
-				}
-				if _, merr := json.Marshal(frame.value); merr != nil {
-					probeMarshalErr = merr.Error()
+			if projectionDiagnosticsEnabled() {
+				if em, ok := frame.value.(EventMessage); ok && em.Event == "projection_patch" {
+					projProbe = true
+					if patch, perr := em.Data.(ProjectionPatch); perr {
+						probeRev = patch.SyncRev
+					}
+					if _, merr := json.Marshal(frame.value); merr != nil {
+						probeMarshalErr = merr.Error()
+					}
 				}
 			}
 			if projProbe {
-				slog.Info("go-bridge: [K4Patch] write_pre",
+				slog.Debug("go-bridge: [K4Patch] write_pre",
 					"sink", fmt.Sprintf("%p", s),
 					"remote", s.conn.RemoteAddr(),
 					"syncRev", probeRev,
@@ -166,7 +172,7 @@ func (s *eventOutboundSink) run() {
 				if b, merr := json.Marshal(frame.value); merr == nil {
 					payloadSize = len(b)
 				}
-				slog.Info("go-bridge: [K4Patch] write_post",
+				slog.Debug("go-bridge: [K4Patch] write_post",
 					"sink", fmt.Sprintf("%p", s),
 					"remote", s.conn.RemoteAddr(),
 					"syncRev", probeRev,
@@ -245,6 +251,10 @@ type EventPublisher struct {
 	projectionSnapshotCuts   map[projectionFenceKey]int
 	projectionInvalidated    map[projectionFenceKey]bool
 	projectionJournal        *ProjectionRevisionJournal
+	// rebindLastAttempt throttles zero-target recovery. A stream can emit many
+	// timeline events per second while a device is offline; rescanning the
+	// device registry for every token only repeats the same failed lookup.
+	rebindLastAttempt map[string]time.Time
 	// rebindTargets is invoked (without p.mu) when a live event has zero online
 	// targets. Handlers rebinds broadcaster subscriptions from device registry +
 	// observation so mid-turn EMITs are not permanently dropped after path thrash.
@@ -299,6 +309,7 @@ func NewEventPublisher(bridgeEpoch string, broadcaster ...*Broadcaster) *EventPu
 		projectionSnapshotCuts:  make(map[projectionFenceKey]int),
 		projectionInvalidated:   make(map[projectionFenceKey]bool),
 		projectionJournal:       NewProjectionRevisionJournal(0, 0),
+		rebindLastAttempt:       make(map[string]time.Time),
 	}
 	if len(broadcaster) > 0 {
 		p.broadcaster = broadcaster[0]
@@ -748,7 +759,7 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 		// (projection frames are reconstructable, not live-bufferable).
 		if ok, reason, queued := sink.tryEnqueue(eventOutboundFrame{value: msg, classHint: classHint, classified: true}); ok {
 			p.projectionSnapshotCuts[key] = patch.SyncRev
-			slog.Info("go-bridge: [K4Patch] delivered",
+			slog.Debug("go-bridge: [K4Patch] delivered",
 				"sessionPrefix", projectionSessionLogPrefix(sessionID),
 				"syncRev", patch.SyncRev,
 				"remote", conn.RemoteAddr(),
@@ -1041,11 +1052,25 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 		canRebind = false
 	}
 	if enqueued == 0 && len(overflowed) == 0 && (len(targets) == 0 || len(rawEligible) > 0) && !logical.Offline && canRebind {
+		// A missing target is stable across adjacent stream events. Reserve one
+		// retry slot per session for the cooldown window; this preserves quick
+		// recovery after a path switch while avoiding a registry scan on every
+		// token when the device is actually gone.
+		rebindKey := logical.BackendID + "\x00" + logical.SessionID
+		now := p.now()
+		if last, ok := p.rebindLastAttempt[rebindKey]; ok && now.Before(last.Add(rebindAttemptCooldown)) {
+			canRebind = false
+		} else {
+			p.rebindLastAttempt[rebindKey] = now
+		}
+	}
+	if enqueued == 0 && len(overflowed) == 0 && (len(targets) == 0 || len(rawEligible) > 0) && !logical.Offline && canRebind {
 		rebind := p.rebindTargets
 		p.mu.Unlock()
 		n := rebind(logical.BackendID, logical.SessionID)
 		p.mu.Lock()
 		if n > 0 {
+			delete(p.rebindLastAttempt, logical.BackendID+"\x00"+logical.SessionID)
 			if logical.Broadcast && p.broadcaster != nil {
 				for _, conn := range p.broadcaster.Targets(logical.BackendID, logical.SessionID, logical.Directory) {
 					targets[conn] = struct{}{}
@@ -1118,7 +1143,7 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 			}
 		} else if patch, flushOk := p.projection.FlushPatch(logical.BackendID, logical.SessionID); flushOk {
 			p.recordProjectionPatchLocked(logical.BackendID, logical.SessionID, patch)
-			slog.Info("go-bridge: [K4Patch] flush",
+			slog.Debug("go-bridge: [K4Patch] flush",
 				"sessionPrefix", projectionSessionLogPrefix(logical.SessionID),
 				"event", logical.Event,
 				"syncRev", patch.SyncRev,

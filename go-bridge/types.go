@@ -549,6 +549,9 @@ func NewBroadcaster() *Broadcaster {
 }
 
 func (b *Broadcaster) RegisterConn(conn Connection) {
+	if conn == nil {
+		return
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.allConns[conn] = struct{}{}
@@ -556,8 +559,17 @@ func (b *Broadcaster) RegisterConn(conn Connection) {
 
 func (b *Broadcaster) HasConnections() bool {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	return len(b.allConns) > 0
+	conns := make([]Connection, 0, len(b.allConns))
+	for conn := range b.allConns {
+		conns = append(conns, conn)
+	}
+	b.mu.Unlock()
+	for _, conn := range conns {
+		if !connectionIsClosed(conn) {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *Broadcaster) Subscribe(conn Connection, key SubscriptionKey) {
@@ -621,9 +633,16 @@ func (b *Broadcaster) TransferSubscriptions(old, new Connection) {
 
 func (b *Broadcaster) ActiveDeviceIDs() []string {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	seen := make(map[string]struct{})
+	conns := make([]Connection, 0, len(b.allConns))
 	for conn := range b.allConns {
+		conns = append(conns, conn)
+	}
+	b.mu.Unlock()
+	seen := make(map[string]struct{})
+	for _, conn := range conns {
+		if connectionIsClosed(conn) {
+			continue
+		}
 		if device := conn.AuthedDevice(); device != nil {
 			seen[device.DeviceID] = struct{}{}
 		}
@@ -741,9 +760,9 @@ func (b *Broadcaster) Targets(backendID, sessionID, directory string) []Connecti
 	b.mu.Unlock()
 	result := make([]Connection, 0, len(targets))
 	for conn := range targets {
-		// Never deliver live frames to a replaced/closed relay connection — they
-		// would only produce "drop outbound on closed" and starve the new generation.
-		if closed, ok := conn.(interface{ isClosed() bool }); ok && closed.isClosed() {
+		// Never deliver live frames to a replaced/closed connection — they would
+		// only produce "drop outbound on closed" and starve the new generation.
+		if connectionIsClosed(conn) {
 			continue
 		}
 		result = append(result, conn)
@@ -797,16 +816,23 @@ func (s *PendingNotificationStore) Consume(deviceID string) []PendingNotificatio
 // SubscriberDeviceIDs 返回订阅了指定 session 的所有（已认证）设备 ID。
 func (b *Broadcaster) SubscriberDeviceIDs(backendID, sessionID string) []string {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	seen := make(map[string]struct{})
-	for k, conns := range b.subscribers {
+	conns := make([]Connection, 0)
+	for k, subscribers := range b.subscribers {
 		if k.BackendID != backendID || k.SessionID != sessionID {
 			continue
 		}
-		for conn := range conns {
-			if device := conn.AuthedDevice(); device != nil {
-				seen[device.DeviceID] = struct{}{}
-			}
+		for conn := range subscribers {
+			conns = append(conns, conn)
+		}
+	}
+	b.mu.Unlock()
+	seen := make(map[string]struct{})
+	for _, conn := range conns {
+		if connectionIsClosed(conn) {
+			continue
+		}
+		if device := conn.AuthedDevice(); device != nil {
+			seen[device.DeviceID] = struct{}{}
 		}
 	}
 	result := make([]string, 0, len(seen))
@@ -822,9 +848,18 @@ func (b *Broadcaster) SubscriberDeviceIDs(backendID, sessionID string) []string 
 // on idle TTL and missing the external turn.
 func (b *Broadcaster) HasSessionSubscriber(backendID, sessionID string) bool {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	for k, conns := range b.subscribers {
-		if k.BackendID == backendID && k.SessionID == sessionID && len(conns) > 0 {
+	conns := make([]Connection, 0)
+	for k, subscribers := range b.subscribers {
+		if k.BackendID != backendID || k.SessionID != sessionID {
+			continue
+		}
+		for conn := range subscribers {
+			conns = append(conns, conn)
+		}
+	}
+	b.mu.Unlock()
+	for _, conn := range conns {
+		if !connectionIsClosed(conn) {
 			return true
 		}
 	}
@@ -836,11 +871,23 @@ func (b *Broadcaster) HasSessionSubscriber(backendID, sessionID string) bool {
 // relay safety-net watcher to keep a relay running for every open session.
 func (b *Broadcaster) SubscribedSessionIDs(backendID string) []string {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	seen := make(map[string]struct{})
+	subs := make(map[string][]Connection)
 	for k, conns := range b.subscribers {
-		if k.BackendID == backendID && len(conns) > 0 {
-			seen[k.SessionID] = struct{}{}
+		if k.BackendID != backendID {
+			continue
+		}
+		for conn := range conns {
+			subs[k.SessionID] = append(subs[k.SessionID], conn)
+		}
+	}
+	b.mu.Unlock()
+	seen := make(map[string]struct{}, len(subs))
+	for sessionID, conns := range subs {
+		for _, conn := range conns {
+			if !connectionIsClosed(conn) {
+				seen[sessionID] = struct{}{}
+				break
+			}
 		}
 	}
 	out := make([]string, 0, len(seen))
@@ -848,4 +895,15 @@ func (b *Broadcaster) SubscribedSessionIDs(backendID string) []string {
 		out = append(out, sid)
 	}
 	return out
+}
+
+// connectionIsClosed is the optional liveness seam shared by direct and relay
+// connections. A connection implementation that does not expose it is treated
+// as open for backwards compatibility with test and extension adapters.
+func connectionIsClosed(conn Connection) bool {
+	if conn == nil {
+		return true
+	}
+	closed, ok := conn.(interface{ isClosed() bool })
+	return ok && closed.isClosed()
 }

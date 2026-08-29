@@ -40,6 +40,12 @@ type projectionSession struct {
 	// whole-turn upsert crossed the no-observer threshold, subsequent tool/input
 	// events can skip another full-turn walk until a new turn starts.
 	largePatchObserved bool
+	// publishedTurnShells records turn IDs whose current authoritative shell has
+	// already been published in a snapshot or an upsertTurns patch. Tool and
+	// user-input events can then use their compact PartOps on subsequent events;
+	// replaying the complete growing turn for every tool transition made an active
+	// stream quadratic on the wire.
+	publishedTurnShells map[string]struct{}
 
 	// pending deltas accumulated since lastFlushedRev; cleared by FlushPatch.
 	textAppends map[string][]string         // assistant messageId -> delta chunks (append_text)
@@ -63,15 +69,19 @@ func cloneProjectionSessionState(source *projectionSession) *projectionSession {
 		return nil
 	}
 	cloned := &projectionSession{
-		projection:         cloneSessionProjection(source.projection),
-		lastAppliedRev:     source.lastAppliedRev,
-		lastFlushedRev:     source.lastFlushedRev,
-		largePatchObserved: source.largePatchObserved,
-		textAppends:        make(map[string][]string, len(source.textAppends)),
-		thinking:           make(map[string]string, len(source.thinking)),
-		tools:              make(map[string]ProjectionPart, len(source.tools)),
-		upsertTurns:        make(map[string]TurnProjection, len(source.upsertTurns)),
-		userInputs:         make(map[string]userInputPending, len(source.userInputs)),
+		projection:          cloneSessionProjection(source.projection),
+		lastAppliedRev:      source.lastAppliedRev,
+		lastFlushedRev:      source.lastFlushedRev,
+		largePatchObserved:  source.largePatchObserved,
+		publishedTurnShells: make(map[string]struct{}, len(source.publishedTurnShells)),
+		textAppends:         make(map[string][]string, len(source.textAppends)),
+		thinking:            make(map[string]string, len(source.thinking)),
+		tools:               make(map[string]ProjectionPart, len(source.tools)),
+		upsertTurns:         make(map[string]TurnProjection, len(source.upsertTurns)),
+		userInputs:          make(map[string]userInputPending, len(source.userInputs)),
+	}
+	for turnID := range source.publishedTurnShells {
+		cloned.publishedTurnShells[turnID] = struct{}{}
 	}
 	for key, chunks := range source.textAppends {
 		cloned.textAppends[key] = append([]string(nil), chunks...)
@@ -352,6 +362,9 @@ func (ps *projectionSession) stageTurnForFlush(turnID string) {
 	if ps == nil || turnID == "" || ps.upsertTurns == nil {
 		return
 	}
+	if _, published := ps.publishedTurnShells[turnID]; published {
+		return
+	}
 	if t := ps.turnByID(turnID); t != nil {
 		ps.upsertTurns[turnID] = *t
 	}
@@ -557,11 +570,12 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 				SessionID: msg.SessionID,
 				Execution: ExecutionView{Phase: "idle"},
 			},
-			textAppends: make(map[string][]string),
-			thinking:    make(map[string]string),
-			tools:       make(map[string]ProjectionPart),
-			upsertTurns: make(map[string]TurnProjection),
-			userInputs:  make(map[string]userInputPending),
+			publishedTurnShells: make(map[string]struct{}),
+			textAppends:         make(map[string][]string),
+			thinking:            make(map[string]string),
+			tools:               make(map[string]ProjectionPart),
+			upsertTurns:         make(map[string]TurnProjection),
+			userInputs:          make(map[string]userInputPending),
 		}
 		r.sessions[key] = ps
 	}
@@ -1358,10 +1372,19 @@ func (r *ProjectionReducer) Restore(backendID, sessionID string, projection Sess
 		projection:     projection,
 		lastAppliedRev: 0,
 		lastFlushedRev: projection.SyncRev,
-		textAppends:    make(map[string][]string),
-		thinking:       make(map[string]string),
-		tools:          make(map[string]ProjectionPart),
-		upsertTurns:    make(map[string]TurnProjection),
+		publishedTurnShells: func() map[string]struct{} {
+			published := make(map[string]struct{}, len(projection.Turns))
+			for _, turn := range projection.Turns {
+				if turn.TurnID != "" {
+					published[turn.TurnID] = struct{}{}
+				}
+			}
+			return published
+		}(),
+		textAppends: make(map[string][]string),
+		thinking:    make(map[string]string),
+		tools:       make(map[string]ProjectionPart),
+		upsertTurns: make(map[string]TurnProjection),
 	}
 }
 
@@ -1423,6 +1446,9 @@ func (r *ProjectionReducer) FlushPatch(backendID, sessionID string) (ProjectionP
 	for _, t := range ps.upsertTurns {
 		patch.UpsertTurns = append(patch.UpsertTurns, cloneTurn(t))
 	}
+	for turnID := range ps.upsertTurns {
+		ps.publishedTurnShells[turnID] = struct{}{}
+	}
 	for msgID, chunks := range ps.textAppends {
 		combined := ""
 		for _, c := range chunks {
@@ -1480,6 +1506,13 @@ func (r *ProjectionReducer) DropPendingPatch(backendID, sessionID string) bool {
 	ps.textAppends = make(map[string][]string)
 	ps.thinking = make(map[string]string)
 	ps.tools = make(map[string]ProjectionPart)
+	// A dropped pending turn upsert is still represented by the authoritative
+	// reducer snapshot. Future observers pull that snapshot before receiving
+	// compact PartOps, so treat those shells as published and avoid rebuilding
+	// them on every subsequent tool event while no observer is attached.
+	for turnID := range ps.upsertTurns {
+		ps.publishedTurnShells[turnID] = struct{}{}
+	}
 	ps.upsertTurns = make(map[string]TurnProjection)
 	ps.userInputs = make(map[string]userInputPending)
 	ps.execution = nil

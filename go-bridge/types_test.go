@@ -81,3 +81,20 @@ func TestSessionRegistry_DeleteClearsBothIDsUsingRealID(t *testing.T) {
 		t.Error("expected thread-real-456 to be deleted")
 	}
 }
+
+func TestBroadcasterRejectsClosedDirectAdapter(t *testing.T) {
+	raw := &Conn{closed: true}
+	conn := adaptDirectConn(raw)
+	b := NewBroadcaster()
+	b.Subscribe(conn, SubscriptionKey{BackendID: "codex-remote", SessionID: "closed"})
+
+	if b.HasConnections() {
+		t.Fatal("closed direct connection must not count as live")
+	}
+	if b.HasSessionSubscriber("codex-remote", "closed") {
+		t.Fatal("closed direct connection must not keep a session subscribed")
+	}
+	if targets := b.Targets("codex-remote", "closed", ""); len(targets) != 0 {
+		t.Fatalf("closed direct connection remained a target: %#v", targets)
+	}
+}

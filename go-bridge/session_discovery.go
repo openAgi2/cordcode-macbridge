@@ -113,6 +113,7 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 	}()
 	seen := map[string]string{}
 	_, isCodexCatalog := agent.(codexThreadHeadLister)
+	_, hasCatalogRefreshSignal := agent.(core.CatalogRefreshSignaler)
 	retry := catalogDiscoveryRetry{base: codexDiscoveryRetryBase, max: codexDiscoveryRetryMax}
 	probeRetry := catalogDiscoveryRetry{base: codexDiscoveryRetryBase, max: codexDiscoveryRetryMax}
 	if !h.snapshotBackendSession(ctx, seen, true, id, agent) && isCodexCatalog {
@@ -122,10 +123,11 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 	defer ticker.Stop()
 	var hintTicker *time.Ticker
 	var hintC <-chan time.Time
-	// 能力断言而非 id=="codex"：codex-web（与 codex 同属 thread/list 富 catalog
-	// seam）同样获得 3s recency-head 探测——Mac 新建 session 时 hint 立即触发
-	// authoritative 全量刷新，无需等 60s scan（P0-4）。
-	if _, ok := agent.(codexThreadHeadLister); ok {
+	// 能力断言而非 id=="codex"：没有官方 catalog refresh signal 的
+	// thread/list backend 获得 recency-head 探测——Mac 新建 session 时 hint
+	// 立即触发 authoritative 全量刷新，无需等 60s scan（P0-4）。已经提供
+	// 生命周期 signal 的 backend 走 signal + 60s safety scan，避免重复轮询。
+	if _, ok := agent.(codexThreadHeadLister); ok && !hasCatalogRefreshSignal {
 		if codexHintInterval > 0 {
 			hintTicker = time.NewTicker(codexHintInterval)
 			hintC = hintTicker.C

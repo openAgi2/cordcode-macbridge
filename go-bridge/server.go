@@ -193,6 +193,19 @@ func (c *Conn) CloseWithControl(code int, reason string) error {
 	return closeErr
 }
 
+// isClosed lets the shared Connection plumbing reject stale direct sockets in
+// exactly the same way as relay connections. Direct connections are wrapped by
+// directConnAdapter before entering the broadcaster, so this small read-side
+// seam is intentionally unexported and only used inside go-bridge.
+func (c *Conn) isClosed() bool {
+	if c == nil {
+		return true
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closed
+}
+
 // Server manages WebSocket connections.
 type Server struct {
 	authMiddleware          *AuthMiddleware
@@ -462,7 +475,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	conn.onCleanup = func() {
 		s.handlers.unregisterConnection(directConnection)
 		if authedDevice != nil {
-			globalDeviceConnRegistry.Unregister(authedDevice.DeviceID, conn)
+			globalDeviceConnRegistry.Unregister(authedDevice.DeviceID, directConnection)
 		}
 		if s.activeConns != nil {
 			s.activeConns.Unregister(conn)
@@ -479,7 +492,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 注册设备连接，用于 revoke 时主动断开
 	if authedDevice != nil {
-		globalDeviceConnRegistry.Register(authedDevice.DeviceID, conn)
+		globalDeviceConnRegistry.Register(authedDevice.DeviceID, directConnection)
 	}
 
 	// pong handler: 更新 lastPong

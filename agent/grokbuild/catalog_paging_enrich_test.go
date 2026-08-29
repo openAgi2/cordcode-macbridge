@@ -161,6 +161,19 @@ func TestEnrichGrokCatalogTitles_EmptyHomeIsNoop(t *testing.T) {
 	}
 }
 
+func TestFindGrokCatalogSessionDirUsesCatalogCwdLayout(t *testing.T) {
+	home := t.TempDir()
+	cwd := filepath.Join(home, "workspace with spaces")
+	const sessionID = "catalog-direct"
+	writeGrokSummary(t, home, cwd, sessionID, "Direct title")
+
+	got := findGrokCatalogSessionDir(home, cwd, sessionID)
+	want := filepath.Join(home, "sessions", url.PathEscape(cwd), sessionID)
+	if got != want {
+		t.Fatalf("direct catalog lookup = %q, want %q", got, want)
+	}
+}
+
 func TestReadGrokGeneratedTitleEdgeCases(t *testing.T) {
 	dir := t.TempDir()
 	if got := readGrokGeneratedTitle(filepath.Join(dir, "absent.json")); got != "" {

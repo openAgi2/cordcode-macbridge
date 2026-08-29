@@ -298,6 +298,64 @@ func TestReducerToolUpsert(t *testing.T) {
 	}
 }
 
+// TestReducerToolPartOpsDoNotRepeatPublishedTurnShell proves that a live turn
+// sends its complete shell once, then carries subsequent tool transitions as
+// compact upsert_tool operations. Re-copying the growing turn for every
+// tool_started/tool_finished event made long active streams unnecessarily
+// expensive for both JSON encoding and iOS projection application.
+func TestReducerToolPartOpsDoNotRepeatPublishedTurnShell(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex", "s1", "tool_started", map[string]interface{}{
+		"itemId": "call_1", "toolName": "shell", "toolInput": "pwd",
+	}))
+
+	first, ok := r.FlushPatch("codex", "s1")
+	if !ok {
+		t.Fatal("first tool event should produce a patch")
+	}
+	if len(first.UpsertTurns) != 1 || first.UpsertTurns[0].TurnID != "T1" {
+		t.Fatalf("first tool patch must publish T1 shell once: %+v", first.UpsertTurns)
+	}
+
+	r.Apply(ev(3, "codex", "s1", "tool_finished", map[string]interface{}{
+		"itemId": "call_1", "toolResult": "ok",
+	}))
+	second, ok := r.FlushPatch("codex", "s1")
+	if !ok {
+		t.Fatal("tool completion should produce a patch")
+	}
+	if len(second.UpsertTurns) != 0 {
+		t.Fatalf("tool completion repeated the published turn shell: %+v", second.UpsertTurns)
+	}
+	if !hasPartOpFor(second, "upsert_tool", "call_1") {
+		t.Fatalf("tool completion missing compact upsert_tool op: %+v", second.PartOps)
+	}
+
+	r.Apply(ev(4, "codex", "s1", "tool_started", map[string]interface{}{
+		"itemId": "call_2", "toolName": "shell", "toolInput": "ls",
+	}))
+	third, ok := r.FlushPatch("codex", "s1")
+	if !ok {
+		t.Fatal("second tool start should produce a patch")
+	}
+	if len(third.UpsertTurns) != 0 {
+		t.Fatalf("second tool start repeated the published turn shell: %+v", third.UpsertTurns)
+	}
+	if !hasPartOpFor(third, "upsert_tool", "call_2") {
+		t.Fatalf("second tool start missing compact upsert_tool op: %+v", third.PartOps)
+	}
+}
+
+func hasPartOpFor(patch ProjectionPatch, opName, itemID string) bool {
+	for _, op := range patch.PartOps {
+		if op.Op == opName && op.Part != nil && op.Part.ItemID == itemID {
+			return true
+		}
+	}
+	return false
+}
+
 func findTool(proj SessionProjection, callID string) *ProjectionPart {
 	if len(proj.Turns) == 0 || proj.Turns[0].Assistant == nil {
 		return nil

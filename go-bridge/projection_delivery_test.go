@@ -173,6 +173,36 @@ func TestProjectionOnlyRawTimelineEventDoesNotTriggerLegacyRebind(t *testing.T) 
 	}
 }
 
+func TestZeroTargetRebindIsRateLimitedPerSession(t *testing.T) {
+	ep := NewEventPublisher("epoch-rebind-cooldown")
+	now := time.Unix(1_700_000_000, 0)
+	ep.now = func() time.Time { return now }
+	rebinds := 0
+	ep.SetRebindTargets(func(_, _ string) int {
+		rebinds++
+		return 0
+	})
+	publish := func() {
+		ep.PublishLogical(LogicalEvent{
+			BackendID: "codex-remote",
+			SessionID: "session-rebind-cooldown",
+			Event:     "text_delta",
+			Data:      map[string]interface{}{"itemId": "turn-1", "delta": "x"},
+		})
+	}
+
+	publish()
+	publish()
+	if rebinds != 1 {
+		t.Fatalf("adjacent zero-target events attempted %d rebinds, want 1", rebinds)
+	}
+	now = now.Add(rebindAttemptCooldown)
+	publish()
+	if rebinds != 2 {
+		t.Fatalf("rebind was not retried after cooldown: attempts=%d", rebinds)
+	}
+}
+
 func TestSessionSyncV2RawTimelineClassification(t *testing.T) {
 	for _, event := range []string{
 		"turn_started", "turn_completed", "user_message",

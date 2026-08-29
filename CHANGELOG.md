@@ -8,6 +8,7 @@
 
 ## [Unreleased]
 
+- **继续降低 Codex Desktop runtime 热路径 CPU**：Grok 会话标题优先按目录直接定位，避免每次目录刷新递归扫描整个 sessions 树；失效的直连 socket 不再继续作为广播目标，离线期间的重绑定尝试按会话节流；Codex Web 已接入官方目录生命周期信号并保留低频安全扫描；投影诊断改为 Debug 才计算，大回合已发布的 turn shell 后续只发送工具增量。
 - **降低无客户端长回合的 runtime CPU**：当没有可接收 `session_sync_v2` patch 的观察者时，仍保留 reducer 的权威投影，但不再为超过阈值的整回合工具/问答增量深拷贝和记录大 patch；后续连接通过现有完整投影快照恢复。没有任何 live connection 时跳过逐 token 的设备重绑定扫描；无在线目标日志降为 Debug，避免流式回合产生高频日志 I/O。
 - **进一步降低 Codex Desktop runtime 空闲 CPU**：Remote 不再按固定 15 秒发送 `thread/list` head 请求；改由官方 `thread/started`、线程名称/归档/删除以及 `turn/started`/`turn/completed` 通知触发权威目录刷新，并保留 60 秒安全扫描。这样目录即时性来自官方事件，空闲连接不再持续解析目录 JSON。
 - **进一步降低 Codex Desktop runtime CPU**：head probe 超时现在进入独立指数退避；Remote 目录指纹忽略流式回合不断变化的 recency 时间戳，仅由会改变会话行的标题、目录、项目和成员变化触发目录事件，避免后台探测和流式事件互相放大。

@@ -481,8 +481,15 @@ func (h *Handlers) rebindLiveTargetsForSession(backendID, sessionID string) int 
 	if h == nil || h.broadcaster == nil || backendID == "" || sessionID == "" {
 		return 0
 	}
+	deviceIDs := globalDeviceConnRegistry.AllDeviceIDs()
+	if len(deviceIDs) == 0 {
+		// No device transport exists, so there is nothing to rebind. Keep this
+		// path silent at normal log levels; PublishLogical may call it while a
+		// remote turn continues after the last iPhone disconnects.
+		return 0
+	}
 	rebound := 0
-	for _, deviceID := range globalDeviceConnRegistry.AllDeviceIDs() {
+	for _, deviceID := range deviceIDs {
 		// Observation scope is the authoritative watch list. A connected device that does
 		// not observe this session must not be subscribed as a recovery side effect.
 		shouldBind := false
@@ -543,16 +550,15 @@ func (h *Handlers) rebindLiveTargetsForSession(backendID, sessionID string) int 
 		// Forensic: PublishLogical zero-target recovery found nothing to rebind.
 		// Common when device registry is empty while an RPC conn still answers
 		// (registry/broadcaster desync) — pull still works, live push does not.
-		deviceN := len(globalDeviceConnRegistry.AllDeviceIDs())
 		hasSub := false
 		if h.broadcaster != nil {
 			hasSub = h.broadcaster.HasSessionSubscriber(backendID, sessionID)
 		}
-		if deviceN > 0 || hasSub {
+		if len(deviceIDs) > 0 || hasSub {
 			slog.Warn("go-bridge: rebind live targets found zero conns",
 				"backendID", backendID,
 				"sessionID", sessionID,
-				"registryDevices", deviceN,
+				"registryDevices", len(deviceIDs),
 				"hasSessionSubscriber", hasSub,
 			)
 		} else {
