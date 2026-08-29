@@ -78,6 +78,7 @@
 - 最终安装后的本地观察窗仍较短；若绑定后约 2 秒死亡，应按 `stream_id` 风暴复发处理。
 - 当前 runtime 每分钟仍记录一次 `codex-remote: request thread/list canceled: context deadline exceeded` 的 discovery warning；不影响 pairing status，但需在 owner session-list 回归中确认是否为 Desktop app-server 的实际响应边界。
 - iOS 工作树已在 `ed60f99` 清洁；Mac 工作树仅保留未跟踪 handoff 文件；真机安装待 Xcode 账号与 provisioning profiles 恢复后重跑。
+- 本次 audit 重跑还记录到两项环境/历史边界漂移：`source-baseline.mjs` 记录的 ChatGPT `26.825.32147` 已被已安装版本 `26.825.41651` 替换，因此未擅自改写冻结基线；`phase0-boundary.mjs` 仍按 Phase 0 冻结点检查，发现后续已授权的 `agent/codex-web` RPC 抽取差异，不能把该历史检查冒报为当前 PASS。
 
 ## 6. Audit Focus (建议审核重点)
 
