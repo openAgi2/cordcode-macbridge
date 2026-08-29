@@ -35,7 +35,7 @@
     "last_generated_at": "2026-08-29T09:58:06Z",
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-29T14:47:00Z",
+  "updated_at": "2026-08-29T14:56:13Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -2153,7 +2153,7 @@
         "phase5-gate-tests"
       ],
       "source": "Phase 5",
-      "notes": "AUDIT INVALIDATED 2026-08-29. The live-subscription and model-selection review fixes are now owner-verified, but the next device regression exposed missing official session mutation RPCs and missing selected-project cwd propagation. Keep blocked until both new review-fix regression chains are proven; review-fix-for:phase5-gate-regression.",
+      "notes": "AUDIT INVALIDATED 2026-08-29. Live subscription, model selection, session mutation, and selected-project cwd are owner-verified. The next regression exposed remote catalog discovery self-excitation/high CPU, delayed iOS mutation visibility, and missing official thread title persistence. Keep blocked until the three new review-fix regression chains are proven; review-fix-for:phase5-gate-regression.",
       "verification": {
         "required": true,
         "status": "failed",
@@ -2671,7 +2671,7 @@
       "id": "phase5-session-mutation-review-fix-regression",
       "title": "Close Codex Desktop session mutation regression — review fix regression",
       "description": "review-fix-for:phase5-gate-regression. Build and install the repaired runtime, then require owner physical-device proof that rename, archive, and delete persist and the session list reflects authoritative Desktop state.",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase5",
       "kind": "regression",
       "depends_on": [
@@ -2681,19 +2681,20 @@
       "notes": "review-fix-for:phase5-gate-regression",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "Automated regression and deployment are complete; the installed runtime advertises the implemented mutation interfaces and is ready/online. Owner physical-device confirmation of rename, archive, and delete persistence remains required.",
+        "summary": "Owner physical-device regression confirms rename, archive, and delete all persist successfully and synchronize with Codex Desktop. The remaining delayed iOS visibility is tracked as a separate performance review-fix rather than weakening this functional result.",
         "artifacts": [
           "git:4a0db630f9b0",
           "cmd:go test ./go-bridge -count=1 -timeout 180s => PASS (68.605s)",
           "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED",
           "runtime:/Applications/CordCodeLink.app PID 62174 TCP 8777 commit 4a0db630f9b0",
-          "cmd:authenticated management status => phase ready; online true; clientType CODEX_DESKTOP_APP"
+          "cmd:authenticated management status => phase ready; online true; clientType CODEX_DESKTOP_APP",
+          "owner-report:2026-08-29 rename/archive/delete all normal and synchronized to Codex Desktop"
         ],
-        "checked_at": "2026-08-29T14:47:00Z"
+        "checked_at": "2026-08-29T15:15:00Z"
       }
     },
     {
@@ -2759,7 +2760,7 @@
       "id": "phase5-new-session-project-directory-review-fix-regression",
       "title": "Close new-session project directory regression — review fix regression",
       "description": "review-fix-for:phase5-gate-regression. Build and install the repaired runtime, then require owner physical-device proof that a session created with + inside a project is cataloged under that project rather than the user home directory.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "regression",
       "depends_on": [
@@ -2769,11 +2770,263 @@
       "notes": "review-fix-for:phase5-gate-regression",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "Pending owner physical-device regression.",
+        "summary": "Owner physical-device regression confirms creating a session from a selected project directory, sending a turn, and synchronizing to Codex Desktop all work; the session is cataloged under the selected project instead of the user home directory.",
+        "artifacts": [
+          "git:4a0db630f9b0",
+          "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED",
+          "owner-report:2026-08-29 selected-directory create/send normal and synchronized to Codex Desktop"
+        ],
+        "checked_at": "2026-08-29T15:17:00Z"
+      }
+    },
+    {
+      "id": "phase5-remote-catalog-discovery-backpressure-review-fix-impl",
+      "title": "Stop Codex Desktop catalog discovery self-excitation — review fix impl",
+      "description": "review-fix-for:phase5-gate-regression. Consume official thread lifecycle notifications through the existing CatalogRefreshSignaler contract, prevent a failed authoritative refresh from retriggering on the same stale head fingerprint, and add bounded discovery-specific retry backoff so an 8-second thread/list timeout cannot create a permanent polling loop.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-gate-tests"
+      ],
+      "source": "2026-08-29 runtime CPU investigation and official Codex app-server notifications",
+      "notes": "review-fix-for:phase5-gate-regression; follow the existing agent/codex-web CatalogRefreshSignaler pattern without coupling adapters; use discovery-specific backoff rather than transport reconnect state.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "codex-remote now follows the existing CatalogRefreshSignaler pattern for official thread lifecycle notifications and successful mutations. Bridge discovery uses a Remote-specific 15-second safety head cadence plus a 15s→2m discovery retry backoff, so a failed authoritative refresh cannot self-excite from a stale head. The Remote catalog now uses the official thread/list maximum page size of 100, halving envelope round trips.",
+        "artifacts": [
+          "agent/codex-remote/agent.go",
+          "agent/codex-remote/session.go",
+          "agent/codex-remote/mutations.go",
+          "agent/codex-remote/catalog.go",
+          "go-bridge/session_discovery.go",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server/src/request_processors/thread_processor.rs"
+        ],
+        "checked_at": "2026-08-29T15:39:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:1839"
+      }
+    },
+    {
+      "id": "phase5-remote-catalog-discovery-backpressure-review-fix-tests",
+      "title": "Verify Codex Desktop catalog discovery backpressure — review fix tests",
+      "description": "review-fix-for:phase5-gate-regression. Prove lifecycle notifications coalesce refresh signals, repeated head probes do not repeat a failed full refresh before backoff expires, retry state resets after success, and real connection-loss reconnect behavior remains unchanged.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-remote-catalog-discovery-backpressure-review-fix-impl"
+      ],
+      "source": "2026-08-29 runtime CPU investigation",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Race tests prove lifecycle notification signaling/coalescing, official max-page serialization, failed full-refresh backoff, successful retry reset, unchanged event-pump/replacement-epoch behavior, and unaffected Grok/generic discovery paths.",
+        "artifacts": [
+          "agent/codex-remote/catalog_test.go",
+          "agent/codex-remote/session_test.go",
+          "go-bridge/session_discovery_test.go",
+          "cmd:go test -race ./agent/codex-remote -count=1 -timeout 180s => PASS",
+          "cmd:go test -race ./go-bridge -run TestSessionDiscovery(Codex|UsesGeneric|Grok|BlockedBackend) -count=1 -timeout 180s => PASS"
+        ],
+        "checked_at": "2026-08-29T15:43:00Z"
+      }
+    },
+    {
+      "id": "phase5-remote-catalog-discovery-backpressure-review-fix-regression",
+      "title": "Close Codex Desktop catalog CPU regression — review fix regression",
+      "description": "review-fix-for:phase5-gate-regression. Build and install the repaired runtime, observe a bounded live window with an attached iPhone, and prove CPU no longer remains elevated from repeated fingerprint timeout/head-changed/full-refresh cycles while bidirectional messaging still works.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-remote-catalog-discovery-backpressure-review-fix-tests"
+      ],
+      "source": "2026-08-29 runtime CPU investigation",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Unsigned Release ebdcd68552d6 was built, moved into /Applications, and launched under the product supervisor. The startup log proves the 15s Remote hint interval and 15s..2m discovery retry configuration. Across 30 samples over 60 seconds, the installed runtime averaged 1.34% CPU (min 0.30%, max 8.80%) versus the reported persistent 18-26%; the same window had zero head-change full-refresh triggers, zero refresh backoffs, zero stream losses, and the runtime remained the sole 8777 listener.",
+        "artifacts": [
+          "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED; runtime commit ebdcd68552d6",
+          "/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime -version => commit ebdcd68552d6",
+          "runtime-log:session discovery watcher started interval=1m0s codexRemoteHintInterval=15s codexDiscoveryRetryBase=15s codexDiscoveryRetryMax=2m0s",
+          "runtime-sample:60s/30 samples avg CPU 1.34%, min 0.30%, max 8.80%; head_changed=0, backed_off=0, stream_lost=0",
+          "runtime-process:/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime; sole TCP 8777 listener"
+        ],
+        "checked_at": "2026-08-29T14:56:13Z"
+      }
+    },
+    {
+      "id": "phase5-session-mutation-visible-latency-review-fix-impl",
+      "title": "Make session mutations visible immediately on iOS — review fix impl",
+      "description": "review-fix-for:phase5-gate-regression. Decode and use the authoritative rename/archive session already returned by Bridge instead of discarding it and issuing a second full catalog-dependent get_session request; preserve delete/create local truth and reconcile later lifecycle events without fallback data.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-gate-tests"
+      ],
+      "source": "2026-08-29 owner physical-device latency regression",
+      "notes": "review-fix-for:phase5-gate-regression; consume the existing authoritative mutation response rather than inventing cached or optimistic backend data.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "The paired iOS bridge protocol now returns CCCodeBridgeSession from rename/archive, decodes the existing {session: ...} mutation envelope with method-specific errors, and maps that authoritative response directly to BackendThread. It removes the redundant get_session request while retaining the pin refetch because pin remains a void wire operation.",
+        "artifacts": [
+          "/Users/jacklee/Projects/cordcode-ios-codex-remote/OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeClient.swift",
+          "/Users/jacklee/Projects/cordcode-ios-codex-remote/OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeBackendClient.swift"
+        ],
+        "checked_at": "2026-08-29T15:59:00Z"
+      }
+    },
+    {
+      "id": "phase5-session-mutation-visible-latency-review-fix-tests",
+      "title": "Verify immediate iOS session mutation visibility — review fix tests",
+      "description": "review-fix-for:phase5-gate-regression. Prove rename/archive decode the Bridge mutation envelope, map the returned authoritative session, avoid the redundant get_session refetch, preserve errors, and update existing mutation-refetch tests to pin the corrected request count.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-session-mutation-visible-latency-review-fix-impl"
+      ],
+      "source": "2026-08-29 owner physical-device latency regression",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "The focused iOS test class passes six cases covering rename/archive zero-refetch behavior, direct authoritative mapping, real mutation envelope decode, method-specific missing-session errors, preserved pin refetch, and no refetch after mutation failure.",
+        "artifacts": [
+          "/Users/jacklee/Projects/cordcode-ios-codex-remote/OpenCodeiOS/OpenCodeiOSTests/CCCodeBridgeMutationRefetchTests.swift",
+          "cmd:scripts/run.sh test --only CCCodeBridgeMutationRefetchTests => 6 tests PASS in 0.043s; xcodebuild wall 37.114s"
+        ],
+        "checked_at": "2026-08-29T16:01:00Z"
+      }
+    },
+    {
+      "id": "phase5-session-mutation-visible-latency-review-fix-regression",
+      "title": "Close iOS session mutation latency regression — review fix regression",
+      "description": "review-fix-for:phase5-gate-regression. Install the iOS app on the connected iPhone and require physical-device proof that rename/archive/delete/create effects appear without the prior ten-second catalog delay and remain synchronized with Codex Desktop.",
+      "status": "in_progress",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-session-mutation-visible-latency-review-fix-tests"
+      ],
+      "source": "2026-08-29 owner physical-device latency regression",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "The focused six-test regression suite passed, and iOS commit 5565a8612c0b was built, installed, and launched on the connected physical iPhone. Final proof remains the owner's short physical-device timing observation for rename/archive/delete/create visibility and Desktop reconciliation.",
+        "artifacts": [
+          "cmd:scripts/run.sh device --device <connected-iphone> => build succeeded, installed, launched org.openagi.cordcode",
+          "ios-commit:5565a8612c0b700949ffd9761f4a47d1f3acada1"
+        ],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase5-new-session-title-persistence-review-fix-impl",
+      "title": "Persist iOS-created Codex Desktop session titles — review fix impl",
+      "description": "review-fix-for:phase5-gate-regression. Honor create_session.title by applying official thread/name/set after thread/start and returning authoritative thread metadata, so iOS and Codex Desktop converge on the same title instead of independently falling back to cwd or its basename.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-gate-tests"
+      ],
+      "source": "2026-08-29 owner physical-device title regression and official Codex thread/name/set protocol",
+      "notes": "review-fix-for:phase5-gate-regression; official ThreadStartParams has no title field, so persist through the already implemented SessionRenamer capability and authoritative readback.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "The Bridge create_session path now treats a non-empty requested title as a persistence operation: after thread/start materializes the real session, it invokes the existing SessionRenamer capability (official thread/name/set plus thread/read for codex-remote), rejects any failed/empty readback, and returns the authoritative title/directory metadata instead of an optimistic request echo.",
+        "artifacts": [
+          "go-bridge/handlers.go",
+          "agent/codex-remote/mutations.go",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs"
+        ],
+        "checked_at": "2026-08-29T15:50:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:532; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs:62"
+      }
+    },
+    {
+      "id": "phase5-new-session-title-persistence-review-fix-tests",
+      "title": "Verify iOS-created Codex Desktop title persistence — review fix tests",
+      "description": "review-fix-for:phase5-gate-regression. Prove create_session performs thread/start then official thread/name/set with the requested title, returns authoritative metadata, preserves rename failures, and keeps empty-title behavior truthful.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-new-session-title-persistence-review-fix-impl"
+      ],
+      "source": "2026-08-29 owner physical-device title regression",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Race tests pin create_session title trimming, real-session-id rename ordering, authoritative readback response mapping, fail-closed title persistence errors, absent registry insertion on failure, and the codex-remote exact official mutation/read protocol.",
+        "artifacts": [
+          "go-bridge/handlers_test.go",
+          "agent/codex-remote/mutations_test.go",
+          "cmd:go test -race ./go-bridge -run Test(CreateSessionPersistsAndReturnsAuthoritativeTitle|CreateSessionTitleFailureIsExposed|HandleRenameSessionReturnsUpdatedSession|CodexRemoteAdvertisesMutationAndWorkDirCapabilities) -count=1 -timeout 180s => PASS",
+          "cmd:go test -race ./agent/codex-remote -run Test(SessionMutationsUseOfficialRPCsAndAuthoritativeRead|SessionMutationErrorsFailClosed) -count=1 -timeout 120s => PASS"
+        ],
+        "checked_at": "2026-08-29T15:53:00Z"
+      }
+    },
+    {
+      "id": "phase5-new-session-title-persistence-review-fix-regression",
+      "title": "Close iOS-created Codex Desktop title regression — review fix regression",
+      "description": "review-fix-for:phase5-gate-regression. Build/install both products and require physical-device proof that an iOS-created prompted title remains stable in the message page, iOS session list, and Codex Desktop after catalog refresh/reconnect.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-new-session-title-persistence-review-fix-tests"
+      ],
+      "source": "2026-08-29 owner physical-device title regression",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
         "artifacts": [],
         "checked_at": null
       }
