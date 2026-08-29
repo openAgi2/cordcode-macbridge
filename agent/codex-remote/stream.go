@@ -28,10 +28,14 @@ type Stream struct {
 	cursor   string
 	closed   bool
 	closeErr error
-	lastRecv time.Time
-	// staleStreams 记录同 client+env 下见过的历史 stream_id：重连换 id 后
-	// host 仍按旧会话路由推送（真机 2026-08-29 12:30），client_id 已验证
-	// 属于本机，按本机历史会话接受而非判死流。
+	// lastHostActivity only advances on evidence from the app-server connection:
+	// an active pong or a server message. Relay ACKs prove only that the relay
+	// accepted our frame; the official ClientTracker does not use them as proof
+	// that (client_id, stream_id) still names a live app-server connection.
+	lastHostActivity time.Time
+	// staleStreams records old stream ids seen on this controller connection so
+	// each is diagnosed once. Their payloads must never cross the stream/epoch
+	// boundary: JSON-RPC request ids restart for each Client.
 	staleStreams map[string]struct{}
 	inbound      chan []byte
 	done         chan struct{}
@@ -51,14 +55,14 @@ type chunkAssembly struct {
 // proven on the live controller wire (attempt-008).
 func NewStream(conn FrameConn, clientID, envID, streamID string) *Stream {
 	s := &Stream{
-		conn:     conn,
-		clientID: clientID,
-		envID:    envID,
-		streamID: streamID,
-		lastRecv: time.Now(),
-		inbound:  make(chan []byte, 64),
-		done:     make(chan struct{}),
-		assembly: map[uint64]*chunkAssembly{},
+		conn:             conn,
+		clientID:         clientID,
+		envID:            envID,
+		streamID:         streamID,
+		lastHostActivity: time.Now(),
+		inbound:          make(chan []byte, 64),
+		done:             make(chan struct{}),
+		assembly:         map[uint64]*chunkAssembly{},
 	}
 	go s.readLoop()
 	return s
@@ -192,13 +196,19 @@ func (s *Stream) RecordedCursor() string {
 	return s.cursor
 }
 
-// IdleFor returns time since the last inbound envelope (pongs count). Writes
-// into a silently-dropped TCP connection still succeed, so inbound silence is
-// the only reliable hang signal (真机 2026-08-29 08:34–09:14 假活 40 分钟).
+// IdleFor returns time since the last app-server liveness evidence. Relay ACKs
+// deliberately do not count: upstream ClientTracker answers Ping with
+// PongStatus::Active only while the exact (client_id, stream_id) exists.
 func (s *Stream) IdleFor() time.Duration {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return time.Since(s.lastRecv)
+	return time.Since(s.lastHostActivity)
+}
+
+func (s *Stream) markHostActivity() {
+	s.mu.Lock()
+	s.lastHostActivity = time.Now()
+	s.mu.Unlock()
 }
 
 func (s *Stream) fail(err error) {
@@ -213,17 +223,18 @@ func (s *Stream) fail(err error) {
 	_ = s.conn.Close()
 }
 
-// ownStaleStream 判断路由失败是否仅为本客户端的历史 stream_id 漂移：
-// client_id 与 env_id 都非空且完全匹配时，这条连接上的封包只可能来自
-// 本机此前（重连前）的会话，按本机历史会话接受。
+// ownStaleStream identifies a frame for an older logical app-server connection.
+// It is safe to discard only after client_id and env_id match exactly.
 func (s *Stream) ownStaleStream(env Envelope) bool {
 	return env.StreamID != "" && env.StreamID != s.streamID &&
 		env.ClientID != "" && env.ClientID == s.clientID &&
 		env.EnvID != "" && env.EnvID == s.envID
 }
 
-// acceptStaleStreamID 记录并放行历史 stream_id，每个 id 只告警一次。
-func (s *Stream) acceptStaleStreamID(id string, reason error) {
+// dropStaleStreamID records a discarded historical stream id once. Never
+// deliver its payload: a late id=1 response could otherwise satisfy the new
+// epoch's id=1 initialize request and create a false-ready connection.
+func (s *Stream) dropStaleStreamID(id string, reason error) {
 	s.mu.Lock()
 	if s.staleStreams == nil {
 		s.staleStreams = map[string]struct{}{}
@@ -235,7 +246,7 @@ func (s *Stream) acceptStaleStreamID(id string, reason error) {
 	want := s.streamID
 	s.mu.Unlock()
 	if !seen {
-		slog.Warn("codex-remote stream accepting stale stream_id",
+		slog.Warn("codex-remote stream dropping stale stream_id",
 			"gotStreamID", id, "wantStreamID", want, "reason", reason.Error())
 	}
 }
@@ -251,12 +262,10 @@ func (s *Stream) readLoop() {
 			s.fail(err)
 			return
 		}
-		s.mu.Lock()
-		s.lastRecv = time.Now()
-		s.mu.Unlock()
 		if err := env.routingOK(s.clientID, s.envID, s.streamID); err != nil {
 			if s.ownStaleStream(env) {
-				s.acceptStaleStreamID(env.StreamID, err)
+				s.dropStaleStreamID(env.StreamID, err)
+				continue
 			} else {
 				slog.Warn("codex-remote stream routing mismatch; failing stream",
 					"error", err.Error(),
@@ -277,21 +286,24 @@ func (s *Stream) readLoop() {
 		case typeAck:
 			continue
 		case typePong:
-			// 非 active 的 pong 表示中继还在、但目标端（ChatGPT Desktop）已
-			// 消失：流对 RPC 已不可用，必须判死交给重连。真机 2026-08-29：
-			// Desktop 退出后 pong=unknown，流却保持"存活"。
-			if env.Status != "" && env.Status != "active" {
+			// Match upstream ClientTracker: only Active proves this exact stream
+			// exists; Unknown means the relay is reachable but the app-server
+			// connection is gone.
+			if env.Status != "active" {
 				s.fail(fmt.Errorf("codex-remote: pong status %q: remote endpoint detached", env.Status))
 				return
 			}
+			s.markHostActivity()
 			continue
 		case typeServerMessage:
+			s.markHostActivity()
 			if err := s.deliver(env.Message); err != nil {
 				s.fail(err)
 				return
 			}
 			s.ack(env)
 		case typeServerMessageChunk:
+			s.markHostActivity()
 			payload, done, err := s.observeChunk(env)
 			if err != nil {
 				s.fail(err)

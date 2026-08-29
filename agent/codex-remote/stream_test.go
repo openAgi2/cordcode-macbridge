@@ -138,9 +138,9 @@ func TestStreamRecordsCursorWithoutUsingItAsJSONRPC(t *testing.T) {
 	}
 }
 
-// IdleFor 以最后一个入站封包（含 pong）计时；写入死连接照样成功，只有入站
-// 静默能证明假活。真机 2026-08-29 08:34–09:14 ping 写成功但流已死 40 分钟。
-func TestStreamIdleForTracksInbound(t *testing.T) {
+// IdleFor tracks app-server evidence, not relay ACKs. Upstream ClientTracker
+// uses PongStatus::Active to prove the exact (client_id, stream_id) is alive.
+func TestStreamIdleForTracksHostActivity(t *testing.T) {
 	clientConn, hostConn := LoopbackPair()
 	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_probe")
 	defer stream.Close()
@@ -149,13 +149,20 @@ func TestStreamIdleForTracksInbound(t *testing.T) {
 	}
 
 	stream.mu.Lock()
-	stream.lastRecv = time.Now().Add(-time.Hour)
+	stream.lastHostActivity = time.Now().Add(-time.Hour)
 	stream.mu.Unlock()
 	if idle := stream.IdleFor(); idle < 59*time.Minute {
 		t.Fatalf("idle = %s, want ~1h", idle)
 	}
 
-	_ = hostConn.Write(Envelope{Type: typePong, ClientID: "client_probe", EnvID: "env_desktop", StreamID: "stream_probe"})
+	seq := uint64(1)
+	_ = hostConn.Write(Envelope{Type: typeAck, ClientID: "client_probe", EnvID: "env_desktop", StreamID: "stream_probe", SeqID: &seq})
+	time.Sleep(50 * time.Millisecond)
+	if idle := stream.IdleFor(); idle < 59*time.Minute {
+		t.Fatalf("relay ACK must not refresh host activity, idle = %s", idle)
+	}
+
+	_ = hostConn.Write(Envelope{Type: typePong, ClientID: "client_probe", EnvID: "env_desktop", StreamID: "stream_probe", Status: "active"})
 	deadline := time.After(2 * time.Second)
 	for {
 		if idle := stream.IdleFor(); idle < time.Second {
@@ -163,7 +170,7 @@ func TestStreamIdleForTracksInbound(t *testing.T) {
 		}
 		select {
 		case <-deadline:
-			t.Fatal("inbound pong must reset the idle clock")
+			t.Fatal("active pong must reset the host-activity clock")
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
@@ -204,10 +211,10 @@ func TestStreamSurvivesActivePong(t *testing.T) {
 	}
 }
 
-// 重连后 host 仍按旧会话的 stream_id 推送（真机 2026-08-29 12:30
-// gotStreamID=旧值）：client_id/env_id 均匹配时必须接受并继续投递，
-// 不得判死流引发重连风暴。
-func TestStreamAcceptsStaleStreamIDOfSameClientEnv(t *testing.T) {
+// A late response from an old stream must neither kill the new stream nor cross
+// its epoch boundary. Request ids restart at 1, so delivery would create a
+// false initialize success.
+func TestStreamDropsStaleStreamIDOfSameClientEnv(t *testing.T) {
 	clientConn, hostConn := LoopbackPair()
 	defer hostConn.Close()
 	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_new")
@@ -217,15 +224,21 @@ func TestStreamAcceptsStaleStreamIDOfSameClientEnv(t *testing.T) {
 	_ = hostConn.Write(Envelope{
 		Type:     typeServerMessage,
 		ClientID: "client_probe", EnvID: "env_desktop", StreamID: "stream_old",
-		SeqID:  &seq,
+		SeqID:   &seq,
 		Message: json.RawMessage(`{"jsonrpc":"2.0","method":"turn/started","params":{}}`),
+	})
+	_ = hostConn.Write(Envelope{
+		Type:     typeServerMessage,
+		ClientID: "client_probe", EnvID: "env_desktop", StreamID: "stream_new",
+		SeqID:   &seq,
+		Message: json.RawMessage(`{"jsonrpc":"2.0","method":"turn/completed","params":{}}`),
 	})
 	payload, err := stream.Recv()
 	if err != nil {
-		t.Fatalf("stale-stream envelope must be delivered, got error: %v", err)
+		t.Fatalf("current-stream envelope must be delivered, got error: %v", err)
 	}
-	if !strings.Contains(string(payload), "turn/started") {
-		t.Fatalf("payload = %s", payload)
+	if strings.Contains(string(payload), "turn/started") || !strings.Contains(string(payload), "turn/completed") {
+		t.Fatalf("stale payload crossed epoch boundary: %s", payload)
 	}
 	if err := stream.Send([]byte("{}")); err != nil {
 		t.Fatalf("stream must stay alive after stale envelope: %v", err)
@@ -242,7 +255,7 @@ func TestStreamStillFailsOnForeignRouting(t *testing.T) {
 	_ = hostConn.Write(Envelope{
 		Type:     typeServerMessage,
 		ClientID: "client_other", EnvID: "env_desktop", StreamID: "stream_other",
-		SeqID:  &seq,
+		SeqID:   &seq,
 		Message: json.RawMessage(`{}`),
 	})
 	deadline := time.After(2 * time.Second)

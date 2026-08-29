@@ -148,7 +148,6 @@ func TestPersistedPairingRoundTrip(t *testing.T) {
 	agent.pairing.keys = keys
 	agent.pairing.mu.Lock()
 	agent.pairing.state.clientID = "client_probe"
-	agent.pairing.state.streamID = "stream_stable"
 	agent.pairing.state.ctrlToken = "ctrl"
 	agent.pairing.state.ctrlExp = "2099-01-01T00:00:00Z"
 	agent.pairing.state.key = key
@@ -168,8 +167,8 @@ func TestPersistedPairingRoundTrip(t *testing.T) {
 	if rec.CtrlToken != "ctrl" {
 		t.Fatal("token missing from store")
 	}
-	if rec.StreamID != "stream_stable" {
-		t.Fatalf("streamId = %q, want persisted for reconnect reuse", rec.StreamID)
+	if strings.Contains(string(raw), "\"streamId\"") {
+		t.Fatal("streamId is connection-epoch state and must not be persisted")
 	}
 }
 
@@ -277,8 +276,8 @@ func restoreHTTPServer(t *testing.T, key *deviceKey, online bool, refreshStatus 
 					"challenge_expires_at": "2099-01-01T00:00:00Z", "challenge_id": "ch",
 					"challenge_token": "tok", "client_id": "client_probe",
 					"nonce": "n", "target_origin": "https://chatgpt.com",
-					"target_path": "/backend-api/codex/remote/control/client/refresh/finish",
-					"purpose":     "remote_control_client_enrollment",
+					"target_path":          "/backend-api/codex/remote/control/client/refresh/finish",
+					"purpose":              "remote_control_client_enrollment",
 					"device_identity_hash": key.identityHash(),
 				},
 			})

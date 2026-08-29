@@ -153,7 +153,7 @@ func TestStreamHealthCheck(t *testing.T) {
 	}
 
 	stream.mu.Lock()
-	stream.lastRecv = time.Now().Add(-2 * streamIdleLimit)
+	stream.lastHostActivity = time.Now().Add(-2 * streamIdleLimit)
 	stream.mu.Unlock()
 	if err := streamHealthCheck(cl, stream); err == nil {
 		t.Fatal("silent stream beyond the idle limit must fail health check; ping writes alone cannot detect it")

@@ -19,10 +19,6 @@ const pairingStoreName = "codex-remote-pairing.json"
 type persistedPairing struct {
 	ClientID               string `json:"clientId"`
 	EnvID                  string `json:"envId"`
-	// StreamID 跨重连复用：官方 host 按 (client_id, stream_id) 复用会话并
-	// 按它路由回包；每次重连换新 id 会让回包 mismatch 判死流（真机
-	// 2026-08-29 12:17 重连风暴）。空表示旧版本存储，绑定时生成。
-	StreamID               string `json:"streamId,omitempty"`
 	ClientType             string `json:"clientType"`
 	CtrlExp                string `json:"ctrlExp"`
 	CtrlToken              string `json:"ctrlToken"`
@@ -60,7 +56,6 @@ func (p *PairingController) savePersistedPairing() error {
 	rec := persistedPairing{
 		ClientID:   p.state.clientID,
 		EnvID:      envID,
-		StreamID:   p.state.streamID,
 		ClientType: clientType,
 		CtrlExp:    p.state.ctrlExp,
 		CtrlToken:  p.state.ctrlToken,
@@ -166,7 +161,9 @@ func (p *PairingController) restoreOnce(ctx context.Context) error {
 	p.keys.Put(key)
 	p.mu.Lock()
 	p.state.clientID = rec.ClientID
-	p.state.streamID = rec.StreamID
+	// stream_id is connection-epoch state, never enrollment state. Older stores
+	// may still contain a streamId field; encoding/json ignores it on read.
+	p.state.streamID = ""
 	p.state.ctrlToken = rec.CtrlToken
 	p.state.ctrlExp = rec.CtrlExp
 	p.state.key = key

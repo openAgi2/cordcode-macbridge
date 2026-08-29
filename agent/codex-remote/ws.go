@@ -228,20 +228,19 @@ func (p *PairingController) bindLive(ctx context.Context, env *remoteEnv) error 
 	ctrlToken := p.state.ctrlToken
 	ctrlExp := p.state.ctrlExp
 	clientID := p.state.clientID
-	streamID := p.state.streamID
 	key := p.state.key
 	p.mu.Unlock()
 	if token == "" || accountID == "" || ctrlToken == "" || clientID == "" || env == nil || env.EnvID == "" {
 		return fmt.Errorf("pairing state incomplete")
 	}
-	if streamID == "" {
-		// 首次绑定或重新配对后：生成并固化，此后跨重连复用（见
-		// persistedPairing.StreamID 注释）。
-		streamID = randomStreamID()
-		p.mu.Lock()
-		p.state.streamID = streamID
-		p.mu.Unlock()
-	}
+	// A stream id is the identity of one logical app-server connection, matching
+	// upstream ClientTracker's (client_id, stream_id) key. Every new Client/epoch
+	// gets a fresh id so late responses from an older connection cannot correlate
+	// with request ids restarted at 1.
+	streamID := randomStreamID()
+	p.mu.Lock()
+	p.state.streamID = streamID
+	p.mu.Unlock()
 	conn, err := dialControllerWS(ctx, token, accountID, ctrlToken, clientID)
 	if err != nil {
 		return err
