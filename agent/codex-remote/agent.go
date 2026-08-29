@@ -68,9 +68,10 @@ func (a *Agent) Name() string { return BackendID }
 
 var _ core.CatalogRefreshSignaler = (*Agent)(nil)
 
-// CatalogRefreshSignals exposes official thread lifecycle changes to the
-// Bridge discovery worker. The signal is deliberately data-free: thread/list
-// remains the sole catalog truth and the one-slot channel coalesces bursts.
+// CatalogRefreshSignals exposes official catalog-affecting notifications to
+// the Bridge discovery worker. The signal is deliberately data-free:
+// thread/list remains the sole catalog truth and the one-slot channel coalesces
+// bursts.
 func (a *Agent) CatalogRefreshSignals() <-chan struct{} {
 	a.catalogMu.Lock()
 	defer a.catalogMu.Unlock()

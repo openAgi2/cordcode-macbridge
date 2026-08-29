@@ -283,6 +283,7 @@ func TestOfficialThreadLifecycleNotificationsSignalCatalogRefresh(t *testing.T) 
 	seq := uint64(0)
 	for _, method := range []string{
 		"thread/started", "thread/name/updated", "thread/archived", "thread/unarchived", "thread/deleted",
+		"turn/started", "turn/completed",
 	} {
 		seq++
 		payload, _ := json.Marshal(map[string]any{

@@ -38,9 +38,11 @@ var sessionDiscoveryInterval = 60 * time.Second
 var codexDiscoveryHintInterval = 3 * time.Second
 
 // Remote Control carries each thread/list page through the Desktop data plane.
-// Official lifecycle notifications provide the fast path, so its safety probe
-// can be materially slower than the local codex-web daemon probe.
-var codexRemoteDiscoveryHintInterval = 15 * time.Second
+// The official app-server emits thread lifecycle and turn-boundary notifications;
+// those signals trigger the authoritative refresh directly. Keep the periodic
+// 60-second safety scan below, but do not send a second Remote thread/list head
+// request every few seconds while the stream is otherwise idle.
+var codexRemoteDiscoveryHintInterval time.Duration
 
 var (
 	codexDiscoveryRetryBase = 15 * time.Second
