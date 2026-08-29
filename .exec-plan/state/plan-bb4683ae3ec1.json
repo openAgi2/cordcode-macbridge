@@ -32,10 +32,10 @@
   "reports": {
     "completion_report_path": "docs/2026-08-28-2026-08-26-codex-remote-backend-implementation-plan完成情况.md",
     "completion_report_status": "invalidated",
-    "last_generated_at": "2026-08-29T09:48:13Z",
+    "last_generated_at": "2026-08-29T09:53:00Z",
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-29T09:48:13Z",
+  "updated_at": "2026-08-29T09:53:00Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -2201,7 +2201,7 @@
               "agent/codex-remote/session.go:AttachLiveThread/AttachProjectionLiveSession",
               "go-bridge/handlers_projection.go:startProjectionLiveRelay"
             ],
-            "checked_at": "2026-08-29T09:48:13Z",
+            "checked_at": "2026-08-29T09:53:00Z",
         "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server/src/thread_state.rs:61; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs:335"
       }
     },
@@ -2232,7 +2232,7 @@
               "cmd:go test -race ./agent/codex-remote -count=1 => PASS",
               "cmd:go test ./go-bridge -run Test(ProjectionOpenAttachesLiveSessionBeforeFirstSend|CodexRemoteDescriptorOnlyAdvertisesImplementedCapabilities) -count=1 => PASS"
             ],
-            "checked_at": "2026-08-29T09:48:13Z",
+            "checked_at": "2026-08-29T09:53:00Z",
         "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server/src/thread_state.rs:61"
       }
     },
@@ -2258,13 +2258,13 @@
       "artifacts": [
         "git:2de5189a8bfd",
         "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED",
-        "runtime:/Applications/CordCodeLink.app PID 39406 TCP 8777 commit 2de5189a8bfd",
+        "runtime:/Applications/CordCodeLink.app PID 47431 TCP 8777 commit cd5ff9b18c80",
         "cmd:management status => runtime ready; codex-remote ready/online; relay connected",
         "cmd:./scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05 => blocked: Xcode No Accounts / missing provisioning profiles",
         "cmd:unsigned iOS xcodebuild build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO => BUILD SUCCEEDED",
         "owner-device:open session without sending, then Desktop send => pending"
       ],
-      "checked_at": "2026-08-29T09:48:13Z",
+      "checked_at": "2026-08-29T09:53:00Z",
         "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server/src/thread_state.rs:61"
       }
     },
@@ -2295,7 +2295,7 @@
           "upstream:/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/model.rs",
           "upstream:/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/turn.rs"
         ],
-            "checked_at": "2026-08-29T09:48:13Z",
+            "checked_at": "2026-08-29T09:53:00Z",
         "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:1038; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/model.rs:53; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/turn.rs:152"
       }
     },
@@ -2324,7 +2324,7 @@
               "cmd:go test -race ./agent/codex-remote -count=1 => PASS",
               "cmd:go vet ./... => PASS"
             ],
-            "checked_at": "2026-08-29T09:48:13Z",
+            "checked_at": "2026-08-29T09:53:00Z",
         "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/model.rs:53; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/turn.rs:152"
       }
     },
@@ -2355,7 +2355,7 @@
         "cmd:./scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05 => blocked: Xcode No Accounts / missing provisioning profiles",
         "owner-device:Codex Desktop model menu and selected model/effort honored on iOS => pending"
       ],
-      "checked_at": "2026-08-29T09:48:13Z",
+      "checked_at": "2026-08-29T09:53:00Z",
         "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/model.rs:53; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/turn.rs:152"
       }
     },

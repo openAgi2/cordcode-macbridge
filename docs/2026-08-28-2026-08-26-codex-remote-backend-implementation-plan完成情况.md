@@ -8,7 +8,7 @@
 - Completion Report Verdict: `audit-invalidated`
 - Queue Summary: `90/93 todos done; phase5-gate-regression blocked; session-open review-fix regression in progress; model-catalog review-fix regression pending`
 - Related Commits: Mac `2de5189a8bfd`; iOS `ed60f99`
-- Generated At: `2026-08-29T09:48:00Z`
+- Generated At: `2026-08-29T09:53:00Z`
 
 ## 1. Overall Verdict (总体结论)
 
@@ -54,14 +54,14 @@
 
 ### 4.1 Automated tests
 - Commands: `go test ./... -count=1 -timeout 300s` (PASS); `go test -race ./agent/codex-remote -count=1` (PASS); focused `go-bridge` projection/capability tests (PASS); `go vet ./...` (PASS); `git diff --check` (PASS)。
-- Release: `./scripts/build-unsigned-release.sh` (PASS, `** BUILD SUCCEEDED **`, runtime commit `2de5189a8bfd`).
+- Release: `./scripts/build-unsigned-release.sh` (PASS, `** BUILD SUCCEEDED **`, runtime commit `cd5ff9b18c80`).
 - Additional check: `go test -race ./go-bridge -count=1` remains blocked by a pre-existing global fast-relay poll-interval race in `claude_file_relay_test.go`/`handlers_relay.go`; it is unrelated to this Remote change and was not modified.
 - Attestation: `re-verified`
 - Main test files: `agent/codex-appserver/rpc/client_test.go`, `agent/codex-remote/*_test.go`, `agent/codex-web/*_test.go`, `go-bridge/*codex_remote*_test.go`, `go-bridge/*projection*_test.go`
 - Artifact paths: `agent/codex-remote/testdata/phase5/validation.txt`, `agent/codex-remote/testdata/phase2/validation.txt`, `agent/codex-remote/testdata/phase4/validation.txt`
 
 ### 4.2 Regression evidence
-- Mac Release 已覆盖安装：`/Applications/CordCodeLink.app` 当前 runtime PID `39406`，监听 TCP `8777`；management status 为 runtime `ready`、Remote `ready/online`，relay connected。旧 app 已可恢复地移至 `/tmp/CordCodeLink.previous.FlCjMj`。
+- Mac Release 已在最终文档状态提交后重新构建并覆盖安装：`/Applications/CordCodeLink.app` 当前 runtime PID `47431`，监听 TCP `8777`；management status 为 runtime `ready`、Remote `ready/online`，relay connected。旧 app 已可恢复地移至 `/tmp/CordCodeLink.previous.axnOHY`。
 - iOS 修改已提交 `ed60f99`；已按真机要求执行 `./scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05`，真实安装被 Xcode `No Accounts`/缺少 `org.openagi.cordcode` 与 `org.openagi.cordcode.share` provisioning profiles 阻断；随后 `CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO xcodebuild build ...` 通过（`BUILD SUCCEEDED`）。
 - Owner device verification is still required: open-only session must receive a Desktop-originated turn, and the model menu must show the live catalog and honor a selected model/effort.
 - Attestation: `self-attested` for local build/install; owner device behavior remains unverified.
@@ -77,7 +77,7 @@
 - 本轮未运行 UI test、snapshot test、simulator automation 或真机自动点击；owner 报告的双向 E2E 属 self-attested。
 - 最终安装后的本地观察窗仍较短；若绑定后约 2 秒死亡，应按 `stream_id` 风暴复发处理。
 - 当前 runtime 每分钟仍记录一次 `codex-remote: request thread/list canceled: context deadline exceeded` 的 discovery warning；不影响 pairing status，但需在 owner session-list 回归中确认是否为 Desktop app-server 的实际响应边界。
-- iOS 工作树已在 `ed60f99` 清洁；真机安装待 Xcode 账号与 provisioning profiles 恢复后重跑。
+- iOS 工作树已在 `ed60f99` 清洁；Mac 工作树仅保留未跟踪 handoff 文件；真机安装待 Xcode 账号与 provisioning profiles 恢复后重跑。
 
 ## 6. Audit Focus (建议审核重点)
 
