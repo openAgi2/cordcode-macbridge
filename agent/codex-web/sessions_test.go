@@ -485,9 +485,7 @@ func TestCatalogCtxCancel(t *testing.T) {
 	if time.Since(start) > time.Second {
 		t.Fatal("取消应即时生效")
 	}
-	c.mu.Lock()
-	pending := len(c.pending)
-	c.mu.Unlock()
+	pending := c.pendingCount()
 	if pending != 0 {
 		t.Fatalf("pending 应清空，剩 %d", pending)
 	}

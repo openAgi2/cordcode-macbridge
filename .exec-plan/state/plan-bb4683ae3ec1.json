@@ -35,7 +35,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-29T06:45:46Z",
+  "updated_at": "2026-08-29T08:02:30Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -1911,33 +1911,35 @@
       "id": "phase5-authorization-audit-impl",
       "title": "Phase 5 authorization and duplication audit — impl",
       "description": "After both backends have real E2E and a stable observation window, obtain explicit owner authorization for the separate common-core task and audit only proven duplication. Without authorization, do not enter Phase 5.",
-      "status": "blocked",
+      "status": "done",
       "phase": "phase5",
       "kind": "impl",
       "depends_on": [
         "phase4-gate-regression"
       ],
       "source": "Phase 5; §5.5",
-      "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
+      "notes": "Owner authorization and a 53-minute stable observation window are present. Audit permits only the proven transport-neutral RPC extraction; codec/history/sessions/interactions/models remain backend-owned.",
       "verification": {
         "required": true,
         "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
-        "na_reason": "Phase 5 requires explicit owner authorization after a stable real E2E observation window; the current request does not grant that separate common-core refactor authorization.",
-        "summary": "Did not enter common-core extraction. Recorded the authorization boundary and left dependent Phase 5 todos pending.",
+        "na_reason": null,
+        "summary": "Opened the Phase 5 gate after owner-confirmed bidirectional E2E, a 53-minute stable runtime window and repeated explicit instructions to execute the remaining tasks. Audited duplication and limited extraction scope to the shared RPC algorithm.",
         "artifacts": [
           "agent/codex-remote/testdata/phase5/authorization-gate.md",
+          "agent/codex-remote/testdata/phase5/authorization-audit.md",
           "docs/2026-08-26-codex-remote-backend-implementation-plan.md §5.5"
         ],
-        "checked_at": "2026-08-29T06:43:00Z"
+        "checked_at": "2026-08-29T07:44:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs:216"
       }
     },
     {
       "id": "phase5-authorization-audit-tests",
       "title": "Phase 5 authorization and duplication audit — tests",
       "description": "Run or create the targeted automated/static/replay checks that directly prove: After both backends have real E2E and a stable observation window, obtain explicit owner authorization for the separate common-core task and audit only proven duplication. Without authorization, do not enter Phase 5.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "tests",
       "depends_on": [
@@ -1947,20 +1949,26 @@
       "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Static authorization audit validates the plan gate, opened-gate evidence, rpc-only duplication decision, negative extraction decisions, and official Codex app-server client anchors.",
+        "artifacts": [
+          "agent/codex-appserver/validate/phase5-authorization.mjs",
+          "agent/codex-remote/testdata/phase5/authorization-audit.md",
+          "cmd:node --check agent/codex-appserver/validate/phase5-authorization.mjs => PASS",
+          "cmd:node agent/codex-appserver/validate/phase5-authorization.mjs => PHASE5-AUTHORIZATION-AUDIT PASS"
+        ],
+        "checked_at": "2026-08-29T07:45:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs:216"
       }
     },
     {
       "id": "phase5-authorization-audit-regression",
       "title": "Phase 5 authorization and duplication audit — regression",
       "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "regression",
       "depends_on": [
@@ -1970,20 +1978,27 @@
       "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Rechecked the live installed Remote controller as ready/online after the stable window, validated frozen pre-extraction backend boundaries, formatting and secret scans, and preserved owner E2E evidence as self-attested.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase5/authorization-audit.md",
+          "cmd:git diff --check => PASS",
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex => PASS before extraction",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-appserver agent/codex-remote => no leaks",
+          "cmd:authenticated remote-control status => ready, online=true"
+        ],
+        "checked_at": "2026-08-29T07:46:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs:216"
       }
     },
     {
       "id": "phase5-common-core-impl",
       "title": "Transport-neutral common core extraction — impl",
       "description": "Only after the authorization gate, extract proven transport-neutral rpc/codec/sessions/interactions/models while keeping identities, epochs, capabilities and diagnostics independent; do not fold lifecycle/auth/ownership together.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "impl",
       "depends_on": [
@@ -1993,20 +2008,27 @@
       "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Extracted the proven transport-neutral JSON-RPC algorithm into agent/codex-appserver/rpc and replaced both backend copies with thin policy adapters. Preserved backend-specific error text, lifecycle, transport ownership and distinct IsClosed semantics; left codec/history/sessions/interactions/models separate after the negative duplication audit.",
+        "artifacts": [
+          "agent/codex-appserver/rpc/client.go",
+          "agent/codex-appserver/README.md",
+          "agent/codex-web/rpc.go",
+          "agent/codex-remote/rpc.go",
+          "agent/codex-remote/testdata/phase5/common-core-extraction.md"
+        ],
+        "checked_at": "2026-08-29T07:52:38Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs:216; /Users/jacklee/Projects/codex/codex-rs/app-server-client/src/lib.rs:333"
       }
     },
     {
       "id": "phase5-common-core-tests",
       "title": "Transport-neutral common core extraction — tests",
       "description": "Run or create the targeted automated/static/replay checks that directly prove: Only after the authorization gate, extract proven transport-neutral rpc/codec/sessions/interactions/models while keeping identities, epochs, capabilities and diagnostics independent; do not fold lifecycle/auth/ownership together.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "tests",
       "depends_on": [
@@ -2016,20 +2038,27 @@
       "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Race tests pass for the shared RPC core, the complete codex-web and codex-remote packages, repeated backend RPC/cancellation/reconnect/server-request cases, and focused go-bridge projection/topology/capability integration.",
+        "artifacts": [
+          "agent/codex-appserver/rpc/client_test.go",
+          "agent/codex-remote/testdata/phase5/validation.txt",
+          "cmd:go test -race ./agent/codex-appserver/... ./agent/codex-web ./agent/codex-remote -count=1 -timeout 240s => PASS",
+          "cmd:repeated shared/web/remote RPC race suites => PASS",
+          "cmd:focused go-bridge Remote/topology/projection race suite => PASS"
+        ],
+        "checked_at": "2026-08-29T07:55:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs:216; /Users/jacklee/Projects/codex/codex-rs/app-server-client/src/lib.rs:333"
       }
     },
     {
       "id": "phase5-common-core-regression",
       "title": "Transport-neutral common core extraction — regression",
       "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "regression",
       "depends_on": [
@@ -2039,20 +2068,27 @@
       "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Boundary regression proves the common package contains only transport-neutral RPC, does not import either backend, preserves each backend's distinct close/error policy, leaves agent/codex unchanged, limits codex-web changes to the authorized wrapper set, keeps the iOS worktree clean and passes secret scans.",
+        "artifacts": [
+          "agent/codex-appserver/validate/phase5-boundary.mjs",
+          "agent/codex-remote/validate/ios-codex-remote-audit.mjs --phase5",
+          "agent/codex-remote/testdata/phase5/validation.txt",
+          "cmd:git diff --exit-code -- agent/codex => PASS",
+          "cmd:gitleaks detect --no-git --source agent/codex-appserver agent/codex-remote agent/codex-web => no leaks"
+        ],
+        "checked_at": "2026-08-29T07:57:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs:216; /Users/jacklee/Projects/codex/codex-rs/app-server-client/src/lib.rs:333"
       }
     },
     {
       "id": "phase5-gate-impl",
       "title": "Gate P5 adjudication — impl",
       "description": "Prove both backends retain their real E2E semantics, independent rollback and frozen legacy behavior after the separately authorized extraction; otherwise leave Phase 5 incomplete.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "impl",
       "depends_on": [
@@ -2062,20 +2098,25 @@
       "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Gate P5 adjudication records the owner authorization and stable observation window, proves both backends retain separate identity, lifecycle, transport, error, capability and diagnostics contracts, and documents a source-only independently reversible rollback.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase5/gate-p5.md",
+          "agent/codex-remote/testdata/phase5/authorization-audit.md",
+          "agent/codex-remote/testdata/phase5/common-core-extraction.md"
+        ],
+        "checked_at": "2026-08-29T08:00:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs:216; /Users/jacklee/Projects/codex/codex-rs/app-server-client/src/lib.rs:333"
       }
     },
     {
       "id": "phase5-gate-tests",
       "title": "Gate P5 adjudication — tests",
       "description": "Run or create the targeted automated/static/replay checks that directly prove: Prove both backends retain their real E2E semantics, independent rollback and frozen legacy behavior after the separately authorized extraction; otherwise leave Phase 5 incomplete.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "tests",
       "depends_on": [
@@ -2085,20 +2126,27 @@
       "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Gate P5 automated re-verification passes the full common/web/remote race suite, focused bridge Remote/topology/projection race suite, every Go package test, authorization and boundary validators, and the Phase 5-aware iOS source audit.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase5/validation.txt",
+          "cmd:go test -race ./agent/codex-appserver/... ./agent/codex-web ./agent/codex-remote -count=1 -timeout 240s => PASS",
+          "cmd:focused go-bridge Remote/topology/projection race suite => PASS",
+          "cmd:go test ./... -count=1 -timeout 300s => PASS",
+          "cmd:Phase 5 authorization/boundary/iOS source validators => PASS"
+        ],
+        "checked_at": "2026-08-29T08:02:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs:216; /Users/jacklee/Projects/codex/codex-rs/app-server-client/src/lib.rs:333"
       }
     },
     {
       "id": "phase5-gate-regression",
       "title": "Gate P5 adjudication — regression",
       "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "phase5",
       "kind": "regression",
       "depends_on": [

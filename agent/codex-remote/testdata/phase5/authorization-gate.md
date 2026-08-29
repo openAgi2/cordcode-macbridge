@@ -4,13 +4,17 @@ Phase 5 is an explicitly separate follow-up in the implementation plan. It may
 start only after both backends have real end-to-end evidence, a stable observation
 window, and an explicit owner authorization to extract a common core.
 
-Current evidence establishes the implemented Remote surface, owner-confirmed
-bidirectional projection, focused race coverage, and independent topology/rollback
-boundaries. It does not establish the required long observation window or authorize
-the transport-neutral `codex-appserver` extraction.
+The gate was opened on 2026-08-29 after all three prerequisites became true:
 
-Therefore no Phase 5 implementation, refactor, or speculative duplication cleanup
-is entered. The authorization/audit todo is recorded as **blocked** with the
-concrete reason “explicit owner authorization after the stable observation window
-is missing”; dependent Phase 5 todos remain pending. This preserves the working
-`codex-web` and `codex-remote` identities and keeps rollback reversible.
+1. The owner confirmed real Desktop-to-iPhone and iPhone-to-Desktop projection.
+2. The installed runtime remained online for 53 minutes. Its only stream loss was
+   followed by a successful rebind in 3.4 seconds; no reconnect storm followed.
+3. The owner then explicitly and repeatedly instructed this task to continue the
+   remaining plan work, authorizing the separate Phase 5 task.
+
+The duplication audit permits extraction only where both backends already carry
+the same transport-neutral algorithm. RPC correlation, ordered notification and
+server-request routing, response/error framing, timeout/cancel handling and
+bounded shutdown meet that bar. Codec, history, sessions, interactions and models
+do not: their supported surfaces and lifecycle policies differ, or Remote does not
+advertise the capability. Those areas remain backend-owned.

@@ -7,9 +7,16 @@ import { fileURLToPath } from "node:url";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "../../..");
-const iosRoot = process.argv[2] ?? "/Users/jacklee/Projects/cordcode-ios-codex-remote";
+const phase5 = process.argv.includes("--phase5");
+const positionalArgs = process.argv.slice(2).filter((argument) => argument !== "--phase5");
+const iosRoot = positionalArgs[0] ?? "/Users/jacklee/Projects/cordcode-ios-codex-remote";
 const baseline = "d0762cb9a05997b615ef4589f39afad8f4b4db04";
 const expectedBranch = "codex/codex-remote-backend-ios";
+const phase5CodexWebPaths = [
+  "agent/codex-web/codexweb.go",
+  "agent/codex-web/rpc.go",
+  "agent/codex-web/sessions_test.go",
+];
 
 function run(command, args, cwd = repoRoot) {
   return execFileSync(command, args, {
@@ -79,7 +86,22 @@ expectFileContains("OpenCodeiOS/OpenCodeiOSTests/AgentRuntimeStatusTests.swift",
   "testCodexRemoteUsesCodexRuntimePresentationSource",
 ]);
 
-expect(run("git", ["diff", "--name-only", "--", "agent/codex-web", "agent/codex"]) === "", "legacy Codex backend directories have worktree changes");
+expect(run("git", ["diff", "--name-only", "--", "agent/codex"]) === "", "legacy Codex backend directory has worktree changes");
+
+let legacyBackendDiff = "clean";
+if (phase5) {
+  const changedCodexWebPaths = run("git", ["diff", "--name-only", "--", "agent/codex-web"])
+    .split("\n")
+    .filter(Boolean)
+    .sort();
+  expect(
+    JSON.stringify(changedCodexWebPaths) === JSON.stringify([...phase5CodexWebPaths].sort()),
+    `Phase 5 codex-web changes differ from the authorized RPC wrapper set: ${changedCodexWebPaths.join(", ")}`,
+  );
+  legacyBackendDiff = "phase5-authorized-rpc-wrapper-only";
+} else {
+  expect(run("git", ["diff", "--name-only", "--", "agent/codex-web"]) === "", "legacy Codex backend directory has worktree changes");
+}
 
 console.log(JSON.stringify({
   result: "PASS",
@@ -88,6 +110,6 @@ console.log(JSON.stringify({
   baseline,
   branch: expectedBranch,
   worktree: "clean",
-  legacyBackendDiff: "clean",
+  legacyBackendDiff,
   note: "This validator proves source wiring and ancestry only; it does not claim Swift compilation, UI automation, or a physical-device observation.",
 }, null, 2));
