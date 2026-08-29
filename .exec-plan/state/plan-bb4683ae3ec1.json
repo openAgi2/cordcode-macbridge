@@ -31,11 +31,11 @@
   },
   "reports": {
     "completion_report_path": "docs/2026-08-28-2026-08-26-codex-remote-backend-implementation-plan完成情况.md",
-    "completion_report_status": "missing",
-    "last_generated_at": null,
-    "based_on_queue_hash": null
+    "completion_report_status": "current",
+    "last_generated_at": "2026-08-29T08:05:30Z",
+    "based_on_queue_hash": "65b2188455ba"
   },
-  "updated_at": "2026-08-29T08:02:30Z",
+  "updated_at": "2026-08-29T08:05:30Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -2146,7 +2146,7 @@
       "id": "phase5-gate-regression",
       "title": "Gate P5 adjudication — regression",
       "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase5",
       "kind": "regression",
       "depends_on": [
@@ -2156,13 +2156,21 @@
       "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Release build succeeded at commit ca9c223e47df, was recoverably coverage-installed to /Applications, and launched PID 41727 from the installed bundle on TCP 8777. Authenticated management checks reported runtime ready and codex-remote ready/online; the 51.8-second post-install window showed one normal bind/restore and no 2-second death, stale-stream loop or reconnect storm.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase5/gate-p5.md",
+          "agent/codex-remote/testdata/phase5/validation.txt",
+          "git:ca9c223e47df",
+          "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED",
+          "runtime:/Applications/CordCodeLink.app PID 41727 TCP 8777 commit ca9c223e47df",
+          "cmd:authenticated management status => runtime ready; codex-remote ready/online"
+        ],
+        "checked_at": "2026-08-29T08:04:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs:216; /Users/jacklee/Projects/codex/codex-rs/app-server-client/src/lib.rs:333"
       }
     },
     {

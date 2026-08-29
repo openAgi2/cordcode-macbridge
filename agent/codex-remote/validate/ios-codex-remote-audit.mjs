@@ -94,11 +94,18 @@ if (phase5) {
     .split("\n")
     .filter(Boolean)
     .sort();
-  expect(
-    JSON.stringify(changedCodexWebPaths) === JSON.stringify([...phase5CodexWebPaths].sort()),
-    `Phase 5 codex-web changes differ from the authorized RPC wrapper set: ${changedCodexWebPaths.join(", ")}`,
-  );
-  legacyBackendDiff = "phase5-authorized-rpc-wrapper-only";
+  if (changedCodexWebPaths.length > 0) {
+    expect(
+      JSON.stringify(changedCodexWebPaths) === JSON.stringify([...phase5CodexWebPaths].sort()),
+      `Phase 5 codex-web changes differ from the authorized RPC wrapper set: ${changedCodexWebPaths.join(", ")}`,
+    );
+    legacyBackendDiff = "phase5-authorized-rpc-wrapper-only";
+  } else {
+    const codexWebRPC = readFileSync(path.join(repoRoot, "agent/codex-web/rpc.go"), "utf8");
+    expect(codexWebRPC.includes("agent/codex-appserver/rpc"), "committed codex-web RPC wrapper does not use the shared core");
+    expect(codexWebRPC.includes("IsLocallyClosed()"), "committed codex-web RPC wrapper lost its local-close policy");
+    legacyBackendDiff = "phase5-rpc-wrapper-committed";
+  }
 } else {
   expect(run("git", ["diff", "--name-only", "--", "agent/codex-web"]) === "", "legacy Codex backend directory has worktree changes");
 }

@@ -51,3 +51,28 @@ PASS (all Go packages)
 
 Phase 5 authorization validator, boundary validator and iOS source audit
 PASS
+
+Release deployment regression (2026-08-29)
+
+./scripts/build-unsigned-release.sh
+PASS (** BUILD SUCCEEDED **)
+runtime: cordcode-bridge-runtime 0.1.0, commit ca9c223e47df
+
+Release coverage install
+PASS
+application: /Applications/CordCodeLink.app
+runtime PID: 41727
+listener: PID 41727, TCP *:8777
+prior application preserved at: /tmp/cordcode-install.0A529m/CordCodeLink.app
+
+Authenticated management checks after install
+PASS
+runtime status: ready
+codex-remote phase: ready
+codex-remote online: true
+observation: 51.8 seconds uptime; stream_bound/restored once; no stream_lost,
+2-second death, stale-stream loop or reconnect storm after binding
+
+Exec-plan final internal audit
+PASS (87/87 done; all required proof present; 3 justified n/a; queue hash
+65b2188455ba; completion report current)

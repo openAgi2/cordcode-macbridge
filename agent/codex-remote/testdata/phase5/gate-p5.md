@@ -2,8 +2,8 @@
 
 Checked at: 2026-08-29
 
-Verdict: **PASS**, subject to the final build/install/runtime regression recorded
-in `validation.txt`.
+Verdict: **PASS**. The final build/install/runtime regression is recorded in
+`validation.txt`.
 
 ## Entry gate
 
