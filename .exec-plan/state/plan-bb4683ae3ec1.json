@@ -35,7 +35,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-28T13:10:05Z",
+  "updated_at": "2026-08-29T05:33:56Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -73,22 +73,23 @@
         "phase0-source-baseline-impl"
       ],
       "source": "Phase 0 tasks 1-2",
-      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0. resolved-via:phase0-source-baseline-audit-review-fix-regression",
       "verification": {
         "required": true,
         "status": "present",
         "method": "automated",
         "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Re-ran the source-baseline validator against the live installed App hashes/version, embedded Codex, upstream tag/HEAD/diff, internal ASAR bundle hashes and controller call-site literals, plus host source constants. The first run exposed a dynamic-template assertion bug; the repaired validator then passed without weakening product evidence gates.",
+        "summary": "Re-verified the complete source and binary provenance baseline against the current clean authorized iOS descendant cafadc8; the immutable d0762cb9 Phase 0 baseline remains an enforced ancestor, and a pre-baseline candidate fails closed.",
         "artifacts": [
           "agent/codex-remote/validate/source-baseline.mjs",
           "agent/codex-remote/testdata/phase0/meta/source-baseline-validation.txt",
+          "agent/codex-remote/testdata/phase0/meta/source-baseline-ancestry-negative.txt",
           "cmd:node --check agent/codex-remote/validate/source-baseline.mjs",
           "cmd:node agent/codex-remote/validate/source-baseline.mjs => PASS",
           "git:3e3854321e40a9d51c524f90509bdd850e08c6d4"
         ],
-        "checked_at": "2026-08-28T08:42:11Z"
+        "checked_at": "2026-08-29T05:35:11Z"
       }
     },
     {
@@ -157,20 +158,21 @@
         "phase0-probe-scaffold-impl"
       ],
       "source": "§5.1; Phase 0",
-      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0. resolved-via:phase0-boundary-metadata-audit-review-fix-regression",
       "verification": {
         "required": true,
         "status": "present",
         "method": "automated",
         "attestation": "re-verified",
         "na_reason": null,
-        "summary": "The replayable Phase 0 boundary validator confirms the only top-level entries are README/probe/testdata/validate, all 14 Gate rows are present, no probe code registers or imports legacy backends, frozen backend delivery/worktree diffs are clean, and the paired iOS worktree remains frozen and clean. It explicitly reports productBackendRegistered=false and gateP0Passed=false.",
+        "summary": "Re-verified the Phase 0/1 directory boundary with an explicit .DS_Store-only metadata policy; isolated tests prove unknown files and directories still fail closed.",
         "artifacts": [
           "agent/codex-remote/validate/phase0-boundary.mjs",
           "agent/codex-remote/testdata/phase0/meta/phase0-boundary-validation.txt",
+          "agent/codex-remote/testdata/phase0/meta/boundary-policy-test.txt",
           "git:1d411040bc622f0faf0387f3a23e7c428e08b511"
         ],
-        "checked_at": "2026-08-28T09:21:08Z"
+        "checked_at": "2026-08-29T05:37:34Z"
       }
     },
     {
@@ -237,21 +239,21 @@
         "phase0-controller-fixtures-impl"
       ],
       "source": "Phase 0 tasks 2-3",
-      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker. resolved-via:phase0-boundary-metadata-audit-review-fix-regression",
       "verification": {
         "required": true,
         "status": "present",
         "method": "automated",
         "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Re-ran controller-fixtures static preflight and Phase 1 boundary validator. ASAR frozen target still matches; live fixture count is 8.",
+        "summary": "Re-ran controller-fixtures.mjs against the installed ASAR and eight live fixtures, then passed the repaired boundary replay with frozen backend directories and authorized clean iOS ancestry.",
         "artifacts": [
           "agent/codex-remote/testdata/phase0/meta/controller-fixture-preflight.txt",
           "agent/codex-remote/testdata/phase0/meta/phase1-boundary-validation.txt",
           "cmd:node agent/codex-remote/validate/controller-fixtures.mjs => PASS",
           "cmd:node agent/codex-remote/validate/phase0-boundary.mjs => PASS"
         ],
-        "checked_at": "2026-08-28T12:44:28Z"
+        "checked_at": "2026-08-29T05:37:34Z"
       }
     },
     {
@@ -329,7 +331,7 @@
           "cmd:node --check agent/codex-remote/probe/live_controller.mjs",
           "agent/codex-remote/testdata/phase0/meta/controller-fixture-preflight.txt"
         ],
-        "checked_at": "2026-08-28T12:44:28Z"
+        "checked_at": "2026-08-29T05:33:56Z"
       }
     },
     {
@@ -404,7 +406,7 @@
         "artifacts": [
           "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"
         ],
-        "checked_at": "2026-08-28T12:44:28Z"
+        "checked_at": "2026-08-29T05:00:37Z"
       }
     },
     {
@@ -555,7 +557,7 @@
         "artifacts": [
           "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"
         ],
-        "checked_at": "2026-08-28T12:44:28Z"
+        "checked_at": "2026-08-29T05:33:56Z"
       }
     },
     {
@@ -621,18 +623,18 @@
         "phase0-gate-impl"
       ],
       "source": "Gate P0; §§8-13",
-      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker. resolved-via:phase0-boundary-metadata-audit-review-fix-regression",
       "verification": {
         "required": true,
         "status": "present",
         "method": "automated",
         "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Boundary validator now reports phase 1, productBackendRegistered true, rewritten live gate.",
+        "summary": "The repaired boundary validator re-verifies the owner-rewritten Gate P0 result, frozen backend directories, explicit known-gap classification, and authorized clean iOS descendant.",
         "artifacts": [
           "agent/codex-remote/testdata/phase0/meta/phase1-boundary-validation.txt"
         ],
-        "checked_at": "2026-08-28T12:44:28Z"
+        "checked_at": "2026-08-29T05:37:34Z"
       }
     },
     {
@@ -702,20 +704,20 @@
         "phase1-identity-lifecycle-impl"
       ],
       "source": "Phase 1 tasks 1-2,6",
-      "notes": "Phase 1 identity: BackendID=codex-remote registered, fail-closed, not in default Mac drivers.",
+      "notes": "Phase 1 identity: BackendID=codex-remote registered, fail-closed, not in default Mac drivers. resolved-via:phase0-boundary-metadata-audit-review-fix-regression",
       "verification": {
         "required": true,
         "status": "present",
         "method": "automated",
         "attestation": "re-verified",
         "na_reason": null,
-        "summary": "go test ./agent/codex-remote and targeted go-bridge identity tests passed. Provenance forbids retired Codex and Codex Web imports. Boundary validator reports product backend registered.",
+        "summary": "Re-ran the codex-remote race suite and repaired boundary validator; identity/lifecycle tests, frozen backend isolation, secret scan, and authorized clean iOS ancestry all pass.",
         "artifacts": [
           "agent/codex-remote/testdata/phase0/meta/phase1-identity-test.txt",
           "agent/codex-remote/testdata/phase0/meta/phase1-boundary-validation.txt",
           "cmd:go test ./agent/codex-remote -count=1 => PASS"
         ],
-        "checked_at": "2026-08-28T12:45:00Z"
+        "checked_at": "2026-08-29T05:37:34Z"
       }
     },
     {
@@ -799,7 +801,7 @@
           "agent/codex-remote/testdata/phase1/transport-rpc-test.txt",
           "cmd:go test ./agent/codex-remote -count=1 -timeout 15s => PASS"
         ],
-        "checked_at": "2026-08-28T13:10:05Z"
+        "checked_at": "2026-08-29T05:33:56Z"
       }
     },
     {
@@ -879,7 +881,7 @@
           "agent/codex-remote/testdata/phase1/transport-rpc-test.txt",
           "cmd:go test ./agent/codex-remote -count=1 -timeout 15s => PASS"
         ],
-        "checked_at": "2026-08-28T13:10:05Z"
+        "checked_at": "2026-08-29T05:33:56Z"
       }
     },
     {
@@ -946,27 +948,27 @@
         "phase1-gate-impl"
       ],
       "source": "Gate P1",
-      "notes": "Envelope stream Transport + whitelist rpc.go + Phase 1 text vertical on fake host. Live Desktop batched in OWNER_MANUAL_CHECKLIST.md.",
+      "notes": "Envelope stream Transport + whitelist rpc.go + Phase 1 text vertical on fake host. Live Desktop evidence now includes owner-confirmed iOS↔Desktop bidirectional synchronization. resolved-via:phase0-boundary-metadata-audit-review-fix-regression",
       "verification": {
         "required": true,
         "status": "present",
         "method": "automated",
         "attestation": "re-verified",
         "na_reason": null,
-        "summary": "go test ./agent/codex-remote PASS; phase0-boundary reports phase 1 registered backend; frozen dirs clean.",
+        "summary": "Re-ran the codex-remote race suite and repaired boundary gate; automated Phase 1 transport checks pass, with owner-confirmed bidirectional iOS↔Codex Desktop messaging reserved for the regression todo.",
         "artifacts": [
           "agent/codex-remote/testdata/phase0/meta/phase1-boundary-validation.txt",
           "agent/codex-remote/testdata/phase1/transport-rpc-test.txt",
           "cmd:go test ./agent/codex-remote -count=1 -timeout 15s => PASS"
         ],
-        "checked_at": "2026-08-28T13:10:05Z"
+        "checked_at": "2026-08-29T05:37:34Z"
       }
     },
     {
       "id": "phase1-gate-regression",
       "title": "Gate P1 adjudication — regression",
       "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
-      "status": "pending",
+      "status": "blocked",
       "phase": "phase1",
       "kind": "regression",
       "depends_on": [
@@ -976,13 +978,18 @@
       "notes": "Owner-batched real Desktop checklist. Do not mark done until OWNER_MANUAL_CHECKLIST.md is executed.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "failed",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "REAL-DEVICE REGRESSION EXPOSED A HEAVY FAILURE: owner-confirmed bidirectional messaging passed, but the same runtime later accumulated thread/list timeouts and projection.hydrate_failed while Remote Control still reported ready. Official codex app-server-client requires unread events never block request responses; the local client has bounded event queues and a reconnect-fragile single pump.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase1/OWNER_MANUAL_CHECKLIST.md",
+          "/Users/jacklee/Library/Application Support/CordCode Link/logs/go-bridge.log",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/lib.rs",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs"
+        ],
+        "checked_at": "2026-08-29T05:41:00Z"
       }
     },
     {
@@ -1940,6 +1947,247 @@
       ],
       "source": "Phase 5",
       "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-source-baseline-audit-review-fix-impl",
+      "title": "Make the Phase 0 source-baseline validator progression-safe — review fix impl",
+      "description": "review-fix-for:phase0-source-baseline-tests. Preserve the immutable Phase 0 iOS baseline and provenance checks while allowing the authorized companion branch to advance after Phase 3; validate clean branch plus baseline ancestry instead of permanently requiring current HEAD equality.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-source-baseline-impl"
+      ],
+      "source": "2026-08-29 exec-plan audit",
+      "notes": "review-fix-for:phase0-source-baseline-tests",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Changed the source-baseline validator to preserve the frozen Phase 0 iOS commit as an ancestry floor while accepting the current clean authorized descendant branch; added an explicit candidate revision input for fail-closed verification.",
+        "artifacts": [
+          "agent/codex-remote/validate/source-baseline.mjs",
+          "agent/codex-remote/testdata/phase0/meta/source-baseline-validation.txt"
+        ],
+        "checked_at": "2026-08-29T05:35:11Z"
+      }
+    },
+    {
+      "id": "phase0-source-baseline-audit-review-fix-tests",
+      "title": "Re-verify the progression-safe source-baseline validator — review fix tests",
+      "description": "review-fix-for:phase0-source-baseline-tests. Run the validator against the current clean cafadc8-descended iOS worktree and add a negative fixture or isolated check proving an unrelated or non-descendant iOS HEAD still fails.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-source-baseline-audit-review-fix-impl"
+      ],
+      "source": "2026-08-29 exec-plan audit",
+      "notes": "review-fix-for:phase0-source-baseline-tests",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Re-ran the complete source-baseline validator against clean iOS HEAD cafadc8 descended from frozen baseline d0762cb9; a deterministic baseline-parent candidate failed the ancestry gate as expected.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/source-baseline-validation.txt",
+          "agent/codex-remote/testdata/phase0/meta/source-baseline-ancestry-negative.txt",
+          "cmd:node agent/codex-remote/validate/source-baseline.mjs => PASS"
+        ],
+        "checked_at": "2026-08-29T05:35:11Z"
+      }
+    },
+    {
+      "id": "phase0-source-baseline-audit-review-fix-regression",
+      "title": "Close the source-baseline audit repair — review fix regression",
+      "description": "review-fix-for:phase0-source-baseline-tests. Re-run the full source-baseline validator, confirm the archived baseline metadata is unchanged, and only then restore the original blocked todo with resolved-via evidence.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-source-baseline-audit-review-fix-tests"
+      ],
+      "source": "2026-08-29 exec-plan audit",
+      "notes": "review-fix-for:phase0-source-baseline-tests",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "The complete source-baseline validator passes, the archived source-baseline.json remains byte-for-byte unmodified in git diff, and the negative ancestry evidence remains fail-closed.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/source-baseline.json",
+          "agent/codex-remote/testdata/phase0/meta/source-baseline-validation.txt",
+          "agent/codex-remote/testdata/phase0/meta/source-baseline-ancestry-negative.txt"
+        ],
+        "checked_at": "2026-08-29T05:35:11Z"
+      }
+    },
+    {
+      "id": "phase0-boundary-metadata-audit-review-fix-impl",
+      "title": "Define a safe OS-metadata policy for the Phase 0 boundary validator — review fix impl",
+      "description": "review-fix-for:phase0-probe-scaffold-tests. Make phase0-boundary.mjs ignore only explicitly enumerated non-product OS metadata such as .DS_Store while continuing to reject every unrecognized source, product, executable, or directory entry.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-probe-scaffold-impl"
+      ],
+      "source": "2026-08-29 exec-plan audit",
+      "notes": "review-fix-for:phase0-probe-scaffold-tests; shared root cause also blocks phase0-controller-fixtures-tests, phase0-gate-tests, phase1-identity-lifecycle-tests, and phase1-gate-tests.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Extracted an explicit fail-closed top-level boundary policy that permits only .DS_Store as OS metadata, and made the iOS boundary progression-safe by requiring the authorized branch, a clean worktree, and ancestry from the frozen pre-Phase-3 commit.",
+        "artifacts": [
+          "agent/codex-remote/validate/boundary-policy.mjs",
+          "agent/codex-remote/validate/phase0-boundary.mjs"
+        ],
+        "checked_at": "2026-08-29T05:37:34Z"
+      }
+    },
+    {
+      "id": "phase0-boundary-metadata-audit-review-fix-tests",
+      "title": "Test the Phase 0 boundary metadata policy — review fix tests",
+      "description": "review-fix-for:phase0-probe-scaffold-tests. Re-run phase0-boundary.mjs with .DS_Store present and add an isolated negative case proving a non-enumerated file still fails closed.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-boundary-metadata-audit-review-fix-impl"
+      ],
+      "source": "2026-08-29 exec-plan audit",
+      "notes": "review-fix-for:phase0-probe-scaffold-tests",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "The isolated Node test proves .DS_Store is accepted while unknown source files and directories fail closed; the complete boundary validator passes with the clean cafadc8 iOS descendant.",
+        "artifacts": [
+          "agent/codex-remote/validate/boundary-policy.test.mjs",
+          "agent/codex-remote/testdata/phase0/meta/boundary-policy-test.txt",
+          "agent/codex-remote/testdata/phase0/meta/phase1-boundary-validation.txt",
+          "cmd:node --test agent/codex-remote/validate/boundary-policy.test.mjs => PASS"
+        ],
+        "checked_at": "2026-08-29T05:37:34Z"
+      }
+    },
+    {
+      "id": "phase0-boundary-metadata-audit-review-fix-regression",
+      "title": "Close all boundary-validator audit failures — review fix regression",
+      "description": "review-fix-for:phase0-probe-scaffold-tests. Re-run every done todo that depends on phase0-boundary.mjs, then restore each original blocked todo only with fresh resolved-via evidence.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-boundary-metadata-audit-review-fix-tests"
+      ],
+      "source": "2026-08-29 exec-plan audit",
+      "notes": "review-fix-for:phase0-probe-scaffold-tests; resolves the shared validator cause for five blocked test todos.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Replayed the complete boundary validator, controller fixture validator, codex-remote race suite, frozen-backend diff gate, and gitleaks scan; every shared dependent gate now passes.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/phase1-boundary-validation.txt",
+          "agent/codex-remote/testdata/phase0/meta/boundary-policy-test.txt",
+          "cmd:go test -race ./agent/codex-remote -count=1 -timeout 120s => PASS",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => PASS"
+        ],
+        "checked_at": "2026-08-29T05:37:34Z"
+      }
+    },
+    {
+      "id": "phase1-event-backpressure-review-fix-impl",
+      "title": "Prevent app-server events from blocking RPC responses — review fix impl",
+      "description": "review-fix-for:phase1-gate-regression. Match official codex app-server-client semantics: unread notifications or server requests must not block foreground RPC responses; start an event pump for every connection epoch and fail closed on unsupported server requests.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [
+        "phase1-gate-tests"
+      ],
+      "source": "2026-08-29 real-device regression and upstream codex app-server-client",
+      "notes": "review-fix-for:phase1-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Aligned the Go client with upstream codex app-server-client's non-blocking event invariant: every Client epoch owns a fresh event pump, and unsupported Phase 1 server requests are explicitly rejected instead of filling an unread bounded queue and hiding later RPC responses.",
+        "artifacts": [
+          "agent/codex-remote/agent.go",
+          "agent/codex-remote/rpc.go",
+          "agent/codex-remote/session.go",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/lib.rs",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs"
+        ],
+        "checked_at": "2026-08-29T05:43:47Z"
+      }
+    },
+    {
+      "id": "phase1-event-backpressure-review-fix-tests",
+      "title": "Reproduce and test event backpressure isolation — review fix tests",
+      "description": "review-fix-for:phase1-gate-regression. Flood server requests and replace a bound client epoch, then prove foreground RPC responses and notification delivery continue without bounded-channel deadlock.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "tests",
+      "depends_on": [
+        "phase1-event-backpressure-review-fix-impl"
+      ],
+      "source": "2026-08-29 real-device regression and upstream codex app-server-client",
+      "notes": "review-fix-for:phase1-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Race tests flooded 100 unsupported server requests ahead of a foreground response and replaced Client epochs repeatedly; RPC response delivery and new-epoch notifications remained live. The full codex-remote race suite and six relevant go-bridge tests passed repeatedly.",
+        "artifacts": [
+          "agent/codex-remote/session_test.go",
+          "agent/codex-remote/testdata/phase1/event-backpressure-test.txt",
+          "cmd:go test -race ./agent/codex-remote -count=1 -timeout 120s => PASS"
+        ],
+        "checked_at": "2026-08-29T05:47:45Z"
+      }
+    },
+    {
+      "id": "phase1-event-backpressure-review-fix-regression",
+      "title": "Close the app-server event backpressure regression — review fix regression",
+      "description": "review-fix-for:phase1-gate-regression. Build and install the repaired runtime, verify real Remote Control RPC remains responsive, preserve the owner bidirectional device evidence, and restore the original gate only with resolved-via evidence.",
+      "status": "in_progress",
+      "phase": "phase1",
+      "kind": "regression",
+      "depends_on": [
+        "phase1-event-backpressure-review-fix-tests"
+      ],
+      "source": "2026-08-29 real-device regression and upstream codex app-server-client",
+      "notes": "review-fix-for:phase1-gate-regression",
       "verification": {
         "required": true,
         "status": "missing",

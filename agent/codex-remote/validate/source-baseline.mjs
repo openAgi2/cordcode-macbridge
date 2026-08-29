@@ -14,6 +14,12 @@ const metadataPath = path.join(
   "agent/codex-remote/testdata/phase0/meta/source-baseline.json",
 );
 const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
+const iosCandidateFlag = process.argv.indexOf("--ios-candidate");
+const iosCandidate = iosCandidateFlag === -1 ? "HEAD" : process.argv[iosCandidateFlag + 1];
+
+if (iosCandidateFlag !== -1 && !iosCandidate) {
+  throw new Error("--ios-candidate requires a git revision");
+}
 
 function fail(message) {
   throw new Error(message);
@@ -73,11 +79,15 @@ expectEqual(
   metadata.ios.branch,
   "iOS branch",
 );
-expectEqual(
-  run("git", ["-C", metadata.ios.path, "rev-parse", "HEAD"]),
+const resolvedIOSCandidate = run("git", ["-C", metadata.ios.path, "rev-parse", iosCandidate]);
+run("git", [
+  "-C",
+  metadata.ios.path,
+  "merge-base",
+  "--is-ancestor",
   metadata.ios.commit,
-  "iOS commit",
-);
+  resolvedIOSCandidate,
+]);
 expectEqual(
   run("git", ["-C", metadata.ios.path, "status", "--porcelain"]),
   "",
@@ -233,6 +243,8 @@ console.log(
       gateEffect: metadata.gate_effect,
       chatgptVersion: metadata.chatgpt_desktop.short_version,
       embeddedCodexVersion: metadata.chatgpt_desktop.embedded_codex_version,
+      iosBaselineCommit: metadata.ios.commit,
+      iosCurrentCommit: resolvedIOSCandidate,
       controllerProtocolVersion: metadata.static_controller_findings.protocol_version,
       checkedBundles: metadata.asar_callsite_bundles.map((bundle) => bundle.path),
       note: "Static/source baseline verified; real relay/controller Gate P0 remains unproven.",

@@ -3,12 +3,9 @@
   "phase": 1,
   "productBackendRegistered": true,
   "gateP0Passed": "first-connect-live-with-known-gaps",
-  "allowedTopLevel": [
-    "README.md",
-    "probe",
-    "testdata",
-    "validate"
+  "ignoredTopLevelMetadata": [
+    ".DS_Store"
   ],
   "frozenBackendDiff": "clean",
-  "pairedIOS": "frozen-clean"
+  "pairedIOS": "authorized-descendant-clean"
 }

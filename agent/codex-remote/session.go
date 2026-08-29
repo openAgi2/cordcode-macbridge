@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -80,30 +81,48 @@ func (a *Agent) BindClient(cl *Client) {
 	if old != nil && old != cl {
 		_ = old.Close()
 	}
-	a.ensurePump()
+	a.startPump(cl)
 }
 
-func (a *Agent) ensurePump() {
-	a.mu.Lock()
-	cl := a.client
-	if cl == nil || a.pumpRunning {
-		a.mu.Unlock()
+// startPump mirrors the official app-server-client worker invariant: unread
+// events must never prevent a foreground response from being delivered. A
+// pump belongs to one Client/connection epoch; replacing a Client always
+// starts a new pump instead of sharing reconnect-fragile global state.
+func (a *Agent) startPump(cl *Client) {
+	if cl == nil {
 		return
 	}
-	a.pumpRunning = true
+	a.mu.Lock()
 	codec := a.codec
 	a.mu.Unlock()
 	go func() {
-		for n := range cl.Notifications() {
-			for _, ev := range codec.Decode(n) {
-				a.dispatch(ev)
+		notifications := cl.Notifications()
+		serverRequests := cl.ServerRequests()
+		for notifications != nil || serverRequests != nil {
+			select {
+			case n, ok := <-notifications:
+				if !ok {
+					notifications = nil
+					continue
+				}
+				for _, ev := range codec.Decode(n) {
+					a.dispatch(ev)
+				}
+			case request, ok := <-serverRequests:
+				if !ok {
+					serverRequests = nil
+					continue
+				}
+				// Phase 1 advertises no server-request interactions. Rejecting is
+				// fail-closed and, unlike leaving the bounded queue unread, lets the
+				// read loop continue to responses and liveness notifications.
+				if err := cl.RejectServerRequest(request.RequestID, -32601,
+					fmt.Sprintf("unsupported remote app-server request %q", request.Method)); err != nil {
+					slog.Warn("codex-remote failed to reject unsupported server request",
+						"method", request.Method, "error", err)
+				}
 			}
 		}
-		a.mu.Lock()
-		if a.client == cl {
-			a.pumpRunning = false
-		}
-		a.mu.Unlock()
 	}()
 }
 

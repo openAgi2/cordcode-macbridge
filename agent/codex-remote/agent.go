@@ -14,16 +14,15 @@ var ErrNotConfigured = fmt.Errorf("请先在 Mac 的 CordCode Link 里配对 Cod
 // Agent is the fail-closed Phase 1 identity. Transport, RPC and live turns
 // land in later Phase 1 units.
 type Agent struct {
-	mu          sync.Mutex
-	workDir     string
-	stopped     bool
-	client      *Client
-	codec       *LiveCodec
-	listeners   map[string]map[chan core.Event]struct{}
-	pumpRunning bool
-	paired      bool
-	pairing     *PairingController
-	connEpoch   ConnectionEpoch
+	mu        sync.Mutex
+	workDir   string
+	stopped   bool
+	client    *Client
+	codec     *LiveCodec
+	listeners map[string]map[chan core.Event]struct{}
+	paired    bool
+	pairing   *PairingController
+	connEpoch ConnectionEpoch
 }
 
 // New constructs an unenrolled agent.

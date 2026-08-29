@@ -282,6 +282,21 @@ func (c *Client) RespondServerRequest(id json.Number, result any) error {
 	return c.transport.Send(payload)
 }
 
+func (c *Client) RejectServerRequest(id json.Number, code int64, message string) error {
+	payload, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"error": map[string]any{
+			"code":    code,
+			"message": message,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	return c.transport.Send(payload)
+}
+
 func (c *Client) Close() error {
 	c.mu.Lock()
 	if c.closed {

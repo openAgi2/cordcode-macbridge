@@ -4,13 +4,15 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { isAllowedTopLevelEntry } from "./boundary-policy.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "../../..");
 const remoteRoot = path.join(repoRoot, "agent/codex-remote");
 const frozenStart = "224a632e032aea913c78223b7d2231ffa78f39db";
 const pairedIOS = "/Users/jacklee/Projects/cordcode-ios-codex-remote";
-const pairedIOSCommit = "932f5fd61fc029aa63db333e3cb6d2eb6889ea38";
+const pairedIOSBaselineCommit = "932f5fd61fc029aa63db333e3cb6d2eb6889ea38";
+const pairedIOSBranch = "codex/codex-remote-backend-ios";
 
 function fail(message) {
   throw new Error(message);
@@ -37,11 +39,8 @@ function walk(directory) {
   return files;
 }
 
-const allowedTopLevel = new Set(["README.md", "probe", "testdata", "validate"]);
-const allowedTopLevelFile = (name) =>
-  allowedTopLevel.has(name) || /\.(go|mod|sum)$/u.test(name);
 for (const entry of readdirSync(remoteRoot)) {
-  if (!allowedTopLevelFile(entry)) {
+  if (!isAllowedTopLevelEntry(entry)) {
     fail(`codex-remote top-level entry is not allowed: ${entry}`);
   }
 }
@@ -103,12 +102,20 @@ const worktreeDiff = run("git", ["diff", "--name-only", "--", "agent/codex-web",
 if (worktreeDiff !== "") {
   fail(`frozen backend directories have worktree changes: ${worktreeDiff}`);
 }
-if (run("git", ["-C", pairedIOS, "rev-parse", "HEAD"]) !== pairedIOSCommit) {
-  fail("paired iOS worktree moved before Phase 3");
+if (run("git", ["-C", pairedIOS, "branch", "--show-current"]) !== pairedIOSBranch) {
+  fail("paired iOS worktree is on an unauthorized branch");
 }
 if (run("git", ["-C", pairedIOS, "status", "--porcelain"]) !== "") {
-  fail("paired iOS worktree is dirty before Phase 3");
+  fail("paired iOS worktree is dirty");
 }
+run("git", [
+  "-C",
+  pairedIOS,
+  "merge-base",
+  "--is-ancestor",
+  pairedIOSBaselineCommit,
+  "HEAD",
+]);
 
 console.log(
   JSON.stringify(
@@ -117,9 +124,9 @@ console.log(
       phase: 1,
       productBackendRegistered: true,
       gateP0Passed: "first-connect-live-with-known-gaps",
-      allowedTopLevel: [...allowedTopLevel].sort(),
+      ignoredTopLevelMetadata: [".DS_Store"],
       frozenBackendDiff: "clean",
-      pairedIOS: "frozen-clean",
+      pairedIOS: "authorized-descendant-clean",
     },
     null,
     2,

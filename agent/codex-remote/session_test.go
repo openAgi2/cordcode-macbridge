@@ -3,11 +3,71 @@ package codexremote
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
+
+type serverRequestBacklogTransport struct {
+	startOnce sync.Once
+	closeOnce sync.Once
+	started   chan struct{}
+	done      chan struct{}
+	mu        sync.Mutex
+	next      int
+}
+
+func newServerRequestBacklogTransport() *serverRequestBacklogTransport {
+	return &serverRequestBacklogTransport{started: make(chan struct{}), done: make(chan struct{})}
+}
+
+func (t *serverRequestBacklogTransport) Send(payload []byte) error {
+	var message struct {
+		Method string `json:"method"`
+	}
+	_ = json.Unmarshal(payload, &message)
+	if message.Method == "thread/list" {
+		t.startOnce.Do(func() { close(t.started) })
+	}
+	return nil
+}
+
+func (t *serverRequestBacklogTransport) Recv() ([]byte, error) {
+	select {
+	case <-t.started:
+	case <-t.done:
+		return nil, fmt.Errorf("closed")
+	}
+	t.mu.Lock()
+	t.next++
+	next := t.next
+	t.mu.Unlock()
+	if next <= 100 {
+		return json.Marshal(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      1000 + next,
+			"method":  "item/commandExecution/requestApproval",
+			"params":  map[string]any{"threadId": "thread_probe", "turnId": "turn_probe"},
+		})
+	}
+	if next == 101 {
+		return json.Marshal(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"result":  map[string]any{"data": []any{}},
+		})
+	}
+	<-t.done
+	return nil, fmt.Errorf("closed")
+}
+
+func (t *serverRequestBacklogTransport) Close() error {
+	t.closeOnce.Do(func() { close(t.done) })
+	return nil
+}
 
 func TestVerticalListResumeAndTextDelta(t *testing.T) {
 	clientConn, hostConn := LoopbackPair()
@@ -102,6 +162,63 @@ deltas:
 		case <-deadline:
 			t.Fatalf("events = %+v", got)
 		}
+	}
+}
+
+// Official codex app-server-client keeps its local event queue unbounded so
+// unread events cannot hide a foreground response. Phase 1 rejects unsupported
+// server requests, but must still drain them before the bounded channel fills.
+func TestServerRequestBacklogDoesNotBlockRPCResponse(t *testing.T) {
+	transport := newServerRequestBacklogTransport()
+	cl := NewClient(transport, 1)
+	defer cl.Close()
+	agent := New(nil)
+	agent.BindClient(cl)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	raw, rpcErr, err := cl.RequestContext(ctx, "thread/list", map[string]any{"limit": 1})
+	if err != nil || rpcErr != nil {
+		t.Fatalf("foreground response blocked behind server requests: err=%v rpcErr=%v", err, rpcErr)
+	}
+	if !json.Valid(raw) {
+		t.Fatalf("result is not JSON: %s", raw)
+	}
+}
+
+func TestBindClientStartsEventPumpForReplacementEpoch(t *testing.T) {
+	client1, host1 := LoopbackPair()
+	client2, host2 := LoopbackPair()
+	cl1 := NewClient(NewStream(client1, "client_probe", "env_desktop", "stream_1"), 1)
+	cl2 := NewClient(NewStream(client2, "client_probe", "env_desktop", "stream_2"), 2)
+	defer cl2.Close()
+	defer host1.Close()
+
+	agent := New(nil)
+	agent.BindClient(cl1)
+	events := make(chan core.Event, 1)
+	agent.addListener("thread_probe", events)
+	agent.BindClient(cl2)
+
+	seq := uint64(1)
+	payload, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "turn/started",
+		"params":  map[string]any{"threadId": "thread_probe", "turn": map[string]any{"id": "turn_2"}},
+	})
+	if err := host2.Write(Envelope{
+		Type: typeServerMessage, ClientID: "client_probe", EnvID: "env_desktop",
+		StreamID: "stream_2", SeqID: &seq, Message: payload,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-events:
+		if event.Type != core.EventTurnStarted || event.TurnID != "turn_2" {
+			t.Fatalf("replacement epoch event = %+v", event)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("replacement Client did not get its own event pump")
 	}
 }
 
