@@ -3,7 +3,15 @@ package gobridge
 import "github.com/openAgi2/cordcode-macbridge/core"
 
 func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode string) []string {
-	caps := []string{"model_switch", "session_state"}
+	// model_switch is not a generic property of a live session: it requires a
+	// positively implemented model-selection surface. codex-remote currently
+	// has no sampled Remote model/config payload, so advertise only the state
+	// capability it actually provides. Keep the historical base for migrated
+	// backends until their descriptors are independently tightened.
+	caps := []string{"session_state"}
+	if id != "codex-remote" {
+		caps = append(caps, "model_switch")
+	}
 
 	if _, ok := agent.(core.ProviderSwitcher); ok {
 		caps = append(caps, "provider_switch")

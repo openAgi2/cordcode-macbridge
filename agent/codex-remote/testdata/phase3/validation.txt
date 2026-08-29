@@ -1,0 +1,19 @@
+Phase 3 static/source validation (2026-08-29)
+
+node --check agent/codex-remote/validate/ios-codex-remote-audit.mjs
+PASS
+
+node agent/codex-remote/validate/ios-codex-remote-audit.mjs
+result=PASS
+classification=STATIC-IOS-SOURCE-AUDIT
+baseline=d0762cb9a05997b615ef4589f39afad8f4b4db04
+branch=codex/codex-remote-backend-ios
+worktree=clean
+legacyBackendDiff=clean
+
+xcodebuild -project OpenCodeiOS/CordCode.xcodeproj -scheme CordCode -destination 'generic/platform=iOS' -derivedDataPath /tmp/cordcode-ios-codex-remote-derived build CODE_SIGNING_ALLOWED=NO
+** BUILD SUCCEEDED **
+
+Preflight:
+xcrun xctrace list devices reported no online iPhone (only the local Mac was online).
+No UI test, snapshot test, simulator automation, or device auto-click was run.

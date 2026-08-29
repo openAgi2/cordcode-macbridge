@@ -1,0 +1,11 @@
+checked_at=2026-08-29T05:52:00Z
+runtime_commit=0cc2467edc87
+build=BUILD_SUCCEEDED
+installed=/Applications/CordCodeLink.app
+management_phase=ready
+management_online=true
+management_client_type=CODEX_DESKTOP_APP
+owner_device_evidence=iOS-to-Codex Desktop and Codex Desktop-to-iOS messages both synchronized with replies
+projection_regression=owner reported projection loads after stream epoch fix; no new projection failure in post-install startup window
+full_go_bridge_race=KNOWN_OUT_OF_SCOPE_FAILURE: existing Claude relay global timing race and unrelated catalog timeout
+attestation=self-attested (owner device result); runtime/build checks re-verified

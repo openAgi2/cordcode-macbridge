@@ -1,0 +1,10 @@
+Phase 4 focused validation (2026-08-29)
+
+go test -race ./go-bridge -run 'Test(AggregateDesktopTruthTable|DeriveSyncHealthFullTable|Display|Service|TopologySnapshot|MgmtRemoteStatus|MgmtCodexRemote|CodexRemote)' -count=1 -timeout 120s
+ok github.com/openAgi2/cordcode-macbridge/go-bridge 1.045s
+
+git diff --exit-code -- agent/codex-web agent/codex
+PASS
+
+gitleaks dir --redact --config .gitleaks.toml agent/codex-remote
+no leaks found

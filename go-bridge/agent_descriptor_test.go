@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	codexremote "github.com/openAgi2/cordcode-macbridge/agent/codex-remote"
 	codexweb "github.com/openAgi2/cordcode-macbridge/agent/codex-web"
 	"github.com/openAgi2/cordcode-macbridge/agent/opencode-web"
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -223,6 +224,24 @@ func TestCodexWebDescriptorUsesIndependentIdentityAndTruthfulCapabilities(t *tes
 	} {
 		if !descriptorHasCapability(d.Capabilities, capability) {
 			t.Errorf("codex-web missing truthful capability %q: %v", capability, d.Capabilities)
+		}
+	}
+}
+
+func TestCodexRemoteDescriptorOnlyAdvertisesImplementedCapabilities(t *testing.T) {
+	agent := codexremote.New(nil)
+	d := BuildAgentDescriptor(codexremote.BackendID, agent, "", nil)
+	if d.ID != "codex-remote" || d.Kind != "codex-remote" || d.DisplayName != "Codex Desktop" {
+		t.Fatalf("codex-remote identity = %+v", d)
+	}
+	for _, capability := range []string{"session_state", "session_history"} {
+		if !descriptorHasCapability(d.Capabilities, capability) {
+			t.Errorf("codex-remote missing implemented capability %q: %v", capability, d.Capabilities)
+		}
+	}
+	for _, capability := range []string{"model_switch", "permission_resolve", "structured_user_input_v1", "session_mutation", "session_delete", "session_pagination", "compression", "question_reply"} {
+		if descriptorHasCapability(d.Capabilities, capability) {
+			t.Errorf("codex-remote must fail closed for unsampled capability %q: %v", capability, d.Capabilities)
 		}
 	}
 }

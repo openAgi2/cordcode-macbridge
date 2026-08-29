@@ -18,7 +18,10 @@ type remoteSession struct {
 	alive    bool
 }
 
-func (s *remoteSession) Send(prompt string, _ []core.ImageAttachment, _ []core.FileAttachment) error {
+func (s *remoteSession) Send(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
+	if len(images) != 0 || len(files) != 0 {
+		return fmt.Errorf("codex-remote: image/file turn input is not sampled by the Remote app-server (fail closed)")
+	}
 	s.agent.mu.Lock()
 	cl := s.agent.client
 	s.agent.mu.Unlock()
@@ -37,6 +40,55 @@ func (s *remoteSession) Send(prompt string, _ []core.ImageAttachment, _ []core.F
 		return rpcErr
 	}
 	return nil
+}
+
+// Steer appends a text input to the currently active official turn. It is an
+// optional session surface (core.AgentSession has no steer method); callers
+// must use the returned turn id for subsequent control if the server changes
+// it. The active id comes from the Remote event codec first, then a fresh
+// thread/read, never from an envelope sequence or a locally fabricated id.
+func (s *remoteSession) Steer(ctx context.Context, prompt string) (string, error) {
+	if prompt == "" {
+		return "", fmt.Errorf("codex-remote: turn/steer text is empty")
+	}
+	s.agent.mu.Lock()
+	cl := s.agent.client
+	codec := s.agent.codec
+	s.agent.mu.Unlock()
+	if cl == nil {
+		return "", ErrNotConfigured
+	}
+	turnID := ""
+	if codec != nil {
+		turnID = codec.ActiveTurn(s.threadID)
+	}
+	if turnID == "" {
+		turnID = s.agent.inProgressTurn(ctx, s.threadID)
+	}
+	if turnID == "" {
+		return "", fmt.Errorf("codex-remote: no active turn to steer")
+	}
+	raw, rpcErr, err := cl.RequestContext(ctx, "turn/steer", map[string]any{
+		"threadId":       s.threadID,
+		"expectedTurnId": turnID,
+		"input":          []map[string]string{{"type": "text", "text": prompt}},
+	})
+	if err != nil {
+		return "", err
+	}
+	if rpcErr != nil {
+		return "", rpcErr
+	}
+	var response struct {
+		TurnID string `json:"turnId"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return "", fmt.Errorf("codex-remote: turn/steer decode: %w", err)
+	}
+	if response.TurnID != "" && codec != nil {
+		codec.setActiveTurn(s.threadID, response.TurnID)
+	}
+	return response.TurnID, nil
 }
 
 func (s *remoteSession) interrupt() error {

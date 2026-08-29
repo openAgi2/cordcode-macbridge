@@ -17,6 +17,7 @@
 - iOS → Codex Desktop：发送成功，收到回复，消息与回复同步到 Mac Codex App。
 - Codex Desktop → iOS：Mac 端发送成功，同步到 iOS 会话。
 - 会话投影：此前“无法加载会话投影”故障经 stream epoch 修复后未复现。
+- 修复版部署复核：`0cc2467edc87` 已覆盖安装，管理 API 返回 `phase=ready`、`online=true`、`clientType=CODEX_DESKTOP_APP`。
 - 证据级别：owner 手工真机反馈，`self-attested`；本轮未运行 UI test 或模拟器自动化。
 
 已知缺口：cursor 断线续传与官方手机 Remote controller 共存仍保持 fail-closed；不影响本次 CordCode iPhone 双向消息竖切验收。

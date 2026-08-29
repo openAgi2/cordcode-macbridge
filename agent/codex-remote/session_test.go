@@ -186,6 +186,52 @@ func TestServerRequestBacklogDoesNotBlockRPCResponse(t *testing.T) {
 	}
 }
 
+func TestUnsupportedRemoteServerRequestIsRejectedByOriginalID(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_request")
+	defer stream.Close()
+	cl := NewClient(stream, 1)
+	defer cl.Close()
+	agent := New(nil)
+	agent.BindClient(cl)
+
+	seq := uint64(1)
+	request := json.RawMessage(`{"jsonrpc":"2.0","id":77,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread_probe","turnId":"turn_probe"}}`)
+	if err := hostConn.Write(Envelope{Type: typeServerMessage, ClientID: "client_probe", EnvID: "env_desktop", StreamID: "stream_request", SeqID: &seq, Message: request}); err != nil {
+		t.Fatal(err)
+	}
+	read := make(chan Envelope, 1)
+	go func() {
+		for {
+			env, err := hostConn.Read()
+			if err != nil {
+				return
+			}
+			if env.Type == typeClientMessage && len(env.Message) > 0 {
+				read <- env
+				return
+			}
+		}
+	}()
+	select {
+	case env := <-read:
+		var response struct {
+			ID    json.Number `json:"id"`
+			Error *struct {
+				Code int64 `json:"code"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(env.Message, &response); err != nil {
+			t.Fatal(err)
+		}
+		if response.ID.String() != "77" || response.Error == nil || response.Error.Code != -32601 {
+			t.Fatalf("rejection=%s", env.Message)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("unsupported server request was not rejected")
+	}
+}
+
 func TestBindClientStartsEventPumpForReplacementEpoch(t *testing.T) {
 	client1, host1 := LoopbackPair()
 	client2, host2 := LoopbackPair()
@@ -285,12 +331,76 @@ func TestCancelTurnForThreadFallsBackToInProgressHistory(t *testing.T) {
 	}
 }
 
+func TestRemoteSessionSteerUsesOfficialTurnIdentity(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_steer")
+	defer stream.Close()
+	var got map[string]any
+	startEnvelopePeer(t, hostConn, func(_ int64, method string, params json.RawMessage) (any, *RPCError) {
+		switch method {
+		case "turn/steer":
+			_ = json.Unmarshal(params, &got)
+			return map[string]any{"turnId": "turn_after_steer"}, nil
+		case "thread/read":
+			return map[string]any{"thread": map[string]any{"id": "thread_probe", "status": map[string]any{"type": "active"}, "turns": []any{map[string]any{"id": "turn_before_steer", "status": "inProgress"}}}}, nil
+		case "thread/resume":
+			return map[string]any{"thread": map[string]any{"id": "thread_probe"}}, nil
+		default:
+			return nil, &RPCError{Code: -32601, Message: method}
+		}
+	})
+	cl := NewClient(stream, 1)
+	defer cl.Close()
+	agent := New(nil)
+	agent.BindClient(cl)
+	sess, err := agent.StartSession(context.Background(), "thread_probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	steered, err := sess.(*remoteSession).Steer(context.Background(), "continue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if steered != "turn_after_steer" || got["threadId"] != "thread_probe" || got["expectedTurnId"] != "turn_before_steer" {
+		t.Fatalf("steer response=%q params=%v", steered, got)
+	}
+	input, ok := got["input"].([]any)
+	if !ok || len(input) != 1 || input[0].(map[string]any)["text"] != "continue" {
+		t.Fatalf("steer input=%v", got["input"])
+	}
+}
+
+func TestRemoteSessionRejectsUnsampledAttachments(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_attachment")
+	defer stream.Close()
+	startEnvelopePeer(t, hostConn, func(_ int64, method string, _ json.RawMessage) (any, *RPCError) {
+		if method == "thread/resume" {
+			return map[string]any{"thread": map[string]any{"id": "thread_probe"}}, nil
+		}
+		return nil, &RPCError{Code: -32601, Message: method}
+	})
+	cl := NewClient(stream, 1)
+	defer cl.Close()
+	agent := New(nil)
+	agent.BindClient(cl)
+	sess, err := agent.StartSession(context.Background(), "thread_probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if err := sess.Send("prompt", []core.ImageAttachment{{}}, nil); err == nil {
+		t.Fatal("image input must fail closed until a real Remote sample is frozen")
+	}
+}
+
 func TestCodecUnknownMethodIsCounted(t *testing.T) {
 	c := NewLiveCodec()
-	if evs := c.Decode(Notification{Method: "thread/status/changed", Params: json.RawMessage(`{}`)}); len(evs) != 0 {
+	if evs := c.Decode(Notification{Method: "future/notification", Params: json.RawMessage(`{}`)}); len(evs) != 0 {
 		t.Fatalf("status change must not become a turn event: %+v", evs)
 	}
-	if c.UnknownMethods()["thread/status/changed"] != 1 {
+	if c.UnknownMethods()["future/notification"] != 1 {
 		t.Fatal("expected unknown counter")
 	}
 }

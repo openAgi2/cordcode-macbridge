@@ -2,10 +2,10 @@ package codexremote
 
 import "github.com/openAgi2/cordcode-macbridge/core"
 
-// WireDescriptor is honest for Phase 1 identity: the product transport is
-// not up yet, so no live/interrupt/reconnect capability is advertised.
-// Probe attempt-008 proved a controller *can* receive turn/item events after
-// thread/resume; that is not this Agent's wired path until transport-rpc lands.
+// WireDescriptor keeps Remote-specific static capability claims empty. The
+// transport now delivers live turn/item events and history, but no target
+// Remote payload has yet frozen model mutation or server-request interaction
+// shapes, so those capabilities remain fail-closed in bridge derivation.
 func (a *Agent) WireDescriptor() *core.WireDescriptor {
 	return &core.WireDescriptor{
 		Kind:                        WireKind,

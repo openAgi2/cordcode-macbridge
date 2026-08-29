@@ -1,12 +1,10 @@
 package codexremote
 
-// history.go — bounded official thread/read(includeTurns) cold baseline.
-//
-// Proven on this controller stream (attempt-008): thread/list, thread/resume,
-// turn/started, item/agentMessage/delta, item/completed, turn/completed.
-// thread/read itself was still UNVERIFIED on that probe. This adapter
-// fail-closes on missing thread identity or decode error. Item types without
-// a proven sample on this stream are skipped, never guessed.
+// history.go is the Remote app-server cold baseline. Remote Control carries
+// ordinary app-server JSON-RPC after the envelope is removed, so these wire
+// structs follow the official v2 Thread/Turn/Item schema rather than a
+// rollout file, daemon cache, or codex-web state. Unknown item variants stay
+// visible in SkippedTypes; this adapter never invents an id or terminal state.
 
 import (
 	"context"
@@ -18,122 +16,312 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
-type historyThread struct {
-	ID    string        `json:"id"`
-	Turns []historyTurn `json:"turns"`
+const (
+	remoteTurnItemsViewFull       = "full"
+	remoteTurnItemsViewSummary    = "summary"
+	remoteTurnItemsViewNotLoaded  = "notLoaded"
+	remoteTurnStatusCompleted     = "completed"
+	remoteTurnStatusInterrupted   = "interrupted"
+	remoteTurnStatusFailed        = "failed"
+	remoteTurnStatusInProgress    = "inProgress"
+	remoteThreadStatusActive      = "active"
+	remoteThreadStatusIdle        = "idle"
+	remoteThreadStatusNotLoaded   = "notLoaded"
+	remoteThreadStatusSystemError = "systemError"
+)
+
+// remoteThreadStatus is the official ThreadStatus one-of. The current v2
+// schema serializes it as {type,activeFlags}; accepting a string also keeps
+// the reader compatible with older private app-server builds. Unknown values
+// remain conservative in IsSessionActive.
+type remoteThreadStatus struct {
+	Type        string   `json:"type"`
+	ActiveFlags []string `json:"activeFlags,omitempty"`
 }
 
-type historyTurn struct {
+func (s *remoteThreadStatus) UnmarshalJSON(raw []byte) error {
+	var object struct {
+		Type        string   `json:"type"`
+		ActiveFlags []string `json:"activeFlags"`
+	}
+	if err := json.Unmarshal(raw, &object); err == nil && object.Type != "" {
+		s.Type, s.ActiveFlags = object.Type, object.ActiveFlags
+		return nil
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err == nil {
+		s.Type = value
+		s.ActiveFlags = nil
+		return nil
+	}
+	return fmt.Errorf("codex-remote: invalid thread status")
+}
+
+type remoteThread struct {
+	ID        string             `json:"id"`
+	Name      *string            `json:"name"`
+	Preview   string             `json:"preview"`
+	CreatedAt int64              `json:"createdAt"`
+	UpdatedAt int64              `json:"updatedAt"`
+	RecencyAt *int64             `json:"recencyAt"`
+	Cwd       string             `json:"cwd"`
+	Status    remoteThreadStatus `json:"status"`
+	Turns     []remoteTurn       `json:"turns"`
+}
+
+type remoteTurnError struct {
+	Message           string          `json:"message"`
+	AdditionalDetails *string         `json:"additionalDetails"`
+	CodexErrorInfo    json.RawMessage `json:"codexErrorInfo"`
+}
+
+type remoteTurn struct {
 	ID          string            `json:"id"`
 	Items       []json.RawMessage `json:"items"`
 	ItemsView   string            `json:"itemsView"`
 	Status      string            `json:"status"`
+	Error       *remoteTurnError  `json:"error"`
 	StartedAt   *int64            `json:"startedAt"`
 	CompletedAt *int64            `json:"completedAt"`
-	Error       *struct {
-		Message string `json:"message"`
-	} `json:"error"`
+	DurationMs  *int64            `json:"durationMs"`
 }
 
-type historyItem struct {
-	Type    string `json:"type"`
-	ID      string `json:"id"`
-	Text    string `json:"text"`
-	Content []struct {
+// remoteUserContentPart mirrors the official UserInput tagged union only for
+// fields that can contribute visible text. Image/audio/mention variants stay
+// opaque and are deliberately not converted into text.
+type remoteUserContentPart struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+	URL  string `json:"url"`
+}
+
+type remoteFileUpdateChange struct {
+	Path           string          `json:"path"`
+	Kind           json.RawMessage `json:"kind"`
+	Diff           string          `json:"diff"`
+	MovePath       *string         `json:"movePath"`
+	LegacyMovePath *string         `json:"move_path"`
+}
+
+func (c remoteFileUpdateChange) changeKind() string {
+	var kind struct {
 		Type string `json:"type"`
-		Text string `json:"text"`
-	} `json:"content"`
-	Summary []string `json:"summary"`
+	}
+	if json.Unmarshal(c.Kind, &kind) == nil && kind.Type != "" {
+		return kind.Type
+	}
+	var value string
+	if json.Unmarshal(c.Kind, &value) == nil && value != "" {
+		return value
+	}
+	return string(c.Kind)
 }
 
-func (a *Agent) readThread(ctx context.Context, threadID string) (*historyThread, error) {
+func (c remoteFileUpdateChange) movePath() *string {
+	if c.MovePath != nil {
+		return c.MovePath
+	}
+	if c.LegacyMovePath != nil {
+		return c.LegacyMovePath
+	}
+	var kind struct {
+		MovePath       *string `json:"movePath"`
+		LegacyMovePath *string `json:"move_path"`
+	}
+	if json.Unmarshal(c.Kind, &kind) == nil {
+		if kind.MovePath != nil {
+			return kind.MovePath
+		}
+		return kind.LegacyMovePath
+	}
+	return nil
+}
+
+// remoteThreadItem is a typed view over the official ThreadItem tagged union.
+// Raw is retained so bridge projections can preserve structured result data.
+type remoteThreadItem struct {
+	Type string
+	ID   string
+	Raw  json.RawMessage
+
+	Content []remoteUserContentPart
+	Text    string
+	Summary []string
+	Tail    []string
+
+	Command          string
+	CommandCwd       string
+	CommandStatus    string
+	AggregatedOutput *string
+	ExitCode         *int32
+	ProcessID        *string
+	CommandSource    string
+	CommandDuration  *int64
+
+	Changes     []remoteFileUpdateChange
+	PatchStatus string
+
+	Server     string
+	Tool       string
+	Arguments  json.RawMessage
+	ToolStatus string
+	Result     json.RawMessage
+	ToolError  json.RawMessage
+
+	Query string
+}
+
+func decodeRemoteThreadItem(raw json.RawMessage) remoteThreadItem {
+	var probe struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+	}
+	_ = json.Unmarshal(raw, &probe)
+	it := remoteThreadItem{Type: probe.Type, ID: probe.ID, Raw: raw}
+	switch probe.Type {
+	case "userMessage":
+		var value struct {
+			Text    string                  `json:"text"`
+			Content []remoteUserContentPart `json:"content"`
+		}
+		_ = json.Unmarshal(raw, &value)
+		it.Text, it.Content = value.Text, value.Content
+	case "agentMessage", "plan":
+		var value struct {
+			Text string `json:"text"`
+		}
+		_ = json.Unmarshal(raw, &value)
+		it.Text = value.Text
+	case "reasoning":
+		var value struct {
+			Summary []string `json:"summary"`
+			Content []string `json:"content"`
+		}
+		_ = json.Unmarshal(raw, &value)
+		it.Summary, it.Tail = value.Summary, value.Content
+	case "commandExecution":
+		var value struct {
+			Command          string  `json:"command"`
+			Cwd              string  `json:"cwd"`
+			Status           string  `json:"status"`
+			AggregatedOutput *string `json:"aggregatedOutput"`
+			ExitCode         *int32  `json:"exitCode"`
+			ProcessID        *string `json:"processId"`
+			Source           string  `json:"source"`
+			DurationMs       *int64  `json:"durationMs"`
+		}
+		_ = json.Unmarshal(raw, &value)
+		it.Command, it.CommandCwd, it.CommandStatus = value.Command, value.Cwd, value.Status
+		it.AggregatedOutput, it.ExitCode, it.ProcessID = value.AggregatedOutput, value.ExitCode, value.ProcessID
+		it.CommandSource, it.CommandDuration = value.Source, value.DurationMs
+	case "fileChange":
+		var value struct {
+			Changes []remoteFileUpdateChange `json:"changes"`
+			Status  string                   `json:"status"`
+		}
+		_ = json.Unmarshal(raw, &value)
+		it.Changes, it.PatchStatus = value.Changes, value.Status
+	case "mcpToolCall":
+		var value struct {
+			Server    string          `json:"server"`
+			Tool      string          `json:"tool"`
+			Arguments json.RawMessage `json:"arguments"`
+			Status    string          `json:"status"`
+			Result    json.RawMessage `json:"result"`
+			Error     json.RawMessage `json:"error"`
+		}
+		_ = json.Unmarshal(raw, &value)
+		it.Server, it.Tool, it.Arguments = value.Server, value.Tool, value.Arguments
+		it.ToolStatus, it.Result, it.ToolError = value.Status, value.Result, value.Error
+	case "dynamicToolCall":
+		var value struct {
+			Tool      string          `json:"tool"`
+			Arguments json.RawMessage `json:"arguments"`
+			Status    string          `json:"status"`
+		}
+		_ = json.Unmarshal(raw, &value)
+		it.Tool, it.Arguments, it.ToolStatus = value.Tool, value.Arguments, value.Status
+	case "webSearch":
+		var value struct {
+			Query string `json:"query"`
+		}
+		_ = json.Unmarshal(raw, &value)
+		it.Query = value.Query
+	}
+	return it
+}
+
+func (it remoteThreadItem) userText() string {
+	if strings.TrimSpace(it.Text) != "" {
+		return it.Text
+	}
+	var parts []string
+	for _, part := range it.Content {
+		if part.Type == "text" && part.Text != "" {
+			parts = append(parts, part.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func (a *Agent) readThread(ctx context.Context, threadID string) (*remoteThread, error) {
+	return a.readThreadWithTurns(ctx, threadID, true)
+}
+
+func (a *Agent) readThreadWithTurns(ctx context.Context, threadID string, includeTurns bool) (*remoteThread, error) {
 	a.mu.Lock()
 	cl := a.client
 	a.mu.Unlock()
 	if cl == nil {
 		return nil, ErrNotConfigured
 	}
-	raw, rpcErr, err := cl.RequestContext(ctx, "thread/read", map[string]any{
-		"threadId":     threadID,
-		"includeTurns": true,
-	})
+	params := map[string]any{"threadId": threadID}
+	if includeTurns {
+		params["includeTurns"] = true
+	}
+	raw, rpcErr, err := cl.RequestContext(ctx, "thread/read", params)
 	if err != nil {
 		return nil, err
 	}
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
-	var resp struct {
-		Thread *historyThread `json:"thread"`
+	var response struct {
+		Thread *remoteThread `json:"thread"`
 	}
-	if err := json.Unmarshal(raw, &resp); err != nil {
+	if err := json.Unmarshal(raw, &response); err != nil {
 		return nil, fmt.Errorf("codex-remote: thread/read decode: %w", err)
 	}
-	if resp.Thread == nil || resp.Thread.ID == "" {
+	if response.Thread == nil || response.Thread.ID == "" {
 		return nil, fmt.Errorf("codex-remote: thread/read missing thread identity")
 	}
-	return resp.Thread, nil
+	return response.Thread, nil
 }
 
-func mapHistoryTurns(th *historyThread, limit int) []core.TurnScopedHistoryTurn {
-	out := make([]core.TurnScopedHistoryTurn, 0, len(th.Turns))
-	for _, t := range th.Turns {
-		ht := core.TurnScopedHistoryTurn{TurnID: t.ID, Status: t.Status}
-		if t.Error != nil {
-			ht.ErrorMessage = t.Error.Message
+func mapRemoteHistoryTurns(thread *remoteThread, limit int) []core.TurnScopedHistoryTurn {
+	if thread == nil {
+		return nil
+	}
+	out := make([]core.TurnScopedHistoryTurn, 0, len(thread.Turns))
+	for _, turn := range thread.Turns {
+		historyTurn := core.TurnScopedHistoryTurn{TurnID: turn.ID, Status: turn.Status}
+		if turn.Error != nil {
+			historyTurn.ErrorMessage = turn.Error.Message
 		}
-		if t.StartedAt != nil {
-			ht.StartedAt = time.Unix(*t.StartedAt, 0).UTC()
-			ht.HasTime = true
+		if turn.StartedAt != nil {
+			historyTurn.StartedAt = time.Unix(*turn.StartedAt, 0).UTC()
+			historyTurn.HasTime = true
 		}
-		if t.CompletedAt != nil {
-			ht.CompletedAt = time.Unix(*t.CompletedAt, 0).UTC()
+		if turn.CompletedAt != nil {
+			historyTurn.CompletedAt = time.Unix(*turn.CompletedAt, 0).UTC()
 		}
-		if t.ItemsView == "notLoaded" {
-			ht.SkippedTypes = append(ht.SkippedTypes, "itemsView:notLoaded")
+		if turn.ItemsView == remoteTurnItemsViewNotLoaded {
+			historyTurn.SkippedTypes = append(historyTurn.SkippedTypes, "itemsView:"+remoteTurnItemsViewNotLoaded)
 		}
-		for _, raw := range t.Items {
-			var it historyItem
-			if json.Unmarshal(raw, &it) != nil || it.Type == "" {
-				continue
-			}
-			switch it.Type {
-			case "userMessage":
-				text := it.Text
-				if text == "" {
-					var parts []string
-					for _, p := range it.Content {
-						if p.Type == "text" && p.Text != "" {
-							parts = append(parts, p.Text)
-						}
-					}
-					text = strings.Join(parts, "\n")
-				}
-				if ht.UserItemID == "" {
-					ht.UserItemID = it.ID
-					ht.UserText = text
-				} else if text != "" {
-					ht.Parts = append(ht.Parts, map[string]any{"type": "text", "content": text, "itemId": it.ID})
-				}
-			case "agentMessage":
-				if it.Text == "" {
-					continue
-				}
-				ht.Parts = append(ht.Parts, map[string]any{"type": "text", "content": it.Text, "itemId": it.ID})
-			case "reasoning":
-				text := strings.Join(it.Summary, "\n")
-				if strings.TrimSpace(text) == "" {
-					text = it.Text
-				}
-				if strings.TrimSpace(text) == "" {
-					continue
-				}
-				ht.Parts = append(ht.Parts, map[string]any{"type": "reasoning", "content": text, "itemId": it.ID})
-			default:
-				ht.SkippedTypes = append(ht.SkippedTypes, it.Type)
-			}
+		for _, rawItem := range turn.Items {
+			mapRemoteHistoryItem(&historyTurn, decodeRemoteThreadItem(rawItem))
 		}
-		out = append(out, ht)
+		out = append(out, historyTurn)
 	}
 	if limit > 0 && len(out) > limit {
 		out = out[len(out)-limit:]
@@ -141,25 +329,123 @@ func mapHistoryTurns(th *historyThread, limit int) []core.TurnScopedHistoryTurn 
 	return out
 }
 
+func mapRemoteHistoryItem(turn *core.TurnScopedHistoryTurn, item remoteThreadItem) {
+	switch item.Type {
+	case "userMessage":
+		text := item.userText()
+		if turn.UserItemID == "" {
+			turn.UserItemID, turn.UserText = item.ID, text
+		} else if text != "" {
+			turn.Parts = append(turn.Parts, map[string]any{"type": "text", "content": text, "itemId": item.ID})
+		}
+	case "agentMessage":
+		if item.Text != "" {
+			turn.Parts = append(turn.Parts, map[string]any{"type": "text", "content": item.Text, "itemId": item.ID})
+		}
+	case "reasoning":
+		text := strings.Join(item.Summary, "\n")
+		if strings.TrimSpace(text) == "" {
+			text = strings.Join(item.Tail, "\n")
+		}
+		if strings.TrimSpace(text) != "" {
+			turn.Parts = append(turn.Parts, map[string]any{"type": "reasoning", "content": text, "itemId": item.ID})
+		}
+	case "commandExecution":
+		step := map[string]any{
+			"id": item.ID, "toolName": "Bash", "status": remoteCommandStepStatus(item.CommandStatus),
+			"toolInput": map[string]any{"command": item.Command, "cwd": item.CommandCwd},
+			"title":     item.Command,
+		}
+		if item.AggregatedOutput != nil {
+			step["output"] = *item.AggregatedOutput
+		}
+		if item.ExitCode != nil {
+			step["exitCode"] = *item.ExitCode
+		}
+		if item.CommandDuration != nil {
+			step["duration"] = *item.CommandDuration
+		}
+		turn.Parts = append(turn.Parts, map[string]any{"type": "tool", "step": step, "itemId": item.ID})
+	case "fileChange":
+		step := map[string]any{"id": item.ID, "toolName": "Patch", "status": remoteCommandStepStatus(item.PatchStatus)}
+		changes := make([]map[string]any, 0, len(item.Changes))
+		for _, change := range item.Changes {
+			mapped := map[string]any{"path": change.Path, "kind": change.changeKind(), "diff": change.Diff}
+			if movePath := change.movePath(); movePath != nil {
+				mapped["movePath"] = *movePath
+			}
+			changes = append(changes, mapped)
+		}
+		step["fileChanges"] = changes
+		turn.Parts = append(turn.Parts, map[string]any{"type": "tool", "step": step, "itemId": item.ID})
+	case "mcpToolCall":
+		step := map[string]any{"id": item.ID, "toolName": "MCP", "status": remoteCommandStepStatus(item.ToolStatus)}
+		if item.Server != "" || item.Tool != "" {
+			step["title"] = strings.TrimSpace(item.Server + " " + item.Tool)
+		}
+		if len(item.Arguments) > 0 {
+			step["toolInput"] = json.RawMessage(item.Arguments)
+		}
+		if len(item.Result) > 0 {
+			step["output"] = json.RawMessage(item.Result)
+		} else if len(item.ToolError) > 0 {
+			step["output"] = json.RawMessage(item.ToolError)
+		}
+		turn.Parts = append(turn.Parts, map[string]any{"type": "tool", "step": step, "itemId": item.ID})
+	case "dynamicToolCall":
+		step := map[string]any{"id": item.ID, "toolName": item.Tool, "status": remoteCommandStepStatus(item.ToolStatus)}
+		if len(item.Arguments) > 0 {
+			step["toolInput"] = json.RawMessage(item.Arguments)
+		}
+		turn.Parts = append(turn.Parts, map[string]any{"type": "tool", "step": step, "itemId": item.ID})
+	case "plan":
+		if strings.TrimSpace(item.Text) == "" {
+			return
+		}
+		status := "unknown"
+		if turn.Status == remoteTurnStatusCompleted {
+			status = remoteTurnStatusCompleted
+		}
+		step := map[string]any{"id": item.ID, "toolName": "Plan", "status": status, "output": item.Text}
+		turn.Parts = append(turn.Parts, map[string]any{"type": "tool", "step": step, "itemId": item.ID})
+	case "webSearch":
+		step := map[string]any{"id": item.ID, "toolName": "WebSearch", "status": remoteTurnStatusCompleted, "title": item.Query}
+		turn.Parts = append(turn.Parts, map[string]any{"type": "tool", "step": step, "itemId": item.ID})
+	case "contextCompaction":
+		turn.SystemNotes = append(turn.SystemNotes, "contextCompaction")
+	default:
+		if item.Type != "" {
+			turn.SkippedTypes = append(turn.SkippedTypes, item.Type)
+		}
+	}
+}
+
+func remoteCommandStepStatus(status string) string {
+	if status == "inProgress" {
+		return "running"
+	}
+	return status
+}
+
 func (a *Agent) inProgressTurn(ctx context.Context, threadID string) string {
-	th, err := a.readThread(ctx, threadID)
-	if err != nil || th == nil {
+	thread, err := a.readThread(ctx, threadID)
+	if err != nil || thread == nil {
 		return ""
 	}
-	for i := len(th.Turns) - 1; i >= 0; i-- {
-		if th.Turns[i].Status == "inProgress" && th.Turns[i].ID != "" {
-			return th.Turns[i].ID
+	for i := len(thread.Turns) - 1; i >= 0; i-- {
+		if thread.Turns[i].Status == remoteTurnStatusInProgress && thread.Turns[i].ID != "" {
+			return thread.Turns[i].ID
 		}
 	}
 	return ""
 }
 
 func (a *Agent) GetTurnScopedRichHistory(ctx context.Context, sessionID string, limit int) ([]core.TurnScopedHistoryTurn, error) {
-	th, err := a.readThread(ctx, sessionID)
+	thread, err := a.readThread(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	return mapHistoryTurns(th, limit), nil
+	return mapRemoteHistoryTurns(thread, limit), nil
 }
 
 func (a *Agent) GetRichSessionHistory(ctx context.Context, sessionID string, limit int) ([]core.RichHistoryEntry, error) {
@@ -168,24 +454,39 @@ func (a *Agent) GetRichSessionHistory(ctx context.Context, sessionID string, lim
 		return nil, err
 	}
 	out := make([]core.RichHistoryEntry, 0, len(turns)*2)
-	for _, t := range turns {
-		started := t.StartedAt
-		if !t.HasTime {
-			started = t.CompletedAt
+	for _, turn := range turns {
+		started := turn.StartedAt
+		if !turn.HasTime {
+			started = turn.CompletedAt
 		}
-		if t.UserItemID != "" && t.UserText != "" {
-			out = append(out, core.RichHistoryEntry{ID: t.UserItemID, Role: "user", Content: t.UserText, Timestamp: started})
+		if turn.UserItemID != "" && turn.UserText != "" {
+			out = append(out, core.RichHistoryEntry{ID: turn.UserItemID, Role: "user", Content: turn.UserText, Timestamp: started})
 		}
-		if len(t.Parts) == 0 && t.ErrorMessage == "" {
+		if len(turn.Parts) == 0 && turn.ErrorMessage == "" && len(turn.SystemNotes) == 0 {
 			continue
 		}
-		entry := core.RichHistoryEntry{ID: t.TurnID, Role: "assistant", Parts: t.Parts, Timestamp: started}
-		if t.ErrorMessage != "" {
-			entry.Content = t.ErrorMessage
+		entry := core.RichHistoryEntry{
+			ID: turn.TurnID, Role: "assistant", Parts: turn.Parts, Timestamp: started,
+			TurnStartedAt:   remoteTimeOrNil(turn.HasTime, turn.StartedAt),
+			TurnCompletedAt: remoteTimeOrNil(turn.HasTime, turn.CompletedAt),
+		}
+		if turn.ErrorMessage != "" {
+			entry.Content = "官方 turn 失败：" + turn.ErrorMessage
 		}
 		out = append(out, entry)
+		for _, note := range turn.SystemNotes {
+			out = append(out, core.RichHistoryEntry{ID: turn.TurnID + ":" + note, Role: "system", Content: note, Timestamp: started})
+		}
 	}
 	return out, nil
+}
+
+func remoteTimeOrNil(hasTime bool, value time.Time) *time.Time {
+	if !hasTime || value.IsZero() {
+		return nil
+	}
+	copy := value
+	return &copy
 }
 
 func (a *Agent) GetSessionHistory(ctx context.Context, sessionID string, limit int) ([]core.HistoryEntry, error) {
@@ -194,24 +495,43 @@ func (a *Agent) GetSessionHistory(ctx context.Context, sessionID string, limit i
 		return nil, err
 	}
 	out := make([]core.HistoryEntry, 0, len(rich))
-	for _, e := range rich {
-		content := e.Content
+	for _, entry := range rich {
+		content := entry.Content
 		if content == "" {
-			for _, part := range e.Parts {
-				if part["type"] == "text" {
-					if s, ok := part["content"].(string); ok {
-						content += s
-					}
+			for _, part := range entry.Parts {
+				if part["type"] != "text" {
+					continue
+				}
+				if text, ok := part["content"].(string); ok {
+					content += text
 				}
 			}
 		}
-		out = append(out, core.HistoryEntry{Role: e.Role, Content: content, Timestamp: e.Timestamp})
+		out = append(out, core.HistoryEntry{Role: entry.Role, Content: content, Timestamp: entry.Timestamp})
 	}
 	return out, nil
+}
+
+// IsSessionActive uses the authoritative thread status. Unknown or failed
+// reads are treated as active so hydrate never seals a live user turn.
+func (a *Agent) IsSessionActive(ctx context.Context, sessionID string) bool {
+	thread, err := a.readThreadWithTurns(ctx, sessionID, false)
+	if err != nil || thread == nil {
+		return true
+	}
+	switch thread.Status.Type {
+	case remoteThreadStatusActive:
+		return true
+	case remoteThreadStatusIdle, remoteThreadStatusNotLoaded, remoteThreadStatusSystemError:
+		return false
+	default:
+		return true
+	}
 }
 
 var (
 	_ core.TurnScopedRichHistoryProvider = (*Agent)(nil)
 	_ core.RichHistoryProvider           = (*Agent)(nil)
 	_ core.HistoryProvider               = (*Agent)(nil)
+	_ core.SessionActivityProbing        = (*Agent)(nil)
 )
