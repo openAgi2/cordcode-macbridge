@@ -17,7 +17,9 @@ import (
 )
 
 const (
-	catalogListPageSize = 50
+	// The official app-server clamps thread/list at 100. Using that maximum
+	// halves Remote envelope round trips for the authoritative 400+ row catalog.
+	catalogListPageSize = 100
 	catalogListMaxItems = 500
 	catalogListHeadMax  = 25
 )

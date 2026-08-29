@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -75,6 +76,8 @@ type fakeAgent struct {
 	permissionModes    []core.PermissionModeInfo
 	renameResult       *core.AgentSessionInfo
 	renameErr          error
+	renameSessionID    string
+	renamedTitle       string
 	archiveResult      *core.AgentSessionInfo
 	archiveErr         error
 	providers          []core.ProviderConfig
@@ -257,7 +260,7 @@ func (f *fakeAgent) GetSessionModelSelection(context.Context, string) (core.Sess
 // 抹平到整个目录 —— 路线图 §5.2 / 审计 N3）。
 type perModelEffortAgent struct {
 	*fakeAgent
-	models []core.ModelOption
+	models  []core.ModelOption
 	efforts map[string]fakeModelEfforts
 }
 
@@ -491,6 +494,8 @@ func (f *fakeAgent) GetTokenUsage(context.Context) (*core.TokenUsageReport, erro
 }
 
 func (f *fakeAgent) RenameSession(_ context.Context, sessionID, title string) (*core.AgentSessionInfo, error) {
+	f.renameSessionID = sessionID
+	f.renamedTitle = title
 	if f.renameErr != nil {
 		return nil, f.renameErr
 	}
@@ -499,6 +504,59 @@ func (f *fakeAgent) RenameSession(_ context.Context, sessionID, title string) (*
 		return &copySession, nil
 	}
 	return &core.AgentSessionInfo{ID: sessionID, Summary: title}, nil
+}
+
+func TestCreateSessionPersistsAndReturnsAuthoritativeTitle(t *testing.T) {
+	agent := &fakeAgent{
+		name:              "codex-remote",
+		generateSessionID: true,
+		renameResult: &core.AgentSessionInfo{
+			ID: "generated-1", Summary: "official normalized title",
+			Directory: "/Projects/chat", ModifiedAt: time.Unix(1788010000, 0).UTC(),
+		},
+	}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex-remote", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex-remote", Method: "create_session", RequestID: "create-title",
+		Params: mustJSONRaw(t, map[string]any{
+			"title": "  user requested title  ", "directory": "/Projects/chat",
+		}),
+	})
+	messages := readJSONMaps(t, clientConn, 2)
+	data, _ := messages[1]["data"].(map[string]any)
+	if agent.renameSessionID != "generated-1" || agent.renamedTitle != "user requested title" {
+		t.Fatalf("rename call=(%q,%q)", agent.renameSessionID, agent.renamedTitle)
+	}
+	if data["id"] != "generated-1" || data["title"] != "official normalized title" || data["directory"] != "/Projects/chat" {
+		t.Fatalf("create result must use authoritative rename readback: %#v", data)
+	}
+}
+
+func TestCreateSessionTitleFailureIsExposed(t *testing.T) {
+	agent := &fakeAgent{
+		name: "codex-remote", generateSessionID: true,
+		renameErr: errors.New("official thread/name/set failed"),
+	}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex-remote", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex-remote", Method: "create_session", RequestID: "create-title-error",
+		Params: mustJSONRaw(t, map[string]any{"title": "title"}),
+	})
+	message := readJSONMaps(t, clientConn, 1)[0]
+	if message["ok"] != false || message["error"].(map[string]any)["code"] != "create_failed" {
+		t.Fatalf("title persistence failure must stay visible: %#v", message)
+	}
+	if _, ok := handlers.getSession("generated-1"); ok {
+		t.Fatal("failed titled session must not enter the active bridge registry")
+	}
 }
 
 func (f *fakeAgent) ArchiveSession(_ context.Context, sessionID string, archivedAt time.Time) (*core.AgentSessionInfo, error) {

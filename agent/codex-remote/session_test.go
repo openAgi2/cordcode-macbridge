@@ -270,6 +270,50 @@ func TestUnsupportedRemoteServerRequestIsRejectedByOriginalID(t *testing.T) {
 	}
 }
 
+func TestOfficialThreadLifecycleNotificationsSignalCatalogRefresh(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	stream := NewStream(clientConn, "client_catalog", "env_desktop", "stream_catalog")
+	defer stream.Close()
+	cl := NewClient(stream, 1)
+	defer cl.Close()
+	agent := New(nil)
+	agent.BindClient(cl)
+	signals := agent.CatalogRefreshSignals()
+
+	seq := uint64(0)
+	for _, method := range []string{
+		"thread/started", "thread/name/updated", "thread/archived", "thread/unarchived", "thread/deleted",
+	} {
+		seq++
+		payload, _ := json.Marshal(map[string]any{
+			"jsonrpc": "2.0", "method": method, "params": map[string]any{"threadId": "thread_catalog"},
+		})
+		if err := hostConn.Write(Envelope{
+			Type: typeServerMessage, ClientID: "client_catalog", EnvID: "env_desktop",
+			StreamID: "stream_catalog", SeqID: &seq, Message: payload,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-signals:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("official %s notification did not wake catalog discovery", method)
+		}
+	}
+	agent.signalCatalogRefresh()
+	agent.signalCatalogRefresh()
+	select {
+	case <-signals:
+	default:
+		t.Fatal("missing coalesced catalog refresh signal")
+	}
+	select {
+	case <-signals:
+		t.Fatal("catalog refresh burst must coalesce")
+	default:
+	}
+}
+
 func TestBindClientStartsEventPumpForReplacementEpoch(t *testing.T) {
 	client1, host1 := LoopbackPair()
 	client2, host2 := LoopbackPair()

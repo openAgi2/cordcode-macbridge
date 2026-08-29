@@ -194,6 +194,9 @@ func (a *Agent) startPump(cl *Client) {
 					notifications = nil
 					continue
 				}
+				if isCatalogLifecycleNotification(n.Method) {
+					a.signalCatalogRefresh()
+				}
 				for _, ev := range codec.Decode(n) {
 					a.dispatch(ev)
 				}
@@ -213,6 +216,15 @@ func (a *Agent) startPump(cl *Client) {
 			}
 		}
 	}()
+}
+
+func isCatalogLifecycleNotification(method string) bool {
+	switch method {
+	case "thread/started", "thread/name/updated", "thread/archived", "thread/unarchived", "thread/deleted":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *Agent) dispatch(ev core.Event) {

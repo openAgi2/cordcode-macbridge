@@ -37,6 +37,16 @@ var sessionDiscoveryInterval = 60 * time.Second
 // fingerprint still owns fence/seen/publish. The 60-second full scan remains the safety net.
 var codexDiscoveryHintInterval = 3 * time.Second
 
+// Remote Control carries each thread/list page through the Desktop data plane.
+// Official lifecycle notifications provide the fast path, so its safety probe
+// can be materially slower than the local codex-web daemon probe.
+var codexRemoteDiscoveryHintInterval = 15 * time.Second
+
+var (
+	codexDiscoveryRetryBase = 15 * time.Second
+	codexDiscoveryRetryMax  = 2 * time.Minute
+)
+
 const codexDiscoveryHeadLimit = 25
 
 // Grok ACP session/list has no bounded head/page parameter, but the production catalog is small
@@ -57,13 +67,20 @@ func (h *Handlers) runSessionDiscovery(ctx context.Context) {
 	grokFastInterval := grokDiscoveryFastInterval
 	slog.Info("go-bridge: session discovery watcher started",
 		"interval", interval.String(),
+		"codexRemoteHintInterval", codexRemoteDiscoveryHintInterval.String(),
+		"codexDiscoveryRetryBase", codexDiscoveryRetryBase.String(),
+		"codexDiscoveryRetryMax", codexDiscoveryRetryMax.String(),
 		"backends", len(h.Agents()))
 	var workers sync.WaitGroup
 	for id, agent := range h.Agents() {
+		backendHintInterval := codexHintInterval
+		if id == "codex-remote" {
+			backendHintInterval = codexRemoteDiscoveryHintInterval
+		}
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			h.runBackendSessionDiscovery(ctx, id, agent, interval, codexHintInterval, grokFastInterval)
+			h.runBackendSessionDiscovery(ctx, id, agent, interval, backendHintInterval, grokFastInterval)
 		}()
 	}
 	<-ctx.Done()
@@ -93,7 +110,11 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 		}
 	}()
 	seen := map[string]string{}
-	h.snapshotBackendSession(ctx, seen, true, id, agent)
+	_, isCodexCatalog := agent.(codexThreadHeadLister)
+	retry := catalogDiscoveryRetry{base: codexDiscoveryRetryBase, max: codexDiscoveryRetryMax}
+	if !h.snapshotBackendSession(ctx, seen, true, id, agent) && isCodexCatalog {
+		retry.fail(time.Now())
+	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	var hintTicker *time.Ticker
@@ -123,16 +144,39 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 	}
 	var hintSeen string
 	hintSeeded := false
+	authoritativeRefresh := func(trigger string) bool {
+		if isCodexCatalog && !retry.ready(time.Now()) {
+			slog.Debug("go-bridge: Codex discovery authoritative refresh deferred",
+				"backend", id, "trigger", trigger, "retryAt", retry.next)
+			return false
+		}
+		if h.snapshotBackendSession(ctx, seen, false, id, agent) {
+			if isCodexCatalog {
+				retry.succeed()
+			}
+			return true
+		}
+		if isCodexCatalog {
+			delay := retry.fail(time.Now())
+			slog.Warn("go-bridge: Codex discovery authoritative refresh backed off",
+				"backend", id, "trigger", trigger, "retryDelay", delay.String())
+		}
+		return false
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return false
 		case <-ticker.C:
-			h.snapshotBackendSession(ctx, seen, false, id, agent)
+			if authoritativeRefresh("safety-poll") && isCodexCatalog {
+				hintSeeded = false
+			}
 		case <-refreshC:
 			// Coalesced by the signaler's buffered channel; the fingerprint
 			// diff itself decides whether sessions_changed fires.
-			h.snapshotBackendSession(ctx, seen, false, id, agent)
+			if authoritativeRefresh("catalog-signal") && isCodexCatalog {
+				hintSeeded = false
+			}
 		case <-hintC:
 			if !h.broadcaster.HasConnections() {
 				continue
@@ -141,7 +185,7 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 				// Unlike Codex, Grok has no cheap bounded head RPC. This call is already the
 				// authoritative native fingerprint, so it directly owns fence/seen/publish and
 				// must not be followed by a duplicate full fetch.
-				h.snapshotBackendSession(ctx, seen, false, id, agent)
+				authoritativeRefresh("grok-fast-poll")
 				continue
 			}
 			probeStarted := time.Now()
@@ -160,13 +204,48 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 			if current == hintSeen {
 				continue
 			}
+			if !retry.ready(time.Now()) {
+				continue
+			}
 			slog.Info("go-bridge: Codex discovery head changed; running authoritative full refresh",
 				"headProbeDurationMs", probeDuration.Milliseconds())
-			if h.snapshotBackendSession(ctx, seen, false, id, agent) {
+			if authoritativeRefresh("head-change") {
 				hintSeen = current
 			}
 		}
 	}
+}
+
+type catalogDiscoveryRetry struct {
+	base    time.Duration
+	max     time.Duration
+	attempt uint
+	next    time.Time
+}
+
+func (r *catalogDiscoveryRetry) ready(now time.Time) bool {
+	return r.next.IsZero() || !now.Before(r.next)
+}
+
+func (r *catalogDiscoveryRetry) fail(now time.Time) time.Duration {
+	delay := r.base
+	if delay <= 0 {
+		delay = time.Second
+	}
+	for i := uint(0); i < r.attempt && delay < r.max; i++ {
+		delay *= 2
+		if r.max > 0 && delay > r.max {
+			delay = r.max
+		}
+	}
+	r.attempt++
+	r.next = now.Add(delay)
+	return delay
+}
+
+func (r *catalogDiscoveryRetry) succeed() {
+	r.attempt = 0
+	r.next = time.Time{}
 }
 
 func (h *Handlers) codexDiscoveryHintFingerprint(ctx context.Context, agent core.Agent) (string, error) {

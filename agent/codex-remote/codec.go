@@ -80,7 +80,7 @@ func (c *LiveCodec) Decode(n Notification) []core.Event {
 	case "error":
 		return c.decodeErrorNotification(n)
 	case "warning", "thread/status/changed", "thread/started", "thread/name/updated",
-		"thread/archived", "thread/deleted", "account/rateLimits/updated",
+		"thread/archived", "thread/unarchived", "thread/deleted", "account/rateLimits/updated",
 		"remoteControl/status/changed", "serverRequest/resolved", "thread/goal/cleared",
 		"turn/diff/updated":
 		// These are official notifications whose state is either fetched through

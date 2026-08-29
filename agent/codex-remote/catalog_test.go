@@ -46,6 +46,9 @@ func TestFetchThreadListPaginatesAndFiltersDir(t *testing.T) {
 	if len(calls) != 2 {
 		t.Fatalf("pages=%d", len(calls))
 	}
+	if calls[0]["limit"] != float64(catalogListPageSize) {
+		t.Fatalf("page limit=%v want official max %d", calls[0]["limit"], catalogListPageSize)
+	}
 	cwd, _ := calls[0]["cwd"].([]any)
 	if len(cwd) != 1 || cwd[0] != "/ws" {
 		t.Fatalf("cwd filter=%v", calls[0]["cwd"])

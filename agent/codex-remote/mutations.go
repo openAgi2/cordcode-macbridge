@@ -42,7 +42,12 @@ func (a *Agent) RenameSession(ctx context.Context, sessionID, title string) (*co
 	}); err != nil {
 		return nil, err
 	}
-	return a.FetchSessionInfo(ctx, sessionID)
+	info, err := a.FetchSessionInfo(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	a.signalCatalogRefresh()
+	return info, nil
 }
 
 func (a *Agent) ArchiveSession(ctx context.Context, sessionID string, _ time.Time) (*core.AgentSessionInfo, error) {
@@ -53,7 +58,12 @@ func (a *Agent) ArchiveSession(ctx context.Context, sessionID string, _ time.Tim
 	if err := a.requestVoidThreadOperation(ctx, "thread/archive", map[string]string{"threadId": sessionID}); err != nil {
 		return nil, err
 	}
-	return a.FetchSessionInfo(ctx, sessionID)
+	info, err := a.FetchSessionInfo(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	a.signalCatalogRefresh()
+	return info, nil
 }
 
 func (a *Agent) DeleteSession(ctx context.Context, sessionID string) error {
@@ -67,6 +77,7 @@ func (a *Agent) DeleteSession(ctx context.Context, sessionID string) error {
 	a.mu.Lock()
 	delete(a.sessionSelections, sessionID)
 	a.mu.Unlock()
+	a.signalCatalogRefresh()
 	return nil
 }
 

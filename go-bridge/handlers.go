@@ -2386,16 +2386,38 @@ func (h *Handlers) handleCreateSession(conn Connection, msg WireMessage, agent c
 		sessionID = fmt.Sprintf("pending-%s", generateShortID())
 	}
 
+	var authoritativeSession *core.AgentSessionInfo
+	if title := strings.TrimSpace(params.Title); title != "" {
+		if renamer, ok := agent.(core.SessionRenamer); ok {
+			authoritativeSession, err = renamer.RenameSession(h.ctx, sessionID, title)
+			if err != nil {
+				_ = sess.Close()
+				conn.SendResult(msg.RequestID, nil, &WireError{Code: "create_failed", Message: err.Error()})
+				return
+			}
+			if authoritativeSession == nil {
+				_ = sess.Close()
+				conn.SendResult(msg.RequestID, nil, &WireError{Code: "create_failed", Message: "backend returned no session after setting title"})
+				return
+			}
+		}
+	}
+
 	h.mu.Lock()
 	h.putSession(sessionID, sess)
 	h.mu.Unlock()
 
-	result := map[string]interface{}{
-		"id":    sessionID,
-		"title": params.Title,
-	}
-	if params.Directory != "" {
-		result["directory"] = params.Directory
+	var result map[string]interface{}
+	if authoritativeSession != nil {
+		result = sessionsToWire([]core.AgentSessionInfo{*authoritativeSession})[0]
+	} else {
+		result = map[string]interface{}{
+			"id":    sessionID,
+			"title": params.Title,
+		}
+		if params.Directory != "" {
+			result["directory"] = params.Directory
+		}
 	}
 	if params.AgentPreset != "" {
 		result["agentPreset"] = params.AgentPreset

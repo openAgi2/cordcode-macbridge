@@ -16,6 +16,8 @@ var ErrNotConfigured = fmt.Errorf("请先在 Mac 的 CordCode Link 里配对 Cod
 type Agent struct {
 	mu                 sync.Mutex
 	attachMu           sync.Mutex
+	catalogMu          sync.Mutex
+	catalogWake        chan struct{}
 	workDir            string
 	stopped            bool
 	client             *Client
@@ -63,6 +65,32 @@ func New(opts map[string]any) *Agent {
 }
 
 func (a *Agent) Name() string { return BackendID }
+
+var _ core.CatalogRefreshSignaler = (*Agent)(nil)
+
+// CatalogRefreshSignals exposes official thread lifecycle changes to the
+// Bridge discovery worker. The signal is deliberately data-free: thread/list
+// remains the sole catalog truth and the one-slot channel coalesces bursts.
+func (a *Agent) CatalogRefreshSignals() <-chan struct{} {
+	a.catalogMu.Lock()
+	defer a.catalogMu.Unlock()
+	if a.catalogWake == nil {
+		a.catalogWake = make(chan struct{}, 1)
+	}
+	return a.catalogWake
+}
+
+func (a *Agent) signalCatalogRefresh() {
+	a.catalogMu.Lock()
+	if a.catalogWake == nil {
+		a.catalogWake = make(chan struct{}, 1)
+	}
+	select {
+	case a.catalogWake <- struct{}{}:
+	default:
+	}
+	a.catalogMu.Unlock()
+}
 
 // SetWorkDir implements core.WorkDirSwitcher. The bridge calls it before
 // create_session/send_message; StartSession snapshots the value into the
