@@ -58,15 +58,16 @@ func (s *remoteThreadStatus) UnmarshalJSON(raw []byte) error {
 }
 
 type remoteThread struct {
-	ID        string             `json:"id"`
-	Name      *string            `json:"name"`
-	Preview   string             `json:"preview"`
-	CreatedAt int64              `json:"createdAt"`
-	UpdatedAt int64              `json:"updatedAt"`
-	RecencyAt *int64             `json:"recencyAt"`
-	Cwd       string             `json:"cwd"`
-	Status    remoteThreadStatus `json:"status"`
-	Turns     []remoteTurn       `json:"turns"`
+	ID          string             `json:"id"`
+	Name        *string            `json:"name"`
+	Preview     string             `json:"preview"`
+	CreatedAt   int64              `json:"createdAt"`
+	UpdatedAt   int64              `json:"updatedAt"`
+	RecencyAt   *int64             `json:"recencyAt"`
+	Cwd         string             `json:"cwd"`
+	Status      remoteThreadStatus `json:"status"`
+	HistoryMode string             `json:"historyMode"`
+	Turns       []remoteTurn       `json:"turns"`
 }
 
 type remoteTurnError struct {
@@ -264,11 +265,11 @@ func (it remoteThreadItem) userText() string {
 	return strings.Join(parts, "\n")
 }
 
-func (a *Agent) readThread(ctx context.Context, threadID string) (*remoteThread, error) {
-	return a.readThreadWithTurns(ctx, threadID, true)
-}
-
-func (a *Agent) readThreadWithTurns(ctx context.Context, threadID string, includeTurns bool) (*remoteThread, error) {
+// readThreadWithTurnsCtx is the raw thread/read call. includeTurns=true is
+// the legacy hydration form: it only completes for historyMode=legacy threads
+// on this app-server generation (G0), so production code reaches it solely
+// through readThreadFullCompat.
+func (a *Agent) readThreadWithTurnsCtx(ctx context.Context, threadID string, includeTurns bool) (*remoteThread, error) {
 	a.mu.Lock()
 	cl := a.client
 	a.mu.Unlock()
@@ -298,26 +299,33 @@ func (a *Agent) readThreadWithTurns(ctx context.Context, threadID string, includ
 	return response.Thread, nil
 }
 
+// mapRemoteTurnShell maps the turn envelope (identity/status/time) without
+// items; shared by the legacy mapper and the paginated detail path.
+func mapRemoteTurnShell(turn remoteTurn) core.TurnScopedHistoryTurn {
+	historyTurn := core.TurnScopedHistoryTurn{TurnID: turn.ID, Status: turn.Status}
+	if turn.Error != nil {
+		historyTurn.ErrorMessage = turn.Error.Message
+	}
+	if turn.StartedAt != nil {
+		historyTurn.StartedAt = time.Unix(*turn.StartedAt, 0).UTC()
+		historyTurn.HasTime = true
+	}
+	if turn.CompletedAt != nil {
+		historyTurn.CompletedAt = time.Unix(*turn.CompletedAt, 0).UTC()
+	}
+	if turn.ItemsView == remoteTurnItemsViewNotLoaded {
+		historyTurn.SkippedTypes = append(historyTurn.SkippedTypes, "itemsView:"+remoteTurnItemsViewNotLoaded)
+	}
+	return historyTurn
+}
+
 func mapRemoteHistoryTurns(thread *remoteThread, limit int) []core.TurnScopedHistoryTurn {
 	if thread == nil {
 		return nil
 	}
 	out := make([]core.TurnScopedHistoryTurn, 0, len(thread.Turns))
 	for _, turn := range thread.Turns {
-		historyTurn := core.TurnScopedHistoryTurn{TurnID: turn.ID, Status: turn.Status}
-		if turn.Error != nil {
-			historyTurn.ErrorMessage = turn.Error.Message
-		}
-		if turn.StartedAt != nil {
-			historyTurn.StartedAt = time.Unix(*turn.StartedAt, 0).UTC()
-			historyTurn.HasTime = true
-		}
-		if turn.CompletedAt != nil {
-			historyTurn.CompletedAt = time.Unix(*turn.CompletedAt, 0).UTC()
-		}
-		if turn.ItemsView == remoteTurnItemsViewNotLoaded {
-			historyTurn.SkippedTypes = append(historyTurn.SkippedTypes, "itemsView:"+remoteTurnItemsViewNotLoaded)
-		}
+		historyTurn := mapRemoteTurnShell(turn)
 		for _, rawItem := range turn.Items {
 			mapRemoteHistoryItem(&historyTurn, decodeRemoteThreadItem(rawItem))
 		}
@@ -343,10 +351,11 @@ func mapRemoteHistoryItem(turn *core.TurnScopedHistoryTurn, item remoteThreadIte
 			turn.Parts = append(turn.Parts, map[string]any{"type": "text", "content": item.Text, "itemId": item.ID})
 		}
 	case "reasoning":
+		// G0.5 (owner 2026-08-30): history serves only the reasoning
+		// summary; content is empty across every live sample, "完整思考"
+		// is not a product claim, and empty summaries get no placeholder
+		// and no content fallback.
 		text := strings.Join(item.Summary, "\n")
-		if strings.TrimSpace(text) == "" {
-			text = strings.Join(item.Tail, "\n")
-		}
 		if strings.TrimSpace(text) != "" {
 			turn.Parts = append(turn.Parts, map[string]any{"type": "reasoning", "content": text, "itemId": item.ID})
 		}
@@ -427,25 +436,20 @@ func remoteCommandStepStatus(status string) string {
 	return status
 }
 
+// inProgressTurn finds the newest in-progress turn from the first desc
+// summary page — turns/list works for both history modes (G0: legacy
+// id-143 served turns/list fine), and includeTurns is never risked here.
 func (a *Agent) inProgressTurn(ctx context.Context, threadID string) string {
-	thread, err := a.readThread(ctx, threadID)
-	if err != nil || thread == nil {
+	page, err := a.readTurnsPage(ctx, threadID, "")
+	if err != nil {
 		return ""
 	}
-	for i := len(thread.Turns) - 1; i >= 0; i-- {
-		if thread.Turns[i].Status == remoteTurnStatusInProgress && thread.Turns[i].ID != "" {
-			return thread.Turns[i].ID
+	for i := len(page.Turns) - 1; i >= 0; i-- {
+		if page.Turns[i].Status == remoteTurnStatusInProgress && page.Turns[i].ID != "" {
+			return page.Turns[i].ID
 		}
 	}
 	return ""
-}
-
-func (a *Agent) GetTurnScopedRichHistory(ctx context.Context, sessionID string, limit int) ([]core.TurnScopedHistoryTurn, error) {
-	thread, err := a.readThread(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	return mapRemoteHistoryTurns(thread, limit), nil
 }
 
 func (a *Agent) GetRichSessionHistory(ctx context.Context, sessionID string, limit int) ([]core.RichHistoryEntry, error) {
@@ -515,7 +519,7 @@ func (a *Agent) GetSessionHistory(ctx context.Context, sessionID string, limit i
 // IsSessionActive uses the authoritative thread status. Unknown or failed
 // reads are treated as active so hydrate never seals a live user turn.
 func (a *Agent) IsSessionActive(ctx context.Context, sessionID string) bool {
-	thread, err := a.readThreadWithTurns(ctx, sessionID, false)
+	thread, err := a.readThreadWithTurnsCtx(ctx, sessionID, false)
 	if err != nil || thread == nil {
 		return true
 	}

@@ -12,38 +12,40 @@ func TestHistoryReadMapsUserAndAssistantText(t *testing.T) {
 	clientConn, hostConn := LoopbackPair()
 	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_primary")
 	defer stream.Close()
+	var compatFullReads int
 	startEnvelopePeer(t, hostConn, func(_ int64, method string, params json.RawMessage) (any, *RPCError) {
-		if method != "thread/read" {
-			return nil, &RPCError{Code: -32601, Message: method}
-		}
-		var p struct {
-			ThreadID     string `json:"threadId"`
-			IncludeTurns bool   `json:"includeTurns"`
-		}
-		_ = json.Unmarshal(params, &p)
-		if p.ThreadID != "thread_probe" || !p.IncludeTurns {
-			return nil, &RPCError{Code: -32602, Message: "bad read"}
-		}
-		return map[string]any{
-			"thread": map[string]any{
-				"id": "thread_probe",
-				"turns": []any{
-					map[string]any{
-						"id":        "turn_1",
-						"status":    "completed",
-						"startedAt": int64(100),
-						"items": []any{
-							map[string]any{
-								"type": "userMessage", "id": "user_1",
-								"content": []any{map[string]any{"type": "text", "text": "hello desktop"}},
-							},
-							map[string]any{"type": "agentMessage", "id": "asst_1", "text": "hi from desktop"},
-							map[string]any{"type": "commandExecution", "id": "cmd_1", "command": "ls"},
-						},
+		switch method {
+		case "thread/read":
+			var p map[string]any
+			_ = json.Unmarshal(params, &p)
+			if p["threadId"] != "thread_probe" {
+				return nil, &RPCError{Code: -32602, Message: "bad read"}
+			}
+			if _, ok := p["includeTurns"]; ok {
+				compatFullReads++
+				return nil, &RPCError{Code: -32602, Message: "includeTurns must not be requested for paginated dispatch"}
+			}
+			return map[string]any{"thread": map[string]any{"id": "thread_probe", "historyMode": "paginated", "status": "idle"}}, nil
+		case "thread/turns/list":
+			return map[string]any{
+				"data": []any{map[string]any{
+					"id": "turn_1", "status": "completed", "startedAt": int64(100), "itemsView": "summary",
+					"items": []any{
+						map[string]any{"type": "userMessage", "id": "user_1", "content": []any{map[string]any{"type": "text", "text": "hello desktop"}}},
+						map[string]any{"type": "agentMessage", "id": "asst_1", "text": "hi from desktop"},
 					},
+				}},
+			}, nil
+		case "thread/items/list":
+			return map[string]any{
+				"data": []any{
+					map[string]any{"turnId": "turn_1", "item": map[string]any{"type": "userMessage", "id": "user_1", "content": []any{map[string]any{"type": "text", "text": "hello desktop"}}}},
+					map[string]any{"turnId": "turn_1", "item": map[string]any{"type": "agentMessage", "id": "asst_1", "text": "hi from desktop"}},
+					map[string]any{"turnId": "turn_1", "item": map[string]any{"type": "commandExecution", "id": "cmd_1", "command": "ls"}},
 				},
-			},
-		}, nil
+			}, nil
+		}
+		return nil, &RPCError{Code: -32601, Message: method}
 	})
 	cl := NewClient(stream, 1)
 	defer cl.Close()
@@ -68,6 +70,9 @@ func TestHistoryReadMapsUserAndAssistantText(t *testing.T) {
 	}
 	if step, ok := rich[1].Parts[1]["step"].(map[string]any); !ok || step["toolName"] != "Bash" {
 		t.Fatalf("command item = %+v", rich[1].Parts[1])
+	}
+	if compatFullReads != 0 {
+		t.Fatalf("paginated history must never request includeTurns, got %d", compatFullReads)
 	}
 
 	legacy, err := agent.GetSessionHistory(context.Background(), "thread_probe", 0)

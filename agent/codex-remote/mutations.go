@@ -19,7 +19,7 @@ func (a *Agent) FetchSessionInfo(ctx context.Context, sessionID string) (*core.A
 	if sessionID == "" {
 		return nil, fmt.Errorf("codex-remote: get session: empty session id")
 	}
-	thread, err := a.readThreadWithTurns(ctx, sessionID, false)
+	thread, err := a.readThreadMeta(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}

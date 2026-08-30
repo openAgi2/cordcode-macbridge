@@ -405,14 +405,11 @@ func TestCancelTurnForThreadFallsBackToInProgressHistory(t *testing.T) {
 	var interrupted map[string]any
 	startEnvelopePeer(t, hostConn, func(_ int64, method string, params json.RawMessage) (any, *RPCError) {
 		switch method {
-		case "thread/read":
+		case "thread/turns/list":
 			return map[string]any{
-				"thread": map[string]any{
-					"id": "thread_probe",
-					"turns": []any{
-						map[string]any{"id": "turn_old", "status": "completed", "items": []any{}},
-						map[string]any{"id": "turn_live", "status": "inProgress", "items": []any{}},
-					},
+				"data": []any{
+					map[string]any{"id": "turn_old", "status": "completed", "items": []any{}},
+					map[string]any{"id": "turn_live", "status": "inProgress", "items": []any{}},
 				},
 			}, nil
 		case "turn/interrupt":
@@ -444,8 +441,8 @@ func TestRemoteSessionSteerUsesOfficialTurnIdentity(t *testing.T) {
 		case "turn/steer":
 			_ = json.Unmarshal(params, &got)
 			return map[string]any{"turnId": "turn_after_steer"}, nil
-		case "thread/read":
-			return map[string]any{"thread": map[string]any{"id": "thread_probe", "status": map[string]any{"type": "active"}, "turns": []any{map[string]any{"id": "turn_before_steer", "status": "inProgress"}}}}, nil
+		case "thread/turns/list":
+			return map[string]any{"data": []any{map[string]any{"id": "turn_before_steer", "status": "inProgress"}}}, nil
 		case "thread/resume":
 			return map[string]any{"thread": map[string]any{"id": "thread_probe"}}, nil
 		default:
