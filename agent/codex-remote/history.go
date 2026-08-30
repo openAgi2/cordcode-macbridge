@@ -313,6 +313,9 @@ func mapRemoteTurnShell(turn remoteTurn) core.TurnScopedHistoryTurn {
 	if turn.CompletedAt != nil {
 		historyTurn.CompletedAt = time.Unix(*turn.CompletedAt, 0).UTC()
 	}
+	if turn.DurationMs != nil {
+		historyTurn.DurationMs = *turn.DurationMs
+	}
 	if turn.ItemsView == remoteTurnItemsViewNotLoaded {
 		historyTurn.SkippedTypes = append(historyTurn.SkippedTypes, "itemsView:"+remoteTurnItemsViewNotLoaded)
 	}

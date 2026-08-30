@@ -3,6 +3,8 @@ package gobridge
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // ev builds a stamped EventMessage shaped like the Codex rollout path feeds into PublishLogical.
@@ -847,5 +849,92 @@ func TestTurnStartedRepeatedNoExtraCommit(t *testing.T) {
 	}
 	if patch.SyncRev != 1 {
 		t.Fatalf("SyncRev = %d, want 1 (duplicated turn_started must not commit)", patch.SyncRev)
+	}
+}
+
+
+// 官方 Turn.durationMs（app-server-protocol v2："Duration between turn start and
+// completion in milliseconds, if known"）接线锁定：live turn/completed 与冷 hydrate
+// 两条路都把官方值送进 TurnProjection.DurationMs（零值不覆盖）；客户端渲染官方
+// 「用时」值，不再自行用时间戳相减重算。
+
+func TestTurnCompletedStampsOfficialDurationMs(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "Hello"}))
+	r.Apply(ev(3, "codex", "s1", "turn_completed", map[string]interface{}{
+		"turnId": "T1", "done": true, "durationMs": int64(86_000),
+	}))
+	proj, ok := r.Snapshot("codex", "s1")
+	if !ok {
+		t.Fatal("no projection")
+	}
+	turn := proj.Turns[0]
+	if turn.Status != "completed" || turn.DurationMs != 86_000 {
+		t.Fatalf("turn = %+v, want completed with DurationMs 86000", turn)
+	}
+
+	// 后续不含 duration 的整 turn upsert（如 state-only 路径重建）不清零已落官方值。
+	r.Apply(ev(4, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T2"}))
+	r.Apply(ev(5, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T2", "delta": "x"}))
+	r.Apply(ev(6, "codex", "s1", "turn_completed", map[string]interface{}{"turnId": "T2", "done": true}))
+	proj2, _ := r.Snapshot("codex", "s1")
+	var t1 *TurnProjection
+	for i := range proj2.Turns {
+		if proj2.Turns[i].TurnID == "T1" {
+			t1 = &proj2.Turns[i]
+		}
+	}
+	if t1 == nil || t1.DurationMs != 86_000 {
+		t.Fatalf("T1 DurationMs clobbered by later events: %+v", t1)
+	}
+}
+
+func TestTurnCompletedWithoutDurationMsStaysZero(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex", "s1", "turn_completed", map[string]interface{}{"turnId": "T1", "done": true}))
+	proj, _ := r.Snapshot("codex", "s1")
+	if proj.Turns[0].DurationMs != 0 {
+		t.Fatalf("DurationMs = %d, want 0 when source does not provide it", proj.Turns[0].DurationMs)
+	}
+}
+
+func TestTurnScopedHydrateCarriesDurationMs(t *testing.T) {
+	events := turnScopedHistoryTurnToProjectionEvents([]core.TurnScopedHistoryTurn{
+		{TurnID: "t-hist", Status: "completed", DurationMs: 22},
+		{TurnID: "t-hist-old", Status: "completed"},
+	})
+	byTurn := map[string]map[string]interface{}{}
+	for _, e := range events {
+		if e.Event == "turn_completed" {
+			byTurn[dataString(e.Data, "turnId")] = e.Data
+		}
+	}
+	if got, ok := byTurn["t-hist"]["durationMs"]; !ok || got != int64(22) {
+		t.Fatalf("hydrate turn_completed durationMs = %v (%T), want int64(22)", got, got)
+	}
+	if _, present := byTurn["t-hist-old"]["durationMs"]; present {
+		t.Fatal("absent DurationMs must not appear in the hydrate event")
+	}
+}
+
+func TestLiveTurnCompletedPayloadCarriesDurationMs(t *testing.T) {
+	name, data, done := mapAgentEvent(core.Event{
+		Type:       core.EventResult,
+		SessionID:  "s1",
+		TurnID:     "T1",
+		Done:       true,
+		DurationMs: 86_000,
+	})
+	if name != "turn_completed" || !done {
+		t.Fatalf("event = %q done=%v, want turn_completed terminal", name, done)
+	}
+	payload, ok := data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("payload type = %T, want map", data)
+	}
+	if got := dataInt64(payload, "durationMs"); got != 86_000 {
+		t.Fatalf("payload durationMs = %d, want 86000", got)
 	}
 }

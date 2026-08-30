@@ -188,3 +188,21 @@ func TestRemoteIsSessionActiveUsesOfficialThreadStatus(t *testing.T) {
 		t.Fatal("active official status must remain active")
 	}
 }
+
+// 官方 Turn.durationMs（app-server-protocol v2，"if known"）：remoteTurn 已解码，
+// mapRemoteTurnShell 必须把它带进 TurnScopedHistoryTurn（0 = 源未提供）。
+func TestMapRemoteTurnShellCarriesOfficialDurationMs(t *testing.T) {
+	known := int64(86_000)
+	shell := mapRemoteTurnShell(remoteTurn{
+		ID: "t1", Status: "completed",
+		StartedAt: ptrInt64(1), CompletedAt: ptrInt64(2), DurationMs: &known,
+	})
+	if shell.DurationMs != 86_000 {
+		t.Fatalf("DurationMs = %d, want 86000", shell.DurationMs)
+	}
+	if shell := mapRemoteTurnShell(remoteTurn{ID: "t2", Status: "completed"}); shell.DurationMs != 0 {
+		t.Fatalf("absent DurationMs must stay 0, got %d", shell.DurationMs)
+	}
+}
+
+func ptrInt64(v int64) *int64 { return &v }

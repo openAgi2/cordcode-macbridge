@@ -64,3 +64,23 @@ func TestRemoteCodecDropsMalformedCompletionAndCountsOnlyUnknown(t *testing.T) {
 		t.Fatal("known no-op status notification must not be unknown")
 	}
 }
+
+// 官方 turn/completed 通知携带 turn.durationMs（fixture: codex-web reconnect dump
+// turn/completed durationMs:22）——decodeTurnCompleted 必须保留到 core.Event。
+func TestDecodeTurnCompletedCarriesDurationMs(t *testing.T) {
+	codec := NewLiveCodec()
+	events := codec.Decode(Notification{Method: "turn/completed", Params: json.RawMessage(
+		`{"threadId":"th","turn":{"id":"turn","status":"completed","durationMs":86000}}`)})
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+	if events[0].DurationMs != 86_000 {
+		t.Fatalf("DurationMs = %d, want 86000", events[0].DurationMs)
+	}
+	// 缺席保持 0（官方 "if known"）。
+	events = codec.Decode(Notification{Method: "turn/completed", Params: json.RawMessage(
+		`{"threadId":"th","turn":{"id":"turn2","status":"completed"}}`)})
+	if len(events) != 1 || events[0].DurationMs != 0 {
+		t.Fatalf("absent durationMs must decode 0: %+v", events)
+	}
+}

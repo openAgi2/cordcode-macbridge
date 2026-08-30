@@ -126,9 +126,10 @@ func (c *LiveCodec) decodeTurnCompleted(n Notification) []core.Event {
 	var params struct {
 		ThreadID string `json:"threadId"`
 		Turn     struct {
-			ID     string           `json:"id"`
-			Status string           `json:"status"`
-			Error  *remoteTurnError `json:"error"`
+			ID         string           `json:"id"`
+			Status     string           `json:"status"`
+			Error      *remoteTurnError `json:"error"`
+			DurationMs *int64           `json:"durationMs"`
 		} `json:"turn"`
 	}
 	if json.Unmarshal(n.Params, &params) != nil || params.ThreadID == "" {
@@ -145,6 +146,9 @@ func (c *LiveCodec) decodeTurnCompleted(n Notification) []core.Event {
 	delete(c.retryByThread, params.ThreadID)
 	c.mu.Unlock()
 	event := core.Event{SessionID: params.ThreadID, ThreadID: params.ThreadID, TurnID: params.Turn.ID, Done: true}
+	if params.Turn.DurationMs != nil {
+		event.DurationMs = *params.Turn.DurationMs
+	}
 	if params.Turn.Status == remoteTurnStatusFailed {
 		message := "turn failed"
 		if params.Turn.Error != nil && params.Turn.Error.Message != "" {

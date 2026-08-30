@@ -465,6 +465,10 @@ type Event struct {
 	PermissionActions []string       // approve | approveAlways | reject | rejectAlways
 	TurnID            string         // source-proven turn identity (Codex/Claude/OpenCode turn id; projection lifecycle)
 	ItemID            string         // source-proven item identity (assistant text/reasoning/tool part id)
+	// DurationMs mirrors the official Turn.durationMs ("Duration between turn start and
+	// completion in milliseconds, if known" — codex app-server-protocol v2/Turn.ts). 0 =
+	// unknown; sources that do not provide it leave 0 and consumers fall back to timestamps.
+	DurationMs        int64
 	Questions         []UserQuestion // populated when ToolName == "AskUserQuestion"
 	Plan              []Todo         `json:",omitempty"`
 	Done              bool

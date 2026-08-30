@@ -244,6 +244,9 @@ func (ps *projectionSession) upsertTurn(turn TurnProjection) {
 		if turn.CompletedAt != 0 {
 			t.CompletedAt = turn.CompletedAt
 		}
+		if turn.DurationMs != 0 {
+			t.DurationMs = turn.DurationMs
+		}
 		if turn.User != nil {
 			t.User = turn.User
 		}
@@ -280,6 +283,9 @@ func (ps *projectionSession) upsertTurnPersistOnly(turn TurnProjection) {
 		}
 		if turn.CompletedAt != 0 {
 			t.CompletedAt = turn.CompletedAt
+		}
+		if turn.DurationMs != 0 {
+			t.DurationMs = turn.DurationMs
 		}
 		if turn.User != nil {
 			t.User = turn.User
@@ -1271,7 +1277,13 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			return
 		}
 		commit()
-		ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "completed", CompletedAt: ps.projection.UpdatedAt})
+		completed := TurnProjection{TurnID: turnID, Status: "completed", CompletedAt: ps.projection.UpdatedAt}
+		if durationMs := dataInt64(data, "durationMs"); durationMs > 0 {
+			// Official Turn.durationMs when the source provides it; absent keeps the
+			// timestamp-derived value clients compute as fallback.
+			completed.DurationMs = durationMs
+		}
+		ps.upsertTurn(completed)
 		if turn := ps.turnByID(turnID); turn != nil {
 			classifyProjectionTextPresentation(turn.Assistant, true)
 			ps.upsertTurns[turnID] = *turn

@@ -302,6 +302,10 @@ type TurnScopedHistoryTurn struct {
 	StartedAt    time.Time
 	CompletedAt  time.Time
 	HasTime      bool
+	// DurationMs mirrors the official Turn.durationMs when the source provides it
+	// (0 = unknown). Carried through the kernel TurnProjection so clients render the
+	// official "用时" value instead of recomputing from timestamps.
+	DurationMs   int64
 
 	UserItemID string
 	UserText   string

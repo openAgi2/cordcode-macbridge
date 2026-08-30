@@ -1421,9 +1421,13 @@ func turnScopedHistoryTurnToProjectionEvents(turns []core.TurnScopedHistoryTurn)
 		// §9.2：只按官方 turn status 封口。
 		switch t.Status {
 		case "completed":
+			completedData := map[string]interface{}{"turnId": t.TurnID, "done": true, "reason": "official_turn_status"}
+			if t.DurationMs > 0 {
+				completedData["durationMs"] = t.DurationMs
+			}
 			out = append(out, projectionHydrateEvent{
 				Event:    "turn_completed",
-				Data:     map[string]interface{}{"turnId": t.TurnID, "done": true, "reason": "official_turn_status"},
+				Data:     completedData,
 				TurnDone: true,
 			})
 		case "failed":

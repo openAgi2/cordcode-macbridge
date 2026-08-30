@@ -101,6 +101,9 @@ type TurnProjection struct {
 	Status      string             `json:"status"` // pending | running | completed | aborted | error
 	StartedAt   int64              `json:"startedAt,omitempty"`
 	CompletedAt int64              `json:"completedAt,omitempty"`
+	// Official Turn.durationMs (app-server-protocol v2, "if known"). 0/absent = unknown;
+	// clients fall back to completedAt−startedAt. Additive to bridge-v1 TurnProjection.
+	DurationMs  int64              `json:"durationMs,omitempty"`
 	User        *MessageProjection `json:"user,omitempty"`
 	Assistant   *MessageProjection `json:"assistant,omitempty"`
 	System      *MessageProjection `json:"system,omitempty"`
