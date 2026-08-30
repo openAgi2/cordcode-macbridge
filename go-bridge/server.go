@@ -252,14 +252,12 @@ const projectionWindowProductionEnabled = false
 // get_session_projection_window.
 func (s *Server) SetProjectionWindowEnabled(enabled bool) { s.projectionWindowEnabled = enabled }
 
-// turnDetailLazyProductionEnabled flipped true on 2026-08-30 (lazy-history plan
-// Phase 3): the iOS client shipped first — entry gating on this descriptor
-// capability, session_turn_items request state machine, completion =
-// appliedRev >= ack.syncRev — and G2 closed across three owner review rounds.
-// Frozen release ordering honored: client first, server flip last. Rollback =
-// set false: the capability stops echoing, session_turn_items answers
-// unsupported_capability, and every peer is byte-identical to today.
-const turnDetailLazyProductionEnabled = true
+// turn_detail_lazy_v1 production truth lives in ONE place:
+// core.TurnDetailLazyProductionEnabled (see that const's doc). It gates the
+// hello echo (main.go wires it into SetTurnDetailLazyEnabled below) AND the
+// codex-remote backend descriptor StaticCapabilities that the iOS entry gates
+// on — so flipping it withdraws both surfaces at once (byte-identical
+// rollback). Tests toggle the runtime switch via SetTurnDetailLazyEnabled.
 
 // SetTurnDetailLazyEnabled gates the turn_detail_lazy_v1 capability
 // advertisement (unified-bridge-protocol.md §11.7 / bridge-v1.md). When true

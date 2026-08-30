@@ -407,9 +407,11 @@ func Main() {
 	// turn_detail_lazy_v1 release gate (unified-bridge-protocol §11.7; frozen release
 	// ordering — client first, server flip last): the iOS Phase 3 client shipped on
 	// 2026-08-30 (descriptor-gated entry, session_turn_items state machine, completion =
-	// appliedRev >= ack.syncRev). Rollback = set turnDetailLazyProductionEnabled false:
-	// the capability stops echoing and every peer is byte-identical to today.
-	server.SetTurnDetailLazyEnabled(turnDetailLazyProductionEnabled)
+	// appliedRev >= ack.syncRev). The SAME const also gates the codex-remote backend
+	// descriptor StaticCapabilities (see core.TurnDetailLazyProductionEnabled) so
+	// rollback withdraws the echo AND the descriptor together — iOS hides the entry
+	// before any request. Rollback = set that one const false.
+	server.SetTurnDetailLazyEnabled(core.TurnDetailLazyProductionEnabled)
 	serverDisplayName := "CordCode Link"
 	if mgmtSrv != nil {
 		serverDisplayName = mgmtSrv.DisplayName()
