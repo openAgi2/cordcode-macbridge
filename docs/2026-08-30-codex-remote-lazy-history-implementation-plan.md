@@ -1,23 +1,29 @@
 # codex-remote 懒加载会话历史实施方案（对齐官方分页协议）
 
-- 日期：2026-08-30（r5，按 r4 终审修订）
-- 状态：**设计阶段收敛（audit-r4 为终审，不建议第五轮开放式评审；后续新问题仅由 G0 fixture、
-  定向测试或真机证据触发并在对应 gate 内修复）。Phase 0 = APPROVED，可立即开工**；
-  G1 BLOCKED（G0 fixtures + identity/shape 断言 + 未知 item 原子失败规则落地）；
-  G2 BLOCKED（per-connection delivery 契约 + P1-r4-1～4 冻结）。
+- 日期：2026-08-30（r6，按 r5 合规与官方源码可行性核验修订）
+- 状态：**设计阶段收敛（audit-r4 为终审；r5 合规核验 7/7 通过并确认"无需第六轮开放式评审"，
+  后续新问题仅由 G0 fixture、定向测试或真机证据触发并在对应 gate 内修复）。Phase 0 = APPROVED，
+  可立即开工**；G1 BLOCKED（G0 fixtures + identity/shape 断言 + 未知 item 原子失败规则落地）；
+  G2 BLOCKED（per-connection delivery 契约 + **turn-state patch op wire 修正（§3.2.0，核验 §4.1）**
+  + P1-r4-1～4 冻结）。
 - 评审报告：[r1](2026-08-30-codex-remote-lazy-history-plan-audit.md) /
   [r2](2026-08-30-codex-remote-lazy-history-plan-audit-r2.md) /
   [r3](2026-08-30-codex-remote-lazy-history-plan-audit-r3.md) /
-  [r4 终审](2026-08-30-codex-remote-lazy-history-plan-audit-r4.md)
+  [r4 终审](2026-08-30-codex-remote-lazy-history-plan-audit-r4.md) /
+  [r5 合规与源码可行性核验](2026-08-30-codex-remote-lazy-history-r5-compliance-source-check.md)
 - 母方案：[2026-08-26-codex-remote-backend-implementation-plan.md](2026-08-26-codex-remote-backend-implementation-plan.md)（其 Phase 0/1 的配对、WSS、envelope、live 投影基础设施已交付并多轮真机验证）
 - 目标仓库：`cordcode-macbridge`（`agent/codex-remote` + `go-bridge`）、`cordcode-ios`（配套工作树）
-- 上游官方源码（只读）：`/Users/jacklee/Projects/codex`。**目标行为基线是 tag `rust-v0.150.0-alpha.12.2`**（当前用户 Desktop 内嵌版本）；main 持续移动（r5 撰写时 `63d213884d`），只作参考不作基线。
+- 上游官方源码（只读）：`/Users/jacklee/Projects/codex`。**目标行为基线是 tag `rust-v0.150.0-alpha.12.2`**（当前用户 Desktop 内嵌版本）；main 持续移动（r6 撰写时 `63d213884d`），只作参考不作基线。
 
 > [!IMPORTANT]
 > 本方案把"打开 Codex Desktop 会话"的数据面从重路径（`thread/read includeTurns=true` 一次拉全量回合+全量 items）迁移到官方现行懒加载路径：
 > 首屏 `thread/turns/list`（默认 Summary 视图；对 `historyMode=paginated` 的会话每回合仅返回预计算的"首条用户消息/末条 agent 消息"槽位，各自可缺席；**该预计算收益仅限 paginated，legacy thread 每次请求仍重放整份 rollout**），
 > 用户点开"详细过程"时再按 `thread/items/list` 分页拉取该回合全量 items，由 Mac 侧整回合原子合入投影；
-> 滚动到顶加载更早历史**复用现有 `projection_window_v1` 的 `older` 请求链**——Mac producer 用内部 upstream cursor 按需把更早 Summary 页归约进 Kernel，**历史补水合 commit 按 connection delivery mode 分发**（请求者经 window result 接页、其他窗口客户端仅推进 revision、full 客户端收完整 mutation），**不新增第二套 iOS 历史分页 RPC，upstream cursor 绝不过桥**（bridge-v1.md R2）。
+> 滚动到顶加载更早历史**复用现有 `projection_window_v1` 的 `older` 请求链**——Mac producer 用内部 upstream cursor 按需把更早 Summary 页归约进 Kernel，**历史补水合 commit 按 connection delivery mode 分发**，**不新增第二套 iOS 历史分页 RPC，upstream cursor 绝不过桥**（bridge-v1.md R2）。
+> **上游复用原则（本方案第一原则）**：codex-rs 已有现成实现的能力——"取什么、怎么分页、何时 EOF"——
+> 直接镜像官方实现（核心锚点：`thread_processor.rs:3222-3258` 的 `paginated_turn_full_items`：
+> 固定 turnId、Asc、最大页尺寸、每页严格反序列化、`nextCursor=nil` 才 EOF、cursor 原地重复立即报错），
+> **不重新发明分页不变量**；本项目只实现桥接职责：投影 SoT、revision、connection delivery、iOS 状态与交互。
 > 官方对 **paginated thread** 将 `includeTurns=true` 明确注释为 "slow compatibility path"；
 > legacy thread 的 full read 不在此结论内（分层见 §1.2/§2.1）。
 > 桥面 `session_turn_items` 的响应**只做 ack（detailLoadState + syncRev，或请求级 WireError）**；
@@ -28,27 +34,30 @@
 > 用真实 Desktop app-server 的脱敏 fixture 复核（本仓 audit-plan 纪律：内容形状断言必须有真实样本，
 > 不得凭记忆或类比）。G0 必补样本清单见 §3.0.5（九项）、脚本防误判约束见 §3.0.6、**负结果判定见
 > §3.0.7（采到不一致结果 = G0 失败，不是通过）**。任何一项缺失或任一负结果触发，G0 不得通过。
-> 性能结论必须按 `historyMode` 分层（paginated / legacy），不得混合平均。
+> 性能结论必须按 `historyMode` 分层（paginated / legacy），不得混合平均；**`thread/items/list`
+> 可用性按 historyMode 分层实测，legacy 不继承 paginated 结论**（§2.5）。
 > **生产环境不得自动回退 `includeTurns=true`**（仅 owner 显式裁决的 historyMode/版本范围可走旧路径，
 > 新 RPC 超时或形状错误一律显式报错）。
+> **证据边界**：codex-rs 源码证明的是 app-server 的协议与服务端能力；ChatGPT iOS App 的默认折叠/
+> 点击加载是 **owner 黑盒观察**，两者分开表述，不声称复刻 iOS 私有客户端实现。
 
-## 0. 来源清单（r5 撰写时）
+## 0. 来源清单（r6 撰写时）
 
 ```text
 Mac 仓库=/Users/jacklee/Projects/cordcode-macbridge-codex-remote
 Mac 分支=codex/codex-remote-backend
-Mac 提交=113c18d（r5 撰写时 HEAD，即 r4 稿 + r3 评审入库提交；此后仅新增未提交的 r4 终审报告）
+Mac 提交=4584190（r6 撰写时 HEAD，即 r5 稿 + r4 终审入库提交；此后仅新增未提交的 r5 合规核验报告）
 iOS 配套工作树=/Users/jacklee/Projects/cordcode-ios-codex-remote
 iOS 分支=codex/codex-remote-backend-ios
 iOS 提交=5565a8612c0b700949ffd9761f4a47d1f3acada1
-Codex 上游=/Users/jacklee/Projects/codex @ main @ 63d213884d（只读；行为基线=tag rust-v0.150.0-alpha.12.2，r4 终审已复核）
+Codex 上游=/Users/jacklee/Projects/codex @ main @ 63d213884d（只读；行为基线=tag rust-v0.150.0-alpha.12.2，r4 终审/r5 核验已复核）
 线上目标=ChatGPT Desktop 26.825.32147（bundle 7303）/ 内嵌 codex-cli 0.150.0-alpha.12.2
 当前已安装 runtime=b45463c2ded8（2026-08-29T17:37:20Z 构建；audit-r2 已独立复核）
 ```
 
 注意：两仓多会话并行开发。**实施、构建、安装前必须按 CLAUDE.md P0 门用实际构建目录重新解析
 分支+HEAD 并复核工作树状态**；本文记录不替代未来复核。§1.3/§3.2 引用的本仓/iOS 行号为
-audit-r2～r4 核对时点值，实施时须复核。
+audit-r2～r5 核对时点值，实施时须复核。
 
 ### 0.1 修订记录
 
@@ -56,23 +65,24 @@ audit-r2～r4 核对时点值，实施时须复核。
 
 **r3 轮（对 r2 复评）**：P0-r2-1/2/3、P1-1～P1-6、P2-1～P2-4 全部采纳（audit-r3 §2 复核全部 🟢 关闭）。
 
-**r4 轮（对 r3 复评）**：P0-r3-1、P1-r3-1/2/3、P2-r3-1/2 全部采纳（audit-r4 §2 复核全部 🟢；
-R4 不采纳理由成立）。
+**r4 轮（对 r3 复评）**：P0-r3-1、P1-r3-1/2/3、P2-r3-1/2 全部采纳（audit-r4 §2 复核全部 🟢）。
 
-**r5 轮（对 r4 终审）**：
+**r5 轮（对 r4 终审）**：P0-r4-1/2/3、P1-r4-1～4 全部采纳（r5 合规核验 7/7 ✅）；两项二选一定案
+（failed ack 形状、per-turn generation）见 §9。
 
-| r4 终审条目 | 本稿处置 |
+**r6 轮（对 r5 合规与官方源码可行性核验）**：
+
+| 核验条目 | 本稿处置 |
 | --- | --- |
-| P0-r4-1 historical-hydration commit 按连接投递与 revision 语义 | 采纳：§2.4 冻结三类连接投递规则 + §3.2.0 delivery mode 注册 + T2.0 扩容（bridge-v1.md R3/R4/R10 契约复核修订、测试矩阵） |
-| P0-r4-2 G0 负结果判定 | 采纳：新增 §3.0.7（六类 fail 条件，含 Summary↔items id 不一致直接 G0 失败、control inventory 集合+顺序对照证"无缺口"）；G0 通过条件引用之 |
-| P0-r4-3 未知/不支持 item 整回合原子失败 | 采纳：§2.2 + T2.2 冻结（SkippedTypes 仅诊断字段；中止 commit、保留 Summary、`failed + unsupported_item_type`；不得部分 replace_parts、不得 loaded；修复后可重试） |
-| P1-r4-1 detail RPC wire 状态机补齐 | 采纳：§3.2.0 补四点（patch op 与应用顺序、失败 ack 形状二选一定案为 success-shaped、singleflight follower 终态、orphan loading 崩溃恢复） |
-| P1-r4-2 stale token 单值化 | 采纳：定案为**持久化 per-turn generation**（二选一取舍理由见 §9-r5 行）；§2.2/§3.2.0/T2.2 同步改写；测试须证明"目标 turn 改变→stale、其他 turn 更新→不受影响" |
-| P1-r4-3 producer checkpoint 有界且可验证 | 采纳：T2.0 增 backend-private checkpoint（schema bump、clone/save/restore）、pathless 有效性检查规则、恢复任务资源门与持久化 continuation |
-| P1-r4-4 恢复与多客户端测试 | 采纳：T2.5 增五组场景（A/B/C 三客户端、B 后续 live 无 base mismatch、crash 后无永久 loading、leader/follower 断线不取消 authoritative fetch、unknown item 失败后修复重试只提交一次） |
+| P0（G2 前）三字段 sparse `upsertTurns` 无法被现有 Turn schema 解码（Go `Status` 必填 `projection_types.go:96-105`；Swift 非 optional `SessionProjection.swift:226-236`） | 采纳并定案：弃 sparse upsertTurns，**新增专用 `turnStateOps` patch op**（turnId/detailLoadState/reasonCode/generation，Go/Swift 显式应用）；理由见 §9-r6 定案 3；§3.2.0 已改写 |
+| P1 证据边界措辞（iOS UI 不是"源码验证"） | 采纳：§1.1 改为"owner 黑盒观察 + codex-rs 独立证明 app-server 能力"，IMPORTANT 框加证据边界声明 |
+| 官方复用清单（核验 §6 表） | 采纳：T1.1 改为**镜像官方不变量**（`paginated_turn_full_items` 六项 + `paginated_thread_turns_list_response`），新增 §1.5 官方锚点表，红线 §7-13 |
+| `initialTurnsPage` 作为 G0 有数据候选 | 采纳：新增 T0.6 候选路径实测（baseline vs `thread/resume(initialTurnsPage)` 对比；启用条件三选；源码锚点 `thread_processor.rs:3292-3332`、官方测试 `thread_read.rs:1048-1119`） |
+| legacy 分层能力矩阵（items/list 独立必测，不继承 paginated） | 采纳：新增 §2.5 能力矩阵；T0.1/G0 增加 legacy 会话 items/list 探测；`Unsupported → method-not-found`（`thread_processor.rs:3398-3402`）记录为合法负结果探测目标 |
+| "完整思考原文"承诺措辞 | 采纳：产品承诺改为"按需加载服务端实际提供的 reasoning 摘要、工具调用与执行步骤"；G0 非空 content 证据前不承诺"完整思维链"（§2.2/§4） |
 
-**评审收敛声明（audit-r4）**：本稿为设计阶段终版。**不再发起第五轮开放式文档评审**；后续新问题
-只允许由 G0 fixture、定向测试或真机证据触发，并在对应 gate（G0/G1/G2）内修复。
+**评审收敛声明（audit-r4 / 核验 §7）**：本稿为设计阶段终版。**不再发起新一轮开放式文档评审**；
+后续新问题只允许由 G0 fixture、定向测试或真机证据触发，并在对应 gate（G0/G1/G2）内修复。
 
 ## 1. 背景与已验证证据
 
@@ -83,26 +93,35 @@ R4 不采纳理由成立）。
 （现有 schema replay 中 content 即为空）；`CommandExecution.aggregated_output` 可为 null。重路径的代价：
 
 1. 传输与编码成本：WSS 字节、bridge JSON、投影构建全量承担（对 legacy 会话服务端仍全量重放 rollout，见 §1.2）；
-2. 与官方客户端行为相反——ChatGPT iOS App 打开 Codex 会话很快，思考过程/执行步骤默认不展示、点击才加载（owner 观察 + 源码验证）。
+2. 与用户期望的交互相反——ChatGPT iOS App 打开 Codex 会话很快、思考/步骤默认折叠、点击才加载是
+   **owner 黑盒观察**；codex-rs 源码**独立证明**目标 Desktop app-server 原生提供"元数据/Summary 首屏/
+   按 turn 明细分页"能力（§1.2、§1.5），因此本项目可以实现同类交互，但**不声称复刻 ChatGPT iOS 的
+   私有客户端实现**。
 
 ### 1.2 官方协议证据（codex-rs，tag `rust-v0.150.0-alpha.12.2` checkout 行号）
 
 | 事实 | 位置（tag） | 前提/边界 |
 | --- | --- | --- |
 | `thread/read` 的 `include_turns` serde 默认 false；doc 注释宣布全量水合已废弃 | `app-server-protocol/src/protocol/v2/thread.rs:1650-1658` | — |
-| `thread/turns/list` 参数含 `cursor/limit/sortDirection/itemsView`；默认 **Summary** | `thread.rs:1684-1698`；服务端默认 `thread_processor.rs:3087,3159` | — |
+| 仅 `includeTurns=true` 才水合完整 turns；paginated 走 `paginated_thread_full_turns`，legacy 加载重放 rollout | `thread_processor.rs:2981-3000` | 冷打开改用元数据 + Summary 页确实绕开旧全量应答路径 |
+| `thread/turns/list` 参数含 `cursor/limit/sortDirection/itemsView`；默认 **desc + Summary** | `thread.rs:1684-1698`；服务端 `thread_processor.rs:3087,3159`（列表主实现 `3006-3089,3151-3219`） | — |
 | `TurnItemsView` 三态：`NotLoaded` / `Summary` / `Full`（临时兼容） | `v2/thread_data.rs:377-385` | — |
 | Summary 预计算：thread-store 每 turn 持久化 first-user / final-agent 两个 optional summary 槽位 | `thread-store/src/local/thread_history/read.rs:62-78,123-132` | **仅 `historyMode=paginated`**。legacy thread 走 `load_thread_turns_list_history` 每次请求重放整份 rollout（官方注释："it still replays the entire rollout on every request"） |
 | Summary 槽位各自可缺席：0/1/2 item 均可能出现；synthetic fork boundary 会继承源回合摘要 | `read.rs:128-132` | "每回合恰为两 item"不成立 |
-| `thread/items/list`：`turnId` 可选过滤 + cursor 分页 + 双向 | `thread.rs:1718-1732` | ThreadItemEntry 含 `turnId`+`item` |
+| **官方测试**验证正反 cursor 与三态：Summary 只留首条 user/末条 agent；NotLoaded 空 items 且 turn identity/status/timing 不变 | `app-server/tests/suite/v2/thread_read.rs:330-477` | 本仓 fixture 断言与单测场景的直接来源 |
+| `thread/items/list`：`turnId` 可选过滤 + cursor 分页 + 双向；`ThreadItemEntry{turn_id,item}` | `thread_processor.rs:3365-3422`；`thread.rs:1718-1732` | — |
+| ThreadStore Unsupported → items/list 返回 method-not-found | `thread_processor.rs:3398-3402` | **legacy 可用性必须独立实测**（§2.5），不继承 paginated 结论 |
+| `paginated_turn_full_items`：单回合拉到 EOF 的官方算法（固定 turnId、Asc、最大页尺寸、每页严格反序列化、`nextCursor=nil` 才 EOF、cursor 原地重复立即报错） | `thread_processor.rs:3222-3258` | **T1.1 `ReadTurnItems` 的行为模板**（§1.5） |
+| 官方集成测试覆盖 turn filter、items cursor、Summary/NotLoaded/Full | `thread_read.rs:1781-1934` | 同上，fixture 场景来源 |
 | `Turn` 结构仅 `id/items/itemsView/status/error/time` | `v2/thread_data.rs`（Turn 定义） | **无 item count / type 集合 / has-detail 标志**——入口判定不能依赖 Summary 元数据 |
 | `ThreadItem::Reasoning`：`summary[]` 与 `content[]` 均存在（serde default）、可各自为空；两字段语义不同（完整思考 vs 摘要），映射规则须样本裁决 | `v2/item.rs:268-275` | 同名 `content` 在 `UserMessage` variant 上是用户输入、在 `Reasoning` 上是思考正文——**同名异义，统计必须按 item type 分组**（§3.0.6） |
 | `CommandExecution.aggregated_output` 可 null；十类 item（userMessage/reasoning/agentMessage/commandExecution/fileChange/mcpToolCall/dynamicToolCall/plan/webSearch/contextCompaction）在 full 读取中均出现 | `v2/item.rs`；`testdata/phase2/thread-read-app-server.json`（schema replay，非 live） | schema replay 只证明解码面，不证明 live 形状 |
 | 实时通知轻量：`turn/started` items=NotLoaded；完成仅带 `last_agent_message` | `bespoke_event_handling.rs:170,1303-1305` | — |
 | 官方注释点名 paginated thread 的旧路径为 "slow compatibility path"；`Full` 视图为临时兼容路径 | `thread_processor.rs:3165-3166,3261-3262` | **仅 paginated 语义**；legacy full read 不在此结论内 |
-| `thread/resume.initialTurnsPage` 可带首个 turns 页 | `thread.rs:407-409,446-449`；引入提交 `2a1158b8e2f941afed79db95731b16c8a8db5774`（ancestor 检查可复跑） | 保持可选，不进产品主路径 |
+| `thread/resume.initialTurnsPage`：一次往返同时取得 live resume subscription 与首个 turns 页；处理 live active turn 占位避免首屏超 limit | `thread.rs:407-409,446-449`；`thread_processor.rs:3292-3332`；官方测试 `thread_read.rs:1048-1119`（initial page 与同参数 turns/list 一致） | G0 候选路径实测（T0.6），不因源码存在直接启用 |
+| `initialTurnsPage` 引入提交 `2a1158b8e2f941afed79db95731b16c8a8db5774`、`TurnItemsView` 引入提交 `9e0c191c13` | `git merge-base --is-ancestor <commit> rust-v0.150.0-alpha.12.2`（已验证） | 内嵌版本包含性成立 |
 
-### 1.3 与现有实现的关系（audit-r2～r4 核对的现状）
+### 1.3 与现有实现的关系（audit-r2～r5 核对的现状）
 
 - 现有 live 流（codec/ws/pairing/backoff/重连）**全部保留不动**；目录（`thread/list`）不动。
 - **共享 live tool `FlushPatch` 与 `ps.tools` 累加器不动**（audit-r2 P0-r2-3）；历史明细走专用原子操作（§3.2 T2.2）。
@@ -138,16 +157,35 @@ R4 不采纳理由成立）。
   source validation 基于本地 path/cursor prefix，codex-remote 属 pathless hydrate 路径——
   producer page state 需要新的 backend-private checkpoint（T2.0），**不得**把 opaque string cursor
   塞进 `ProjectionSourceDescriptor.Cursor int64`。
-- **patch 形状现状**：wire `ProjectionPatch` 只有 `UpsertTurns` 与 `PartOps`；`replace_parts` 的
-  PartOp 只有 `turnId/messageId/parts`，无 turn-level state（`go-bridge/projection_types.go:125-143`）；
-  iOS patch 按 `execution → upsertTurns → partOps` 顺序应用（`Models/ProjectionStore.swift:1102-1110`）——
-  detailLoadState 的具体 patch op 须冻结（§3.2.0）。
+- **patch 形状现状（r6 核验 §4.1 阻塞的根源）**：wire `ProjectionPatch` 只有 `UpsertTurns` 与
+  `PartOps`；两端 `upsertTurns` 元素都是**完整 turn 类型**——Go `TurnProjection.Status` 必填
+  （`go-bridge/projection_types.go:96-105`）、Swift `SessionTurnProjection.status` 非 optional
+  （`Models/SessionProjection.swift:226-236`），`merged(with:)` 按完整 turn 合并，`ProjectionReplica`
+  把任意 `upsertTurns != nil` 标 `orderChanged=true`；iOS patch 按 `execution → upsertTurns →
+  partOps` 顺序应用（`Models/ProjectionStore.swift:1102-1110`）。**r5 冻结的三字段 sparse
+  `upsertTurns` 无法被该 schema 解码——改为专用 `turnStateOps` op（§3.2.0 定案）**。
 
 ### 1.4 内嵌版本包含性（已验证）
 
-`TurnItemsView` 引入提交 `9e0c191c13` 与 `initial_turns_page` 引入提交 `2a1158b8e2f941afed79db95731b16c8a8db5774`
-均已通过 `git merge-base --is-ancestor <commit> rust-v0.150.0-alpha.12.2` 验证包含在用户当前 Desktop 内嵌版本中。
+见 §1.2 末行：`TurnItemsView`（`9e0c191c13`）与 `initial_turns_page`
+（`2a1158b8e2f941afed79db95731b16c8a8db5774`）均包含于 tag `rust-v0.150.0-alpha.12.2`。
 Phase 0 仍需线上实证真实应答形状。
+
+### 1.5 官方复用锚点表（r6 新增；"直接抄官方实现"原则的任务落点）
+
+| 本项目任务 | 官方锚点（tag `rust-v0.150.0-alpha.12.2`） | 复用方式 |
+| --- | --- | --- |
+| metadata-only read | `apply_thread_read_store_fields`（仅 includeTurns 才水合，`thread_processor.rs:2981-3000`） | 行为对齐：不含 includeTurns 的 read 只取元数据 |
+| Summary/NotLoaded 首屏 | `thread_turns_list_response_inner` + `paginated_thread_turns_list_response`（`3006-3089,3151-3219`） | 参数/默认值/三态语义直接采用 |
+| 单回合 items 请求 | `thread_items_list_response_inner`（`3365-3422`） | 参数与响应形状直接采用 |
+| 单回合拉到 EOF | `paginated_turn_full_items`（`3222-3258`）：固定 turnId、Asc、最大页尺寸、每页严格反序列化、`nextCursor=nil` 才 EOF、cursor 原地重复立即报错 | **逐项镜像其不变量**，再叠加 G0 裁决的 maxPages/maxBytes/timeout |
+| 全量路径只作兼容基线 | `paginated_thread_full_turns` 的 "slow compatibility path"（`3261-3290`） | 仅探针/基线/owner 裁决范围 |
+| resume 一次往返候选 | `paginated_resume_initial_turns_page(_with_active_slot)`（`3292-3332`） | T0.6 实测候选，裁决后才可能启用 |
+| 行为测试基线 | `app-server/tests/suite/v2/thread_read.rs:330-477,1048-1119,1781-1934` | 本仓 fixture 断言与单测场景的直接来源 |
+
+上游"取什么、怎么分页、何时 EOF"遵循 codex-rs；本项目只实现它不得不承担的桥接职责——投影 SoT、
+revision、connection delivery、iOS 状态与交互。**不要复制或重写上游已有分页语义，也不要把 bridge
+内部 cursor 暴露成上游 cursor。**
 
 ## 2. 目标行为（验收口径）
 
@@ -167,11 +205,14 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
 
 - **入口判定**：所有"可分页且已完成"的回合统一显示"加载详细过程"入口（r1 评审 P0-2 方案 A）。
   不从 Summary 反推"是否有工具/思考"——`Turn` 元数据不含该信息，反推即编造。
-- **加载状态机**：`detailLoadState = notRequested | loading | loaded | failed`，**turn-level 字段**
-  （patch op 与应用顺序冻结见 §3.2.0；缺席解码为 notRequested）。**空明细也是 loaded**：
-  "空明细"定义为**去除与 Summary 槽位重复的 user/final-agent 后，没有 reasoning/tool/fileChange 等
-  明细 item**（上游 items 数组为空只是其子集；fixture 与 UI 测试用同一口径）。
+- **加载状态机**：`detailLoadState = notRequested | loading | loaded | failed`，**turn-level 字段**，
+  经**专用 `turnStateOps` patch op** 承载（形状与应用顺序冻结见 §3.2.0；缺席解码为 notRequested）。
+  **空明细也是 loaded**："空明细"定义为**去除与 Summary 槽位重复的 user/final-agent 后，没有
+  reasoning/tool/fileChange 等明细 item**（上游 items 数组为空只是其子集；fixture 与 UI 测试用同一口径）。
   不引入未经证明的 `hasDetail` 字段。
+- **产品承诺口径（r6 收紧）**：可承诺"按需加载服务端实际提供的 reasoning 摘要、工具调用与执行
+  步骤"；**在 G0 取得非空 Reasoning content 证据（或 owner 裁决删除该主张）之前，不承诺"展示完整
+  思维链/思考原文"**。
 - **拉取与提交**：iOS 发起 `session_turn_items`（桥面方法，§3.2.0 冻结）→ **Mac 侧负责把该回合
   items/list 拉到 EOF 并原子合入投影**（singleflight、幂等），不向 iOS 暴露分页 cursor；
   重复请求返回已合入结果。整回合原子渲染；逐页渐进渲染**不进入本版**（见 §9-R2）。
@@ -187,7 +228,7 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
   **不得执行部分 `replace_parts`、不得标 `loaded`**；修复/升级后允许重试。
   已映射但只有 schema replay、无 live 样本的类型可以实现并测试，但交付报告不得标 live proven。
 - **合并语义**：专用历史明细 merge（§3.2 T2.2），通过显式 `(turnId, messageId)` 的原子
-  `replace_parts` + 同 patch 的 detailLoadState upsert 提交；按官方 item id 构造/替换该回合
+  `replace_parts` + 同 patch 的 `turnStateOps`（置终态）提交；按官方 item id 构造/替换该回合
   assistant parts；不伪装 live delta、不改变 `ExecutionView`/不 markRunning、不把历史工具塞进
   `ps.tools`、**不修改共享 live FlushPatch**；不重复 Summary 已有的 user/final-agent 正文
   （去重依据 = canonical 持久化的官方 item id，G0.7 证据 + §3.2 T2.1 存储）。
@@ -227,9 +268,9 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
   inclusive cursor 去重 + **prepend 归约进同一 Kernel truth**（同一 snapshot fence / syncRev 链），
   再由既有切片逻辑返回窗口。**每次窗口请求至多触发一页上游拉取（有界，受资源门约束）**；
   仍不足时由后续 `older` 请求继续，不循环拉全量。
-- **按连接投递与 revision 语义（audit-r4 P0-r4-1，实施前必须冻结）**：历史补水合 commit
-  **不得**按普通 `upsertTurns` patch 广播给该 session 全部连接。按每个 `(conn, backend, session)`
-  注册的 **delivery mode**（window / full；bridge 在窗口 RPC 首次命中时登记，不能只看连接声明的
+- **按连接投递与 revision 语义（audit-r4 P0-r4-1）**：历史补水合 commit **不得**按普通
+  `upsertTurns` patch 广播给该 session 全部连接。按每个 `(conn, backend, session)` 注册的
+  **delivery mode**（window / full；bridge 在窗口 RPC 首次命中时登记，不能只看连接声明的
   capability）分发同一 snapshot 的 mutation，保持**一条连续 revision 链**：
   1. **请求者 window 连接**：该页只经本次 window result 交付（`syncRev=N` 接续）——
      "一个 turn 在同一 page chain 只归属一个 window response"，不被 push patch 绕过；
@@ -246,24 +287,34 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
 - **诚实 hasOlder**：`hasOlder=false` 仅当 Kernel 无更旧**且**上游 EOF；"尚未水合"必须表现为
   `hasOlder=true`，**绝不把"未加载"报告成"会话起点"**。wire cursor 仍由 kernel turn ids +
   admission cut 派生，**upstream cursor 绝不过桥、不嵌入 wire cursor**（bridge-v1.md R2）。
-- **producer 状态持久化（有界且可验证，audit-r4 P1-r4-3）**：`hasOlderUpstream` + 内部 upstream
-  cursor 存入**新的 backend-private producer checkpoint**（具体字段、schema version bump、
-  clone/save/restore 由 T2.0 冻结；不复用 `ProjectionSourceDescriptor.Cursor int64`，也不用本地
-  文件 prefix digest 假装已验证远端 cursor）。**恢复**：restart 后先以 target RPC 验证/续接
-  cursor（如以持久化边界 turn id 对照上游翻页首结果），错误则进入 typed recovery；
-  "从 latest 重翻到 overlap"的恢复任务是**有界**的——每次任务 maxPages/maxBytes/timeout 与
-  **持久化 continuation**，达到上限返回显式 retryable failure，**不得一次循环扫完全历史**
-  （不重新制造 CPU/传输尖峰）。
+- **producer 状态持久化（有界且可验证）**：`hasOlderUpstream` + 内部 upstream cursor 存入**新的
+  backend-private producer checkpoint**（具体字段、schema version bump、clone/save/restore 由
+  T2.0 冻结；不复用 `ProjectionSourceDescriptor.Cursor int64`，也不用本地文件 prefix digest 假装
+  已验证远端 cursor）。**恢复**：restart 后先以 target RPC 验证/续接 cursor（如以持久化边界
+  turn id 对照上游翻页首结果），错误则进入 typed recovery；"从 latest 重翻到 overlap"的恢复任务
+  是**有界**的——每次任务 maxPages/maxBytes/timeout 与**持久化 continuation**，达到上限返回显式
+  retryable failure，**不得一次循环扫完全历史**。
 - **并发裁决**：多 iPhone 并发 `older` 按会话串行化/singleflight（同一补水合只拉一次）；
   live tail 同时推进时 prepend 不得影响 live append（snapshot cut 不回退、syncRev 链不断）；
   upstream cursor stale（服务端数据变化）→ typed error + 走恢复路径，不得以旧页覆盖新 truth。
 - **契约先行**：实施前复核 bridge-v1.md 现行窗口契约（含 R3/R4/R10）是否允许 producer-on-demand
   扩展 Kernel 与按连接投递；不允许则先修订 canonical 契约与测试，再写代码。
 
+### 2.5 historyMode 能力矩阵（r6 新增，核验 §5）
+
+| historyMode | turns Summary 首屏 | turn-filtered items/list | 首屏收益 | 点击明细策略 |
+| --- | --- | --- | --- | --- |
+| **paginated** | 必测（G0） | 必测（G0） | 传输/编码 + 服务端查询 | 官方 items/list 主路径（§1.5 锚点） |
+| **legacy** | 必测（G0） | **独立必测，不继承 paginated 结论**（源码不能保证 legacy 有 ThreadStore items 索引；Unsupported → method-not-found，`thread_processor.rs:3398-3402`） | 至少传输/编码；服务端仍重放 rollout | owner 明确裁决：保留旧 full 兼容路径 **或** 明确不支持该类会话的明细展开；**禁止自动回退** |
+
+G0 必须包含 legacy 会话的 `thread/items/list` 探测样本（T0.1）；若 legacy 不支持 items/list，
+"打开快"仍成立（首屏 Summary），但明细展开按 owner 裁决执行并记录入 fixture 元数据。
+
 ## 3. 实施阶段（五个阶段、五道门 G0–G4）
 
 每阶段沿用本仓 impl/tests/regression 三段交付纪律；引用门未过不得进入下一阶段。
-**当前判定（audit-r4 终审）：Phase 0 = APPROVED 可立即开工；G1 BLOCKED；G2 BLOCKED。**
+**当前判定（audit-r4 终审 + r5 合规核验）：Phase 0 = APPROVED 可立即开工；G1 BLOCKED；G2 BLOCKED
+（新增：turn-state patch op wire 修正）。**
 
 ### Phase 0 — 线上证据探针（阻塞门 G0）
 
@@ -271,7 +322,8 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
   对 live Desktop app-server 调用并捕获**脱敏 fixture**：
   - `thread/turns/list`（`itemsView:"summary"` / `"notLoaded"`、desc 首页、翻页 cursor 正反往返、
     **>30 回合会话翻页全链到 EOF**）；
-  - `thread/items/list`（按 turnId 过滤、asc 两页、空页、非法 turnId）；
+  - `thread/items/list`（按 turnId 过滤、asc 两页、空页、非法 turnId；**paginated 与 legacy 会话
+    各测一组**——§2.5 能力矩阵）；
   - `thread/read`（元数据，**必须记录 `thread.historyMode`**；同会话 **includeTurns=true 的
     control inventory 仅限探针使用**，供 §3.0.7 对照）。
 - T0.2 体积与耗时基线，**按 historyMode 分组**：同一会话的 full read / Summary 首页 / items-list
@@ -282,19 +334,29 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
   记录 0/1/2 分布、空文本、interrupted synthetic boundary 继承行为；核对 `itemsView/status/time/error`。
 - T0.4 十类 item 覆盖：按 owner 真实会话尽可能捕获每种出现的 item 类型；缺样本类型明确标为
   未验证并保持 fail-closed / SkippedTypes 可观测（仅诊断，终态规则见 §2.2）。
-- T0.5 **legacy 裁决**：若 owner 现存长会话含 `historyMode=legacy`，向 owner 呈现 T0.2 分层数据并
-  裁决产品策略（接受"仅传输收益"或对该类会话保留旧路径），裁决记录入 fixture 元数据
-  （该裁决同时是 §2.3 唯一允许生产走旧路径的入口）。
-- 采样脚本先落实 §3.0.7 的 pass/fail 断言与 control inventory 对照（audit-r4：不依赖 Phase 2 架构）。
+- T0.5 **legacy 裁决**：若 owner 现存长会话含 `historyMode=legacy`，向 owner 呈现 T0.2 分层数据
+  **+ §2.5 能力矩阵实测结果**并裁决产品策略（接受"仅传输收益"或对该类会话保留旧路径；
+  items/list 不可用时裁决明细展开策略），裁决记录入 fixture 元数据（该裁决同时是 §2.3 唯一允许
+  生产走旧路径的入口）。
+- T0.6 **`initialTurnsPage` 候选路径实测（r6 新增）**：对比
+  baseline（`thread/read(includeTurns=false)` + `thread/turns/list(summary)`）与
+  candidate（`thread/resume(initialTurnsPage=summary)`，源码锚点 `thread_processor.rs:3292-3332`、
+  官方测试 `thread_read.rs:1048-1119`）的往返数、耗时与 live subscription 重复性；仅在
+  **目标 Desktop 实测支持 + 不重复现有 live subscription + 耗时数据支持** 三条件齐备时才裁决
+  启用候选路径，否则维持 baseline；裁决记录入 fixture 元数据。**不因源码存在直接启用 experimental
+  参数**。
+- 采样脚本先落实 §3.0.7 的 pass/fail 断言与 control inventory 对照（不依赖 Phase 2 架构）。
 - **G0 通过条件 = §3.0.5 九项样本齐全（任一缺失不得通过，含 G0.5 owner 裁决闭环）
-  且 §3.0.7 零负结果触发** + T0.2 分层基线与资源画像 + 资源门裁决值 + T0.5 裁决（如适用）。
+  且 §3.0.7 零负结果触发** + T0.2 分层基线与资源画像 + 资源门裁决值 + T0.5 裁决（如适用）
+  + T0.6 候选路径裁决记录。
 
 #### 3.0.5 G0 必补九项（未验证内容清单）
 
 1. `thread/read` 元数据中的 `historyMode`（至少一个 owner 长会话；两态并存则分组）；
 2. Summary 的 0/1/2 item 分布、`itemsView/status/time/error` 与正反 cursor；
 3. NotLoaded 空 items 与同一 turn identity；
-4. items/list 的 `ThreadItemEntry.turnId`、asc 两页、next/backwards cursor、空页与非法 turnId；
+4. items/list 的 `ThreadItemEntry.turnId`、asc 两页、next/backwards cursor、空页与非法 turnId
+   （**paginated 与 legacy 分组**）；
 5. Reasoning **summary/content 四态分布**（均空 / 仅 summary / 仅 content / 双非空）+ 至少一个
    非空 `content[]` 真实样本；**若目标环境无法产生非空 content，owner 必须裁决从本版验收与实现
    主张中删除"完整思考"，不保留 pending 形状声明**（未裁决前 G0 不通过）；
@@ -305,7 +367,8 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
 9. **>30 回合真实会话的 turns/list 翻页全链**：逐页 cursor、翻到 EOF、turn id 无重叠
    （无缺口的判定见 §3.0.7 control inventory 对照）、desc 首页与后续页衔接。
 
-`initialTurnsPage` 保持可选：不进产品主路径则不阻塞 G0，但其源码 round-trip 测试不得写成线上已 proven。
+`initialTurnsPage` 经 T0.6 实测裁决前保持可选：不进产品主路径则不阻塞 G0，但其源码 round-trip
+测试不得写成线上已 proven。
 
 #### 3.0.6 G0 脚本防误判约束
 
@@ -314,7 +377,7 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
 - **Summary↔items 去重必须输出 `turnId → summary item ids → full item ids` 映射**：first-user 与
   final-agent 分别验证，不得把两个槽位合并成集合后只看交集或只比文本/总数。
 
-#### 3.0.7 G0 负结果判定（audit-r4 P0-r4-2：负结果 = 失败，不是"样本已采"）
+#### 3.0.7 G0 负结果判定（负结果 = 失败，不是"样本已采"）
 
 以下任一发生，**G0 直接失败**，回到 owner 重新裁决 identity/merge/分页方案；**禁止**降级为
 文本相似度去重或"继续实施并容错"：
@@ -329,14 +392,20 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
    **control inventory**（仅探针使用，不得进产品路径）做**集合与顺序双重对照**，并完成
    backwards round-trip——跳过对照只能证明"无重复"，不能证明"无缺口"，视为未通过。
 
+（`thread/items/list` 对 legacy 会话返回 method-not-found **不属于负结果**——它是 §2.5 能力矩阵的
+合法探测目标，走 T0.5 owner 裁决。）
+
 ### Phase 1 — Mac agent：`agent/codex-remote`（门 G1）
 
-- T1.1 `history.go` 拆分：
+- T1.1 `history.go` 拆分（**镜像官方不变量，见 §1.5 锚点表**）：
   - `ReadThreadSummary(ctx, threadID, cursor)` → `thread/read`（元数据）+ `thread/turns/list`
-    （Summary，支持任意 cursor 翻页——它同时是 §2.4 producer 补水合的取页原语）；
-  - `ReadTurnItems(ctx, threadID, turnID)` → `thread/items/list` 循环拉到 EOF：**定义请求 limit 常量
-    （沿用 `CODEX_REMOTE_TURNS_PAGE_SIZE` 或独立 `CODEX_REMOTE_ITEMS_PAGE_SIZE`），接受服务端 clamp，
-    按实际 `nextCursor` 判 EOF**（客户端没有协商出的上限值，不写"用服务端上限"）；
+    （Summary，支持任意 cursor 翻页——它同时是 §2.4 producer 补水合的取页原语；行为对齐
+    `paginated_thread_turns_list_response` 的默认值与三态语义）；
+  - `ReadTurnItems(ctx, threadID, turnID)` → `thread/items/list` 循环拉到 EOF，**逐项镜像官方
+    `paginated_turn_full_items`（`thread_processor.rs:3222-3258`）的不变量**：固定 turnId、
+    `sortDirection=Asc`、最大页尺寸请求（limit 常量，接受服务端 clamp）、每页严格反序列化、
+    `nextCursor=nil` 才算 EOF、**cursor 原地重复立即报错（防死循环）**；再叠加本项目 G0 裁决的
+    maxPages/maxBytes/timeout；
   - 删除打开路径上的 `includeTurns=true`（保留为显式命名的兼容函数，**默认仅供 T0.2 探针/基线与
     owner 裁决范围使用；生产路径失败显式报错，禁止自动回退**）。
 - T1.2 类型与页元数据：**保留/传播** `remoteTurn.ItemsView`（已存在，`history.go:81`）与页元数据
@@ -344,9 +413,10 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
   状态使用；Summary 槽位映射为现有 `EventUserMessage`/`EventText` 语义时标注 "summary 槽位"来源，
   **且必须携带官方 item id 走现有 `text_delta.itemId` 通道**——agent→bridge 边界不得丢弃 id。
 - T1.3 live 路径零改动；`catalog.go` 零改动。
-- T1.4 单测（fixtures 驱动）：Summary 首页/翻页/空页/EOF、turnId 过滤、itemsView 透传、
-  **十类 item 解码（fixture 下限 = schema replay 已覆盖十类；proven 主张仅限 live 样本中出现的类型）**、
-  Reasoning content 为空数组的行为、SkippedTypes 计数可观测（仅诊断字段）。
+- T1.4 单测（fixtures 驱动；**场景直接取自官方 `thread_read.rs` 测试基线**，§1.5）：Summary
+  首页/翻页/空页/EOF、turnId 过滤、itemsView 透传、**十类 item 解码（fixture 下限 = schema replay
+  已覆盖十类；proven 主张仅限 live 样本中出现的类型）**、Reasoning content 为空数组的行为、
+  repeated-cursor guard、SkippedTypes 计数可观测（仅诊断字段）。
 - T1.5 **Reasoning detail 映射按 G0.5 裁决实现**：不得复用 `history.go:345-351` 的 summary-first
   规则；四态样本驱动单测（样本缺失的 case 标 unverified 且不宣称 proven）。
 - **G1**：`go test ./agent/codex-remote/` 全绿（含 race）；形状断言全部来自 G0 fixture；
@@ -363,11 +433,9 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
   fail-closed 返回 unsupported；幂等/singleflight 键 = `(sessionId, turnId)`；
 - **请求/响应**：请求 `{ sessionId, turnId }`；响应**成功形状 ack**：
   `{ detailLoadState: "loaded"|"failed", syncRev, reasonCode? }`——**canonical items 不进 result**，
-  投影 snapshot/patch 是唯一内容写者。**失败 ack 形状定案（audit-r4 P1-r4-1-2）**：上游 RPC 错误、
-  资源门超限、未知 item、中断等**过程性失败走 success-shaped failed ack**（携带该失败 commit 的
-  `syncRev` 与 `reasonCode`，iOS 据此等待 `appliedRev >= syncRev` 后呈现 failed 态）；仅
-  **请求级错误**（未知 backend/session/turn、malformed 请求）返回 WireError；
-  禁止"typed error/failed ack"两可表述并存；
+  投影 snapshot/patch 是唯一内容写者。**失败 ack 形状定案**：上游 RPC 错误、资源门超限、未知 item、
+  中断等**过程性失败走 success-shaped failed ack**（携带该失败 commit 的 `syncRev` 与
+  `reasonCode`）；仅**请求级错误**（未知 backend/session/turn、malformed 请求）返回 WireError；
 - **状态机与顺序无关完成条件**：
   1. 请求受理后，Mac 先把该 turn 的 `detailLoadState=loading` 提交进投影 SoT（singleflight
      follower 观察同一状态，不发第二次拉取）；
@@ -378,34 +446,40 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
   4. 失败时提交 `failed + reasonCode`（同样得到 commit syncRev），再返回 failed ack；
      重试迁移 `failed → loading`；
   5. 会话删除、archive、同 turn generation 改变时，旧请求由 fence 丢弃或返回 typed stale；
-- **singleflight follower 终态（audit-r4 P1-r4-1-3）**：leader 处于 loading 时，follower **等待同一
-  terminal commit** 并返回**相同 terminal syncRev**（loaded 或 failed）；**不得**返回中间 loading
-  ack——否则 follower 可能把 `appliedRev >= loadingRev` 误判为 detail 完成；
-- **orphan loading 恢复（audit-r4 P1-r4-1-4）**：bridge 在 loading commit 后崩溃/重启时，restore
-  必须把**没有 active leader** 的 orphan loading **原子恢复为 `failed(reasonCode=interrupted)`**，
-  不得永久停在 loading；
-- **stale-write fence（per-turn generation，audit-r4 P1-r4-2 定案）**：投影 turn 新增**持久化
-  per-turn generation**（completion 后任何 mutation bump；随 snapshot 持久化，schema bump 同步）；
-  `replace_parts` admission token = `(backendId, sessionId, turnId, turnGeneration)`；提交前验证
-  目标仍是同一 completed turn；变化 → typed stale 并保留新 truth。**不用全局 baseRev**；
-  测试证明目标 turn 改变 → stale、其他 turn 更新 → 不受影响；
-- **detailLoadState patch op（audit-r4 P1-r4-1-1）**：以 **sparse `upsertTurns`**（只含
-  `turnId + detailLoadState + generation`，不携带 items）承载状态变化；`replace_parts + loaded`
-  在**同一 patch**内按现有 iOS 应用顺序（`execution → upsertTurns → partOps`）落地：partOps 先
-  替换明细、sparse upsertTurns 置终态（同 patch 原子）；`loading` 与 `failed` 单独以 sparse
-  upsertTurns patch 提交；backward decoding：旧 snapshot/patch 无该字段 → `notRequested`；
-  此形状与顺序在本条冻结，双方不得各自发明；
+- **singleflight follower 终态**：leader 处于 loading 时，follower **等待同一 terminal commit**
+  并返回**相同 terminal syncRev**（loaded 或 failed）；**不得**返回中间 loading ack；
+- **orphan loading 恢复**：bridge 在 loading commit 后崩溃/重启时，restore 必须把**没有 active
+  leader** 的 orphan loading **原子恢复为 `failed(reasonCode=interrupted)`**，不得永久停在 loading；
+- **`turnStateOps` 专用 patch op（r6 定案，替代 r5 的 sparse upsertTurns——核验 §4.1）**：
+  - **弃用理由**：现有 Go `TurnProjection.Status` 必填（`projection_types.go:96-105`）、Swift
+    `SessionTurnProjection.status` 非 optional（`SessionProjection.swift:226-236`），三字段 sparse
+    JSON 无法被完整 Turn schema 解码；若改发完整 turn upsert，`ProjectionReplica` 会把
+    `upsertTurns != nil` 标 `orderChanged=true`、`merged(with:)` 按完整 turn 合并——触碰共享
+    merge/顺序语义，违反 live 零改动红线；
+  - **定案形状**：`ProjectionPatch` 新增 `turnStateOps: [ { turnId, detailLoadState, reasonCode?,
+    generation } ]`（与 `partOps` 对称的专用 op；Go/Swift 显式应用，不伪装完整 turn upsert）；
+  - **应用顺序冻结**：iOS patch 应用顺序改为 `execution → upsertTurns → turnStateOps → partOps`
+    （状态先行、parts 后至，同 patch 内原子）；`replace_parts + loaded` 同 patch：partOps 替换
+    明细、turnStateOps 置终态；`loading`/`failed` 单独以 turnStateOps patch 提交；
+  - **向后兼容**：旧 patch 无 `turnStateOps` 字段 → 忽略；旧 snapshot turn 缺 detailLoadState →
+    `notRequested`；bridge 旧版本发出的 patch 不含该字段，iOS 行为不变（live 零改动）；
+  - schema bump 与 Go/Swift 类型、解码测试同批冻结；
+- **stale-write fence（per-turn generation）**：投影 turn 新增**持久化 per-turn generation**
+  （completion 后任何 mutation bump；随 snapshot 持久化，schema bump 同步）；`replace_parts`
+  admission token = `(backendId, sessionId, turnId, turnGeneration)`；提交前验证目标仍是同一
+  completed turn；变化 → typed stale 并保留新 truth。**不用全局 baseRev**；测试证明目标 turn
+  改变 → stale、其他 turn 更新 → 不受影响；
 - **detailLoadState schema 层级**：**turn-level 字段**（挂在投影 turn 对象上，Go/Swift schema
   同步）；缺席解码为 `notRequested`；restore 向后兼容；
-- **delivery mode 注册（audit-r4 P0-r4-1）**：bridge 为每个 `(conn, backend, session)` 记录
-  **window / full** delivery mode（窗口 RPC 首次命中时登记，非 capability 声明）；历史补水合
-  commit 按 §2.4 三类规则分发；契约文字（bridge-v1.md R3/R4/R10）如不兼容先修订；
+- **delivery mode 注册**：bridge 为每个 `(conn, backend, session)` 记录 **window / full** delivery
+  mode（窗口 RPC 首次命中时登记，非 capability 声明）；历史补水合 commit 按 §2.4 三类规则分发；
+  契约文字（bridge-v1.md R3/R4/R10）如不兼容先修订；
 - **分页所有权**：**Mac 拉到 EOF 后原子提交**；iOS 不见 cursor、无 partial 状态；
 - **资源门**：maxPages / maxBytes / timeout 用 G0 裁决值；超限 → failed ack + 原因码，
   不截断合法历史、不以 placeholder 代替超大 tool output；
 - **fence**：live turn 未落库、archive/delete、重连窗口与 detail 加载并发时的裁决顺序（投影 SoT
   串行化）；
-- **错误语义**：过程性失败 → success-shaped failed ack（见上）；请求级错误 → WireError；
+- **错误语义**：过程性失败 → success-shaped failed ack；请求级错误 → WireError；
   空明细（§2.2 口径）→ `loaded`。
 
 #### 实施任务
@@ -441,10 +515,10 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
   仍按同一 id 去重。
 - T2.2 **专用历史明细 merge**（不复用 live reducer 生命周期语义，不改共享 FlushPatch）：
   - 输入：`turnId + 有序全量 items + 终态 detailLoadState + admission token(per-turn generation)`；
-  - 提交通道：**现有 wire 的 `replace_parts`（显式 `turnId, messageId`）+ 同 patch 的 sparse
-    upsertTurns detailLoadState upsert**（§3.2.0 冻结形状）；**不把历史工具塞进 `ps.tools`、
-    不修改 live tool FlushPatch**（若未来确需重构 FlushPatch，必须另立方案并扩充全部 backend 的
-    live 回归矩阵，不在本方案内）；
+  - 提交通道：**现有 wire 的 `replace_parts`（显式 `turnId, messageId`）+ 同 patch 的
+    `turnStateOps` 置终态**（§3.2.0 定案形状）；**不把历史工具塞进 `ps.tools`、不修改 live tool
+    FlushPatch**（若未来确需重构 FlushPatch，必须另立方案并扩充全部 backend 的 live 回归矩阵，
+    不在本方案内）；
   - **未知/无法无损映射的 item type/shape → 整回合原子失败**（中止 commit、保留 Summary、
     `failed + unsupported_item_type`；不执行部分 replace_parts、不标 loaded）；
   - 按**官方 item id** 构造/替换该回合 assistant parts（依赖 T2.1 持久化的 id），不伪装
@@ -454,14 +528,16 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
   - Reasoning 映射按 G0.5 裁决（§2.2），禁止 summary-first；
   - 可复用 item decoder；SkippedTypes 仅作诊断观测。
 - T2.3 桥面方法实现（按 §3.2.0 冻结稿）；管理 API/relay 测试复用 `fakeAgentSession` 模式。
-- T2.4 协议文档更新与 handler 同提交入库（含 T2.0 若引发的 bridge-v1.md 契约修订）。
+- T2.4 协议文档更新与 handler 同提交入库（含 T2.0 若引发的 bridge-v1.md 契约修订、
+  `turnStateOps` 的 unified-bridge-protocol.md/schema/Go/Swift 类型同步）。
 - T2.5 **并发与归属测试矩阵**：已完成回合、非末回合、当前另有 live turn、重复请求（幂等）、
   两 turn 并发展开（singleflight）、空明细（§2.2 口径）、冷水合与 live 输出同时进行、Summary
   返回瞬间 live turn 完成、detail 加载时新 turn 开始、replace_parts 重复提交幂等、重连 restore
   后 detail merge 去重、generation 改变/会话删除时的 typed stale、older 补水合与 detail 加载
   并发、**A/B/C 三连接投递正确性与 B 的 live baseRev 链**（T2.0）、**loading 中 bridge crash →
   重启无永久 loading（orphan → failed(interrupted)）**、**leader/follower 断线与取消不互相取消
-  authoritative fetch**、**unknown item 失败后 Summary 不变、修复后重试只提交一次完整 parts**。
+  authoritative fetch**、**unknown item 失败后 Summary 不变、修复后重试只提交一次完整 parts**、
+  **turnStateOps 向后兼容（旧 bridge patch 无该字段时 iOS 行为不变）**。
 - **G2**：`go test ./go-bridge/` 全绿 + **detail merge、窗口补水合、per-connection delivery 与投影
   并发路径的定向 race 测试通过**（不笼统主张全包 race 已证明）；桥面协议文档变更入同一提交。
 
@@ -478,8 +554,8 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
   `loaded` 后入口变为直接展开/收起，不再发请求（防重复拉取）。
 - T3.3 live 回合不受影响；断线重连后已加载明细不丢（投影 SoT 在 Mac，`detailLoadState` 与
   canonical itemId 随 snapshot 恢复）。
-- T3.4 单测（ChatViewModel/projection store）+ 真机构建安装（`scripts/run.sh device`，
-  遵循 REAL_DEVICE_DEBUGGING.md）。
+- T3.4 单测（ChatViewModel/projection store，含 `turnStateOps` 解码与应用顺序）+ 真机构建安装
+  （`scripts/run.sh device`，遵循 REAL_DEVICE_DEBUGGING.md）。
 - **G3**：真机回归 + owner 验收矩阵（§4）。
 
 ### Phase 4 — 回归与交付（门 G4）
@@ -492,7 +568,7 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
 | # | 步骤 | 期望 |
 | --- | --- | --- |
 | 1 | iPhone 打开一个长历史 Codex Desktop 会话 | 首屏可交互时间明显缩短（对照 G0 基线）；最近回合正常显示 |
-| 2 | 点开某回合"加载详细过程" | 展示该回合思考（按 G0.5 裁决口径；若 owner 已裁决删除"完整思考"主张，则按裁决后口径验收）/工具/命令/文件变更等完整明细 |
+| 2 | 点开某回合"加载详细过程" | 展示该回合服务端实际提供的思考摘要/完整思考（按 G0.5 裁决口径）/工具/命令/文件变更等明细 |
 | 3 | 点开一个无工具纯对话回合 | 明细加载完成，按 §2.2 口径显示"无详细过程"或仅思考摘要——**不得报错** |
 | 4 | 再次点开同一回合 | 即时展开，无网络拉取（detailLoadState=loaded） |
 | 5 | Mac 端同会话发起新回合 | iOS live 同步照旧（live 零回归） |
@@ -500,19 +576,23 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
 | 7 | 加载明细同时 Mac 端开始新回合 | 明细与新 turn 互不串扰（fence 生效） |
 | 8 | **>30 回合会话滚动到顶继续加载更早历史** | 第 31 回合以前的历史可达；连续 older 直到会话起点；无重复/无缺口；与 live 推进互不干扰（§2.4 窗口链） |
 | 9 | **两台 iPhone 同会话，A 滚动加载旧历史，B 停在首屏不动** | B 列表顺序/内容不变、无旧回合插入、后续 live 消息照常到达且无 base mismatch（§2.4 per-connection delivery） |
+| 10 | （如适用）legacy 会话打开与展开 | 打开速度受益照常；明细展开行为符合 T0.5 owner 裁决（含明确不支持的情形），无静默 full fallback |
 
 （矩阵 #3 覆盖"空明细也是 loaded"；#6 覆盖"不重复正文/不误标执行中/restore 保留"红线；
-#8/#9 覆盖 P0-r3-1 与 P0-r4-1 端到端。）
+#8/#9 覆盖 P0-r3-1 与 P0-r4-1 端到端；#10 覆盖 §2.5 能力矩阵。）
 
 ## 5. 非目标
 
 - 中继 cursor 断线续传、出站 seq/ack 重放缓冲：既有 fail-closed 缺口，维持不动。
 - `codex-web` 后端任何改动。
-- `initialTurnsPage` 进产品主路径（保持可选观察）。
+- `initialTurnsPage` 进产品主路径（T0.6 三条件裁决前保持可选观察）。
 - 逐页渐进渲染（见 §9-R2 搁置理由）。
 - 重构共享 live tool FlushPatch（如确需，另立方案并扩充全部 backend 的 live 回归矩阵）。
 - **新增第二套 iOS 历史分页 RPC**（更早历史只走现有 `projection_window_v1` older 链）。
 - 未知 item 的静默跳过/部分渲染（按 §2.2 一律整回合原子失败）。
+- **重新发明 codex-rs 已有分页语义**（"取什么/怎么分页/何时 EOF"镜像官方实现，§1.5）。
+- 复刻 ChatGPT iOS 私有客户端实现（仅实现同类交互；iOS 行为依据是 owner 观察 + 本方案设计，
+  非 iOS 源码）。
 
 ## 6. 关联已修复问题（上下文更新）
 
@@ -545,30 +625,35 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
     分发，不得全量广播旧回合**；契约不允许时先修 bridge-v1.md 再写代码。
 11. **回退红线**：生产环境不得自动回退 `includeTurns=true`；仅 owner 显式裁决的 historyMode/版本
     范围可走旧路径，且须记录可移除条件；新 RPC 超时/形状错误一律显式报错。
-12. **未知 item 红线（audit-r4 P0-r4-3）**：无法无损映射的 item → 整回合原子失败（保留 Summary、
+12. **未知 item 红线**：无法无损映射的 item → 整回合原子失败（保留 Summary、
     `failed + unsupported_item_type`）；SkippedTypes 仅诊断，不作为丢弃后继续成功的开关。
+13. **官方复用红线（r6 新增）**："取什么、怎么分页、何时 EOF"等上游语义**直接镜像 codex-rs 现成
+    实现（§1.5 锚点表），不自行发明等价逻辑**；本项目只实现桥接职责（投影 SoT、revision、
+    connection delivery、iOS 状态与交互）。镜像实现的偏差（如新增 clamp/资源门）必须在代码注释与
+    测试中标注与官方锚点的差异点。
 
 ## 8. 交付物清单
 
 - [ ] `agent/codex-remote/testdata/phase0/live/`：turns/list（含 >30 回合翻页全链 + control
-      inventory 对照结果）、items/list、thread/read(含 historyMode) 脱敏 fixtures + 分层体积/耗时
-      基线 + 单回合资源画像 + 资源门裁决值 + §3.0.7 负结果判定记录 + （如适用）legacy 裁决记录
-- [ ] `agent/codex-remote/history.go` 拆分 + 兼容路径显式化（默认仅探针/裁决范围）+ 页元数据与
-      item id 传递保留 + Reasoning 映射按 G0.5 裁决重写（非 summary-first）+ 未知 item 原子失败
+      inventory 对照结果）、items/list（**paginated + legacy 分组**）、thread/read(含 historyMode)
+      脱敏 fixtures + 分层体积/耗时基线 + 单回合资源画像 + 资源门裁决值 + §3.0.7 负结果判定记录 +
+      T0.6 initialTurnsPage 候选裁决记录 + （如适用）legacy 裁决记录
+- [ ] `agent/codex-remote/history.go` 拆分（**镜像 `paginated_turn_full_items` 六项不变量**）+
+      兼容路径显式化（默认仅探针/裁决范围）+ 页元数据与 item id 传递保留 + Reasoning 映射按
+      G0.5 裁决重写（非 summary-first）+ 未知 item 原子失败
 - [ ] `go-bridge` 投影 Summary 化（正序化/prepend/去重）+ **上游分页 ↔ `projection_window_v1`
       接线（T2.0：producer 补水合、per-connection delivery、诚实 hasOlder、backend-private
       checkpoint 与有界恢复）** + canonical `ProjectionPart.ItemID` 已映射 variant 持久化 +
-      **per-turn generation** stale fence + 专用历史明细 merge（`replace_parts` 通道 + 未知 item
-      原子失败）+ 并发归属测试矩阵（含 T2.5 新增场景）
+      **per-turn generation** stale fence + **`turnStateOps` patch op（Go/Swift schema 同步）** +
+      专用历史明细 merge（`replace_parts` 通道 + 未知 item 原子失败）+ 并发归属测试矩阵
 - [ ] `docs/protocol/unified-bridge-protocol.md`：`session_turn_items` wire contract
-      （ack-only、backend 归属、状态机/syncRev 完成条件、sparse upsertTurns 状态 op、
-      delivery mode、资源门——先冻结后实现）；如 T2.0 契约复核需要，同步修订 `bridge-v1.md`
-      （R2/R3/R4/R10）
-- [ ] iOS 统一入口 + detailLoadState 状态机 + appliedRev≥syncRev 完成条件渲染 + 现有窗口链
-      load-older 验证（不重造）+ 防重复拉取
-- [ ] 两仓测试全绿、真机矩阵（§4，含 #8/#9）全绿、文档同步
+      （ack-only、backend 归属、状态机/syncRev 完成条件、`turnStateOps`、delivery mode、资源门
+      ——先冻结后实现）；如 T2.0 契约复核需要，同步修订 `bridge-v1.md`（R2/R3/R4/R10）
+- [ ] iOS 统一入口 + detailLoadState 状态机（`turnStateOps` 解码/顺序）+ appliedRev≥syncRev 完成
+      条件渲染 + 现有窗口链 load-older 验证（不重造）+ 防重复拉取
+- [ ] 两仓测试全绿、真机矩阵（§4，含 #8/#9/#10）全绿、文档同步
 
-## 9. 评审采纳记录（四轮，含不采纳项理由）
+## 9. 评审采纳记录（四轮评审 + 一轮合规核验，含不采纳项理由）
 
 ### r1 轮（对 [r1 评审](2026-08-30-codex-remote-lazy-history-plan-audit.md)）
 
@@ -596,12 +681,19 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
 
 | 编号 | 建议 | 处置 | 理由 |
 | --- | --- | --- | --- |
-| — | P0-r4-1/2/3、P1-r4-1～4 | **全部采纳** | 落点见 §0.1 r5 表：§2.4 按连接投递、§3.0.7 负结果判定、§2.2/T2.2 未知 item 原子失败、§3.2.0 四点 wire 补齐、T2.0 checkpoint/恢复有界化、T2.5 五组新场景 |
-| （定案记录 1） | P1-r4-1-2 失败 ack 形状二选一 | **选 success-shaped failed ack** | 与 ack-only 单写者设计自洽：failed commit 本身产生 syncRev，failed ack 直接携带它，iOS 用同一 `appliedRev >= syncRev` 条件处理成败两态；WireError 路径要求 iOS 另行获取失败 commit 的 syncRev，徒增协议复杂度。WireError 仅保留给请求级错误（未知 backend/session/turn、malformed） |
+| — | P0-r4-1/2/3、P1-r4-1～4 | **全部采纳**（r5 合规核验 7/7 ✅） | 落点见 §0.1 r5 轮 |
+| （定案记录 1） | P1-r4-1-2 失败 ack 形状二选一 | **选 success-shaped failed ack** | 与 ack-only 单写者设计自洽：failed commit 本身产生 syncRev，failed ack 直接携带它，iOS 用同一 `appliedRev >= syncRev` 条件处理成败两态；WireError 路径要求 iOS 另行获取失败 commit 的 syncRev，徒增协议复杂度。WireError 仅保留给请求级错误 |
 | （定案记录 2） | P1-r4-2 stale token 算法二选一 | **选持久化 per-turn generation**（备选：completed-turn fingerprint） | generation 是 O(1) 整数比较，schema bump 与 detailLoadState/per-turn 持久化工作顺路；fingerprint 需定义 canonical 序列化与哈希、比较成本高且对"回合被修正"的语义间接。两条路线都满足 audit 的"目标 turn 改变→stale、其他 turn 更新→不受影响"测试要求，取实现更简单者 |
 
-**评审收敛声明**：audit-r4 为设计阶段终审；r5 后不再进行开放式文档评审，后续新问题仅由
-G0 fixture、定向测试或真机证据触发并在对应 gate 内修复。
+### r5 合规核验轮（对 [r5 合规与官方源码可行性核验](2026-08-30-codex-remote-lazy-history-r5-compliance-source-check.md)）
+
+| 编号 | 建议 | 处置 | 理由 |
+| --- | --- | --- | --- |
+| — | P0（sparse upsertTurns 修正）、P1（证据边界措辞）、官方复用清单、initialTurnsPage 候选、legacy 分层矩阵、完整思考承诺措辞 | **全部采纳** | 落点见 §0.1 r6 表 |
+| （定案记录 3） | sparse `upsertTurns` 修正二选一（完整 turn upsert vs 专用 turn-state op） | **选新增专用 `turnStateOps` patch op** | 方案 A（发完整 turn upsert）会被现有 `ProjectionReplica` 标 `orderChanged=true`、经 `merged(with:)` 完整合并——触碰共享 merge/顺序语义，恰好违反本方案 live 零改动红线（§7-8）；方案 B 与既有 `partOps`/`replace_parts` 的专用 op 风格对称，向后兼容解码简单（旧 patch 无字段即忽略），不动任何共享 live 路径。核验自己也标注 B 为"更干净方案" |
+
+**评审收敛声明**：audit-r4 为设计阶段终审，r5 合规核验确认"无需第六轮开放式评审"；r6 后不再进行
+开放式文档评审，后续新问题仅由 G0 fixture、定向测试或真机证据触发并在对应 gate 内修复。
 
 ## 10. 变更历史
 
@@ -612,15 +704,17 @@ G0 fixture、定向测试或真机证据触发并在对应 gate 内修复。
 - 2026-08-30 r3：按 r2 复评修订——canonical item id 持久化、Reasoning 四态裁决禁 summary-first、
   `replace_parts` 原子通道不改共享 FlushPatch、ack-only 单写者 + backend 归属 + 资源门、"空明细"
   口径、G0.5 阻塞语义、tag 行号重算、脚本防误判约束。
-- 2026-08-30 r4：按 r3 复评修订——§2.4 + T2.0 上游分页 ↔ 窗口端到端接线（producer 补水合、诚实
-  hasOlder、upstream cursor 不过桥、状态持久化/恢复）、G0 增 >30 回合翻页 fixture、§3.2.0 状态机
-  与 stale fence、生产禁自动回退、mapped variants 收窄、detailLoadState 层级冻结。
-- 2026-08-30 r5：按 r4 终审修订（设计收敛终版）——**§2.4 冻结历史补水合的按连接投递与 revision
-  语义**（requester/other-window/full 三类 + delivery mode 注册 + connection-specific no-op
-  revision patch + bridge-v1 R3/R4/R10 契约复核）；**§3.0.7 G0 负结果判定**（六类 fail，含
-  Summary↔items id 不一致直接失败、control inventory 集合+顺序对照证无缺口）；**未知/不支持 item
-  整回合原子失败**（§2.2/T2.2/§7-12）；§3.2.0 补齐 detailLoadState sparse upsertTurns patch op、
-  失败 ack 形状定案、singleflight follower 终态、orphan loading 崩溃恢复；stale token 定案为
-  持久化 per-turn generation；T2.0 增 backend-private checkpoint（schema bump、pathless 验证、
-  有界恢复 + continuation）；T2.5/§4 增多客户端（#9）、crash、断线取消、unknown-item 重试场景。
-  本轮无整体不采纳项，两项二选一定案理由见 §9-r4 轮。
+- 2026-08-30 r4：按 r3 复评修订——§2.4 + T2.0 上游分页 ↔ 窗口端到端接线、G0 增 >30 回合翻页
+  fixture、§3.2.0 状态机与 stale fence、生产禁自动回退、mapped variants 收窄、detailLoadState
+  层级冻结。
+- 2026-08-30 r5：按 r4 终审修订——按连接投递与 revision 语义、G0 负结果判定（§3.0.7）、未知 item
+  整回合原子失败、detailLoadState sparse upsertTurns patch op、失败 ack 形状/follower 终态/orphan
+  loading 恢复、per-turn generation、producer checkpoint 有界恢复、多客户端/crash/重试测试。
+- 2026-08-30 r6：按 r5 合规与官方源码可行性核验修订——**sparse `upsertTurns` 改为专用
+  `turnStateOps` patch op**（现有完整 Turn schema 无法解码三字段 sparse JSON；定案理由见
+  §9-r6 定案 3；应用顺序/向后兼容/schema bump 冻结）；**§1.5 官方复用锚点表 + 红线 §7-13**
+  （"取什么/怎么分页/何时 EOF"直接镜像 `paginated_turn_full_items` 等官方实现，不造轮子）；
+  **T0.6 `initialTurnsPage` 候选路径实测**（三条件裁决）；**§2.5 historyMode 能力矩阵**（legacy
+  items/list 独立必测，Unsupported=合法探测目标）；**证据边界拆分**（iOS UI=owner 黑盒观察，
+  codex-rs 只证明 app-server 能力）；产品承诺收紧为"服务端实际提供的明细"，G0 前不承诺完整思维链；
+  G0 增 legacy items/list 分组探测、真机矩阵增 #10。本轮无整体不采纳项，定案记录 3 见 §9。
