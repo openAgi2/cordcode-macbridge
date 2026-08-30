@@ -10,7 +10,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -362,6 +364,127 @@ func TestTurnItemsTotalDeadlineGate(t *testing.T) {
 	})
 	if _, err := agent.ReadTurnItems(context.Background(), "thread_probe", "turn_items"); !errors.Is(err, ErrTurnItemsTimeout) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// metricsCaptureHandler collects slog records so the owner-adjudicated
+// resource-gate metrics (2026-08-30 #8) can be asserted per exit path.
+type metricsCaptureHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *metricsCaptureHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *metricsCaptureHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r.Clone())
+	return nil
+}
+func (h *metricsCaptureHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *metricsCaptureHandler) WithGroup(string) slog.Handler      { return h }
+
+func (h *metricsCaptureHandler) attrs(r slog.Record) map[string]any {
+	out := map[string]any{}
+	r.Attrs(func(a slog.Attr) bool {
+		out[a.Key] = a.Value.Any()
+		return true
+	})
+	return out
+}
+
+func captureTurnItemsMetrics(t *testing.T, fn func()) map[string]any {
+	t.Helper()
+	handler := &metricsCaptureHandler{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(handler))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	fn()
+	for i := len(handler.records) - 1; i >= 0; i-- {
+		if handler.records[i].Message == "codex-remote: turn items metrics" {
+			return handler.attrs(handler.records[i])
+		}
+	}
+	t.Fatal("turn items metrics record not emitted")
+	return nil
+}
+
+// TestTurnItemsMetricsOnSuccess pins the owner-adjudicated field set on the
+// EOF exit: every dimension named in the 2026-08-30 #8 ruling (pageCount,
+// rawResponseBytes, decodedItemBytes, itemCount, item types, max item size
+// and type, per-page and total timings, failGate) must be present and sane.
+func TestTurnItemsMetricsOnSuccess(t *testing.T) {
+	agent, _ := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
+		if call.Params["cursor"] == nil {
+			return map[string]any{
+				"data":       []any{itemEntry("turn_items", map[string]any{"type": "userMessage", "id": "u1", "text": "q"})},
+				"nextCursor": "cur-2",
+			}, nil
+		}
+		return map[string]any{"data": []any{itemEntry("turn_items", map[string]any{"type": "agentMessage", "id": "a1", "text": "answer-text"})}}, nil
+	})
+	var fetchErr error
+	m := captureTurnItemsMetrics(t, func() {
+		_, fetchErr = agent.ReadTurnItems(context.Background(), "thread_probe", "turn_items")
+	})
+	if fetchErr != nil {
+		t.Fatal(fetchErr)
+	}
+	if m["failGate"] != "eof" {
+		t.Fatalf("failGate = %v", m["failGate"])
+	}
+	if m["pageCount"] != int64(2) {
+		t.Fatalf("pageCount = %v", m["pageCount"])
+	}
+	if m["itemCount"] != int64(2) {
+		t.Fatalf("itemCount = %v", m["itemCount"])
+	}
+	raw, ok := m["rawResponseBytes"].(int64)
+	if !ok || raw <= 0 {
+		t.Fatalf("rawResponseBytes = %v", m["rawResponseBytes"])
+	}
+	decoded, ok := m["decodedItemBytes"].(int64)
+	if !ok || decoded <= 0 || decoded > raw {
+		t.Fatalf("decodedItemBytes = %v (raw %v)", m["decodedItemBytes"], raw)
+	}
+	types, ok := m["itemTypes"].(map[string]int)
+	if !ok || types["userMessage"] != 1 || types["agentMessage"] != 1 {
+		t.Fatalf("itemTypes = %v", m["itemTypes"])
+	}
+	if m["maxItemType"] != "agentMessage" {
+		t.Fatalf("maxItemType = %v (expected the larger later item)", m["maxItemType"])
+	}
+}
+
+// TestTurnItemsMetricsOnMaxBytesGate pins the failGate=max_bytes exit: the
+// summary must record the OVERSHOOT cumulative raw bytes (including the page
+// that tripped the gate) so real-turn data shows how far past the cap the
+// turn actually reaches.
+func TestTurnItemsMetricsOnMaxBytesGate(t *testing.T) {
+	big := strings.Repeat("x", 60*1024)
+	agent, _ := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
+		cursor, _ := call.Params["cursor"].(string)
+		return map[string]any{
+			"data":       []any{itemEntry("turn_items", map[string]any{"type": "commandExecution", "id": "c1", "aggregatedOutput": big})},
+			"nextCursor": "cur-" + cursor + "-more",
+		}, nil
+	})
+	var fetchErr error
+	m := captureTurnItemsMetrics(t, func() {
+		_, fetchErr = agent.ReadTurnItems(context.Background(), "thread_probe", "turn_items")
+	})
+	if !errors.Is(fetchErr, ErrTurnItemsMaxBytes) {
+		t.Fatal(fetchErr)
+	}
+	if m["failGate"] != "max_bytes" {
+		t.Fatalf("failGate = %v", m["failGate"])
+	}
+	raw, ok := m["rawResponseBytes"].(int64)
+	if !ok || raw <= int64(remoteTurnItemsMaxBytes) {
+		t.Fatalf("rawResponseBytes = %v must record the overshoot cumulative size", raw)
+	}
+	if m["error"] == "" {
+		t.Fatal("error field must name the typed failure")
 	}
 }
 

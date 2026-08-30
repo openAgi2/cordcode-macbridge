@@ -1059,13 +1059,19 @@ type DiagnosticCheck = {
   hydrate 重建，`detailLoadState` 回到 `notRequested`——该条款不是当前真机必测项，
   `RecoverOrphanDetailLoading` 是未来引入 checkpoint 后的准入钩子。
 
-#### 资源门（G0 owner 裁决冻结值，2026-08-30）
+#### 资源门（G0 owner 裁决冻结值，2026-08-30；终局裁决 2026-08-30 深夜）
 
 - turns page limit **30**；items request limit **5**；单回合 **24 页或 512KB** 任一先到即
   **原子失败**；单 RPC **30 秒**；整个单回合拉取 **90 秒总 deadline**（不是 24 × 30s）。
 - 超限分别返回 `max_pages` / `max_bytes` / `timeout`；**不截断、不提交部分明细、不以
   placeholder 代替超大 tool output**；后续只能依据真实 `resource_limit` 触发数据调整，
   不得自动扩大。
+- **终局裁决（G3 真机验收触发，plan §3.0 owner 裁决记录第 5 条为准）**：上述门限为
+  **临时安全门**——终案 = 官方 cursor 分页 + 有界增量提交 + 瞬时资源门（单页/单 patch/
+  驻留内存/单 RPC/临时存储/取消清理），废止 512KB 作为整回合永久查看上限；取证据步骤
+  = agent 层 `turn items metrics` 逐页计量日志（已落地，不记录正文）。终案落地前
+  本节数值门继续生效（fail-closed），**不得单独调大 512KB**（fence/journal/relay 的
+  2MB 级限制会把失败点后移而非根治）。
 
 #### reasonCode 冻结闭集（v1）
 

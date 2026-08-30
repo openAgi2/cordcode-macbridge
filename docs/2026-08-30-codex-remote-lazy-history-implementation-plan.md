@@ -385,6 +385,26 @@ Summary），明细展开按 owner 裁决执行并记录入 fixture 元数据。
    512KB 任一先到即原子失败**；单 RPC 30s；**整个单回合拉取 90s 总 deadline**（不是
    24×30s）；超限分别返回明确 `max_pages` / `max_bytes` / `timeout` reasonCode，不截断、
    不提交部分明细。后续仅可依据真实 `resource_limit` 触发数据调整，不得自动扩大。
+5. **资源门终局裁决（owner 2026-08-30 深夜，G3 反馈触发，修订第 4 条的"冻结"语义）**：
+   G3 真机验收确认 8–15 分钟思考回合合法触发 `max_bytes`（内容过大）后 owner 裁定——
+   **"合法大回合永久不可查看"是设计缺陷而非 by-design**；第 4 条的门限值是**临时安全门**
+   （防止单次请求/单次内存聚合/单次 patch 过大），不是"整个回合是否允许查看"的产品上限。
+   **终案方向定案：官方 cursor 分页 + 有界增量提交**——门限内的回合维持现状（一次拉完、
+   原子提交）；超过门限不报永久失败，继续官方 `thread/items/list` cursor 逐页拉取，每页
+   经官方 item id 去重后转为**有界投影 patch 逐批写入**该回合；上游 cursor 由 Mac 私有
+   持有、不下放 iOS；EOF 才置 `loaded`，中途保持 `loading` 并携带进度，断线/超时从已
+   确认 cursor 续传；**资源门改造为瞬时资源门**（单页大小 / 单 patch 大小 / 驻留内存 /
+   单 RPC 时间 / 临时存储总量 / 取消与断线清理），废止 512KB 作为整回合永久上限。
+   **明确否决"单纯调大 512KB"**：桥面尚有 projection fence 与 revision journal 等 2MB 级
+   限制（event_publisher.go），只放大门限会把失败点后移到 fence 溢出/journal 淘汰/
+   relay 压力/iOS 解码内存峰值/断线重传整包，不是根治。**取证步骤（本轮已落地）**：
+   agent 层逐页计量（history_paginated.go `turn items metrics` 日志——pageCount、
+   rawResponseBytes、decodedItemBytes、itemCount、item 类型分布、最大单 item 大小+类型、
+   每页耗时+总耗时、命中门类 failGate；不记录正文），采集 3–10 个真实 8–15 分钟回合后
+   owner 凭数据裁决瞬时门限与增量 patch 尺寸。**G3 验收口径相应修订**：矩阵补
+   "一个超过 512KB/24 页的真实回合成功展开明细"验收项；在该项通过（终案落地）前
+   G3 不视为完全通过。§11.7 / R2 的相关表述以本条为准（R2"逐页渐进渲染"由搁置转为
+   **终案方向**，其"当前无数据支撑"的保留由上述取证步骤补足）。
 
 **G0 记分方式（owner 指定）**：G0 记为 **owner 接受两项证据替代后的 PASS**——
 (a) paginated control inventory 不可获得（替代证据：官方源码/测试、cursor 链完整性、EOF、
