@@ -1755,7 +1755,9 @@ turnStateOps?: Array<{
 `execution → upsertTurns → turnStateOps → partOps` — state first, parts after, atomic within
 one patch. `replace_parts + loaded` share ONE patch: the `partOps` entry swaps in the detail
 parts, the `turnStateOps` entry sets the terminal state, both at the same `syncRev`. `loading`
-and `failed` normally travel as state-only patches (no partOps).
+and `failed` normally travel as state-only patches (no partOps). An EMPTY
+detail load (no detail items after Summary-slot dedup) is also a state-only `loaded`
+commit — the Summary parts stay in place, never an empty `replace_parts`.
 
 #### Change-set visibility
 
