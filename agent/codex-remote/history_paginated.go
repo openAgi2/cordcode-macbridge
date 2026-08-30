@@ -395,6 +395,93 @@ func (a *Agent) ReadTurnItems(ctx context.Context, threadID, turnID string) ([]R
 	return entries, err
 }
 
+// ReadTurnItemsPage is the §11.8 v2 batch-engine primitive: ONE official
+// thread/items/list request (fixed turnId filter, asc, page limit) with the
+// same per-page validation discipline as fetchTurnItems — foreign turn item
+// and unknown item variant fail the page atomically, nextCursor=nil is the
+// only EOF, a cursor equal to the request cursor fails immediately
+// (anti-infinite-loop). NO page-count/byte caps and NO internal deadline: the
+// owner final ruling abolished the permanent gates, and the per-RPC timeout
+// (core.TurnDetailPageRPCTimeout) belongs to the bridge caller. An empty page
+// with a cursor is returned as-is — cursor-invalidation detection (empty page
+// / content re-walk) is the batch engine's call, not this layer's.
+func (a *Agent) ReadTurnItemsPage(ctx context.Context, threadID, turnID, cursor string) (*core.TurnItemsPage, error) {
+	cl, err := a.paginatedClient()
+	if err != nil {
+		return nil, err
+	}
+	params := map[string]any{
+		"threadId":      threadID,
+		"turnId":        turnID,
+		"limit":         remoteItemsPageLimit,
+		"sortDirection": "asc",
+	}
+	if cursor != "" {
+		params["cursor"] = cursor
+	}
+	raw, rpcErr, err := cl.RequestContext(ctx, "thread/items/list", params)
+	if err != nil {
+		return nil, err
+	}
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	var response remoteItemsListResponse
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return nil, fmt.Errorf("codex-remote: thread/items/list decode: %w", err)
+	}
+	page := &core.TurnItemsPage{RawBytes: len(raw)}
+	for _, wire := range response.Data {
+		if wire.TurnID != turnID {
+			return nil, ErrForeignTurnItem
+		}
+		var probe struct {
+			Type string `json:"type"`
+			ID   string `json:"id"`
+		}
+		if err := json.Unmarshal(wire.Item, &probe); err != nil {
+			return nil, fmt.Errorf("%w: turn %s item decode: %v", ErrUnknownThreadItem, turnID, err)
+		}
+		if !remoteKnownItemTypes[probe.Type] {
+			return nil, fmt.Errorf("%w: %q", ErrUnknownThreadItem, probe.Type)
+		}
+		var item map[string]any
+		if err := json.Unmarshal(wire.Item, &item); err != nil {
+			return nil, fmt.Errorf("%w: turn %s item map decode: %v", ErrUnknownThreadItem, turnID, err)
+		}
+		page.Entries = append(page.Entries, core.TurnItemsEntry{TurnID: wire.TurnID, Item: item})
+	}
+	if response.NextCursor == nil {
+		page.EOF = true
+		return page, nil
+	}
+	if *response.NextCursor == cursor {
+		return nil, ErrRepeatedCursor
+	}
+	page.NextCursor = *response.NextCursor
+	return page, nil
+}
+
+// MapTurnItemsPage maps ONE page's decoded items into the caller's scratch
+// turn through the same mapRemoteHistoryItem discipline as the v1 detail path
+// (one mapper, one identity rule: canonical official item ids). The scratch
+// turn carries cross-page state — the FIRST userMessage is absorbed into the
+// turn's user slot (the projection Summary already owns it), so mapping must
+// proceed in page order across the whole batch.
+func (a *Agent) MapTurnItemsPage(turn *core.TurnScopedHistoryTurn, page *core.TurnItemsPage) error {
+	if turn == nil || page == nil {
+		return errors.New("codex-remote: map turn items page: nil argument")
+	}
+	for _, entry := range page.Entries {
+		raw, err := json.Marshal(entry.Item)
+		if err != nil {
+			return fmt.Errorf("%w: item encode: %v", ErrUnknownThreadItem, err)
+		}
+		mapRemoteHistoryItem(turn, decodeRemoteThreadItem(raw))
+	}
+	return nil
+}
+
 // ReadTurnItemsDiagnostic is the closed-evidence walk (owner 2026-08-30 deep
 // night): high explicit bounds (128 pages / 16MB raw / 90s) to the REAL EOF
 // or a diagnostic bound, full per-item accounting of every page including

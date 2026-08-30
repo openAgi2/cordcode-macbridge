@@ -68,7 +68,15 @@ type Handlers struct {
 	// turnDetailFlights is the session_turn_items singleflight registry
 	// (§11.7): key = backend|session|turn; followers mirror the leader's
 	// terminal ack (same terminal syncRev, never a mid-flight loading ack).
-	turnDetailFlights      sync.Map
+	turnDetailFlights sync.Map
+	// turnDetailChunksFlights is the session_turn_items v2 singleflight
+	// registry (§11.8): same key discipline as turnDetailFlights; the leader
+	// also fans its turn_detail_chunk frames out to follower connections.
+	turnDetailChunksFlights sync.Map
+	// turnDetailStore is the process-wide §11.8 detail store (lazy init,
+	// rooted at <dataDir>/detail with a one-shot startup sweep).
+	turnDetailStore        *TurnDetailStore
+	turnDetailStoreOnce    sync.Once
 	agents                 map[string]core.Agent
 	sessions               *sessionRegistry
 	runningMap             *runningMapCache

@@ -260,7 +260,7 @@ type RichHistoryProvider interface {
 // the INTERNAL upstream cursor (never crosses the bridge); empty means upstream
 // EOF for the walked direction.
 type UpstreamHistoryPage struct {
-	Turns     []TurnScopedHistoryTurn
+	Turns      []TurnScopedHistoryTurn
 	NextCursor string
 }
 
@@ -295,6 +295,40 @@ type TurnDetailReader interface {
 	ReadTurnDetail(ctx context.Context, sessionID, turnID string) (TurnScopedHistoryTurn, error)
 }
 
+// TurnItemsEntry is one decoded official items entry of a thread/items/list
+// page (§11.8 v2 batch engine). Item stays the decoded official item map so
+// identity is item["id"] all the way through; mapping into parts is the
+// agent's single-mapper discipline (MapTurnItemsPage).
+type TurnItemsEntry struct {
+	TurnID string
+	Item   map[string]any
+}
+
+// TurnItemsPage is ONE items page for the v2 batch engine: cursor-driven,
+// nextCursor=nil as the only EOF (official invariant), raw-bytes footprint for
+// the 4MB single-response backstop. NO page-count/byte caps — the owner final
+// ruling abolished permanent gates.
+type TurnItemsPage struct {
+	Entries    []TurnItemsEntry
+	NextCursor string
+	EOF        bool
+	RawBytes   int
+}
+
+// TurnItemsPager is the §11.8 v2 batch-engine surface: one official
+// thread/items/list request per call (fixed turnId filter, asc, page limit),
+// with the per-page validation discipline of ReadTurnItems (foreign turn item
+// and unknown item variant fail the page atomically; a repeated cursor fails
+// immediately). The per-call RPC timeout belongs to the CALLER
+// (core.TurnDetailPageRPCTimeout). MapTurnItemsPage mutates the CALLER's
+// scratch turn through the same mapRemoteHistoryItem discipline so detail
+// part identity stays official item ids across pages (first-user absorption
+// included).
+type TurnItemsPager interface {
+	ReadTurnItemsPage(ctx context.Context, sessionID, turnID, cursor string) (*TurnItemsPage, error)
+	MapTurnItemsPage(turn *TurnScopedHistoryTurn, page *TurnItemsPage) error
+}
+
 type TurnScopedHistoryTurn struct {
 	TurnID       string
 	Status       string
@@ -305,7 +339,7 @@ type TurnScopedHistoryTurn struct {
 	// DurationMs mirrors the official Turn.durationMs when the source provides it
 	// (0 = unknown). Carried through the kernel TurnProjection so clients render the
 	// official "用时" value instead of recomputing from timestamps.
-	DurationMs   int64
+	DurationMs int64
 
 	UserItemID string
 	UserText   string

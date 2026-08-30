@@ -246,6 +246,23 @@ func writeFileSynced(final string, data []byte) error {
 	return nil
 }
 
+// DropTurn removes the whole per-turn cache dir. The batch engine calls it on
+// generation rotation (§11.8): a store manifest from a SUPERSEDED generation
+// can never accept the new generation's pages, and the new truth rebuilds the
+// cache from official pagination. Missing dir is a no-op.
+func (s *TurnDetailStore) DropTurn(backendID, sessionID, turnID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	dir, err := s.turnDir(backendID, sessionID, turnID)
+	if err != nil {
+		return err
+	}
+	if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 func (s *TurnDetailStore) loadManifestLocked(dir string) (*TurnDetailManifest, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
 	if err != nil {

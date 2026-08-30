@@ -42,6 +42,13 @@ type turnDetailAgent struct {
 	diagReport *codexremote.TurnItemsDiagnosticReport
 	diagErr    error
 	diagFetch  int64
+	// §11.8 v2 batch-engine pager surface (turn_detail_batch_engine_test.go):
+	// scripted items pages keyed by cursor; unknown cursor = clean EOF.
+	itemPages   map[string]*core.TurnItemsPage
+	pageErr     error
+	pageGate    chan struct{} // blocks every ReadTurnItemsPage while open
+	pageDelay   time.Duration
+	pageFetches int64 // atomic ReadTurnItemsPage counter
 }
 
 func (a *turnDetailAgent) ReadColdHistory(ctx context.Context, sessionID string) (*core.ColdHistoryResult, error) {

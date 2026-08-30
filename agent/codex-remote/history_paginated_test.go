@@ -985,3 +985,141 @@ func TestResumeInitialTurnsPageGateVersionIsClientEpochScoped(t *testing.T) {
 		t.Fatal("re-announced verified version must re-open the gate")
 	}
 }
+
+// ---------- §11.8 v2 batch-engine primitives (ReadTurnItemsPage / MapTurnItemsPage) ----------
+
+func itemsListPage(entries []map[string]any, nextCursor any) map[string]any {
+	out := map[string]any{"data": entries}
+	if nextCursor != nil {
+		out["nextCursor"] = nextCursor
+	}
+	return out
+}
+
+// TestReadTurnItemsPageParamsChainingAndEOF pins the wire discipline of the
+// v2 page primitive: fixed turnId filter + asc + page limit on every call,
+// cursor forwarding, nextCursor=nil as the only EOF, and the raw-bytes
+// footprint for the bridge's 4MB single-response backstop.
+func TestReadTurnItemsPageParamsChainingAndEOF(t *testing.T) {
+	agent, calls := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
+		if call.Method != "thread/items/list" {
+			return nil, &RPCError{Code: -32601, Message: call.Method}
+		}
+		if cursor, _ := call.Params["cursor"].(string); cursor == "" {
+			return itemsListPage([]map[string]any{
+				itemEntry("turn_items", map[string]any{"type": "userMessage", "id": "u1", "text": "q"}),
+				itemEntry("turn_items", map[string]any{"type": "agentMessage", "id": "a1", "text": "first"}),
+			}, "cur-2"), nil
+		}
+		return itemsListPage([]map[string]any{
+			itemEntry("turn_items", map[string]any{"type": "agentMessage", "id": "a2", "text": "last"}),
+		}, nil), nil
+	})
+
+	page1, err := agent.ReadTurnItemsPage(context.Background(), "thread_probe", "turn_items", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page1.Entries) != 2 || page1.EOF || page1.NextCursor != "cur-2" {
+		t.Fatalf("page1 = %+v", page1)
+	}
+	if page1.RawBytes <= 0 {
+		t.Fatalf("RawBytes must carry the raw footprint: %d", page1.RawBytes)
+	}
+	for _, call := range *calls {
+		if call.Method != "thread/items/list" {
+			continue
+		}
+		if call.Params["threadId"] != "thread_probe" || call.Params["turnId"] != "turn_items" ||
+			call.Params["sortDirection"] != "asc" || int(call.Params["limit"].(float64)) != remoteItemsPageLimit {
+			t.Fatalf("items/list params = %+v", call.Params)
+		}
+	}
+
+	page2, err := agent.ReadTurnItemsPage(context.Background(), "thread_probe", "turn_items", "cur-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page2.Entries) != 1 || !page2.EOF || page2.NextCursor != "" {
+		t.Fatalf("page2 = %+v (nextCursor=nil is the only EOF)", page2)
+	}
+}
+
+// TestReadTurnItemsPageAtomicFailures pins the per-page validation
+// discipline: a foreign-turn entry or an unknown item variant fails the page
+// atomically (no partial entries), and a repeated cursor fails immediately.
+func TestReadTurnItemsPageAtomicFailures(t *testing.T) {
+	cases := []struct {
+		name  string
+		page  map[string]any
+		cursor string
+		want  error
+	}{
+		{"foreign turn item", itemsListPage([]map[string]any{
+			itemEntry("turn_items", map[string]any{"type": "agentMessage", "id": "a1", "text": "x"}),
+			itemEntry("turn_other", map[string]any{"type": "agentMessage", "id": "a2", "text": "y"}),
+		}, "c2"), "", ErrForeignTurnItem},
+		{"unknown item variant", itemsListPage([]map[string]any{
+			itemEntry("turn_items", map[string]any{"type": "futureItem", "id": "f1"}),
+		}, "c2"), "", ErrUnknownThreadItem},
+		{"repeated cursor", itemsListPage([]map[string]any{
+			itemEntry("turn_items", map[string]any{"type": "agentMessage", "id": "a1", "text": "x"}),
+		}, "cur-loop"), "cur-loop", ErrRepeatedCursor},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			agent, _ := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
+				return tc.page, nil
+			})
+			page, err := agent.ReadTurnItemsPage(context.Background(), "thread_probe", "turn_items", tc.cursor)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want %v (page = %+v)", err, tc.want, page)
+			}
+			if page != nil && len(page.Entries) != 0 {
+				t.Fatalf("failed page must not leak entries: %+v", page.Entries)
+			}
+		})
+	}
+}
+
+// TestMapTurnItemsPageFirstUserAbsorptionAcrossPages pins the scratch-turn
+// contract: the FIRST userMessage of the batch lands in the turn's user slot
+// (the Summary owns it), a LATER userMessage becomes a text part, and the
+// official item ids survive as itemId on every mapped part.
+func TestMapTurnItemsPageFirstUserAbsorptionAcrossPages(t *testing.T) {
+	agent, _ := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
+		return nil, &RPCError{Code: -32601, Message: call.Method}
+	})
+	page1 := &core.TurnItemsPage{Entries: []core.TurnItemsEntry{
+		{TurnID: "t", Item: map[string]any{"type": "userMessage", "id": "u1", "text": "q"}},
+		{TurnID: "t", Item: map[string]any{"type": "commandExecution", "id": "c1", "command": "ls", "cwd": "/tmp", "status": "completed"}},
+	}}
+	page2 := &core.TurnItemsPage{Entries: []core.TurnItemsEntry{
+		{TurnID: "t", Item: map[string]any{"type": "agentMessage", "id": "a1", "text": "answer"}},
+		{TurnID: "t", Item: map[string]any{"type": "userMessage", "id": "u2", "text": "again"}},
+	}}
+	scratch := core.TurnScopedHistoryTurn{TurnID: "t", Status: "completed"}
+	if err := agent.MapTurnItemsPage(&scratch, page1); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.MapTurnItemsPage(&scratch, page2); err != nil {
+		t.Fatal(err)
+	}
+	if scratch.UserItemID != "u1" || scratch.UserText != "q" {
+		t.Fatalf("first user must absorb into the slot: %q/%q", scratch.UserItemID, scratch.UserText)
+	}
+	if len(scratch.Parts) != 3 {
+		t.Fatalf("parts = %+v", scratch.Parts)
+	}
+	tool, _ := scratch.Parts[0]["step"].(map[string]any)
+	if scratch.Parts[0]["type"] != "tool" || scratch.Parts[0]["itemId"] != "c1" ||
+		tool["toolName"] != "Bash" || tool["status"] != "completed" {
+		t.Fatalf("command part = %+v", scratch.Parts[0])
+	}
+	if scratch.Parts[1]["type"] != "text" || scratch.Parts[1]["itemId"] != "a1" || scratch.Parts[1]["content"] != "answer" {
+		t.Fatalf("agent part = %+v", scratch.Parts[1])
+	}
+	if scratch.Parts[2]["type"] != "text" || scratch.Parts[2]["itemId"] != "u2" {
+		t.Fatalf("LATER user message must map to a text part: %+v", scratch.Parts[2])
+	}
+}

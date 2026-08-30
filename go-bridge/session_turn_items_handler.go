@@ -133,6 +133,13 @@ func (h *Handlers) handleSessionTurnItems(conn Connection, msg WireMessage, agen
 		return
 	}
 
+	// v2 dispatch (§11.8): a turn_detail_chunks_v1 connection takes the F4
+	// batch engine. v1/v2 marks may coexist on one connection; v2 wins.
+	if h.eventPublisher.ConnTurnDetailChunksV1(conn) {
+		h.handleSessionTurnItemsV2(conn, msg, params.SessionID, params.TurnID, target, proj.SyncRev)
+		return
+	}
+
 	// Idempotent repeat: already loaded → same terminal ack without refetch
 	// (§11.7). The journal recovers the original commit rev when still
 	// retained; otherwise the current syncRev is a conservative watermark.

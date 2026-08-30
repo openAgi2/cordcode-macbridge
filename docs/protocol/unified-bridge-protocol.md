@@ -1192,8 +1192,24 @@ failed(interrupted)` **携带保留 manifest**（partial 不是孤儿——进�
   `[firstChunkSeq, lastChunkSeq]` 帧后才认为本批交付完成；**发现缺口不得假装成功**，
   必须从 detail cache 重放补齐（重发 `session_turn_items` 走 fast-path）；
 - 客户端收到 `partial` 自动再次调用（每次调用 = 一个新 90s 批次，从持久 cursor 续传）；
+- 可选加法参数 `replaySinceChunkSeq`（int，≥0）：重连/补缺 fast-path 的触发器——存在时
+  批次先从 detail cache **确定性重放** chunkSeq > 该值的全部已提交 chunk（重放走存储
+  读路径的同源 re-split，不重拉上游），再从持久 cursor 续传剩余部分；缺省 = 纯续传
+  （ack 的 `[firstChunkSeq, lastChunkSeq]` 只含本批**新** chunk，与上方冻结示例一致）；
 - 请求级错误（`unknown_backend`/`session_not_found`/`turn_not_found`/`invalid_params`）
   与 §11.7 相同。
+
+*实现锚点（F4）*：批次引擎 = `go-bridge/turn_detail_batch_engine.go`；单页原语 =
+agent `ReadTurnItemsPage`/`MapTurnItemsPage`（无内部 deadline/无页数字节门，逐页
+foreign-turn/unknown-item 原子失败，repeated-cursor 立即失败）；v2 分派在 §11.7
+能力门/legacy 门之后按 `turn_detail_chunks_v1` 连接标记优先接管（v1/v2 标记可并存，
+v2 优先）。singleflight follower 经 flight 连接表与 leader **同批收帧**、逐字镜像
+终态 ack。cursor 失效（空页带 cursor / 全已知页，重扫之外）→ 一次从头重扫，按
+canonical itemId 跳过已提交内容（重扫中的全已知页 = 正常前缀跳过，非异常）；同一
+批次内第二次异常 → `upstream_error`（进度保留）。generation 轮换 → `DropTurn`
+丢弃跨代缓存、从官方分页重建。淘汰重水化守卫 = kernel 与 store 的 manifest 摘要
+逐字段取 max 后提交（`mergeTurnSummary`，store 重建从 rev 1 起步时 kernel 高水位
+不回退）。
 
 #### `turn_detail_chunk` 帧（专用非 replayable overlay envelope，仅请求连接）
 
