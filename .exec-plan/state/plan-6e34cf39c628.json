@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-31T02:55:00+08:00",
+  "updated_at": "2026-08-31T03:40:00+08:00",
   "todos": [
     {
       "id": "phase0-probe-impl",
@@ -1227,7 +1227,7 @@
       "id": "phase5-blob-rpc",
       "title": "F5 turn_output_chunk RPC — 128KB blob chunk reads + blob_evicted re-hydration path",
       "description": "Handler for turn_output_chunk: read chunk from blob store (128KB target chunks); blob LRU-evicted -> UnifiedError blob_evicted (retryable) and client re-invokes session_turn_items which re-hydrates blob from official pagination before continuing; never truncate. Tests: chunk reads, boundaries, evicted error + re-hydration, oversized turn chunk math.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "impl-tests-regression-triple",
       "depends_on": [
@@ -1235,16 +1235,22 @@
         "phase5-batch-engine"
       ],
       "source": "owner-final-adjudication-2026-08-30",
-      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge | 2026-08-31 CLOSED at 3b6d2e1 per frozen model (protocol §11.8 F5 anchors; plan §3F-F5): turn_output_chunk RPC w/ full binding echo + three-layer validation, all cache-class misses converge to retryable blob_evicted (client re-pulls via session_turn_items; handles generation+content-hash immutable so unchanged items rebuild under the SAME handle); engine rehydrate mode rebuilds the store from official pagination WITHOUT kernel state commits (loaded terminal - syncRev/summary frozen, fresh deliveryId + chunkSeq restart at 1, loaded short-circuit requires store EOF so interrupted rebuilds resume), corrupt manifests quarantine-and-rebuild; tool-attribution fix (tool hydrate events carry no turnId - full-scratch remap + prefix slicing w/ kernel Summary user anchor for resumed batches)",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "pass",
+        "method": "go test ./go-bridge/ -run 'TestTurnOutputChunk|TestRehydration|TestSessionTurnItemsV2' -count=1",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "F5 landed (3b6d2e1): 4 new F5 tests (full binding echo + chunk walk reassembly at persisted offsets; 7-case error surface table incl. retryable blob_evicted vs non-retryable invalid_params split; evicted->blob_evicted->re-hydration->same-handle serve loop w/ kernel syncRev+summary frozen + chunkSeq restart; interrupted rebuild resume to EOF w/ zero kernel commits) + 2 tool-only-page anchoring regression tests (mid-batch + resumed-batch-first-page via kernel user anchor - real part-drop bug found by F5 tests and fixed in-engine); full go-bridge 69.7s + targeted race green.",
+        "artifacts": [
+          "go-bridge/turn_output_chunk_handler.go",
+          "go-bridge/turn_output_chunk_test.go",
+          "go-bridge/turn_detail_batch_engine.go",
+          "go-bridge/handlers.go",
+          "docs/protocol/unified-bridge-protocol.md"
+        ],
+        "checked_at": "2026-08-31T03:40:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -1506,23 +1512,23 @@
       "id": "phase5-blob-rpc-tests",
       "title": "F5 turn_output_chunk RPC — TESTS",
       "description": "Unit tests for phase5-blob-rpc: Handler for turn_output_chunk: read chunk from blob store (128KB target chunks); blob LRU-evicted -> UnifiedError blob_evicted (retryable) and client re-invokes session_turn_items which re-hydrates blob from official pagination before continuing; never truncate. Deliver the Tests: items listed in impl todo as formal suite; run targeted + -race x2.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "impl-tests-regression-triple",
       "depends_on": [
         "phase5-blob-rpc"
       ],
       "source": "owner-final-adjudication-2026-08-30",
-      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge | 2026-08-31 CLOSED at 3b6d2e1",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "pass",
+        "method": "go test ./go-bridge/ -run 'TestTurnOutputChunk|TestRehydration|TestSessionTurnItemsV2ToolOnlyPageAnchoring' -count=1",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
+        "summary": "pass at 3b6d2e1 (full suite 69.7s ok; targeted race ok)",
         "artifacts": [],
-        "checked_at": null,
+        "checked_at": "2026-08-31T03:40:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -1530,23 +1536,23 @@
       "id": "phase5-blob-rpc-regression",
       "title": "F5 turn_output_chunk RPC — REGRESSION",
       "description": "Regression gate for phase5-blob-rpc: full go-bridge + agent/codex-remote suites (or iOS full targeted set per stash-compare baseline discipline), no new failures vs recorded baseline, v1 deprecated path still green during transition.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "impl-tests-regression-triple",
       "depends_on": [
         "phase5-blob-rpc-tests"
       ],
       "source": "owner-final-adjudication-2026-08-30",
-      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge | 2026-08-31 CLOSED at 3b6d2e1",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "pass",
+        "method": "go test ./go-bridge/ -count=1 && go test ./go-bridge/ -race -run 'TestSessionTurnItemsV2|TestTurnOutputChunk|TestRehydration' -count=1",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
+        "summary": "pass at 3b6d2e1 (full suite 69.7s ok; targeted race ok)",
         "artifacts": [],
-        "checked_at": null,
+        "checked_at": "2026-08-31T03:40:00+08:00",
         "upstream_anchor": null
       }
     },
