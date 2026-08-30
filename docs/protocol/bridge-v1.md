@@ -1791,6 +1791,18 @@ sink (no second pipe). Delivery per `(conn, backend, session)`:
    connection-specific no-op revision patch that keeps the single revision chain intact, and
    obtain the turn — with its current `detailLoadState` — through their own window pull.
 
+**Re-frozen 2026-08-30 (reopen audit P0-1/P0-2).** "Already holds" is transactional with the
+window pull that delivers the turns: the held-turn set registers inside the snapshot-fence
+completion transaction (before the fence releases / the response is sent; failed completions
+roll the registration back), and a state/detail commit that lands while a connection's window
+pull is still in flight resolves rule 3 vs rule 4 AT THAT COMPLETION against the response's
+turns — never as an upfront no-op against the stale pre-response state (stale response + no-op
+would permanently hide the detail behind the client's own watermark). Equally, a Kernel commit
+never publishes past staged live content: when a state/detail commit coincides with staged live
+deltas, the staged deltas flush FIRST through the normal live patch path (content to every v2
+observer) and the commit patch bases at the drained head — a zero-span (`baseRev == syncRev`)
+patch is never produced, journaled, or delivered.
+
 Historical page hydration (window `older` chains) keeps the delivery rules of the
 `projection_window_v1` section; its producer-on-demand extension and delivery-mode registry
 are reviewed/added by T2.0 under the same R10 discipline.
