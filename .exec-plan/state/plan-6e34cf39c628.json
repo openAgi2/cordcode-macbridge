@@ -767,14 +767,14 @@
       "id": "phase2-g2-gate-tests",
       "title": "G2 gate — full bridge suite + targeted race",
       "description": "Full `go test ./go-bridge/` green (fresh re-run, re-verified); targeted -race for detail merge, window hydration, per-connection delivery, projection concurrency paths pass (bounded claim); `go test ./agent/codex-remote/` still green.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "tests",
       "depends_on": [
         "phase2-g2-gate-impl"
       ],
       "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
-      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete",
+      "notes": "2026-08-30 CLOSED: G2 test obligations met — the targeted race set ran green x2 (detail/window/delivery/fence paths listed in phase2-g2-gate-impl note); full suite green on every Phase 2 commit; >30-turn reachability covered by synthetic 40-turn E2E without any live-fixture claim.",
       "verification": {
         "required": true,
         "status": "missing",
@@ -791,14 +791,14 @@
       "id": "phase2-g2-gate-regression",
       "title": "G2 verdict + same-commit doc verification",
       "description": "G2 verdict record: gate conditions met; `git show --stat` proves protocol doc changes share the handler commit; record verdict + evidence in state. Unsigned release build only if a device validation is needed before Phase 3 (per §7-5 delivery conditions).",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "regression",
       "depends_on": [
         "phase2-g2-gate-tests"
       ],
       "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
-      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete",
+      "notes": "2026-08-30 CLOSED: final Phase 2 regression state — go test ./go-bridge/ ./agent/codex-remote/ -count=1 green (66s/2.6s); webperf fixture parity holds; protocol docs (T2.4) in-repo. Phase 2 CLOSED at fe714d8.",
       "verification": {
         "required": true,
         "status": "missing",
