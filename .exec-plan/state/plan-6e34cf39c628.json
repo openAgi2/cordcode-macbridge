@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-31T01:17:54+08:00",
+  "updated_at": "2026-08-31T01:49:00+08:00",
   "todos": [
     {
       "id": "phase0-probe-impl",
@@ -1145,18 +1145,18 @@
         "phase5-contract-freeze"
       ],
       "source": "owner-final-adjudication-2026-08-30",
-      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge | 2026-08-31 REOPENED by owner F2.1 review (plan doc section 3.0 item 8: 3 P0 + 5 P1, ALL adopted) and re-closed at 54f4691",
       "verification": {
         "required": true,
         "status": "pass",
         "method": "go test ./go-bridge/ -run \"TestDetailStore|TestSplitDetailChunks\" -count=1 (10/10)",
         "attestation": "evidence-backed",
-        "summary": "F2 landed (f88cfd9): TurnDetailStore per frozen §11.8 model - sha256-hex path segments (raw ids only in manifest, backend/handle charset-validated); AcceptPage = fixed commit order (blob temp/fsync/rename -> items.log tx append/fsync -> manifest temp/fsync/rename COMMIT POINT + dir sync); SplitDetailChunks shared deterministic packer assigns chunkSeq spans recorded in tx records (ReadRecords re-split must equal recorded span - fast-path replay guarantee); oversize staging derives handle sha256(backend|session|turn|item), TotalBytes=len(content), TotalChunks=DetailChunkOffsets actual table, preview rune-truncated 2KB, inline >256KB rejected; ReadBlobChunk manifest-binding + frozen offsets + LRU touch; UpdateState no-progress-bump mirror; SweepUncommitted startup step 4 (truncate log beyond TxApplied, torn-tail tolerant, delete unreferenced blobs, remove manifest-less dirs); whole-store budget with whole-turn-dir LRU eviction never evicting the just-committed turn.",
+        "summary": "F2 landed (f88cfd9): TurnDetailStore per frozen §11.8 model - sha256-hex path segments (raw ids only in manifest, backend/handle charset-validated); AcceptPage = fixed commit order (blob temp/fsync/rename -> items.log tx append/fsync -> manifest temp/fsync/rename COMMIT POINT + dir sync); SplitDetailChunks shared deterministic packer assigns chunkSeq spans recorded in tx records (ReadRecords re-split must equal recorded span - fast-path replay guarantee); oversize staging derives handle sha256(backend|session|turn|item), TotalBytes=len(content), TotalChunks=DetailChunkOffsets actual table, preview rune-truncated 2KB, inline >256KB rejected; ReadBlobChunk manifest-binding + frozen offsets + LRU touch; UpdateState no-progress-bump mirror; SweepUncommitted startup step 4 (truncate log beyond TxApplied, torn-tail tolerant, delete unreferenced blobs, remove manifest-less dirs); whole-store budget with whole-turn-dir LRU eviction never evicting the just-committed turn. || F2.1 landed (54f4691): ORDERED DetailPageEntry{ItemID, Inline|Oversize} single array - manifest/items.log/chunk packing/LastAcceptedItemID strictly follow official page order (oversize-last boundary no longer dropped); oversize entry = SLIM tool card (ToolName/ToolInput/ToolStatus/Title kept, output stripped; fat card rejected at accept) + ref riding the SAME chunk + blob content; strict recovery: validateCommittedRecords enforces tx/page/chunkSeq continuity + deterministic re-split on 1..TxApplied (any defect = whole-dir quarantine, re-hydrate from official pagination), only tx>TxApplied suffix or a SINGLE FINAL torn tail rolls back, mid-log torn line / multiple bad lines quarantine, manifest-less dirs (incl. blobs-only leftovers) removed unconditionally, sweep rewrite itself crash-safe with propagated errors; ReadRecords fail-closed (corrupt + unparseable); blob handle binds generation+sha256(content) (immutable, no cross-generation overwrite); blob offset tables persisted at accept, ReadAt chunk reads outside the lock, LRU touch throttled 10s; DetailChunkOffsets escaped-size re-check covers the tail chunk too.",
         "artifacts": [
           "go-bridge/turn_detail_store.go",
           "go-bridge/turn_detail_chunks.go (SplitDetailChunks)"
         ],
-        "checked_at": "2026-08-31T01:50:00+08:00",
+        "checked_at": "2026-08-31T01:49:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -1341,18 +1341,18 @@
         "phase5-detail-store"
       ],
       "source": "owner-final-adjudication-2026-08-30",
-      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge | 2026-08-31 REOPENED by owner F2.1 review (plan doc section 3.0 item 8: 3 P0 + 5 P1, ALL adopted) and re-closed at 54f4691",
       "verification": {
         "required": true,
         "status": "pass",
         "method": "targeted -count=1 -v 10/10 + -race -count=2",
         "attestation": "evidence-backed",
-        "summary": "10 tests in go-bridge/turn_detail_store_test.go: hashed paths w/ traversal+NUL ids (assert 64-hex segments + raw-id audit in manifest), commit order + page/generation/duplicate fences, inline threshold rejection, oversize blob lifecycle (1.05MB multibyte content: ref math, preview prefix, chunk union reconstruction, index/unref errors), replay==accept chunkSeq spans, crash-between-steps sweep rollback + successful re-accept of the lost page, manifest-less dir removal, budget whole-dir eviction oldest-first w/ survivors, UpdateState generation fence + no rev bump, packer packing order + hard-cap error + empty page.",
+        "summary": "10 tests in go-bridge/turn_detail_store_test.go: hashed paths w/ traversal+NUL ids (assert 64-hex segments + raw-id audit in manifest), commit order + page/generation/duplicate fences, inline threshold rejection, oversize blob lifecycle (1.05MB multibyte content: ref math, preview prefix, chunk union reconstruction, index/unref errors), replay==accept chunkSeq spans, crash-between-steps sweep rollback + successful re-accept of the lost page, manifest-less dir removal, budget whole-dir eviction oldest-first w/ survivors, UpdateState generation fence + no rev bump, packer packing order + hard-cap error + empty page. || 14 store tests green (paths, commit order+fences incl. oversize-last boundary, entry validation, official page order preservation interleaved reasoning->big-cmd->fileChange, slim card metadata + immutable handles, blob lifecycle with persisted offsets, replay==accept, sweep rollback + torn-tail-position + committed-corruption quarantine, ReadRecords fail-closed, manifestless removal incl. blobs-only, budget, UpdateState, packing) + new tail-escaped-overflow spec test.",
         "artifacts": [
           "go-bridge/turn_detail_store.go",
           "go-bridge/turn_detail_chunks.go (SplitDetailChunks)"
         ],
-        "checked_at": "2026-08-31T01:50:00+08:00",
+        "checked_at": "2026-08-31T01:49:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -1367,18 +1367,18 @@
         "phase5-detail-store-tests"
       ],
       "source": "owner-final-adjudication-2026-08-30",
-      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge | 2026-08-31 REOPENED by owner F2.1 review (plan doc section 3.0 item 8: 3 P0 + 5 P1, ALL adopted) and re-closed at 54f4691",
       "verification": {
         "required": true,
         "status": "pass",
         "method": "3x full suite exit 0 + targeted -race x2",
         "attestation": "evidence-backed",
-        "summary": "Full go-bridge suite green x3 consecutive runs (69.9s/70s/69s exit 0); one earlier FAIL in the first post-F2 run did not reproduce and left no output through the piped tail - recorded as an unidentified one-off (repo has known rare flake history); agent/codex-remote 3.3s + core 0.6s green; go vet clean.",
+        "summary": "Full go-bridge suite green x3 consecutive runs (69.9s/70s/69s exit 0); one earlier FAIL in the first post-F2 run did not reproduce and left no output through the piped tail - recorded as an unidentified one-off (repo has known rare flake history); agent/codex-remote 3.3s + core 0.6s green; go vet clean. || Full go-bridge suite 66.9s ok; whole-module go build ./... + go test ./... ok; targeted race ok.",
         "artifacts": [
           "go-bridge/turn_detail_store.go",
           "go-bridge/turn_detail_chunks.go (SplitDetailChunks)"
         ],
-        "checked_at": "2026-08-31T01:50:00+08:00",
+        "checked_at": "2026-08-31T01:49:00+08:00",
         "upstream_anchor": null
       }
     },

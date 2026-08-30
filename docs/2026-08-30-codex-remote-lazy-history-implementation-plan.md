@@ -464,6 +464,29 @@ Summary），明细展开按 owner 裁决执行并记录入 fixture 元数据。
    口径统一**——F1 定义收窄为「冻结 Mac wire schema；iOS contract.json SoT 同步
    归 F6」，状态回填已按此重填。F2 在 P0×3 + 存储事务模型冻结（本条）完成后解冻。
 
+8. **F2.1 存储修订裁决（owner 2026-08-30 night Y，F2 评审重开的小范围修订，全部采纳）**：
+   **P0-1 有序 entry 模型**——废止 Items/Oversize 双数组（先普通后 oversize 会重排官方
+   顺序、且 LastAcceptedItemID 在 inline 存在时忽略 oversize 末项破坏重叠恢复边界）；
+   定案单数组 `DetailPageEntry{itemId, inlinePart? | oversizePart?+blobContent?}`，
+   manifest/items.log/chunk 打包/LastAcceptedItemID **严格沿用官方页面顺序**。
+   **P0-2 超大工具输出保留工具元数据**——oversize entry 同时携带**去掉 ToolResult/
+   巨型 output 的精简 ProjectionPart（slim 工具卡：command/cwd/status/exitCode/
+   duration/title 完整）** + OversizeRef + blob content；卡片与 ref **同 chunk** 交付，
+   iOS 先渲染完整工具卡、output 为二级懒加载入口；卡片本身超阈值在接纳时拒绝（不静默）。
+   **P0-3 严格恢复校验**——Sweep 只允许回滚**合法未提交后缀**（tx>TxApplied 的可解析
+   记录，或**仅最后一条**的 torn tail）；`1..TxApplied` 任一缺失/重复/损坏/page 或
+   chunkSeq 不连续/重切分不匹配 → **整 turn 目录隔离删除、从官方分页重新水化，禁止
+   "修复"**；无 manifest 目录（含仅有 blobs 的崩溃残留）**无条件整体清理**。**P1
+   五项**——回滚重写本身耐崩溃（temp+fsync+rename+dir fsync，sync/remove/预算错误
+   不吞掉）；**尾块**也做 JSON 转义后尺寸复核（raw 128KB 控制字符可编码超 512KB，
+   `DetailChunkOffsets` 复核覆盖所有块含尾块）；blob RPC 接纳时**持久化 chunk 偏移表**、
+   读取用 ReadAt 只读目标区间、LRU touch 限频合并、blob 读取不长期占全局写锁；
+   ReadRecords 生产路径 **fail-closed**（校验 tx/page/chunkSeq 连续性 + 重切分对照）；
+   **handle 绑定 generation + sha256(content)**（blob 不可变，陈旧 handle 自然失效，
+   同 itemId 新内容不覆盖旧 blob）。**测试失败记录口径**——"一次未分类失败、后续
+   三次未复现"不得归类为已知仓库偶发；再现必须保留未经管道吞掉的完整输出。
+   F3 在本条完成后解冻（generation 重置与 Kernel manifest 依赖此磁盘模型）。
+
 #### 3F 终案实现单元（phase5，依赖 §11.8 契约冻结）
 
 - **F1 契约冻结（含 F1.1 闭合）**：协议 §11.8 + wire descriptor 声明 `turn_detail_chunks_v1`
@@ -480,6 +503,10 @@ Summary），明细展开按 owner 裁决执行并记录入 fixture 元数据。
   淘汰）；**页接纳 = 固定提交顺序事务**（blob temp+fsync+rename → items 事务记录
   +fsync → manifest temp+fsync+rename 为提交点 → 启动扫描回滚未提交事务）；
   >256KB item 提取为 blob（预览 2KB + handle + totalBytes + 实际偏移表 totalChunks）。
+  **F2.1 修订（§3.0-8）**：有序 `DetailPageEntry` 单数组沿用官方页序；oversize =
+  slim 工具卡（元数据完整、输出剥离）+ 同 chunk ref + blob；严格恢复校验（committed
+  区缺陷整目录隔离、仅末位 torn tail 可回滚、无 manifest 无条件清理）；handle 绑定
+  generation+内容哈希；偏移表落盘 + 尾块转义复核；ReadRecords fail-closed。
 - **F3 Kernel manifest 提交路径**：turn 增量 manifest 字段（不进 parts），
   `partial`/`loading+progress`/`loaded`/`failed(reasonCode)` 状态机，checkpoint
   版本升级；v2 reasonCode 闭集（去 max_pages/max_bytes，增 page_oversize）。
