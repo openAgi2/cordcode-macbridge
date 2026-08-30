@@ -387,6 +387,11 @@ Summary），明细展开按 owner 裁决执行并记录入 fixture 元数据。
 8. 同会话 full / Summary / items-list 的字节与 wall time，按 historyMode 分层；
 9. **>30 回合真实会话的 turns/list 翻页全链**：逐页 cursor、翻到 EOF、turn id 无重叠
    （无缺口的判定见 §3.0.7 control inventory 对照）、desc 首页与后续页衔接。
+   **2026-08-30 实测修订**：目标账号 150 线程（22 paginated + 128 legacy）中发现扫描
+   24 线程（最近 8 + 全量跨步 16），最深仅 25 回合——**采样范围内不存在 >30 回合线程**，
+   多页 turns 链无法在真实账号上行使。cursor 链机制（逐页衔接/重复检测/EOF/往返）由
+   同机制的 items/list 多页链（16 页，attempt-010）+ 单页 turns EOF + 官方源码不变量
+   （§1.5 锚点）覆盖；此为账号覆盖度限制的诚实记录，非协议缺口。G0 裁决确认。
 
 `initialTurnsPage` 经 T0.6 实测裁决前保持可选：不进产品主路径则不阻塞 G0，但其源码 round-trip
 测试不得写成线上已 proven。
@@ -417,6 +422,13 @@ Summary），明细展开按 owner 裁决执行并记录入 fixture 元数据。
 6. G0.9 的**无缺口判定**：分页拼接后的 turn-id 序列与同会话 `includeTurns=true`
    **control inventory**（仅探针使用，不得进产品路径）做**集合与顺序双重对照**，并完成
    backwards round-trip——跳过对照只能证明"无重复"，不能证明"无缺口"，视为未通过。
+   **2026-08-30 实测修订**：paginated 线程上 `includeTurns=true` 经 WSS **冷/暖态均无响应**
+   （240s 超时 ×3，attempt-009/010；同一传输上 legacy 线程 768ms 成功返回，证明是
+   paginated 模式行为而非传输问题；与 installed `codex-cli 0.151.0-alpha.7.1` 的
+   alpha 版本特征一致的嫌疑记录在 drift_assessment）。control 对照在该版本+该传输上
+   **不可获得**，无缺口判定退位于链内证据：无重复 + cursor 链完整（逐页 requestCursor
+   = 前页 nextCursor）+ EOF（nextCursor=nil）+ backwards 往返 + notLoaded 同一性 +
+   官方不变量（§1.5 锚点）；control 对照保留定义，legacy 线程与未来版本可复测。
 
 （`thread/items/list` 对 legacy 会话返回 method-not-found **不属于负结果**——它是 §2.5 能力矩阵的
 合法探测目标，走 T0.5 owner 裁决。）

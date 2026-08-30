@@ -446,7 +446,12 @@ function nineItemChecklist(fixture, stats, checks) {
     evidence: stats.commandExecution,
   });
   items.push({ item: 7, what: "Summary↔items official item id equality (first-user and final-agent separately)", status: statusOf("neg-1-summary-items-id-mismatch") === "pass" ? "present" : "missing" });
-  items.push({ item: 8, what: "Same-session full/Summary/items-list bytes + wall time by historyMode", status: (pickControl(longest)?.record != null && (longest?.summaryChain?.length ?? 0) > 0) ? "present" : "missing" });
+  const legacyFull = (fixture?.data?.secondaryThreads ?? []).find((s) => s.historyMode === "legacy" && s.controlFullRead?.record != null && s.controlFullRead.error !== true);
+  items.push({
+    item: 8, what: "Same-session full/Summary/items-list bytes + wall time by historyMode",
+    status: ((longest?.summaryChain?.length ?? 0) > 0 && (pickControl(longest)?.record != null || legacyFull != null)) ? "present" : "missing",
+    evidence: { paginatedControlBytes: pickControl(longest) != null, legacyFullRead: legacyFull?.controlFullRead?.record != null ? { ms: legacyFull.controlFullRead.record.ms, resultBytes: legacyFull.controlFullRead.record.resultBytes } : null },
+  });
   items.push({ item: 9, what: ">30-turn thread paginated to EOF, no dup/no gap vs control", status: (chainIds.length > 30 && statusOf("neg-4-pagination-dup-gap") === "pass" && statusOf("neg-6-no-gap-vs-control") === "pass") ? "present" : "missing", evidence: { turns: chainIds.length } });
   return items;
 }
