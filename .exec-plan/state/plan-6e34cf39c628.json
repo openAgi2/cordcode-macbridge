@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-31T02:25:00+08:00",
+  "updated_at": "2026-08-31T02:55:00+08:00",
   "todos": [
     {
       "id": "phase0-probe-impl",
@@ -1193,7 +1193,7 @@
       "id": "phase5-batch-engine",
       "title": "F4 handler batch engine — 90s-batch incremental accept + chunk delivery to requesting conn + resume + singleflight + orphan + reconnect fast-path",
       "description": "session_turn_items v2: batch loop reads pages via existing agent walker (official cursor pagination; per-page gates: 30s RPC, 4MB raw backstop -> page_oversize, NO page-count/byte-total caps); each accepted page: detail-store atomic accept + kernel manifest commit (partial) + turn_detail_chunk event to REQUESTING conn only (<=256KB advisory/512KB post-encode hard cap, split pages as needed, seq monotonic); EOF->loaded ack; 90s deadline->partial ack + progress (NOT failed; client auto-re-invokes); upstream stall->failed(upstream_error|timeout) ack with progress RETAINED (cache + already-delivered chunks kept; UI keeps loaded items per ruling 7); cursor-invalid detection (empty page/rewind)->re-walk from page 1 skip-by-canonical-itemID until overlap boundary; singleflight followers share event stream; orphan loading -> failed(interrupted) cache retained; reconnect with existing manifest -> fast-path replay chunks from detail cache WITHOUT upstream refetch. Tests: batch pause/resume, stall retention, cursor-invalidation overlap recovery, conn-scoped delivery, fast-path replay, race.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "impl-tests-regression-triple",
       "depends_on": [
@@ -1201,16 +1201,25 @@
         "phase5-kernel-manifest"
       ],
       "source": "owner-final-adjudication-2026-08-30",
-      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge | 2026-08-31 CLOSED at 9898aa3 per frozen model (protocol §11.8 incl. F4 anchors paragraph + replaySinceChunkSeq additive param; plan §3F-F4): core.TurnItemsPager single-page primitive (agent ReadTurnItemsPage - one official thread/items/list, per-page atomic foreign/unknown/repeated-cursor failure, NO caps/deadline; MapTurnItemsPage scratch-turn mapping through the single mapRemoteHistoryItem discipline incl. first-user absorption across pages); store DropTurn for generation rotation; engine = turn_detail_batch_engine.go (v2 dispatch after §11.7 gates on turn_detail_chunks_v1 mark, idempotent loaded ack, lazy V2 orphan recovery carrying retained manifest, v2 singleflight + per-connection chunk fan-out + verbatim follower ack mirror, 90s batch deadline -> partial+resume, classify->AcceptPage->CommitTurnStateOpsV2 lockstep->deterministic chunk re-split delivery, oversize slim card+blob ref, cursor-invalidation head re-walk skipping committed canonical ids + second-anomaly upstream_error, page_oversize 4MB backstop, replaySinceChunkSeq fast-path replay, mergeTurnSummary max() eviction re-hydration guard, terminal state mirrored into store manifest)",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "pass",
+        "method": "go test ./go-bridge/ -run 'TestSessionTurnItemsV2' -count=1 && go test ./agent/codex-remote/ -run 'TestReadTurnItemsPage|TestMapTurnItemsPage' -count=1",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "F4 landed (9898aa3): 11 engine tests (happy multi-page EOF w/ kernel-store manifest lockstep + §11.8 layering guarantee [kernel keeps Summary parts only], idempotent loaded ack fresh deliveryId no refetch, deadline partial + resume w/ chunkSeq continuity across batches, fast-path replay from detail cache w/o upstream refetch, cursor-invalidation re-walk skipping committed ids [slot-consumed user id included], second anomaly upstream_error w/ retained manifest, page_oversize, typed failure table [unsupported_item_type/timeout/upstream_error + zero manifest + Summary intact], singleflight follower same-batch frames + mirrored ack on 2nd conn, orphan V2 recovery carrying manifest then loaded, generation rotation drops stale store and rebuilds) + 3 agent pager tests (wire params/chaining/EOF, atomic failures, first-user absorption); full go-bridge + agent + core suites green; race green on turn-items suites; re-walk user-slot consumption bug found by tests and fixed in-engine (acceptedIDs includes slot-consumed user id).",
+        "artifacts": [
+          "go-bridge/turn_detail_batch_engine.go",
+          "go-bridge/turn_detail_batch_engine_test.go",
+          "go-bridge/session_turn_items_handler.go",
+          "go-bridge/handlers.go",
+          "core/interfaces.go",
+          "agent/codex-remote/history_paginated.go",
+          "go-bridge/turn_detail_store.go",
+          "docs/protocol/unified-bridge-protocol.md"
+        ],
+        "checked_at": "2026-08-31T02:55:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -1449,23 +1458,23 @@
       "id": "phase5-batch-engine-tests",
       "title": "F4 handler batch engine — TESTS",
       "description": "Unit tests for phase5-batch-engine: session_turn_items v2: batch loop reads pages via existing agent walker (official cursor pagination; per-page gates: 30s RPC, 4MB raw backstop -> page_oversize, NO page-count/byte-total caps); each accepted page: detail-store atomic accept + kernel manifest commit (partial) + turn_detail_chunk event to REQUESTING conn only (<=256KB advisory/512KB post-encode hard cap, split pages as needed, seq monotonic); EOF->loaded ack; 90s deadline->partial ack + progress (NOT failed; client auto-re-invokes); upstream stall->failed(upstream_error|timeout) ack with progress RETAINED (cache + already-delivered chunks kept; UI keeps loaded items per ruling 7); cursor-invalid detection (empty page/rewind)->re-walk from page 1 skip-by-canonical-itemID until overlap boundary; singleflight followers share event stream; orphan loading -> failed(interrupted) cache retained; reconnect with existing manifest -> fast-path replay chunks from detail cache WITHOUT upstream refetch. Deliver the Tests: items listed in impl todo as formal suite; run targeted + -race x2.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "impl-tests-regression-triple",
       "depends_on": [
         "phase5-batch-engine"
       ],
       "source": "owner-final-adjudication-2026-08-30",
-      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge | 2026-08-31 CLOSED at 9898aa3",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "pass",
+        "method": "go test ./go-bridge/ -run 'TestSessionTurnItemsV2' -count=1 && go test ./agent/codex-remote/ -run 'TestReadTurnItemsPage|TestMapTurnItemsPage' -count=1",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
+        "summary": "pass at 9898aa3 (full suite 69.7s ok; agent+core ok; targeted race ok)",
         "artifacts": [],
-        "checked_at": null,
+        "checked_at": "2026-08-31T02:55:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -1473,23 +1482,23 @@
       "id": "phase5-batch-engine-regression",
       "title": "F4 handler batch engine — REGRESSION",
       "description": "Regression gate for phase5-batch-engine: full go-bridge + agent/codex-remote suites (or iOS full targeted set per stash-compare baseline discipline), no new failures vs recorded baseline, v1 deprecated path still green during transition.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "impl-tests-regression-triple",
       "depends_on": [
         "phase5-batch-engine-tests"
       ],
       "source": "owner-final-adjudication-2026-08-30",
-      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge | 2026-08-31 CLOSED at 9898aa3",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "pass",
+        "method": "go test ./go-bridge/ ./agent/codex-remote/ ./core/ -count=1 && go test ./go-bridge/ -race -run 'TestSessionTurnItemsV2|TestSessionTurnItems' -count=1",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
+        "summary": "pass at 9898aa3 (full suite 69.7s ok; agent+core ok; targeted race ok)",
         "artifacts": [],
-        "checked_at": null,
+        "checked_at": "2026-08-31T02:55:00+08:00",
         "upstream_anchor": null
       }
     },
