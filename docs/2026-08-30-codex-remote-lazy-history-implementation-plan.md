@@ -515,8 +515,18 @@ control inventory 改为**链路后暖态重试**（turns/items 分页链已把�
   5. 会话删除、archive、同 turn generation 改变时，旧请求由 fence 丢弃或返回 typed stale；
 - **singleflight follower 终态**：leader 处于 loading 时，follower **等待同一 terminal commit**
   并返回**相同 terminal syncRev**（loaded 或 failed）；**不得**返回中间 loading ack；
-- **orphan loading 恢复**：bridge 在 loading commit 后崩溃/重启时，restore 必须把**没有 active
-  leader** 的 orphan loading **原子恢复为 `failed(reasonCode=interrupted)`**，不得永久停在 loading；
+- **orphan loading 恢复（pathless 裁决三分，2026-08-30 复核修正——当前产品不要求真实
+  crash/restore 覆盖）**：
+  1. **当前拓扑 N/A（restart restore）**：go-bridge 现无完整 Projection checkpoint（仅
+     CodexProducerState side-file），重启后投影由上游重新 Summary hydrate 重建，
+     `detailLoadState` 随之回到 `notRequested`——不存在可恢复的持久 loading 态；
+  2. **当前必须覆盖（进程内 orphan recovery）**：loading commit 后 leader 消失（请求取消、
+     连接断开、fetch 异常退出）而 bridge 存活时，下一次请求路径发现 loading 且无 in-flight
+     leader，必须**先**原子提交 `failed(reasonCode=interrupted)` 再重试
+     （`recoverOrphanLoadingTurn`），不得永久停在 loading；
+  3. **future hook（checkpoint 准入门槛）**：未来引入完整 Projection checkpoint（重启
+     restore）后，restore 扫描必须把无 active leader 的 orphan loading 原子恢复为
+     `failed(interrupted)`——`RecoverOrphanDetailLoading` 及其单测已冻结为该准入钩子；
 - **`turnStateOps` 专用 patch op（r6 定案，替代 r5 的 sparse upsertTurns——核验 §4.1）**：
   - **弃用理由**：现有 Go `TurnProjection.Status` 必填（`projection_types.go:96-105`）、Swift
     `SessionTurnProjection.status` 非 optional（`SessionProjection.swift:226-236`），三字段 sparse
@@ -613,8 +623,9 @@ control inventory 改为**链路后暖态重试**（turns/items 分页链已把�
   两 turn 并发展开（singleflight）、空明细（§2.2 口径）、冷水合与 live 输出同时进行、Summary
   返回瞬间 live turn 完成、detail 加载时新 turn 开始、replace_parts 重复提交幂等、重连 restore
   后 detail merge 去重、generation 改变/会话删除时的 typed stale、older 补水合与 detail 加载
-  并发、**A/B/C 三连接投递正确性与 B 的 live baseRev 链**（T2.0）、**loading 中 bridge crash →
-  重启无永久 loading（orphan → failed(interrupted)）**、**leader/follower 断线与取消不互相取消
+  并发、**A/B/C 三连接投递正确性与 B 的 live baseRev 链**（T2.0）、**进程内 leader 消失 →
+  orphan loading 恢复（下次请求先原子 failed(interrupted) 再重试，不永久 loading；restart
+  restore 属 future hook，当前无完整 Projection checkpoint，N/A）**、**leader/follower 断线与取消不互相取消
   authoritative fetch**、**unknown item 失败后 Summary 不变、修复后重试只提交一次完整 parts**、
   **turnStateOps 向后兼容（旧 bridge patch 无该字段时 iOS 行为不变）**、**state-only loading/failed
   change-set 含目标 turn 且 orderChanged=false**、**同 turn 的 state+parts 只报告一个 changedTurnID**、
