@@ -204,18 +204,36 @@ function checkPaginationChain(fixture) {
 }
 
 function checkIllegalTurnId(fixture) {
-  const c = check("neg-5-illegal-turnid-success", "§3.0.7-5: illegal turnId returns an rpc error, never success-shaped foreign content");
+  // Amended 2026-08-30 against tag rust-v0.150.0-alpha.12.2
+  // thread_processor.rs:3365-3425: items/list passes turn_id straight into the
+  // store as a filter; the error mapping covers thread-level failures only, so
+  // an unknown well-formed turnId officially yields an EMPTY SUCCESS page.
+  const c = check("neg-5-illegal-turnid-semantics", "§3.0.7-5 (amended): unknown well-formed turnId is a store filter — expect empty success page; foreign items or a fabricated rpc error both fail");
   const record = fixture?.data?.longestThread?.illegalTurnId?.record;
   if (record == null) return unverified(c, "illegal turnId probe not captured");
-  if (record.error == null) return failCheck(c, "illegal turnId returned a success-shaped response");
-  return pass(c, { errorCode: record.error.code ?? null });
+  if (record.error != null) return failCheck(c, `unknown turnId returned an rpc error (code ${record.error.code ?? "?"}) — contradicts official filter semantics (thread_processor.rs:3365-3425)`);
+  const n = record.resultShape?.data?.n;
+  if (typeof n !== "number") return unverified(c, "illegal turnId success response shape not captured");
+  if (n !== 0) return failCheck(c, `unknown turnId returned ${n} items — turn-filter leak/fabrication`);
+  return pass(c, { emptySuccessPage: true });
+}
+
+// Control inventory pick: prefer the post-chain warm re-attempt (cold
+// includeTurns on a paginated thread times out server-side, attempts 1+2),
+// fall back to the cold attempt; only non-error records are usable as a
+// comparison set.
+function pickControl(longest) {
+  for (const candidate of [longest?.controlFullReadWarm, longest?.controlFullRead]) {
+    if (candidate?.record != null && candidate.error !== true) return candidate;
+  }
+  return null;
 }
 
 function checkNoGapVsControl(fixture) {
   const c = check("neg-6-no-gap-vs-control", "§3.0.7-6: full desc chain (normalized oldest→newest) matches includeTurns=true control inventory in BOTH set and order");
   const longest = fixture?.data?.longestThread;
   const chain = longest?.summaryChain;
-  const controlIds = longest?.controlFullRead?.turnIds;
+  const controlIds = pickControl(longest)?.turnIds;
   if (!Array.isArray(chain) || chain.length === 0) return unverified(c, "no summary chain captured");
   if (!Array.isArray(controlIds) || controlIds.length === 0) return unverified(c, "no control inventory (includeTurns=true) captured");
   const descIds = chainTurnIds(chain);
@@ -414,7 +432,7 @@ function nineItemChecklist(fixture, stats, checks) {
   items.push({ item: 3, what: "NotLoaded empty items with same turn identity", status: statusOf("notloaded-identity") === "pass" ? "present" : "missing" });
   items.push({
     item: 4, what: "items/list entry shape, asc pages, cursors, empty page, illegal turnId",
-    status: (statusOf("neg-3-items-turn-filter-leak") === "pass" && statusOf("neg-5-illegal-turnid-success") === "pass" && multiPageSamples > 0) ? (emptyItemPages > 0 ? "present" : "partial: no empty items page observed") : "missing",
+    status: (statusOf("neg-3-items-turn-filter-leak") === "pass" && statusOf("neg-5-illegal-turnid-semantics") === "pass" && multiPageSamples > 0) ? (emptyItemPages > 0 ? "present" : "partial: no empty items page observed") : "missing",
     evidence: { multiPageSamples, emptyItemPages },
   });
   items.push({
@@ -428,7 +446,7 @@ function nineItemChecklist(fixture, stats, checks) {
     evidence: stats.commandExecution,
   });
   items.push({ item: 7, what: "Summary↔items official item id equality (first-user and final-agent separately)", status: statusOf("neg-1-summary-items-id-mismatch") === "pass" ? "present" : "missing" });
-  items.push({ item: 8, what: "Same-session full/Summary/items-list bytes + wall time by historyMode", status: (longest?.controlFullRead?.record != null && (longest?.summaryChain?.length ?? 0) > 0) ? "present" : "missing" });
+  items.push({ item: 8, what: "Same-session full/Summary/items-list bytes + wall time by historyMode", status: (pickControl(longest)?.record != null && (longest?.summaryChain?.length ?? 0) > 0) ? "present" : "missing" });
   items.push({ item: 9, what: ">30-turn thread paginated to EOF, no dup/no gap vs control", status: (chainIds.length > 30 && statusOf("neg-4-pagination-dup-gap") === "pass" && statusOf("neg-6-no-gap-vs-control") === "pass") ? "present" : "missing", evidence: { turns: chainIds.length } });
   return items;
 }
@@ -441,7 +459,7 @@ function baselineTable(fixture) {
     rows.push({
       thread: longest.thread,
       historyMode: longest.historyMode,
-      fullRead: longest.controlFullRead?.record != null ? { ms: longest.controlFullRead.record.ms, resultBytes: longest.controlFullRead.record.resultBytes } : null,
+      fullRead: (() => { const control = pickControl(longest); return control?.record != null ? { ms: control.record.ms, resultBytes: control.record.resultBytes } : null; })(),
       metaRead: { ms: longest.readMeta.record.ms, resultBytes: longest.readMeta.record.resultBytes },
       summaryFirstPage: summaryPage1?.record != null ? { ms: summaryPage1.record.ms, resultBytes: summaryPage1.record.resultBytes, turns: summaryPage1.turnCount ?? summaryPage1.turnIds?.length ?? null } : null,
       itemsSamples: (longest.itemsSamples ?? []).map((s) => {
@@ -587,7 +605,7 @@ function syntheticFixture() {
         }],
         backwardsChain: { anchoredOn: "cur-3", pages: ascPages },
         itemsSamples: [itemsSampleFor(0), itemsSampleFor(17), itemsSampleFor(34)],
-        illegalTurnId: { record: { method: "thread/items/list", params: { turnId: "id-0" }, ms: 8, resultBytes: 60, error: { code: -32602, messageLen: 30, messageShape: { len: 30 } } }, expectation: "rpc-error" },
+        illegalTurnId: { record: { method: "thread/items/list", params: { turnId: "id-0" }, ms: 8, resultBytes: 52, error: null, resultShape: { data: { n: 0, items: [] }, nextCursor: null, backwardsCursor: null } }, expectation: "empty-success-per-official-filter-semantics" },
         resumeCandidate: {
           record: { ms: 130, resultBytes: 2500, error: null }, error: false, errorCode: null,
           threadTurnsPresent: true, threadTurnsCount: 0, threadTurnsEmpty: true,
@@ -635,7 +653,8 @@ function selfTest() {
   expectFail("M3 foreign turnId in filtered items page", (f) => { setDeep(f, "data.longestThread.itemsSamples.0.pages.0.entries.0.turnId", "id-33"); }, "neg-3-items-turn-filter-leak");
   expectFail("M4a duplicate turn id across pages", (f) => { setDeep(f, "data.longestThread.summaryChain.1.turns.0.id", "id-35"); setDeep(f, "data.longestThread.summaryChain.1.turns.0.items", []); }, "neg-4-pagination-dup-gap");
   expectFail("M4c cursor chain break", (f) => { setDeep(f, "data.longestThread.summaryChain.1.requestCursor", "cur-wrong"); }, "neg-4-pagination-dup-gap");
-  expectFail("M5 illegal turnId success-shaped", (f) => { setDeep(f, "data.longestThread.illegalTurnId.record.error", null); setDeep(f, "data.longestThread.illegalTurnId.record.resultFields", ["data"]); }, "neg-5-illegal-turnid-success");
+  expectFail("M5 illegal turnId returns foreign items", (f) => { setDeep(f, "data.longestThread.illegalTurnId.record.resultShape.data.n", 3); }, "neg-5-illegal-turnid-semantics");
+  expectFail("M5b illegal turnId fabricated rpc error", (f) => { setDeep(f, "data.longestThread.illegalTurnId.record.error", { code: -32602, messageLen: 30, messageShape: { len: 30 } }); }, "neg-5-illegal-turnid-semantics");
   expectFail("M6 control inventory missing a turn", (f) => { setDeep(f, "data.longestThread.controlFullRead.turnIds.10", null); f.data.longestThread.controlFullRead.turnIds = f.data.longestThread.controlFullRead.turnIds.filter(Boolean); }, "neg-6-no-gap-vs-control");
   expectFail("M6b control inventory reordered", (f) => {
     const ids = f.data.longestThread.controlFullRead.turnIds;

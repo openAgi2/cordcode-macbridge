@@ -408,13 +408,25 @@ Summary），明细展开按 owner 裁决执行并记录入 fixture 元数据。
 2. Summary 出现 first-user / final-agent 以外的 item type；
 3. `turnId` 过滤的 items/list 返回了其他 turn 的 item；
 4. 分页往返产生重复 turn/item 或**缺页**；
-5. 非法 turnId 返回 success-shaped 的外来内容（应为错误）；
+5. 非法 turnId（格式合法但不存在）返回了**非空 items**（turn 过滤泄漏/编造）或返回 rpc 错误
+   （**2026-08-30 修订**：原假设"应为错误"与官方源码不符——tag `rust-v0.150.0-alpha.12.2`
+   `thread_processor.rs:3365-3425` 中 `turn_id` 直接作为 store 过滤器下推，错误映射只覆盖
+   thread 级失败（InvalidRequest/Unsupported/ThreadNotFound），**不存在未知 turnId 报错路径**；
+   线上实测（attempt-009）同样返回 200 + 空页。因此正确断言为：未知合法格式 turnId →
+   `error == null` 且 `data` 为空；任一偏离（返回错误、返回非空 items）才是负结果）；
 6. G0.9 的**无缺口判定**：分页拼接后的 turn-id 序列与同会话 `includeTurns=true`
    **control inventory**（仅探针使用，不得进产品路径）做**集合与顺序双重对照**，并完成
    backwards round-trip——跳过对照只能证明"无重复"，不能证明"无缺口"，视为未通过。
 
 （`thread/items/list` 对 legacy 会话返回 method-not-found **不属于负结果**——它是 §2.5 能力矩阵的
 合法探测目标，走 T0.5 owner 裁决。）
+
+**2026-08-30 G0 实测补充注记（attempt-001~009，两次完整 live 运行）**：冷态（线程未加载）
+`thread/read includeTurns=true` 在 paginated 线程上经 WSS **240 秒内无响应**（两次运行行为
+一致；此时空闲看门狗与 RPC 超时的交互曾导致探针挂死，已修复并记录于探针代码注释）。
+control inventory 改为**链路后暖态重试**（turns/items 分页链已把线程加载进 app-server），
+冷态行为本身作为观察记录保留。该行为与 paginated 模式"turns 必须走 `turns/list`"的设计
+假设一致，不构成负结果。
 
 ### Phase 1 — Mac agent：`agent/codex-remote`（门 G1）
 

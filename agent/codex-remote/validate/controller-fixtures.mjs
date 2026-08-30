@@ -169,7 +169,7 @@ if (mode === "require-live") {
         expect(longest[section] != null, `${rel} history fixture missing data.longestThread.${section}`);
       }
       expect(value.probe?.caps != null, `${rel} history fixture missing probe.caps`);
-      expect(value.target?.detected?.chatgptDesktopVersion != null, `${rel} history fixture missing target.detected versions`);
+      expect(value.target?.detected?.chatgpt_desktop_version != null, `${rel} history fixture missing target.detected versions`);
       expect(value.adjudication?.result != null, `${rel} history fixture missing adjudication.result`);
       continue;
     }

@@ -423,7 +423,14 @@ export function openRpcSession({ enrollment, environment, observe = () => {}, on
     };
     const armTimeout = (ms) => {
       clearTimeout(timeout);
-      timeout = setTimeout(() => { ws.terminate(); reject(new Error("controller WSS timeout")); }, ms);
+      // A long RPC in flight guards itself with its own timer; the idle
+      // watchdog must not terminate the socket under it (2026-08-30 hang:
+      // thread/read includeTurns cold-load > idle window killed the WSS,
+      // then close() deadlocked on an already-emitted close event).
+      timeout = setTimeout(() => {
+        if (pending.size > 0) { armTimeout(ms); return; }
+        ws.terminate(); reject(new Error("controller WSS timeout"));
+      }, ms);
     };
     const sendClientMessage = (method, message) => {
       const seqID = nextClientSeq;
@@ -460,9 +467,17 @@ export function openRpcSession({ enrollment, environment, observe = () => {}, on
       clearTimeout(timeout);
       if (keepAlive != null) clearInterval(keepAlive);
       for (const settle of pending.values()) settle({ message: { message: { error: { code: -1, message: "session closed" } } } });
-      ws.once("close", () => resolveClose());
-      ws.close(1000);
-      setTimeout(() => ws.terminate(), 2_000).unref();
+      pending.clear();
+      if (ws.readyState === ws.OPEN) {
+        ws.once("close", () => resolveClose());
+        ws.close(1000);
+        setTimeout(() => ws.terminate(), 2_000).unref();
+      } else {
+        // Socket already closed/terminated: the close event was emitted
+        // before this listener could be registered — resolve immediately.
+        resolveClose();
+      }
+      setTimeout(resolveClose, 3_000).unref();
     });
     ws.on("open", () => observe("websocket_handshake", { status: "open", protocol_version: 3 }));
     ws.on("error", (error) => { clearTimeout(timeout); reject(new Error(`controller WSS error: ${error.message}`)); });
@@ -517,6 +532,13 @@ export function openRpcSession({ enrollment, environment, observe = () => {}, on
       if (message.type === "pong" && message.status !== "active") {
         clearTimeout(timeout); ws.terminate(); reject(new Error("pong status mismatch")); return;
       }
+      if (message.type === "pong") armTimeout(idleTimeoutMs);
+    });
+    ws.on("close", () => {
+      // Server-side drop or terminate: fail in-flight RPCs immediately so
+      // callers record a real error instead of waiting out their timers.
+      for (const settle of pending.values()) settle({ message: { message: { error: { code: -1, message: "websocket closed" } } } });
+      pending.clear();
     });
   });
 }

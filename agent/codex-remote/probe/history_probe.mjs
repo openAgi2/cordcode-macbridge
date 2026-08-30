@@ -59,7 +59,10 @@ const scriptPath = fileURLToPath(import.meta.url);
 const CAPS = {
   threadListPages: 3,
   threadListLimit: 50,
-  discoveryThreads: 8,
+  // Attempt 3: recency-first sampling missed all 128 legacy threads (recent
+  // threads are all paginated), so discovery now sweeps the whole inventory
+  // with a stride in addition to the recency head.
+  discoveryThreads: 24,
   discoveryPages: 4,
   turnsPageLimit: 30,
   turnsChainPages: 80,
@@ -68,7 +71,10 @@ const CAPS = {
   secondaryThreads: 2,
   secondaryItemsPages: 10,
   rpcTimeoutMs: 30_000,
-  controlReadTimeoutMs: 180_000,
+  // thread/read includeTurns on a cold paginated thread can take minutes
+  // server-side (2026-08-30 attempt 1: no response within 180s); the idle
+  // watchdog now yields to pending RPCs, so this can safely be generous.
+  controlReadTimeoutMs: 240_000,
   resumeTimeoutMs: 60_000,
   illegalTurnId: "00000000-0000-0000-0000-000000000000",
 };
@@ -241,6 +247,22 @@ async function callWithLoadRetry(session, method, params, options = {}) {
   observe("load_retry", { method, after_error_code: first.record.error?.code ?? null });
   await call(session, "thread/resume", { threadId: params.threadId, excludeTurns: true }, { note: "load-retry-resume" });
   return call(session, method, params, { ...options, note: `${options.note ?? ""}|retried-after-resume` });
+}
+
+// Control full-read is allowed to fail (server cold-load can outlive the RPC
+// timeout, or the socket may drop first): record the failure as an observation
+// and keep the rest of the battery running (attempt-1 lesson).
+async function controlFullRead(session, threadId, note, timeoutMs = CAPS.controlReadTimeoutMs) {
+  try {
+    return await callWithLoadRetry(session, "thread/read", { threadId, includeTurns: true }, { timeoutMs, note, slim: true });
+  } catch (error) {
+    const message = redactErrorMessage(error.message) ?? "unknown";
+    observe("control_read_exception", { note, error: message });
+    return {
+      record: { method: "thread/read", params: paramsRecordOf({ threadId, includeTurns: true }), error: { code: "rpc-exception", message }, note },
+      response: { error: { code: "rpc-exception", message } },
+    };
+  }
 }
 
 function turnsOfResult(result) {
@@ -440,9 +462,14 @@ async function main() {
     fixture.data.inventory = inventory;
     observe("history_inventory", inventory.counts);
 
-    // ---- 2) discovery: bounded depth-estimate of recent idle threads
+    // ---- 2) discovery: recency head + strided sweep for depth/historyMode
+    // coverage (legacy threads cluster in older inventory pages).
     const discovery = [];
-    const candidates = inventoryThreads.filter((t) => t.statusType !== "active").slice(0, CAPS.discoveryThreads);
+    const pool = inventoryThreads.filter((t) => t.statusType !== "active");
+    const head = pool.slice(0, 8);
+    const stride = Math.max(1, Math.floor(pool.length / Math.max(1, CAPS.discoveryThreads - head.length)));
+    const sweep = pool.filter((_, index) => index % stride === 0).filter((t) => !head.includes(t));
+    const candidates = [...head, ...sweep].slice(0, CAPS.discoveryThreads);
     for (const candidate of candidates) {
       const raw = rawFromRef(candidate.thread);
       if (raw == null) continue;
@@ -479,22 +506,26 @@ async function main() {
       turnsPresent: Array.isArray(metaRead.response.result?.thread?.turns),
     };
 
-    const control = await call(session, "thread/read", { threadId: longestRaw, includeTurns: true }, { timeoutMs: CAPS.controlReadTimeoutMs, note: "control-full-read", slim: true });
-    battery.controlFullRead = {
-      record: control.record,
-      error: control.response.error != null,
-      turnIds: Array.isArray(control.response.result?.thread?.turns)
-        ? control.response.result.thread.turns.map((turn) => pseudonym(turn.id) ?? "<unparsed>")
+    const controlEntry = (result) => ({
+      record: result.record,
+      error: result.response.error != null,
+      turnIds: Array.isArray(result.response.result?.thread?.turns)
+        ? result.response.result.thread.turns.map((turn) => pseudonym(turn.id) ?? "<unparsed>")
         : null,
-      turnSummaries: Array.isArray(control.response.result?.thread?.turns)
-        ? control.response.result.thread.turns.map((turn) => ({
+      turnSummaries: Array.isArray(result.response.result?.thread?.turns)
+        ? result.response.result.thread.turns.map((turn) => ({
             id: pseudonym(turn.id) ?? "<unparsed>",
             itemsView: turn.itemsView ?? null,
             itemTypes: Array.isArray(turn.items) ? turn.items.map((item) => item.type) : null,
             itemCount: Array.isArray(turn.items) ? turn.items.length : null,
           }))
         : null,
-    };
+    });
+    // Cold read: attempts 1+2 established the server never answers cold
+    // includeTurns on a paginated thread within 240s; 30s re-records the
+    // signature without burning the budget. The warm re-attempt below runs
+    // after the pagination chains have loaded the thread.
+    battery.controlFullRead = controlEntry(await controlFullRead(session, longestRaw, "control-full-read", 30_000));
 
     const summaryWalk = await walkTurnsPages(session, longestRaw, {
       itemsView: "summary", sortDirection: "desc", limit: CAPS.turnsPageLimit,
@@ -541,8 +572,12 @@ async function main() {
       });
     }
 
+    // Warm re-attempt: the summary/backwards/items chains above have loaded
+    // the thread in the app-server, so includeTurns can finally answer.
+    battery.controlFullReadWarm = controlEntry(await controlFullRead(session, longestRaw, "control-full-read-warm"));
+
     const illegal = await call(session, "thread/items/list", { threadId: longestRaw, turnId: CAPS.illegalTurnId, sortDirection: "asc" }, { note: "illegal-turn-id" });
-    battery.illegalTurnId = { record: illegal.record, expectation: "rpc-error" };
+    battery.illegalTurnId = { record: illegal.record, expectation: "empty-success-per-official-filter-semantics" };
 
     // T0.6 candidate — last on this thread: resume attaches live state.
     const liveBeforeResume = liveSeen.length;
@@ -601,7 +636,7 @@ async function main() {
         };
       }
       if (pick.historyMode === "legacy") {
-        const controlLegacy = await call(session, "thread/read", { threadId: raw, includeTurns: true }, { timeoutMs: CAPS.controlReadTimeoutMs, note: `legacy|${pick.thread}|control-full-read`, slim: true });
+        const controlLegacy = await controlFullRead(session, raw, `legacy|${pick.thread}|control-full-read`);
         entry.controlFullRead = {
           record: controlLegacy.record,
           error: controlLegacy.response.error != null,
@@ -619,7 +654,13 @@ async function main() {
     await session.close();
   } catch (error) {
     if (session != null) { try { await session.close(); } catch {} }
-    throw error;
+    // Emit the partial fixture instead of losing every captured section to a
+    // mid-battery failure; the harness treats missing sections explicitly.
+    fixture.data.batteryError = { message: redactErrorMessage(error?.message ?? "") ?? "unknown" };
+    fixture.adjudication.result = "PARTIAL-CAPTURE-FAILED";
+    fixture.adjudication.note = "Probe failed mid-battery; sections captured before the failure remain valid evidence. Re-run required for missing sections.";
+    observe("battery_failed", { error: fixture.data.batteryError.message });
+    process.exitCode = 1;
   } finally {
     try {
       const revoked = await cleanupController(enrollment, observe);
