@@ -1,16 +1,18 @@
 # codex-remote 懒加载会话历史实施方案（对齐官方分页协议）
 
-- 日期：2026-08-30（r6，按 r5 合规与官方源码可行性核验修订）
-- 状态：**设计阶段收敛（audit-r4 为终审；r5 合规核验 7/7 通过并确认"无需第六轮开放式评审"，
+- 日期：2026-08-30（r6 收敛终版，已吸收最终评审的四项定向修订）
+- 状态：**设计阶段收敛（audit-r4 为终审；r5 合规核验与 r6 最终评审均已闭环，
   后续新问题仅由 G0 fixture、定向测试或真机证据触发并在对应 gate 内修复）。Phase 0 = APPROVED，
   可立即开工**；G1 BLOCKED（G0 fixtures + identity/shape 断言 + 未知 item 原子失败规则落地）；
-  G2 BLOCKED（per-connection delivery 契约 + **turn-state patch op wire 修正（§3.2.0，核验 §4.1）**
-  + P1-r4-1～4 冻结）。
+  G2 BLOCKED（等待 per-connection delivery / `turnStateOps` canonical wire、实现与测试落地；
+  设计契约已在 §3.2.0 收口）。
 - 评审报告：[r1](2026-08-30-codex-remote-lazy-history-plan-audit.md) /
   [r2](2026-08-30-codex-remote-lazy-history-plan-audit-r2.md) /
   [r3](2026-08-30-codex-remote-lazy-history-plan-audit-r3.md) /
   [r4 终审](2026-08-30-codex-remote-lazy-history-plan-audit-r4.md) /
-  [r5 合规与源码可行性核验](2026-08-30-codex-remote-lazy-history-r5-compliance-source-check.md)
+  [r5 合规与源码可行性核验](2026-08-30-codex-remote-lazy-history-r5-compliance-source-check.md) /
+  [r6 最终评审](2026-08-30-codex-remote-lazy-history-plan-final-audit-r6.md)
+- 开工指令：[2026-08-30-codex-remote-lazy-history-kickoff-directive.md](2026-08-30-codex-remote-lazy-history-kickoff-directive.md)
 - 母方案：[2026-08-26-codex-remote-backend-implementation-plan.md](2026-08-26-codex-remote-backend-implementation-plan.md)（其 Phase 0/1 的配对、WSS、envelope、live 投影基础设施已交付并多轮真机验证）
 - 目标仓库：`cordcode-macbridge`（`agent/codex-remote` + `go-bridge`）、`cordcode-ios`（配套工作树）
 - 上游官方源码（只读）：`/Users/jacklee/Projects/codex`。**目标行为基线是 tag `rust-v0.150.0-alpha.12.2`**（当前用户 Desktop 内嵌版本）；main 持续移动（r6 撰写时 `63d213884d`），只作参考不作基线。
@@ -46,7 +48,7 @@
 ```text
 Mac 仓库=/Users/jacklee/Projects/cordcode-macbridge-codex-remote
 Mac 分支=codex/codex-remote-backend
-Mac 提交=4584190（r6 撰写时 HEAD，即 r5 稿 + r4 终审入库提交；此后仅新增未提交的 r5 合规核验报告）
+Mac 提交=6ff83c8（r6 最终评审前 HEAD；最终评审报告与本次定向修订尚未提交）
 iOS 配套工作树=/Users/jacklee/Projects/cordcode-ios-codex-remote
 iOS 分支=codex/codex-remote-backend-ios
 iOS 提交=5565a8612c0b700949ffd9761f4a47d1f3acada1
@@ -77,11 +79,20 @@ audit-r2～r5 核对时点值，实施时须复核。
 | P0（G2 前）三字段 sparse `upsertTurns` 无法被现有 Turn schema 解码（Go `Status` 必填 `projection_types.go:96-105`；Swift 非 optional `SessionProjection.swift:226-236`） | 采纳并定案：弃 sparse upsertTurns，**新增专用 `turnStateOps` patch op**（turnId/detailLoadState/reasonCode/generation，Go/Swift 显式应用）；理由见 §9-r6 定案 3；§3.2.0 已改写 |
 | P1 证据边界措辞（iOS UI 不是"源码验证"） | 采纳：§1.1 改为"owner 黑盒观察 + codex-rs 独立证明 app-server 能力"，IMPORTANT 框加证据边界声明 |
 | 官方复用清单（核验 §6 表） | 采纳：T1.1 改为**镜像官方不变量**（`paginated_turn_full_items` 六项 + `paginated_thread_turns_list_response`），新增 §1.5 官方锚点表，红线 §7-13 |
-| `initialTurnsPage` 作为 G0 有数据候选 | 采纳：新增 T0.6 候选路径实测（baseline vs `thread/resume(initialTurnsPage)` 对比；启用条件三选；源码锚点 `thread_processor.rs:3292-3332`、官方测试 `thread_read.rs:1048-1119`） |
+| `initialTurnsPage` 作为 G0 有数据候选 | 采纳：新增 T0.6 候选路径实测（baseline vs `thread/resume(excludeTurns=true, initialTurnsPage=summary)` 对比；启用条件三选；源码锚点 `thread_processor.rs:3292-3332`、官方测试 `thread_read.rs:1048-1119`） |
 | legacy 分层能力矩阵（items/list 独立必测，不继承 paginated） | 采纳：新增 §2.5 能力矩阵；T0.1/G0 增加 legacy 会话 items/list 探测；`Unsupported → method-not-found`（`thread_processor.rs:3398-3402`）记录为合法负结果探测目标 |
 | "完整思考原文"承诺措辞 | 采纳：产品承诺改为"按需加载服务端实际提供的 reasoning 摘要、工具调用与执行步骤"；G0 非空 content 证据前不承诺"完整思维链"（§2.2/§4） |
 
-**评审收敛声明（audit-r4 / 核验 §7）**：本稿为设计阶段终版。**不再发起新一轮开放式文档评审**；
+**r6 最终评审定向修订（不新增版本轮次）**：
+
+| 最终评审条目 | 本稿处置 |
+| --- | --- |
+| P0-final-1 `initialTurnsPage` 漏 `excludeTurns:true` | 采纳：T0.6/§1.2/§1.5/交付清单统一为完整请求；响应强制断言 `thread.turns == []`，否则候选失败 |
+| P1-final-1 `turnStateOps` 未进入 change set | 采纳：§3.2.0 冻结 `changedTurnIDs` union、`orderChanged=false` 与 state-only UI 刷新测试 |
+| P1-final-2 `reasonCode` 清除语义缺失 | 采纳：failed 必填非空；loading/loaded 显式清除；非法组合 fail-closed |
+| P2-final-1 无 legacy 样本时 N/A | 采纳：先做 target inventory；无 legacy 时附证据标 `N/A(no target legacy thread)`，不伪造样本、不继承 paginated 结论 |
+
+**评审收敛声明**：本稿为设计阶段终版，r6 最终评审四项已全部写回。**不再发起新一轮开放式文档评审**；
 后续新问题只允许由 G0 fixture、定向测试或真机证据触发，并在对应 gate（G0/G1/G2）内修复。
 
 ## 1. 背景与已验证证据
@@ -118,7 +129,7 @@ audit-r2～r5 核对时点值，实施时须复核。
 | `CommandExecution.aggregated_output` 可 null；十类 item（userMessage/reasoning/agentMessage/commandExecution/fileChange/mcpToolCall/dynamicToolCall/plan/webSearch/contextCompaction）在 full 读取中均出现 | `v2/item.rs`；`testdata/phase2/thread-read-app-server.json`（schema replay，非 live） | schema replay 只证明解码面，不证明 live 形状 |
 | 实时通知轻量：`turn/started` items=NotLoaded；完成仅带 `last_agent_message` | `bespoke_event_handling.rs:170,1303-1305` | — |
 | 官方注释点名 paginated thread 的旧路径为 "slow compatibility path"；`Full` 视图为临时兼容路径 | `thread_processor.rs:3165-3166,3261-3262` | **仅 paginated 语义**；legacy full read 不在此结论内 |
-| `thread/resume.initialTurnsPage`：一次往返同时取得 live resume subscription 与首个 turns 页；处理 live active turn 占位避免首屏超 limit | `thread.rs:407-409,446-449`；`thread_processor.rs:3292-3332`；官方测试 `thread_read.rs:1048-1119`（initial page 与同参数 turns/list 一致） | G0 候选路径实测（T0.6），不因源码存在直接启用 |
+| `thread/resume.initialTurnsPage`：与 `excludeTurns:true` 组合后，一次往返同时取得 live resume subscription 与首个 turns 页；处理 live active turn 占位避免首屏超 limit | `thread.rs:398-409,446-449`；`thread_processor.rs:3292-3332`；官方 README `376-382,405-421`；官方测试 `thread_read.rs:1048-1119`（显式 `exclude_turns:true`、`thread.turns` 为空、initial page 与同参数 turns/list 一致） | G0 候选路径实测（T0.6），不因源码存在直接启用；漏传 `excludeTurns` 会走默认 full hydration，候选直接失败 |
 | `initialTurnsPage` 引入提交 `2a1158b8e2f941afed79db95731b16c8a8db5774`、`TurnItemsView` 引入提交 `9e0c191c13` | `git merge-base --is-ancestor <commit> rust-v0.150.0-alpha.12.2`（已验证） | 内嵌版本包含性成立 |
 
 ### 1.3 与现有实现的关系（audit-r2～r5 核对的现状）
@@ -180,7 +191,7 @@ Phase 0 仍需线上实证真实应答形状。
 | 单回合 items 请求 | `thread_items_list_response_inner`（`3365-3422`） | 参数与响应形状直接采用 |
 | 单回合拉到 EOF | `paginated_turn_full_items`（`3222-3258`）：固定 turnId、Asc、最大页尺寸、每页严格反序列化、`nextCursor=nil` 才 EOF、cursor 原地重复立即报错 | **逐项镜像其不变量**，再叠加 G0 裁决的 maxPages/maxBytes/timeout |
 | 全量路径只作兼容基线 | `paginated_thread_full_turns` 的 "slow compatibility path"（`3261-3290`） | 仅探针/基线/owner 裁决范围 |
-| resume 一次往返候选 | `paginated_resume_initial_turns_page(_with_active_slot)`（`3292-3332`） | T0.6 实测候选，裁决后才可能启用 |
+| resume 一次往返候选 | `paginated_resume_initial_turns_page(_with_active_slot)`（`3292-3332`）+ 官方请求形状 `excludeTurns:true + initialTurnsPage`（README `405-421`、测试 `1089-1111`） | T0.6 实测候选；必须断言 `thread.turns == []`，裁决后才可能启用 |
 | 行为测试基线 | `app-server/tests/suite/v2/thread_read.rs:330-477,1048-1119,1781-1934` | 本仓 fixture 断言与单测场景的直接来源 |
 
 上游"取什么、怎么分页、何时 EOF"遵循 codex-rs；本项目只实现它不得不承担的桥接职责——投影 SoT、
@@ -305,25 +316,30 @@ legacy 会话的产品策略由 T0.5 显式裁决，**禁止静默回退 full �
 | historyMode | turns Summary 首屏 | turn-filtered items/list | 首屏收益 | 点击明细策略 |
 | --- | --- | --- | --- | --- |
 | **paginated** | 必测（G0） | 必测（G0） | 传输/编码 + 服务端查询 | 官方 items/list 主路径（§1.5 锚点） |
-| **legacy** | 必测（G0） | **独立必测，不继承 paginated 结论**（源码不能保证 legacy 有 ThreadStore items 索引；Unsupported → method-not-found，`thread_processor.rs:3398-3402`） | 至少传输/编码；服务端仍重放 rollout | owner 明确裁决：保留旧 full 兼容路径 **或** 明确不支持该类会话的明细展开；**禁止自动回退** |
+| **legacy** | inventory 存在则必测，否则有证据 N/A | **存在则独立必测，不继承 paginated 结论**（源码不能保证 legacy 有 ThreadStore items 索引；Unsupported → method-not-found，`thread_processor.rs:3398-3402`）；不存在则 inventory-backed N/A | 至少传输/编码；服务端仍重放 rollout | owner 明确裁决：保留旧 full 兼容路径 **或** 明确不支持该类会话的明细展开；**禁止自动回退** |
 
-G0 必须包含 legacy 会话的 `thread/items/list` 探测样本（T0.1）；若 legacy 不支持 items/list，
-"打开快"仍成立（首屏 Summary），但明细展开按 owner 裁决执行并记录入 fixture 元数据。
+G0 先对目标 thread 做 `historyMode` inventory：若存在 legacy，会话的 `thread/items/list` 探测样本
+与 T0.5 裁决均为必需；若 inventory 证明目标环境没有 legacy，则该能力格记为
+`N/A(no target legacy thread)` 并保存 inventory 证据，**不得凭空制造 legacy 样本，也不得把 paginated
+结论外推给未来出现的 legacy 会话**。若 legacy 存在但不支持 items/list，"打开快"仍成立（首屏
+Summary），明细展开按 owner 裁决执行并记录入 fixture 元数据。
 
 ## 3. 实施阶段（五个阶段、五道门 G0–G4）
 
 每阶段沿用本仓 impl/tests/regression 三段交付纪律；引用门未过不得进入下一阶段。
-**当前判定（audit-r4 终审 + r5 合规核验）：Phase 0 = APPROVED 可立即开工；G1 BLOCKED；G2 BLOCKED
-（新增：turn-state patch op wire 修正）。**
+**当前判定（r6 最终评审四项已写回）：Phase 0 = APPROVED 可立即开工；G1 BLOCKED；G2 BLOCKED
+（等待 canonical wire、实现与测试，不再有文档评审前置项）。**
 
 ### Phase 0 — 线上证据探针（阻塞门 G0）
 
 - T0.1 复用 `testdata/phase0` 探针设施与 owner 手册流程（localhost 表单、配对码不进聊天），
-  对 live Desktop app-server 调用并捕获**脱敏 fixture**：
+  先枚举目标 thread 并保存 `threadId → historyMode` 脱敏 inventory，再对 live Desktop app-server
+  调用并捕获**脱敏 fixture**：
   - `thread/turns/list`（`itemsView:"summary"` / `"notLoaded"`、desc 首页、翻页 cursor 正反往返、
     **>30 回合会话翻页全链到 EOF**）；
-  - `thread/items/list`（按 turnId 过滤、asc 两页、空页、非法 turnId；**paginated 与 legacy 会话
-    各测一组**——§2.5 能力矩阵）；
+  - `thread/items/list`（按 turnId 过滤、asc 两页、空页、非法 turnId；paginated 必测；**inventory
+    存在 legacy 时 legacy 另测一组**，不存在则附 inventory 证据标
+    `N/A(no target legacy thread)`——§2.5 能力矩阵）；
   - `thread/read`（元数据，**必须记录 `thread.historyMode`**；同会话 **includeTurns=true 的
     control inventory 仅限探针使用**，供 §3.0.7 对照）。
 - T0.2 体积与耗时基线，**按 historyMode 分组**：同一会话的 full read / Summary 首页 / items-list
@@ -334,20 +350,25 @@ G0 必须包含 legacy 会话的 `thread/items/list` 探测样本（T0.1）；�
   记录 0/1/2 分布、空文本、interrupted synthetic boundary 继承行为；核对 `itemsView/status/time/error`。
 - T0.4 十类 item 覆盖：按 owner 真实会话尽可能捕获每种出现的 item 类型；缺样本类型明确标为
   未验证并保持 fail-closed / SkippedTypes 可观测（仅诊断，终态规则见 §2.2）。
-- T0.5 **legacy 裁决**：若 owner 现存长会话含 `historyMode=legacy`，向 owner 呈现 T0.2 分层数据
+- T0.5 **legacy 裁决 / N/A**：若 inventory 含 `historyMode=legacy`，向 owner 呈现 T0.2 分层数据
   **+ §2.5 能力矩阵实测结果**并裁决产品策略（接受"仅传输收益"或对该类会话保留旧路径；
   items/list 不可用时裁决明细展开策略），裁决记录入 fixture 元数据（该裁决同时是 §2.3 唯一允许
-  生产走旧路径的入口）。
-- T0.6 **`initialTurnsPage` 候选路径实测（r6 新增）**：对比
+  生产走旧路径的入口）；若 inventory 无 legacy，记录 `N/A(no target legacy thread)` + inventory
+  证据后关闭本项，但未来发现 legacy 时仍 fail-closed，不继承 paginated 能力结论。
+- T0.6 **`initialTurnsPage` 候选路径实测（r6 新增，final-audit 修正请求形状）**：对比
   baseline（`thread/read(includeTurns=false)` + `thread/turns/list(summary)`）与
-  candidate（`thread/resume(initialTurnsPage=summary)`，源码锚点 `thread_processor.rs:3292-3332`、
-  官方测试 `thread_read.rs:1048-1119`）的往返数、耗时与 live subscription 重复性；仅在
+  candidate（`thread/resume(excludeTurns=true, initialTurnsPage={limit:30, sortDirection:desc,
+  itemsView:summary})`，源码锚点 `thread_processor.rs:3292-3332`、官方 README `376-382,405-421`、
+  官方测试 `thread_read.rs:1048-1119`）的往返数、响应总字节、耗时与 live subscription 重复性；
+  **响应必须断言 `thread.turns == []`**，非空即证明发生默认 full hydration，候选直接失败且全量字节
+  不得排除在性能统计之外；仅在
   **目标 Desktop 实测支持 + 不重复现有 live subscription + 耗时数据支持** 三条件齐备时才裁决
   启用候选路径，否则维持 baseline；裁决记录入 fixture 元数据。**不因源码存在直接启用 experimental
   参数**。
 - 采样脚本先落实 §3.0.7 的 pass/fail 断言与 control inventory 对照（不依赖 Phase 2 架构）。
-- **G0 通过条件 = §3.0.5 九项样本齐全（任一缺失不得通过，含 G0.5 owner 裁决闭环）
-  且 §3.0.7 零负结果触发** + T0.2 分层基线与资源画像 + 资源门裁决值 + T0.5 裁决（如适用）
+- **G0 通过条件 = §3.0.5 九项样本齐全（或仅 legacy 格按 inventory 规则提供有证据 N/A；其他任一
+  缺失不得通过，含 G0.5 owner 裁决闭环）
+  且 §3.0.7 零负结果触发** + T0.2 分层基线与资源画像 + 资源门裁决值 + T0.5 裁决或有证据 N/A
   + T0.6 候选路径裁决记录。
 
 #### 3.0.5 G0 必补九项（未验证内容清单）
@@ -356,7 +377,7 @@ G0 必须包含 legacy 会话的 `thread/items/list` 探测样本（T0.1）；�
 2. Summary 的 0/1/2 item 分布、`itemsView/status/time/error` 与正反 cursor；
 3. NotLoaded 空 items 与同一 turn identity；
 4. items/list 的 `ThreadItemEntry.turnId`、asc 两页、next/backwards cursor、空页与非法 turnId
-   （**paginated 与 legacy 分组**）；
+   （paginated 必测；legacy 按 inventory 分组实测或附证据标 `N/A(no target legacy thread)`）；
 5. Reasoning **summary/content 四态分布**（均空 / 仅 summary / 仅 content / 双非空）+ 至少一个
    非空 `content[]` 真实样本；**若目标环境无法产生非空 content，owner 必须裁决从本版验收与实现
    主张中删除"完整思考"，不保留 pending 形状声明**（未裁决前 G0 不通过）；
@@ -458,9 +479,16 @@ G0 必须包含 legacy 会话的 `thread/items/list` 探测样本（T0.1）；�
     merge/顺序语义，违反 live 零改动红线；
   - **定案形状**：`ProjectionPatch` 新增 `turnStateOps: [ { turnId, detailLoadState, reasonCode?,
     generation } ]`（与 `partOps` 对称的专用 op；Go/Swift 显式应用，不伪装完整 turn upsert）；
+  - **状态字段不变量**：`failed` op 的 `reasonCode` **必填且非空**；`loading` / `loaded` op 应用时
+    **无条件清除**该 turn 旧 `reasonCode`（不是“字段缺席就保留旧值”）；`notRequested` 不通过普通
+    网络 op 回写，只是旧 snapshot / 缺席字段的解码默认；任何非法 state/reasonCode 组合 fail-closed；
   - **应用顺序冻结**：iOS patch 应用顺序改为 `execution → upsertTurns → turnStateOps → partOps`
     （状态先行、parts 后至，同 patch 内原子）；`replace_parts + loaded` 同 patch：partOps 替换
     明细、turnStateOps 置终态；`loading`/`failed` 单独以 turnStateOps patch 提交；
+  - **change-set 可见性**：`ProjectionReplica.changedTurnIDs(from:)` 必须 union
+    `turnStateOps.map(\.turnId)`；state-only loading/failed patch 产生 `orderChanged=false` 且
+    `changedTurns` 含目标 turn；同 patch 的 `turnStateOps + replace_parts` 对同一 turn 只产生一个
+    changedTurnID，确保状态写入 replica 后展示层必定刷新、又不触发顺序重排；
   - **向后兼容**：旧 patch 无 `turnStateOps` 字段 → 忽略；旧 snapshot turn 缺 detailLoadState →
     `notRequested`；bridge 旧版本发出的 patch 不含该字段，iOS 行为不变（live 零改动）；
   - schema bump 与 Go/Swift 类型、解码测试同批冻结；
@@ -537,7 +565,9 @@ G0 必须包含 legacy 会话的 `thread/items/list` 探测样本（T0.1）；�
   并发、**A/B/C 三连接投递正确性与 B 的 live baseRev 链**（T2.0）、**loading 中 bridge crash →
   重启无永久 loading（orphan → failed(interrupted)）**、**leader/follower 断线与取消不互相取消
   authoritative fetch**、**unknown item 失败后 Summary 不变、修复后重试只提交一次完整 parts**、
-  **turnStateOps 向后兼容（旧 bridge patch 无该字段时 iOS 行为不变）**。
+  **turnStateOps 向后兼容（旧 bridge patch 无该字段时 iOS 行为不变）**、**state-only loading/failed
+  change-set 含目标 turn 且 orderChanged=false**、**同 turn 的 state+parts 只报告一个 changedTurnID**、
+  **failed→loading→loaded 显式清除旧 reasonCode，非法组合 fail-closed**。
 - **G2**：`go test ./go-bridge/` 全绿 + **detail merge、窗口补水合、per-connection delivery 与投影
   并发路径的定向 race 测试通过**（不笼统主张全包 race 已证明）；桥面协议文档变更入同一提交。
 
@@ -554,7 +584,8 @@ G0 必须包含 legacy 会话的 `thread/items/list` 探测样本（T0.1）；�
   `loaded` 后入口变为直接展开/收起，不再发请求（防重复拉取）。
 - T3.3 live 回合不受影响；断线重连后已加载明细不丢（投影 SoT 在 Mac，`detailLoadState` 与
   canonical itemId 随 snapshot 恢复）。
-- T3.4 单测（ChatViewModel/projection store，含 `turnStateOps` 解码与应用顺序）+ 真机构建安装
+- T3.4 单测（ChatViewModel/projection store，含 `turnStateOps` 解码与应用顺序、state-only patch
+  驱动 UI 刷新、changedTurnIDs/orderChanged、failed→loading→loaded 清除 reasonCode）+ 真机构建安装
   （`scripts/run.sh device`，遵循 REAL_DEVICE_DEBUGGING.md）。
 - **G3**：真机回归 + owner 验收矩阵（§4）。
 
@@ -635,16 +666,19 @@ G0 必须包含 legacy 会话的 `thread/items/list` 探测样本（T0.1）；�
 ## 8. 交付物清单
 
 - [ ] `agent/codex-remote/testdata/phase0/live/`：turns/list（含 >30 回合翻页全链 + control
-      inventory 对照结果）、items/list（**paginated + legacy 分组**）、thread/read(含 historyMode)
+      inventory 对照结果）、items/list（paginated 必测；legacy 按 target inventory 实测或附证据 N/A）、
+      thread/read(含 historyMode)
       脱敏 fixtures + 分层体积/耗时基线 + 单回合资源画像 + 资源门裁决值 + §3.0.7 负结果判定记录 +
-      T0.6 initialTurnsPage 候选裁决记录 + （如适用）legacy 裁决记录
+      T0.6 `excludeTurns=true + initialTurnsPage` 候选裁决记录（含 `thread.turns == []` 断言）+
+      legacy 裁决或 inventory-backed N/A 记录
 - [ ] `agent/codex-remote/history.go` 拆分（**镜像 `paginated_turn_full_items` 六项不变量**）+
       兼容路径显式化（默认仅探针/裁决范围）+ 页元数据与 item id 传递保留 + Reasoning 映射按
       G0.5 裁决重写（非 summary-first）+ 未知 item 原子失败
 - [ ] `go-bridge` 投影 Summary 化（正序化/prepend/去重）+ **上游分页 ↔ `projection_window_v1`
       接线（T2.0：producer 补水合、per-connection delivery、诚实 hasOlder、backend-private
       checkpoint 与有界恢复）** + canonical `ProjectionPart.ItemID` 已映射 variant 持久化 +
-      **per-turn generation** stale fence + **`turnStateOps` patch op（Go/Swift schema 同步）** +
+      **per-turn generation** stale fence + **`turnStateOps` patch op（Go/Swift schema 同步、
+      changedTurnIDs/change-set、reasonCode 清除不变量）** +
       专用历史明细 merge（`replace_parts` 通道 + 未知 item 原子失败）+ 并发归属测试矩阵
 - [ ] `docs/protocol/unified-bridge-protocol.md`：`session_turn_items` wire contract
       （ack-only、backend 归属、状态机/syncRev 完成条件、`turnStateOps`、delivery mode、资源门
@@ -653,7 +687,7 @@ G0 必须包含 legacy 会话的 `thread/items/list` 探测样本（T0.1）；�
       条件渲染 + 现有窗口链 load-older 验证（不重造）+ 防重复拉取
 - [ ] 两仓测试全绿、真机矩阵（§4，含 #8/#9/#10）全绿、文档同步
 
-## 9. 评审采纳记录（四轮评审 + 一轮合规核验，含不采纳项理由）
+## 9. 评审采纳记录（四轮评审 + 合规核验 + 最终定向评审，含不采纳项理由）
 
 ### r1 轮（对 [r1 评审](2026-08-30-codex-remote-lazy-history-plan-audit.md)）
 
@@ -692,7 +726,16 @@ G0 必须包含 legacy 会话的 `thread/items/list` 探测样本（T0.1）；�
 | — | P0（sparse upsertTurns 修正）、P1（证据边界措辞）、官方复用清单、initialTurnsPage 候选、legacy 分层矩阵、完整思考承诺措辞 | **全部采纳** | 落点见 §0.1 r6 表 |
 | （定案记录 3） | sparse `upsertTurns` 修正二选一（完整 turn upsert vs 专用 turn-state op） | **选新增专用 `turnStateOps` patch op** | 方案 A（发完整 turn upsert）会被现有 `ProjectionReplica` 标 `orderChanged=true`、经 `merged(with:)` 完整合并——触碰共享 merge/顺序语义，恰好违反本方案 live 零改动红线（§7-8）；方案 B 与既有 `partOps`/`replace_parts` 的专用 op 风格对称，向后兼容解码简单（旧 patch 无字段即忽略），不动任何共享 live 路径。核验自己也标注 B 为"更干净方案" |
 
-**评审收敛声明**：audit-r4 为设计阶段终审，r5 合规核验确认"无需第六轮开放式评审"；r6 后不再进行
+### r6 最终定向评审（对 [最终评审](2026-08-30-codex-remote-lazy-history-plan-final-audit-r6.md)）
+
+| 编号 | 建议 | 处置 | 落点 |
+| --- | --- | --- | --- |
+| P0-final-1 | initialTurnsPage 候选补 `excludeTurns:true` + 空 turns 断言 | **采纳** | §1.2/§1.5/T0.6/交付清单 |
+| P1-final-1 | turnStateOps 进入 changedTurnIDs/change set | **采纳** | §3.2.0/T2.5/T3.4 |
+| P1-final-2 | reasonCode failed 必填、loading/loaded 清除 | **采纳** | §3.2.0/T2.5/T3.4 |
+| P2-final-1 | 无 legacy 时允许 inventory-backed N/A | **采纳** | §2.5/T0.1/T0.5/G0.4/交付清单 |
+
+**评审收敛声明**：audit-r4 为设计阶段终审，r5 合规核验与 r6 最终定向评审均已闭环；本稿后不再进行
 开放式文档评审，后续新问题仅由 G0 fixture、定向测试或真机证据触发并在对应 gate 内修复。
 
 ## 10. 变更历史
@@ -718,3 +761,7 @@ G0 必须包含 legacy 会话的 `thread/items/list` 探测样本（T0.1）；�
   items/list 独立必测，Unsupported=合法探测目标）；**证据边界拆分**（iOS UI=owner 黑盒观察，
   codex-rs 只证明 app-server 能力）；产品承诺收紧为"服务端实际提供的明细"，G0 前不承诺完整思维链；
   G0 增 legacy items/list 分组探测、真机矩阵增 #10。本轮无整体不采纳项，定案记录 3 见 §9。
+- 2026-08-30 r6-final：按最终定向评审修订（不新增版本轮次）——`initialTurnsPage` 候选强制
+  `excludeTurns:true` 并断言 `thread.turns == []`；`turnStateOps` 纳入 changedTurnIDs/change set，
+  冻结 reasonCode 赋值/清除不变量；legacy 改为 target inventory 驱动的必测或有证据 N/A。四项全部
+  采纳，设计评审到此结束，下一步直接执行 G0。
