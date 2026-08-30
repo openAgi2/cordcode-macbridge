@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-31T00:48:28+08:00",
+  "updated_at": "2026-08-31T01:00:30+08:00",
   "todos": [
     {
       "id": "phase0-probe-impl",
@@ -1113,28 +1113,31 @@
     {
       "id": "phase5-contract-freeze",
       "title": "F1 wire contract freeze — turn_detail_chunks_v1 (protocol §11.8 + descriptor + turnStateOps manifest op + chunk event + blob RPC shapes + iOS contract.json)",
-      "description": "Freeze BEFORE handlers (Phase-2 discipline). Mac: wire descriptor advertises turn_detail_chunks_v1 beside deprecated turn_detail_lazy_v1 (single shared production const gate, mirroring a6c6609 pattern); turnStateOps gains manifest op (detailLoadState/manifestRev/itemCount/totalBytes/progress, NO parts); new event turn_detail_chunk {backendId,sessionId,turnId,manifestRev,seq,items[],oversize[{itemId,handle,type,totalBytes,preview,totalChunks}],progress} conn-scoped; new RPC turn_output_chunk {sessionId,turnId,itemId,chunkIndex} -> {chunkIndex,totalChunks,totalBytes,encoding,data}; v2 reasonCode set upstream_error|timeout|stale_turn|interrupted|unsupported_item_type|page_oversize (max_pages/max_bytes REMOVED per owner ruling); frozen params 256KB blob boundary/128KB chunk target/256KB patch advisory/512KB post-encode hard cap/4MB single-page backstop/30s RPC/90s batch deadline/no permanent page or byte caps. iOS: contract.json SoT + quicktype regen.",
+      "description": "Freeze BEFORE handlers (Phase-2 discipline). Mac: wire descriptor advertises turn_detail_chunks_v1 beside deprecated turn_detail_lazy_v1 (single shared production const gate, mirroring a6c6609 pattern); turnStateOps gains manifest op (detailLoadState/manifestRev/itemCount/totalBytes/progress, NO parts); new event turn_detail_chunk {backendId,sessionId,turnId,manifestRev,seq,items[],oversize[{itemId,handle,type,totalBytes,preview,totalChunks}],progress} conn-scoped; new RPC turn_output_chunk {sessionId,turnId,itemId,chunkIndex} -> {chunkIndex,totalChunks,totalBytes,encoding,data}; v2 reasonCode set upstream_error|timeout|stale_turn|interrupted|unsupported_item_type|page_oversize (max_pages/max_bytes REMOVED per owner ruling); frozen params 256KB blob boundary/128KB chunk target/256KB patch advisory/512KB post-encode hard cap/4MB single-page backstop/30s RPC/90s batch deadline/no permanent page or byte caps. SCOPE (F1.1 unified): Mac wire schema freeze ONLY; iOS contract.json SoT + quicktype regen land in F6 (owner-approved scope unify, recorded plan §3.0 item 7).",
       "status": "done",
       "phase": "phase5",
       "kind": "impl-tests-regression-triple",
       "depends_on": [],
       "source": "owner-final-adjudication-2026-08-30",
-      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge | REOPENED 2026-08-30 night X by owner F1.1 review (P0x3+P1x4+scope unify); RE-CLOSED by F1.1 commit 0501edf",
       "verification": {
         "required": true,
         "status": "pass",
-        "method": "go test ./go-bridge/ -run spec set -count=1 + full suites + race x2",
+        "method": "spec suite + full suites + race x2",
         "attestation": "evidence-backed",
-        "summary": "Mac-side contract freeze landed (d39f7b9): core/turn_detail_chunks_gate.go (TurnDetailChunksProductionEnabled=false client-first + owner-frozen params 256KB/128KB/256KB/512KB/4MB/30s/90s/2KB/128MB); go-bridge/turn_detail_chunks.go (v2 reasonCode set sans max_pages/max_bytes + page_oversize, ValidateTurnStateOpsV2/ApplyTurnStateOpsV2 partial+manifest+generation-fence, TurnDetailProgress/OversizeRef/ChunkPayload/TurnOutputChunkAck, ChunkTotalCountFor); TurnProjection/TurnStateOp additive manifest fields; PublishTurnDetailChunk conn-scoped control-queue delivery (never journal/snapshot), envelope builder in event_publisher.go (blessed site per bypass guard); hello negotiateTurnDetailChunksV1 direct (server.go) + relay mirror (main.go) + SetTurnDetailChunksEnabled const-wired once; per-conn turnDetailChunksV1 registry with unregister cleanup; descriptor appends turn_detail_chunks_v1 under its own const. iOS contract.json SoT sync deliberately deferred to F6 (iOS repo batch).",
-        "artifacts": [],
-        "checked_at": "2026-08-30T19:55:00+08:00",
+        "summary": "F1 (Mac wire freeze, d39f7b9) + F1.1 closure (0501edf): dedicated non-replayable TurnDetailChunkFrame (no EventMessage identity fields; chunkSeq not seq; identity binds sessionId/turnId/turnGeneration/deliveryId/manifestRev); TurnDetailBatchAck with deliveryId+[firstChunkSeq,lastChunkSeq] contiguous-completion rule; TurnOutputChunkParams/Ack full blob binding echo; ApplyTurnStateOpsV2 kernel-state monotonicity (manifest no-regress within generation, loaded terminal idempotent-only, retry must carry retained manifest); DetailChunkOffsets rune-aligned + JSON-escaped-size-rechecked boundaries, totalChunks from actual offset table (ceil banned); TurnDetailCacheBudgetBytes whole-cache 128MB initial default per-turn-dir eviction; storage tx model frozen in §11.8 (file store, fixed commit order blob->items->manifest rename commit point, startup scan rollback, sha256 path names, no-SQLite rationale). 11 spec tests incl. CJK/emoji/backslash-heavy/control-char chunking + kernel monotonicity table; go-bridge 67.9s + agent 3.5s + core 0.6s ok; targeted -race x2 ok.",
+        "artifacts": [
+          "docs/protocol/unified-bridge-protocol.md#11.8",
+          "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md (§3.0 item 7)"
+        ],
+        "checked_at": "2026-08-31T01:10:00+08:00",
         "upstream_anchor": null
       }
     },
     {
       "id": "phase5-detail-store",
       "title": "F2 Mac detail store — per-turn manifest + items append log + blob store + LRU + atomic page-accept transaction",
-      "description": "New package under go-bridge (or core): <data-dir>/detail/<backend>/<sessionID>/<turnID>/ manifest.json {turnID,generation,detailLoadState,manifestRev,itemCount,totalBytes,items:[{itemId,type,bytes,blob?{handle,totalBytes,previewLen,totalChunks},page}],resume:{nextCursor,lastAcceptedItemID,acceptedCount},blobs:[...]} + items.jsonl append log + blobs/<handle>.bin. Page-accept = atomic transaction (manifest temp+rename, append+fsync). >256KB serialized item -> blob extraction (2KB preview + handle). LRU eviction default 128MB const (oldest-lastAccess blobs first, manifest keeps handles for re-hydration from official pagination). Tests: manifest roundtrip, accept transaction ordering, LRU eviction, blob chunk read, oversize extraction, crash-consistency basics.",
+      "description": "F2 Mac detail store per FROZEN model (§11.8 detail store 事务模型, F1.1 P1-5/P1-6): paths <data-dir>/detail/<backend>/<hex sha256(sessionID)>/<hex sha256(turnID)>/ (NEVER raw IDs in paths); manifest + items transaction-record append + blobs/ + temp files; page accept = FIXED COMMIT ORDER transaction (blob temp+fsync+rename -> items tx record+fsync -> manifest temp+fsync+rename = commit point -> startup scan rolls back uncommitted); GLOBAL cache budget core.TurnDetailCacheBudgetBytes 128MB initial default covering manifests+items+blobs+temp, eviction granularity WHOLE per-turn dir (LRU/TTL by dir last-access); >256KB items -> blob (2KB preview + handle + totalChunks from DetailChunkOffsets actual offset table); resume state nextCursor+lastAcceptedItemID+acceptedCount+generation+manifestRev+blob info. Original detail: New package under go-bridge (or core): <data-dir>/detail/<backend>/<sessionID>/<turnID>/ manifest.json {turnID,generation,detailLoadState,manifestRev,itemCount,totalBytes,items:[{itemId,type,bytes,blob?{handle,totalBytes,previewLen,totalChunks},page}],resume:{nextCursor,lastAcceptedItemID,acceptedCount},blobs:[...]} + items.jsonl append log + blobs/<handle>.bin. Page-accept = atomic transaction (manifest temp+rename, append+fsync). >256KB serialized item -> blob extraction (2KB preview + handle). LRU eviction default 128MB const (oldest-lastAccess blobs first, manifest keeps handles for re-hydration from official pagination). Tests: manifest roundtrip, accept transaction ordering, LRU eviction, blob chunk read, oversize extraction, crash-consistency basics.",
       "status": "pending",
       "phase": "phase5",
       "kind": "impl-tests-regression-triple",
@@ -1290,13 +1293,13 @@
         "phase5-contract-freeze"
       ],
       "source": "owner-final-adjudication-2026-08-30",
-      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge | F1.1 included",
       "verification": {
         "required": true,
         "status": "pass",
         "method": "go test -run ... -count=1 -v 9/9",
         "attestation": "evidence-backed",
-        "summary": "9 spec tests in go-bridge/turn_detail_chunks_spec_test.go: TestTurnDetailChunksReasonCodeSetV2 (v1-only codes banned), TestTurnStateOpsV2Validation (10 invalid cases), TestTurnStateOpsV2ApplyStampsManifestAndFences (manifest stamping + errors.Is fence + atomicity), TestTurnDetailChunkPayloadWireShape, TestTurnOutputChunkAckWireShape, TestTurnDetailChunkEventEnvelope, TestChunkTotalCountMath (incl 1057417B evidence item -> 9 chunks), TestTurnDetailChunksDescriptorRidesOwnGate (source pins: own const, no ungated literal, exactly-one main.go wiring, relay mirror), TestHelloNegotiatesTurnDetailChunksV1 (echo/registry/prerequisite/disabled/unregister).",
+        "summary": "9 spec tests in go-bridge/turn_detail_chunks_spec_test.go: TestTurnDetailChunksReasonCodeSetV2 (v1-only codes banned), TestTurnStateOpsV2Validation (10 invalid cases), TestTurnStateOpsV2ApplyStampsManifestAndFences (manifest stamping + errors.Is fence + atomicity), TestTurnDetailChunkPayloadWireShape, TestTurnOutputChunkAckWireShape, TestTurnDetailChunkEventEnvelope, TestChunkTotalCountMath (incl 1057417B evidence item -> 9 chunks), TestTurnDetailChunksDescriptorRidesOwnGate (source pins: own const, no ungated literal, exactly-one main.go wiring, relay mirror), TestHelloNegotiatesTurnDetailChunksV1 (echo/registry/prerequisite/disabled/unregister). | F1.1 additions: frame-shape ban list, batch-ack range, blob binding, kernel monotonicity (8 regression cases + idempotent + fence), rune/escape chunk table, dedicated-frame publish refusal (0501edf)",
         "artifacts": [],
         "checked_at": "2026-08-30T19:55:00+08:00",
         "upstream_anchor": null
@@ -1313,13 +1316,13 @@
         "phase5-contract-freeze-tests"
       ],
       "source": "owner-final-adjudication-2026-08-30",
-      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge | F1.1 included",
       "verification": {
         "required": true,
         "status": "pass",
         "method": "full suite runs listed in summary, exit 0",
         "attestation": "evidence-backed",
-        "summary": "Full regression green: go test ./go-bridge/ ./agent/codex-remote/ ./core/ -count=1 (go-bridge 67.7s ok, agent 3.3s ok, core 0.6s ok); targeted -race -count=2 ok. Business-event bypass guard passed (envelope builder lives in event_publisher.go). v1 path untouched: all §11.7 tests green alongside v2 additions.",
+        "summary": "Full regression green: go test ./go-bridge/ ./agent/codex-remote/ ./core/ -count=1 (go-bridge 67.7s ok, agent 3.3s ok, core 0.6s ok); targeted -race -count=2 ok. Business-event bypass guard passed (envelope builder lives in event_publisher.go). v1 path untouched: all §11.7 tests green alongside v2 additions. | F1.1 re-run: go-bridge 67.9s ok / agent 3.5s ok / core 0.6s ok; -race x2 ok (0501edf)",
         "artifacts": [],
         "checked_at": "2026-08-30T19:55:00+08:00",
         "upstream_anchor": null
