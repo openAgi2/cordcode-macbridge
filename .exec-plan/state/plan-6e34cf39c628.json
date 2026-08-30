@@ -575,14 +575,14 @@
       "id": "phase2-window-wiring-regression",
       "title": "Window wiring race + existing-window zero-regression",
       "description": "Targeted -race tests pass for hydration/prepend/delivery concurrency paths (bounded claim: these paths, not whole-package race proof); existing window RPC behaviors (snapshot cut, opaque cursor semantics, newer/latest/locate) unchanged for non-historical paths; pre-existing go-bridge window tests green.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "regression",
       "depends_on": [
         "phase2-window-wiring-tests"
       ],
       "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
-      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete",
+      "notes": "2026-08-30 CLOSED: window regression closed in T2.1/T2.3 batches — full go-bridge suite green across all commits (a35ff7a, 3b992d1, T2.2/T2.3 batch); race x2 green on window/prepend/older-walk/delivery subsets.",
       "verification": {
         "required": true,
         "status": "missing",
@@ -671,14 +671,14 @@
       "id": "phase2-detail-merge-impl",
       "title": "T2.2+T2.3 dedicated detail merge + session_turn_items handler",
       "description": "Dedicated history detail merge (NOT live reducer lifecycle, zero FlushPatch/ps.tools change): input = turnId + ordered full items + terminal detailLoadState + admission token (per-turn generation); commit channel = existing wire replace_parts (explicit turnId,messageId) + same-patch turnStateOps terminal state; never markRunning, never fake reasoning_delta/text_delta, never change ExecutionView; unknown/unmappable item type/shape → whole-turn ATOMIC failure (abort commit, keep Summary parts, failed+unsupported_item_type, no partial replace_parts, no loaded; retry allowed after fix); construct/replace that turn's assistant parts keyed by official item id (T2.1 ids); dedup Summary's user/final-agent by canonical item id (G0.7 + §3.0.6 mapping evidence); Reasoning mapping per G0.5. Bridge method session_turn_items implemented strictly per the frozen §3.2.0 (backend gate fail-closed; singleflight idempotent; follower terminal ack; orphan loading restore → failed(interrupted); resource gate fail-closed); management/relay tests reuse the fakeAgentSession pattern.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "impl",
       "depends_on": [
         "phase2-summary-consumption-regression"
       ],
       "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
-      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | upstream-anchor-required-at-done (plan §1.5, tag rust-v0.150.0-alpha.12.2) — pagination/EOF semantics thread_processor.rs:3222-3258 (via agent API)",
+      "notes": "2026-08-30 CLOSED (T2.2+T2.3 batch commit + T2.5 matrix commit): kernel MergeHistoricalTurnDetail (per-turn generation admission, running/missing typed fences, replace_parts+loaded ONE patch, generation bump, empty-detail = state-only loaded preserving Summary parts, gapless patch chain over staged live deltas); CommitTurnStateOps state-only atomic commits; RecoverOrphanDetailLoading wired at checkpoint restore + lazy in-place; session_turn_items handler per frozen §11.7 (capability gates incl. per-session HistoryMode legacy gate, Kernel-adjudicated turn_not_found, loading→terminal state machine, success-shaped acks, closed-set reasonCodes, singleflight followers mirror leader ack, loaded repeats ack journal-recovered original rev); per-connection delivery rules 1-4 via held-turn registry; T0.5 mode-aware cold open (core.ColdHistoryReader + agent ReadColdHistory — agent owns historyMode dispatch; legacy → compat full read, closing the T2.1 gap where legacy threads would have been served by turns/list).",
       "verification": {
         "required": true,
         "status": "missing",
@@ -695,14 +695,14 @@
       "id": "phase2-detail-merge-tests",
       "title": "T2.5 detail-merge test matrix",
       "description": "Concurrency & ownership matrix (detail rows): completed turn; non-last turn; concurrent live turn elsewhere; duplicate request idempotent; two turns expanded concurrently (singleflight); empty detail (§2.2 definition: no reasoning/tool/fileChange items after removing summary-duplicated user/final-agent) → loaded; cold hydration concurrent with live output; live turn completes while Summary page in flight; new turn starts during detail load; replace_parts repeated commit idempotent; reconnect restore → detail merge dedup; generation change / session delete → typed stale; older-hydration concurrent with detail load; leader/follower disconnect+cancel do not cancel each other's authoritative fetch; unknown-item failure leaves Summary unchanged and post-fix retry commits exactly one complete parts set.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "tests",
       "depends_on": [
         "phase2-detail-merge-impl"
       ],
       "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
-      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete",
+      "notes": "2026-08-30 CLOSED: session_turn_items_test.go (merge atomicity/fences/empty-detail, state commits, orphan unit, capability/legacy/turn_not_found gates, happy + idempotent repeat w/ original-rev watermark, reason-code matrix w/ Summary preservation, skipped-types atomic failure, singleflight, orphan-then-retry, reducer-level running fence) + session_turn_items_matrix_test.go (two-turn concurrent expand, live-append-on-other-turn fence independence, retry-commits-once) + agent ReadColdHistory/ReadTurnDetail covered by paginated tests. Harness fixes: TempDir/Shutdown LIFO ordering + checkpoint quiescence helper (Shutdown does not join hydrate runner).",
       "verification": {
         "required": true,
         "status": "missing",
@@ -719,14 +719,14 @@
       "id": "phase2-detail-merge-regression",
       "title": "turnStateOps Go-side semantics tests",
       "description": "turnStateOps rows (Go side): old-bridge patch without the field → decode+behavior unchanged (live zero-change); state-only loading/failed patch → change-set contains target turn AND orderChanged=false; same-turn state+parts in one patch → exactly one changedTurnID; failed→loading→loaded explicitly clears old reasonCode; illegal state/reasonCode combos fail-closed; orphan loading → bridge restart restore → failed(interrupted), no permanent loading.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "regression",
       "depends_on": [
         "phase2-detail-merge-tests"
       ],
       "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
-      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete",
+      "notes": "2026-08-30 CLOSED: full go-bridge + agent + core suites green; fixture regeneration verified additive-only (T2.1). NOTE for reports: codex-remote is pathless — no projection checkpoint on disk; bridge restart = fresh Summary hydrate (detail states reset to notRequested; orphan loading cannot persist across restart — restore hook guards future checkpoint adoption).",
       "verification": {
         "required": true,
         "status": "missing",
@@ -743,14 +743,14 @@
       "id": "phase2-g2-gate-impl",
       "title": "T2.4 protocol docs finalized with handlers",
       "description": "Protocol doc changes committed together with the handler code (same commit): unified-bridge-protocol.md gains session_turn_items wire contract (ack-only, backend ownership, state machine/syncRev completion, turnStateOps, delivery mode, resource gate) and turnStateOps schema; bridge-v1.md R2/R3/R4/R10 revisions if T2.0 review required them; Go/Swift schema/type references in sync.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "impl",
       "depends_on": [
         "phase2-detail-merge-regression"
       ],
       "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
-      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete",
+      "notes": "2026-08-30 CLOSED: G2 = full go test ./go-bridge/ green + targeted race on detail merge / window older-hydration / per-connection delivery / projection fence paths (race x2 green, explicit set: TestSessionTurnItems|TestTurnItems|TestMergeHistorical|TestCommitTurnStateOps|TestRecoverOrphan|TestOlderWalk|TestWindowOlderWalk|TestColdHydrate|TestPublishProjectionPrepend|TestPrependHistorical|TestSlice|TestProjectionPatchFence|TestProjectionSnapshotFence) + protocol docs in-repo (T2.4 commits: loaded-repeat watermark + empty-detail state-only rulings). 40-turn walk E2E uses synthetic fixtures — no >30-turn LIVE claim; G2 fixture-reference constraints respected (no attempt-010 citation).",
       "verification": {
         "required": true,
         "status": "missing",
