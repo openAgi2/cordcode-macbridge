@@ -42,7 +42,13 @@ import (
 // generation (turnStateOps patch op), and the checkpoint gains the backend-private
 // CodexProducerState (lazy-history producer checkpoint, bridge-v1.md R11d). v10 checkpoints
 // lack the turn fence/state fields and must be rebuilt so cold hydrate re-reduces with them.
-const projectionCheckpointSchemaVersion = 11
+// v12: turn_detail_chunks_v1 §11.8 (F3) — turns gain the detail manifest SUMMARY
+// (detailManifestRev/detailItemCount/detailTotalBytes) and the v2-only partial
+// detailLoadState, produced exclusively by the V2 manifest commit path
+// (CommitTurnStateOpsV2) and the generation-bump baseline reset. v11 checkpoints
+// predate that bookkeeping — restoring them would crown zero-manifest turns as
+// authoritative under v2 semantics — so they rebuild from the canonical source.
+const projectionCheckpointSchemaVersion = 12
 
 var (
 	ErrProjectionCheckpointInvalid  = errors.New("projection checkpoint invalid")
@@ -129,9 +135,9 @@ type ProjectionCheckpoint struct {
 // bridge and is never embedded in a wire cursor (R2). Restart validation is by target
 // RPC (T2.0), not file digest.
 type CodexProducerState struct {
-	HasOlderUpstream   bool      `json:"hasOlderUpstream"`
-	UpstreamNextCursor string    `json:"upstreamNextCursor,omitempty"`
-	BoundaryTurnID     string    `json:"boundaryTurnId,omitempty"`
+	HasOlderUpstream   bool   `json:"hasOlderUpstream"`
+	UpstreamNextCursor string `json:"upstreamNextCursor,omitempty"`
+	BoundaryTurnID     string `json:"boundaryTurnId,omitempty"`
 	// HistoryMode records the upstream thread's declared mode at cold open
 	// ("paginated" | "legacy"; empty = pre-T2.3 files). It gates the
 	// turn_detail_lazy_v1 capability per session (§11.7: legacy never exposes
@@ -294,6 +300,9 @@ func (s *ProjectionCheckpointStore) LoadValidated(
 			return ProjectionCheckpoint{}, err
 		}
 	}
+	if err := validateTurnDetailCheckpointFields(checkpoint.Projection.Turns); err != nil {
+		return ProjectionCheckpoint{}, err
+	}
 	if checkpoint.CodexProducerState != nil {
 		if err := ValidateCodexProducerState(*checkpoint.CodexProducerState); err != nil {
 			return ProjectionCheckpoint{}, err
@@ -329,6 +338,42 @@ func (s *ProjectionCheckpointStore) LoadValidated(
 	}
 	checkpoint.Projection = cloneSessionProjection(checkpoint.Projection)
 	return checkpoint, nil
+}
+
+// validateTurnDetailCheckpointFields enforces the §11.8 fail-closed rules on
+// restored turns (v12 checkpoints): the detail state stays inside the frozen
+// closed set (v2 adds partial), reasonCode exists iff failed, and the manifest
+// summary is internally consistent (items counted ⇒ a manifest revision
+// exists — mirrors ValidateTurnStateOpsV2). Reason-code SET membership is
+// deliberately not checked here: a restored turn may predate a set revision.
+func validateTurnDetailCheckpointFields(turns []TurnProjection) error {
+	for i := range turns {
+		turn := &turns[i]
+		switch turn.DetailLoadState {
+		case DetailStateNotRequested, DetailStateLoading, DetailStatePartial, DetailStateLoaded, DetailStateFailed:
+		default:
+			return fmt.Errorf("%w: turn %s detailLoadState %q",
+				ErrProjectionCheckpointInvalid, turn.TurnID, turn.DetailLoadState)
+		}
+		if turn.DetailLoadState == DetailStateFailed {
+			if turn.DetailReasonCode == "" {
+				return fmt.Errorf("%w: turn %s failed without reasonCode",
+					ErrProjectionCheckpointInvalid, turn.TurnID)
+			}
+		} else if turn.DetailReasonCode != "" {
+			return fmt.Errorf("%w: turn %s state %q carries reasonCode",
+				ErrProjectionCheckpointInvalid, turn.TurnID, turn.DetailLoadState)
+		}
+		if turn.DetailManifestRev < 0 || turn.DetailItemCount < 0 || turn.DetailTotalBytes < 0 {
+			return fmt.Errorf("%w: turn %s negative manifest summary",
+				ErrProjectionCheckpointInvalid, turn.TurnID)
+		}
+		if (turn.DetailItemCount > 0 || turn.DetailTotalBytes > 0) && turn.DetailManifestRev <= 0 {
+			return fmt.Errorf("%w: turn %s item summary without manifestRev",
+				ErrProjectionCheckpointInvalid, turn.TurnID)
+		}
+	}
+	return nil
 }
 
 func validateProjectionSourceCheckpoint(path string, checkpoint ProjectionSourceCheckpoint) error {
@@ -973,10 +1018,12 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 				// Only true pathless full rebuilds (no Path, no Segments) skip Restore.
 				restored := checkpoint.Projection
 				if backendID == "codex-remote" {
-					// §11.7 orphan recovery: a loading turn whose leader died with
-					// the previous bridge epoch is atomically failed(interrupted);
-					// the rev bump journals as a gap (dead-epoch conns are gone).
-					RecoverOrphanDetailLoading(&restored)
+					// §11.8 orphan recovery (V2 semantics supersede the §11.7
+					// hook here): a loading turn whose batch leader died with the
+					// previous bridge epoch is atomically failed(interrupted)
+					// CARRYING the retained manifest summary; the rev bump
+					// journals as a gap (dead-epoch conns are gone).
+					RecoverOrphanDetailLoadingV2(&restored)
 				}
 				tx.reducer.Restore(backendID, sessionID, restored)
 			}

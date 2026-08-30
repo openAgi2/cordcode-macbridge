@@ -209,10 +209,10 @@ func TestTurnStateOpsPatchRoundTrip(t *testing.T) {
 	}
 }
 
-// Schema v11 checkpoint round-trip: turn state fields and the codex producer
-// checkpoint persist through save/load; a v10 checkpoint is rejected and
-// rebuilt from the canonical source instead of being restored.
-func TestCheckpointV11RoundTripTurnStateAndProducerState(t *testing.T) {
+// Schema v12 checkpoint round-trip: turn state + manifest summary fields and
+// the codex producer checkpoint persist through save/load; a v11 checkpoint
+// is rejected and rebuilt from the canonical source instead of being restored.
+func TestCheckpointV12RoundTripTurnStateAndProducerState(t *testing.T) {
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "source.jsonl")
 	if err := os.WriteFile(sourcePath, []byte("{\"a\":1}\n{\"a\":2}\n"), 0o644); err != nil {
@@ -227,8 +227,15 @@ func TestCheckpointV11RoundTripTurnStateAndProducerState(t *testing.T) {
 	}
 	projection := turnStateTestProjection()
 	projection.Turns[0].DetailLoadState = DetailStateLoaded
+	projection.Turns[0].DetailManifestRev = 7
+	projection.Turns[0].DetailItemCount = 50
+	projection.Turns[0].DetailTotalBytes = 900000
 	projection.Turns[1].DetailLoadState = DetailStateFailed
 	projection.Turns[1].DetailReasonCode = "timeout"
+	// failed carrying the retained manifest is a legal v2 shape
+	projection.Turns[1].DetailManifestRev = 2
+	projection.Turns[1].DetailItemCount = 10
+	projection.Turns[1].DetailTotalBytes = 1000
 	now := time.Now().UTC().Truncate(time.Second)
 	checkpoint := NewReadyProjectionCheckpoint("codex-remote", "sess-ts", source, projection, now)
 	checkpoint.CodexProducerState = &CodexProducerState{
@@ -249,15 +256,21 @@ func TestCheckpointV11RoundTripTurnStateAndProducerState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.SchemaVersion != 11 {
+	if loaded.SchemaVersion != 12 {
 		t.Fatalf("schema = %d", loaded.SchemaVersion)
 	}
 	turns := loaded.Projection.Turns
 	if turns[0].DetailLoadState != DetailStateLoaded || turns[0].EffectiveDetailLoadState() != "loaded" {
 		t.Fatalf("turn state lost: %+v", turns[0])
 	}
+	if turns[0].DetailManifestRev != 7 || turns[0].DetailItemCount != 50 || turns[0].DetailTotalBytes != 900000 {
+		t.Fatalf("turn manifest summary lost: %+v", turns[0])
+	}
 	if turns[1].DetailLoadState != DetailStateFailed || turns[1].DetailReasonCode != "timeout" {
 		t.Fatalf("failed state lost: %+v", turns[1])
+	}
+	if turns[1].DetailManifestRev != 2 || turns[1].DetailItemCount != 10 {
+		t.Fatalf("failed-turn retained manifest lost: %+v", turns[1])
 	}
 	if loaded.CodexProducerState == nil ||
 		!loaded.CodexProducerState.HasOlderUpstream ||
@@ -267,29 +280,29 @@ func TestCheckpointV11RoundTripTurnStateAndProducerState(t *testing.T) {
 	}
 }
 
-func TestCheckpointV10RejectedAfterSchemaBump(t *testing.T) {
+func TestCheckpointV11RejectedAfterSchemaBump(t *testing.T) {
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "source.jsonl")
 	if err := os.WriteFile(sourcePath, []byte("{\"a\":1}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	source, err := BuildProjectionSourceCheckpoint(ProjectionSourceDescriptor{
-		Identity: "codex-remote:sess-v10",
+		Identity: "codex-remote:sess-v11",
 		Path:     sourcePath,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	projection := turnStateTestProjection()
-	projection.SessionID = "sess-v10"
-	checkpoint := NewReadyProjectionCheckpoint("codex-remote", "sess-v10", source, projection, time.Now())
-	checkpoint.SchemaVersion = 10 // simulate a pre-bump checkpoint on disk
+	projection.SessionID = "sess-v11"
+	checkpoint := NewReadyProjectionCheckpoint("codex-remote", "sess-v11", source, projection, time.Now())
+	checkpoint.SchemaVersion = 11 // simulate a pre-bump checkpoint on disk
 	raw, err := json.Marshal(checkpoint)
 	if err != nil {
 		t.Fatal(err)
 	}
 	store := NewProjectionCheckpointStore(dir)
-	path, err := store.checkpointPath("codex-remote", "sess-v10")
+	path, err := store.checkpointPath("codex-remote", "sess-v11")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,12 +312,68 @@ func TestCheckpointV10RejectedAfterSchemaBump(t *testing.T) {
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.LoadValidated("codex-remote", "sess-v10", ProjectionSourceDescriptor{
-		Identity: "codex-remote:sess-v10",
+	_, err = store.LoadValidated("codex-remote", "sess-v11", ProjectionSourceDescriptor{
+		Identity: "codex-remote:sess-v11",
 		Path:     sourcePath,
 	})
 	if !errors.Is(err, ErrProjectionCheckpointInvalid) {
 		t.Fatalf("err = %v, want ErrProjectionCheckpointInvalid (rebuild from source)", err)
+	}
+}
+
+// §11.8 checkpoint-side fail-closed validation (v12): the restored projection's
+// detail fields must be internally consistent — an inconsistent checkpoint is
+// invalid (rebuilt from source), never restored as-is.
+func TestCheckpointTurnDetailFieldValidation(t *testing.T) {
+	valid := func(mutate func(*TurnProjection)) func() ProjectionCheckpoint {
+		return func() ProjectionCheckpoint {
+			projection := turnStateTestProjection()
+			projection.Turns[0].DetailLoadState = DetailStateLoaded
+			projection.Turns[0].DetailManifestRev = 3
+			projection.Turns[0].DetailItemCount = 5
+			projection.Turns[0].DetailTotalBytes = 500
+			mutate(&projection.Turns[0])
+			return ProjectionCheckpoint{
+				SchemaVersion: projectionCheckpointSchemaVersion,
+				BackendID:     "codex-remote", SessionID: "sess-ts",
+				Projection: projection, ProjectionRev: projection.SyncRev,
+				HydrateState: ProjectionHydrateReady,
+			}
+		}
+	}
+	bad := []struct {
+		name  string
+		build func() ProjectionCheckpoint
+	}{
+		{"unknown state", valid(func(t *TurnProjection) { t.DetailLoadState = "paused" })},
+		{"reasonCode without failed", valid(func(t *TurnProjection) { t.DetailReasonCode = "timeout" })},
+		{"failed without reasonCode", valid(func(t *TurnProjection) { t.DetailLoadState = DetailStateFailed })},
+		{"negative manifestRev", valid(func(t *TurnProjection) { t.DetailManifestRev = -1 })},
+		{"itemCount without manifestRev", valid(func(t *TurnProjection) {
+			t.DetailManifestRev = 0
+			t.DetailItemCount = 5
+		})},
+		{"totalBytes without manifestRev", valid(func(t *TurnProjection) {
+			t.DetailManifestRev = 0
+			t.DetailTotalBytes = 500
+		})},
+	}
+	for _, tc := range bad {
+		if err := validateTurnDetailCheckpointFields(tc.build().Projection.Turns); err == nil {
+			t.Errorf("%s: expected rejection", tc.name)
+		} else if !errors.Is(err, ErrProjectionCheckpointInvalid) {
+			t.Errorf("%s: err = %v, want ErrProjectionCheckpointInvalid", tc.name, err)
+		}
+	}
+	// The legal shapes pass: v2 partial with a manifest, loaded zero-manifest
+	// (v1-path turn), failed carrying a retained manifest, notRequested.
+	legal := turnStateTestProjection()
+	legal.Turns[0].DetailLoadState = DetailStatePartial
+	legal.Turns[0].DetailManifestRev = 2
+	legal.Turns[0].DetailItemCount = 4
+	legal.Turns[0].DetailTotalBytes = 400
+	if err := validateTurnDetailCheckpointFields(legal.Turns); err != nil {
+		t.Fatalf("legal v2 shapes rejected: %v", err)
 	}
 }
 

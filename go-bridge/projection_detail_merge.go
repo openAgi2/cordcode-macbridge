@@ -109,6 +109,13 @@ func (r *ProjectionReducer) MergeHistoricalTurnDetail(
 	target.DetailLoadState = DetailStateLoaded
 	target.DetailReasonCode = ""
 	target.TurnGeneration++
+	// F3/§11.8: the generation bump is the manifest-baseline reset point —
+	// the old generation's manifest summary describes pre-bump detail truth;
+	// the new generation starts from zero (a stale V2 op then fails the
+	// generation fence, and a fresh V2 load rebuilds the manifest).
+	target.DetailManifestRev = 0
+	target.DetailItemCount = 0
+	target.DetailTotalBytes = 0
 
 	// P0-1 drain-first: flush any staged live delta (other turns) into its own
 	// patch BEFORE this commit consumes its rev, so the commit patch bases at
