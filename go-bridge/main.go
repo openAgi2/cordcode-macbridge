@@ -421,6 +421,10 @@ func Main() {
 	// rollback withdraws the echo AND the descriptor together — iOS hides the entry
 	// before any request. Rollback = set that one const false.
 	server.SetTurnDetailLazyEnabled(core.TurnDetailLazyProductionEnabled)
+	// turn_detail_chunks_v1 (§11.8, phase5): same const-wired discipline; the
+	// const stays false until the client-first rollout completes (iOS overlay
+	// installed), so production peers see only the deprecated v1 until then.
+	server.SetTurnDetailChunksEnabled(core.TurnDetailChunksProductionEnabled)
 	serverDisplayName := "CordCode Link"
 	if mgmtSrv != nil {
 		serverDisplayName = mgmtSrv.DisplayName()
@@ -536,6 +540,13 @@ func Main() {
 		// (§11.7: echo only when the rollout flag is on and the client declared the
 		// capability with its session_sync_v2 prerequisite).
 		if !server.negotiateTurnDetailLazyV1(ack, &hello, conn) {
+			conn.SendJSON(ack)
+			return
+		}
+		// turn_detail_chunks_v1 relay path mirrors the direct hello negotiation
+		// exactly (§11.8; relay is the iPhone production path — the mirror is
+		// mandatory, not optional).
+		if !server.negotiateTurnDetailChunksV1(ack, &hello, conn) {
 			conn.SendJSON(ack)
 			return
 		}

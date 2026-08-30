@@ -226,6 +226,7 @@ type Server struct {
 	sessionSyncV2Enabled    bool
 	projectionWindowEnabled bool
 	turnDetailLazyEnabled   bool
+	turnDetailChunksEnabled bool
 }
 
 // K3 enables the Codex-only shadow data plane. The client still owns UI with legacy history;
@@ -265,6 +266,58 @@ func (s *Server) SetProjectionWindowEnabled(enabled bool) { s.projectionWindowEn
 // echoes capabilities["turn_detail_lazy_v1"]=true and the connection may call
 // session_turn_items.
 func (s *Server) SetTurnDetailLazyEnabled(enabled bool) { s.turnDetailLazyEnabled = enabled }
+
+// helloSupportsTurnDetailChunksV1 returns true when the client advertised
+// turn_detail_chunks_v1 in hello.
+func helloSupportsTurnDetailChunksV1(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "turn_detail_chunks_v1" {
+			return true
+		}
+	}
+	return false
+}
+
+// negotiateTurnDetailChunksV1 applies the hello rules for
+// turn_detail_chunks_v1 (§11.8): same session_sync_v2 prerequisite as v1;
+// echo + per-conn registry only when the production gate is on. A v2 client
+// typically also declares v1 (fallback during transition) — both marks may
+// coexist on one connection; the handler prefers the v2 path.
+func (s *Server) negotiateTurnDetailChunksV1(ack *HelloAckMessage, hello *HelloMessage, conn Connection) bool {
+	if !helloSupportsTurnDetailChunksV1(hello) {
+		return true
+	}
+	if !helloSupportsSessionSyncV2(hello) {
+		retryable := false
+		ack.Ok = false
+		ack.Error = &WireError{
+			Code:      "protocol.invalid_capabilities",
+			Message:   "turn_detail_chunks_v1 requires session_sync_v2",
+			Retryable: &retryable,
+		}
+		return false
+	}
+	if s.turnDetailChunksEnabled && ack.Ok {
+		ack.Capabilities["turn_detail_chunks_v1"] = true
+		s.eventPublisher.SetConnTurnDetailChunksV1(conn, true)
+	}
+	return true
+}
+
+// turn_detail_chunks_v1 production truth lives in ONE place:
+// core.TurnDetailChunksProductionEnabled (see that const's doc). Same
+// two-surface discipline as v1: main.go wires the const into
+// SetTurnDetailChunksEnabled (hello echo, direct + relay) and the
+// codex-remote descriptor gates StaticCapabilities on it. Stays false until
+// the phase5 client-first rollout completes (iOS overlay installed), then
+// flips once — v1 stays advertised (deprecated) during the transition.
+//
+// SetTurnDetailChunksEnabled gates the turn_detail_chunks_v1 capability
+// advertisement (unified-bridge-protocol.md §11.8). When true and the client
+// declares turn_detail_chunks_v1 (plus session_sync_v2), hello_ack echoes
+// capabilities["turn_detail_chunks_v1"]=true and the connection may use the
+// v2 incremental path.
+func (s *Server) SetTurnDetailChunksEnabled(enabled bool) { s.turnDetailChunksEnabled = enabled }
 
 // helloSupportsTurnDetailLazyV1 returns true when the client advertised
 // turn_detail_lazy_v1 in hello.
@@ -726,6 +779,12 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 	// turn_detail_lazy_v1 (§11.7): same hello discipline; the per-session
 	// legacy-historyMode gate stays with the session_turn_items handler.
 	if !s.negotiateTurnDetailLazyV1(ack, &hello, connection) {
+		conn.SendJSON(ack)
+		return
+	}
+	// turn_detail_chunks_v1 (§11.8): v2 incremental path, gated on the
+	// phase5 production const; coexists with the deprecated v1 mark.
+	if !s.negotiateTurnDetailChunksV1(ack, &hello, connection) {
 		conn.SendJSON(ack)
 		return
 	}

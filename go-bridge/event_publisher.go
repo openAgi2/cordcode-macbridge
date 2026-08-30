@@ -256,6 +256,7 @@ type EventPublisher struct {
 	// the content patch, non-holders the no-op revision patch.
 	projectionHeldTurns   map[Connection]map[string]map[string]struct{}
 	turnDetailV1          map[Connection]bool
+	turnDetailChunksV1    map[Connection]bool
 	projectionInvalidated map[projectionFenceKey]bool
 	projectionJournal     *ProjectionRevisionJournal
 	// rebindLastAttempt throttles zero-target recovery. A stream can emit many
@@ -317,6 +318,7 @@ func NewEventPublisher(bridgeEpoch string, broadcaster ...*Broadcaster) *EventPu
 		projectionDeliveryModes: make(map[Connection]map[string]ProjectionDeliveryMode),
 		projectionHeldTurns:     make(map[Connection]map[string]map[string]struct{}),
 		turnDetailV1:            make(map[Connection]bool),
+		turnDetailChunksV1:      make(map[Connection]bool),
 		projectionInvalidated:   make(map[projectionFenceKey]bool),
 		projectionJournal:       NewProjectionRevisionJournal(0, 0),
 		rebindLastAttempt:       make(map[string]time.Time),
@@ -427,6 +429,19 @@ func (p *EventPublisher) ActiveRecoveryID(conn Connection) string {
 	return ""
 }
 
+// turnDetailChunkEvent wraps a payload into the pushed EventMessage envelope
+// (§11.8 turn_detail_chunk; conn-scoped overlay delivery).
+func turnDetailChunkEvent(backendID, sessionID string, payload TurnDetailChunkPayload, nowMS int64) EventMessage {
+	return EventMessage{
+		Type:      "event",
+		Event:     "turn_detail_chunk",
+		SessionID: sessionID,
+		BackendID: backendID,
+		Data:      payload,
+		Timestamp: nowMS,
+	}
+}
+
 func (p *EventPublisher) EnqueueControl(conn Connection, frame interface{}, wait bool) error {
 	if conn == nil {
 		return fmt.Errorf("connection is required")
@@ -482,6 +497,7 @@ func (p *EventPublisher) UnregisterConnection(conn Connection) {
 	delete(p.projectionDeliveryModes, conn)
 	delete(p.projectionHeldTurns, conn)
 	delete(p.turnDetailV1, conn)
+	delete(p.turnDetailChunksV1, conn)
 	for key := range p.projectionFences {
 		if key.conn == conn {
 			delete(p.projectionFences, key)

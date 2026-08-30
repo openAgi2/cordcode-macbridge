@@ -112,6 +112,12 @@ type TurnProjection struct {
 	DetailLoadState  string `json:"detailLoadState,omitempty"`  // "" (notRequested) | loading | loaded | failed
 	DetailReasonCode string `json:"detailReasonCode,omitempty"` // non-empty iff failed
 	TurnGeneration   int    `json:"generation,omitempty"`       // per-turn fence counter; bumps on post-completion content mutation
+	// turn_detail_chunks_v1 (§11.8, owner final ruling 2026-08-30): manifest
+	// SUMMARY only — detail content never enters the projection. Additive;
+	// absent decodes as zero (v1 snapshots stay valid).
+	DetailManifestRev int   `json:"detailManifestRev,omitempty"` // 0 = no manifest yet
+	DetailItemCount   int   `json:"detailItemCount,omitempty"`
+	DetailTotalBytes  int64 `json:"detailTotalBytes,omitempty"`
 }
 
 // ExecutionView is the session-level execution state. isExecuting = phase ∈ {running, requires_action}.
@@ -162,4 +168,10 @@ type TurnStateOp struct {
 	DetailLoadState string `json:"detailLoadState"` // loading | loaded | failed (never "" or notRequested on the wire)
 	ReasonCode      string `json:"reasonCode,omitempty"`
 	TurnGeneration  int    `json:"generation"`
+	// turn_detail_chunks_v1 manifest op (§11.8): additive summary fields. A
+	// v2 op may set DetailLoadState=partial and carries the manifest summary
+	// (validated by ValidateTurnStateOpsV2; v1 conns never receive v2 ops).
+	ManifestRev int    `json:"manifestRev,omitempty"`
+	ItemCount   int    `json:"itemCount,omitempty"`
+	TotalBytes  int64  `json:"totalBytes,omitempty"`
 }
