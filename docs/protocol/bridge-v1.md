@@ -1651,6 +1651,37 @@ NOT advertised by any production MacBridge until PERF-S4B/S4C implement and gate
 producer/replica sides. Open product semantics discovered later are BLOCKERS to be re-frozen
 here first; implementing agents MUST NOT guess them in code.
 
+**R11 — Producer on-demand hydration & per-connection delivery (frozen 2026-08-30,
+lazy-history §2.4/T2.0 review outcome).** R1–R10 remain unchanged except as explicitly
+amended here; this rule AUTHORIZES the two extensions the review found mechanism-compatible
+but textually unspecified:
+
+- **R11a — Producer on-demand hydration.** An `older` request MAY trigger AT MOST ONE
+  bounded upstream page fetch per window request (page size/byte/timeout bounds as frozen
+  for the backend; for codex-remote see the `turn_detail_lazy_v1` resource gates). Fetched
+  pages MUST be reduced into the SAME Kernel truth before slicing (network desc order
+  reversed to oldest→newest, inclusive boundary dedup by upstream turn id, PREPEND under one
+  snapshot fence); the `syncRev` chain continues unbroken and a live append never rewinds the
+  cut. If one page is still not enough, the remainder is expressed by honest
+  `hasOlder`/`nextOlderCursor` — the server MUST NOT loop to full history within one request.
+- **R11b — Delivery-mode registry.** MacBridge records a delivery mode `window | full` per
+  `(conn, backend, session)` at the FIRST window-RPC hit on that connection (observed
+  behavior, NOT a declared capability). Commits that add historical turns or turn detail are
+  delivered per the per-connection rules of the `turn_detail_lazy_v1` section (requester
+  always; full-projection connections always; window connections already holding the turnId
+  receive the commit; window connections lacking it receive the no-op revision patch and
+  obtain the turn through their own window pull).
+- **R11c — No-op revision patch.** A `projection_patch` carrying `baseRev`/`syncRev` and NO
+  content ops (every op field absent) is a legal frame whose purpose is to advance a
+  connection's `appliedRev` along the single revision chain without delivering content. It
+  rides the existing ordered sink (no second pipe) and follows the exact-shape absence rules.
+- **R11d — Honest `hasOlder` & producer checkpoint.** `hasOlder = false` ONLY when the Kernel
+  has no older turn AND upstream EOF is known; "not yet hydrated" MUST report
+  `hasOlder = true` (never report "session start" for "not loaded"). Upstream pagination
+  cursors NEVER cross the bridge and are never embedded in a wire cursor (R2 reaffirmed);
+  they live in a backend-private producer checkpoint (schema-bumped, validated on restore,
+  bounded recovery with persisted continuation — never a full-history rescan).
+
 ### Observed-sample contract
 
 `docs/protocol/samples/projection-window-v1/` carries the canonical SYNTHETIC wire-shape
