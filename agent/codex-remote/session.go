@@ -149,6 +149,10 @@ func (a *Agent) BindClient(cl *Client) {
 		a.listeners = map[string]map[chan core.Event]struct{}{}
 	}
 	a.attached = map[string]*Client{}
+	// Cached resume initial pages are client-epoch-scoped: a rebind re-attaches
+	// every observed thread (which re-caches fresh pages on the new client), so
+	// the old entries must never outlive their connection.
+	a.resumeInitialPages = map[string]*resumeInitialPage{}
 	observed := make([]string, 0, len(a.listeners))
 	for threadID := range a.listeners {
 		observed = append(observed, threadID)
@@ -378,10 +382,24 @@ func (a *Agent) attachLiveThreadOn(ctx context.Context, cl *Client, threadID str
 		return nil
 	}
 	a.mu.Unlock()
-	raw, rpcErr, err := cl.RequestContext(ctx, "thread/resume", map[string]any{
+	carryInitialPage := a.resumeInitialPageCandidateOn()
+	// Owner-approved T0.6 candidate (resumeInitialTurnsPageVerified): the one
+	// attach this thread needs anyway also returns the first desc summary
+	// turns page, so the paginated cold open costs zero extra RPCs. The
+	// official experimental shape is excludeTurns:true + initialTurnsPage;
+	// omitting excludeTurns would trigger default full hydration.
+	params := map[string]any{
 		"threadId":     threadID,
 		"excludeTurns": true,
-	})
+	}
+	if carryInitialPage {
+		params["initialTurnsPage"] = map[string]any{
+			"limit":         remoteTurnsPageLimit,
+			"sortDirection": "desc",
+			"itemsView":     remoteTurnItemsViewSummary,
+		}
+	}
+	raw, rpcErr, err := cl.RequestContext(ctx, "thread/resume", params)
 	if err != nil {
 		return err
 	}
@@ -389,12 +407,36 @@ func (a *Agent) attachLiveThreadOn(ctx context.Context, cl *Client, threadID str
 		return rpcErr
 	}
 	var response struct {
-		Model           string  `json:"model"`
-		ModelProvider   string  `json:"modelProvider"`
-		ReasoningEffort *string `json:"reasoningEffort"`
+		Thread           *remoteThread            `json:"thread"`
+		Model            string                   `json:"model"`
+		ModelProvider    string                   `json:"modelProvider"`
+		ReasoningEffort  *string                  `json:"reasoningEffort"`
+		InitialTurnsPage *remoteTurnsListResponse `json:"initialTurnsPage"`
 	}
 	if err := json.Unmarshal(raw, &response); err != nil {
 		return fmt.Errorf("codex-remote: thread/resume decode: %w", err)
+	}
+	if carryInitialPage {
+		if response.Thread == nil || len(response.Thread.Turns) != 0 {
+			// Probe contract: excludeTurns must keep thread.turns empty; a
+			// non-empty turns array means this upstream answered the candidate
+			// with default full hydration. Trip the breaker and keep only the
+			// official baseline reads for cold opens — never trust, never
+			// re-try silently.
+			a.breakResumeInitialPageCandidate()
+		} else if response.InitialTurnsPage != nil && response.Thread.HistoryMode == "paginated" {
+			page := RemoteTurnsPage{
+				Turns: response.InitialTurnsPage.Data,
+				EOF:   response.InitialTurnsPage.NextCursor == nil,
+			}
+			if response.InitialTurnsPage.NextCursor != nil {
+				page.NextCursor = *response.InitialTurnsPage.NextCursor
+			}
+			if response.InitialTurnsPage.BackwardsCursor != nil {
+				page.BackwardsCursor = *response.InitialTurnsPage.BackwardsCursor
+			}
+			a.cacheResumeInitialPage(threadID, &resumeInitialPage{client: cl, mode: response.Thread.HistoryMode, page: page})
+		}
 	}
 	a.mu.Lock()
 	if a.client == cl {

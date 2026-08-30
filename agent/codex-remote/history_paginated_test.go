@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 type rpcCall struct {
@@ -484,4 +486,182 @@ func TestReadUpstreamHistoryPageReversesToAscending(t *testing.T) {
 	if len(older.Turns) != 1 || older.Turns[0].TurnID != "turn_1" || older.NextCursor != "" {
 		t.Fatalf("EOF page = %+v", older)
 	}
+}
+
+// ---------- T0.6 resume(excludeTurns + initialTurnsPage) production path ----------
+
+func resumeResult(historyMode string, turns []any, nextCursor any, threadTurns []any) map[string]any {
+	thread := map[string]any{"id": "thread_probe", "historyMode": historyMode, "status": "idle"}
+	if threadTurns != nil {
+		thread["turns"] = threadTurns
+	}
+	result := map[string]any{
+		"thread":        thread,
+		"model":         "gpt-test",
+		"modelProvider": "openai",
+	}
+	if turns != nil || nextCursor != nil {
+		page := map[string]any{}
+		if turns != nil {
+			page["data"] = turns
+		}
+		if nextCursor != nil {
+			page["nextCursor"] = nextCursor
+		}
+		result["initialTurnsPage"] = page
+	}
+	return result
+}
+
+func assertRPCs(t *testing.T, calls *[]rpcCall, method string) []rpcCall {
+	t.Helper()
+	found := []rpcCall{}
+	for _, call := range *calls {
+		if call.Method == method {
+			found = append(found, call)
+		}
+	}
+	return found
+}
+
+// The single attach carries the official experimental shape and its page serves
+// the paginated cold open with ZERO extra RPCs (probe: 1 RPC vs baseline 2).
+func TestResumeInitialTurnsPageServesColdOpen(t *testing.T) {
+	agent, calls := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
+		switch call.Method {
+		case "thread/resume":
+			if call.Params["excludeTurns"] != true {
+				t.Errorf("resume must keep excludeTurns:true, params = %+v", call.Params)
+			}
+			page, ok := call.Params["initialTurnsPage"].(map[string]any)
+			if !ok {
+				t.Fatalf("resume must carry initialTurnsPage, params = %+v", call.Params)
+			}
+			if page["limit"] != float64(remoteTurnsPageLimit) || page["sortDirection"] != "desc" ||
+				page["itemsView"] != remoteTurnItemsViewSummary {
+				t.Fatalf("initialTurnsPage shape = %+v", page)
+			}
+			return resumeResult("paginated",
+				[]any{summaryTurn("turn_new", "completed"), summaryTurn("turn_old", "completed")},
+				"cursor-older", []any{}), nil
+		}
+		return nil, &RPCError{Code: -32601, Message: call.Method}
+	})
+	if err := agent.AttachLiveThread(context.Background(), "thread_probe"); err != nil {
+		t.Fatal(err)
+	}
+	cold, err := agent.ReadColdHistory(context.Background(), "thread_probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cold.HistoryMode != "paginated" {
+		t.Fatalf("mode = %s", cold.HistoryMode)
+	}
+	if ids := coldTurnIDs(cold); len(ids) != 2 || ids[0] != "turn_old" || ids[1] != "turn_new" {
+		t.Fatalf("cold turns must be asc from the desc page: %v", ids)
+	}
+	if cold.Page.NextCursor != "cursor-older" {
+		t.Fatalf("nextCursor = %q", cold.Page.NextCursor)
+	}
+	// The entire cold open cost exactly one RPC — no thread/read, no turns/list.
+	if resumes := assertRPCs(t, calls, "thread/resume"); len(resumes) != 1 {
+		t.Fatalf("resume count = %d", len(resumes))
+	}
+	if got := assertRPCs(t, calls, "thread/read"); len(got) != 0 {
+		t.Fatalf("cached cold open must not re-read metadata: %+v", got)
+	}
+	if got := assertRPCs(t, calls, "thread/turns/list"); len(got) != 0 {
+		t.Fatalf("cached cold open must not list turns: %+v", got)
+	}
+	// Consumed once: the next cold open pre-selects the baseline.
+	if _, err := agent.ReadColdHistory(context.Background(), "thread_probe"); err == nil {
+		t.Fatal("second cold open needs the baseline handler; fake rejects unknown methods")
+	}
+}
+
+func coldTurnIDs(cold *core.ColdHistoryResult) []string {
+	ids := make([]string, 0, len(cold.Page.Turns))
+	for _, turn := range cold.Page.Turns {
+		ids = append(ids, turn.TurnID)
+	}
+	return ids
+}
+
+// A legacy thread's attach page is NEVER trusted (candidate verified on
+// paginated only): the cold open pre-selects metadata + compat full read.
+func TestResumeInitialTurnsPageLegacyPreSelectsBaseline(t *testing.T) {
+	agent, calls := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
+		switch call.Method {
+		case "thread/resume":
+			return resumeResult("legacy", []any{summaryTurn("L1", "completed")}, nil, []any{}), nil
+		case "thread/read":
+			if call.Params["includeTurns"] == true {
+				return map[string]any{"thread": map[string]any{
+					"id": "thread_probe", "historyMode": "legacy", "status": "idle",
+					"turns": []any{summaryTurn("L1", "completed")},
+				}}, nil
+			}
+			return threadMetaResult("legacy"), nil
+		}
+		return nil, &RPCError{Code: -32601, Message: call.Method}
+	})
+	if err := agent.AttachLiveThread(context.Background(), "thread_probe"); err != nil {
+		t.Fatal(err)
+	}
+	cold, err := agent.ReadColdHistory(context.Background(), "thread_probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cold.HistoryMode != "legacy" || len(cold.Page.Turns) != 1 || cold.Page.Turns[0].TurnID != "L1" {
+		t.Fatalf("legacy cold = %+v", cold.Page)
+	}
+	if got := assertRPCs(t, calls, "thread/turns/list"); len(got) != 0 {
+		t.Fatalf("legacy cold open must not hit paginated turns/list: %+v", got)
+	}
+}
+
+// A non-empty thread.turns violates the probe contract (default full
+// hydration): the breaker trips, the cold open uses baseline, and later
+// attaches drop initialTurnsPage — no silent retry, no full-read fallback.
+func TestResumeInitialTurnsPageContractViolationTripsBreaker(t *testing.T) {
+	agent, calls := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
+		switch call.Method {
+		case "thread/resume":
+			if _, carries := call.Params["initialTurnsPage"]; carries {
+				return resumeResult("paginated", nil, nil,
+					[]any{summaryTurn("surprise", "completed")}), nil
+			}
+			return resumeResult("paginated", nil, nil, []any{}), nil
+		case "thread/read":
+			return threadMetaResult("paginated"), nil
+		case "thread/turns/list":
+			return map[string]any{"data": []any{summaryTurn("turn_new", "completed")}}, nil
+		}
+		return nil, &RPCError{Code: -32601, Message: call.Method}
+	})
+	if err := agent.AttachLiveThread(context.Background(), "thread_probe"); err != nil {
+		t.Fatal(err)
+	}
+	if !agent.resumeInitialPageBrokenForTest() {
+		t.Fatal("contract violation must trip the per-process breaker")
+	}
+	cold, err := agent.ReadColdHistory(context.Background(), "thread_probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cold.Page.Turns) != 1 || cold.Page.Turns[0].TurnID != "turn_new" {
+		t.Fatalf("breaker cold open must use the baseline: %+v", cold.Page)
+	}
+	if got := assertRPCs(t, calls, "thread/read"); len(got) != 1 {
+		t.Fatalf("baseline metadata read missing: %+v", got)
+	}
+	if got := assertRPCs(t, calls, "thread/turns/list"); len(got) != 1 {
+		t.Fatalf("baseline turns page missing: %+v", got)
+	}
+}
+
+func (a *Agent) resumeInitialPageBrokenForTest() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.resumePageBroken
 }

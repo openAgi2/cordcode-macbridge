@@ -24,6 +24,8 @@ type Agent struct {
 	codec              *LiveCodec
 	listeners          map[string]map[chan core.Event]struct{}
 	attached           map[string]*Client
+	resumeInitialPages map[string]*resumeInitialPage
+	resumePageBroken   bool
 	modelKnown         map[string]struct{}
 	modelEfforts       map[string][]string
 	modelDefaultEffort map[string]string

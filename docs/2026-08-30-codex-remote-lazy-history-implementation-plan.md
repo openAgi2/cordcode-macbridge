@@ -414,8 +414,9 @@ control 或 >30-turn live fixture。**
    同机制的 items/list 多页链（16 页，attempt-010）+ 单页 turns EOF + 官方源码不变量
    （§1.5 锚点）覆盖；此为账号覆盖度限制的诚实记录，非协议缺口。G0 裁决确认。
 
-`initialTurnsPage` 经 T0.6 实测裁决前保持可选：不进产品主路径则不阻塞 G0，但其源码 round-trip
-测试不得写成线上已 proven。
+`initialTurnsPage` 经 T0.6 实测后已由 owner 批准进入产品主路径（G0 裁决 #2；落实见 §5 非目标
+修订与 `attachLiveThreadOn`）。其源码 round-trip 测试仍不得写成线上已 proven——线上 proven 的
+边界以 T0.6 探针实测（1 RPC 921ms/78611B、`thread.turns==[]` 两次成立、单次 attach）为准。
 
 #### 3.0.6 G0 脚本防误判约束
 
@@ -666,7 +667,17 @@ control inventory 改为**链路后暖态重试**（turns/items 分页链已把�
 
 - 中继 cursor 断线续传、出站 seq/ack 重放缓冲：既有 fail-closed 缺口，维持不动。
 - `codex-web` 后端任何改动。
-- `initialTurnsPage` 进产品主路径（T0.6 三条件裁决前保持可选观察）。
+- ~~`initialTurnsPage` 进产品主路径（T0.6 三条件裁决前保持可选观察）~~
+  **2026-08-30 owner 裁决后修订（P1-3 落实）**：T0.6 三条件齐备，owner 已批准启用
+  （G0 裁决 #2，约束：仅已验证 paginated 版本、每连接/session 只 attach 一次、未验证版本
+  预先选择 baseline，不得先失败再静默 full-read）。产品路径已落实：
+  `thread/resume(excludeTurns:true + initialTurnsPage{limit:30, desc, summary})` 于
+  唯一 attach 点携带，响应断言 `thread.turns == []`（违例触发 per-process breaker 回退
+  官方 baseline，非静默 full-read）；缓存页仅服务 `historyMode=paginated` 的
+  `ReadColdHistory`，legacy/unknown/无缓存一律预先选择官方 metadata + turns/list
+  baseline（`agent/codex-remote/session.go attachLiveThreadOn` +
+  `history_paginated.go ReadColdHistory`）。非目标中保留的是"未经重新裁决扩大到
+  未验证版本"。
 - 逐页渐进渲染（见 §9-R2 搁置理由）。
 - 重构共享 live tool FlushPatch（如确需，另立方案并扩充全部 backend 的 live 回归矩阵）。
 - **新增第二套 iOS 历史分页 RPC**（更早历史只走现有 `projection_window_v1` older 链）。

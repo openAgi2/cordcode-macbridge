@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -39,6 +40,31 @@ const (
 // remoteTurnItemsDeadline bounds the WHOLE per-turn items fetch (owner: "90s
 // total deadline, not 24x30s"). Var only so tests can shrink it.
 var remoteTurnItemsDeadline = 90 * time.Second
+
+// resumeInitialTurnsPageVerified anchors the owner-approved T0.6 candidate
+// (G0 evidence report "T0.6 resume 候选路径裁决", adjudication #2, 2026-08-30):
+// thread/resume(excludeTurns:true + initialTurnsPage{limit:30, desc, summary})
+// answered 1 RPC 921ms/78611B vs the 2-RPC baseline 1336ms, thread.turns==[]
+// asserted on both probe runs, single live attach, deterministic bytes —
+// measured against the installed Desktop 26.825.41651 / codex-cli
+// 0.151.0-alpha.7.1 (upstream diff to the plan-frozen tag additive-only).
+// Flip to false only with a new probe + owner re-adjudication; a malformed
+// candidate response (thread.turns non-empty) trips the per-process breaker
+// (Agent.resumePageBroken) and every later attach pre-selects the plain
+// excludeTurns form again.
+const resumeInitialTurnsPageVerified = true
+
+// resumeInitialPage is the one round-trip cold-open artifact cached by the
+// version-gated thread/resume candidate: the thread's authoritative
+// historyMode (same Thread view thread/read returns) plus the first desc
+// summary turns page (official TurnsPage shape rides initialTurnsPage, never
+// thread.turns). Consumed at most once by ReadColdHistory; entries are
+// client-epoch-scoped and cleared on BindClient.
+type resumeInitialPage struct {
+	client *Client
+	mode   string
+	page   RemoteTurnsPage
+}
 
 // remoteLegacyFullReadDeadline bounds the legacy compatibility full read
 // (owner T0.5: full-read timeout must surface an explicit error).
@@ -413,7 +439,24 @@ func (a *Agent) turnScopedHistoryPaginated(ctx context.Context, threadID string,
 // auto-falls-back a legacy thread onto paginated reads. paginated → ONE summary
 // page (asc) + upstream cursor fact; legacy → the explicit compat full read with
 // an EOF cursor fact (legacy sessions never run the producer older-walk).
+//
+// T0.6 owner-approved fast path: when this connection's single thread/resume
+// attach carried initialTurnsPage (resumeInitialTurnsPageVerified, version
+// gated) the cached first page serves the paginated cold open with ZERO extra
+// RPCs — the attach that the live relay performs anyway already paid for it.
+// Every other case (no cached page, legacy/unknown mode in the cached meta,
+// candidate breaker tripped) PRE-SELECTS the official baseline below:
+// thread/read metadata + thread/turns/list — never a try-then-silent-full-read.
 func (a *Agent) ReadColdHistory(ctx context.Context, threadID string) (*core.ColdHistoryResult, error) {
+	if cached := a.takeResumeInitialPage(threadID); cached != nil && cached.mode == "paginated" {
+		turns := mapRemoteHistoryTurns(&remoteThread{ID: threadID, Turns: cached.page.Turns}, len(cached.page.Turns))
+		for i, j := 0, len(turns)-1; i < j; i, j = i+1, j-1 {
+			turns[i], turns[j] = turns[j], turns[i]
+		}
+		return &core.ColdHistoryResult{HistoryMode: "paginated", Page: &core.UpstreamHistoryPage{
+			Turns: turns, NextCursor: cached.page.NextCursor,
+		}}, nil
+	}
 	meta, err := a.readThreadMeta(ctx, threadID)
 	if err != nil {
 		return nil, err
@@ -460,4 +503,59 @@ func (a *Agent) ReadTurnDetail(ctx context.Context, sessionID, turnID string) (c
 		mapRemoteHistoryItem(&turn, entry.Item)
 	}
 	return turn, nil
+}
+
+// takeResumeInitialPage consumes (at most once) the initial turns page cached
+// by this client epoch's single thread/resume attach. Entries from a previous
+// epoch, a non-paginated mode, or after the candidate breaker tripped are
+// dropped — the caller then pre-selects the official 2-RPC baseline.
+func (a *Agent) takeResumeInitialPage(threadID string) *resumeInitialPage {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	entry, ok := a.resumeInitialPages[threadID]
+	if !ok {
+		return nil
+	}
+	delete(a.resumeInitialPages, threadID)
+	if entry.client != a.client || a.resumePageBroken || entry.mode == "" {
+		return nil
+	}
+	return entry
+}
+
+// cacheResumeInitialPage stores the one-round-trip cold-open artifact from the
+// version-gated resume candidate (caller holds the attach transaction, so at
+// most one entry per thread per client epoch exists).
+func (a *Agent) cacheResumeInitialPage(threadID string, entry *resumeInitialPage) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.client != entry.client {
+		return
+	}
+	if a.resumeInitialPages == nil {
+		a.resumeInitialPages = map[string]*resumeInitialPage{}
+	}
+	a.resumeInitialPages[threadID] = entry
+}
+
+// resumeInitialPageCandidateOn reports whether the next attach should carry
+// initialTurnsPage (frozen verification + per-process breaker).
+func (a *Agent) resumeInitialPageCandidateOn() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return resumeInitialTurnsPageVerified && !a.resumePageBroken
+}
+
+// breakResumeInitialPageCandidate trips the per-process breaker: a response
+// shape that violates the probe contract (thread.turns non-empty = default
+// full hydration) means the candidate is no longer trustworthy on this
+// upstream; later attaches pre-select the plain excludeTurns form and cold
+// opens use the official baseline. Never a silent fallback to a full read.
+func (a *Agent) breakResumeInitialPageCandidate() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.resumePageBroken {
+		a.resumePageBroken = true
+		slog.Warn("codex-remote: resume initialTurnsPage candidate contract violated — reverting to official baseline reads")
+	}
 }
