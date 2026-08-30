@@ -561,13 +561,18 @@
       "notes": "2026-08-30: E2E matrix closed in the T2.1 batch (per plan note): TestWindowOlderWalkFullReachability (40-turn / 4-page full walk, no-gap/no-overlap, one page per step, EOF honesty), TestWindowOlderWalkRoutesPerConnection (handler-level A/B/C: requester page rides result, window peer no-op revision patch on its own baseRev chain, full peer sync_invalidate), TestColdHydrateReseedsStaleProducerFact. Evidence: go-bridge 3b992d1; full suite green; race x2 on window/prepend/older-walk subset green.",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "present",
+        "method": "go test -race -count=2",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "T2.0 wiring matrix in place and deterministic under -race: prepend chain order/rev/journal-gap + atomic overlap failure (TestPrependHistoricalTurnsOrderRevAndJournalGap, TestPrependHistoricalTurnsOverlapFailsAtomically, TestPrependKernelRequiresReadySession); honest upstream hasOlder (TestSliceHasOlderUpstreamHonesty); producer side-file checkpoint round-trip (TestProducerStateSideFileRoundTrip); Summary->projection mapping (TestUpstreamSummaryTurnsToProjection); per-connection delivery routing by mode incl. no-op revision patch (TestPublishProjectionPrependRoutesByDeliveryMode); older-walk hydrate-one-page+prepend, upstream cursor-stale typed recovery, concurrent walk singleflight (TestOlderWalkHydratesOnePageAndPrepends, TestOlderWalkUpstreamCursorStaleTypedRecovery, TestOlderWalkSingleFlightConcurrent); T2.1 E2E window reachability + per-connection routes (TestWindowOlderWalkFullReachability, TestWindowOlderWalkRoutesPerConnection). Run: go test ./go-bridge/ -race -count=2 (targeted T2.0/T2.1/T2.2 set) PASS 2026-08-30.",
+        "artifacts": [
+          "commit:a35ff7a T2.0-core window wiring",
+          "commit:3b992d1 T2.1 summary consumption",
+          "go-bridge/projection_window_prepend_test.go",
+          "go-bridge/projection_window_t21_test.go"
+        ],
+        "checked_at": "2026-08-30T17:55:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -585,13 +590,18 @@
       "notes": "2026-08-30 CLOSED: window regression closed in T2.1/T2.3 batches — full go-bridge suite green across all commits (a35ff7a, 3b992d1, T2.2/T2.3 batch); race x2 green on window/prepend/older-walk/delivery subsets.",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "present",
+        "method": "go test -race -count=2 + go test ./go-bridge/ -count=1",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "Race gate: -race -count=2 over the full T2.0/T2.1/T2.2/T2.5 targeted set (prepend/window-walk/producer/per-connection/turnStateOps/turn-items/fence) PASS 2026-08-30 (4.3s). Zero-regression: go-bridge full package -count=1 PASS (68.1s) and agent/codex-remote PASS (2.9s) 2026-08-30, including all pre-existing projection_window/projection_snapshot suites — existing-window behavior unchanged (live prepend path untouched; older-walk only extends the producer side).",
+        "artifacts": [
+          "commit:a35ff7a",
+          "commit:3b992d1",
+          "go-bridge/projection_window_prepend_test.go",
+          "go-bridge/projection_window_t21_test.go"
+        ],
+        "checked_at": "2026-08-30T17:55:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -609,13 +619,18 @@
       "notes": "2026-08-30 CLOSED 3b992d1: codex-remote cold hydrate consumes ONE Summary page via ReadUpstreamHistoryPage (pager-gated; legacy turn-scoped read stays for non-pager agents; includeTurns left the production path). Producer seed persisted post-commit with tear-free visibility (peek-first reads, write-then-CompareAndDelete under producerWritesMu, UpdatedAt lost-update guard, hydrate-failure purge). Reducer stamps canonical item ids on user/reasoning/text parts; item-boundary splits ride whole-turn upserts; first-part creation keeps the append_text path (steady O(delta) wire preserved). Slice core: zero-length older page at committed front = honest empty page (fixed index panic). webperf fixtures regenerated (additive itemId only).",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "present",
+        "method": "code review vs frozen contract + go test",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "T2.1 implemented per plan: one-page cold hydrate consumes the version-gated resume initialTurnsPage (production path commit 835bed5; r2 hardening commit in this batch replaces the const-true gate with a real initialize-userAgent allowlist — unverified server versions pre-select the official 2-RPC baseline, plan line 379); producer seeding feeds window older-walk from the page (3b992d1); canonical part item ids persisted through the reducer (TestReducerPartsCarryCanonicalItemIds); cold hydrate re-seeds a stale producer fact honestly (TestColdHydrateReseedsStaleProducerFact). go test ./agent/codex-remote/ + targeted go-bridge PASS 2026-08-30.",
+        "artifacts": [
+          "commit:3b992d1 T2.1 summary consumption",
+          "commit:835bed5 P1-3 production resume candidate",
+          "agent/codex-remote/history_paginated.go (serverVersionFromUserAgent + resumeInitialTurnsPageVerifiedServers allowlist)",
+          "agent/codex-remote/ws.go (initialize userAgent captured)"
+        ],
+        "checked_at": "2026-08-30T17:55:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -633,13 +648,17 @@
       "notes": "2026-08-30 CLOSED: agent TestReadUpstreamHistoryPageReversesToAscending (desc->asc + cursor passthrough + EOF); older-walk fixtures rebuilt on pager cold page + auto-seed (hasOlder=true honesty at window_0, no manual seeding); TestReducerPartsCarryCanonicalItemIds (user/reasoning ItemID, same-item merge, split upsert); E2E matrix above. iOS d6e1515+1 commit: ProjectionPartItemIdTests (decode-retention, split upsert distinct ids, append preserves id) + Replica/Store/TurnStateOps classes green on iPhone 17 Pro Max.",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "present",
+        "method": "go test -race -count=2",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "Agent-side: T0.6 candidate suite — TestResumeInitialTurnsPageServesColdOpen (1-RPC cold open, page shape), TestResumeInitialTurnsPageLegacyPreSelectsBaseline, TestResumeInitialTurnsPageContractViolationTripsBreaker, TestServerVersionFromUserAgent, TestResumeInitialTurnsPageGateUnverifiedServerPreSelectsBaseline (no-initialize/unlisted-version subtests: attach omits initialTurnsPage, baseline 2-RPC cold open), TestResumeInitialTurnsPageGateVersionIsClientEpochScoped (rebind clears version) — race x2 PASS. Bridge-side: TestWindowOlderWalkFullReachability, TestWindowOlderWalkRoutesPerConnection, TestColdHydrateReseedsStaleProducerFact, TestReducerPartsCarryCanonicalItemIds + TestReadThreadSummary*/ReadColdHistory agent suites — targeted race set PASS 2026-08-30.",
+        "artifacts": [
+          "commit:3b992d1",
+          "agent/codex-remote/history_paginated_test.go",
+          "go-bridge/projection_window_t21_test.go"
+        ],
+        "checked_at": "2026-08-30T17:55:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -657,13 +676,17 @@
       "notes": "2026-08-30 CLOSED: go test ./go-bridge/ ./agent/codex-remote/ -count=1 all green (68s); race x2 green on TestOlderWalk|TestWindowOlderWalk|TestColdHydrateReseeds|TestPublishProjectionPrepend|TestPrependHistorical|TestReducerParts|TestProducerState|TestSlice; webperf fixture parity verified after regeneration; iOS targeted classes green.",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "present",
+        "method": "go test -count=1 full package",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "Hydration switchover zero-regression: full go-bridge -count=1 PASS 68.1s and agent/codex-remote PASS 2.9s 2026-08-30 — legacy/live projection suites (projection_snapshot, live append, K4 fence) unchanged; codex-remote full history suites (summary pagination, turn items gates, legacy compat read) green after the version-gate change; T2.1 closure batch commit 9cfde67 originally gated this and today's runs re-confirm on current HEAD+working tree.",
+        "artifacts": [
+          "commit:9cfde67 T2.1 batch closure",
+          "go test ./go-bridge/ -count=1 (2026-08-30, 68.1s)",
+          "go test ./agent/codex-remote/ -count=1 (2026-08-30, 2.9s)"
+        ],
+        "checked_at": "2026-08-30T17:55:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -681,13 +704,18 @@
       "notes": "2026-08-30 CLOSED (T2.2+T2.3 batch commit + T2.5 matrix commit): kernel MergeHistoricalTurnDetail (per-turn generation admission, running/missing typed fences, replace_parts+loaded ONE patch, generation bump, empty-detail = state-only loaded preserving Summary parts, gapless patch chain over staged live deltas); CommitTurnStateOps state-only atomic commits; RecoverOrphanDetailLoading wired at checkpoint restore + lazy in-place; session_turn_items handler per frozen §11.7 (capability gates incl. per-session HistoryMode legacy gate, Kernel-adjudicated turn_not_found, loading→terminal state machine, success-shaped acks, closed-set reasonCodes, singleflight followers mirror leader ack, loaded repeats ack journal-recovered original rev); per-connection delivery rules 1-4 via held-turn registry; T0.5 mode-aware cold open (core.ColdHistoryReader + agent ReadColdHistory — agent owns historyMode dispatch; legacy → compat full read, closing the T2.1 gap where legacy threads would have been served by turns/list).",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "present",
+        "method": "code review vs frozen contract + go test",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "T2.2 dedicated detail merge + T2.3 session_turn_items handler per frozen §11.7: commit c940430 (MergeHistoricalTurnDetail replace_parts + loaded in ONE patch, per-turn generation fence, empty-detail = state-only loaded, success-shaped acks, singleflight, resource-gate reasonCodes, lazy in-process orphan recovery recoverOrphanLoadingTurn); P0-1 reopen fix 03a5d39 serializes detail/state commits with staged live deltas through shared flushLocked — atomic consecutive chain [staged-live?, commit], zero-span patches never produced. Targeted race set PASS 2026-08-30.",
+        "artifacts": [
+          "commit:c940430 T2.2/T2.3",
+          "commit:03a5d39 P0-1 serialization",
+          "go-bridge/projection_detail_merge.go",
+          "go-bridge/session_turn_items_handler.go"
+        ],
+        "checked_at": "2026-08-30T17:55:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -705,13 +733,22 @@
       "notes": "2026-08-30 CLOSED: session_turn_items_test.go (merge atomicity/fences/empty-detail, state commits, orphan unit, capability/legacy/turn_not_found gates, happy + idempotent repeat w/ original-rev watermark, reason-code matrix w/ Summary preservation, skipped-types atomic failure, singleflight, orphan-then-retry, reducer-level running fence) + session_turn_items_matrix_test.go (two-turn concurrent expand, live-append-on-other-turn fence independence, retry-commits-once) + agent ReadColdHistory/ReadTurnDetail covered by paginated tests. Harness fixes: TempDir/Shutdown LIFO ordering + checkpoint quiescence helper (Shutdown does not join hydrate runner).",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "present",
+        "method": "go test -race -count=2",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "Detail-merge matrix green under race x2: core handler suite (session_turn_items_test.go — commit atomicity/gating, recover-orphan unit, empty-detail, idempotent repeat watermark) + T2.5 concurrency matrix 664aa86 (TestTurnItemsTwoTurnsConcurrentExpand, TestTurnItemsLiveAppendOnOtherTurnDoesNotStaleDetail, TestTurnItemsRetryAfterFailureCommitsOnce) + reopen supplements 55a1d66 (TestTurnItemsOlderHydrateRacesDetailLoad, TestTurnItemsLeaderSurvivesRequesterDisconnect, TestTurnItemsStaleWhenTurnReactivatedMidFlight, TestTurnItemsConcurrentMergeWinsAndLoserAcksWinner, TestColdHydrateRacesLiveCompletion, TestLoadedDetailWatermarkFallsBackToCurrentRev) + P0-1/P0-2 concurrency tests 03a5d39 (TestTurnItemsDetailCommitFlushesPendingLiveText, TestWindowConnReceivesDetailCommitForHeldTurn) + r2 fence async-branch rollback tests in this batch (TestProjectionWindowFenceRollsBackWhenResponseDeliveryFails, TestProjectionWindowFenceRollsBackOnDeliveryTimeout). Targeted -race -count=2 PASS 2026-08-30.",
+        "artifacts": [
+          "commit:664aa86 T2.5 matrix",
+          "commit:55a1d66 supplement",
+          "commit:03a5d39 P0-1/P0-2",
+          "go-bridge/session_turn_items_test.go",
+          "go-bridge/session_turn_items_matrix_test.go",
+          "go-bridge/session_turn_items_matrix2_test.go",
+          "go-bridge/projection_detail_concurrency_test.go",
+          "go-bridge/projection_snapshot_fence_test.go (r2 async-branch rollback tests)"
+        ],
+        "checked_at": "2026-08-30T17:55:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -729,13 +766,18 @@
       "notes": "2026-08-30 CLOSED: full go-bridge + agent + core suites green; fixture regeneration verified additive-only (T2.1). NOTE for reports: codex-remote is pathless — no projection checkpoint on disk; bridge restart = fresh Summary hydrate (detail states reset to notRequested; orphan loading cannot persist across restart — restore hook guards future checkpoint adoption).",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "present",
+        "method": "go test -race -count=2",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "turnStateOps Go semantics pinned in projection_turn_state_test.go: old-patch decode ignores the op (TestTurnStateOpsOldPatchDecodeIgnored); old snapshot turn decodes notRequested (TestTurnStateOldSnapshotTurnDecodesNotRequested); illegal state/reasonCode combinations fail closed (TestTurnStateOpsIllegalCombinationsFailClosed); loading/loaded unconditionally clear stale reasonCode, failed sets state+code atomically (TestTurnStateOpsApplyLifecycle); kernel-strict unknown-turn admission (TestTurnStateOpsKernelStrictUnknownTurn); generation fence (TestTurnStateOpsGenerationFence); journal round-trip preserves key absence (TestTurnStateOpsPatchRoundTrip); checkpoint v11 round-trip carries turn state + producer state (TestCheckpointV11RoundTripTurnStateAndProducerState); atomic gated commit (TestCommitTurnStateOpsAtomicAndGated). Race x2 PASS 2026-08-30.",
+        "artifacts": [
+          "commit:c940430",
+          "commit:94b0feb types+validation batch",
+          "go-bridge/projection_turn_state_test.go",
+          "go-bridge/session_turn_items_test.go"
+        ],
+        "checked_at": "2026-08-30T17:55:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -743,7 +785,7 @@
       "id": "phase2-g2-gate-impl",
       "title": "T2.4 protocol docs finalized with handlers",
       "description": "Protocol doc changes committed together with the handler code (same commit): unified-bridge-protocol.md gains session_turn_items wire contract (ack-only, backend ownership, state machine/syncRev completion, turnStateOps, delivery mode, resource gate) and turnStateOps schema; bridge-v1.md R2/R3/R4/R10 revisions if T2.0 review required them; Go/Swift schema/type references in sync.",
-      "status": "completed",
+      "status": "done",
       "phase": "phase2",
       "kind": "impl",
       "depends_on": [
@@ -756,7 +798,7 @@
         "status": "present",
         "method": "go test",
         "attestation": "self-attested",
-        "summary": "Owner-directed reopen fixes implemented and pinned: P0-1 drain-first patch chain (MergeHistoricalTurnDetail/CommitTurnStateOps share flushLocked; PublishProjectionDetail publishes staged-live prefix via the live broadcast path then routes the commit patch; TestTurnItemsDetailCommitFlushesPendingLiveText asserts the concurrent T3 live text is DELIVERED — contiguous chain from the client cut, zero-span-free, nothing stranded). P0-2 held-turn registration inside CompleteProjectionSnapshotWithHeldTurns (register before fence release, rollback on failed delivery; mid-fence detail commits defer as undecided and resolve content-vs-no-op at completion): TestProjectionWindowFenceResolvesDeferredDetailCommit (content vs no-op split) + TestProjectionWindowFenceHeldTurnRegistrationRollsBackOnFailure (saturated-sink rollback) + TestWindowConnReceivesDetailCommitForHeldTurn (handler wiring). P1-3 production resume(excludeTurns:true+initialTurnsPage{30,desc,summary}) at the single attach site, thread.turns==[] contract with per-process breaker, legacy/unknown/no-cache pre-select the official 2-RPC baseline: TestResumeInitialTurnsPage{ServesColdOpen,LegacyPreSelectsBaseline,ContractViolationTripsBreaker}.",
+        "summary": "Owner-directed reopen fixes implemented and pinned: P0-1 drain-first patch chain (MergeHistoricalTurnDetail/CommitTurnStateOps share flushLocked; PublishProjectionDetail publishes staged-live prefix via the live broadcast path then routes the commit patch; TestTurnItemsDetailCommitFlushesPendingLiveText asserts the concurrent T3 live text is DELIVERED — contiguous chain from the client cut, zero-span-free, nothing stranded). P0-2 held-turn registration inside CompleteProjectionSnapshotWithHeldTurns (register before fence release, rollback on failed delivery; mid-fence detail commits defer as undecided and resolve content-vs-no-op at completion): TestProjectionWindowFenceResolvesDeferredDetailCommit (content vs no-op split) + TestProjectionWindowFenceHeldTurnRegistrationRollsBackOnFailure (saturated-sink rollback) + TestWindowConnReceivesDetailCommitForHeldTurn (handler wiring). P1-3 production resume(excludeTurns:true+initialTurnsPage{30,desc,summary}) at the single attach site, thread.turns==[] contract with per-process breaker, legacy/unknown/no-cache pre-select the official 2-RPC baseline: TestResumeInitialTurnsPage{ServesColdOpen,LegacyPreSelectsBaseline,ContractViolationTripsBreaker}. ROUND-2 CLOSURE (same batch): async delivery-failure branches re-lock via self-locking ClearConnWindowTurns + generation captured under p.mu (deterministic tests TestProjectionWindowFenceRollsBackWhenResponseDeliveryFails / TestProjectionWindowFenceRollsBackOnDeliveryTimeout); initialTurnsPage gate now version-real (initialize userAgent allowlist, unlisted/absent pre-selects baseline).",
         "artifacts": [
           "commit:03a5d39 fix(codex-remote): P0-1/P0-2",
           "commit:835bed5 feat(codex-remote): P1-3",
@@ -764,7 +806,7 @@
           "go-bridge/projection_snapshot_fence.go CompleteProjectionSnapshotWithHeldTurns",
           "agent/codex-remote/history_paginated_test.go TestResumeInitialTurnsPage*"
         ],
-        "checked_at": "2026-08-30T17:30:00+08:00",
+        "checked_at": "2026-08-30T17:55:00+08:00",
         "upstream_anchor": null,
         "na_reason": null
       }
@@ -773,7 +815,7 @@
       "id": "phase2-g2-gate-tests",
       "title": "G2 gate — full bridge suite + targeted race",
       "description": "Full `go test ./go-bridge/` green (fresh re-run, re-verified); targeted -race for detail merge, window hydration, per-connection delivery, projection concurrency paths pass (bounded claim); `go test ./agent/codex-remote/` still green.",
-      "status": "completed",
+      "status": "done",
       "phase": "phase2",
       "kind": "tests",
       "depends_on": [
@@ -801,7 +843,7 @@
       "id": "phase2-g2-gate-regression",
       "title": "G2 verdict + same-commit doc verification",
       "description": "G2 verdict record: gate conditions met; `git show --stat` proves protocol doc changes share the handler commit; record verdict + evidence in state. Unsigned release build only if a device validation is needed before Phase 3 (per §7-5 delivery conditions).",
-      "status": "completed",
+      "status": "done",
       "phase": "phase2",
       "kind": "regression",
       "depends_on": [
