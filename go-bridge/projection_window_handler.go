@@ -197,14 +197,17 @@ func (h *Handlers) handleGetSessionProjectionWindow(conn Connection, msg WireMes
 		return
 	}
 
-	if err := h.eventPublisher.CompleteProjectionSnapshot(conn, admission, msg.RequestID, response); err != nil {
-		slog.Warn("go-bridge: projection window response enqueue failed", "requestId", msg.RequestID, "error", err)
-	}
-	// turn_detail_lazy_v1 rule 3/4 bookkeeping: the replica now holds these
-	// turns; detail/state commits route content vs no-op by this set.
+	// turn_detail_lazy_v1 rule 3/4 bookkeeping rides the SAME completion
+	// transaction (audit P0-2): the held-turn set registers inside the fence
+	// release, before the response can race a concurrent detail commit on
+	// another connection — a post-hoc registration window would route this
+	// connection a no-op revision patch and permanently strand the detail
+	// behind the stale response. Completion failure rolls the set back.
 	turnIDs := make([]string, 0, len(response.Turns))
 	for _, turn := range response.Turns {
 		turnIDs = append(turnIDs, turn.TurnID)
 	}
-	h.eventPublisher.RecordConnWindowTurns(conn, msg.BackendID, params.SessionID, turnIDs)
+	if err := h.eventPublisher.CompleteProjectionSnapshotWithHeldTurns(conn, admission, msg.RequestID, response, turnIDs); err != nil {
+		slog.Warn("go-bridge: projection window response enqueue failed", "requestId", msg.RequestID, "error", err)
+	}
 }

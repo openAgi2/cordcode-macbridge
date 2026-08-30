@@ -174,7 +174,7 @@ func (h *Handlers) loadedDetailWatermark(backendID, sessionID, turnID string, cu
 // checkpoint-restore scan). A stale fence means another writer moved the turn —
 // its truth stays.
 func (h *Handlers) recoverOrphanLoadingTurn(backendID, sessionID, turnID string, generation int) {
-	_, patch, err := h.projectionKernel.CommitTurnStateOps(backendID, sessionID, []TurnStateOp{{
+	_, patches, err := h.projectionKernel.CommitTurnStateOps(backendID, sessionID, []TurnStateOp{{
 		TurnID:          turnID,
 		DetailLoadState: DetailStateFailed,
 		ReasonCode:      "interrupted",
@@ -183,7 +183,7 @@ func (h *Handlers) recoverOrphanLoadingTurn(backendID, sessionID, turnID string,
 	if err != nil {
 		return
 	}
-	h.eventPublisher.PublishProjectionDetail(backendID, sessionID, patch, nil)
+	h.eventPublisher.PublishProjectionDetail(backendID, sessionID, patches, nil)
 }
 
 // runTurnDetailFetch is the singleflight leader: loading admission → bounded
@@ -213,7 +213,7 @@ func (h *Handlers) runTurnDetailFetch(requester Connection, backendID, sessionID
 			// Another request already merged the detail — its truth wins.
 			return sessionTurnItemsAck(DetailStateLoaded, h.loadedDetailWatermark(backendID, sessionID, turnID, proj.SyncRev), "")
 		}
-		_, patch, err := h.projectionKernel.CommitTurnStateOps(backendID, sessionID, []TurnStateOp{{
+		_, patches, err := h.projectionKernel.CommitTurnStateOps(backendID, sessionID, []TurnStateOp{{
 			TurnID:          turnID,
 			DetailLoadState: DetailStateFailed,
 			ReasonCode:      reasonCode,
@@ -224,8 +224,8 @@ func (h *Handlers) runTurnDetailFetch(requester Connection, backendID, sessionID
 			// the commit: the new truth stays; this request is typed stale.
 			return sessionTurnItemsAck(DetailStateFailed, proj.SyncRev, "stale_turn")
 		}
-		h.eventPublisher.PublishProjectionDetail(backendID, sessionID, patch, requester)
-		return sessionTurnItemsAck(DetailStateFailed, patch.SyncRev, reasonCode)
+		h.eventPublisher.PublishProjectionDetail(backendID, sessionID, patches, requester)
+		return sessionTurnItemsAck(DetailStateFailed, patches[len(patches)-1].SyncRev, reasonCode)
 	}
 
 	proj, ok := h.projectionKernel.Snapshot(backendID, sessionID)
@@ -239,13 +239,13 @@ func (h *Handlers) runTurnDetailFetch(requester Connection, backendID, sessionID
 	generation := turn.TurnGeneration
 
 	// 1. Loading admission into the projection SoT (§11.7 state machine).
-	_, patch, err := h.projectionKernel.CommitTurnStateOps(backendID, sessionID, []TurnStateOp{{
+	_, patches, err := h.projectionKernel.CommitTurnStateOps(backendID, sessionID, []TurnStateOp{{
 		TurnID:          turnID,
 		DetailLoadState: DetailStateLoading,
 		TurnGeneration:  generation,
 	}})
 	if err == nil {
-		h.eventPublisher.PublishProjectionDetail(backendID, sessionID, patch, requester)
+		h.eventPublisher.PublishProjectionDetail(backendID, sessionID, patches, requester)
 	} else if errors.Is(err, ErrTurnStateStale) {
 		// The turn moved under the admission (generation bump / re-activation).
 		return failTerminal("stale_turn")
@@ -280,7 +280,7 @@ func (h *Handlers) runTurnDetailFetch(requester Connection, backendID, sessionID
 	if len(mapped) == 1 && mapped[0].Assistant != nil {
 		detailParts = mapped[0].Assistant.Parts
 	}
-	_, mergePatch, err := h.projectionKernel.MergeHistoricalTurnDetail(
+	_, mergePatches, err := h.projectionKernel.MergeHistoricalTurnDetail(
 		backendID, sessionID, turnID, generation, detailParts,
 	)
 	if err != nil {
@@ -293,8 +293,8 @@ func (h *Handlers) runTurnDetailFetch(requester Connection, backendID, sessionID
 			return failTerminal("upstream_error")
 		}
 	}
-	h.eventPublisher.PublishProjectionDetail(backendID, sessionID, mergePatch, requester)
-	return sessionTurnItemsAck(DetailStateLoaded, mergePatch.SyncRev, "")
+	h.eventPublisher.PublishProjectionDetail(backendID, sessionID, mergePatches, requester)
+	return sessionTurnItemsAck(DetailStateLoaded, mergePatches[len(mergePatches)-1].SyncRev, "")
 }
 
 // turnDetailReasonCode maps the agent's typed detail-fetch errors onto the

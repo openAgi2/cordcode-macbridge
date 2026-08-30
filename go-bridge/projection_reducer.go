@@ -1474,6 +1474,16 @@ func (r *ProjectionReducer) FlushPatch(backendID, sessionID string) (ProjectionP
 	if ps == nil {
 		return ProjectionPatch{}, false
 	}
+	return r.flushLocked(ps)
+}
+
+// flushLocked drains the staged live delta into one patch and advances the
+// flush fence to the head. It backs both the live publisher flush AND the
+// pre-commit drain inside the detail/state commit primitives
+// (projection_detail_merge.go): a commit that pushes lastFlushedRev past a
+// staged delta would strand it into a later zero-span patch that journal and
+// delivery drop (audit P0-1). Caller MUST hold r.mu; ps must be non-nil.
+func (r *ProjectionReducer) flushLocked(ps *projectionSession) (ProjectionPatch, bool) {
 	ps.stageOwningTurnsForPendingParts()
 	headRev := ps.projection.SyncRev
 	if headRev == ps.lastFlushedRev && len(ps.textAppends) == 0 && len(ps.thinking) == 0 &&

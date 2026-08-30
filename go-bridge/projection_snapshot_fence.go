@@ -30,12 +30,23 @@ type projectionFenceKey struct {
 	backendID, sessionID string
 }
 
+// projectionFencePendingPatch is one patch queued behind a fence's response.
+// decide marks a turn_detail rule-4 deferral: the connection was mid-window-
+// pull when the detail commit landed, so content-vs-no-op routing is resolved
+// at fence completion once the response's held turns are registered (audit
+// P0-2 — deciding no-op up front would strand the detail behind the stale
+// response permanently).
+type projectionFencePendingPatch struct {
+	patch  ProjectionPatch
+	decide bool
+}
+
 type projectionSnapshotFence struct {
 	id           uint64
 	generation   uint64
 	cutRev       int
 	expectedRev  int
-	pending      []ProjectionPatch
+	pending      []projectionFencePendingPatch
 	pendingBytes int
 	invalidated  bool
 }
@@ -137,7 +148,26 @@ func (p *EventPublisher) CompleteProjectionSnapshot(
 	requestID string,
 	data interface{},
 ) error {
-	return p.completeProjectionSnapshot(conn, admission, requestID, data, nil)
+	return p.completeProjectionSnapshot(conn, admission, requestID, data, nil, nil)
+}
+
+// CompleteProjectionSnapshotWithHeldTurns completes a projection-window fence
+// AND registers the response's turn ids as the connection's held-turn set in
+// the SAME transaction (audit P0-2): a concurrent detail commit on another
+// connection that lands between the response and a post-hoc registration would
+// route this connection a no-op revision patch — stale response + no-op =
+// permanently missed detail. Registering before the fence releases means every
+// later routing decision (and every rule-4 deferral resolved below) sees the
+// turns this response actually delivered. Any failure after registration rolls
+// the set back.
+func (p *EventPublisher) CompleteProjectionSnapshotWithHeldTurns(
+	conn Connection,
+	admission ProjectionSnapshotAdmission,
+	requestID string,
+	data interface{},
+	heldTurnIDs []string,
+) error {
+	return p.completeProjectionSnapshot(conn, admission, requestID, data, heldTurnIDs, nil)
 }
 
 // CompleteProjectionSnapshotError releases a fence whose pull failed after admission (e.g. a
@@ -149,7 +179,7 @@ func (p *EventPublisher) CompleteProjectionSnapshotError(
 	requestID string,
 	resultErr *WireError,
 ) error {
-	return p.completeProjectionSnapshot(conn, admission, requestID, nil, resultErr)
+	return p.completeProjectionSnapshot(conn, admission, requestID, nil, nil, resultErr)
 }
 
 func (p *EventPublisher) completeProjectionSnapshot(
@@ -157,6 +187,7 @@ func (p *EventPublisher) completeProjectionSnapshot(
 	admission ProjectionSnapshotAdmission,
 	requestID string,
 	data interface{},
+	heldTurnIDs []string,
 	resultErr *WireError,
 ) error {
 	if p == nil || conn == nil || requestID == "" {
@@ -176,6 +207,33 @@ func (p *EventPublisher) completeProjectionSnapshot(
 		_ = conn.Close()
 		return fmt.Errorf("projection snapshot connection generation changed")
 	}
+	// P0-2 held-turn registration INSIDE the completion transaction, before the
+	// fence releases: from here on, every detail/state routing decision sees the
+	// turns this response delivers. It also feeds the rule-4 deferral decisions
+	// just below. Failed completions roll the registration back.
+	if len(heldTurnIDs) > 0 && !fence.invalidated {
+		p.recordConnWindowTurnsLocked(conn, admission.BackendID, admission.SessionID, heldTurnIDs)
+	}
+	if fence.invalidated {
+		// Deferred decisions and the registration are moot: the client re-syncs
+		// from the authoritative snapshot, which already carries the detail
+		// truth, and its next window pull re-registers fresh held turns.
+		fence.pending = nil
+	}
+	for i, frame := range fence.pending {
+		if !frame.decide {
+			continue
+		}
+		if p.connHoldsAnyTurnLocked(conn, admission.BackendID, admission.SessionID, patchTurnIDs(frame.patch)) {
+			continue // held: the queued full patch is correct as-is
+		}
+		resolved := frame.patch
+		resolved.UpsertTurns = nil
+		resolved.PartOps = nil
+		resolved.TurnStateOps = nil
+		resolved.Execution = nil
+		fence.pending[i].patch = resolved
+	}
 	sink := p.sinkLocked(conn)
 	required := 1 + len(fence.pending)
 	slog.Info("go-bridge: [K4Patch] fence_complete",
@@ -188,6 +246,7 @@ func (p *EventPublisher) completeProjectionSnapshot(
 	}
 	if cap(sink.slots)-len(sink.slots) < required {
 		delete(p.projectionFences, key)
+		p.clearConnWindowTurnsLocked(conn, admission.BackendID, admission.SessionID)
 		p.mu.Unlock()
 		_ = conn.Close()
 		return fmt.Errorf("outbound queue cannot accept projection snapshot batch")
@@ -207,10 +266,10 @@ func (p *EventPublisher) completeProjectionSnapshot(
 		p.enqueueProjectionInvalidateIntoSinkLocked(sink, admission.BackendID, admission.SessionID)
 		p.projectionInvalidated[key] = true
 	} else {
-		for _, patch := range fence.pending {
+		for _, frame := range fence.pending {
 			sink.slots <- struct{}{}
 			sink.queue <- eventOutboundFrame{
-				value:      projectionPatchEvent(p.bridgeEpoch, admission.BackendID, admission.SessionID, patch),
+				value:      projectionPatchEvent(p.bridgeEpoch, admission.BackendID, admission.SessionID, frame.patch),
 				classHint:  classifyRelayEvent("projection_patch"),
 				classified: true,
 			}
@@ -223,6 +282,7 @@ func (p *EventPublisher) completeProjectionSnapshot(
 	select {
 	case <-responseEnqueued:
 		if err := <-resultDone; err != nil {
+			p.clearConnWindowTurnsLocked(conn, admission.BackendID, admission.SessionID)
 			return err
 		}
 		return nil
@@ -231,6 +291,7 @@ func (p *EventPublisher) completeProjectionSnapshot(
 			"remote", conn.RemoteAddr(),
 			"generation", p.connectionGenerations[conn],
 		)
+		p.clearConnWindowTurnsLocked(conn, admission.BackendID, admission.SessionID)
 		_ = conn.Close()
 		return fmt.Errorf("projection snapshot response delivery timeout")
 	}

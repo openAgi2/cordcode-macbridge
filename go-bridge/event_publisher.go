@@ -754,6 +754,61 @@ func (p *EventPublisher) PublishProjectionPrepend(backendID, sessionID string, s
 	}
 }
 
+// deferProjectionPatchForFenceLocked queues a rule-4-routed detail commit
+// behind an in-flight window fence as UNDECIDED (audit P0-2): whether the
+// connection holds the patch's turns only becomes known when the fence
+// completes and the response's turns are registered — the completion
+// transaction then resolves content vs no-op. Deciding no-op here (as the
+// pre-fix code did) would strand the detail behind the stale response.
+// Caller MUST hold p.mu.
+func (p *EventPublisher) deferProjectionPatchForFenceLocked(
+	backendID, sessionID string,
+	fence *projectionSnapshotFence, patch ProjectionPatch,
+) {
+	p.appendFencePatchLocked(backendID, sessionID, fence, patch, true)
+}
+
+// appendFencePatchLocked admits one patch into an active snapshot fence: chain
+// and byte guards invalidate the fence on mismatch/overflow (the client then
+// re-syncs from the authoritative snapshot), otherwise the patch queues behind
+// the response in arrival (= revision chain) order. decide marks a rule-4
+// deferral whose content-vs-no-op routing resolves at fence completion.
+// Caller MUST hold p.mu.
+func (p *EventPublisher) appendFencePatchLocked(
+	backendID, sessionID string,
+	fence *projectionSnapshotFence, patch ProjectionPatch, decide bool,
+) {
+	if patch.SyncRev <= fence.expectedRev || fence.invalidated {
+		return
+	}
+	if patch.BaseRev != fence.expectedRev {
+		slog.Info("go-bridge: [K4Patch] drop",
+			"sessionPrefix", projectionSessionLogPrefix(sessionID),
+			"reason", "fence_base_mismatch",
+			"baseRev", patch.BaseRev, "expectedRev", fence.expectedRev,
+		)
+		fence.pending = nil
+		fence.pendingBytes = 0
+		fence.invalidated = true
+		return
+	}
+	encoded, _ := json.Marshal(patch)
+	if len(fence.pending)+1 > projectionFenceMaxPatches ||
+		fence.pendingBytes+len(encoded) > projectionFenceMaxBytes {
+		slog.Info("go-bridge: [K4Patch] drop",
+			"sessionPrefix", projectionSessionLogPrefix(sessionID),
+			"reason", "fence_overflow", "pending", len(fence.pending),
+		)
+		fence.pending = nil
+		fence.pendingBytes = 0
+		fence.invalidated = true
+		return
+	}
+	fence.pending = append(fence.pending, projectionFencePendingPatch{patch: patch, decide: decide})
+	fence.pendingBytes += len(encoded)
+	fence.expectedRev = patch.SyncRev
+}
+
 // deliverSingleConnPatchLocked sends ONE patch to ONE connection through the same
 // fence/cut/sink machinery as the broadcast path. Caller MUST hold p.mu.
 func (p *EventPublisher) deliverSingleConnPatchLocked(conn Connection, backendID, sessionID string, patch ProjectionPatch) {
@@ -761,26 +816,7 @@ func (p *EventPublisher) deliverSingleConnPatchLocked(conn Connection, backendID
 	classHint := classifyRelayEvent("projection_patch")
 	key := projectionFenceKey{conn: conn, backendID: backendID, sessionID: sessionID}
 	if fence := p.projectionFences[key]; fence != nil {
-		if patch.SyncRev <= fence.expectedRev || fence.invalidated {
-			return
-		}
-		if patch.BaseRev != fence.expectedRev {
-			fence.pending = nil
-			fence.pendingBytes = 0
-			fence.invalidated = true
-			return
-		}
-		encoded, _ := json.Marshal(patch)
-		if len(fence.pending)+1 > projectionFenceMaxPatches ||
-			fence.pendingBytes+len(encoded) > projectionFenceMaxBytes {
-			fence.pending = nil
-			fence.pendingBytes = 0
-			fence.invalidated = true
-			return
-		}
-		fence.pending = append(fence.pending, patch)
-		fence.pendingBytes += len(encoded)
-		fence.expectedRev = patch.SyncRev
+		p.appendFencePatchLocked(backendID, sessionID, fence, patch, false)
 		return
 	}
 	if p.projectionInvalidated[key] {
@@ -855,37 +891,13 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 				)
 				continue
 			}
-			if patch.BaseRev != fence.expectedRev {
-				slog.Info("go-bridge: [K4Patch] drop",
+			p.appendFencePatchLocked(backendID, sessionID, fence, patch, false)
+			if !fence.invalidated {
+				slog.Info("go-bridge: [K4Patch] held_in_fence",
 					"sessionPrefix", projectionSessionLogPrefix(sessionID),
-					"reason", "fence_base_mismatch",
-					"baseRev", patch.BaseRev, "expectedRev", fence.expectedRev,
+					"syncRev", patch.SyncRev, "pending", len(fence.pending),
 				)
-				fence.pending = nil
-				fence.pendingBytes = 0
-				fence.invalidated = true
-				continue
 			}
-			encoded, _ := json.Marshal(patch)
-			if len(fence.pending)+1 > projectionFenceMaxPatches ||
-				fence.pendingBytes+len(encoded) > projectionFenceMaxBytes {
-				slog.Info("go-bridge: [K4Patch] drop",
-					"sessionPrefix", projectionSessionLogPrefix(sessionID),
-					"reason", "fence_overflow",
-					"pending", len(fence.pending),
-				)
-				fence.pending = nil
-				fence.pendingBytes = 0
-				fence.invalidated = true
-				continue
-			}
-			fence.pending = append(fence.pending, patch)
-			fence.pendingBytes += len(encoded)
-			fence.expectedRev = patch.SyncRev
-			slog.Info("go-bridge: [K4Patch] held_in_fence",
-				"sessionPrefix", projectionSessionLogPrefix(sessionID),
-				"syncRev", patch.SyncRev, "pending", len(fence.pending),
-			)
 			continue
 		}
 		if p.projectionInvalidated[key] {
@@ -1588,6 +1600,12 @@ func (p *EventPublisher) RecordConnWindowTurns(conn Connection, backendID, sessi
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.recordConnWindowTurnsLocked(conn, backendID, sessionID, turnIDs)
+}
+
+// recordConnWindowTurnsLocked is the p.mu-held core of RecordConnWindowTurns,
+// shared with the snapshot-fence completion transaction (P0-2).
+func (p *EventPublisher) recordConnWindowTurnsLocked(conn Connection, backendID, sessionID string, turnIDs []string) {
 	key := projectionDeliveryKey(backendID, sessionID)
 	if p.projectionHeldTurns[conn] == nil {
 		p.projectionHeldTurns[conn] = make(map[string]map[string]struct{})
@@ -1611,6 +1629,10 @@ func (p *EventPublisher) ClearConnWindowTurns(conn Connection, backendID, sessio
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.clearConnWindowTurnsLocked(conn, backendID, sessionID)
+}
+
+func (p *EventPublisher) clearConnWindowTurnsLocked(conn Connection, backendID, sessionID string) {
 	if per := p.projectionHeldTurns[conn]; per != nil {
 		delete(per, projectionDeliveryKey(backendID, sessionID))
 	}
@@ -1661,26 +1683,44 @@ func patchTurnIDs(patch ProjectionPatch) []string {
 }
 
 // PublishProjectionDetail routes a detail/state commit (turn_detail_lazy_v1
-// delivery rules, bridge-v1.md):
-//  1. the REQUESTING connection always receives the commit patches — its
-//     completion condition is appliedRev >= ack.syncRev (patch-before-ack and
-//     ack-before-patch are both valid);
-//  2. full-projection connections always receive them (full-truth obligation);
-//  3. other WINDOW connections that hold one of the patch's turns receive the
-//     full commit patch;
-//  4. window connections that do NOT hold any of them receive the
-//     connection-specific no-op revision patch that keeps the single revision
-//     chain intact (they obtain the turn, with its current detailLoadState,
-//     through their own window pull).
-func (p *EventPublisher) PublishProjectionDetail(backendID, sessionID string, patch ProjectionPatch, requester Connection) {
+// delivery rules, bridge-v1.md) through ONE serial publisher transaction:
+//   1. the REQUESTING connection always receives the commit patches — its
+//      completion condition is appliedRev >= ack.syncRev (patch-before-ack and
+//      ack-before-patch are both valid);
+//   2. full-projection connections always receive them (full-truth obligation);
+//   3. other WINDOW connections that hold one of the patch's turns receive the
+//      full commit patch;
+//   4. window connections that do NOT hold any of them receive the
+//      connection-specific no-op revision patch that keeps the single revision
+//      chain intact (they obtain the turn, with its current detailLoadState,
+//      through their own window pull).
+//
+// patches is the P0-1 atomic chain from the reducer: [staged-live patch?] +
+// [commit patch]. The staged-live prefixes publish FIRST through the normal
+// live broadcast path (content to every v2 connection — same semantics as any
+// live delta), then the final commit patch routes by rules 1-4. Journal order
+// matches publication order.
+func (p *EventPublisher) PublishProjectionDetail(backendID, sessionID string, patches []ProjectionPatch, requester Connection) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.broadcaster == nil || len(p.syncV2) == 0 || patch.SyncRev <= patch.BaseRev {
+	if p.broadcaster == nil || len(p.syncV2) == 0 || len(patches) == 0 {
 		return
 	}
-	p.projectionJournal.Record(backendID, sessionID, patch, p.now())
+	commit := patches[len(patches)-1]
+	if commit.SyncRev <= commit.BaseRev {
+		return
+	}
+	for _, patch := range patches {
+		if patch.SyncRev <= patch.BaseRev {
+			continue
+		}
+		p.projectionJournal.Record(backendID, sessionID, patch, p.now())
+	}
+	for _, live := range patches[:len(patches)-1] {
+		p.deliverProjectionPatchLocked(backendID, sessionID, live)
+	}
 	targets := p.broadcaster.Targets(backendID, sessionID, "")
-	turnIDs := patchTurnIDs(patch)
+	turnIDs := patchTurnIDs(commit)
 	for _, conn := range targets {
 		if !p.syncV2[conn] {
 			continue
@@ -1688,18 +1728,26 @@ func (p *EventPublisher) PublishProjectionDetail(backendID, sessionID string, pa
 		if conn == requester ||
 			p.connDeliveryModeLocked(conn, backendID, sessionID) != ProjectionDeliveryWindow ||
 			p.connHoldsAnyTurnLocked(conn, backendID, sessionID, turnIDs) {
-			p.deliverSingleConnPatchLocked(conn, backendID, sessionID, patch)
+			p.deliverSingleConnPatchLocked(conn, backendID, sessionID, commit)
 			continue
 		}
 		key := projectionFenceKey{conn: conn, backendID: backendID, sessionID: sessionID}
 		base := p.projectionSnapshotCuts[key]
 		if fence := p.projectionFences[key]; fence != nil && !fence.invalidated {
-			base = fence.expectedRev
-		}
-		if base == 0 || base >= patch.SyncRev {
+			// The connection's window response is still being built — whether it
+			// "holds" the patch's turns is decided when that fence completes
+			// (CompleteProjectionSnapshotWithHeldTurns registers the response's
+			// turns and resolves the deferral). Queue the FULL patch as
+			// undecided so the completion transaction can pick content vs no-op
+			// (audit P0-2: a no-op decided here would permanently strand the
+			// detail behind the not-yet-sent stale response).
+			p.deferProjectionPatchForFenceLocked(backendID, sessionID, fence, commit)
 			continue
 		}
-		p.deliverSingleConnPatchLocked(conn, backendID, sessionID, ProjectionPatch{BaseRev: base, SyncRev: patch.SyncRev})
+		if base == 0 || base >= commit.SyncRev {
+			continue
+		}
+		p.deliverSingleConnPatchLocked(conn, backendID, sessionID, ProjectionPatch{BaseRev: base, SyncRev: commit.SyncRev})
 	}
 }
 

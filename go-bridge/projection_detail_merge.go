@@ -3,10 +3,12 @@ package gobridge
 // T2.2 dedicated historical detail merge (lazy-history plan §2.2/§3.2, frozen in
 // unified-bridge-protocol.md §11.7 + bridge-v1.md turn_detail_lazy_v1). This is
 // deliberately NOT the live reducer lifecycle: no markRunning, no ExecutionView
-// change, no ps.tools accumulator, no fake reasoning_delta/text_delta, and the
-// shared live FlushPatch is untouched. One completed turn's fetched detail is
-// committed atomically as a replace_parts PartOp + terminal loaded turnStateOp
-// in ONE projection patch; the projection stays the single content writer.
+// change, no ps.tools accumulator, no fake reasoning_delta/text_delta. One
+// completed turn's fetched detail is committed atomically as a replace_parts
+// PartOp + terminal loaded turnStateOp in ONE projection patch; the projection
+// stays the single content writer. The commit shares flushLocked with the live
+// FlushPatch path (audit P0-1): staged live deltas drain into the head of the
+// returned patch chain so the commit never strands them behind lastFlushedRev.
 //
 // Admission is the per-turn generation fence (audit-r4 P1-r4-2): the caller
 // carries the turn's TurnGeneration observed at fetch start. Any drift (turn
@@ -44,23 +46,30 @@ var (
 // mutation bumps the turn's TurnGeneration (the state op in the patch reports
 // the POST-bump generation). The user slot is never touched — the Summary user
 // part already carries the canonical user item (dedup by persisted itemId).
+//
+// Audit P0-1 serialization: any live delta staged since the last flush is
+// drained FIRST, inside the same reducer critical section, so the commit bases
+// at the drained head instead of jumping lastFlushedRev past unflushed content
+// (which later produced a zero-span patch delivery drops). The return is the
+// atomic consecutive patch CHAIN: [staged-live patch?] + [detail commit patch];
+// the caller publishes them in order (live path, then detail routing).
 func (r *ProjectionReducer) MergeHistoricalTurnDetail(
 	backendID, sessionID, turnID string,
 	generation int,
 	detailParts []ProjectionPart,
-) (SessionProjection, ProjectionPatch, error) {
+) (SessionProjection, []ProjectionPatch, error) {
 	if r == nil {
-		return SessionProjection{}, ProjectionPatch{}, errors.New("projection reducer nil")
+		return SessionProjection{}, nil, errors.New("projection reducer nil")
 	}
 	if backendID == "" || sessionID == "" || turnID == "" {
-		return SessionProjection{}, ProjectionPatch{}, fmt.Errorf(
+		return SessionProjection{}, nil, fmt.Errorf(
 			"%w: empty backend/session/turn id", ErrProjectionPrependInvalid)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	ps := r.sessions[projectionSessionKey(backendID, sessionID)]
 	if ps == nil {
-		return SessionProjection{}, ProjectionPatch{}, fmt.Errorf(
+		return SessionProjection{}, nil, fmt.Errorf(
 			"%w: session %s/%s not present", ErrProjectionPrependInvalid, backendID, sessionID)
 	}
 	at := -1
@@ -71,24 +80,18 @@ func (r *ProjectionReducer) MergeHistoricalTurnDetail(
 		}
 	}
 	if at < 0 {
-		return SessionProjection{}, ProjectionPatch{}, fmt.Errorf("%w: turn %s", ErrDetailTargetMissing, turnID)
+		return SessionProjection{}, nil, fmt.Errorf("%w: turn %s", ErrDetailTargetMissing, turnID)
 	}
 	target := &ps.projection.Turns[at]
 	if target.Status != "completed" {
-		return SessionProjection{}, ProjectionPatch{}, fmt.Errorf(
+		return SessionProjection{}, nil, fmt.Errorf(
 			"%w: turn %s status %q", ErrDetailTargetRunning, turnID, target.Status)
 	}
 	if target.TurnGeneration != generation {
-		return SessionProjection{}, ProjectionPatch{}, fmt.Errorf(
+		return SessionProjection{}, nil, fmt.Errorf(
 			"%w: turn %s merge generation %d != kernel %d",
 			ErrTurnStateStale, turnID, generation, target.TurnGeneration)
 	}
-
-	// The patch bases at the PREVIOUS flushed rev so the chain stays gapless
-	// even when staged live deltas (other turns) are pending: their content
-	// flushes next, basing at this patch's syncRev (same coalescing as
-	// FlushPatch spanning unflushed revs).
-	base := ps.lastFlushedRev
 
 	messageID := turnID
 	if target.Assistant != nil && target.Assistant.ID != "" {
@@ -106,10 +109,19 @@ func (r *ProjectionReducer) MergeHistoricalTurnDetail(
 	target.DetailLoadState = DetailStateLoaded
 	target.DetailReasonCode = ""
 	target.TurnGeneration++
+
+	// P0-1 drain-first: flush any staged live delta (other turns) into its own
+	// patch BEFORE this commit consumes its rev, so the commit patch bases at
+	// the drained head and the chain stays gapless with no stranded content.
+	patches := make([]ProjectionPatch, 0, 2)
+	if live, ok := r.flushLocked(ps); ok {
+		patches = append(patches, live)
+	}
+	base := ps.projection.SyncRev
 	ps.projection.SyncRev++
 	ps.lastFlushedRev = ps.projection.SyncRev
 
-	patch := ProjectionPatch{
+	commit := ProjectionPatch{
 		BaseRev: base,
 		SyncRev: ps.projection.SyncRev,
 		TurnStateOps: []TurnStateOp{{
@@ -119,14 +131,15 @@ func (r *ProjectionReducer) MergeHistoricalTurnDetail(
 		}},
 	}
 	if len(detailParts) > 0 && target.Assistant != nil {
-		patch.PartOps = []PartOp{{
+		commit.PartOps = []PartOp{{
 			TurnID:    turnID,
 			MessageID: messageID,
 			Op:        "replace_parts",
 			Parts:     cloneParts(detailParts),
 		}}
 	}
-	return cloneSessionProjection(ps.projection), patch, nil
+	patches = append(patches, commit)
+	return cloneSessionProjection(ps.projection), patches, nil
 }
 
 func cloneParts(parts []ProjectionPart) []ProjectionPart {
@@ -145,36 +158,45 @@ func cloneParts(parts []ProjectionPart) []ProjectionPart {
 // machine uses it for the loading admission and every failed terminal commit
 // (resource gates, upstream errors, stale fences, orphan recovery). On any
 // validation/fence error the projection is untouched (ApplyTurnStateOps is
-// atomic) and NO rev is consumed.
+// atomic) and NO rev is consumed. Same P0-1 drain-first serialization as
+// MergeHistoricalTurnDetail: staged live deltas flush into the head of the
+// returned chain before the state commit consumes its rev.
 func (r *ProjectionReducer) CommitTurnStateOps(
 	backendID, sessionID string,
 	ops []TurnStateOp,
-) (SessionProjection, ProjectionPatch, error) {
+) (SessionProjection, []ProjectionPatch, error) {
 	if r == nil {
-		return SessionProjection{}, ProjectionPatch{}, errors.New("projection reducer nil")
+		return SessionProjection{}, nil, errors.New("projection reducer nil")
 	}
 	if len(ops) == 0 {
-		return SessionProjection{}, ProjectionPatch{}, fmt.Errorf("%w: empty batch", ErrTurnStateInvalid)
+		return SessionProjection{}, nil, fmt.Errorf("%w: empty batch", ErrTurnStateInvalid)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	ps := r.sessions[projectionSessionKey(backendID, sessionID)]
 	if ps == nil {
-		return SessionProjection{}, ProjectionPatch{}, fmt.Errorf(
+		return SessionProjection{}, nil, fmt.Errorf(
 			"%w: session %s/%s not present", ErrProjectionPrependInvalid, backendID, sessionID)
 	}
-	base := ps.lastFlushedRev
+	// Validation first: a failed batch must not drain the staged live delta
+	// either (the drain advances lastFlushedRev; an unpublished drain would
+	// strand the live content exactly like the bug it exists to fix).
 	if err := ApplyTurnStateOps(&ps.projection, ops); err != nil {
-		return SessionProjection{}, ProjectionPatch{}, err
+		return SessionProjection{}, nil, err
 	}
+	patches := make([]ProjectionPatch, 0, 2)
+	if live, ok := r.flushLocked(ps); ok {
+		patches = append(patches, live)
+	}
+	base := ps.projection.SyncRev
 	ps.projection.SyncRev++
 	ps.lastFlushedRev = ps.projection.SyncRev
-	patch := ProjectionPatch{
+	patches = append(patches, ProjectionPatch{
 		BaseRev:      base,
 		SyncRev:      ps.projection.SyncRev,
 		TurnStateOps: append([]TurnStateOp(nil), ops...),
-	}
-	return cloneSessionProjection(ps.projection), patch, nil
+	})
+	return cloneSessionProjection(ps.projection), patches, nil
 }
 
 // RecoverOrphanDetailLoading implements §11.7 orphan recovery for the checkpoint
@@ -217,18 +239,18 @@ func RecoverOrphanDetailLoading(projection *SessionProjection) bool {
 func (k *ProjectionKernel) CommitTurnStateOps(
 	backendID, sessionID string,
 	ops []TurnStateOp,
-) (SessionProjection, ProjectionPatch, error) {
+) (SessionProjection, []ProjectionPatch, error) {
 	if k == nil {
-		return SessionProjection{}, ProjectionPatch{}, errors.New("projection kernel nil")
+		return SessionProjection{}, nil, errors.New("projection kernel nil")
 	}
 	if len(ops) == 0 {
-		return SessionProjection{}, ProjectionPatch{}, nil
+		return SessionProjection{}, nil, nil
 	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	session := k.sessionLocked(backendID, sessionID)
 	if session.status.Phase != ProjectionHydrateReady {
-		return SessionProjection{}, ProjectionPatch{}, fmt.Errorf(
+		return SessionProjection{}, nil, fmt.Errorf(
 			"projection: turn state commit requires ready session, %s/%s is %s",
 			backendID, sessionID, session.status.Phase,
 		)

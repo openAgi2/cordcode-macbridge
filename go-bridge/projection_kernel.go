@@ -1650,20 +1650,21 @@ func NewReadyCompositeProjectionCheckpoint(
 
 // MergeHistoricalTurnDetail (T2.2) is the Kernel gate for the dedicated
 // historical detail merge: requires a READY session (hydrated truth), then
-// delegates to the reducer's atomic replace_parts + loaded turnStateOp commit.
+// delegates to the reducer's atomic replace_parts + loaded turnStateOp commit
+// (P0-1 chain: staged-live flush patch first, then the detail commit patch).
 func (k *ProjectionKernel) MergeHistoricalTurnDetail(
 	backendID, sessionID, turnID string,
 	generation int,
 	detailParts []ProjectionPart,
-) (SessionProjection, ProjectionPatch, error) {
+) (SessionProjection, []ProjectionPatch, error) {
 	if k == nil {
-		return SessionProjection{}, ProjectionPatch{}, errors.New("projection kernel nil")
+		return SessionProjection{}, nil, errors.New("projection kernel nil")
 	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	session := k.sessionLocked(backendID, sessionID)
 	if session.status.Phase != ProjectionHydrateReady {
-		return SessionProjection{}, ProjectionPatch{}, fmt.Errorf(
+		return SessionProjection{}, nil, fmt.Errorf(
 			"projection: detail merge requires ready session, %s/%s is %s",
 			backendID, sessionID, session.status.Phase,
 		)

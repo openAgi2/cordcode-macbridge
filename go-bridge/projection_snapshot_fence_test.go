@@ -12,6 +12,7 @@ import (
 type snapshotFenceCaptureConn struct {
 	mu     sync.Mutex
 	frames []string
+	events []EventMessage
 	closed bool
 }
 
@@ -23,6 +24,7 @@ func (c *snapshotFenceCaptureConn) SendJSON(value any) {
 	}
 	if event, ok := value.(EventMessage); ok {
 		c.frames = append(c.frames, fmt.Sprintf("%s:%d", event.Event, event.PerSessionSeq))
+		c.events = append(c.events, event)
 		return
 	}
 	c.frames = append(c.frames, "json")
@@ -57,6 +59,45 @@ func (c *snapshotFenceCaptureConn) snapshot() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]string(nil), c.frames...)
+}
+
+// snapshotPatchEvents returns the projection_patch frames in wire order with
+// their decoded payloads (fence-completion P0-2 assertions need content, not
+// just the event:seq summary).
+func (c *snapshotFenceCaptureConn) snapshotPatchEvents() []ProjectionPatch {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	patches := make([]ProjectionPatch, 0, len(c.events))
+	for _, event := range c.events {
+		if event.Event != "projection_patch" {
+			continue
+		}
+		if patch, ok := event.Data.(ProjectionPatch); ok {
+			patches = append(patches, patch)
+		}
+	}
+	return patches
+}
+
+// gatedSnapshotFenceConn stalls every outbound write until release closes —
+// used to hold the sink's pump mid-write so the queue fills deterministically.
+type gatedSnapshotFenceConn struct {
+	snapshotFenceCaptureConn
+	release <-chan struct{}
+}
+
+func (c *gatedSnapshotFenceConn) SendJSON(value any) {
+	<-c.release
+	c.snapshotFenceCaptureConn.SendJSON(value)
+}
+
+func (c *gatedSnapshotFenceConn) SendJSONClassified(value any, class relayOutboundClass) {
+	c.SendJSON(value)
+}
+
+func (c *gatedSnapshotFenceConn) SendResult(requestID string, data interface{}, err *WireError) {
+	<-c.release
+	c.snapshotFenceCaptureConn.SendResult(requestID, data, err)
 }
 
 func readyProjectionPublisher(t *testing.T, epoch string) (*Handlers, *EventPublisher) {
@@ -301,4 +342,119 @@ func waitSnapshotFenceFrames(t *testing.T, conn *snapshotFenceCaptureConn, count
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %d frames; got %v", count, conn.snapshot())
+}
+
+// ---------- turn_detail_lazy_v1 fence-completion transaction (P0-2) ----------
+
+// A detail commit from another connection landing while a window pull's fence
+// is active (or completing) must not be reduced to a no-op revision patch for
+// that window connection: the held-turn registration rides the completion
+// transaction and the deferred patch resolves to CONTENT when the response
+// carries the patch's turn, and to a no-op only when it does not. Pre-fix, the
+// stale response + no-op permanently hid the detail from the window client.
+func TestProjectionWindowFenceResolvesDeferredDetailCommit(t *testing.T) {
+	_, publisher := readyProjectionPublisher(t, "epoch-p02-defer")
+	holds := &snapshotFenceCaptureConn{}
+	misses := &snapshotFenceCaptureConn{}
+	for _, conn := range []Connection{holds, misses} {
+		publisher.RegisterConnection(conn)
+		publisher.SetConnSyncV2(conn, true)
+		publisher.broadcaster.Subscribe(conn, SubscriptionKey{BackendID: "codex", SessionID: "s1"})
+		publisher.SetConnProjectionDeliveryMode(conn, "codex", "s1", ProjectionDeliveryWindow)
+	}
+	holdsAdmission := beginFence(t, publisher, holds)
+	missesAdmission := beginFence(t, publisher, misses)
+	cut := holdsAdmission.CutRev
+	if missesAdmission.CutRev != cut {
+		t.Fatalf("fence cuts drifted: %d vs %d", cut, missesAdmission.CutRev)
+	}
+
+	// Another connection's detail commit for T1 lands mid-fence.
+	commit := ProjectionPatch{
+		BaseRev: cut, SyncRev: cut + 1,
+		PartOps:      []PartOp{{TurnID: "T1", MessageID: "T1", Op: "replace_parts", Parts: []ProjectionPart{{Type: "text", Text: "detail"}}}},
+		TurnStateOps: []TurnStateOp{{TurnID: "T1", DetailLoadState: DetailStateLoaded, TurnGeneration: 1}},
+	}
+	publisher.PublishProjectionDetail("codex", "s1", []ProjectionPatch{commit}, nil)
+	if got := holds.snapshot(); len(got) != 0 {
+		t.Fatalf("fence leaked before completion: %v", got)
+	}
+
+	response := map[string]any{"turns": "window"}
+	if err := publisher.CompleteProjectionSnapshotWithHeldTurns(holds, holdsAdmission, "r-holds", response, []string{"T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := publisher.CompleteProjectionSnapshotWithHeldTurns(misses, missesAdmission, "r-misses", response, []string{"T2"}); err != nil {
+		t.Fatal(err)
+	}
+
+	waitSnapshotFenceFrames(t, holds, 2)
+	waitSnapshotFenceFrames(t, misses, 2)
+	if got := holds.snapshot(); got[0] != "result:r-holds" || got[1] != fmt.Sprintf("projection_patch:%d", cut+1) {
+		t.Fatalf("holds wire order = %v", got)
+	}
+	// holds: the response carries T1 → the deferred patch resolves to CONTENT.
+	holdsPatches := holds.snapshotPatchEvents()
+	if len(holdsPatches) != 1 {
+		t.Fatalf("holds patches = %d", len(holdsPatches))
+	}
+	got := holdsPatches[0]
+	if got.BaseRev != cut || got.SyncRev != cut+1 ||
+		len(got.PartOps) != 1 || got.PartOps[0].Op != "replace_parts" || got.PartOps[0].TurnID != "T1" ||
+		len(got.TurnStateOps) != 1 || got.TurnStateOps[0].DetailLoadState != DetailStateLoaded {
+		t.Fatalf("held-turn patch must carry the detail content: %+v", got)
+	}
+	// misses: the response does NOT carry T1 → same revs, no content.
+	missesPatches := misses.snapshotPatchEvents()
+	if len(missesPatches) != 1 {
+		t.Fatalf("misses patches = %d", len(missesPatches))
+	}
+	noOp := missesPatches[0]
+	if noOp.BaseRev != cut || noOp.SyncRev != cut+1 ||
+		noOp.PartOps != nil || noOp.TurnStateOps != nil || noOp.UpsertTurns != nil || noOp.Execution != nil {
+		t.Fatalf("non-holding patch must be a no-op revision patch: %+v", noOp)
+	}
+}
+
+// Registration is transactional with completion: a completion that cannot
+// deliver (sink saturated) rolls the held-turn set back — the connection is
+// closed anyway, but a stale registration must never survive a failed send.
+func TestProjectionWindowFenceHeldTurnRegistrationRollsBackOnFailure(t *testing.T) {
+	_, publisher := readyProjectionPublisher(t, "epoch-p02-rollback")
+	release := make(chan struct{})
+	defer close(release)
+	conn := &gatedSnapshotFenceConn{release: release}
+	publisher.RegisterConnection(conn)
+	publisher.SetConnSyncV2(conn, true)
+	publisher.broadcaster.Subscribe(conn, SubscriptionKey{BackendID: "codex", SessionID: "s1"})
+	publisher.SetConnProjectionDeliveryMode(conn, "codex", "s1", ProjectionDeliveryWindow)
+	// A filler stream on another session saturates this conn's sink while its
+	// pump is stalled inside the first blocked write.
+	publisher.broadcaster.Subscribe(conn, SubscriptionKey{BackendID: "filler", SessionID: "f1"})
+
+	admission := beginFence(t, publisher, conn)
+	commit := ProjectionPatch{
+		BaseRev: admission.CutRev, SyncRev: admission.CutRev + 1,
+		TurnStateOps: []TurnStateOp{{TurnID: "T1", DetailLoadState: DetailStateFailed, ReasonCode: "timeout"}},
+	}
+	publisher.PublishProjectionDetail("codex", "s1", []ProjectionPatch{commit}, nil)
+	// Saturate the sink synchronously: the pump is stalled inside the first
+	// gated write, so every filler patch on the OTHER session (no fence there)
+	// occupies one slot until the queue is full.
+	for i := 0; i < eventOutboundQueueCapacity+4; i++ {
+		publisher.PublishProjectionPatch("filler", "f1", sequentialPatch(i+1))
+	}
+
+	if err := publisher.CompleteProjectionSnapshotWithHeldTurns(conn, admission, "r-fail", nil, []string{"T1"}); err == nil {
+		t.Fatal("saturated sink completion must fail")
+	}
+	if !conn.isClosed() {
+		t.Fatal("failed completion must close the connection")
+	}
+	publisher.mu.Lock()
+	held := publisher.projectionHeldTurns[conn]
+	publisher.mu.Unlock()
+	if len(held) != 0 {
+		t.Fatalf("held-turn registration must roll back on failed completion: %+v", held)
+	}
 }

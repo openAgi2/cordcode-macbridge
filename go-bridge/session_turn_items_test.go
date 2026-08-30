@@ -133,7 +133,7 @@ func TestMergeHistoricalTurnDetailAtomicCommit(t *testing.T) {
 
 	mapped := upstreamSummaryTurnsToProjection([]core.TurnScopedHistoryTurn{detailTurnFixture()})
 	parts := mapped[0].Assistant.Parts
-	committed, patch, err := h.projectionKernel.MergeHistoricalTurnDetail("codex-remote", sessionID, "T1", 0, parts)
+	committed, patches, err := h.projectionKernel.MergeHistoricalTurnDetail("codex-remote", sessionID, "T1", 0, parts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,13 @@ func TestMergeHistoricalTurnDetailAtomicCommit(t *testing.T) {
 	if turn.User == nil || turn.User.Parts[0].Text != "q1" {
 		t.Fatalf("user slot must stay untouched: %+v", turn.User)
 	}
-	// ONE patch, both ops, frozen shapes: replace_parts + loaded at one syncRev.
+	// Steady state (no staged live delta): ONE commit patch, both ops, frozen
+	// shapes: replace_parts + loaded at one syncRev. (The staged-live prefix
+	// variant is covered by TestTurnItemsDetailCommitFlushesPendingLiveText.)
+	if len(patches) != 1 {
+		t.Fatalf("patch chain = %+v, want exactly the commit patch", patches)
+	}
+	patch := patches[len(patches)-1]
 	if patch.BaseRev != before || patch.SyncRev != before+1 {
 		t.Fatalf("patch revs %d→%d", patch.BaseRev, patch.SyncRev)
 	}
@@ -186,7 +192,7 @@ func TestMergeHistoricalTurnDetailFencesAndEmptyDetail(t *testing.T) {
 	olderWalkDispatch(h2, conn2, map[string]any{
 		"direction": "window_0", "backendId": "codex-remote", "sessionId": sessionID2, "limit": 10,
 	})
-	committed, patch, err := h2.projectionKernel.MergeHistoricalTurnDetail("codex-remote", sessionID2, "T1", 0, nil)
+	committed, patches, err := h2.projectionKernel.MergeHistoricalTurnDetail("codex-remote", sessionID2, "T1", 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,8 +202,8 @@ func TestMergeHistoricalTurnDetailFencesAndEmptyDetail(t *testing.T) {
 	if committed.Turns[0].Assistant == nil || committed.Turns[0].Assistant.Parts[0].Text != "summary answer" {
 		t.Fatalf("empty detail must preserve Summary parts: %+v", committed.Turns[0].Assistant)
 	}
-	if len(patch.PartOps) != 0 {
-		t.Fatalf("empty detail patch must be state-only: %+v", patch.PartOps)
+	if commit := patches[len(patches)-1]; len(commit.PartOps) != 0 {
+		t.Fatalf("empty detail patch must be state-only: %+v", commit.PartOps)
 	}
 }
 
@@ -233,12 +239,16 @@ func TestCommitTurnStateOpsAtomicAndGated(t *testing.T) {
 	}
 
 	// Loading commit: state-only patch shape.
-	_, patch, err := h.projectionKernel.CommitTurnStateOps("codex-remote", sessionID, []TurnStateOp{{
+	_, patches, err := h.projectionKernel.CommitTurnStateOps("codex-remote", sessionID, []TurnStateOp{{
 		TurnID: "T1", DetailLoadState: DetailStateLoading, TurnGeneration: 0,
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(patches) != 1 {
+		t.Fatalf("steady-state chain = %+v, want exactly the commit patch", patches)
+	}
+	patch := patches[len(patches)-1]
 	if len(patch.TurnStateOps) != 1 || patch.TurnStateOps[0].DetailLoadState != DetailStateLoading {
 		t.Fatalf("patch = %+v", patch.TurnStateOps)
 	}
