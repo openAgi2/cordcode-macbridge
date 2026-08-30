@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-30T17:40:00+08:00",
+  "updated_at": "2026-08-30T18:34:05",
   "todos": [
     {
       "id": "phase0-probe-impl",
@@ -873,14 +873,14 @@
       "id": "phase3-ios-state-impl",
       "title": "iOS projection state — turnStateOps decode/apply + detailLoadState machine",
       "description": "iOS worktree /Users/jacklee/Projects/cordcode-ios-codex-remote branch codex/codex-remote-backend-ios (P0 source manifest re-verified before edit): decode turnStateOps; apply order frozen to execution→upsertTurns→turnStateOps→partOps; detailLoadState as turn-level field (absent → notRequested); ProjectionReplica.changedTurnIDs(from:) unions turnStateOps ids; state-only patch → orderChanged=false with target turn in changedTurns; same-turn state+parts → one changedTurnID; failed→loading→loaded clears reasonCode; illegal combos fail-closed; old patches without the field ignored (live zero-change); appliedRev>=syncRev completion helper; snapshot restore carries detailLoadState + canonical itemId.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "impl",
       "depends_on": [
         "phase2-g2-gate-regression"
       ],
       "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
-      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree:/Users/jacklee/Projects/cordcode-ios-codex-remote@codex/codex-remote-backend-ios",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree:/Users/jacklee/Projects/cordcode-ios-codex-remote@codex/codex-remote-backend-ios | VERIFIED 2026-08-30: turnStateOps decode/apply frozen order (execution→upsertTurns→turnStateOps→partOps), effectiveDetailLoadState absent→notRequested, changedTurnIDs(from:) unions turnStateOps with held-turn no-op rule (replica §11.7 comment), state-only patch orderChanged=false, failed→loading→loaded clears reasonCode, old patches without field ignored — committed d6e1515f (decode batch) + cacb77ee (canonical itemId retention); waitForAppliedRevision helper committed dc2a35ff.",
       "verification": {
         "required": true,
         "status": "missing",
@@ -897,14 +897,14 @@
       "id": "phase3-ios-state-tests",
       "title": "iOS state layer unit tests",
       "description": "T3.4 unit tests (ChatViewModel/projection store): turnStateOps decode + apply order; state-only patch drives UI refresh; changedTurnIDs/orderChanged semantics; reasonCode clearing; old-patch backward compat; snapshot restore of detailLoadState/itemId.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "tests",
       "depends_on": [
         "phase3-ios-state-impl"
       ],
       "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
-      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree | VERIFIED 2026-08-30: ProjectionTurnStateOpsTests (earlier committed decode/apply-order suite) + TurnDetailLazyPhase3Tests 11/11 green on iPhone 17 Pro Max simulator (state-only remap, changedTurnIDs/orderChanged via enum facts, reasonCode carry, wait immediate/deferred/honest-timeout) — commit dc2a35ff.",
       "verification": {
         "required": true,
         "status": "missing",
@@ -921,14 +921,14 @@
       "id": "phase3-ios-state-regression",
       "title": "iOS state layer zero-regression + device install",
       "description": "Existing iOS projection/replica tests green (live merge semantics untouched — SessionProjection.merged/ProjectionReplica upsertTurns path unchanged); iOS build green. If iPhone connected: install this batch to the device per kickoff directive §6 (install failure = real recorded blocker, no simulator substitution).",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "regression",
       "depends_on": [
         "phase3-ios-state-tests"
       ],
       "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
-      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree | VERIFIED 2026-08-30: full CCCodeTests stash-comparison against baseline HEAD cacb77ee — this batch adds ZERO new failures; 12 failures identical at baseline (guardrails ×2, handrace ×1, reconnect ×3, SSV2 send ×1, highlight samples ×1, perf fixtures ×1, directory selection ×1, todo route ×2; plus hello-capabilities ×1 pre-existing which this batch REPAIRED to current truth). Simulator build-for-testing green. iPhone not connected during batch → device install deferred to G3 (todo phase3-ios-ux-regression) per its conditional wording.",
       "verification": {
         "required": true,
         "status": "missing",
@@ -945,14 +945,14 @@
       "id": "phase3-ios-ux-impl",
       "title": "iOS lazy-history UX — entry, completion condition, window-chain reuse",
       "description": "T3.1–T3.3: unified 加载详细过程 entry on ALL paginated completed turns (never infer from Summary metadata); tap → session_turn_items → render detail from projection patch with replica appliedRev>=syncRev as the completion condition (order-independent; failed ack also waits for its syncRev then shows failed; reconnect restores via snapshot); loading / loaded (§2.2 empty-detail copy) / failed-retry states; after loaded the entry becomes expand/collapse with NO refetch; VERIFY (do not rebuild) the existing projection_window_v1 load-older chain (pullWindow/nextOlderCursor/coverage ledger/viewport anchoring/cursor-stale recovery) under producer hydration + per-connection delivery; live turns unaffected; loaded detail survives reconnect.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "impl",
       "depends_on": [
         "phase3-ios-state-regression"
       ],
       "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
-      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree | VERIFIED 2026-08-30 commit dc2a35ff: entry stamped on ALL completed paginated turns via mapping (never Summary metadata inference), gated by descriptor capability + per-session unsupported memo at snapshot builder (fields absent when off); tap→session_turn_items→completion = replica appliedRev>=ack.syncRev (order-independent, tested); loaded→local expand/collapse no refetch; live turns never stamped (T3.3); T3.1 window chain verified by replica test (page adopt→no-op revision patch→producer-hydrated older prepend→live append; chain order chronological, head=oldest boundary per go-bridge projection_window.go), protocol surface unchanged. SERVER FLIP LANDED AFTER CLIENT: Mac 0808a7e (descriptor StaticCapabilities=[turn_detail_lazy_v1], const→true, single main.go enable, relay negotiate mirror + spec gate tests).",
       "verification": {
         "required": true,
         "status": "missing",
@@ -969,14 +969,14 @@
       "id": "phase3-ios-ux-tests",
       "title": "iOS UX unit tests",
       "description": "T3.4 unit tests part 2: entry rendering rules for all completed paginated turns; completion condition + no content render from RPC result; no-duplicate-fetch after loaded; window-chain protocol surface unchanged; failure/retry flow.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "tests",
       "depends_on": [
         "phase3-ios-ux-impl"
       ],
       "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
-      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree | VERIFIED 2026-08-30: TurnDetailLazyPhase3Tests covers entry rules (mapping/gate on-off), completion condition + no-content-from-RPC-result (render path is projection changeset driven), no-duplicate-fetch after loaded, window-chain surface unchanged, failure/retry (reasonCode labels + unsupported_capability session memo hides entries) — 11/11 green, commit dc2a35ff.",
       "verification": {
         "required": true,
         "status": "missing",
@@ -1000,7 +1000,7 @@
         "phase3-ios-ux-tests"
       ],
       "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
-      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree; owner-hands-required",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree; owner-hands-required | 2026-08-30: client batch dc2a35ff + server flip 0808a7e both committed; install this pair to device for G3. Preregistered baseline caveat: 12 pre-existing CCCodeTests failures at HEAD cacb77ee (inventory in phase3-ios-state-regression notes) are NOT G3 blockers; G3 matrix is §4 #1–#10.",
       "verification": {
         "required": true,
         "status": "missing",
