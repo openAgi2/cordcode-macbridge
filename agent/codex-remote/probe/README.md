@@ -70,3 +70,12 @@ Before requesting owner action, implementation must provide one bounded command 
 6. exposes a deterministic revoke command for only the probe controller.
 
 Static package inspection cannot establish any of these live properties.
+
+### Abnormal-exit ledger (2026-08-30)
+
+`history_probe.mjs` records its controller clientID (identifier only, no secrets) under
+`/tmp/codex-remote-probe-ledger/` at enrollment and removes the entry after a clean
+`cleanupController`. Any entry a previous run left behind (wedged/killed process) is revoked
+automatically at the next run's enrollment using the fresh token — leftover enrollments no
+longer persist in the device list. Runs 1/3 of 2026-08-30 predate this mechanism; their two
+orphan controllers must be removed from the Desktop device list by the owner.

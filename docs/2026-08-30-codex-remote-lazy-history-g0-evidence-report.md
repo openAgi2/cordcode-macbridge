@@ -70,10 +70,13 @@ fixtures：`agent/codex-remote/testdata/phase0/live/attempt-009-history-lazy-g0.
 - 最重 turn（id-341）：16 页、77 items、376KB 总量，最大单页 108KB；
 - 最大单 item：commandExecution output 57040B。
 
-**资源门建议值**（供 T2.x 实现与 owner 裁决）：turns 页 limit 30（75–96KB/页）；items 页
-limit 5；单 turn items 上限 24 页 / 512KB（超限 → `failed` + 原因码，不截断不 placeholder）；
-单 RPC 超时 30s（链路页 90s 冷启动窗口）；控制面 includeTurns **不得**出现在产品路径
-（paginated 不可用，legacy 走旧路径）。
+**资源门冻结值（owner 2026-08-30 裁决）**：turns 页 limit 30（75–96KB/页）；items 页
+limit 5；单回合 **24 页或 512KB 任一先到即原子失败**；单 RPC 超时 30s；**整个单回合拉取
+90s 总 deadline**（不得退化为 24×30s）；超限分别返回明确 `max_pages` / `max_bytes` /
+`timeout` reasonCode——不截断、不提交部分明细。后续仅可依据真实 `resource_limit` 触发数据
+调整，不得自动扩大（24 页/512KB 余量不宽，但这是用户手动展开的非关键能力，原子失败比
+超大投影拖垮 bridge 稳妥）。控制面 includeTurns **不得**出现在产品路径（paginated 不可用，
+legacy 走旧路径且超时显式报错）。
 
 ## T0.3 Summary 断言
 
@@ -88,31 +91,32 @@ limit 5；单 turn items 上限 24 页 / 512KB（超限 → `failed` + 原因码
   按计划保持 fail-closed / SkippedTypes 可观测；解码面由 schema replay 十类覆盖
   （proven 主张仅限 live 出现类型，计划 §3.1 原文规则）。
 
-## T0.5 legacy 裁决（pending owner）
+## T0.5 legacy 裁决（owner 已批准，含约束）
 
 实测（id-143，128 个 legacy 线程在库）：turns/list **可用**（38509B 首页）；items/list
 **-32601**（与官方 `"thread/items/list is not supported yet"` 一致）；includeTurns 全读
 **可用且快**（768ms/148KB）。
 
-**建议**：legacy 保留旧全读路径（includeTurns），不提供 summary/items 懒加载能力；
-§2.5 能力矩阵 legacy 格 = full-read only。不接受"仅传输收益"折中（items/list 缺失使
-明细懒加载在 legacy 上不可实现）。
+**裁决**：legacy 仅在明确 `historyMode=legacy` 时保留旧全读路径；**不得作为 paginated
+失败后的自动 fallback**；全读超时显式报错。§2.5 能力矩阵 legacy 格 = full-read only。
 
-## T0.6 resume 候选路径裁决（pending owner）
+## T0.6 resume 候选路径裁决（owner 已批准，含约束）
 
 - 关键断言 `thread.turns == []` **两次运行均成立**；initialPage 25 turns + 双 backwardsCursor；
 - 往返：candidate 1 RPC 921ms/78611B vs baseline 2 RPC 1336ms/77646B；
 - 字节确定性：两次运行 78611B 完全一致；
 - live subscription：单次 attach，resume 后 live 方法仅 `thread/goal/cleared`，无重复流迹象。
 
-三条件齐备 → **建议启用**：resume(excludeTurns+initialTurnsPage) 作为冷打开首页原语
-（§2.4 producer 补水合取页沿用 ReadThreadSummary 的官方不变量）。
+**裁决**：仅对已验证支持的 paginated 版本启用 `resume(excludeTurns:true + initialTurnsPage)`；
+每个连接/session 只 attach 一次；未验证版本**预先选择**官方 metadata + turns/list baseline，
+不得先失败再静默 full-read。
 
-## G0.5 reasoning content 裁决（pending owner）
+## G0.5 reasoning content 裁决（owner 已批准）
 
 55 样本 content 全空（双空 32 / 仅 summary 23）→ 该账号历史中 reasoning content 整体不可用。
-**建议**：按计划 §3.0.5-5 原文——从本版验收与实现主张中**删除"完整思考"**，UI 仅映射
-summary，不保留 pending 形状声明。
+
+**裁决**：删除"完整思考"承诺，产品统一称**"思考摘要"**；summary 为空时不补 placeholder；
+未来若发现非空 content，须重新取得样本再增加能力。
 
 ## 版本重锚（已按 owner 开工指令 + runbook 建议接受）
 
@@ -120,8 +124,23 @@ summary，不保留 pending 形状声明。
 源码锚点保持冻结 tag `rust-v0.150.0-alpha.12.2` + additive-only diff 记录
 （usageMetadata / functionCallOutput / misalignment 错误细节，anchored 文件核心函数未变）。
 
-## G0 判定
+## G0 判定（owner 2026-08-30 指定记分方式）
 
-**G0-PASS-CONDITIONAL**：九项达成（含三条证据化修订）、零负结果触发、T0.2/T0.3/T0.4
-基线齐备、版本重锚已接受。**待 owner 裁决四项后放行 Phase 1**：
-T0.5 legacy 策略、T0.6 候选启用、G0.5 删除完整思考主张、资源门建议值。
+**G0 PASS，owner 接受两项证据替代**：
+
+- (a) paginated control inventory **不可获得**（includeTurns 经 WSS 240s×3，冷+暖）；
+  替代证据 = 官方源码/测试、cursor 链完整性、EOF、backwards round-trip、legacy 同通道对照；
+- (b) 账号**无 >30 回合线程**（24/150 采样最深 25）；替代证据 = 多页 items fixture（16 页）
+  + 官方分页不变量。
+
+**不得宣称"九项实测达成"，亦不得宣称已取得 paginated includeTurns control 或 >30-turn
+live fixture。** §3.0.7 零负结果触发；T0.2/T0.3/T0.4 基线齐备；四项裁决全部批准。
+**Phase 1 放行。G2 前必须修正计划对 ">30-turn G0 fixture" 的引用**（app-server 测试环境
+生成确定性 fixture 或复用官方分页测试基线；不得引用 attempt-010 冒充）。
+
+## 残留 controller 记录（诚实边界）
+
+运行 1/3 各留下一个未吊销的探针 controller（进程在清理前终止，clientID 随进程内存丢失）。
+短期 token 过期降低风险，但 **enrollment 记录可能保留在设备列表**——不宣称"无害"。处理：
+owner 在 Desktop 授权设备列表中删除即可；探针已补**异常退出后的吊销清理机制**
+（enrollment clientID 台账文件 + 下次运行自动吊销残留项），下一次 live probe 前生效。

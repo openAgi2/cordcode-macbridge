@@ -39,6 +39,7 @@
 //   operator_attestation and recording a gitleaks PASS.
 
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -46,6 +47,7 @@ import {
   cleanupController,
   collectManualPairingCode,
   pairedEnvironments,
+  revokeProbeController,
   selectEnvironment,
   openRpcSession,
   redactErrorMessage,
@@ -55,6 +57,33 @@ import {
 
 const helperSource = new URL("./device_key_helper.swift", import.meta.url).pathname;
 const scriptPath = fileURLToPath(import.meta.url);
+
+// Abnormal-exit ledger (owner adjudication 2026-08-30): each run records its
+// controller clientID here (identifier only, no secrets); a clean cleanup
+// removes it, and the next run revokes whatever previous runs left behind —
+// so wedged/aborted processes no longer leave enrollments in the device list.
+const LEDGER_DIR = "/tmp/codex-remote-probe-ledger";
+function writeLedger(clientID) {
+  fs.mkdirSync(LEDGER_DIR, { recursive: true, mode: 0o700 });
+  const file = path.join(LEDGER_DIR, `${clientID}.client`);
+  fs.writeFileSync(file, clientID, { mode: 0o600 });
+  return file;
+}
+async function revokeOrphanedControllers(enrollment, ownClientID, observe) {
+  let names = [];
+  try { names = fs.readdirSync(LEDGER_DIR).filter((n) => n.endsWith(".client")); } catch { return; }
+  for (const name of names) {
+    const clientID = name.replace(/\.client$/u, "");
+    if (clientID === ownClientID) continue;
+    try {
+      const response = await revokeProbeController(enrollment.token, enrollment.accountID, clientID);
+      observe("orphan_controller_revoked", { http_status: response.status });
+      fs.rmSync(path.join(LEDGER_DIR, name));
+    } catch (error) {
+      observe("orphan_controller_revoke_failed", { error: redactErrorMessage(error.message) ?? "unknown" });
+    }
+  }
+}
 
 const CAPS = {
   threadListPages: 3,
@@ -410,6 +439,8 @@ async function main() {
   };
 
   const enrollment = await enrollController({ helperSource, observe });
+  let ledgerFile = writeLedger(enrollment.clientID);
+  await revokeOrphanedControllers(enrollment, enrollment.clientID, observe);
   let session = null;
   try {
     const environments = await pairedEnvironments(
@@ -691,6 +722,10 @@ async function main() {
     try {
       const revoked = await cleanupController(enrollment, observe);
       fixture.metadata.cleanup_result = `probe revoked client_probe ok=${revoked}; probe key deleted; helper temp dir removed`;
+      if (revoked && ledgerFile != null) {
+        try { fs.rmSync(ledgerFile); } catch { /* already removed */ }
+        ledgerFile = null;
+      }
     } catch (error) {
       fixture.metadata.cleanup_result = `cleanup error: ${error.message}`;
     }

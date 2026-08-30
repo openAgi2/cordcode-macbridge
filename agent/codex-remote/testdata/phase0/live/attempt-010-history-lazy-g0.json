@@ -41,7 +41,8 @@
           }
         },
         "recommendation": "legacy keeps the old full-read path (includeTurns); no summary/items lazy features for legacy; §2.5 matrix records legacy = full-read only. NOT accepted-transport-only.",
-        "status": "pending-owner"
+        "status": "owner-approved-2026-08-30",
+        "owner_decision": "legacy full-read ONLY when historyMode=legacy explicitly; NOT an automatic fallback for paginated failures; full-read timeout must error explicitly."
       },
       "t0_6_resume_candidate": {
         "evidence": {
@@ -51,7 +52,8 @@
           "liveSubscription": "single attach, liveMethods after resume = [thread/goal/cleared], no duplicate stream indicators"
         },
         "recommendation": "enable resume+initialTurnsPage as the cold-open first-page primitive per plan T0.6 (three conditions met)",
-        "status": "pending-owner"
+        "status": "owner-approved-2026-08-30",
+        "owner_decision": "enable ONLY for verified paginated versions; single attach per connection/session; unverified versions PRE-SELECT metadata + turns/list baseline (no try-then-silent-full-read)."
       },
       "g0_5_reasoning_content": {
         "evidence": {
@@ -62,13 +64,31 @@
           "bothNonEmpty": 0
         },
         "recommendation": "remove \"完整思考\" (full reasoning content) from this version acceptance and implementation claims; UI maps reasoning summary only; no pending-shape declarations",
-        "status": "pending-owner"
+        "status": "owner-approved-2026-08-30",
+        "owner_decision": "drop full-reasoning-content claims; product term = 思考摘要; no placeholder for empty summary; future non-empty content requires re-sampling before capability is added."
       },
       "version_reanchor": {
         "evidence": "installed 26.825.41651 / codex-cli 0.151.0-alpha.7.1 vs plan-frozen 26.825.32147 / 0.150.0-alpha.12.2; protocol-surface diff additive-only",
         "recommendation": "evidence anchors to installed versions; source anchors keep frozen tag rust-v0.150.0-alpha.12.2 + recorded diff",
         "status": "accepted-per-owner-start-instruction"
-      }
+      },
+      "resource_gates": {
+        "status": "owner-approved-2026-08-30",
+        "frozen": {
+          "turnsPageLimit": 30,
+          "itemsRequestLimit": 5,
+          "perTurn": "24 pages OR 512KB, whichever first, atomic failure",
+          "singleRpc": "30s",
+          "perTurnTotalDeadline": "90s (not 24x30s)",
+          "reasonCodes": [
+            "max_pages",
+            "max_bytes",
+            "timeout"
+          ],
+          "policy": "no truncation, no partial detail commit; adjust only via real resource_limit-triggered data, never auto-expand"
+        }
+      },
+      "g0_scoring": "G0 PASS with owner-accepted evidence substitutions: (a) paginated control inventory unobtainable; (b) no >30-turn thread in account. Do NOT claim nine-items-live-measured, paginated includeTurns control, or >30-turn live fixture."
     }
   },
   "probe": {

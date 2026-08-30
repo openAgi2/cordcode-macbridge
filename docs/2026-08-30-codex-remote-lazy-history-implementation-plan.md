@@ -371,6 +371,27 @@ Summary），明细展开按 owner 裁决执行并记录入 fixture 元数据。
   且 §3.0.7 零负结果触发** + T0.2 分层基线与资源画像 + 资源门裁决值 + T0.5 裁决或有证据 N/A
   + T0.6 候选路径裁决记录。
 
+**2026-08-30 G0 owner 裁决记录（四项全部批准，含约束；证据报告
+`docs/2026-08-30-codex-remote-lazy-history-g0-evidence-report.md`）**：
+
+1. **T0.5 legacy**：同意——仅在明确 `historyMode=legacy` 时保留旧全读路径；**不得作为 paginated
+   失败后的自动 fallback**；全读超时必须显式报错。
+2. **T0.6 resume 候选**：同意——仅对**已验证支持的 paginated 版本**启用
+   `resume(excludeTurns:true + initialTurnsPage)`；每个连接/session **只 attach 一次**；
+   未验证版本必须**预先选择**官方 metadata + turns/list baseline，不得先失败再静默 full-read。
+3. **G0.5 reasoning content**：同意——删除"完整思考"承诺，产品统一称**"思考摘要"**；
+   summary 为空时不补 placeholder；未来发现非空 content 须重新采样取证后再增加能力。
+4. **资源门（冻结层级）**：turns page limit 30；items request limit 5；单回合 **24 页或
+   512KB 任一先到即原子失败**；单 RPC 30s；**整个单回合拉取 90s 总 deadline**（不是
+   24×30s）；超限分别返回明确 `max_pages` / `max_bytes` / `timeout` reasonCode，不截断、
+   不提交部分明细。后续仅可依据真实 `resource_limit` 触发数据调整，不得自动扩大。
+
+**G0 记分方式（owner 指定）**：G0 记为 **owner 接受两项证据替代后的 PASS**——
+(a) paginated control inventory 不可获得（替代证据：官方源码/测试、cursor 链完整性、EOF、
+backwards round-trip、legacy 同通道对照）；(b) 账号无 >30 回合线程（替代证据：多页 items
+fixture + 官方分页不变量）。**不得宣称"九项实测达成"，亦不得宣称已取得 paginated includeTurns
+control 或 >30-turn live fixture。**
+
 #### 3.0.5 G0 必补九项（未验证内容清单）
 
 1. `thread/read` 元数据中的 `historyMode`（至少一个 owner 长会话；两态并存则分组）；
@@ -556,6 +577,11 @@ control inventory 改为**链路后暖态重试**（turns/items 分页链已把�
     older；live tail 同时推进时 syncRev 链不断；bridge restart/restore 后继续 older；upstream
     cursor stale → typed error + 恢复路径；**A 请求 older / B 停在首屏 / C full projection 三类
     连接各自内容与 revision 均正确；B 随后收 live turn 无 base mismatch/全量 recovery**。
+    **2026-08-30 owner 裁决修正**：G0 live 采集证明目标账号**不存在** >30 回合线程
+    （24/150 采样最深 25，attempt-010），故本矩阵的 ">30 回合 fixture" **不得引用
+    attempt-010 或任何 live fixture 冒充**；到 G2 前必须通过**真实 app-server 测试环境生成
+    确定性 >30 回合 fixture**（本地 app-server + 脚本造回合），或**复用官方分页测试基线**
+    （`thread_read.rs` 分页/EOF 用例形状）。此修正不阻塞 Phase 1 API 拆分。
 - T2.1 投影消费 Summary：历史路径改为消费 agent 的 Summary 历史；**desc 网络页先反转为
   oldest→newest 再入 reducer；加载更旧页只 prepend；turn id 去重；inclusive backwards cursor
   有 fixture 测试**。
@@ -629,7 +655,7 @@ control inventory 改为**链路后暖态重试**（turns/items 分页链已把�
 | 5 | Mac 端同会话发起新回合 | iOS live 同步照旧（live 零回归） |
 | 6 | 断网/代理切换后重连，重复 1-4、8 | 行为一致；无重复拉取、无风暴日志；执行状态不被误标 running；已加载明细不丢 |
 | 7 | 加载明细同时 Mac 端开始新回合 | 明细与新 turn 互不串扰（fence 生效） |
-| 8 | **>30 回合会话滚动到顶继续加载更早历史** | 第 31 回合以前的历史可达；连续 older 直到会话起点；无重复/无缺口；与 live 推进互不干扰（§2.4 窗口链） |
+| 8 | **>30 回合会话滚动到顶继续加载更早历史** | 第 31 回合以前的历史可达；连续 older 直到会话起点；无重复/无缺口；与 live 推进互不干扰（§2.4 窗口链）。**2026-08-30 修正：owner 账号无 >30 回合线程（G0 实测），本行真机验收以测试环境生成的长会话进行，或降级为窗口链单测 + owner 接受** |
 | 9 | **两台 iPhone 同会话，A 滚动加载旧历史，B 停在首屏不动** | B 列表顺序/内容不变、无旧回合插入、后续 live 消息照常到达且无 base mismatch（§2.4 per-connection delivery） |
 | 10 | （如适用）legacy 会话打开与展开 | 打开速度受益照常；明细展开行为符合 T0.5 owner 裁决（含明确不支持的情形），无静默 full fallback |
 
@@ -689,9 +715,11 @@ control inventory 改为**链路后暖态重试**（turns/items 分页链已把�
 
 ## 8. 交付物清单
 
-- [ ] `agent/codex-remote/testdata/phase0/live/`：turns/list（含 >30 回合翻页全链 + control
-      inventory 对照结果）、items/list（paginated 必测；legacy 按 target inventory 实测或附证据 N/A）、
-      thread/read(含 historyMode)
+- [ ] `agent/codex-remote/testdata/phase0/live/`：turns/list（**多页 turns 全链 fixture 按
+      2026-08-30 owner 裁决由 app-server 测试环境生成或复用官方分页测试基线——live 采集已证明
+      账号无 >30 回合线程；control inventory 对照以"不可获得（paginated 经 WSS 240s×3）+
+      legacy 对照 + 链内证据"的替代记录形式交付**）、items/list（paginated 必测；legacy 按
+      target inventory 实测或附证据 N/A）、thread/read(含 historyMode)
       脱敏 fixtures + 分层体积/耗时基线 + 单回合资源画像 + 资源门裁决值 + §3.0.7 负结果判定记录 +
       T0.6 `excludeTurns=true + initialTurnsPage` 候选裁决记录（含 `thread.turns == []` 断言）+
       legacy 裁决或 inventory-backed N/A 记录
