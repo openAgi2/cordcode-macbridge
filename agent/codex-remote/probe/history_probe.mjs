@@ -63,7 +63,13 @@ const CAPS = {
   // threads are all paginated), so discovery now sweeps the whole inventory
   // with a stride in addition to the recency head.
   discoveryThreads: 24,
-  discoveryPages: 4,
+  // Page-1 only since attempt 4: deeper discovery pages cold-load old threads
+  // server-side and can blow the RPC timeout (attempt-3 lesson); depth beyond
+  // one page is signaled by pageOneHasMore instead.
+  discoveryPages: 1,
+  // Full-chain pages may also cold-load; give them room under the idle-yield
+  // watchdog (a hung page still fails the page, not the run).
+  chainPageTimeoutMs: 90_000,
   turnsPageLimit: 30,
   turnsChainPages: 80,
   itemsPageLimit: 5,
@@ -271,14 +277,14 @@ function turnsOfResult(result) {
 
 // Walk thread/turns/list in one direction until EOF, cap, or error.
 // Returns page records (fixture-safe) plus raw turn ids (memory-only).
-async function walkTurnsPages(session, rawThreadId, { itemsView, sortDirection, rawStartCursor, limit, maxPages, note }) {
+async function walkTurnsPages(session, rawThreadId, { itemsView, sortDirection, rawStartCursor, limit, maxPages, note, timeoutMs }) {
   const pages = [];
   const rawTurnIds = [];
   let cursor = rawStartCursor ?? null;
   for (let page = 1; page <= maxPages; page += 1) {
     const params = { threadId: rawThreadId, limit, sortDirection, itemsView };
     if (cursor != null) params.cursor = cursor;
-    const { record, response } = await callWithLoadRetry(session, "thread/turns/list", params, { note: `${note}|page-${page}`, slim: true });
+    const { record, response } = await callWithLoadRetry(session, "thread/turns/list", params, { note: `${note}|page-${page}`, slim: true, ...(timeoutMs != null ? { timeoutMs } : {}) });
     const turns = turnsOfResult(response.result);
     if (response.error == null) for (const turn of turns) rawTurnIds.push(turn.id);
     pages.push({
@@ -465,6 +471,7 @@ async function main() {
     // ---- 2) discovery: recency head + strided sweep for depth/historyMode
     // coverage (legacy threads cluster in older inventory pages).
     const discovery = [];
+    fixture.data.discovery = discovery; // live reference: survives a mid-stage failure
     const pool = inventoryThreads.filter((t) => t.statusType !== "active");
     const head = pool.slice(0, 8);
     const stride = Math.max(1, Math.floor(pool.length / Math.max(1, CAPS.discoveryThreads - head.length)));
@@ -473,22 +480,40 @@ async function main() {
     for (const candidate of candidates) {
       const raw = rawFromRef(candidate.thread);
       if (raw == null) continue;
-      const { pages, rawTurnIds } = await walkTurnsPages(session, raw, {
-        itemsView: "summary", sortDirection: "desc", limit: CAPS.turnsPageLimit,
-        maxPages: CAPS.discoveryPages, note: `discovery|${candidate.thread}`,
-      });
-      const lastPage = pages[pages.length - 1];
-      discovery.push({
-        thread: candidate.thread,
-        historyMode: candidate.historyMode,
-        turnsSeen: rawTurnIds.length,
-        pagesWalked: pages.length,
-        reachedEofWithinCap: lastPage != null && lastPage.error !== true && lastPage.nextCursor == null && !lastPage.repeatedCursorDetected,
-        discovery: true,
-      });
+      try {
+        const { pages, rawTurnIds } = await walkTurnsPages(session, raw, {
+          itemsView: "summary", sortDirection: "desc", limit: CAPS.turnsPageLimit,
+          maxPages: CAPS.discoveryPages, note: `discovery|${candidate.thread}`,
+        });
+        const lastPage = pages[pages.length - 1];
+        discovery.push({
+          thread: candidate.thread,
+          historyMode: candidate.historyMode,
+          turnsSeen: rawTurnIds.length,
+          pagesWalked: pages.length,
+          pageOneHasMore: lastPage?.nextCursor != null,
+          reachedEofWithinCap: lastPage != null && lastPage.error !== true && lastPage.nextCursor == null && !lastPage.repeatedCursorDetected,
+          error: lastPage?.error === true ? (lastPage.record?.error?.code ?? "error") : null,
+          discovery: true,
+        });
+      } catch (error) {
+        // One slow/cold candidate must not kill the sweep (attempt-3 lesson).
+        discovery.push({
+          thread: candidate.thread,
+          historyMode: candidate.historyMode,
+          turnsSeen: null,
+          pagesWalked: 0,
+          pageOneHasMore: null,
+          reachedEofWithinCap: false,
+          error: redactErrorMessage(error.message) ?? "exception",
+          discovery: true,
+        });
+      }
     }
-    discovery.sort((a, b) => b.turnsSeen - a.turnsSeen);
-    fixture.data.discovery = discovery;
+    // Prefer a thread whose page 1 still has a nextCursor — guaranteed deeper
+    // than one page (>30 turns at limit 30), which is exactly the multi-page
+    // chain the §3.0.5 checklist needs; ties/fallback by page-1 turns seen.
+    discovery.sort((a, b) => (b.pageOneHasMore === true) - (a.pageOneHasMore === true) || (b.turnsSeen ?? 0) - (a.turnsSeen ?? 0));
     observe("discovery", { threads: discovery.length, deepest_turns: discovery[0]?.turnsSeen ?? 0 });
 
     const longest = discovery[0];
@@ -497,6 +522,7 @@ async function main() {
 
     // ---- 3) full battery on the longest thread
     const battery = { thread: longest.thread, historyMode: longest.historyMode, discoveryTurnsSeen: longest.turnsSeen };
+    fixture.data.longestThread = battery; // live reference: survives a mid-stage failure
 
     const metaRead = await callWithLoadRetry(session, "thread/read", { threadId: longestRaw }, { note: "meta-read" });
     battery.readMeta = {
@@ -529,7 +555,7 @@ async function main() {
 
     const summaryWalk = await walkTurnsPages(session, longestRaw, {
       itemsView: "summary", sortDirection: "desc", limit: CAPS.turnsPageLimit,
-      maxPages: CAPS.turnsChainPages, note: "chain|summary|desc",
+      maxPages: CAPS.turnsChainPages, note: "chain|summary|desc", timeoutMs: CAPS.chainPageTimeoutMs,
     });
     battery.summaryChain = summaryWalk.pages;
 
@@ -548,7 +574,7 @@ async function main() {
       const rawAnchor = rawCursorFromRef(anchorRef);
       const ascWalk = await walkTurnsPages(session, longestRaw, {
         itemsView: "summary", sortDirection: "asc", rawStartCursor: rawAnchor,
-        limit: CAPS.turnsPageLimit, maxPages: CAPS.turnsChainPages, note: "chain|summary|asc",
+        limit: CAPS.turnsPageLimit, maxPages: CAPS.turnsChainPages, note: "chain|summary|asc", timeoutMs: CAPS.chainPageTimeoutMs,
       });
       battery.backwardsChain = { anchoredOn: anchorRef, pages: ascWalk.pages };
     }
