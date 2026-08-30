@@ -279,19 +279,22 @@ func (p *EventPublisher) completeProjectionSnapshot(
 	}
 	delete(p.projectionFences, key)
 	p.mu.Unlock()
+	// Past this point p.mu is NOT held: the rollback paths below must use the
+	// self-locking public cleaner (never the *Locked variants), and shared-map
+	// reads must come from values captured under the lock above.
 	select {
 	case <-responseEnqueued:
 		if err := <-resultDone; err != nil {
-			p.clearConnWindowTurnsLocked(conn, admission.BackendID, admission.SessionID)
+			p.ClearConnWindowTurns(conn, admission.BackendID, admission.SessionID)
 			return err
 		}
 		return nil
 	case <-time.After(bridgeWriteTimeout):
 		slog.Info("event-publisher: projection snapshot delivery timeout closing conn",
 			"remote", conn.RemoteAddr(),
-			"generation", p.connectionGenerations[conn],
+			"generation", generation,
 		)
-		p.clearConnWindowTurnsLocked(conn, admission.BackendID, admission.SessionID)
+		p.ClearConnWindowTurns(conn, admission.BackendID, admission.SessionID)
 		_ = conn.Close()
 		return fmt.Errorf("projection snapshot response delivery timeout")
 	}

@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -456,5 +457,105 @@ func TestProjectionWindowFenceHeldTurnRegistrationRollsBackOnFailure(t *testing.
 	publisher.mu.Unlock()
 	if len(held) != 0 {
 		t.Fatalf("held-turn registration must roll back on failed completion: %+v", held)
+	}
+}
+
+// Reopen round 2: the two ASYNC delivery-failure branches (post p.mu release)
+// must roll the held-turn registration back through the self-locking cleaner —
+// and the tests below exercise them deterministically under -race, which the
+// saturated-sink test (capacity check found while still holding the lock)
+// never could.
+
+func fenceWaitFor(t *testing.T, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("condition never became true")
+}
+
+func heldTurnEntries(publisher *EventPublisher, conn Connection) int {
+	publisher.mu.Lock()
+	defer publisher.mu.Unlock()
+	return len(publisher.projectionHeldTurns[conn])
+}
+
+// Branch 1: the response was already enqueued when the connection died — the
+// sink's pump reports the failure through resultDone.
+func TestProjectionWindowFenceRollsBackWhenResponseDeliveryFails(t *testing.T) {
+	_, publisher := readyProjectionPublisher(t, "epoch-p02b-delivery-fail")
+	release := make(chan struct{})
+	conn := &gatedSnapshotFenceConn{release: release}
+	publisher.RegisterConnection(conn)
+	publisher.SetConnSyncV2(conn, true)
+	publisher.broadcaster.Subscribe(conn, SubscriptionKey{BackendID: "codex", SessionID: "s1"})
+	publisher.SetConnProjectionDeliveryMode(conn, "codex", "s1", ProjectionDeliveryWindow)
+	publisher.broadcaster.Subscribe(conn, SubscriptionKey{BackendID: "filler", SessionID: "f1"})
+
+	admission := beginFence(t, publisher, conn)
+	// Park the pump inside the first gated write so the completion's result
+	// frame stays queued behind it.
+	publisher.PublishProjectionPatch("filler", "f1", sequentialPatch(1))
+
+	done := make(chan error, 1)
+	go func() {
+		done <- publisher.CompleteProjectionSnapshotWithHeldTurns(conn, admission, "r-delivery", nil, []string{"T1"})
+	}()
+	// The completion has now committed the registration under the lock and is
+	// parked in the delivery select with the result queued.
+	fenceWaitFor(t, func() bool {
+		publisher.mu.Lock()
+		defer publisher.mu.Unlock()
+		sink := publisher.sinks[conn]
+		return sink != nil && len(sink.queue) >= 1
+	})
+	// The connection dies before the pump reaches the result frame.
+	conn.Close()
+	close(release)
+
+	if err := <-done; err == nil {
+		t.Fatal("failed result delivery must surface an error")
+	}
+	if got := heldTurnEntries(publisher, conn); got != 0 {
+		t.Fatalf("held-turn registration must roll back on failed delivery: %d entries", got)
+	}
+}
+
+// Branch 2: the write never completes inside bridgeWriteTimeout.
+func TestProjectionWindowFenceRollsBackOnDeliveryTimeout(t *testing.T) {
+	oldTimeout := bridgeWriteTimeout
+	bridgeWriteTimeout = 50 * time.Millisecond
+	defer func() { bridgeWriteTimeout = oldTimeout }()
+
+	_, publisher := readyProjectionPublisher(t, "epoch-p02b-timeout")
+	release := make(chan struct{})
+	defer close(release)
+	conn := &gatedSnapshotFenceConn{release: release}
+	publisher.RegisterConnection(conn)
+	publisher.SetConnSyncV2(conn, true)
+	publisher.broadcaster.Subscribe(conn, SubscriptionKey{BackendID: "codex", SessionID: "s1"})
+	publisher.SetConnProjectionDeliveryMode(conn, "codex", "s1", ProjectionDeliveryWindow)
+	publisher.broadcaster.Subscribe(conn, SubscriptionKey{BackendID: "filler", SessionID: "f1"})
+
+	admission := beginFence(t, publisher, conn)
+	publisher.PublishProjectionPatch("filler", "f1", sequentialPatch(1))
+
+	start := time.Now()
+	err := publisher.CompleteProjectionSnapshotWithHeldTurns(conn, admission, "r-timeout", nil, []string{"T1"})
+	if err == nil || !strings.Contains(err.Error(), "delivery timeout") {
+		t.Fatalf("err = %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("timeout branch took %s — the shrunk var was not honored", elapsed)
+	}
+	if !conn.isClosed() {
+		t.Fatal("delivery timeout must close the connection")
+	}
+	if got := heldTurnEntries(publisher, conn); got != 0 {
+		t.Fatalf("held-turn registration must roll back on timeout: %d entries", got)
 	}
 }
