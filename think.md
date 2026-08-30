@@ -1,5 +1,153 @@
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
 
+## 2026-08-29～30 Codex Desktop Remote：双端接力、权威状态与 runtime CPU 收口
+
+这轮把 Codex Desktop 从“能列 thread、偶尔能看到 live event”推进到可在 iPhone 与
+Mac Codex App 之间双向发送、交替接力，并补齐模型/effort、创建、重命名、归档、删除、
+目录归属和标题同步。真正困难的部分不是某个 RPC，而是分清三类不同职责：controller
+WSS 负责实时运输，官方 app-server JSON-RPC 负责权威 thread 状态，iOS projection 只是
+前两者的可重建视图。把三者混成一个“消息同步接口”，就会反复出现假在线、旧标题、目录
+漂移、操作延迟和 CPU 空转。
+
+### 1. “无法加载会话投影”不能靠伪造历史兜底
+
+最初 iOS 能列出 Codex Desktop session，但打开任意 session 都显示“无法加载会话投影”。
+原因是 list 只证明 thread 存在，不等于本地已有可展示的 turn；hydrate 路径没有从官方
+thread 状态建立 projection。
+
+修复按 `/Users/jacklee/Projects/codex` 的边界对齐：
+
+1. 用官方 `thread/read(includeTurns)` 获取权威历史，用 `thread/resume` 建立该 thread 的
+   live 观察关系；不从 JSONL 猜历史，也不制造空快照或假成功。
+2. 历史和 live event 进入同一 projection reducer；断线后可以由权威 snapshot 重建，
+   而不是要求所有增量永不丢失。
+3. 打开 session 本身就必须 attach/observe，不能等 iOS 首次发送消息后才开始 relay。
+
+因此“只打开 session，Mac 发消息但 iOS 不更新”不是缺少 cursor，而是观察生命周期没有
+在 open 时建立。官方 controller envelope 的 reconnect cursor 拿不到，也不妨碍 live
+同步；当前可验证的机制是 `thread/resume` 订阅，重连一致性由权威 read、revision/fence
+和幂等 reducer 保证。不得为了补 cursor 发明私有协议或用文件轮询冒充官方 live 流。
+
+另一个隐蔽问题是连接身份不一致：device registry 注册的是原始连接，而 broadcaster
+持有 adapter，关闭时无法用同一个 key 注销，导致死连接仍被计为订阅者并触发 zero-target
+重绑。注册、广播、注销现在使用同一 adapter identity，并在选 target 前检查连接存活。
+
+### 2. 双端接力的核心是一个 thread、一套归属规则
+
+iOS→Mac 和 Mac→iOS 分别打通并不等于“接力”完成。必须保证外部 Mac turn、iOS 发起的
+turn、冷 hydrate 出来的 turn 都进入同一个 session projection，并使用一致的 turn/item
+identity 与 ownership 归并。否则常见表现是：两端都能收到消息，但交替回合错位、重复、
+或只在发送端可见。
+
+最终验证通过的能力包括：
+
+- iOS 与 Mac Codex App 双向发送、流式同步和交替接力；
+- 只打开 session、不从 iOS 发送，也能收到 Mac 新 turn；
+- 模型列表与 reasoning effort 来自 Desktop 官方能力，而不是 iOS 写死；
+- reconnect 后以权威 thread 状态恢复，旧 generation 的事件不能污染当前 projection。
+
+### 3. stream_id 是 generation fence，不是“看到不同就重连”
+
+数据面连续暴露了三个事故：stream 死亡后不重连、重连没有退避、以及旧 `stream_id`
+触发重连风暴。第三个最危险：token 刷新或旧订阅残留可能让上一 generation 的 frame 晚到；
+若把任何 stream_id 不一致都解释为当前流死亡，客户端会主动杀死刚绑定的新流，形成自激。
+
+稳定规则是：
+
+1. 当前连接成功 bind 后固定该 generation 的 expected stream_id。
+2. 旧 stream_id frame 只丢弃，不允许它撤销、重绑或替换当前 generation。
+3. 真正的 transport loss 才进入有上限的指数退避重连；成功稳定后再复位退避。
+4. projection/revision 同样必须带 generation fence，避免迟到事件写入新连接的状态。
+
+判别证据也要区分：刷新 token 后偶发一次 stale stream_id drop 可以是正常历史残留；如果
+“新流绑定后约 2 秒死亡”连续重复，才是 stream_id 风暴复发。这个 2 秒模式比单看日志里
+出现 `stream_id mismatch` 更可靠。
+
+### 4. session mutation 必须写权威源，并立即回写本地 catalog
+
+重命名、归档、删除最初直接返回“不支持”；接入官方 RPC 后功能能执行，但 iOS 仍比 Mac
+晚十几秒看到结果。原因不是 RPC 慢，而是 iOS 把 mutation 的可见性错误地交给下一轮
+session discovery：Mac 已收到官方状态，iOS 还在等轮询再次发现。
+
+修复原则：mutation response 是本次操作的权威确认，应立即更新/删除本地 catalog 并广播；
+官方 lifecycle signal 负责失效和交叉校验，周期 discovery 只是安全网，不是操作反馈通道。
+同一原则适用于创建、归档、删除和重命名，避免每个动作各写一套延迟刷新逻辑。
+
+### 5. cwd 与 title 都只能有一个权威来源
+
+在 iOS 的 `chat` 目录新建 session 后，session 曾被放到 `jacklee` 目录；消息页一度显示
+“西游记故事”，Mac 却显示 `/Users/jacklee/Projects/chat`，列表刷新后 iOS 又变成 `chat`。
+这是两个独立但相互放大的身份问题：
+
+- 创建链路没有把用户选中的 cwd 完整传到官方 thread/start 路径，catalog 只能按默认目录
+  归类；
+- 页面临时生成标题、cwd basename 和官方 thread name 同时被当作 title，刷新顺序决定
+  最终显示什么。
+
+修复后，选择目录产生的规范 cwd 沿创建请求完整传递，后续 catalog 只按官方返回的 cwd
+归类；生成标题通过官方 thread name/rename RPC 持久化，再从官方 metadata 读回。页面不能
+把 cwd basename 当作会话标题，也不能保留一个只存在于本地 projection 的“更漂亮标题”。
+
+### 6. 高 CPU 的第一根因是 discovery 自激，不是连接风暴
+
+最初 runtime 持续占用约 18%～26% CPU，sys time 高于 user time。日志证明 WSS 稳定、没有
+反复 `stream lost`，真正的循环是：
+
+1. 全量 `thread/list` 指纹请求超过 8 秒调用截止线而失败；
+2. 轻量 head probe 约 500ms 成功，但失败路径没有更新指纹基线；
+3. head 与旧基线比较后永远被判断为“变化”；
+4. 再触发全量刷新、目录过滤、projection 克隆和广播；额外负载又让下一次全量请求更慢。
+
+这是典型的快慢请求不对称造成的正反馈。修复不是单纯把轮询周期调大，而是：错误态不能
+被解释为“内容变化”；head/full refresh 分别退避；只有证实 head 变化才做全量刷新；刷新
+失败继续计入退避。对已有官方 lifecycle signal 的 Codex Desktop backend，事件驱动 catalog
+失效，保留 60 秒安全扫描，不再并行跑 3 秒 head probe。head fingerprint 也不包含会频繁
+抖动的 `updatedAt`，只表达 session ID/顺序等真正的目录结构变化。
+
+Grok 侧还发现 title enrichment 对每个无标题 session 都递归 `WalkDir`。已改成按
+`sessions/<url.PathEscape(cwd)>/<sessionID>` 直达原生路径，只在识别到 legacy/stale 布局时
+处理旧结构，避免正常路径每轮扫描整棵目录树。
+
+### 7. 剩余 CPU 不是一个问题，要区分 idle、冷打开和活跃 turn
+
+消除 discovery 风暴后仍观察到 runtime CPU 偏高，继续拆出了三个放大器：
+
+- iPhone 已断开时，每个 token event 都尝试 zero-target rebind 并写 Info 日志；现在无设备
+  直接退出，并对同 session 的重绑加冷却。
+- projection 诊断为了统计大小，在 Info 路径把 patch 和完整 response 再 JSON marshal 一遍；
+  现在这些昂贵指标只在 Debug 开启时计算。
+- 每个 `tool_started/tool_finished` 都携带并编码不断增长的完整 turn shell。现在记录已发布
+  shell：首次 patch 带 shell，后续工具更新只发送紧凑 `upsert_tool`；权威 snapshot restore
+  会恢复这份已发布状态，避免重连后再次全量复制。
+
+一次真实大 session 的冷投影达到 `responseBytes=24,013,835`，其中 tool result
+`22,215,211` bytes、`1,653` parts，hydrate 约 17.5 秒；随后 journal delta 只有 10,550 bytes，
+约 4.5ms。这说明冷打开大历史确实有不可消除的真实成本，但不能再让日志统计和每个工具
+event 把这份成本重复数遍。正式路径也不能用截断 tool result、缓存假快照或 placeholder
+掩盖问题。
+
+最终覆盖安装的 runtime 版本为 `b45463c2ded8`。空闲 `top -l 8` 样本约为
+`0.0, 0.5, 0.9, 0.6, 1.2, 1.2, 0.9, 1.0%`，`ps` 约 0.6%；偶发安全扫描峰值约
+3.8%。这与最初持续 18%～26% 已不是同一种状态。活跃模型流、大 session 首次 hydrate
+仍会产生真实 CPU，验收时必须分别测 idle、冷打开和活跃 turn，不能混成一个平均值。
+
+### 8. 复发时先看症状形状
+
+- iOS 只能看到自己发送后的新消息：先查 open 时是否建立 observe/`thread/resume`，不要先追 cursor。
+- 新 data stream 绑定后约 2 秒反复死亡：查 stream_id generation fence 与旧 frame 处理。
+- `thread/list` 超时后紧跟 head changed、全量刷新并循环：查 discovery 错误态和退避。
+- Mac mutation 已生效、iOS 十几秒后才变化：查 mutation response 是否直接更新 catalog。
+- 新 session 跑到用户根目录：查 selected cwd 是否完整传到官方创建 RPC，而不是修列表过滤。
+- 标题从语义标题退化为目录名：查是否存在本地临时 title/cwd basename/官方 name 多重真相。
+- idle 无客户端仍高 CPU：查 discovery、zero-target rebind 和 Info 级序列化。
+- 只在大 session 冷打开时高：先量 snapshot/tool-result 大小；只在活跃 turn 高，则量 patch
+  频率、`UpsertTurnsBytes` 和 shell 是否被重复携带。
+
+这轮最重要的工程结论是：**实时事件负责低延迟，官方 thread 状态负责真相，projection
+负责可重建展示；任何一层都不能越权成为另一层的 fallback。** 连接风暴、轮询风暴、标题
+漂移和操作延迟看似四类 bug，本质都是错误地让“暂时可见的局部状态”替代了权威状态或
+明确的生命周期。
+
 ## 2026-08-28 Codex Remote Phase 1 已开始（identity）
 
 Owner 改写 Gate P0 后开工。`agent/codex-remote` 注册独立 `BackendID=codex-remote`，
