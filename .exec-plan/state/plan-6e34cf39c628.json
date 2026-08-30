@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-31T01:49:00+08:00",
+  "updated_at": "2026-08-31T02:25:00+08:00",
   "todos": [
     {
       "id": "phase0-probe-impl",
@@ -1164,23 +1164,28 @@
       "id": "phase5-kernel-manifest",
       "title": "F3 kernel manifest commit path — turn manifest summary (no parts) + partial/loading-progress/loaded/failed states + checkpoint bump",
       "description": "SessionTurn gains detail manifest summary fields (detailLoadState v2 semantics incl partial, manifestRev, itemCount, totalBytes); turnStateOps manifest op atomic commit WITHOUT parts (v1 replace_parts path stays for deprecated v1); state machine notRequested->loading(progress)->partial->loaded, failed(reasonCode) retryable with manifest retained; checkpoint schema version bump + restore validation; unknown manifest op decode = fail-closed (iOS-side discipline mirrored from d6e1515f). Tests: manifest commit states, generation fence, stale_turn, empty-detail loaded state-only, checkpoint roundtrip.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "impl-tests-regression-triple",
       "depends_on": [
         "phase5-contract-freeze"
       ],
       "source": "owner-final-adjudication-2026-08-30",
-      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge | 2026-08-31 CLOSED at 6b25f0e per frozen model (protocol §11.8 + plan §3.0 items 6/7/8): CommitTurnStateOpsV2 reducer+kernel gate is the sole manifest-summary mutation producer (validation-first incl. monotonicity/loaded-terminal, P0-1 drain-first, one-rev state-only patch with manifest fields); generation bump at MergeHistoricalTurnDetail zeroes the manifest baseline; checkpoint v12 + fail-closed turn-detail restore validation (v11 rebuilds); restore orphan hook switched to RecoverOrphanDetailLoadingV2 (failed/interrupted CARRYING retained manifest; partial not an orphan)",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "pass",
+        "method": "go test ./go-bridge/ -run \"TestCommitTurnStateOpsV2|TestGenerationBumpResets|TestRecoverOrphanDetailLoadingV2|TestCheckpointV12|TestCheckpointV11Rejected|TestCheckpointTurnDetailFieldValidation\" -count=1",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "F3 landed (6b25f0e): turn_detail_kernel_commit.go CommitTurnStateOpsV2 (reducer + kernel READY gate) mirroring the frozen v1 commit structure - ApplyTurnStateOpsV2 validation before any mutation or drain, staged-live drain-first chain head, one rev/one state-only patch carrying ops verbatim with manifestRev/itemCount/totalBytes; MergeHistoricalTurnDetail bump site resets DetailManifestRev/ItemCount/TotalBytes to zero with the generation (old-gen V2 ops fail ErrTurnStateStale; post-merge loaded terminal for V2 by design); checkpoint schema v11->v12 + validateTurnDetailCheckpointFields fail-closed restore rules (state closed set incl. partial, reasonCode iff failed, non-negative manifest, item summary implies manifestRev); restore hook RecoverOrphanDetailLoadingV2 carries retained manifest.",
+        "artifacts": [
+          "go-bridge/turn_detail_kernel_commit.go",
+          "go-bridge/turn_detail_kernel_commit_test.go",
+          "go-bridge/projection_detail_merge.go",
+          "go-bridge/projection_kernel.go"
+        ],
+        "checked_at": "2026-08-31T02:25:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -1386,23 +1391,28 @@
       "id": "phase5-kernel-manifest-tests",
       "title": "F3 kernel manifest commit path — TESTS",
       "description": "Unit tests for phase5-kernel-manifest: SessionTurn gains detail manifest summary fields (detailLoadState v2 semantics incl partial, manifestRev, itemCount, totalBytes); turnStateOps manifest op atomic commit WITHOUT parts (v1 replace_parts path stays for deprecated v1); state machine notRequested->loading(progress)->partial->loaded, failed(reasonCode) retryable with manifest retained; checkpoint schema version bump + restore validation; unknown manifest op decode = fail-closed (iOS-side discipline mirrored from d6e1515f). Deliver the Tests: items listed in impl todo as formal suite; run targeted + -race x2.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "impl-tests-regression-triple",
       "depends_on": [
         "phase5-kernel-manifest"
       ],
       "source": "owner-final-adjudication-2026-08-30",
-      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge | 2026-08-31 CLOSED at 6b25f0e per frozen model (protocol §11.8 + plan §3.0 items 6/7/8): CommitTurnStateOpsV2 reducer+kernel gate is the sole manifest-summary mutation producer (validation-first incl. monotonicity/loaded-terminal, P0-1 drain-first, one-rev state-only patch with manifest fields); generation bump at MergeHistoricalTurnDetail zeroes the manifest baseline; checkpoint v12 + fail-closed turn-detail restore validation (v11 rebuilds); restore orphan hook switched to RecoverOrphanDetailLoadingV2 (failed/interrupted CARRYING retained manifest; partial not an orphan)",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "pass",
+        "method": "go test ./go-bridge/ -run \"TestCommitTurnStateOpsV2|TestGenerationBumpResets|TestRecoverOrphanDetailLoadingV2|TestCheckpointV12|TestCheckpointV11Rejected|TestCheckpointTurnDetailFieldValidation\" -count=1",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "5 new tests: manifest chain with terminal/monotonicity rejects consuming NO rev; drain-first (staged live delta survives a failed validation, then rides next successful chain); kernel gate (absent session rejected, ready harness commit shape+rev); bump-reset (manifest zeroed, old-gen stale, fresh-gen zero baseline via ApplyTurnStateOpsV2, post-merge loaded terminal); V2 orphan recovery (retained manifest carried, partial untouched, no-op false). Checkpoint tests updated to v12 round-trip (manifest fields + failed-with-retained-manifest persist) / v11 rejection / validator table 6 negatives + legal shapes.",
+        "artifacts": [
+          "go-bridge/turn_detail_kernel_commit.go",
+          "go-bridge/turn_detail_kernel_commit_test.go",
+          "go-bridge/projection_detail_merge.go",
+          "go-bridge/projection_kernel.go"
+        ],
+        "checked_at": "2026-08-31T02:25:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -1410,23 +1420,28 @@
       "id": "phase5-kernel-manifest-regression",
       "title": "F3 kernel manifest commit path — REGRESSION",
       "description": "Regression gate for phase5-kernel-manifest: full go-bridge + agent/codex-remote suites (or iOS full targeted set per stash-compare baseline discipline), no new failures vs recorded baseline, v1 deprecated path still green during transition.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "impl-tests-regression-triple",
       "depends_on": [
         "phase5-kernel-manifest-tests"
       ],
       "source": "owner-final-adjudication-2026-08-30",
-      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge | 2026-08-31 CLOSED at 6b25f0e per frozen model (protocol §11.8 + plan §3.0 items 6/7/8): CommitTurnStateOpsV2 reducer+kernel gate is the sole manifest-summary mutation producer (validation-first incl. monotonicity/loaded-terminal, P0-1 drain-first, one-rev state-only patch with manifest fields); generation bump at MergeHistoricalTurnDetail zeroes the manifest baseline; checkpoint v12 + fail-closed turn-detail restore validation (v11 rebuilds); restore orphan hook switched to RecoverOrphanDetailLoadingV2 (failed/interrupted CARRYING retained manifest; partial not an orphan)",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "pass",
+        "method": "go test ./go-bridge/ -run \"TestCommitTurnStateOpsV2|TestGenerationBumpResets|TestRecoverOrphanDetailLoadingV2|TestCheckpointV12|TestCheckpointV11Rejected|TestCheckpointTurnDetailFieldValidation\" -count=1",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "go test ./go-bridge/ -count=1 full suite 67.2s ok (includes turn-items/window/detail-merge/checkpoint surfaces); targeted -race ok; go build ./... ok.",
+        "artifacts": [
+          "go-bridge/turn_detail_kernel_commit.go",
+          "go-bridge/turn_detail_kernel_commit_test.go",
+          "go-bridge/projection_detail_merge.go",
+          "go-bridge/projection_kernel.go"
+        ],
+        "checked_at": "2026-08-31T02:25:00+08:00",
         "upstream_anchor": null
       }
     },

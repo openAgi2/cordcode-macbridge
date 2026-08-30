@@ -1157,7 +1157,12 @@ manifestRev/itemCount/totalBytes **单调不倒退**（failed/重试 op 必须�
 manifest 全量，零值清空即拒绝）；`loaded` 在同一 generation 内是**终态**（仅接受同
 manifestRev 的幂等重复；partial/loading/failed 回退全部拒绝）。generation 变更
 （回合重新激活）在 bump 提交点重置 manifest 基线（新 truth = 全新明细状态），故上述
-规则天然按 generation 生效。
+规则天然按 generation 生效。*实现锚点（F3，6b25f0e）*：以上规则的唯一提交通道 =
+`CommitTurnStateOpsV2`（校验先行 + P0-1 drain-first + 单 rev state-only patch）；
+bump 重置位 = detail merge 的 `TurnGeneration++`；checkpoint 升 **v12**（restore
+fail-closed 校验 turn detail 字段一致性，v11 重建）；restore 孤儿恢复 = `loading →
+failed(interrupted)` **携带保留 manifest**（partial 不是孤儿——进度在 detail store，
+续传即可）。
 
 #### `session_turn_items`（v2 语义）
 
