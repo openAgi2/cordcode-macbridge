@@ -404,6 +404,12 @@ func Main() {
 	// returns to the frozen full-projection path, no data is touched, no legacy writer
 	// returns. Undeclared/flag-off peers are byte-identical to today by contract.
 	server.SetProjectionWindowEnabled(true)
+	// turn_detail_lazy_v1 release gate (unified-bridge-protocol §11.7; frozen release
+	// ordering — client first, server flip last): the iOS Phase 3 client shipped on
+	// 2026-08-30 (descriptor-gated entry, session_turn_items state machine, completion =
+	// appliedRev >= ack.syncRev). Rollback = set turnDetailLazyProductionEnabled false:
+	// the capability stops echoing and every peer is byte-identical to today.
+	server.SetTurnDetailLazyEnabled(turnDetailLazyProductionEnabled)
 	serverDisplayName := "CordCode Link"
 	if mgmtSrv != nil {
 		serverDisplayName = mgmtSrv.DisplayName()
@@ -512,6 +518,13 @@ func Main() {
 		}
 		// projection_window_v1 relay path mirrors the direct hello negotiation exactly.
 		if !server.negotiateProjectionWindowV1(ack, &hello, conn) {
+			conn.SendJSON(ack)
+			return
+		}
+		// turn_detail_lazy_v1 relay path mirrors the direct hello negotiation exactly
+		// (§11.7: echo only when the rollout flag is on and the client declared the
+		// capability with its session_sync_v2 prerequisite).
+		if !server.negotiateTurnDetailLazyV1(ack, &hello, conn) {
 			conn.SendJSON(ack)
 			return
 		}

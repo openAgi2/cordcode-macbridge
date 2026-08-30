@@ -252,11 +252,14 @@ const projectionWindowProductionEnabled = false
 // get_session_projection_window.
 func (s *Server) SetProjectionWindowEnabled(enabled bool) { s.projectionWindowEnabled = enabled }
 
-// turnDetailLazyProductionEnabled stays false until the iOS Phase 3 replica and
-// the release gates ship (same frozen release ordering as projection_window_v1:
-// client first, server flip last). Tests enable the producer through
-// SetTurnDetailLazyEnabled; production must not.
-const turnDetailLazyProductionEnabled = false
+// turnDetailLazyProductionEnabled flipped true on 2026-08-30 (lazy-history plan
+// Phase 3): the iOS client shipped first — entry gating on this descriptor
+// capability, session_turn_items request state machine, completion =
+// appliedRev >= ack.syncRev — and G2 closed across three owner review rounds.
+// Frozen release ordering honored: client first, server flip last. Rollback =
+// set false: the capability stops echoing, session_turn_items answers
+// unsupported_capability, and every peer is byte-identical to today.
+const turnDetailLazyProductionEnabled = true
 
 // SetTurnDetailLazyEnabled gates the turn_detail_lazy_v1 capability
 // advertisement (unified-bridge-protocol.md §11.7 / bridge-v1.md). When true
