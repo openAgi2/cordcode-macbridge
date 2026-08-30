@@ -17,7 +17,8 @@
         "parts": [
           {
             "type": "text",
-            "text": "MOCK:STREAM catalog first turn"
+            "text": "MOCK:STREAM catalog first turn",
+            "itemId": "item-1"
           }
         ]
       },
@@ -28,7 +29,8 @@
           {
             "type": "text",
             "text": "MOCK:STREAM catalog first turn\u003c0\u003e MOCK:STREAM catalog first turn\u003c1\u003e MOCK:STREAM catalog first turn\u003c2\u003e MOCK:STREAM catalog first turn\u003c3\u003e MOCK:STREAM catalog first turn\u003c4\u003e MOCK:STREAM catalog first turn\u003c5\u003e MOCK:STREAM catalog first turn\u003c6\u003e MOCK:STREAM catalog first turn\u003c7\u003e MOCK:STREAM catalog first turn\u003c8\u003e MOCK:STREAM catalog first turn\u003c9\u003e",
-            "presentation": "final"
+            "presentation": "final",
+            "itemId": "item-2"
           }
         ]
       }
@@ -43,7 +45,8 @@
         "parts": [
           {
             "type": "text",
-            "text": "MOCK:REASON history reasoning sample"
+            "text": "MOCK:REASON history reasoning sample",
+            "itemId": "item-3"
           }
         ]
       },
@@ -53,12 +56,14 @@
         "parts": [
           {
             "type": "reasoning",
-            "text": "mock summary one\nmock summary two"
+            "text": "mock summary one\nmock summary two",
+            "itemId": "item-4"
           },
           {
             "type": "text",
             "text": "history reasoning sample(0) history reasoning sample(1) history reasoning sample(2) history reasoning sample(3) history reasoning sample(4) history reasoning sample(5) history reasoning sample(6) history reasoning sample(7) history reasoning sample(8) history reasoning sample(9)",
-            "presentation": "final"
+            "presentation": "final",
+            "itemId": "item-5"
           }
         ]
       }

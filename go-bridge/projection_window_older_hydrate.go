@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -72,6 +73,17 @@ func (h *Handlers) producerHasOlderUpstreamFact(backendID, sessionID string) boo
 func (h *Handlers) loadProducerState(backendID, sessionID string) *CodexProducerState {
 	if h == nil || h.projectionKernel == nil {
 		return nil
+	}
+	// The cold-open seed may still be inside its post-commit persist window:
+	// CommitHydrateTransaction releases Done-waiters BEFORE the runner's
+	// persistCodexProducerSeed hook runs, so a same-moment older walk can read
+	// here between the two. The in-memory seed is the freshest page-1 fact and
+	// wins over any on-disk claim from a previous epoch; it is peeked, never
+	// consumed (the persist hook owns the LoadAndDelete).
+	if raw, ok := h.hydrateProducerSeeds.Load(projectionDeliveryKey(backendID, sessionID)); ok {
+		if seed, ok := raw.(*CodexProducerState); ok {
+			return seed
+		}
 	}
 	state, err := h.projectionKernel.LoadCodexProducerState(backendID, sessionID)
 	if err != nil || state == nil {
@@ -219,8 +231,118 @@ func (h *Handlers) saveProducerFact(backendID, sessionID, nextCursor string) (bo
 }
 
 func (h *Handlers) saveProducerState(backendID, sessionID string, state CodexProducerState) error {
+	h.producerWritesMu.Lock()
+	defer h.producerWritesMu.Unlock()
+	return h.saveProducerStateLocked(backendID, sessionID, state)
+}
+
+// saveProducerStateLocked is the lock-free writer; the caller holds
+// producerWritesMu (persistCodexProducerSeed's guard+write critical section).
+func (h *Handlers) saveProducerStateLocked(backendID, sessionID string, state CodexProducerState) error {
 	if h.projectionKernel == nil {
 		return nil
 	}
 	return h.projectionKernel.SaveCodexProducerState(backendID, sessionID, state)
+}
+
+// streamCodexRemoteSummaryProjectionEvents is the T2.1 cold-hydrate source for
+// codex-remote: ONE Summary page (plan §2.1 — desc network page 1, page size =
+// the agent's frozen turns/list limit 30, already reversed ascending by the
+// pager). This is where includeTurns=true finally leaves the production path;
+// the agent's compat full read remains for probe/baseline use only. The
+// upstream cursor fact is recorded as a producer seed and persisted AFTER the
+// hydrate commits (persistCodexProducerSeed) so a failed hydrate never leaves a
+// stale "older upstream" claim behind.
+func (h *Handlers) streamCodexRemoteSummaryProjectionEvents(
+	ctx context.Context,
+	pager core.UpstreamHistoryPager,
+	backendID, sessionID string,
+	emit func(projectionHydrateEvent) bool,
+) error {
+	page, err := pager.ReadUpstreamHistoryPage(ctx, sessionID, "")
+	if err != nil {
+		return err
+	}
+	for _, ev := range turnScopedHistoryTurnToProjectionEvents(page.Turns) {
+		if !emit(ev) {
+			return nil
+		}
+	}
+	seed := CodexProducerState{
+		HasOlderUpstream:   page.NextCursor != "",
+		UpstreamNextCursor: page.NextCursor,
+		UpdatedAt:          time.Now().UTC(),
+	}
+	// Boundary = the oldest MAPPED turn (the kernel front after commit).
+	for _, turn := range page.Turns {
+		if turn.TurnID != "" {
+			seed.BoundaryTurnID = turn.TurnID
+			break
+		}
+	}
+	if seed.HasOlderUpstream && seed.BoundaryTurnID == "" {
+		// Pathological page (cursor claims more upstream but nothing mappable
+		// landed): an empty kernel cannot serve older walks anyway — record EOF
+		// rather than an invalid boundary-less claim.
+		seed.HasOlderUpstream = false
+		seed.UpstreamNextCursor = ""
+	}
+	h.hydrateProducerSeeds.Store(projectionDeliveryKey(backendID, sessionID), &seed)
+	return nil
+}
+
+// persistCodexProducerSeed runs AFTER a successful codex-remote hydrate commit:
+// it installs the page-1 producer fact, anchored at the committed kernel front
+// (re-asserted — the commit gate may have merged live appends at the tail, but
+// the front must still be the seeded page's oldest turn).
+func (h *Handlers) persistCodexProducerSeed(backendID, sessionID string, committed SessionProjection) {
+	key := projectionDeliveryKey(backendID, sessionID)
+	raw, ok := h.hydrateProducerSeeds.Load(key)
+	if !ok {
+		return
+	}
+	seed := *raw.(*CodexProducerState)
+	// Lost-update guard: an older walk (or its stale recovery) may have advanced
+	// the persisted fact while this seed sat in its post-commit persist window —
+	// those saves all stamp UpdatedAt=now, i.e. strictly after the seed. The
+	// newer persisted state wins; the seed is consumed either way.
+	h.producerWritesMu.Lock()
+	defer h.producerWritesMu.Unlock()
+	if disk, derr := h.projectionKernel.LoadCodexProducerState(backendID, sessionID); derr == nil && disk != nil {
+		if disk.UpdatedAt.After(seed.UpdatedAt) {
+			h.hydrateProducerSeeds.CompareAndDelete(key, raw)
+			return
+		}
+	}
+	if len(committed.Turns) > 0 {
+		if seed.BoundaryTurnID != "" && committed.Turns[0].TurnID != seed.BoundaryTurnID {
+			// Commit reordered/pruned the front (unexpected): anchor at the real
+			// front only when the seeded boundary survived; otherwise drop the
+			// claim — the older walk re-derives honestly on demand.
+			found := false
+			for _, turn := range committed.Turns {
+				if turn.TurnID == seed.BoundaryTurnID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				h.hydrateProducerSeeds.CompareAndDelete(key, raw)
+				return
+			}
+		}
+		seed.BoundaryTurnID = committed.Turns[0].TurnID
+	} else if seed.HasOlderUpstream {
+		h.hydrateProducerSeeds.CompareAndDelete(key, raw)
+		return
+	}
+	if err := h.saveProducerStateLocked(backendID, sessionID, seed); err != nil {
+		slog.Warn("go-bridge: codex producer seed persist failed",
+			"backendID", backendID, "sessionPrefix", projectionSessionLogPrefix(sessionID), "error", err)
+	}
+	// Consume only AFTER the disk write: readers peek the map before falling
+	// back to disk (loadProducerState), so write-then-delete keeps the fact
+	// continuously visible across the Done-release/persist window. CompareAndDelete
+	// leaves a newer hydrate's seed intact if one raced in.
+	h.hydrateProducerSeeds.CompareAndDelete(key, raw)
 }

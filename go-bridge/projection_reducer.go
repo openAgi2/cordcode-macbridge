@@ -526,6 +526,24 @@ func (ps *projectionSession) applyUserInputExecution(turnID string) {
 
 // ensureAssistantTextPart returns the assistant message's trailing text part, creating one if
 // the last part is not text. Used by append_text accumulation.
+// trailingTextPartForItem returns the trailing text part only when it belongs to
+// the same canonical item (either side may lack an id — legacy live frames carry
+// the turn id as itemId, cold Summary frames carry real item ids). A different
+// canonical itemId forces a new part (T2.1 item-boundary rule).
+func (m *MessageProjection) trailingTextPartForItem(itemID string) *ProjectionPart {
+	if len(m.Parts) == 0 {
+		return nil
+	}
+	trailing := &m.Parts[len(m.Parts)-1]
+	if trailing.Type != "text" {
+		return nil
+	}
+	if itemID != "" && trailing.ItemID != "" && trailing.ItemID != itemID {
+		return nil
+	}
+	return trailing
+}
+
 func (m *MessageProjection) ensureTrailingTextPart() *ProjectionPart {
 	if len(m.Parts) == 0 || m.Parts[len(m.Parts)-1].Type != "text" {
 		m.Parts = append(m.Parts, ProjectionPart{Type: "text", Presentation: "progress"})
@@ -633,7 +651,11 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		ps.upsertTurn(TurnProjection{
 			TurnID: turnID,
 			Status: "running",
-			User:   &MessageProjection{ID: itemID, Role: "user", Parts: []ProjectionPart{{Type: "text", Text: text}}},
+			// Canonical official item id (T2.1): the Summary user slot dedups against
+			// detail items by this part-level id, mirroring the upstream mapper.
+			User: &MessageProjection{ID: itemID, Role: "user", Parts: []ProjectionPart{
+				{Type: "text", Text: text, ItemID: itemID},
+			}},
 		})
 		// Design §7.4: any in-flight content must keep execution.running. After cold
 		// hydrate the last completed turn leaves phase=idle; a new user_message without
@@ -696,13 +718,28 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if t.Assistant == nil {
 			t.Assistant = &MessageProjection{ID: turnID, Role: "assistant"}
 		}
+		itemID := dataString(data, "itemId")
 		var tp *ProjectionPart
 		newPart, _ := data["newPart"].(bool)
 		if newPart {
-			t.Assistant.Parts = append(t.Assistant.Parts, ProjectionPart{Type: "text", Presentation: "progress"})
+			t.Assistant.Parts = append(t.Assistant.Parts, ProjectionPart{Type: "text", Presentation: "progress", ItemID: itemID})
 			tp = &t.Assistant.Parts[len(t.Assistant.Parts)-1]
+		} else if trailing := t.Assistant.trailingTextPartForItem(itemID); trailing != nil {
+			tp = trailing
+			if tp.ItemID == "" {
+				tp.ItemID = itemID
+			}
+		} else if len(t.Assistant.Parts) > 0 && t.Assistant.Parts[len(t.Assistant.Parts)-1].Type == "text" {
+			// Canonical official item boundary (T2.1): the trailing part belongs to
+			// a DIFFERENT item — never merge across the boundary. Whole-turn upsert
+			// publishes the split; append_text PartOps cannot express it.
+			t.Assistant.Parts = append(t.Assistant.Parts, ProjectionPart{Type: "text", ItemID: itemID})
+			tp = &t.Assistant.Parts[len(t.Assistant.Parts)-1]
+			newPart = true
 		} else {
+			// First text part: keep the legacy append_text path, now item-stamped.
 			tp = t.Assistant.ensureTrailingTextPart()
+			tp.ItemID = itemID
 		}
 		tp.Text += delta
 		if newPart {
@@ -745,9 +782,12 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 				break
 			}
 		}
+		rItemID := dataString(data, "itemId")
 		if rpart == nil {
-			t.Assistant.Parts = append(t.Assistant.Parts, ProjectionPart{Type: "reasoning"})
+			t.Assistant.Parts = append(t.Assistant.Parts, ProjectionPart{Type: "reasoning", ItemID: rItemID})
 			rpart = &t.Assistant.Parts[len(t.Assistant.Parts)-1]
+		} else if rpart.ItemID == "" {
+			rpart.ItemID = rItemID
 		}
 		rpart.Text += delta
 		ps.thinking[turnID] = rpart.Text

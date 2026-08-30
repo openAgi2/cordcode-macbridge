@@ -433,3 +433,55 @@ func TestInProgressTurnUsesSummaryPage(t *testing.T) {
 		}
 	}
 }
+
+// TestReadUpstreamHistoryPageReversesToAscending drives the bridge-facing pager
+// primitive (T2.1 §2.4): one desc summary page per call, mapped to ascending
+// kernel order, upstream cursor passed through untouched, EOF as "".
+func TestReadUpstreamHistoryPageReversesToAscending(t *testing.T) {
+	agent, _ := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
+		switch call.Method {
+		case "thread/read":
+			return threadMetaResult("paginated"), nil
+		case "thread/turns/list":
+			if call.Params["cursor"] == nil {
+				return map[string]any{
+					"data": []any{
+						summaryTurn("turn_3", "completed",
+							map[string]any{"type": "userMessage", "id": "u3", "text": "q3"},
+							map[string]any{"type": "agentMessage", "id": "a3", "text": "r3"}),
+						summaryTurn("turn_2", "completed",
+							map[string]any{"type": "userMessage", "id": "u2", "text": "q2"}),
+					},
+					"nextCursor": "cur-old",
+				}, nil
+			}
+			return map[string]any{
+				"data": []any{summaryTurn("turn_1", "completed",
+					map[string]any{"type": "userMessage", "id": "u1", "text": "q1"})},
+			}, nil
+		}
+		return nil, &RPCError{Code: -32601, Message: call.Method}
+	})
+
+	first, err := agent.ReadUpstreamHistoryPage(context.Background(), "thread_probe", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Turns) != 2 || first.Turns[0].TurnID != "turn_2" || first.Turns[1].TurnID != "turn_3" {
+		t.Fatalf("ascending order = %+v", first.Turns)
+	}
+	if first.NextCursor != "cur-old" {
+		t.Fatalf("nextCursor passthrough = %q", first.NextCursor)
+	}
+	if first.Turns[1].UserItemID != "u3" || first.Turns[1].UserText != "q3" {
+		t.Fatalf("mapped user slot = %+v", first.Turns[1])
+	}
+
+	older, err := agent.ReadUpstreamHistoryPage(context.Background(), "thread_probe", "cur-old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(older.Turns) != 1 || older.Turns[0].TurnID != "turn_1" || older.NextCursor != "" {
+		t.Fatalf("EOF page = %+v", older)
+	}
+}

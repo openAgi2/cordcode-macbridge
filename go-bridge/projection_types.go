@@ -16,8 +16,10 @@ type ProjectionPart struct {
 	Text         string `json:"text,omitempty"`
 	Presentation string `json:"presentation,omitempty"` // text: progress | final
 
-	// tool
-	ItemID     string      `json:"itemId,omitempty"` // rollout call_id (authoritative tool identity)
+	// canonical official item id. Tool parts: rollout call_id (authoritative tool
+	// identity). Text/reasoning/user parts: upstream item id, used by detail merge
+	// dedup (T2.1; agent Summary mapper and reducer both stamp it).
+	ItemID     string      `json:"itemId,omitempty"`
 	ToolName   string      `json:"toolName,omitempty"`
 	ToolInput  interface{} `json:"toolInput,omitempty"`
 	ToolResult interface{} `json:"toolResult,omitempty"`

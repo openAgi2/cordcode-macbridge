@@ -317,8 +317,10 @@ func TestCodexProducerStateValidation(t *testing.T) {
 	if err := ValidateCodexProducerState(CodexProducerState{HasOlderUpstream: true, UpstreamNextCursor: "c", BoundaryTurnID: "t_old"}); err != nil {
 		t.Fatalf("valid state rejected: %v", err)
 	}
-	if err := ValidateCodexProducerState(CodexProducerState{HasOlderUpstream: true, BoundaryTurnID: "t_old"}); err == nil {
-		t.Fatal("cursor-less claim accepted")
+	// Cursor-less WITH boundary is the explicit head re-walk state (R11d typed
+	// stale-cursor recovery) — valid.
+	if err := ValidateCodexProducerState(CodexProducerState{HasOlderUpstream: true, BoundaryTurnID: "t_old"}); err != nil {
+		t.Fatalf("head re-walk state rejected: %v", err)
 	}
 	if err := ValidateCodexProducerState(CodexProducerState{HasOlderUpstream: true, UpstreamNextCursor: "c"}); err == nil {
 		t.Fatal("boundary-less claim accepted")

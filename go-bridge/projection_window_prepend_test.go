@@ -249,7 +249,8 @@ func (a *olderWalkPagerAgent) GetTurnScopedRichHistory(context.Context, string, 
 
 func (a *olderWalkPagerAgent) ReadUpstreamHistoryPage(ctx context.Context, sessionID, cursor string) (*core.UpstreamHistoryPage, error) {
 	a.fetches.Add(1)
-	if a.gate != nil {
+	if a.gate != nil && cursor != "" {
+		// Gate blocks walk pages only; the cold-open "" page must never stall.
 		<-a.gate
 	}
 	page, ok := a.pages[cursor]
@@ -329,6 +330,14 @@ func olderWalkDispatch(h *Handlers, conn *olderWalkConn, params map[string]any) 
 
 func TestOlderWalkHydratesOnePageAndPrepends(t *testing.T) {
 	pages := map[string]*core.UpstreamHistoryPage{
+		// T2.1: cold open consumes ONE Summary page via the pager ("" cursor,
+		// already ascending) — includeTurns has left the production path.
+		"": {Turns: []core.TurnScopedHistoryTurn{
+			{TurnID: "T1", Status: "completed", UserItemID: "u1", UserText: "q1",
+				Parts: []map[string]any{{"type": "text", "content": "a1", "itemId": "asst1"}}},
+			{TurnID: "T2", Status: "completed", UserItemID: "u2", UserText: "q2",
+				Parts: []map[string]any{{"type": "text", "content": "a2", "itemId": "asst2"}}},
+		}, NextCursor: "c1"},
 		"c1": {Turns: []core.TurnScopedHistoryTurn{
 			{TurnID: "O1", Status: "completed", UserText: "oq1", Parts: []map[string]any{{"type": "text", "content": "oa1"}}},
 			{TurnID: "O2", Status: "completed", UserText: "oq2", Parts: []map[string]any{{"type": "text", "content": "oa2"}}},
@@ -336,8 +345,9 @@ func TestOlderWalkHydratesOnePageAndPrepends(t *testing.T) {
 	}
 	h, conn, sessionID, agent := olderWalkHarness(t, pages)
 
-	// window_0 → kernel ready (T1,T2); no producer state yet → today's semantics
-	// (hasOlder=false at the kernel front, coverage=full).
+	// window_0 → kernel ready (T1,T2). The Summary page's unexhausted cursor
+	// auto-seeds the producer fact, and the front is honest about older upstream
+	// (hasOlder=true even though the kernel itself holds the full known set).
 	firstErr, first := olderWalkDispatch(h, conn, map[string]any{
 		"direction": "window_0", "backendId": "codex-remote", "sessionId": sessionID, "limit": 10,
 	})
@@ -347,17 +357,22 @@ func TestOlderWalkHydratesOnePageAndPrepends(t *testing.T) {
 	if turns := first["turns"]; turns == nil {
 		t.Fatalf("window_0 result = %+v", first)
 	}
+	if window, _ := first["window"].(map[string]any); window == nil || window["hasOlder"] != true {
+		t.Fatalf("window_0 must report hasOlder=true with an unexhausted upstream cursor: %+v", first["window"])
+	}
 	proj, ok := h.projectionKernel.Snapshot("codex-remote", sessionID)
 	if !ok || len(proj.Turns) != 2 {
 		t.Fatalf("kernel after window_0: ok=%v turns=%+v", ok, proj.Turns)
 	}
 	front := proj.Turns[0].TurnID
 
-	// Seed the producer fact (T2.1's cold-open seeding lands later; tests seed it).
-	if err := h.projectionKernel.SaveCodexProducerState("codex-remote", sessionID, CodexProducerState{
-		HasOlderUpstream: true, UpstreamNextCursor: "c1", BoundaryTurnID: front,
-	}); err != nil {
-		t.Fatal(err)
+	// T2.1 cold-open seeding: the producer fact lands with the page-1 cursor,
+	// anchored at the committed kernel front — no manual seeding anywhere. The
+	// seed hook runs right after Done release, so poll briefly for durability.
+	seeded := waitForCodexProducerState(t, h, sessionID)
+	if seeded == nil || !seeded.HasOlderUpstream ||
+		seeded.UpstreamNextCursor != "c1" || seeded.BoundaryTurnID != front {
+		t.Fatalf("cold-open producer seed = %+v", seeded)
 	}
 
 	cursor := encodeProjectionWindowCursor(projectionWindowCursor{
@@ -369,8 +384,8 @@ func TestOlderWalkHydratesOnePageAndPrepends(t *testing.T) {
 		"cursor": cursor, "limit": 10,
 	})
 
-	if got := agent.fetches.Load(); got != 1 {
-		t.Fatalf("upstream fetches = %d, want exactly one bounded page", got)
+	if got := agent.fetches.Load(); got != 2 {
+		t.Fatalf("upstream fetches = %d, want cold page + exactly one walk page", got)
 	}
 	proj, ok = h.projectionKernel.Snapshot("codex-remote", sessionID)
 	if !ok {
@@ -406,6 +421,22 @@ func TestOlderWalkHydratesOnePageAndPrepends(t *testing.T) {
 	}
 }
 
+// waitForCodexProducerState polls the durable producer fact until the post-commit
+// seed hook has flushed it (the hook runs just after CommitHydrateTransaction
+// releases Done-waiters, so the immediate read may still be in flight).
+func waitForCodexProducerState(t *testing.T, h *Handlers, sessionID string) *CodexProducerState {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if state, err := h.projectionKernel.LoadCodexProducerState("codex-remote", sessionID); err == nil && state != nil {
+			return state
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	state, _ := h.projectionKernel.LoadCodexProducerState("codex-remote", sessionID)
+	return state
+}
+
 func projTurnIDs(proj SessionProjection) []string {
 	ids := make([]string, 0, len(proj.Turns))
 	for _, turn := range proj.Turns {
@@ -418,6 +449,10 @@ func projTurnIDs(proj SessionProjection) []string {
 // state falls back to a head re-walk, and no kernel mutation happens.
 func TestOlderWalkUpstreamCursorStaleTypedRecovery(t *testing.T) {
 	pages := map[string]*core.UpstreamHistoryPage{
+		"": {Turns: []core.TurnScopedHistoryTurn{
+			{TurnID: "T1", Status: "completed", UserText: "q1", Parts: []map[string]any{{"type": "text", "content": "a1"}}},
+			{TurnID: "T2", Status: "completed", UserText: "q2", Parts: []map[string]any{{"type": "text", "content": "a2"}}},
+		}, NextCursor: "c1"},
 		"c1": {Turns: []core.TurnScopedHistoryTurn{
 			{TurnID: "T1", Status: "completed", UserText: "dup", Parts: []map[string]any{{"type": "text", "content": "dup"}}},
 		}, NextCursor: "c2"},
@@ -428,11 +463,6 @@ func TestOlderWalkUpstreamCursorStaleTypedRecovery(t *testing.T) {
 	})
 	proj, _ := h.projectionKernel.Snapshot("codex-remote", sessionID)
 	front := proj.Turns[0].TurnID
-	if err := h.projectionKernel.SaveCodexProducerState("codex-remote", sessionID, CodexProducerState{
-		HasOlderUpstream: true, UpstreamNextCursor: "c1", BoundaryTurnID: front,
-	}); err != nil {
-		t.Fatal(err)
-	}
 	cursor := encodeProjectionWindowCursor(projectionWindowCursor{
 		V: 1, BridgeEpoch: h.eventPublisher.BridgeEpoch(), BackendID: "codex-remote",
 		SessionID: sessionID, AnchorTurnID: front, Side: "o",
@@ -457,6 +487,10 @@ func TestOlderWalkUpstreamCursorStaleTypedRecovery(t *testing.T) {
 // Concurrent older walks on one session: exactly ONE upstream page per wave.
 func TestOlderWalkSingleFlightConcurrent(t *testing.T) {
 	pages := map[string]*core.UpstreamHistoryPage{
+		"": {Turns: []core.TurnScopedHistoryTurn{
+			{TurnID: "T1", Status: "completed", UserText: "q1", Parts: []map[string]any{{"type": "text", "content": "a1"}}},
+			{TurnID: "T2", Status: "completed", UserText: "q2", Parts: []map[string]any{{"type": "text", "content": "a2"}}},
+		}, NextCursor: "c1"},
 		"c1": {Turns: []core.TurnScopedHistoryTurn{
 			{TurnID: "O1", Status: "completed", UserText: "oq1", Parts: []map[string]any{{"type": "text", "content": "oa1"}}},
 			{TurnID: "O2", Status: "completed", UserText: "oq2", Parts: []map[string]any{{"type": "text", "content": "oa2"}}},
@@ -469,11 +503,6 @@ func TestOlderWalkSingleFlightConcurrent(t *testing.T) {
 	})
 	proj, _ := h.projectionKernel.Snapshot("codex-remote", sessionID)
 	front := proj.Turns[0].TurnID
-	if err := h.projectionKernel.SaveCodexProducerState("codex-remote", sessionID, CodexProducerState{
-		HasOlderUpstream: true, UpstreamNextCursor: "c1", BoundaryTurnID: front,
-	}); err != nil {
-		t.Fatal(err)
-	}
 	cursor := encodeProjectionWindowCursor(projectionWindowCursor{
 		V: 1, BridgeEpoch: h.eventPublisher.BridgeEpoch(), BackendID: "codex-remote",
 		SessionID: sessionID, AnchorTurnID: front, Side: "o",
@@ -494,8 +523,8 @@ func TestOlderWalkSingleFlightConcurrent(t *testing.T) {
 	close(agent.gate)
 	wg.Wait()
 
-	if got := agent.fetches.Load(); got != 1 {
-		t.Fatalf("upstream fetches = %d, want 1 (singleflight)", got)
+	if got := agent.fetches.Load(); got != 2 {
+		t.Fatalf("upstream fetches = %d, want cold page + 1 walk page (singleflight)", got)
 	}
 	final, _ := h.projectionKernel.Snapshot("codex-remote", sessionID)
 	if got := projTurnIDs(final); len(got) != 4 || got[0] != "O1" || got[1] != "O2" {

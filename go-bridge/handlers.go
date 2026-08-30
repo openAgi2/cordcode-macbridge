@@ -57,8 +57,14 @@ const (
 )
 
 type Handlers struct {
-	mu                     sync.Mutex
-	olderHydrateFlights    sync.Map
+	mu                  sync.Mutex
+	olderHydrateFlights sync.Map
+	// producerWritesMu serializes producer-state persistence between the
+	// post-commit seed hook and older-walk cursor advances (T2.1): the seed's
+	// lost-update guard must read and write the fact atomically against
+	// concurrent walk saves.
+	producerWritesMu       sync.Mutex
+	hydrateProducerSeeds   sync.Map
 	agents                 map[string]core.Agent
 	sessions               *sessionRegistry
 	runningMap             *runningMapCache
@@ -1387,6 +1393,9 @@ func (h *Handlers) SetWebPushPipeline(pipeline *WebPushCandidatePipeline) {
 // markHydrateFailed 统一 MarkFailed 调用点：kernel 失败后把未提交的 deferred
 // web push candidate 显式丢弃（§8.1：不假发送，记脱敏诊断）。
 func (h *Handlers) markHydrateFailed(backendID, sessionID, code, message string, retryable bool) {
+	// A failed hydrate must not leave its page-1 producer seed behind (T2.1):
+	// the seed is a claim about a baseline that never committed.
+	h.hydrateProducerSeeds.Delete(projectionDeliveryKey(backendID, sessionID))
 	_, deferred := h.projectionKernel.MarkFailed(backendID, sessionID, code, message, retryable)
 	if len(deferred) > 0 {
 		h.mu.Lock()

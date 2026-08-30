@@ -975,6 +975,11 @@ func (h *Handlers) runProjectionHydrateTransaction(
 	if commit.PendingPatch != nil {
 		h.eventPublisher.PublishProjectionPatch(backendID, sessionID, *commit.PendingPatch)
 	}
+	// T2.1: persist the cold-open producer seed (upstream cursor fact) now that
+	// the summary baseline is committed.
+	if backendID == "codex-remote" {
+		h.persistCodexProducerSeed(backendID, sessionID, commit.Projection)
+	}
 	// Install a fresh Mac-private Claude source ledger now that hydrate owns the source cut, so
 	// the live file relay can route content through the source-batch transaction. No-op when a
 	// checkpoint already restored one. Must run before the live relay's startup correlation.
@@ -1161,6 +1166,15 @@ func (h *Handlers) produceProjectionHydrateRange(
 		// turn-scoped surface to merge on one identity (design §9.1 live/cold row).
 		return h.streamTurnScopedRichHistoryProjectionEvents(ctx, "codex-web", sessionID, emit)
 	case "codex-remote":
+		// T2.1 lazy history: when the agent exposes the upstream pager, cold
+		// hydrate consumes ONE Summary page instead of the full turn-scoped
+		// read (includeTurns leaves the production path). Agents without the
+		// pager keep the legacy turn-scoped surface.
+		if agent, ok := h.getFirstAgentByName("codex-remote"); ok {
+			if pager, pagerOK := agent.(core.UpstreamHistoryPager); pagerOK {
+				return h.streamCodexRemoteSummaryProjectionEvents(ctx, pager, "codex-remote", sessionID, emit)
+			}
+		}
 		return h.streamTurnScopedRichHistoryProjectionEvents(ctx, "codex-remote", sessionID, emit)
 	default:
 		return errProjectionBackendNotMigrated

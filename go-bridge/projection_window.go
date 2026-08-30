@@ -245,6 +245,9 @@ func sliceProjectionWindowWithUpstream(
 	nextOlderAnchor := ""
 	nextNewerAnchor := ""
 	empty := len(turns) == 0
+	// Set only by the older direction when its page is empty (anchor == kernel
+	// front): the resume anchor for the newer-side cursor of that empty page.
+	pageEmptyNewerAnchor := ""
 
 	switch params.Direction {
 	case projectionWindowDirectionWindow0, projectionWindowDirectionLatest:
@@ -269,6 +272,9 @@ func sliceProjectionWindowWithUpstream(
 		// The boundary turn itself follows this page in the chain.
 		hasOlder = slice.start > 0
 		hasNewer = true
+		// Anchor == kernel front yields an honest EMPTY page (nothing committed
+		// below); the newer chain resumes at the anchor itself.
+		pageEmptyNewerAnchor = cursor.AnchorTurnID
 	case projectionWindowDirectionNewer:
 		cursor, err := decodeProjectionWindowCursor(params.Cursor)
 		if err != nil {
@@ -334,9 +340,15 @@ func sliceProjectionWindowWithUpstream(
 	}
 
 	page := turns[slice.start:slice.end]
-	if !empty {
+	if slice.end > slice.start {
 		nextOlderAnchor = turns[slice.start].TurnID
 		nextNewerAnchor = turns[slice.end-1].TurnID
+	} else if !empty {
+		// Zero-length older page pinned at the committed front. nextOlderCursor
+		// (when the producer fact claims upstream) anchors at the kernel front;
+		// the newer chain resumes at the walk anchor. head/tail stay unset.
+		nextOlderAnchor = turns[0].TurnID
+		nextNewerAnchor = pageEmptyNewerAnchor
 	}
 
 	generation := projectionWindowGeneration.Add(1)
@@ -350,10 +362,12 @@ func sliceProjectionWindowWithUpstream(
 	if empty {
 		descriptor.Coverage = "full"
 	} else {
-		head := turns[slice.start].TurnID
-		tail := turns[slice.end-1].TurnID
-		descriptor.HeadTurnID = &head
-		descriptor.TailTurnID = &tail
+		if slice.end > slice.start {
+			head := turns[slice.start].TurnID
+			tail := turns[slice.end-1].TurnID
+			descriptor.HeadTurnID = &head
+			descriptor.TailTurnID = &tail
+		}
 		if !hasOlder {
 			descriptor.Coverage = "full"
 		}
