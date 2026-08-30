@@ -267,7 +267,8 @@ code，capability 字符串为 extensible addition，无 major version bump。
 | `read_memory_file` | `backendId`, `fileId` | (Phase 2b+) |
 | `update_memory_file` | `backendId`, `fileId`, `content`, `expectedVersion`, `dryRun?` | (Phase 5D) |
 | `run_diagnostics` | `backendId` | (Phase 2b+) |
-| `session_turn_items` | `backendId`, `sessionId`, `turnId` | `turn_detail_lazy_v1`（§11.7；v1 仅 codex-remote descriptor 声明） |
+| `session_turn_items` | `backendId`, `sessionId`, `turnId` | `turn_detail_lazy_v1`（§11.7，deprecated）或 `turn_detail_chunks_v1`（§11.8 终案）；仅 codex-remote descriptor 声明 |
+| `turn_output_chunk` | `backendId`, `sessionId`, `turnId`, `itemId`, `chunkIndex` | `turn_detail_chunks_v1`（§11.8；blob 二级懒加载） |
 
 ### 4.3 方法参数详细 Schema
 
@@ -1090,6 +1091,125 @@ interrupted`。producer 不得发送闭集外值；iOS 对未知 code 按通用�
   字段，不是"丢弃后继续成功"的开关）；修复/升级后允许重试。
 - 产品承诺口径（G0.5 裁决）：按需加载**服务端实际提供的** reasoning 摘要与工具调用；不承诺
   "完整思维链/思考原文"。
+
+### 11.8 Session Turn Detail 增量分层加载（终案，`turn_detail_chunks_v1`，2026-08-30 owner 终审冻结）
+
+> §11.7 的 `turn_detail_lazy_v1`（整回合原子 `replace_parts` 进 Kernel、经
+> projection_patch 管道交付）在 v2 客户端上线后**过渡期保留（deprecated）**；新客户端
+> 以 descriptor 声明 `turn_detail_chunks_v1` 时**必须走本节**。§11.7 的方法门控、
+> `turn_not_found` Kernel 裁决、singleflight、orphan 恢复语义全部继承；**交付模型、
+> 资源门、reasonCode 闭集以本节为准**。
+
+#### 设计原则：默认轻量（owner 终审裁决 2026-08-30）
+
+封闭取证（`docs/2026-08-30-codex-remote-turn-items-closed-evidence.md`）证明合法回合
+≥128 页/5.7MB 且 raw→projection 无放大。**明细全文不得永久写入默认 Session Projection
+Kernel**——否则大回合加载完成后，后续 snapshot、重连与另一台 iPhone 会重复携带全部明细，
+违背"默认轻量打开"。数据分层：
+
+| 层 | 内容 | 生命周期 |
+|----|------|----------|
+| 主 Session Projection（Kernel） | Summary parts + `detailLoadState` + `generation` + **manifest 摘要**（manifestRev/itemCount/totalBytes/进度） | 随会话投影 |
+| Mac detail cache | 分页明细全文（items 追加日志）+ 超大 output blob | 磁盘持久，LRU 淘汰可重建 |
+| iOS detail overlay | 请求连接按 chunk 接收的明细内容 | **connection-scoped**，断线即弃，重连按需续拉 |
+
+非请求连接**不接收**明细 chunk；默认 `projection_snapshot`/`projection_patch` **永不携带**
+明细全文。
+
+#### 冻结参数（owner 终审，2026-08-30）
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| item/blob 分界 | 序列化后 **256KB** | 超过的 item 提取为 blob，主明细只留摘要+预览+handle |
+| detail chunk 目标 | **128KB** | 单 chunk 交付体量 |
+| 单 chunk/patch 建议上限 | **256KB** | 超过即拆分 |
+| 单 patch 编码后硬顶 | **512KB** | 绝对上限，不得突破 |
+| 单 upstream page raw 兜底 | **4MB** | **仅单响应异常保护，绝不得用作整回合上限** |
+| 单页 RPC timeout | **30s** | |
+| 单次加载批次 deadline | **90s** | 到期保存进度续传，**不是失败** |
+| 页数 / 整回合累计字节 | **均不设永久上限** | 废止 24 页/512KB 永久门 |
+| blob 预览 | 2KB（const 可调） | 折叠行展示 |
+| blob LRU 预算 | 128MB（const 可调，凭真实数据调整） | 淘汰后可从官方分页重建 |
+
+达到时间/内存/批次预算 → **保存进度续传**，不得标记 `failed(max_bytes/max_pages)`
+（这两个 reasonCode 从 v2 闭集**移除**）。
+
+#### 状态机（v2）
+
+`notRequested → loading(含进度) → partial → loaded`；任一步可入
+`failed(reasonCode)`（可重试，已加载内容保留）。partial = 已有持久进度、批次结束待续。
+上游停摆时**已加载明细继续保留**，UI 显示"已加载 X 项，继续重试"，不得清空回到统一
+"加载失败"。Kernel turn 上的 manifest 摘要字段（`detailLoadState`/`manifestRev`/
+`itemCount`/`totalBytes`）随 `turnStateOps` 的 manifest op 原子提交。
+
+#### `session_turn_items`（v2 语义）
+
+请求形状不变。ack = **本批次的终态**（批次期间的增量内容经 `turn_detail_chunk` 事件
+流式交付，不在 ack 里）：
+
+```jsonc
+// 批次因 deadline 暂停（续传，不是失败）
+{ "detailLoadState": "partial", "syncRev": 130, "manifestRev": 7,
+  "progress": { "pages": 46, "items": 227, "bytes": 937241, "eof": false } }
+// EOF
+{ "detailLoadState": "loaded", "syncRev": 131, "manifestRev": 8,
+  "progress": { "pages": 52, "items": 260, "bytes": 1020000, "eof": true } }
+// 可重试失败（进度保留在 detail cache 与 manifest）
+{ "detailLoadState": "failed", "syncRev": 132, "reasonCode": "upstream_error",
+  "progress": { "pages": 19, "items": 95, "bytes": 412906, "eof": false } }
+```
+
+客户端收到 `partial` 自动再次调用（每次调用 = 一个新 90s 批次，从持久 cursor 续传）。
+请求级错误（`unknown_backend`/`session_not_found`/`turn_not_found`/`invalid_params`）
+与 §11.7 相同。
+
+#### `turn_detail_chunk` 事件（仅请求连接）
+
+```jsonc
+{ "event": "turn_detail_chunk", "backendId": "codex-remote",
+  "sessionId": "sess-1", "turnId": "turn-42", "manifestRev": 7, "seq": 12,
+  "items": [ /* ProjectionPart[]（普通明细 item，≤256KB 建议/512KB 硬顶内可多 item） */ ],
+  "oversize": [ { "itemId": "…", "handle": "…", "type": "commandExecution",
+                  "totalBytes": 1057417, "preview": "…", "totalChunks": 9 } ],
+  "progress": { "pages": 46, "items": 227, "bytes": 937241, "eof": false } }
+```
+
+- 每个 chunk 对应一个成功接纳的上游页（或页的拆分）；`seq` 在 turn 内单调；
+- **只发给请求了该 turn 明细的连接**（per-connection registry）；singleflight follower
+  观察同一批次的事件流；
+- 重连后重新调用 `session_turn_items`：manifest 已有持久进度时走 **fast-path**——从
+  detail cache 重放 chunk（不重拉上游），再从持久 cursor 续传剩余部分；
+- chunk 事件不进 revision journal、不进 snapshot——overlay 是唯一客户端载体。
+
+#### `turn_output_chunk` RPC（超大输出二级懒加载）
+
+```jsonc
+// 请求
+{ "method": "turn_output_chunk", "backendId": "codex-remote",
+  "params": { "sessionId": "sess-1", "turnId": "turn-42", "itemId": "…", "chunkIndex": 0 } }
+// 成功（data envelope）
+{ "chunkIndex": 0, "totalChunks": 9, "totalBytes": 1057417, "encoding": "utf-8", "data": "…" }
+```
+
+- chunk 目标 128KB；按 itemId+chunkIndex 顺序读取 Mac blob cache；
+- blob 已被 LRU 淘汰 → UnifiedError `blob_evicted`（可重试）：客户端重新调用
+  `session_turn_items`，Mac 从官方分页重建 blob 后再取 chunk；
+- **完整内容可达，永不静默截断**（面向模型上下文的官方 output truncation 语义
+  不适用于历史 UI）。
+
+#### 断点恢复（owner 终审规则）
+
+每个成功接纳的页面**原子保存**：upstream next cursor、已接纳 item ID 集合（或连续
+边界）、turn generation、manifest revision、已落盘 blob 信息。cursor 跨 stream/client
+epoch 失效时（空页/内容回跳检测）：**从第一页重新翻、按 canonical item ID 跳过已提交
+内容、找到重叠边界后继续**——不得假设 cursor 永远有效，也不得因 cursor 失效丢弃已
+加载内容。
+
+#### reasonCode 闭集（v2）
+
+`upstream_error | timeout | stale_turn | interrupted | unsupported_item_type |
+page_oversize`。`max_pages`/`max_bytes` 已移除（永久门废止）；`page_oversize` = 单
+upstream 页 raw 超 4MB 异常兜底。iOS 对未知 code 按通用可重试失败渲染（前向兼容）。
 
 ---
 

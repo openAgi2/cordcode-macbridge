@@ -406,6 +406,67 @@ Summary），明细展开按 owner 裁决执行并记录入 fixture 元数据。
    G3 不视为完全通过。§11.7 / R2 的相关表述以本条为准（R2"逐页渐进渲染"由搁置转为
    **终案方向**，其"当前无数据支撑"的保留由上述取证步骤补足）。
 
+6. **终案裁决（owner 2026-08-30 深夜 II，封闭取证报告
+   `docs/2026-08-30-codex-remote-turn-items-closed-evidence.md` 批准后）**：
+   取证结论全部采信（1MB 级页面由单个 `commandExecution.aggregatedOutput` 主导；
+   合法回合 ≥128 页/5.7MB 仍未 EOF；raw→projection 无放大；整回合原子
+   `replace_parts` 不可行；cursor 分页/增量处理/断点恢复为必需功能）；"3/7 停摆"
+   仅描述当次样本、不泛化为稳定故障率，但足以否定"一次 walk 到 EOF"的可靠性。
+   **关键架构修正（owner 对 agent 方案的否决项）：明细不得全部永久写入默认
+   Session Projection Kernel**——否则 5MB 回合加载完成后，后续 snapshot、重连与
+   另一台 iPhone 仍会重复携带 5MB，违背"默认轻量打开"的初衷。终案数据分层：
+   主 Projection 只存 Summary、`detailLoadState`、`generation` 与**明细 manifest**；
+   Mac detail cache 存分页明细全文与超大 output blob；iOS **connection-scoped
+   detail overlay** 按 chunk 接收，不混入默认会话 snapshot；非请求连接不收大明细；
+   重连后基础会话保持轻量、展开态按需重新续拉。**冻结参数（正式采用）**：
+   item/blob 分界 = 序列化后 256KB；detail chunk 目标 128KB；单 chunk/patch 建议上限
+   256KB；单 patch 编码后绝对硬顶 512KB；单 upstream page raw 兜底 4MB（**只作单响应
+   异常保护，不得成为整回合上限**）；单页 RPC 30s；单次加载批次 deadline 90s；
+   页数与整回合累计字节**均不设永久上限**；达到时间/内存/批次预算 → 保存进度续传、
+   **不得标记 failed(max_pages/max_bytes)**（两 reasonCode 从 v2 闭集移除）。
+   **超大 command output**：>256KB 的 `commandExecution` 主明细页只提交命令/状态/
+   退出码/输出大小/短预览/blob handle；iOS 默认折叠（"输出 1.06MB，点击查看全文"），
+   点击后从 Mac blob cache 分块加载；完整内容可达、不静默截断；blob LRU 清理后可从
+   官方分页重新获取。**断点恢复**：每个成功接纳的页面原子保存 upstream next cursor、
+   已接纳 item ID 集合（或连续边界）、turn generation、manifest revision、已落盘 blob
+   信息；cursor 跨 stream/client epoch 失效时**从第一页重新翻、按 canonical item ID
+   跳过已提交内容、找到重叠边界后继续**，不得假设 cursor 永远有效。**UI 状态语义**：
+   `notRequested | loading(含进度) | partial | loaded | failedRetryable`；上游停摆时
+   已加载明细保留，UI 显示"已加载 X 项，继续重试"，**不得清空回到统一"加载失败"**。
+   线上契约冻结于协议 **§11.8（`turn_detail_chunks_v1`）**，§11.7 v1 过渡期保留
+   （deprecated）。**G3 终局验收条件：真实 ≥128 页/≥5.7MB 回合最终可完整展开**。
+   实现单元见 §3F（exec-plan `phase5-detail-final-*`）。
+
+#### 3F 终案实现单元（phase5，依赖 §11.8 契约冻结）
+
+- **F1 契约冻结**：协议 §11.8 + wire descriptor 声明 `turn_detail_chunks_v1`
+  （与 deprecated `turn_detail_lazy_v1` 并存一个过渡期）+ `turnStateOps` manifest op
+  形状 + `turn_detail_chunk` 事件形状 + `turn_output_chunk` RPC 形状 + iOS
+  contract.json SoT 同步。先冻结后写 handler（Phase-2 纪律）。
+- **F2 Mac detail store**：`<data-dir>/detail/<backend>/<sessionID>/<turnID>/`
+  manifest（state/generation/manifestRev/item 摘要含 blob handle/resume：
+  nextCursor+lastAcceptedItemID+acceptedCount）+ items 追加日志 + blobs/ 二级存储 +
+  LRU（默认 128MB，const 可调）；**页接纳 = 原子事务**（manifest 重写 + append +
+  fsync）；>256KB item 提取为 blob（预览 2KB + handle + totalBytes + chunk 数）。
+- **F3 Kernel manifest 提交路径**：turn 增量 manifest 字段（不进 parts），
+  `partial`/`loading+progress`/`loaded`/`failed(reasonCode)` 状态机，checkpoint
+  版本升级；v2 reasonCode 闭集（去 max_pages/max_bytes，增 page_oversize）。
+- **F4 handler 批次引擎 + chunk 交付 + 断点恢复**：批次循环（90s deadline /
+  30s RPC / 4MB 单页兜底 / 无页数与累计字节上限），每接纳页 = detail store 事务 +
+  kernel manifest commit + `turn_detail_chunk` 事件（仅请求连接，≤256KB 目标 /
+  512KB 编码后硬顶）；EOF→loaded；deadline→partial+进度（ack 非失败）；停摆→
+  failedRetryable 但缓存与已交付 chunk 保留；cursor 失效→头翻+canonical item ID
+  重叠恢复；singleflight + orphan 恢复（failed(interrupted)，缓存保留）；
+  重连 fast-path：manifest 命中时从 detail cache 重放 chunk，不重拉上游。
+- **F5 blob chunk RPC**：`turn_output_chunk`（128KB 目标 chunk）；`blob_evicted`
+  → 客户端经 session_turn_items 触发 cache 重水化（从官方分页重建 blob）。
+- **F6 iOS overlay + 渐进 UI**：connection-scoped overlay（sessionID/turnID/
+  manifestRev）接收 chunk 渐进渲染；partial 显示已加载 X 项 + 继续；停摆保留已载
+  内容+"继续重试"；超大输出折叠行（大小+"点击查看全文"→ turn_output_chunk 分页）；
+  重连 overlay 清空、基础 snapshot 轻量、展开态重新续拉；loaded 展开/收起不变。
+- **F7 G3 终局验收**：真实 ≥128 页/≥5.7MB 回合完整展开（端到端：渐进加载、
+  blob 折叠展开、断线重连后续拉）；G3 矩阵该项通过前 G3 不关闭。
+
 **G0 记分方式（owner 指定）**：G0 记为 **owner 接受两项证据替代后的 PASS**——
 (a) paginated control inventory 不可获得（替代证据：官方源码/测试、cursor 链完整性、EOF、
 backwards round-trip、legacy 同通道对照）；(b) 账号无 >30 回合线程（替代证据：多页 items

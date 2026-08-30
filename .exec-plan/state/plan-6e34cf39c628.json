@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-30T18:50:00+08:00",
+  "updated_at": "2026-08-31T00:37:13+08:00",
   "todos": [
     {
       "id": "phase0-probe-impl",
@@ -1098,6 +1098,512 @@
       ],
       "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
       "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-contract-freeze",
+      "title": "F1 wire contract freeze — turn_detail_chunks_v1 (protocol §11.8 + descriptor + turnStateOps manifest op + chunk event + blob RPC shapes + iOS contract.json)",
+      "description": "Freeze BEFORE handlers (Phase-2 discipline). Mac: wire descriptor advertises turn_detail_chunks_v1 beside deprecated turn_detail_lazy_v1 (single shared production const gate, mirroring a6c6609 pattern); turnStateOps gains manifest op (detailLoadState/manifestRev/itemCount/totalBytes/progress, NO parts); new event turn_detail_chunk {backendId,sessionId,turnId,manifestRev,seq,items[],oversize[{itemId,handle,type,totalBytes,preview,totalChunks}],progress} conn-scoped; new RPC turn_output_chunk {sessionId,turnId,itemId,chunkIndex} -> {chunkIndex,totalChunks,totalBytes,encoding,data}; v2 reasonCode set upstream_error|timeout|stale_turn|interrupted|unsupported_item_type|page_oversize (max_pages/max_bytes REMOVED per owner ruling); frozen params 256KB blob boundary/128KB chunk target/256KB patch advisory/512KB post-encode hard cap/4MB single-page backstop/30s RPC/90s batch deadline/no permanent page or byte caps. iOS: contract.json SoT + quicktype regen.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-detail-store",
+      "title": "F2 Mac detail store — per-turn manifest + items append log + blob store + LRU + atomic page-accept transaction",
+      "description": "New package under go-bridge (or core): <data-dir>/detail/<backend>/<sessionID>/<turnID>/ manifest.json {turnID,generation,detailLoadState,manifestRev,itemCount,totalBytes,items:[{itemId,type,bytes,blob?{handle,totalBytes,previewLen,totalChunks},page}],resume:{nextCursor,lastAcceptedItemID,acceptedCount},blobs:[...]} + items.jsonl append log + blobs/<handle>.bin. Page-accept = atomic transaction (manifest temp+rename, append+fsync). >256KB serialized item -> blob extraction (2KB preview + handle). LRU eviction default 128MB const (oldest-lastAccess blobs first, manifest keeps handles for re-hydration from official pagination). Tests: manifest roundtrip, accept transaction ordering, LRU eviction, blob chunk read, oversize extraction, crash-consistency basics.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-contract-freeze"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-kernel-manifest",
+      "title": "F3 kernel manifest commit path — turn manifest summary (no parts) + partial/loading-progress/loaded/failed states + checkpoint bump",
+      "description": "SessionTurn gains detail manifest summary fields (detailLoadState v2 semantics incl partial, manifestRev, itemCount, totalBytes); turnStateOps manifest op atomic commit WITHOUT parts (v1 replace_parts path stays for deprecated v1); state machine notRequested->loading(progress)->partial->loaded, failed(reasonCode) retryable with manifest retained; checkpoint schema version bump + restore validation; unknown manifest op decode = fail-closed (iOS-side discipline mirrored from d6e1515f). Tests: manifest commit states, generation fence, stale_turn, empty-detail loaded state-only, checkpoint roundtrip.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-contract-freeze"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-batch-engine",
+      "title": "F4 handler batch engine — 90s-batch incremental accept + chunk delivery to requesting conn + resume + singleflight + orphan + reconnect fast-path",
+      "description": "session_turn_items v2: batch loop reads pages via existing agent walker (official cursor pagination; per-page gates: 30s RPC, 4MB raw backstop -> page_oversize, NO page-count/byte-total caps); each accepted page: detail-store atomic accept + kernel manifest commit (partial) + turn_detail_chunk event to REQUESTING conn only (<=256KB advisory/512KB post-encode hard cap, split pages as needed, seq monotonic); EOF->loaded ack; 90s deadline->partial ack + progress (NOT failed; client auto-re-invokes); upstream stall->failed(upstream_error|timeout) ack with progress RETAINED (cache + already-delivered chunks kept; UI keeps loaded items per ruling 7); cursor-invalid detection (empty page/rewind)->re-walk from page 1 skip-by-canonical-itemID until overlap boundary; singleflight followers share event stream; orphan loading -> failed(interrupted) cache retained; reconnect with existing manifest -> fast-path replay chunks from detail cache WITHOUT upstream refetch. Tests: batch pause/resume, stall retention, cursor-invalidation overlap recovery, conn-scoped delivery, fast-path replay, race.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-detail-store",
+        "phase5-kernel-manifest"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-blob-rpc",
+      "title": "F5 turn_output_chunk RPC — 128KB blob chunk reads + blob_evicted re-hydration path",
+      "description": "Handler for turn_output_chunk: read chunk from blob store (128KB target chunks); blob LRU-evicted -> UnifiedError blob_evicted (retryable) and client re-invokes session_turn_items which re-hydrates blob from official pagination before continuing; never truncate. Tests: chunk reads, boundaries, evicted error + re-hydration, oversized turn chunk math.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-detail-store",
+        "phase5-batch-engine"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-ios-overlay",
+      "title": "F6 iOS detail overlay — connection-scoped chunk receiver + progressive UI + oversize collapsed row + reconnect semantics",
+      "description": "iOS: connection-scoped overlay store keyed (sessionID,turnID,manifestRev) consuming turn_detail_chunk events (NOT merged into messages/snapshot); progressive render from overlay (partial shows loaded-X-items + continue affordance; upstream-stall keeps loaded content with retry, never blanket fail); oversize items render collapsed row '输出 1.06MB，点击查看全文' -> turn_output_chunk paged fetch; reconnect clears overlay, base snapshot stays light, expanded state re-pull via session_turn_items fast-path; loaded expand/collapse UX unchanged from G3 rounds. Tests: overlay decode/seq ordering, partial rendering, blob chunk fetch + evicted retry, reconnect clearing, contract fixtures.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-contract-freeze",
+        "phase5-batch-engine"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-g3-final",
+      "title": "F7 G3 final acceptance — real >=128-page/5.7MB turn fully expandable end-to-end",
+      "description": "Owner real-device acceptance per ruling: a real >=128 pages/>=5.7MB turn (session 01a04be1 turns 01a04c13/01a04e48 candidates) expands fully: progressive loading with progress, oversize output collapsed then fully viewable via chunks, reconnect resume, default snapshot of other sessions stays light. G3 matrix row stays open until this passes; requires phase5 units installed on both devices.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-ios-overlay",
+        "phase5-blob-rpc"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-contract-freeze-tests",
+      "title": "F1 wire contract freeze — TESTS",
+      "description": "Unit tests for phase5-contract-freeze: Freeze BEFORE handlers (Phase-2 discipline). Mac: wire descriptor advertises turn_detail_chunks_v1 beside deprecated turn_detail_lazy_v1 (single shared production const gate, mirroring a6c6609 pattern); turnStateOps gains manifest op (detailLoadState/manifestRev/itemCount/totalBytes/progress, NO parts); new event turn_detail_chunk {backendId,sessionId,turnId,manifestRev,seq,items[],oversize[{itemId,handle,type,totalBytes,preview,totalChunks}],progress} conn-scoped; new RPC turn_output_chunk {sessionId,turnId,itemId,chunkIndex} -> {chunkIndex,totalChunks,totalBytes,encoding,data}; v2 reasonCode set upstream_error|timeout|stale_turn|interrupted|unsupported_item_type|page_oversize (max_pages/max_bytes REMOVED per owner ruling); frozen params 256KB blob boundary/128KB chunk target/256KB patch advisory/512KB post-encode hard cap/4MB single-page backstop/30s RPC/90s batch deadline/no permanent page or byte caps. iOS: contract.json SoT + quicktype regen.. Deliver the Tests: items listed in impl todo as formal suite; run targeted + -race x2.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-contract-freeze"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-contract-freeze-regression",
+      "title": "F1 wire contract freeze — REGRESSION",
+      "description": "Regression gate for phase5-contract-freeze: full go-bridge + agent/codex-remote suites (or iOS full targeted set per stash-compare baseline discipline), no new failures vs recorded baseline, v1 deprecated path still green during transition.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-contract-freeze-tests"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-detail-store-tests",
+      "title": "F2 Mac detail store — TESTS",
+      "description": "Unit tests for phase5-detail-store: New package under go-bridge (or core): <data-dir>/detail/<backend>/<sessionID>/<turnID>/ manifest.json {turnID,generation,detailLoadState,manifestRev,itemCount,totalBytes,items:[{itemId,type,bytes,blob?{handle,totalBytes,previewLen,totalChunks},page}],resume:{nextCursor,lastAcceptedItemID,acceptedCount},blobs:[...]} + items.jsonl append log + blobs/<handle>.bin. Page-accept = atomic transaction (manifest temp+rename, append+fsync). >256KB serialized item -> blob extraction (2KB preview + handle). LRU eviction default 128MB const (oldest-lastAccess blobs first, manifest keeps handles for re-hydration from official pagination). Deliver the Tests: items listed in impl todo as formal suite; run targeted + -race x2.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-detail-store"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-detail-store-regression",
+      "title": "F2 Mac detail store — REGRESSION",
+      "description": "Regression gate for phase5-detail-store: full go-bridge + agent/codex-remote suites (or iOS full targeted set per stash-compare baseline discipline), no new failures vs recorded baseline, v1 deprecated path still green during transition.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-detail-store-tests"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-kernel-manifest-tests",
+      "title": "F3 kernel manifest commit path — TESTS",
+      "description": "Unit tests for phase5-kernel-manifest: SessionTurn gains detail manifest summary fields (detailLoadState v2 semantics incl partial, manifestRev, itemCount, totalBytes); turnStateOps manifest op atomic commit WITHOUT parts (v1 replace_parts path stays for deprecated v1); state machine notRequested->loading(progress)->partial->loaded, failed(reasonCode) retryable with manifest retained; checkpoint schema version bump + restore validation; unknown manifest op decode = fail-closed (iOS-side discipline mirrored from d6e1515f). Deliver the Tests: items listed in impl todo as formal suite; run targeted + -race x2.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-kernel-manifest"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-kernel-manifest-regression",
+      "title": "F3 kernel manifest commit path — REGRESSION",
+      "description": "Regression gate for phase5-kernel-manifest: full go-bridge + agent/codex-remote suites (or iOS full targeted set per stash-compare baseline discipline), no new failures vs recorded baseline, v1 deprecated path still green during transition.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-kernel-manifest-tests"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-batch-engine-tests",
+      "title": "F4 handler batch engine — TESTS",
+      "description": "Unit tests for phase5-batch-engine: session_turn_items v2: batch loop reads pages via existing agent walker (official cursor pagination; per-page gates: 30s RPC, 4MB raw backstop -> page_oversize, NO page-count/byte-total caps); each accepted page: detail-store atomic accept + kernel manifest commit (partial) + turn_detail_chunk event to REQUESTING conn only (<=256KB advisory/512KB post-encode hard cap, split pages as needed, seq monotonic); EOF->loaded ack; 90s deadline->partial ack + progress (NOT failed; client auto-re-invokes); upstream stall->failed(upstream_error|timeout) ack with progress RETAINED (cache + already-delivered chunks kept; UI keeps loaded items per ruling 7); cursor-invalid detection (empty page/rewind)->re-walk from page 1 skip-by-canonical-itemID until overlap boundary; singleflight followers share event stream; orphan loading -> failed(interrupted) cache retained; reconnect with existing manifest -> fast-path replay chunks from detail cache WITHOUT upstream refetch. Deliver the Tests: items listed in impl todo as formal suite; run targeted + -race x2.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-batch-engine"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-batch-engine-regression",
+      "title": "F4 handler batch engine — REGRESSION",
+      "description": "Regression gate for phase5-batch-engine: full go-bridge + agent/codex-remote suites (or iOS full targeted set per stash-compare baseline discipline), no new failures vs recorded baseline, v1 deprecated path still green during transition.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-batch-engine-tests"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-blob-rpc-tests",
+      "title": "F5 turn_output_chunk RPC — TESTS",
+      "description": "Unit tests for phase5-blob-rpc: Handler for turn_output_chunk: read chunk from blob store (128KB target chunks); blob LRU-evicted -> UnifiedError blob_evicted (retryable) and client re-invokes session_turn_items which re-hydrates blob from official pagination before continuing; never truncate. Deliver the Tests: items listed in impl todo as formal suite; run targeted + -race x2.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-blob-rpc"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-blob-rpc-regression",
+      "title": "F5 turn_output_chunk RPC — REGRESSION",
+      "description": "Regression gate for phase5-blob-rpc: full go-bridge + agent/codex-remote suites (or iOS full targeted set per stash-compare baseline discipline), no new failures vs recorded baseline, v1 deprecated path still green during transition.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-blob-rpc-tests"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-ios-overlay-tests",
+      "title": "F6 iOS detail overlay — TESTS",
+      "description": "Unit tests for phase5-ios-overlay: iOS: connection-scoped overlay store keyed (sessionID,turnID,manifestRev) consuming turn_detail_chunk events (NOT merged into messages/snapshot); progressive render from overlay (partial shows loaded-X-items + continue affordance; upstream-stall keeps loaded content with retry, never blanket fail); oversize items render collapsed row '输出 1.06MB，点击查看全文' -> turn_output_chunk paged fetch; reconnect clears overlay, base snapshot stays light, expanded state re-pull via session_turn_items fast-path; loaded expand/collapse UX unchanged from G3 rounds. Deliver the Tests: items listed in impl todo as formal suite; run targeted + -race x2.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-ios-overlay"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-ios-overlay-regression",
+      "title": "F6 iOS detail overlay — REGRESSION",
+      "description": "Regression gate for phase5-ios-overlay: full go-bridge + agent/codex-remote suites (or iOS full targeted set per stash-compare baseline discipline), no new failures vs recorded baseline, v1 deprecated path still green during transition.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-ios-overlay-tests"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-g3-final-tests",
+      "title": "F7 G3 final acceptance — TESTS",
+      "description": "Unit tests for phase5-g3-final: Owner real-device acceptance per ruling: a real >=128 pages/>=5.7MB turn (session 01a04be1 turns 01a04c13/01a04e48 candidates) expands fully: progressive loading with progress, oversize output collapsed then fully viewable via chunks, reconnect resume, default snapshot of other sessions stays light. G3 matrix row stays open until this passes; requires phase5 units installed on both devices.. Deliver the Tests: items listed in impl todo as formal suite; run targeted + -race x2.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-g3-final"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase5-g3-final-regression",
+      "title": "F7 G3 final acceptance — REGRESSION",
+      "description": "Regression gate for phase5-g3-final: full go-bridge + agent/codex-remote suites (or iOS full targeted set per stash-compare baseline discipline), no new failures vs recorded baseline, v1 deprecated path still green during transition.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl-tests-regression-triple",
+      "depends_on": [
+        "phase5-g3-final-tests"
+      ],
+      "source": "owner-final-adjudication-2026-08-30",
+      "notes": "parent-plan:docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md | owner-final-ruling:docs/2026-08-30-codex-remote-turn-items-closed-evidence.md + plan §3.0 item 6 + protocol §11.8 | local-only-no-push-no-main-merge",
       "verification": {
         "required": true,
         "status": "missing",
