@@ -1,0 +1,1031 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge-codex-remote",
+  "plan_file": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-6e34cf39c628.json",
+    "legacy_path": ".claude/exec-plans/plan-6e34cf39c628.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "todo-write-optional-mirror",
+    "invocation_policy": "slash-or-natural-language-equivalent",
+    "persistence_rule": "persist-on-every-status-transition"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-08-30-2026-08-30-codex-remote-lazy-history-implementation-plan完成情况.md",
+    "completion_report_status": "missing",
+    "last_generated_at": null,
+    "based_on_queue_hash": null
+  },
+  "updated_at": "2026-08-30T13:50:00+08:00",
+  "todos": [
+    {
+      "id": "phase0-probe-impl",
+      "title": "Phase 0 probe tooling — turns/items/read/resume probes + assertion harness",
+      "description": "Extend agent/codex-remote/probe/ per probe/README.md discipline (owner-authorized, allowlisted origin/paths, in-memory credentials, revoke own controller, redacted output schema only): (1) thread/turns/list probe — itemsView summary+notLoaded, desc first page, cursor forward/backward round-trips, paginate a >30-turn thread through every page to EOF; (2) thread/items/list probe — turnId filter, asc two pages, empty page, illegal turnId; paginated mandatory; legacy group only if inventory shows legacy threads; (3) thread/read metadata probe recording thread.historyMode + includeTurns=true control inventory (probe-only, never product path); (4) thread/resume candidate probe — excludeTurns:true + initialTurnsPage={limit:30,sortDirection:desc,itemsView:summary}, assert thread.turns==[] (non-empty = default full hydration = candidate fails, bytes stay in stats). Harness must implement §3.0.6 (all content/summary stats grouped by ThreadItem type — userMessage vs reasoning content are same-name-different-meaning; Summary↔items dedup outputs turnId→summary item ids→full item ids mapping with first-user and final-agent compared SEPARATELY) and §3.0.7 negative assertions (1 Summary↔items id mismatch, 2 foreign item type in Summary, 3 turnId-filtered list returning other turns' items, 4 pagination dup/missing page, 5 illegal turnId returning success-shaped foreign content, 6 no-gap adjudication = paginated turn-id sequence vs includeTurns=true control inventory in BOTH set and order + backwards round-trip). Extend live-fixture-contract.json for new shapes.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | upstream-anchor-required-at-done (plan §1.5, tag rust-v0.150.0-alpha.12.2) — thread.rs:1684-1698,1718-1732 / thread_processor.rs:3006-3219,3222-3258,3292-3332,3365-3422; docs-baseline:8352f74",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "G0 probe tooling landed: probe/lib/controller_session.mjs (enrollment/WSS machinery extracted from proven live_controller.mjs, which stays untouched), probe/history_probe.mjs (turns/list summary+notLoaded desc chains to EOF + asc backwards round-trip anchored on last desc page backwardsCursor per official thread_read.rs:364-407 semantics, items/list turnId-filtered asc pages + illegal turnId, thread/read metadata historyMode + includeTurns control inventory, T0.6 resume candidate with thread.turns==[] assertion; runtime version detection with drift assessment), validate/history-fixture-assert.mjs (offline §3.0.7 six negative checks + §3.0.5 nine-item checklist + §3.0.6 type-grouped stats; self-test 13/13 with every synthetic negative detected; --dump-synthetic verified via --fixture path), live-fixture-contract.json history_probe schema, probe/README.md contract. Target version drift discovered and recorded: installed 26.825.41651/0.151.0-alpha.7.1 vs plan-frozen 26.825.32147/0.150.0-alpha.12.2; upstream diff rust-v0.150.0-alpha.12.2→rust-v0.151.0-alpha.7.2 over anchored files is additive-only (usageMetadata field, functionCallOutput item variant — an 11th live item type beyond the plan's ten, handled by the generic shape recorder; misalignment error details; anchored structs/functions unchanged). Version re-anchor decision deferred to owner with live run.",
+        "artifacts": [
+          "agent/codex-remote/probe/lib/controller_session.mjs",
+          "agent/codex-remote/probe/history_probe.mjs",
+          "agent/codex-remote/validate/history-fixture-assert.mjs",
+          "agent/codex-remote/testdata/phase0/live-fixture-contract.json",
+          "agent/codex-remote/probe/README.md",
+          "git:059bc9c",
+          "cmd:node --check ×3 PASS",
+          "cmd:history-fixture-assert.mjs --self-test SELF-TEST-PASS 13/13",
+          "cmd:--dump-synthetic|--fixture path G0-EVIDENCE-COMPLETE 9/9"
+        ],
+        "checked_at": "2026-08-30T03:48:23Z",
+        "upstream_anchor": "codex-rs@rust-v0.150.0-alpha.12.2: app-server-protocol/src/protocol/v2/thread.rs:1684-1698,1718-1732,398-449,1650-1658; v2/thread_data.rs:352-385,73-77; v2/item.rs:268-275; app-server/src/request_processors/thread_processor.rs:3006-3219,3222-3258,3292-3332,3365-3422; app-server/tests/suite/v2/thread_read.rs:330-477,1048-1119"
+      }
+    },
+    {
+      "id": "phase0-probe-tests",
+      "title": "Phase 0 assertion harness self-tests (synthetic negatives)",
+      "description": "Offline self-tests for the §3.0.6/§3.0.7 assertion harness: every one of the six negative cases provably DETECTED on synthetic bad fixtures (not just happy path); §3.0.6 mapping correctness verified — type-grouped content/summary stats produce no userMessage-vs-reasoning false divergence, first-user and final-agent id comparison never merged into one set; validator (agent/codex-remote/validate/controller-fixtures.mjs extension) accepts the new fixture shapes and rejects malformed/redaction-failing ones.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-probe-impl"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | upstream-anchor-required-at-done (plan §1.5, tag rust-v0.150.0-alpha.12.2)",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Harness self-test 13/13 (synthetic good fixture all-pass + 10 single-mutation negatives each detected by the intended check: M1 summary finalAgent id mismatch, M2 foreign summary type, M3 turn-filter leak, M4a dup turn, M4c cursor-chain break, M5 illegal-turnId success, M6/M6b control-inventory set/order, M7 notLoaded non-empty, M8 resume turns non-empty, M9 chain gap vs control, M10 legacy N/A without evidence); self-test re-run fresh at done time. controller-fixtures.mjs extended: --history-only mode (skips frozen-ASAR pin which drifted with Desktop 26.825.41651; redaction scan kept) + --require-live history-fixture structural validation (contract history_probe required sections) + >=1 history fixture required; full mode behavior unchanged (still red on asar drift + cursor reconnect kinds, parent-plan state). Test matrix via CR_PHASE0_LIVE_ROOT scratch dir: good PASS exit0 / malformed-section exit1 / forbidden-marker exit1 / real-dir-no-history-fixtures exit1 / scan-only PASS / full-mode unchanged exit1.",
+        "artifacts": [
+          "agent/codex-remote/validate/controller-fixtures.mjs",
+          "agent/codex-remote/validate/history-fixture-assert.mjs",
+          "git:e57734e",
+          "cmd:history-fixture-assert.mjs --self-test PASS 13/13 (re-run)",
+          "cmd:controller-fixtures.mjs --require-live --history-only matrix 6 cases"
+        ],
+        "checked_at": "2026-08-30T03:52:24Z",
+        "upstream_anchor": "self-test scenarios mirror app-server/tests/suite/v2/thread_read.rs:330-477,1048-1119 @rust-v0.150.0-alpha.12.2 (backwardsCursor inclusive-anchor semantics verified from official test before encoding)"
+      }
+    },
+    {
+      "id": "phase0-probe-regression",
+      "title": "Phase 0 live capture run — sanitized fixtures + historyMode inventory",
+      "description": "Owner-authorized live run against real Desktop app-server (ChatGPT 26.825.32147 / embedded codex 0.150.0-alpha.12.2; installed runtime b45463c2ded8): capture all probe fixtures, redact per testdata/phase0/README.md + live-fixture-contract.json, commit under agent/codex-remote/testdata/phase0/live/ with metadata record (versions, purpose, redaction procedure, secret-scan result). Deliver: turns/list incl. >30-turn full pagination chain + control inventory comparison result; items/list (paginated mandatory; legacy measured or inventory-backed N/A(no target legacy thread)); thread/read historyMode; threadId→historyMode inventory; T0.6 baseline-vs-candidate comparison incl. thread.turns==[] assertion result. Must pass fixture validator + repo gitleaks. Pairing code only via localhost form, never chat/stdout/disk. Owner presence is a real external input — if unavailable, mark blocked with the concrete ask.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-probe-tests"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | upstream-anchor-required-at-done (plan §1.5, tag rust-v0.150.0-alpha.12.2) | completed:2026-08-30 | runbook:docs/2026-08-30-codex-remote-lazy-history-g0-capture-runbook.md",
+      "verification": {
+        "required": true,
+        "status": "pass",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Live fixtures committed + validated; zero §3.0.7 negatives; amendments evidence-backed. upstream_anchor: plan §1.5 tag rust-v0.150.0-alpha.12.2 (thread_processor.rs:3365-3425 items/list filter semantics; 3292-3332 resume initial page; anchors recorded in fixtures probe.upstream_anchor).",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      },
+      "attempts": [
+        {
+          "started_at": "2026-08-30T12:00:00+08:00",
+          "actor": "agent",
+          "note": "Owner authorized live capture in chat 2026-08-30 (\"直接开始吧，开始前先读下两个仓库的Claude.md文档\") and confirmed MacBridge prod controller already paired (probe still uses its own independent controller identity per security contract, so fresh step-up + pairing code apply). §7-4 version re-anchor adjudication: accepted per runbook recommendation — evidence anchors to installed 26.825.41651 / codex-cli 0.151.0-alpha.7.1 (probe records detected versions at runtime), source anchors keep frozen tag rust-v0.150.0-alpha.12.2 with recorded additive-only diff (r6 audit doc). Launching history_probe per runbook."
+        },
+        {
+          "started_at": "2026-08-30T12:45:00+08:00",
+          "actor": "agent",
+          "note": "DONE via 4 live runs (2 completed captures). Deliverables: attempt-009 + attempt-010 fixtures (gitleaks PASS, validator --history-only PASS, §3.0.7 harness zero negatives), probe hardening commits 1684426/cfcf2d9, plan amendments §3.0.7-5/§3.0.7-6/§3.0.5-9 with tag-pinned source anchors + 3x timeout evidence. T0.6 assertion thread.turns==[] holds twice. Version re-anchor accepted (evidence=installed versions, source=frozen tag)."
+        }
+      ]
+    },
+    {
+      "id": "phase0-g0-evidence-impl",
+      "title": "Phase 0 evidence reports — baselines, summary distributions, coverage, resource profile",
+      "description": "Generate from captured fixtures: T0.2 baselines grouped by historyMode (full read / Summary first page / items-list response bytes, RPC wall time, bridge projection bytes, cold-open TTI; CPU conclusions split into server-work vs transport/encoding columns); per-turn resource profile (items total bytes, page count, max single item bytes) feeding proposed maxPages/maxBytes/timeout gate values; T0.3 Summary page assertions (first-user/final-agent only, each may be absent, 0/1/2 distribution, empty text, interrupted synthetic boundary inheritance, itemsView/status/time/error checked); T0.4 ten-item-type coverage report (missing types explicitly unverified, fail-closed/SkippedTypes observable); §3.0.5 nine-item checklist artifact.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-probe-regression"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | upstream-anchor-required-at-done (plan §1.5, tag rust-v0.150.0-alpha.12.2)",
+      "verification": {
+        "required": true,
+        "status": "pass",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      },
+      "attempts": [
+        {
+          "started_at": "2026-08-30T12:45:00+08:00",
+          "actor": "agent",
+          "note": "DONE: docs/2026-08-30-codex-remote-lazy-history-g0-evidence-report.md (T0.2 baselines by historyMode, T0.3 distributions, T0.4 5/10 live + fail-closed remainder, resource profile + recommended gates, T0.5/T0.6/G0.5 adjudication records in attempt-010 metadata). Harness re-run green on both fixtures + self-test."
+        }
+      ]
+    },
+    {
+      "id": "phase0-g0-evidence-tests",
+      "title": "Phase 0 G0 assertion re-run over live fixtures",
+      "description": "Re-run assertion harness over the committed live fixtures (re-verified attestation): zero §3.0.7 negative results including control-inventory set+order comparison and backwards round-trip; §3.0.5 nine items all present, legacy cell only via inventory-backed N/A; Reasoning four-state distribution recorded (G0.5) incl. at least one non-empty content[] sample or explicit owner-decision trigger.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-g0-evidence-impl"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | upstream-anchor-required-at-done (plan §1.5, tag rust-v0.150.0-alpha.12.2)",
+      "verification": {
+        "required": true,
+        "status": "pass",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      },
+      "attempts": [
+        {
+          "started_at": "2026-08-30T12:45:00+08:00",
+          "actor": "agent",
+          "note": "DONE: docs/2026-08-30-codex-remote-lazy-history-g0-evidence-report.md (T0.2 baselines by historyMode, T0.3 distributions, T0.4 5/10 live + fail-closed remainder, resource profile + recommended gates, T0.5/T0.6/G0.5 adjudication records in attempt-010 metadata). Harness re-run green on both fixtures + self-test."
+        }
+      ]
+    },
+    {
+      "id": "phase0-g0-evidence-regression",
+      "title": "G0 verdict — adjudications + resource gate values",
+      "description": "G0 gate verdict: T0.5 legacy adjudication (if inventory has legacy: owner decides transport-only benefit vs keeping old path per §2.5 matrix, recorded in fixture metadata — this is the ONLY production old-path entry; if none: record N/A(no target legacy thread) + inventory evidence); T0.6 candidate adjudication record (three conditions: target Desktop support + no duplicate live subscription + latency data; default keep-baseline; thread.turns==[] assertion outcome recorded); G0.5 — if no non-empty Reasoning content sample exists, owner must decide removal of the 完整思考 claim BEFORE G0 passes (no pending shape claims); resource gate values (maxPages/maxBytes/timeout) adjudicated from T0.2 profile and recorded in fixture metadata. Any §3.0.7 negative = G0 FAIL, back to owner. This todo is G1's hard prerequisite.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-g0-evidence-tests"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | upstream-anchor-required-at-done (plan §1.5, tag rust-v0.150.0-alpha.12.2)",
+      "verification": {
+        "required": true,
+        "status": "pass",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "G0 PASS (owner-adjudicated). Zero §3.0.7 negatives; three evidence-backed amendments; four adjudications approved with constraints; Phase 1 released.",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      },
+      "attempts": [
+        {
+          "started_at": "2026-08-30T12:45:00+08:00",
+          "actor": "agent",
+          "note": "G0-PASS-CONDITIONAL. Blocked on 4 owner adjudications (see evidence report): T0.5 legacy strategy (rec: keep old full-read path), T0.6 enable resume candidate (rec: enable, 3 conditions met), G0.5 drop full-reasoning-content claims (rec: drop), resource gate values (rec: items cap 24p/512KB per turn, turns page 30, rpc 30s/90s). Version re-anchor already accepted per owner start instruction."
+        },
+        {
+          "started_at": "2026-08-30T12:50:00+08:00",
+          "actor": "owner+agent",
+          "note": "G0 CLOSED: owner approved all four adjudications with constraints (recorded in plan §G0 owner 裁决记录 + attempt-010 metadata + evidence report). G0 scoring = PASS with two owner-accepted evidence substitutions (paginated control inventory unobtainable via WSS 240s×3 + legacy contrast; no >30-turn thread in 24/150 sampled). Resource gates frozen incl. per-turn 90s TOTAL deadline + atomic failure + distinct reasonCodes. G2 fixture-reference corrections applied in plan (app-server test env or official baselines; never attempt-010). Probe abnormal-exit ledger + auto-revoke added."
+        }
+      ]
+    },
+    {
+      "id": "phase1-history-api-impl",
+      "title": "Mac agent history API split — ReadThreadSummary + ReadTurnItems (mirror official invariants)",
+      "description": "Split agent/codex-remote/history.go per T1.1/T1.2/T1.3: ReadThreadSummary(ctx, threadID, cursor) = thread/read metadata + thread/turns/list Summary with arbitrary-cursor pagination (behavior aligned to paginated_thread_turns_list_response defaults + three-state semantics; this is ALSO the §2.4 producer hydration page primitive); ReadTurnItems(ctx, threadID, turnID) = thread/items/list loop to EOF mirroring ALL SIX paginated_turn_full_items invariants — fixed turnId, sortDirection=Asc, max page size request (limit constant, server clamp accepted+recorded), strict per-page deserialization, nextCursor=nil is the ONLY EOF, repeated-same-cursor errors immediately — plus G0-adjudicated maxPages/maxBytes/timeout fail-closed. Remove includeTurns=true from the open path but keep an explicitly-named compat function (probe/baseline/owner-adjudicated scope only; production failures are explicit errors, no auto full fallback). Propagate remoteTurn.ItemsView + upstream nextCursor/backwardsCursor + network order + EOF fact for G2. Summary slot mapping carries official item id through the existing text_delta.itemId channel (agent→bridge boundary never drops ids). Live path + catalog.go zero change (diff-audited). go-bridge keeps compiling via the compat function until T2.1 flips consumption. Divergences from official anchors (e.g. added clamps/resource gate) annotated in code comments per red-line §7-13.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-g0-evidence-regression"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | upstream-anchor-required-at-done (plan §1.5, tag rust-v0.150.0-alpha.12.2) — thread_processor.rs:3222-3258,3006-3219,2981-3000; app-server/tests/suite/v2/thread_read.rs:330-477,1781-1934",
+      "verification": {
+        "required": true,
+        "status": "pass",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      },
+      "attempts": [
+        {
+          "started_at": "2026-08-30T12:50:00+08:00",
+          "actor": "agent",
+          "note": "Phase 1 started after G0 closure. T1.1: split ReadThreadSummary/ReadTurnItems mirroring official invariants (plan §1.5 anchors), owner T0.6 constraint: resume+initialTurnsPage only for verified paginated versions with pre-selected baseline for unverified; T0.5 constraint: legacy full-read only on explicit historyMode=legacy; resource gates frozen (24p/512KB/90s deadline/atomic failure/reasonCodes). DESIGN (settled 2026-08-30): new history_paginated.go with (1) ReadThreadSummary(ctx,threadID,cursor) — thread/read metadata on first page only + thread/turns/list summary pages (desc, limit 30, explicit itemsView; RemoteTurnsPage carries ItemsView + nextCursor/backwardsCursor + EOF for §2.4/T1.2); (2) ReadTurnItems(ctx,threadID,turnID) — items/list loop mirroring official paginated_turn_full_items six invariants VERBATIM at tag thread_processor.rs:3222-3260 (fixed turnId, includeArchived semantics, max page size request limit=5 frozen gate + accept server clamp, Asc, strict per-page decode, nextCursor=nil only EOF, repeated-cursor immediate error) + frozen gates (24 pages / 512KB / 90s TOTAL deadline, atomic failure, typed errors mapping to max_pages/max_bytes/timeout reasonCodes); (3) GetTurnScopedRichHistory rewired: paginated → summary pages + ReadTurnItems per turn (FIXES LIVE REGRESSION — includeTurns hangs on paginated via WSS, current prod path broken since Desktop update); legacy → compat full read ONLY on explicit historyMode=legacy (owner T0.5), timeout explicit, never auto-fallback; (4) reasoning mapping summary-only everywhere, remove Tail fallback (G0.5); (5) summary-slot parts carry itemId + source:summarySlot mark (T1.2); tests via LoopbackPair fake, scenarios from official thread_read.rs baseline; unknown item in DETAIL path = atomic failure (§2.2/G1), summary path keeps SkippedTypes diagnostic."
+        },
+        {
+          "started_at": "2026-08-30T13:05:00+08:00",
+          "actor": "agent",
+          "note": "commit 2f3bf5f: history_paginated.go — ReadThreadSummary/ReadTurnItems mirroring official invariants at tag rust-v0.150.0-alpha.12.2 thread_processor.rs:3222-3260 (verified verbatim); historyMode pre-selected dispatch (paginated lazy / legacy compat-full-read-only / unknown fail-closed per owner T0.5); fixes live includeTurns regression on paginated threads."
+        }
+      ]
+    },
+    {
+      "id": "phase1-history-api-tests",
+      "title": "Agent fixture-driven unit tests (official test scenarios)",
+      "description": "Fixture-driven unit tests for the new agent APIs, scenarios taken from official app-server/tests/suite/v2/thread_read.rs:330-477,1781-1934: Summary first page / pagination / empty page / EOF; turnId filter; itemsView passthrough; ten item-type decode (live-proven claims ONLY for types present in G0 fixtures; schema-replay-only types implemented+tested but not marked live-proven); Reasoning content empty-array behavior; repeated-cursor guard fires; SkippedTypes count observable as diagnostic only.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "tests",
+      "depends_on": [
+        "phase1-history-api-impl"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | upstream-anchor-required-at-done (plan §1.5, tag rust-v0.150.0-alpha.12.2)",
+      "verification": {
+        "required": true,
+        "status": "pass",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      },
+      "attempts": [
+        {
+          "started_at": "2026-08-30T13:05:00+08:00",
+          "actor": "agent",
+          "note": "14 new scenario tests (history_paginated_test.go) from official thread_read.rs baseline + G0 fixture shapes (52-byte empty illegal-turnId page, desc network order, cursor chaining, gates, atomic failures); existing fakes migrated off includeTurns; upstream_anchor: plan §1.5 turns_list thread.rs:1684-1698, items_list thread.rs:1718-1732, invariants thread_processor.rs:3222-3258."
+        }
+      ]
+    },
+    {
+      "id": "phase1-history-api-regression",
+      "title": "Agent red-lines — unknown-item atomic failure + race + live zero-change",
+      "description": "Agent-level red-line verification: unknown/unmappable item type → whole-turn atomic failure in decoder/mapper (abort turn, no partial parts, no silent drop, failed+unsupported_item_type semantics per §2.2) with dedicated test; resource-gate fail-closed tests (maxPages/maxBytes/timeout exceeded → error, never truncation/placeholder); existing live replay tests unchanged and green; `go test ./agent/codex-remote/` green including -race; catalog.go/live-path diff audit shows zero functional change.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "regression",
+      "depends_on": [
+        "phase1-history-api-tests"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | upstream-anchor-required-at-done (plan §1.5, tag rust-v0.150.0-alpha.12.2)",
+      "verification": {
+        "required": true,
+        "status": "pass",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      },
+      "attempts": [
+        {
+          "started_at": "2026-08-30T13:05:00+08:00",
+          "actor": "agent",
+          "note": "G1 agent gate: go test -race ./agent/codex-remote/ ALL GREEN; repo build OK; go-bridge dependency suite ok (66.5s). Unknown-item atomic failure (§2.2) implemented + tested (ErrUnknownThreadItem / ErrForeignTurnItem)."
+        }
+      ]
+    },
+    {
+      "id": "phase1-reasoning-mapping-impl",
+      "title": "Reasoning detail mapping per G0.5 adjudication",
+      "description": "T1.5: implement the Reasoning detail mapping per the G0.5 owner adjudication (candidates: A content-non-empty-first with summary fallback; B summary and content as two independent parts). MUST NOT reuse the summary-first rule at history.go:345-351; four-state behavior (empty/empty, summary-only, content-only, both) defined by the adjudication; states without live samples implemented defensively but marked unverified. Annotate mapping vs official item.rs Reasoning semantics in comments.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [
+        "phase1-history-api-regression"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | upstream-anchor-required-at-done (plan §1.5, tag rust-v0.150.0-alpha.12.2) — v2/item.rs:268-275 + G0.5 fixture evidence",
+      "verification": {
+        "required": true,
+        "status": "pass",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      },
+      "attempts": [
+        {
+          "started_at": "2026-08-30T13:05:00+08:00",
+          "actor": "agent",
+          "note": "G0.5 owner adjudication implemented: reasoning maps summary only (history.go), content fallback removed, no placeholder on empty summary; decode keeps content as diagnostic field only."
+        }
+      ]
+    },
+    {
+      "id": "phase1-reasoning-mapping-tests",
+      "title": "Reasoning four-state fixture tests",
+      "description": "Four-state fixture-driven tests for the G0.5-adjudicated mapping; dedup vs Summary slots by official item id; states missing from live fixtures explicitly marked unverified (never claimed proven).",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "tests",
+      "depends_on": [
+        "phase1-reasoning-mapping-impl"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | upstream-anchor-required-at-done (plan §1.5, tag rust-v0.150.0-alpha.12.2)",
+      "verification": {
+        "required": true,
+        "status": "pass",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      },
+      "attempts": [
+        {
+          "started_at": "2026-08-30T13:05:00+08:00",
+          "actor": "agent",
+          "note": "TestReasoningMappingIsSummaryOnlyPerG05 four-state matrix (bothEmpty/summaryOnly/contentOnly cases; content never surfaces); content-nonempty cases marked unverified-not-proven per G0.5 (re-sampling required before any capability claim)."
+        }
+      ]
+    },
+    {
+      "id": "phase1-reasoning-mapping-regression",
+      "title": "G1 gate verdict",
+      "description": "G1 gate record: full `go test ./agent/codex-remote/` green including -race (re-run fresh); every shape assertion traceable to a G0 fixture; unknown-item atomic failure implemented and tested at decoder/mapper layer; record G1 verdict + evidence in state and commit.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "regression",
+      "depends_on": [
+        "phase1-reasoning-mapping-tests"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | upstream-anchor-required-at-done (plan §1.5, tag rust-v0.150.0-alpha.12.2)",
+      "verification": {
+        "required": true,
+        "status": "pass",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      },
+      "attempts": [
+        {
+          "started_at": "2026-08-30T13:05:00+08:00",
+          "actor": "agent",
+          "note": "G1 CLOSED: full race suite green including the four-state test; resource gates frozen in code (24p/512KB/90s total deadline, distinct typed errors ready for max_pages/max_bytes/timeout reasonCodes at §3.2.0 ack layer)."
+        }
+      ]
+    },
+    {
+      "id": "phase2-wire-contract-impl",
+      "title": "Wire contract freeze — session_turn_items + turnStateOps + T2.0 contract review + schema types",
+      "description": "§3.2.0 freeze BEFORE any handler, in docs/protocol/unified-bridge-protocol.md: session_turn_items (registered ONLY on backendId=codex-remote, others fail-closed unsupported; idempotent singleflight key=(sessionId,turnId); request {sessionId,turnId}; success-shaped ack {detailLoadState:loaded|failed, syncRev, reasonCode?} — canonical items NEVER in result, projection snapshot/patch is the only content writer; process failures → success-shaped failed ack carrying that commit's syncRev+reasonCode; ONLY request-level errors (unknown backend/session/turn, malformed) → WireError; state machine: loading committed to SoT on acceptance → success commits replace_parts+loaded in ONE Kernel transaction → syncRev=N, ack only after commit; iOS completion = replica appliedRev>=N order-independent; failure commits failed+reasonCode then failed ack; retry failed→loading; session delete/archive/generation change → fence drop or typed stale; singleflight follower waits the SAME terminal commit and returns the SAME terminal syncRev (never intermediate loading ack); orphan loading (bridge crash after loading commit) restored atomically to failed(interrupted)). turnStateOps patch op: ProjectionPatch gains turnStateOps:[{turnId,detailLoadState,reasonCode?,generation}] (symmetric with partOps, never disguised full turn upsert — r6 定案 3); reasonCode invariants: failed requires non-empty; loading/loaded UNCONDITIONALLY clear old reasonCode; notRequested only as decode default of absent field, never a network op; illegal combos fail-closed; iOS apply order frozen execution→upsertTurns→turnStateOps→partOps; changedTurnIDs must union turnStateOps ids; state-only patch → orderChanged=false + target turn in changedTurns; same-turn state+parts → exactly one changedTurnID; old patches without the field ignored (live zero-change). per-turn generation: persisted monotonic per-turn counter bumped by any post-completion mutation, admission token=(backendId,sessionId,turnId,turnGeneration), NOT global baseRev. delivery mode registration per (conn,backend,session) window/full at first window-RPC hit. Resource gate = G0 values; over-limit → failed ack + reason code, no truncation. PLUS T2.0 contract review: verify bridge-v1.md projection_window_v1 (R2/R3/R4/R10, snapshot cut, admission, bridge-owned cursor) permits producer-on-demand Kernel extension + per-connection delivery; if not, revise canonical contract + tests FIRST. Go+Swift types + schema bump v10→v11(+ per-turn generation, detailLoadState, producer checkpoint fields) frozen in the same batch with decode tests.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase1-reasoning-mapping-regression"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | upstream-anchor-required-at-done (plan §1.5, tag rust-v0.150.0-alpha.12.2) where official semantics referenced; turnStateOps/delivery are bridge-own design (anchor may cite plan §3.2.0)",
+      "verification": {
+        "required": true,
+        "status": "pass",
+        "method": "test+doc-review",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "§3.2.0 frozen BEFORE handler code. Mac docs: c1c6450 (unified §11.7 session_turn_items full contract + bridge-v1 Capability turn_detail_lazy_v1: turnStateOps op/turn fields/apply order/change-set/journal/compat/per-connection delivery + types.ts shapes, tsc clean) and e972abe (T2.0 contract review outcome = R11: producer-on-demand one-bounded-page-per-older, delivery-mode registry, no-op revision patch, honest hasOlder, backend-private producer checkpoint). Impl+types batch: Go 94b0feb (types+validation+Kernel-strict apply+checkpoint v10→v11+CodexProducerState, full go-bridge suite green); iOS d6e1515f (decode types, fail-closed decode, frozen apply order, changedTurnIDs union w/ replica-held filter, merged state-authoritative pair carry).",
+        "artifacts": [
+          "docs/protocol/unified-bridge-protocol.md#§11.7",
+          "docs/protocol/bridge-v1.md#turn_detail_lazy_v1",
+          "docs/protocol/bridge-v1.md#R11",
+          "docs/protocol/schema/bridge-v1.types.ts",
+          "go-bridge/projection_turn_state.go",
+          "mac-HEAD:94b0feb",
+          "ios-HEAD:d6e1515f"
+        ],
+        "checked_at": "2026-08-30T13:30:00+08:00",
+        "upstream_anchor": null
+      },
+      "attempts": [
+        {
+          "started_at": "2026-08-30T13:05:00+08:00",
+          "actor": "agent",
+          "note": "Phase 2 opened. Contract-first per §3.2.0: freeze wire semantics in docs/protocol/unified-bridge-protocol.md (session_turn_items codex-remote-only registration, success-shaped failed acks with syncRev+reasonCode, turnStateOps patch op per r6 §4.1, orphan loading recovery, singleflight follower terminal semantics) BEFORE any handler code. G2 fixture correction applies: >30-turn fixture from app-server test env or official baselines."
+        }
+      ]
+    },
+    {
+      "id": "phase2-wire-contract-tests",
+      "title": "Wire contract decode/compat tests (Go + Swift)",
+      "description": "Decode & compat tests in both repos (Swift in /Users/jacklee/Projects/cordcode-ios-codex-remote, commit hash as artifact): old patch without turnStateOps → ignored, behavior identical; old snapshot turn without detailLoadState → notRequested; illegal state/reasonCode combinations fail-closed; schema v11 round-trip clone/save/restore; Swift apply-order + changedTurnIDs union contract encoded as tests.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-wire-contract-impl"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete",
+      "verification": {
+        "required": true,
+        "status": "pass",
+        "method": "test+doc-review",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Go projection_turn_state_test.go (9 tests): old patch w/o turnStateOps ignored+absence preserved; old snapshot turn → notRequested; illegal combos fail-closed matrix (incl. out-of-set reasonCode); lifecycle failed→retry-loading clears code; generation fence typed stale + sibling-turn isolation; wire round-trip; v11 save/load round-trip incl. CodexProducerState; v10 rejected→rebuild. Full go test ./go-bridge/ green. iOS ProjectionTurnStateOpsTests (9 cases): old patch/snapshot compat, 7 illegal-combo decode throws, replace_parts+loaded same-patch atomic, per-turn no-op unknown turn w/ empty change-set, state-only patch change-set union + orderChanged=false, merged upsert carry (state-authoritative pair), wire-name round-trip. Tests caught 2 real contract deviations, both fixed in-model: merged nil-keeps left stale failed code after loaded upsert; changedTurnIDs reported no-op unknown turns. Neighboring classes ProjectionReplicaTests + SessionProjectionModelsTests re-run 27/27 green.",
+        "artifacts": [
+          "go-bridge/projection_turn_state_test.go",
+          "ios:OpenCodeiOS/OpenCodeiOSTests/ProjectionTurnStateOpsTests.swift",
+          "ios-commit:d6e1515f"
+        ],
+        "checked_at": "2026-08-30T13:30:00+08:00",
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase2-wire-contract-regression",
+      "title": "Contract freeze verification",
+      "description": "Verify the frozen doc: unified-bridge-protocol.md contains every §3.2.0 element (method ownership, ack shape, state machine, follower/orphan rules, turnStateOps shape+invariants+apply order+change-set semantics, generation token, delivery mode, resource gate); bridge-v1.md revision landed if T2.0 review required it; Go/Swift schema sync landed as one batch; docs committed as their own boundary before handler work.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-wire-contract-tests"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete",
+      "verification": {
+        "required": true,
+        "status": "pass",
+        "method": "test+doc-review",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Verified every §3.2.0 element is normative text in the frozen docs: method ownership (v1 codex-remote only, descriptor-gated, unsupported_capability elsewhere), ack shape {detailLoadState, syncRev, reasonCode?} with canonical items never in result, request-level vs process-level error split incl. turn_not_found Kernel-adjudicated + upstream empty-page reconciliation note, 5-step state machine w/ order-independent completion (appliedRev>=N), singleflight follower same-terminal-syncRev, orphan loading→failed(interrupted), G0-frozen resource gates (30/5/24p|512KB/30s/90s-total, distinct reasonCodes, no truncation), reasonCode closed set, empty-detail=loaded, unsupported_item_type atomic turn failure, turnStateOps shape+invariants+apply order (execution→upsertTurns→turnStateOps→partOps)+change-set semantics+generation token (per-turn, not global baseRev)+delivery-mode registration+backward compat. T2.0 review DONE: bridge-v1 revision R11 landed (e972abe). Go/Swift schema sync landed as one batch (94b0feb + d6e1515f, both suites green). Docs committed as their own boundary before any handler work. CLAUDE.md (owner-modified) untouched in both repos; no push.",
+        "artifacts": [
+          "docs-commit:c1c6450",
+          "docs-commit:e972abe",
+          "go-commit:94b0feb",
+          "ios-commit:d6e1515f"
+        ],
+        "checked_at": "2026-08-30T13:30:00+08:00",
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase2-window-wiring-impl",
+      "title": "T2.0 upstream pagination ↔ projection_window_v1 wiring",
+      "description": "go-bridge producer admission extension: on older request beyond committed Kernel with hasOlderUpstream fact (upstream nextCursor non-empty), fetch ONE bounded upstream page via ReadThreadSummary internal cursor → desc→asc reverse + inclusive-cursor dedup + prepend into the SAME Kernel truth (same snapshot fence / continuous syncRev chain) → existing slice logic serves the window; never loop-pull full history per request. per-connection delivery: (conn,backend,session) delivery-mode registry + three rules — requester window connection receives the page ONLY via this window result (syncRev=N); other window connections receive a connection-specific no-op revision patch via the EXISTING projection_patch shape + ordered sink (NOT a second pipe) advancing appliedRev N-1→N without new turns or coverage changes; full-projection connections receive the full mutation. honest hasOlder: false only when Kernel has no older AND upstream EOF; un-hydrated must report true; wire cursor stays kernel-derived, upstream cursor NEVER crosses the bridge or embeds in wire cursor. backend-private producer checkpoint: hasOlderUpstream + internal upstream cursor persisted (schema v11+; NOT ProjectionSourceDescriptor.Cursor int64; no fake path-prefix validation); restart revalidates/continues cursor via target RPC (e.g. persisted boundary turn id vs upstream page-1 result), mismatch → typed recovery; recovery bounded (maxPages/maxBytes/timeout + persisted continuation, over-limit → explicit retryable failure).",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-wire-contract-regression"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | opened 2026-08-30 after wire-contract triplet closed; contract anchors: unified §11.7, bridge-v1 turn_detail_lazy_v1 + R11; G2 fixture rule applies (>30-turn from app-server test env or official baselines, never attempt-010)",
+      "verification": {
+        "required": true,
+        "status": "pass",
+        "method": "test",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "T2.0-core landed (a35ff7a): reducer PrependHistoricalTurns (atomic front-insert, one rev bump, journal-gap-by-design so journal catchup falls to authoritative full form — the only order-correct prepend carrier), R11b delivery-mode registry + PublishProjectionPrepend routing (requester none / window no-op revision patch per-conn baseRev / full sync_invalidate→full pull), producer side-file persistence (schema envelope + atomic rename + validation; re-walk state = boundary required, cursor empty allowed only there), slice hasOlder upstream honesty, handler older-path singleflight (one bounded page per wave, followers share leader commit), core.UpstreamHistoryPager + agent ReadUpstreamHistoryPage (one page/call, desc→asc, internal cursor), prepend mapping reuses turnScopedHistoryTurnToProjectionEvents via scratch reducer w/ projectionReducerEvent (bypass guard satisfied). Tests: 10 new incl. 4-goroutine singleflight + typed stale recovery; race x2 green; full go-bridge+agent green. SCOPE SPLIT recorded: initial-hydrate summary consumption + cold-open producer-state seeding land with T2.1 (shared official-id mapper pulled forward into this commit).",
+        "artifacts": [
+          "go-bridge/projection_window_older_hydrate.go",
+          "go-bridge/projection_window_prepend_test.go",
+          "commit:a35ff7a"
+        ],
+        "checked_at": "2026-08-30T13:50:00+08:00",
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase2-window-wiring-tests",
+      "title": "T2.0 window wiring test matrix",
+      "description": "Test matrix with the >30-turn G0 fixture: window_0→older→…→EOF reachability (pre-31st turn reachable; turn ids no overlap/no gap vs control inventory); hasOlder honesty both ways; wire cursor contains no upstream artifact; multi-iPhone concurrent older serializes/singleflights (one hydration per page); live tail advancing while prepending keeps snapshot cut non-regressing + syncRev chain unbroken; bridge restart/restore then continue older; upstream cursor stale → typed error + recovery path; A(requests older)/B(parks at first screen)/C(full projection) three-connection delivery correctness AND B's subsequent live patch has no base mismatch / no full recovery.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-window-wiring-impl"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "2026-08-30: E2E matrix closed in the T2.1 batch (per plan note): TestWindowOlderWalkFullReachability (40-turn / 4-page full walk, no-gap/no-overlap, one page per step, EOF honesty), TestWindowOlderWalkRoutesPerConnection (handler-level A/B/C: requester page rides result, window peer no-op revision patch on its own baseRev chain, full peer sync_invalidate), TestColdHydrateReseedsStaleProducerFact. Evidence: go-bridge 3b992d1; full suite green; race x2 on window/prepend/older-walk subset green.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase2-window-wiring-regression",
+      "title": "Window wiring race + existing-window zero-regression",
+      "description": "Targeted -race tests pass for hydration/prepend/delivery concurrency paths (bounded claim: these paths, not whole-package race proof); existing window RPC behaviors (snapshot cut, opaque cursor semantics, newer/latest/locate) unchanged for non-historical paths; pre-existing go-bridge window tests green.",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-window-wiring-tests"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase2-summary-consumption-impl",
+      "title": "T2.1 projection consumes Summary + canonical item id persistence",
+      "description": "go-bridge projection history path consumes agent Summary: desc network page REVERSED to oldest→newest before entering the reducer; loading older pages prepend-only; turn-id dedup; inclusive backwards cursor handling fixture-tested. Canonical item id: extend ProjectionPart.ItemID from tool-only to ALL mapped official item variants (text/reasoning/etc.; unmapped variant → §2.2 atomic failure, never silent drop); sync Go schema comments + Swift SessionProjectionPart.itemId (field exists; makeText/makeReasoning currently default nil — wire them); snapshot, patch, restore retain ids full-chain. Switch cold-open hydration from the compat full-read to ReadThreadSummary — this is where includeTurns=true finally leaves the production path (agent compat function remains for probe/baseline).",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-window-wiring-regression"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "2026-08-30 CLOSED 3b992d1: codex-remote cold hydrate consumes ONE Summary page via ReadUpstreamHistoryPage (pager-gated; legacy turn-scoped read stays for non-pager agents; includeTurns left the production path). Producer seed persisted post-commit with tear-free visibility (peek-first reads, write-then-CompareAndDelete under producerWritesMu, UpdatedAt lost-update guard, hydrate-failure purge). Reducer stamps canonical item ids on user/reasoning/text parts; item-boundary splits ride whole-turn upserts; first-part creation keeps the append_text path (steady O(delta) wire preserved). Slice core: zero-length older page at committed front = honest empty page (fixed index panic). webperf fixtures regenerated (additive itemId only).",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase2-summary-consumption-tests",
+      "title": "Summary consumption tests",
+      "description": "Tests: Summary snapshot final-agent part itemId non-empty; reconnect restore → detail merge dedups by the same id; desc→asc reversal correctness; prepend-only ordering; turn-id dedup; inclusive cursor no-dup/no-gap; projection bytes measurably reduced vs compat full-read (uses G0 baseline numbers).",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-summary-consumption-impl"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "2026-08-30 CLOSED: agent TestReadUpstreamHistoryPageReversesToAscending (desc->asc + cursor passthrough + EOF); older-walk fixtures rebuilt on pager cold page + auto-seed (hasOlder=true honesty at window_0, no manual seeding); TestReducerPartsCarryCanonicalItemIds (user/reasoning ItemID, same-item merge, split upsert); E2E matrix above. iOS d6e1515+1 commit: ProjectionPartItemIdTests (decode-retention, split upsert distinct ids, append preserves id) + Replica/Store/TurnStateOps classes green on iPhone 17 Pro Max.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase2-summary-consumption-regression",
+      "title": "Bridge projection zero-regression + hydration switchover",
+      "description": "Existing go-bridge projection/window tests green after the hydration switch (no snapshot-cut regression); fakeAgentSession-based hydration tests updated to Summary fixtures; cold-open projection bytes recorded vs G0 baseline.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-summary-consumption-tests"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "2026-08-30 CLOSED: go test ./go-bridge/ ./agent/codex-remote/ -count=1 all green (68s); race x2 green on TestOlderWalk|TestWindowOlderWalk|TestColdHydrateReseeds|TestPublishProjectionPrepend|TestPrependHistorical|TestReducerParts|TestProducerState|TestSlice; webperf fixture parity verified after regeneration; iOS targeted classes green.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase2-detail-merge-impl",
+      "title": "T2.2+T2.3 dedicated detail merge + session_turn_items handler",
+      "description": "Dedicated history detail merge (NOT live reducer lifecycle, zero FlushPatch/ps.tools change): input = turnId + ordered full items + terminal detailLoadState + admission token (per-turn generation); commit channel = existing wire replace_parts (explicit turnId,messageId) + same-patch turnStateOps terminal state; never markRunning, never fake reasoning_delta/text_delta, never change ExecutionView; unknown/unmappable item type/shape → whole-turn ATOMIC failure (abort commit, keep Summary parts, failed+unsupported_item_type, no partial replace_parts, no loaded; retry allowed after fix); construct/replace that turn's assistant parts keyed by official item id (T2.1 ids); dedup Summary's user/final-agent by canonical item id (G0.7 + §3.0.6 mapping evidence); Reasoning mapping per G0.5. Bridge method session_turn_items implemented strictly per the frozen §3.2.0 (backend gate fail-closed; singleflight idempotent; follower terminal ack; orphan loading restore → failed(interrupted); resource gate fail-closed); management/relay tests reuse the fakeAgentSession pattern.",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-summary-consumption-regression"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | upstream-anchor-required-at-done (plan §1.5, tag rust-v0.150.0-alpha.12.2) — pagination/EOF semantics thread_processor.rs:3222-3258 (via agent API)",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase2-detail-merge-tests",
+      "title": "T2.5 detail-merge test matrix",
+      "description": "Concurrency & ownership matrix (detail rows): completed turn; non-last turn; concurrent live turn elsewhere; duplicate request idempotent; two turns expanded concurrently (singleflight); empty detail (§2.2 definition: no reasoning/tool/fileChange items after removing summary-duplicated user/final-agent) → loaded; cold hydration concurrent with live output; live turn completes while Summary page in flight; new turn starts during detail load; replace_parts repeated commit idempotent; reconnect restore → detail merge dedup; generation change / session delete → typed stale; older-hydration concurrent with detail load; leader/follower disconnect+cancel do not cancel each other's authoritative fetch; unknown-item failure leaves Summary unchanged and post-fix retry commits exactly one complete parts set.",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-detail-merge-impl"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase2-detail-merge-regression",
+      "title": "turnStateOps Go-side semantics tests",
+      "description": "turnStateOps rows (Go side): old-bridge patch without the field → decode+behavior unchanged (live zero-change); state-only loading/failed patch → change-set contains target turn AND orderChanged=false; same-turn state+parts in one patch → exactly one changedTurnID; failed→loading→loaded explicitly clears old reasonCode; illegal state/reasonCode combos fail-closed; orphan loading → bridge restart restore → failed(interrupted), no permanent loading.",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-detail-merge-tests"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase2-g2-gate-impl",
+      "title": "T2.4 protocol docs finalized with handlers",
+      "description": "Protocol doc changes committed together with the handler code (same commit): unified-bridge-protocol.md gains session_turn_items wire contract (ack-only, backend ownership, state machine/syncRev completion, turnStateOps, delivery mode, resource gate) and turnStateOps schema; bridge-v1.md R2/R3/R4/R10 revisions if T2.0 review required them; Go/Swift schema/type references in sync.",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-detail-merge-regression"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase2-g2-gate-tests",
+      "title": "G2 gate — full bridge suite + targeted race",
+      "description": "Full `go test ./go-bridge/` green (fresh re-run, re-verified); targeted -race for detail merge, window hydration, per-connection delivery, projection concurrency paths pass (bounded claim); `go test ./agent/codex-remote/` still green.",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-g2-gate-impl"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase2-g2-gate-regression",
+      "title": "G2 verdict + same-commit doc verification",
+      "description": "G2 verdict record: gate conditions met; `git show --stat` proves protocol doc changes share the handler commit; record verdict + evidence in state. Unsigned release build only if a device validation is needed before Phase 3 (per §7-5 delivery conditions).",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-g2-gate-tests"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase3-ios-state-impl",
+      "title": "iOS projection state — turnStateOps decode/apply + detailLoadState machine",
+      "description": "iOS worktree /Users/jacklee/Projects/cordcode-ios-codex-remote branch codex/codex-remote-backend-ios (P0 source manifest re-verified before edit): decode turnStateOps; apply order frozen to execution→upsertTurns→turnStateOps→partOps; detailLoadState as turn-level field (absent → notRequested); ProjectionReplica.changedTurnIDs(from:) unions turnStateOps ids; state-only patch → orderChanged=false with target turn in changedTurns; same-turn state+parts → one changedTurnID; failed→loading→loaded clears reasonCode; illegal combos fail-closed; old patches without the field ignored (live zero-change); appliedRev>=syncRev completion helper; snapshot restore carries detailLoadState + canonical itemId.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-g2-gate-regression"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree:/Users/jacklee/Projects/cordcode-ios-codex-remote@codex/codex-remote-backend-ios",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase3-ios-state-tests",
+      "title": "iOS state layer unit tests",
+      "description": "T3.4 unit tests (ChatViewModel/projection store): turnStateOps decode + apply order; state-only patch drives UI refresh; changedTurnIDs/orderChanged semantics; reasonCode clearing; old-patch backward compat; snapshot restore of detailLoadState/itemId.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "tests",
+      "depends_on": [
+        "phase3-ios-state-impl"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase3-ios-state-regression",
+      "title": "iOS state layer zero-regression + device install",
+      "description": "Existing iOS projection/replica tests green (live merge semantics untouched — SessionProjection.merged/ProjectionReplica upsertTurns path unchanged); iOS build green. If iPhone connected: install this batch to the device per kickoff directive §6 (install failure = real recorded blocker, no simulator substitution).",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-ios-state-tests"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase3-ios-ux-impl",
+      "title": "iOS lazy-history UX — entry, completion condition, window-chain reuse",
+      "description": "T3.1–T3.3: unified 加载详细过程 entry on ALL paginated completed turns (never infer from Summary metadata); tap → session_turn_items → render detail from projection patch with replica appliedRev>=syncRev as the completion condition (order-independent; failed ack also waits for its syncRev then shows failed; reconnect restores via snapshot); loading / loaded (§2.2 empty-detail copy) / failed-retry states; after loaded the entry becomes expand/collapse with NO refetch; VERIFY (do not rebuild) the existing projection_window_v1 load-older chain (pullWindow/nextOlderCursor/coverage ledger/viewport anchoring/cursor-stale recovery) under producer hydration + per-connection delivery; live turns unaffected; loaded detail survives reconnect.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [
+        "phase3-ios-state-regression"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase3-ios-ux-tests",
+      "title": "iOS UX unit tests",
+      "description": "T3.4 unit tests part 2: entry rendering rules for all completed paginated turns; completion condition + no content render from RPC result; no-duplicate-fetch after loaded; window-chain protocol surface unchanged; failure/retry flow.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "tests",
+      "depends_on": [
+        "phase3-ios-ux-impl"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase3-ios-ux-regression",
+      "title": "G3 — real-device build/install + owner acceptance matrix",
+      "description": "G3: real-device build+install via scripts/run.sh device following REAL_DEVICE_DEBUGGING.md (install failure = real blocker, never simulator substitution); owner acceptance matrix §4 (#1–#10) executed with owner hands — honest self-attestation per row; #5 (Mac→iOS live sync) also re-verifies the pending parent-plan iPhone bidirectional-sync regression; G3 verdict recorded.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-ios-ux-tests"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree; owner-hands-required",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase4-delivery-impl",
+      "title": "Delivery — tests, release build, install, docs sync, baseline comparison",
+      "description": "Full targeted test suites both repos; ./scripts/build-unsigned-release.sh + cover-install + startup verification per BUILD_INSTALL_AND_RUNTIME.md; CHANGELOG + owner manual sync for lazy-history behavior; G0 baseline comparison data (open-session bytes/TTI vs G0 baseline) written into delivery notes; parent plan doc gets ONE forward link to this subplan + its completion report (parent queue/history untouched).",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "impl",
+      "depends_on": [
+        "phase3-ios-ux-regression"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | no-push-no-main-merge",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase4-delivery-tests",
+      "title": "Delivery verification — re-run suites + device smoke",
+      "description": "Re-run both repo suites fresh (re-verified); device smoke after install: open long session, expand detail, scroll older to start, live send both directions.",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "tests",
+      "depends_on": [
+        "phase4-delivery-impl"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase4-delivery-regression",
+      "title": "G4 verdict + completion report",
+      "description": "G4 verdict: owner device matrix §4 all green (incl. #8/#9/#10); baseline comparison recorded; docs synced; then completion report docs/2026-08-30-2026-08-30-codex-remote-lazy-history-implementation-plan完成情况.md generated per exec-plan rules ONLY if all required todos proven (lists parent plan as proved-complete dependency; Mac/iOS commits and evidence listed separately; attestation labels honest).",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "regression",
+      "depends_on": [
+        "phase4-delivery-tests"
+      ],
+      "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": null,
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
+        "upstream_anchor": null
+      }
+    }
+  ]
+}
