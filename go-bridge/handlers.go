@@ -149,6 +149,12 @@ type Handlers struct {
 	bridgeOwnedTurns map[string]struct{}
 	relayEnabled     bool
 	sessionListLimit int
+	// turnItemsDiagnostic routes session_turn_items through the closed-evidence
+	// walk (owner 2026-08-30 deep night): high bounds to the real EOF, full
+	// per-item metrics, NO projection commit — the ack replays the frozen
+	// gates' reasonCode so the client shows the same retry affordance. Set
+	// from CORDCODE_TURN_ITEMS_DIAGNOSTIC=1 in main; never a production flag.
+	turnItemsDiagnostic bool
 
 	// pinStore persists MacBridge-owned session pin (置顶) metadata. Injected from main()
 	// (under the bridge data dir) via SetPinStore; nil in tests that don't exercise pinning.
@@ -622,6 +628,12 @@ func (h *Handlers) effectiveSessionListLimit(requested int) int {
 		return requested
 	}
 	return configured
+}
+
+// SetTurnItemsDiagnostic wires the closed-evidence diagnostic route (main
+// reads CORDCODE_TURN_ITEMS_DIAGNOSTIC). Evidence collection only.
+func (h *Handlers) SetTurnItemsDiagnostic(enabled bool) {
+	h.turnItemsDiagnostic = enabled
 }
 
 func (h *Handlers) SetRelayEnabled(enabled bool) {

@@ -30,8 +30,8 @@ import (
 const (
 	remoteTurnsPageLimit    = 30
 	remoteItemsPageLimit    = 5
-	remoteTurnItemsMaxPages = 24
-	remoteTurnItemsMaxBytes = 512 * 1024
+	RemoteTurnItemsMaxPages = 24
+	RemoteTurnItemsMaxBytes = 512 * 1024
 	// remoteTurnsMaxPages is a chain-safety cap (not owner-frozen): the
 	// summary chain must terminate via nextCursor=nil EOF, and a runaway
 	// chain fails explicitly instead of paginating forever.
@@ -298,6 +298,80 @@ type RemoteTurnItemEntry struct {
 	Item   remoteThreadItem
 }
 
+// Diagnostic gates (owner closed-evidence ruling 2026-08-30 deep night):
+// evidence-collection ONLY — walk to the real EOF with explicit high bounds,
+// never commit into any projection. These are NOT production parameters and
+// must not be cited as gate values.
+const (
+	diagTurnItemsMaxPages = 128
+	diagTurnItemsMaxBytes = 16 * 1024 * 1024
+)
+
+// TurnItemsPageStat is one page's footprint in the resource metrics.
+type TurnItemsPageStat struct {
+	Page          int   // 1-based page number
+	ElapsedMs     int64 // RPC wall time
+	RawBytes      int   // raw JSON-RPC response bytes
+	ItemBytes     int   // sum of serialized item bytes on this page
+	EnvelopeBytes int   // RawBytes - ItemBytes (JSON envelope + escaping)
+	Items         int   // decoded entries (always counted, even on the gate page)
+}
+
+// TurnItemsItemStat names one large item for the overshoot investigation.
+type TurnItemsItemStat struct {
+	Page  int
+	Bytes int
+	Type  string
+}
+
+// turnItemsLargeItemFloor is the size at which an item is individually
+// reported in LargeItems. At limit=5 a whole-turn page breach implies items
+// ≥ ~100KB each, so every meaningful overshoot contributor is listed.
+const turnItemsLargeItemFloor = 32 * 1024
+
+// TurnItemsMetrics is the owner-adjudicated evidence set (2026-08-30 #8
+// closed-evidence round): sizes/counts/timings only, NEVER content. The
+// gate-tripping page is decoded and counted too — the first metrics round
+// left it at items=0, which is the blind spot this struct removes.
+type TurnItemsMetrics struct {
+	PageCount          int
+	RawResponseBytes   int
+	DecodedItemBytes   int
+	EnvelopeBytes      int
+	ItemCount          int
+	ItemTypes          map[string]int
+	MaxItemBytes       int
+	MaxItemType        string
+	PageElapsedTotalMs int64
+	TotalElapsedMs     int64
+	Pages              []TurnItemsPageStat
+	LargeItems         []TurnItemsItemStat
+	FailGate           string
+	EOF                bool
+	Error              string
+}
+
+// turnItemsGates parameterizes the fetch loop: the frozen production gates
+// and the diagnostic evidence gates share one implementation with different
+// numbers (and the diagnostic walk NEVER commits).
+type turnItemsGates struct {
+	maxPages   int
+	maxBytes   int
+	deadline   time.Duration
+	diagnostic bool
+}
+
+// productionTurnItemsGates reads the CURRENT var values on every call (the
+// deadline is a test-shrinkable var; a package-level struct literal would
+// freeze the init-time value and break that seam).
+func productionTurnItemsGates() turnItemsGates {
+	return turnItemsGates{
+		maxPages: RemoteTurnItemsMaxPages,
+		maxBytes: RemoteTurnItemsMaxBytes,
+		deadline: remoteTurnItemsDeadline,
+	}
+}
+
 // ReadTurnItems pulls one turn's full items to EOF, mirroring the official
 // paginated_turn_full_items invariants (thread_processor.rs:3222-3260):
 // fixed turnId, Asc order, max page-size request, strict per-page
@@ -309,68 +383,121 @@ type RemoteTurnItemEntry struct {
 // an error: the official store filters and returns an empty page.
 //
 // Resource-gate metrics (owner adjudication 2026-08-30 #8): every exit —
-// success or any failure — emits one slog summary with per-page counts so
-// real 8–15-minute turns can re-adjudicate the gates with data. Content is
-// NEVER logged, only sizes/counts/timings/gate. Projected (post-mapper)
-// byte size is not measurable here — it rides the bridge patch layer and is
-// observed when the incremental-commit design lands.
+// success or any failure — emits one slog summary. The gate-tripping page is
+// decoded and fully counted before the gate fires (blind-spot fix from the
+// closed-evidence round); content is NEVER logged, only sizes/counts/
+// timings. Projected (post-mapper) byte size is not produced here in
+// production — it rides the bridge patch layer; the diagnostic walk below
+// measures both layers.
 func (a *Agent) ReadTurnItems(ctx context.Context, threadID, turnID string) ([]RemoteTurnItemEntry, error) {
+	entries, m, err := a.fetchTurnItems(ctx, threadID, turnID, productionTurnItemsGates())
+	logTurnItemsMetrics(threadID, turnID, m, err, false)
+	return entries, err
+}
+
+// ReadTurnItemsDiagnostic is the closed-evidence walk (owner 2026-08-30 deep
+// night): high explicit bounds (128 pages / 16MB raw / 90s) to the REAL EOF
+// or a diagnostic bound, full per-item accounting of every page including
+// any oversized ones, plus the post-mapper history-turn JSON size as the
+// bridge-patch proxy. The report and entries are EVIDENCE ONLY — callers
+// must never commit them into a projection.
+func (a *Agent) ReadTurnItemsDiagnostic(ctx context.Context, threadID, turnID string) (*TurnItemsDiagnosticReport, error) {
+	gates := turnItemsGates{
+		maxPages:   diagTurnItemsMaxPages,
+		maxBytes:   diagTurnItemsMaxBytes,
+		deadline:   remoteTurnItemsDeadline,
+		diagnostic: true,
+	}
+	entries, m, err := a.fetchTurnItems(ctx, threadID, turnID, gates)
+	logTurnItemsMetrics(threadID, turnID, m, err, true)
+	report := &TurnItemsDiagnosticReport{Metrics: m, Entries: entries}
+	if err == nil && len(entries) > 0 {
+		turn := core.TurnScopedHistoryTurn{TurnID: turnID, Status: "completed"}
+		for _, entry := range entries {
+			mapRemoteHistoryItem(&turn, entry.Item)
+		}
+		report.HistoryTurn = &turn
+		if blob, jsonErr := json.Marshal(turn); jsonErr == nil {
+			report.HistoryTurnJSONBytes = len(blob)
+		}
+	}
+	return report, err
+}
+
+// TurnItemsDiagnosticReport carries the closed-evidence walk's result.
+// HistoryTurnJSONBytes is the json.Marshal size of the mapped
+// TurnScopedHistoryTurn — the agent-layer projection-size proxy. The
+// bridge-layer ProjectionPart serialization is measured by the handler's
+// diagnostic branch; no patch is ever emitted from this walk.
+type TurnItemsDiagnosticReport struct {
+	Metrics              TurnItemsMetrics
+	Entries              []RemoteTurnItemEntry
+	HistoryTurn          *core.TurnScopedHistoryTurn
+	HistoryTurnJSONBytes int
+}
+
+func logTurnItemsMetrics(threadID, turnID string, m TurnItemsMetrics, err error, diagnostic bool) {
+	parts := make([]string, 0, len(m.Pages))
+	for _, p := range m.Pages {
+		parts = append(parts, fmt.Sprintf("p%d:%dms/%dB(raw)/%dB(items)/%di",
+			p.Page, p.ElapsedMs, p.RawBytes, p.ItemBytes, p.Items))
+	}
+	large := make([]string, 0, len(m.LargeItems))
+	for _, it := range m.LargeItems {
+		large = append(large, fmt.Sprintf("p%d:%dB/%s", it.Page, it.Bytes, it.Type))
+	}
+	slog.Info("codex-remote: turn items metrics",
+		"threadId", threadID,
+		"turnId", turnID,
+		"diag", diagnostic,
+		"pageCount", m.PageCount,
+		"rawResponseBytes", m.RawResponseBytes,
+		"decodedItemBytes", m.DecodedItemBytes,
+		"envelopeBytes", m.EnvelopeBytes,
+		"itemCount", m.ItemCount,
+		"itemTypes", m.ItemTypes,
+		"maxItemBytes", m.MaxItemBytes,
+		"maxItemType", m.MaxItemType,
+		"pageElapsedTotalMs", m.PageElapsedTotalMs,
+		"totalElapsedMs", m.TotalElapsedMs,
+		"pages", strings.Join(parts, " "),
+		"largeItems", strings.Join(large, " "),
+		"failGate", m.FailGate,
+		"eof", m.EOF,
+		"error", errText(err),
+	)
+}
+
+// fetchTurnItems is the shared bounded walk behind the production gates and
+// the diagnostic gates. Gate order per page: pages → RPC → deadline →
+// DECODE+COUNT (always, even on the page that trips a gate — the metrics
+// blind-spot fix) → bytes gate → cursor advance.
+func (a *Agent) fetchTurnItems(ctx context.Context, threadID, turnID string, gates turnItemsGates) ([]RemoteTurnItemEntry, TurnItemsMetrics, error) {
 	cl, err := a.paginatedClient()
 	if err != nil {
-		return nil, err
+		return nil, TurnItemsMetrics{}, err
 	}
-	fetchCtx, cancel := context.WithTimeout(ctx, remoteTurnItemsDeadline)
+	fetchCtx, cancel := context.WithTimeout(ctx, gates.deadline)
 	defer cancel()
 
 	fetchStart := time.Now()
-	type pageStat struct {
-		elapsedMs int64
-		bytes     int
-		items     int
-	}
-	var (
-		pages          []pageStat
-		rawBytes       int
-		decodedBytes   int
-		itemCount      int
-		itemTypeCounts = map[string]int{}
-		maxItemBytes   int
-		maxItemType    string
-		failGate       = "eof"
-	)
-	logMetrics := func(errOut error) {
-		parts := make([]string, 0, len(pages))
-		totalPageMs := int64(0)
-		for _, p := range pages {
-			totalPageMs += p.elapsedMs
-			parts = append(parts, fmt.Sprintf("%dms/%dB/%di", p.elapsedMs, p.bytes, p.items))
-		}
-		slog.Info("codex-remote: turn items metrics",
-			"threadId", threadID,
-			"turnId", turnID,
-			"pageCount", len(pages),
-			"rawResponseBytes", rawBytes,
-			"decodedItemBytes", decodedBytes,
-			"itemCount", itemCount,
-			"itemTypes", itemTypeCounts,
-			"maxItemBytes", maxItemBytes,
-			"maxItemType", maxItemType,
-			"pageElapsedTotalMs", totalPageMs,
-			"totalElapsedMs", time.Since(fetchStart).Milliseconds(),
-			"pages", strings.Join(parts, " "),
-			"failGate", failGate,
-			"error", errText(errOut),
-		)
+	m := TurnItemsMetrics{ItemTypes: map[string]int{}}
+	fail := func(gate string, ferr error) ([]RemoteTurnItemEntry, TurnItemsMetrics, error) {
+		m.TotalElapsedMs = time.Since(fetchStart).Milliseconds()
+		m.FailGate = gate
+		m.Error = errText(ferr)
+		return nil, m, ferr
 	}
 
 	entries := make([]RemoteTurnItemEntry, 0, remoteItemsPageLimit)
 	cursor := ""
 	for page := 1; ; page++ {
-		if page > remoteTurnItemsMaxPages {
-			failGate = "max_pages"
-			err = ErrTurnItemsMaxPages
-			logMetrics(err)
-			return nil, err
+		if page > gates.maxPages {
+			gate := "max_pages"
+			if gates.diagnostic {
+				gate = "diag_max_pages"
+			}
+			return fail(gate, ErrTurnItemsMaxPages)
 		}
 		params := map[string]any{
 			"threadId":      threadID,
@@ -384,80 +511,75 @@ func (a *Agent) ReadTurnItems(ctx context.Context, threadID, turnID string) ([]R
 		pageStart := time.Now()
 		raw, rpcErr, err := cl.RequestContext(fetchCtx, "thread/items/list", params)
 		pageElapsed := time.Since(pageStart)
+		stat := TurnItemsPageStat{Page: page, ElapsedMs: pageElapsed.Milliseconds(), RawBytes: len(raw)}
 		if err != nil {
 			if errors.Is(fetchCtx.Err(), context.DeadlineExceeded) {
-				failGate = "timeout"
-				err = ErrTurnItemsTimeout
-			} else {
-				failGate = "rpc_error"
+				return fail("timeout", ErrTurnItemsTimeout)
 			}
-			logMetrics(err)
-			return nil, err
+			return fail("rpc_error", err)
 		}
 		if rpcErr != nil {
 			if errors.Is(fetchCtx.Err(), context.DeadlineExceeded) {
-				failGate = "timeout"
-				err = rpcErr
-			} else {
-				failGate = "rpc_rejected"
+				return fail("timeout", rpcErr)
 			}
-			logMetrics(err)
-			return nil, rpcErr
+			return fail("rpc_rejected", rpcErr)
 		}
-		totalBytes := rawBytes + len(raw)
-		if totalBytes > remoteTurnItemsMaxBytes {
-			failGate = "max_bytes"
-			rawBytes = totalBytes
-			pages = append(pages, pageStat{elapsedMs: pageElapsed.Milliseconds(), bytes: len(raw), items: 0})
-			err = ErrTurnItemsMaxBytes
-			logMetrics(err)
-			return nil, err
-		}
-		rawBytes = totalBytes
 		var response remoteItemsListResponse
 		if err := json.Unmarshal(raw, &response); err != nil {
-			failGate = "decode_error"
-			logMetrics(err)
-			return nil, fmt.Errorf("codex-remote: thread/items/list decode: %w", err)
+			return fail("decode_error", fmt.Errorf("codex-remote: thread/items/list decode: %w", err))
 		}
+		// Count every item on this page BEFORE any gate fires: the page that
+		// trips max_bytes is exactly the one whose composition the evidence
+		// needs (single huge item vs several vs envelope inflation).
 		for _, wire := range response.Data {
 			if wire.TurnID != turnID {
-				failGate = "foreign_turn_item"
-				logMetrics(ErrForeignTurnItem)
-				return nil, ErrForeignTurnItem
+				return fail("foreign_turn_item", ErrForeignTurnItem)
 			}
 			var probe struct {
 				Type string `json:"type"`
 				ID   string `json:"id"`
 			}
 			if err := json.Unmarshal(wire.Item, &probe); err != nil {
-				failGate = "unknown_item"
-				logMetrics(err)
-				return nil, fmt.Errorf("%w: turn %s item decode: %v", ErrUnknownThreadItem, turnID, err)
+				return fail("unknown_item", fmt.Errorf("%w: turn %s item decode: %v", ErrUnknownThreadItem, turnID, err))
 			}
 			if !remoteKnownItemTypes[probe.Type] {
-				failGate = "unknown_item"
-				logMetrics(fmt.Errorf("%w: %q", ErrUnknownThreadItem, probe.Type))
-				return nil, fmt.Errorf("%w: %q", ErrUnknownThreadItem, probe.Type)
+				return fail("unknown_item", fmt.Errorf("%w: %q", ErrUnknownThreadItem, probe.Type))
 			}
-			decodedBytes += len(wire.Item)
-			itemCount++
-			itemTypeCounts[probe.Type]++
-			if len(wire.Item) > maxItemBytes {
-				maxItemBytes = len(wire.Item)
-				maxItemType = probe.Type
+			stat.ItemBytes += len(wire.Item)
+			stat.Items++
+			m.DecodedItemBytes += len(wire.Item)
+			m.ItemCount++
+			m.ItemTypes[probe.Type]++
+			if len(wire.Item) > m.MaxItemBytes {
+				m.MaxItemBytes = len(wire.Item)
+				m.MaxItemType = probe.Type
+			}
+			if len(wire.Item) >= turnItemsLargeItemFloor {
+				m.LargeItems = append(m.LargeItems, TurnItemsItemStat{Page: page, Bytes: len(wire.Item), Type: probe.Type})
 			}
 			entries = append(entries, RemoteTurnItemEntry{TurnID: wire.TurnID, Item: decodeRemoteThreadItem(wire.Item)})
 		}
-		pages = append(pages, pageStat{elapsedMs: pageElapsed.Milliseconds(), bytes: len(raw), items: len(response.Data)})
+		stat.EnvelopeBytes = stat.RawBytes - stat.ItemBytes
+		m.RawResponseBytes += stat.RawBytes
+		m.EnvelopeBytes += stat.EnvelopeBytes
+		m.PageCount = page
+		m.PageElapsedTotalMs += stat.ElapsedMs
+		m.Pages = append(m.Pages, stat)
+		if m.RawResponseBytes > gates.maxBytes {
+			gate := "max_bytes"
+			if gates.diagnostic {
+				gate = "diag_max_bytes"
+			}
+			return fail(gate, ErrTurnItemsMaxBytes)
+		}
 		if response.NextCursor == nil {
-			logMetrics(nil)
-			return entries, nil
+			m.EOF = true
+			m.FailGate = "eof"
+			m.TotalElapsedMs = time.Since(fetchStart).Milliseconds()
+			return entries, m, nil
 		}
 		if *response.NextCursor == cursor {
-			failGate = "repeated_cursor"
-			logMetrics(ErrRepeatedCursor)
-			return nil, ErrRepeatedCursor
+			return fail("repeated_cursor", ErrRepeatedCursor)
 		}
 		cursor = *response.NextCursor
 	}

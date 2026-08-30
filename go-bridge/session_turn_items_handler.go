@@ -141,6 +141,22 @@ func (h *Handlers) handleSessionTurnItems(conn Connection, msg WireMessage, agen
 		return
 	}
 
+	// Closed-evidence diagnostic route (owner 2026-08-30 deep night): walk to
+	// the real EOF under high explicit bounds, log BOTH the agent-layer
+	// metrics (per-item accounting, envelope overhead) and the bridge-layer
+	// ProjectionPart serialization, and NEVER commit — the kernel state is
+	// untouched (no loading admission, no failed commit). The ack replays the
+	// frozen gates' verdict so the client shows the identical retry
+	// affordance; a turn that would have SUCCEEDED under the frozen gates
+	// falls through to the normal production path below.
+	if h.turnItemsDiagnostic {
+		if diagAgent, haveDiagAgent := h.getFirstAgentByName(msg.BackendID); haveDiagAgent {
+			if h.runTurnItemsDiagnostic(conn, msg, diagAgent, params.SessionID, params.TurnID, proj.SyncRev, sendAck) {
+				return
+			}
+		}
+	}
+
 	// Lazy orphan recovery: a loading turn with no in-flight leader is a
 	// crashed leader's leftover — recover it to failed(interrupted) FIRST so
 	// the retry starts from an honest failed state (restarts recover at
@@ -328,4 +344,112 @@ func turnDetailReasonCode(err error) string {
 	default:
 		return "upstream_error"
 	}
+}
+
+// turnItemsDiagnosticWalker is the agent-side closed-evidence surface. Kept
+// local (not in core) because the report type is evidence-shaped, not a
+// production contract.
+type turnItemsDiagnosticWalker interface {
+	ReadTurnItemsDiagnostic(ctx context.Context, sessionID, turnID string) (*codexremote.TurnItemsDiagnosticReport, error)
+}
+
+// replayFrozenGateReason re-derives the PRODUCTION verdict from the
+// diagnostic walk's per-page accounting: walk the pages in fetch order under
+// the frozen numbers (24 pages / 512KB). A timeout upstream also times out in
+// production. "" means the frozen gates would have SUCCEEDED (EOF inside the
+// bounds) — the diagnostic route then defers to the normal production path.
+func replayFrozenGateReason(m codexremote.TurnItemsMetrics) string {
+	if m.FailGate == "timeout" {
+		return "timeout"
+	}
+	total := 0
+	for _, p := range m.Pages {
+		if p.Page > codexremote.RemoteTurnItemsMaxPages {
+			return "max_pages"
+		}
+		total += p.RawBytes
+		if total > codexremote.RemoteTurnItemsMaxBytes {
+			return "max_bytes"
+		}
+	}
+	if !m.EOF {
+		// Diagnostics stopped at its own bounds/timeouts but the replay above
+		// never tripped a frozen gate: impossible in practice (diagnostic
+		// bounds strictly exceed the frozen ones); classify honestly anyway.
+		return "max_pages"
+	}
+	return ""
+}
+
+// runTurnItemsDiagnostic performs the closed-evidence walk and answers the
+// client with the replayed frozen verdict. handled=false means the walk
+// proved the turn fits the frozen gates — the caller falls through to the
+// normal production fetch (evidence already logged).
+func (h *Handlers) runTurnItemsDiagnostic(
+	conn Connection,
+	msg WireMessage,
+	agent core.Agent,
+	sessionID, turnID string,
+	currentSyncRev int,
+	sendAck func(map[string]interface{}),
+) (handled bool) {
+	walker, ok := agent.(turnItemsDiagnosticWalker)
+	if !ok {
+		// Agent without the diagnostic surface: production behavior, no
+		// evidence lost beyond this branch's scope.
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	report, err := walker.ReadTurnItemsDiagnostic(ctx, sessionID, turnID)
+
+	// Bridge-layer projection size: the same upstreamSummaryTurnsToProjection
+	// the production merge uses, serialized — the patch-body proxy (no patch
+	// is ever emitted from this walk).
+	partsBytes := 0
+	if err == nil && report != nil && report.HistoryTurn != nil {
+		mapped := upstreamSummaryTurnsToProjection([]core.TurnScopedHistoryTurn{*report.HistoryTurn})
+		if len(mapped) == 1 && mapped[0].Assistant != nil {
+			if blob, jsonErr := json.Marshal(mapped[0].Assistant.Parts); jsonErr == nil {
+				partsBytes = len(blob)
+			}
+		}
+	}
+
+	var metrics codexremote.TurnItemsMetrics
+	if report != nil {
+		metrics = report.Metrics
+	}
+	reason := replayFrozenGateReason(metrics)
+	slog.Info("go-bridge: session_turn_items diagnostic",
+		"requestId", msg.RequestID, "backendId", msg.BackendID,
+		"sessionId", sessionID, "turnId", turnID,
+		"replayReason", reason,
+		"eof", metrics.EOF,
+		"pageCount", metrics.PageCount,
+		"rawResponseBytes", metrics.RawResponseBytes,
+		"decodedItemBytes", metrics.DecodedItemBytes,
+		"envelopeBytes", metrics.EnvelopeBytes,
+		"historyTurnJSONBytes", reportHistoryTurnBytes(report),
+		"projectionPartsJSONBytes", partsBytes,
+		"committed", false,
+		"error", func() string {
+			if err == nil {
+				return ""
+			}
+			return err.Error()
+		}())
+	if reason == "" {
+		// Frozen gates would succeed: production path owns the real commit.
+		return false
+	}
+	sendAck(sessionTurnItemsAck(DetailStateFailed, currentSyncRev, reason))
+	return true
+}
+
+func reportHistoryTurnBytes(report *codexremote.TurnItemsDiagnosticReport) int {
+	if report == nil {
+		return 0
+	}
+	return report.HistoryTurnJSONBytes
 }

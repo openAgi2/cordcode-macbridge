@@ -132,6 +132,15 @@ func Main() {
 	handlers.SetRelayEnabled(*relayEnabled)
 	handlers.SetSessionListLimit(*sessionListLimit)
 	handlers.SetDataDir(*dataDirPath)
+	// 封闭取证开关（owner 2026-08-30 深夜裁决）：TURN_ITEMS_DIAGNOSTIC=1 时
+	// session_turn_items 走高门限诊断拉取（128 页/16MB/90s 到真实 EOF、逐 item 计量、
+	// 不 commit 投影、ack 回放冻结门 reasonCode）。只取证，不是生产行为。
+	// 注意：必须用无 CORDCODE_ 前缀的名字——clearControlPlaneEnv 的 sweep 会清掉
+	// 全部 CORDCODE_* 变量（本调用点在 sweep 之后，前缀名永远读到空值）。
+	if os.Getenv("TURN_ITEMS_DIAGNOSTIC") == "1" {
+		handlers.SetTurnItemsDiagnostic(true)
+		slog.Warn("go-bridge: turn-items closed-evidence diagnostic route ENABLED (no projection commits)")
+	}
 	// 真实样本采集钩子（设计 delta §3）：CCCODE_WEB_PUSH_SAMPLE_CAPTURE=1 才启用，缺省零行为差异。
 	initWebPushSampleCapture(*dataDirPath)
 	var webPushPipeline *WebPushCandidatePipeline

@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -480,11 +481,91 @@ func TestTurnItemsMetricsOnMaxBytesGate(t *testing.T) {
 		t.Fatalf("failGate = %v", m["failGate"])
 	}
 	raw, ok := m["rawResponseBytes"].(int64)
-	if !ok || raw <= int64(remoteTurnItemsMaxBytes) {
+	if !ok || raw <= int64(RemoteTurnItemsMaxBytes) {
 		t.Fatalf("rawResponseBytes = %v must record the overshoot cumulative size", raw)
 	}
 	if m["error"] == "" {
 		t.Fatal("error field must name the typed failure")
+	}
+	// Blind-spot fix (owner closed-evidence round): the gate page is decoded
+	// and counted — the first metrics round left it at items=0.
+	if itemCount, _ := m["itemCount"].(int64); itemCount < 8 {
+		t.Fatalf("itemCount = %v — the gate page must be decoded and counted", itemCount)
+	}
+	if envelope, _ := m["envelopeBytes"].(int64); envelope <= 0 {
+		t.Fatalf("envelopeBytes = %v must be > 0 (JSON envelope + escaping overhead)", envelope)
+	}
+	if largeItems, _ := m["largeItems"].(string); !strings.Contains(largeItems, "commandExecution") {
+		t.Fatalf("largeItems = %q must list the gate page's items", largeItems)
+	}
+}
+
+// TestTurnItemsDiagnosticWalksToEOF pins the closed-evidence walk (owner
+// 2026-08-30 deep night): diagnostic bounds reach the real EOF across pages
+// that would have tripped BOTH frozen gates, and the report carries the
+// mapped history turn with its serialized size.
+func TestTurnItemsDiagnosticWalksToEOF(t *testing.T) {
+	// 30 pages of ~60KB command executions — past frozen 24 pages AND 512KB.
+	big := strings.Repeat("x", 60*1024)
+	pages := map[string]map[string]any{}
+	for i := 0; i < 30; i++ {
+		resp := map[string]any{
+			"data": []any{itemEntry("turn_items", map[string]any{"type": "commandExecution", "id": fmt.Sprintf("c%d", i), "aggregatedOutput": big})},
+		}
+		if i < 29 {
+			resp["nextCursor"] = fmt.Sprintf("cur-%d", i+1)
+		}
+		pages[fmt.Sprintf("cur-%d", i)] = resp
+	}
+	agent, _ := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
+		cursor, _ := call.Params["cursor"].(string)
+		if cursor == "" {
+			cursor = "cur-0"
+		}
+		return pages[cursor], nil
+	})
+	report, err := agent.ReadTurnItemsDiagnostic(context.Background(), "thread_probe", "turn_items")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Metrics.EOF {
+		t.Fatal("diagnostic walk must reach the real EOF")
+	}
+	if report.Metrics.PageCount != 30 {
+		t.Fatalf("pageCount = %d, want 30 (frozen max_pages is 24)", report.Metrics.PageCount)
+	}
+	if report.Metrics.RawResponseBytes <= RemoteTurnItemsMaxBytes {
+		t.Fatalf("rawResponseBytes = %d must exceed the frozen gate", report.Metrics.RawResponseBytes)
+	}
+	if report.HistoryTurn == nil || report.HistoryTurnJSONBytes <= 0 {
+		t.Fatalf("report must carry the mapped history turn and its JSON size: %+v", report.HistoryTurn)
+	}
+	if len(report.Entries) != 30 {
+		t.Fatalf("entries = %d, want 30", len(report.Entries))
+	}
+}
+
+// TestTurnItemsDiagnosticGateStillFailsClosed pins that the diagnostic walk's
+// own bounds fail closed with their own gate names — evidence bounds, never
+// silent truncation, never an EOF claim at a bound.
+func TestTurnItemsDiagnosticGateStillFailsClosed(t *testing.T) {
+	huge := strings.Repeat("x", 1024*1024) // 1MB items → trips diag 16MB within ~16 pages
+	agent, _ := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
+		cursor, _ := call.Params["cursor"].(string)
+		return map[string]any{
+			"data":       []any{itemEntry("turn_items", map[string]any{"type": "commandExecution", "id": "c1", "aggregatedOutput": huge})},
+			"nextCursor": "cur-" + cursor + "-more",
+		}, nil
+	})
+	report, err := agent.ReadTurnItemsDiagnostic(context.Background(), "thread_probe", "turn_items")
+	if !errors.Is(err, ErrTurnItemsMaxBytes) {
+		t.Fatalf("err = %v", err)
+	}
+	if report == nil || report.Metrics.FailGate != "diag_max_bytes" {
+		t.Fatalf("failGate = %+v", report)
+	}
+	if report.Metrics.EOF {
+		t.Fatal("must not claim EOF at a diagnostic bound")
 	}
 }
 

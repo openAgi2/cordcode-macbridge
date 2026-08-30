@@ -30,15 +30,18 @@ import (
 // TurnDetailReader (session_turn_items fetch).
 type turnDetailAgent struct {
 	*fakeAgent
-	cold      *core.ColdHistoryResult
-	detail    core.TurnScopedHistoryTurn
-	detailErr error
-	fetches   int64 // atomic fetch counter
-	gate      chan struct{}
-	coldGate  chan struct{} // blocks ReadColdHistory when set
-	walkGate  chan struct{} // blocks cursor != "" upstream pages when set
-	pages     map[string]*core.UpstreamHistoryPage
-	walkFetch int64 // atomic cursor-page counter
+	cold       *core.ColdHistoryResult
+	detail     core.TurnScopedHistoryTurn
+	detailErr  error
+	fetches    int64 // atomic fetch counter
+	gate       chan struct{}
+	coldGate   chan struct{} // blocks ReadColdHistory when set
+	walkGate   chan struct{} // blocks cursor != "" upstream pages when set
+	pages      map[string]*core.UpstreamHistoryPage
+	walkFetch  int64 // atomic cursor-page counter
+	diagReport *codexremote.TurnItemsDiagnosticReport
+	diagErr    error
+	diagFetch  int64
 }
 
 func (a *turnDetailAgent) ReadColdHistory(ctx context.Context, sessionID string) (*core.ColdHistoryResult, error) {
@@ -72,6 +75,13 @@ func (a *turnDetailAgent) ReadTurnDetail(ctx context.Context, sessionID, turnID 
 	turn := a.detail
 	turn.TurnID = turnID
 	return turn, nil
+}
+
+// ReadTurnItemsDiagnostic fakes the closed-evidence walk (diagFetch counts;
+// the report is whatever the test stages).
+func (a *turnDetailAgent) ReadTurnItemsDiagnostic(ctx context.Context, sessionID, turnID string) (*codexremote.TurnItemsDiagnosticReport, error) {
+	atomic.AddInt64(&a.diagFetch, 1)
+	return a.diagReport, a.diagErr
 }
 
 func turnDetailHarness(t *testing.T, detail core.TurnScopedHistoryTurn) (*Handlers, *olderWalkConn, string, *turnDetailAgent) {
@@ -560,5 +570,178 @@ func quiesceProjectionWrites(t *testing.T, h *Handlers) {
 			return
 		}
 		prev = cur
+	}
+}
+
+// TestReplayFrozenGateReason pins the production-verdict replay from a
+// diagnostic walk's per-page accounting (closed-evidence round, owner
+// 2026-08-30 deep night): page order + cumulative bytes under the frozen
+// numbers; "" only when EOF fits inside the frozen gates.
+func TestReplayFrozenGateReason(t *testing.T) {
+	page := func(n, raw int) codexremote.TurnItemsPageStat {
+		return codexremote.TurnItemsPageStat{Page: n, RawBytes: raw}
+	}
+	cases := []struct {
+		name string
+		m    codexremote.TurnItemsMetrics
+		want string
+	}{
+		{
+			name: "eof inside frozen gates",
+			m: codexremote.TurnItemsMetrics{
+				EOF:   true,
+				Pages: []codexremote.TurnItemsPageStat{page(1, 10_000), page(2, 20_000)},
+			},
+			want: "",
+		},
+		{
+			name: "cumulative raw trips max_bytes on page 9",
+			m: codexremote.TurnItemsMetrics{
+				EOF:   true,
+				Pages: pagesOf(9, 70_000),
+			},
+			want: "max_bytes",
+		},
+		{
+			name: "page 25 trips max_pages even at tiny bytes",
+			m: codexremote.TurnItemsMetrics{
+				EOF:   true,
+				Pages: pagesOf(25, 1_000),
+			},
+			want: "max_pages",
+		},
+		{
+			name: "page order: max_pages before cumulative bytes at page 25",
+			m: codexremote.TurnItemsMetrics{
+				EOF:   true,
+				Pages: pagesOf(30, 100_000),
+			},
+			want: "max_bytes", // bytes (page ~8) trip before page count (page 25)
+		},
+		{
+			name: "diagnostic bound stop replays as the earlier frozen stop",
+			m: codexremote.TurnItemsMetrics{
+				Pages: pagesOf(40, 50_000),
+			},
+			want: "max_bytes", // page ~11 cumulative 550KB > 512KB
+		},
+		{
+			name: "upstream timeout replays as timeout",
+			m: codexremote.TurnItemsMetrics{
+				FailGate: "timeout",
+				Pages:    []codexremote.TurnItemsPageStat{page(1, 10_000)},
+			},
+			want: "timeout",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := replayFrozenGateReason(tc.m); got != tc.want {
+				t.Fatalf("replay = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func pagesOf(n int, rawEach int) []codexremote.TurnItemsPageStat {
+	out := make([]codexremote.TurnItemsPageStat, 0, n)
+	for i := 1; i <= n; i++ {
+		out = append(out, codexremote.TurnItemsPageStat{Page: i, RawBytes: rawEach})
+	}
+	return out
+}
+
+// TestSessionTurnItemsDiagnosticRouteNoCommit pins the closed-evidence
+// diagnostic route: evidence is collected and logged, the kernel is NEVER
+// touched (no loading admission, no failed commit, no patches), and the ack
+// replays the frozen gates' reasonCode with the current syncRev so the client
+// shows the identical retry affordance.
+func TestSessionTurnItemsDiagnosticRouteNoCommit(t *testing.T) {
+	h, conn, sessionID, agent := turnDetailHarness(t, detailTurnFixture())
+	olderWalkDispatch(h, conn, map[string]any{
+		"direction": "window_0", "backendId": "codex-remote", "sessionId": sessionID, "limit": 10,
+	})
+	quiesceProjectionWrites(t, h)
+	projBefore, _ := h.projectionKernel.Snapshot("codex-remote", sessionID)
+	conn.mu.Lock()
+	framesBefore := len(conn.frames)
+	conn.mu.Unlock()
+
+	// Diagnostic walk: 30 pages × 60KB — past both frozen gates, at EOF.
+	agent.diagReport = &codexremote.TurnItemsDiagnosticReport{
+		Metrics: codexremote.TurnItemsMetrics{
+			EOF: true, PageCount: 30, RawResponseBytes: 30 * 60_000, ItemCount: 60,
+			Pages: pagesOf(30, 60_000),
+		},
+		HistoryTurn:          &core.TurnScopedHistoryTurn{TurnID: "T1"},
+		HistoryTurnJSONBytes: 12345,
+	}
+	h.SetTurnItemsDiagnostic(true)
+
+	wireErr, ack := turnItemsDispatch(t, h, conn, sessionID, "T1")
+	if wireErr != nil {
+		t.Fatalf("ack err = %+v", wireErr)
+	}
+	if ack["detailLoadState"] != DetailStateFailed || ack["reasonCode"] != "max_bytes" {
+		t.Fatalf("ack = %+v (want failed max_bytes)", ack)
+	}
+	if int(ack["syncRev"].(float64)) != projBefore.SyncRev {
+		t.Fatalf("ack syncRev = %v, want current %d (no commit happened)",
+			ack["syncRev"], projBefore.SyncRev)
+	}
+	if got := atomic.LoadInt64(&agent.diagFetch); got != 1 {
+		t.Fatalf("diagFetch = %d", got)
+	}
+	if got := atomic.LoadInt64(&agent.fetches); got != 0 {
+		t.Fatalf("production fetches = %d — diagnostic must not run the production read", got)
+	}
+	projAfter, _ := h.projectionKernel.Snapshot("codex-remote", sessionID)
+	if projAfter.SyncRev != projBefore.SyncRev {
+		t.Fatalf("kernel rev moved: %d → %d (diagnostic must not commit)", projBefore.SyncRev, projAfter.SyncRev)
+	}
+	for _, turn := range projAfter.Turns {
+		if turn.TurnID == "T1" && turn.DetailLoadState != "" && turn.DetailLoadState != DetailStateNotRequested {
+			t.Fatalf("turn detail state = %q — diagnostic must not touch kernel state", turn.DetailLoadState)
+		}
+	}
+	conn.mu.Lock()
+	framesAfter := len(conn.frames)
+	conn.mu.Unlock()
+	if framesAfter != framesBefore {
+		t.Fatalf("conn frames %d → %d — diagnostic must not emit patches", framesBefore, framesAfter)
+	}
+}
+
+// TestSessionTurnItemsDiagnosticFallsThroughInsideGates pins the fallthrough:
+// when the walk proves the turn fits the frozen gates, the normal production
+// path owns the real commit (evidence already logged).
+func TestSessionTurnItemsDiagnosticFallsThroughInsideGates(t *testing.T) {
+	h, conn, sessionID, agent := turnDetailHarness(t, detailTurnFixture())
+	olderWalkDispatch(h, conn, map[string]any{
+		"direction": "window_0", "backendId": "codex-remote", "sessionId": sessionID, "limit": 10,
+	})
+	quiesceProjectionWrites(t, h)
+
+	agent.diagReport = &codexremote.TurnItemsDiagnosticReport{
+		Metrics: codexremote.TurnItemsMetrics{
+			EOF: true, PageCount: 2, RawResponseBytes: 20_000,
+			Pages: pagesOf(2, 10_000),
+		},
+		HistoryTurn: &core.TurnScopedHistoryTurn{TurnID: "T1"},
+	}
+	h.SetTurnItemsDiagnostic(true)
+
+	wireErr, ack := turnItemsDispatch(t, h, conn, sessionID, "T1")
+	if wireErr != nil {
+		t.Fatalf("ack err = %+v", wireErr)
+	}
+	if ack["detailLoadState"] != DetailStateLoaded {
+		t.Fatalf("ack = %+v — inside-gates turn must fall through to the real commit", ack)
+	}
+	if got := atomic.LoadInt64(&agent.diagFetch); got != 1 {
+		t.Fatalf("diagFetch = %d", got)
+	}
+	if got := atomic.LoadInt64(&agent.fetches); got != 1 {
+		t.Fatalf("production fetches = %d", got)
 	}
 }
