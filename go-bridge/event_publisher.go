@@ -249,6 +249,7 @@ type EventPublisher struct {
 	nextProjectionFenceID    uint64
 	projectionFences         map[projectionFenceKey]*projectionSnapshotFence
 	projectionSnapshotCuts   map[projectionFenceKey]int
+	projectionDeliveryModes  map[Connection]map[string]ProjectionDeliveryMode
 	projectionInvalidated    map[projectionFenceKey]bool
 	projectionJournal        *ProjectionRevisionJournal
 	// rebindLastAttempt throttles zero-target recovery. A stream can emit many
@@ -307,6 +308,7 @@ func NewEventPublisher(bridgeEpoch string, broadcaster ...*Broadcaster) *EventPu
 		connectionGenerations:   make(map[Connection]uint64),
 		projectionFences:        make(map[projectionFenceKey]*projectionSnapshotFence),
 		projectionSnapshotCuts:  make(map[projectionFenceKey]int),
+		projectionDeliveryModes: make(map[Connection]map[string]ProjectionDeliveryMode),
 		projectionInvalidated:   make(map[projectionFenceKey]bool),
 		projectionJournal:       NewProjectionRevisionJournal(0, 0),
 		rebindLastAttempt:       make(map[string]time.Time),
@@ -469,6 +471,7 @@ func (p *EventPublisher) UnregisterConnection(conn Connection) {
 	delete(p.catalogCursorEpochV2, conn)
 	delete(p.projectionWindowV1, conn)
 	delete(p.connectionGenerations, conn)
+	delete(p.projectionDeliveryModes, conn)
 	for key := range p.projectionFences {
 		if key.conn == conn {
 			delete(p.projectionFences, key)
@@ -652,6 +655,137 @@ func projectionInvalidateEvent(bridgeEpoch, backendID, sessionID string) EventMe
 			"reason":      "gap",
 			"bridgeEpoch": bridgeEpoch,
 		},
+	}
+}
+
+// ProjectionDeliveryMode is the R11b per-(conn, backend, session) delivery mode,
+// registered at the connection's FIRST window-RPC hit (observed behavior, not a
+// declared capability).
+type ProjectionDeliveryMode string
+
+const (
+	ProjectionDeliveryWindow ProjectionDeliveryMode = "window"
+	ProjectionDeliveryFull   ProjectionDeliveryMode = "full"
+)
+
+// SetConnProjectionDeliveryMode registers the R11b delivery mode for
+// (conn, backend, session). Window RPCs register window mode; connections that
+// only ever pull full projections stay on the full default.
+func (p *EventPublisher) SetConnProjectionDeliveryMode(conn Connection, backendID, sessionID string, mode ProjectionDeliveryMode) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	key := projectionDeliveryKey(backendID, sessionID)
+	if p.projectionDeliveryModes[conn] == nil {
+		p.projectionDeliveryModes[conn] = make(map[string]ProjectionDeliveryMode)
+	}
+	p.projectionDeliveryModes[conn][key] = mode
+}
+
+// ConnProjectionDeliveryMode reports the registered mode; absent = full
+// (today's behavior for every non-window connection).
+func (p *EventPublisher) ConnProjectionDeliveryMode(conn Connection, backendID, sessionID string) ProjectionDeliveryMode {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.connDeliveryModeLocked(conn, backendID, sessionID)
+}
+
+func (p *EventPublisher) connDeliveryModeLocked(conn Connection, backendID, sessionID string) ProjectionDeliveryMode {
+	if modes := p.projectionDeliveryModes[conn]; modes != nil {
+		if mode, ok := modes[projectionDeliveryKey(backendID, sessionID)]; ok {
+			return mode
+		}
+	}
+	return ProjectionDeliveryFull
+}
+
+func projectionDeliveryKey(backendID, sessionID string) string {
+	return backendID + "|" + sessionID
+}
+
+// PublishProjectionPrepend routes a structural historical prepend commit (R11a)
+// per delivery mode (R11b):
+//   - the REQUESTING connection receives nothing — its page rides the window
+//     result admitted at the new cut (R3 unique page ownership);
+//   - other WINDOW connections receive a connection-specific no-op revision
+//     patch (R11c) advancing their appliedRev along the single chain without
+//     content; the prepended turns reach them through their own window pulls;
+//   - FULL-projection connections receive sync_invalidate so their next
+//     get_session_projection re-syncs order-correct complete truth (a replica
+//     cannot express a front insert via upsertTurns).
+//
+// No content patch is broadcast or journaled for this revision (journal gap by
+// design — see ProjectionReducer.PrependHistoricalTurns).
+func (p *EventPublisher) PublishProjectionPrepend(backendID, sessionID string, syncRev int, requester Connection) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.broadcaster == nil || len(p.syncV2) == 0 {
+		return
+	}
+	targets := p.broadcaster.Targets(backendID, sessionID, "")
+	for _, conn := range targets {
+		if !p.syncV2[conn] || conn == requester {
+			continue
+		}
+		key := projectionFenceKey{conn: conn, backendID: backendID, sessionID: sessionID}
+		if p.connDeliveryModeLocked(conn, backendID, sessionID) == ProjectionDeliveryWindow {
+			base := p.projectionSnapshotCuts[key]
+			if fence := p.projectionFences[key]; fence != nil && !fence.invalidated {
+				base = fence.expectedRev
+			}
+			if base == 0 || base >= syncRev {
+				// Not yet synced onto this chain (or already past it): its own
+				// snapshot/window pull will land at the new head — no frame needed.
+				continue
+			}
+			p.deliverSingleConnPatchLocked(conn, backendID, sessionID, ProjectionPatch{BaseRev: base, SyncRev: syncRev})
+			continue
+		}
+		p.enqueueProjectionInvalidateLocked(conn, backendID, sessionID)
+	}
+}
+
+// deliverSingleConnPatchLocked sends ONE patch to ONE connection through the same
+// fence/cut/sink machinery as the broadcast path. Caller MUST hold p.mu.
+func (p *EventPublisher) deliverSingleConnPatchLocked(conn Connection, backendID, sessionID string, patch ProjectionPatch) {
+	msg := projectionPatchEvent(p.bridgeEpoch, backendID, sessionID, patch)
+	classHint := classifyRelayEvent("projection_patch")
+	key := projectionFenceKey{conn: conn, backendID: backendID, sessionID: sessionID}
+	if fence := p.projectionFences[key]; fence != nil {
+		if patch.SyncRev <= fence.expectedRev || fence.invalidated {
+			return
+		}
+		if patch.BaseRev != fence.expectedRev {
+			fence.pending = nil
+			fence.pendingBytes = 0
+			fence.invalidated = true
+			return
+		}
+		encoded, _ := json.Marshal(patch)
+		if len(fence.pending)+1 > projectionFenceMaxPatches ||
+			fence.pendingBytes+len(encoded) > projectionFenceMaxBytes {
+			fence.pending = nil
+			fence.pendingBytes = 0
+			fence.invalidated = true
+			return
+		}
+		fence.pending = append(fence.pending, patch)
+		fence.pendingBytes += len(encoded)
+		fence.expectedRev = patch.SyncRev
+		return
+	}
+	if p.projectionInvalidated[key] {
+		return
+	}
+	if patch.SyncRev <= p.projectionSnapshotCuts[key] {
+		return
+	}
+	if cut := p.projectionSnapshotCuts[key]; cut != 0 && patch.BaseRev != cut {
+		p.enqueueProjectionInvalidateLocked(conn, backendID, sessionID)
+		p.projectionInvalidated[key] = true
+		return
+	}
+	if ok, _, _ := p.sinkLocked(conn).tryEnqueue(eventOutboundFrame{value: msg, classHint: classHint, classified: true}); ok {
+		p.projectionSnapshotCuts[key] = patch.SyncRev
 	}
 }
 

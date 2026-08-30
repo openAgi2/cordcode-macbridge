@@ -347,6 +347,26 @@ func (a *Agent) GetTurnScopedRichHistory(ctx context.Context, sessionID string, 
 	}
 }
 
+// ReadUpstreamHistoryPage serves the bridge's lazy-history window producer
+// (lazy-history §2.4 / bridge-v1.md R11a): exactly ONE bounded thread/turns/list
+// page per call, keyed by the INTERNAL upstream cursor. Never full-reads. The
+// returned page is ASCENDING (oldest→newest); NextCursor is upstream-owned and
+// must never cross the bridge.
+func (a *Agent) ReadUpstreamHistoryPage(ctx context.Context, sessionID, cursor string) (*core.UpstreamHistoryPage, error) {
+	summary, err := a.ReadThreadSummary(ctx, sessionID, cursor)
+	if err != nil {
+		return nil, err
+	}
+	page := summary.Page
+	turns := mapRemoteHistoryTurns(&remoteThread{ID: sessionID, Turns: page.Turns}, len(page.Turns))
+	// network order is newest→oldest; reverse to ascending so the bridge prepends
+	// in kernel order without re-sorting.
+	for i, j := 0, len(turns)-1; i < j; i, j = i+1, j-1 {
+		turns[i], turns[j] = turns[j], turns[i]
+	}
+	return &core.UpstreamHistoryPage{Turns: turns, NextCursor: page.NextCursor}, nil
+}
+
 // turnScopedHistoryPaginated rebuilds the legacy API's turn list from the
 // paginated primitives: collect desc summary pages until the caller's limit
 // window or upstream EOF, reverse to thread order, then fetch every turn's

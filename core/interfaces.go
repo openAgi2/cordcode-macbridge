@@ -254,6 +254,23 @@ type RichHistoryProvider interface {
 // producers must not locally guess a terminal state the official source did
 // not report. Parts follow the projection step conventions (text/reasoning/
 // tool with nested step map).
+// UpstreamHistoryPage is one bounded page of upstream summary history for lazy
+// hydration (lazy-history plan §2.4 / bridge-v1.md R11a). Turns are ASCENDING
+// (oldest→newest, already reversed from the network's desc order). NextCursor is
+// the INTERNAL upstream cursor (never crosses the bridge); empty means upstream
+// EOF for the walked direction.
+type UpstreamHistoryPage struct {
+	Turns     []TurnScopedHistoryTurn
+	NextCursor string
+}
+
+// UpstreamHistoryPager is implemented by paginated-history agents (codex-remote)
+// so the bridge's window producer can hydrate exactly one bounded page per older
+// request (R11a) instead of full-reading a thread.
+type UpstreamHistoryPager interface {
+	ReadUpstreamHistoryPage(ctx context.Context, sessionID, cursor string) (*UpstreamHistoryPage, error)
+}
+
 type TurnScopedHistoryTurn struct {
 	TurnID       string
 	Status       string

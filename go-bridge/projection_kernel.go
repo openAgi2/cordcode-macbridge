@@ -135,14 +135,14 @@ type CodexProducerState struct {
 	UpdatedAt          time.Time `json:"updatedAt"`
 }
 
-// ValidateCodexProducerState enforces the checkpoint-side invariants: a cursor
-// claim requires the cursor and the kernel boundary turn it was observed at.
+// ValidateCodexProducerState enforces the checkpoint-side invariants: claiming
+// older upstream requires the kernel boundary turn the fact was observed at.
+// UpstreamNextCursor may be empty ONLY as the explicit head re-walk state written
+// by typed stale-cursor recovery (R11d): the next older request fetches upstream
+// page 1 and walks back down to the boundary.
 func ValidateCodexProducerState(state CodexProducerState) error {
 	if !state.HasOlderUpstream {
 		return nil
-	}
-	if state.UpstreamNextCursor == "" {
-		return fmt.Errorf("%w: codex producer state claims older upstream without cursor", ErrProjectionCheckpointInvalid)
 	}
 	if state.BoundaryTurnID == "" {
 		return fmt.Errorf("%w: codex producer state claims older upstream without boundary turn", ErrProjectionCheckpointInvalid)
@@ -352,6 +352,79 @@ func validateProjectionSourceCheckpoint(path string, checkpoint ProjectionSource
 		return fmt.Errorf("%w: consumed prefix digest mismatch", ErrProjectionCheckpointInvalid)
 	}
 	return nil
+}
+
+// LoadCodexProducerState reads the backend-private lazy-history producer
+// checkpoint side file (R11d). Missing file is (nil, nil) — first use. The state
+// is validated; an invalid file is a typed error, never a silent zero state.
+func (s *ProjectionCheckpointStore) LoadCodexProducerState(
+	backendID, sessionID string,
+) (*CodexProducerState, error) {
+	path, err := s.producerStatePath(backendID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var envelope struct {
+		SchemaVersion int                 `json:"schemaVersion"`
+		State         *CodexProducerState `json:"state"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, fmt.Errorf("%w: producer state decode: %v", ErrProjectionCheckpointInvalid, err)
+	}
+	if envelope.SchemaVersion != 1 {
+		return nil, fmt.Errorf("%w: producer state schema %d", ErrProjectionCheckpointInvalid, envelope.SchemaVersion)
+	}
+	if envelope.State == nil {
+		return nil, fmt.Errorf("%w: producer state envelope without state", ErrProjectionCheckpointInvalid)
+	}
+	if err := ValidateCodexProducerState(*envelope.State); err != nil {
+		return nil, err
+	}
+	return envelope.State, nil
+}
+
+// SaveCodexProducerState atomically persists the producer checkpoint side file.
+func (s *ProjectionCheckpointStore) SaveCodexProducerState(
+	backendID, sessionID string,
+	state CodexProducerState,
+) error {
+	if err := ValidateCodexProducerState(state); err != nil {
+		return err
+	}
+	path, err := s.producerStatePath(backendID, sessionID)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(struct {
+		SchemaVersion int                `json:"schemaVersion"`
+		State         CodexProducerState `json:"state"`
+	}{SchemaVersion: 1, State: state})
+	if err != nil {
+		return err
+	}
+	temp := path + ".tmp"
+	if err := os.WriteFile(temp, raw, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(temp, path)
+}
+
+func (s *ProjectionCheckpointStore) producerStatePath(backendID, sessionID string) (string, error) {
+	path, err := s.checkpointPath(backendID, sessionID)
+	if err != nil {
+		return "", err
+	}
+	return path + ".producer.json", nil
 }
 
 func (s *ProjectionCheckpointStore) Save(checkpoint ProjectionCheckpoint) error {
@@ -1292,6 +1365,60 @@ func projectionSourceDescriptorsEqual(lhs, rhs ProjectionSourceDescriptor) bool 
 		}
 	}
 	return true
+}
+
+// LoadCodexProducerState reads the backend-private producer checkpoint through
+// the installed store; a nil/foreign store means no persistence (session-lifetime
+// producer state only).
+func (k *ProjectionKernel) LoadCodexProducerState(backendID, sessionID string) (*CodexProducerState, error) {
+	if k == nil {
+		return nil, nil
+	}
+	k.mu.Lock()
+	store := k.store
+	k.mu.Unlock()
+	concrete, ok := store.(*ProjectionCheckpointStore)
+	if !ok {
+		return nil, nil
+	}
+	return concrete.LoadCodexProducerState(backendID, sessionID)
+}
+
+// SaveCodexProducerState persists through the installed store (no-op without one).
+func (k *ProjectionKernel) SaveCodexProducerState(backendID, sessionID string, state CodexProducerState) error {
+	if k == nil {
+		return nil
+	}
+	k.mu.Lock()
+	store := k.store
+	k.mu.Unlock()
+	concrete, ok := store.(*ProjectionCheckpointStore)
+	if !ok {
+		return nil
+	}
+	return concrete.SaveCodexProducerState(backendID, sessionID, state)
+}
+
+// PrependHistoricalTurns commits a structural historical prepend (R11a) on a
+// READY session; see ProjectionReducer.PrependHistoricalTurns for the journal-gap
+// and delivery contract.
+func (k *ProjectionKernel) PrependHistoricalTurns(
+	backendID, sessionID string,
+	turns []TurnProjection,
+) (SessionProjection, error) {
+	if k == nil {
+		return SessionProjection{}, errors.New("projection kernel nil")
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	session := k.sessionLocked(backendID, sessionID)
+	if session.status.Phase != ProjectionHydrateReady {
+		return SessionProjection{}, fmt.Errorf(
+			"projection: prepend requires ready session, %s/%s is %s",
+			backendID, sessionID, session.status.Phase,
+		)
+	}
+	return k.reducer.PrependHistoricalTurns(backendID, sessionID, turns)
 }
 
 func (k *ProjectionKernel) Snapshot(backendID, sessionID string) (SessionProjection, bool) {

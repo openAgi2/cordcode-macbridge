@@ -58,6 +58,7 @@ const (
 
 type Handlers struct {
 	mu                     sync.Mutex
+	olderHydrateFlights    sync.Map
 	agents                 map[string]core.Agent
 	sessions               *sessionRegistry
 	runningMap             *runningMapCache

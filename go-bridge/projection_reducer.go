@@ -2,6 +2,8 @@ package gobridge
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -1868,4 +1870,73 @@ func cloneProjectionJSONValue(value interface{}) interface{} {
 	default:
 		return value
 	}
+}
+
+var (
+	// ErrProjectionPrependInvalid rejects a structural historical prepend: empty or
+	// duplicate turn ids, or a turn already committed (inclusive-cursor dedup is the
+	// caller's contract; the reducer re-asserts it).
+	ErrProjectionPrependInvalid = errors.New("projection: historical prepend invalid")
+)
+
+// PrependHistoricalTurns atomically inserts strictly-older historical turns (given in
+// ASCENDING order) at the front of the committed projection, advancing syncRev by
+// exactly one (lazy-history §2.4 / bridge-v1.md R11a). It deliberately produces NO
+// pending content patch: this rev is journaled as a GAP on purpose — journal catch-up
+// conns crossing it fall back to the authoritative {projection} form, which is the only
+// order-correct carrier of a structural prepend (replica upsertTurns appends unknown
+// turns at the tail and cannot express a front insert). Per-connection frames are the
+// caller's job (no-op revision patch for window conns, sync_invalidate for
+// full-projection conns; the requester sees the page inside its window result).
+func (r *ProjectionReducer) PrependHistoricalTurns(
+	backendID, sessionID string,
+	turns []TurnProjection,
+) (SessionProjection, error) {
+	if r == nil {
+		return SessionProjection{}, errors.New("projection reducer nil")
+	}
+	if backendID == "" || sessionID == "" {
+		return SessionProjection{}, fmt.Errorf("%w: empty backend/session id", ErrProjectionPrependInvalid)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ps := r.sessions[projectionSessionKey(backendID, sessionID)]
+	if ps == nil {
+		return SessionProjection{}, fmt.Errorf("%w: session %s/%s not present", ErrProjectionPrependInvalid, backendID, sessionID)
+	}
+	if len(turns) == 0 {
+		return cloneSessionProjection(ps.projection), nil
+	}
+	existing := make(map[string]struct{}, len(ps.projection.Turns))
+	for i := range ps.projection.Turns {
+		if ps.projection.Turns[i].TurnID != "" {
+			existing[ps.projection.Turns[i].TurnID] = struct{}{}
+		}
+	}
+	prepared := make([]TurnProjection, 0, len(turns))
+	for i := range turns {
+		turn := cloneTurn(turns[i])
+		if turn.TurnID == "" {
+			return SessionProjection{}, fmt.Errorf("%w: empty turnId at %d", ErrProjectionPrependInvalid, i)
+		}
+		if _, dup := existing[turn.TurnID]; dup {
+			return SessionProjection{}, fmt.Errorf("%w: turn %s already committed", ErrProjectionPrependInvalid, turn.TurnID)
+		}
+		if _, dup := existing[""]; dup {
+			delete(existing, "")
+		}
+		existing[turn.TurnID] = struct{}{}
+		if turn.Status == "" {
+			turn.Status = "completed"
+		}
+		prepared = append(prepared, turn)
+	}
+	ps.projection.Turns = append(prepared, ps.projection.Turns...)
+	ps.projection.SyncRev++
+	for i := range prepared {
+		ps.publishedTurnShells[prepared[i].TurnID] = struct{}{}
+	}
+	// No patch for this rev — journal gap by design (see doc comment).
+	ps.lastFlushedRev = ps.projection.SyncRev
+	return cloneSessionProjection(ps.projection), nil
 }

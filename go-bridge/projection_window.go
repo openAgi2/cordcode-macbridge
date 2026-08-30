@@ -216,6 +216,19 @@ func sliceProjectionWindow(
 	proj SessionProjection,
 	params GetSessionProjectionWindowParams,
 ) (ProjectionWindowResponse, error) {
+	return sliceProjectionWindowWithUpstream(backendID, sessionID, bridgeEpoch, proj, params, false)
+}
+
+// sliceProjectionWindowWithUpstream is the R11d-honest slice: hasOlderUpstream is
+// the backend-private producer fact ("more upstream history exists but is not yet
+// hydrated"). When the kernel slice reaches its own front but upstream is not at
+// EOF, hasOlder MUST be true (never report "session start" for "not loaded").
+func sliceProjectionWindowWithUpstream(
+	backendID, sessionID, bridgeEpoch string,
+	proj SessionProjection,
+	params GetSessionProjectionWindowParams,
+	hasOlderUpstream bool,
+) (ProjectionWindowResponse, error) {
 	turns := proj.Turns
 	limit := params.Limit
 	if limit <= 0 {
@@ -312,6 +325,12 @@ func sliceProjectionWindow(
 	if empty {
 		slice.start, slice.end = 0, 0
 		hasOlder, hasNewer = false, false
+	}
+	if !empty && !hasOlder && hasOlderUpstream && slice.start == 0 {
+		// R11d honesty: the kernel front is not the session start when the producer
+		// still holds an unexhausted upstream cursor. The nextOlderCursor anchors at
+		// the current kernel front; the older walk hydrates from there.
+		hasOlder = true
 	}
 
 	page := turns[slice.start:slice.end]
