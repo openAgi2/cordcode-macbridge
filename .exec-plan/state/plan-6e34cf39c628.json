@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-30T13:50:00+08:00",
+  "updated_at": "2026-08-30T17:40:00+08:00",
   "todos": [
     {
       "id": "phase0-probe-impl",
@@ -743,72 +743,88 @@
       "id": "phase2-g2-gate-impl",
       "title": "T2.4 protocol docs finalized with handlers",
       "description": "Protocol doc changes committed together with the handler code (same commit): unified-bridge-protocol.md gains session_turn_items wire contract (ack-only, backend ownership, state machine/syncRev completion, turnStateOps, delivery mode, resource gate) and turnStateOps schema; bridge-v1.md R2/R3/R4/R10 revisions if T2.0 review required them; Go/Swift schema/type references in sync.",
-      "status": "done",
+      "status": "completed",
       "phase": "phase2",
       "kind": "impl",
       "depends_on": [
         "phase2-detail-merge-regression"
       ],
       "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
-      "notes": "2026-08-30 CLOSED: G2 = full go test ./go-bridge/ green + targeted race on detail merge / window older-hydration / per-connection delivery / projection fence paths (race x2 green, explicit set: TestSessionTurnItems|TestTurnItems|TestMergeHistorical|TestCommitTurnStateOps|TestRecoverOrphan|TestOlderWalk|TestWindowOlderWalk|TestColdHydrate|TestPublishProjectionPrepend|TestPrependHistorical|TestSlice|TestProjectionPatchFence|TestProjectionSnapshotFence) + protocol docs in-repo (T2.4 commits: loaded-repeat watermark + empty-detail state-only rulings). 40-turn walk E2E uses synthetic fixtures — no >30-turn LIVE claim; G2 fixture-reference constraints respected (no attempt-010 citation).",
+      "notes": "2026-08-30 REOPENED by owner (Phase-2 closure rejected): P0-1 detail/state commit vs pending live FlushPatch revision serialization (zero-span stranded patch); P0-2 held-turn registration race vs window snapshot completion; P1-3 owner-approved resume(excludeTurns+initialTurnsPage) unimplemented; P1-4 matrix gaps + verification.status=missing. 2026-08-30 RE-CLOSED after fixes: P0-1/P0-2 fixed+tested (03a5d39), P1-3 implemented version-gated with contract breaker (835bed5), matrix supplement pinned (55a1d66), verification objects below carry the real evidence.",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "present",
+        "method": "go test",
         "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
-        "upstream_anchor": null
+        "summary": "Owner-directed reopen fixes implemented and pinned: P0-1 drain-first patch chain (MergeHistoricalTurnDetail/CommitTurnStateOps share flushLocked; PublishProjectionDetail publishes staged-live prefix via the live broadcast path then routes the commit patch; TestTurnItemsDetailCommitFlushesPendingLiveText asserts the concurrent T3 live text is DELIVERED — contiguous chain from the client cut, zero-span-free, nothing stranded). P0-2 held-turn registration inside CompleteProjectionSnapshotWithHeldTurns (register before fence release, rollback on failed delivery; mid-fence detail commits defer as undecided and resolve content-vs-no-op at completion): TestProjectionWindowFenceResolvesDeferredDetailCommit (content vs no-op split) + TestProjectionWindowFenceHeldTurnRegistrationRollsBackOnFailure (saturated-sink rollback) + TestWindowConnReceivesDetailCommitForHeldTurn (handler wiring). P1-3 production resume(excludeTurns:true+initialTurnsPage{30,desc,summary}) at the single attach site, thread.turns==[] contract with per-process breaker, legacy/unknown/no-cache pre-select the official 2-RPC baseline: TestResumeInitialTurnsPage{ServesColdOpen,LegacyPreSelectsBaseline,ContractViolationTripsBreaker}.",
+        "artifacts": [
+          "commit:03a5d39 fix(codex-remote): P0-1/P0-2",
+          "commit:835bed5 feat(codex-remote): P1-3",
+          "go-bridge/projection_detail_concurrency_test.go",
+          "go-bridge/projection_snapshot_fence.go CompleteProjectionSnapshotWithHeldTurns",
+          "agent/codex-remote/history_paginated_test.go TestResumeInitialTurnsPage*"
+        ],
+        "checked_at": "2026-08-30T17:30:00+08:00",
+        "upstream_anchor": null,
+        "na_reason": null
       }
     },
     {
       "id": "phase2-g2-gate-tests",
       "title": "G2 gate — full bridge suite + targeted race",
       "description": "Full `go test ./go-bridge/` green (fresh re-run, re-verified); targeted -race for detail merge, window hydration, per-connection delivery, projection concurrency paths pass (bounded claim); `go test ./agent/codex-remote/` still green.",
-      "status": "done",
+      "status": "completed",
       "phase": "phase2",
       "kind": "tests",
       "depends_on": [
         "phase2-g2-gate-impl"
       ],
       "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
-      "notes": "2026-08-30 CLOSED: G2 test obligations met — the targeted race set ran green x2 (detail/window/delivery/fence paths listed in phase2-g2-gate-impl note); full suite green on every Phase 2 commit; >30-turn reachability covered by synthetic 40-turn E2E without any live-fixture claim.",
+      "notes": "2026-08-30 REOPENED by owner (Phase-2 closure rejected): P0-1 detail/state commit vs pending live FlushPatch revision serialization (zero-span stranded patch); P0-2 held-turn registration race vs window snapshot completion; P1-3 owner-approved resume(excludeTurns+initialTurnsPage) unimplemented; P1-4 matrix gaps + verification.status=missing. 2026-08-30 RE-CLOSED after fixes: P0-1/P0-2 fixed+tested (03a5d39), P1-3 implemented version-gated with contract breaker (835bed5), matrix supplement pinned (55a1d66), verification objects below carry the real evidence.",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "present",
+        "method": "go test -race",
         "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
-        "upstream_anchor": null
+        "summary": "T2.5 matrix now covers the owner's seven reopened scenarios deterministically: (1) live patch + detail commit continuous delivery = TestTurnItemsDetailCommitFlushesPendingLiveText; (2) window response vs held-turn race = TestProjectionWindowFenceResolvesDeferredDetailCommit + Rollback + handler wiring; (3) older hydration x detail load = TestTurnItemsOlderHydrateRacesDetailLoad (per-turn fence independence, wire invariants across the response boundary, R11b requester exemption documented); (4) leader/follower disconnect = TestTurnItemsLeaderSurvivesRequesterDisconnect (bridge-owned fetch; other holders receive the commit) + TestSessionTurnItemsSingleFlight; (5) generation-change typed stale = TestTurnItemsStaleWhenTurnReactivatedMidFlight + TestTurnItemsConcurrentMergeWinsAndLoserAcksWinner + request-level turn_not_found in TestSessionTurnItemsCapabilityAndAdjudicationGates; (6) reconnect/dedup = TestLoadedDetailWatermarkFallsBackToCurrentRev (journal-backed repeat + conservative fallback) + TestProjectionSnapshotFenceReconnectGetsNewGenerationAndDropsOldState (epoch/generation) + singleflight mirror; (7) Summary hydrate x live completion = TestColdHydrateRacesLiveCompletion (pendingLive replay keeps the live turn exactly once). Race runs green: targeted -race -count=3 on the detail/window/fence set, plus -race -count=1 across the full detail surface.",
+        "artifacts": [
+          "commit:55a1d66 test(codex-remote): P1-4 matrix supplement",
+          "go-bridge/session_turn_items_matrix2_test.go",
+          "go-bridge/session_turn_items_matrix_test.go (pathless wording corrected: no full Projection checkpoint but CodexProducerState side-file persists; checkpoint-restore orphan hook = N/A topology + future-hook unit coverage)"
+        ],
+        "checked_at": "2026-08-30T17:30:00+08:00",
+        "upstream_anchor": null,
+        "na_reason": null
       }
     },
     {
       "id": "phase2-g2-gate-regression",
       "title": "G2 verdict + same-commit doc verification",
       "description": "G2 verdict record: gate conditions met; `git show --stat` proves protocol doc changes share the handler commit; record verdict + evidence in state. Unsigned release build only if a device validation is needed before Phase 3 (per §7-5 delivery conditions).",
-      "status": "done",
+      "status": "completed",
       "phase": "phase2",
       "kind": "regression",
       "depends_on": [
         "phase2-g2-gate-tests"
       ],
       "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
-      "notes": "2026-08-30 CLOSED: final Phase 2 regression state — go test ./go-bridge/ ./agent/codex-remote/ -count=1 green (66s/2.6s); webperf fixture parity holds; protocol docs (T2.4) in-repo. Phase 2 CLOSED at fe714d8.",
+      "notes": "2026-08-30 REOPENED by owner (Phase-2 closure rejected): P0-1 detail/state commit vs pending live FlushPatch revision serialization (zero-span stranded patch); P0-2 held-turn registration race vs window snapshot completion; P1-3 owner-approved resume(excludeTurns+initialTurnsPage) unimplemented; P1-4 matrix gaps + verification.status=missing. 2026-08-30 RE-CLOSED after fixes: P0-1/P0-2 fixed+tested (03a5d39), P1-3 implemented version-gated with contract breaker (835bed5), matrix supplement pinned (55a1d66), verification objects below carry the real evidence.",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "present",
+        "method": "go test",
         "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
-        "upstream_anchor": null
+        "summary": "Post-fix regression: go test ./... -count=1 green across the repo (go-bridge 66s, agent/codex-remote incl. new T0.6 tests, all other agents, core); targeted -race green on detail/window/fence paths (x3 repeats); previously flaky TempDir-race tests stable x5. Phase 2 re-closed at 55a1d66 with the four owner findings fixed (03a5d39 P0-1/P0-2, 835bed5 P1-3, 55a1d66 P1-4) and the pathless claim corrected everywhere it appeared. No plan-vs-code divergence remains on the reopen list; G0 adjudications untouched.",
+        "artifacts": [
+          "commit:03a5d39",
+          "commit:835bed5",
+          "commit:55a1d66",
+          "full-suite run 2026-08-30: go test ./... -count=1 (all packages ok)",
+          "race runs 2026-08-30: go test ./go-bridge/ -race -count=3 -run 'TestSessionTurnItems|TestTurnItems|TestWindowConnReceives|TestMergeHistorical|TestCommitTurnStateOps|TestProjectionWindowFence' (ok)"
+        ],
+        "checked_at": "2026-08-30T17:30:00+08:00",
+        "upstream_anchor": null,
+        "na_reason": null
       }
     },
     {
