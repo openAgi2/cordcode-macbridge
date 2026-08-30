@@ -275,7 +275,7 @@ func (p *PairingController) activateStream(ctx context.Context, conn FrameConn, 
 	p.agent.mu.Unlock()
 	cl := NewClient(stream, epoch)
 	p.agent.BindClient(cl)
-	_, rpcErr, err := cl.RequestContext(ctx, "initialize", map[string]any{
+	raw, rpcErr, err := cl.RequestContext(ctx, "initialize", map[string]any{
 		"clientInfo": map[string]any{
 			"name":    "codex_remote",
 			"title":   "CordCode Link",
@@ -290,6 +290,20 @@ func (p *PairingController) activateStream(ctx context.Context, conn FrameConn, 
 	if rpcErr != nil {
 		_ = cl.Close()
 		return rpcErr
+	}
+	// The initialize result carries the app-server's userAgent
+	// ("{originator}/{workspace-version} (...)"); it is the version fact the
+	// resume initialTurnsPage allowlist gates on. BindClient already cleared
+	// the previous epoch's version, so attaches racing ahead of this point
+	// pre-select the baseline until the new version is announced.
+	var initResult struct {
+		UserAgent string `json:"userAgent"`
+	}
+	if jsonErr := json.Unmarshal(raw, &initResult); jsonErr != nil || initResult.UserAgent == "" {
+		slog.Warn("codex-remote initialize response carried no readable userAgent; version gate stays closed",
+			"decodeErr", jsonErr)
+	} else {
+		p.agent.NoteServerUserAgent(initResult.UserAgent)
 	}
 	if err := cl.Notify("initialized", map[string]any{}); err != nil {
 		_ = cl.Close()

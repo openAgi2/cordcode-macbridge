@@ -26,6 +26,11 @@ type Agent struct {
 	attached           map[string]*Client
 	resumeInitialPages map[string]*resumeInitialPage
 	resumePageBroken   bool
+	// serverVersion is the codex app-server workspace version announced by
+	// this client epoch's initialize response ("" until then); it gates the
+	// thread/resume initialTurnsPage candidate on the probe-verified
+	// allowlist. Client-epoch-scoped: BindClient clears it.
+	serverVersion      string
 	modelKnown         map[string]struct{}
 	modelEfforts       map[string][]string
 	modelDefaultEffort map[string]string

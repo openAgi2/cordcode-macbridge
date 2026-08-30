@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -41,18 +42,61 @@ const (
 // total deadline, not 24x30s"). Var only so tests can shrink it.
 var remoteTurnItemsDeadline = 90 * time.Second
 
-// resumeInitialTurnsPageVerified anchors the owner-approved T0.6 candidate
-// (G0 evidence report "T0.6 resume 候选路径裁决", adjudication #2, 2026-08-30):
-// thread/resume(excludeTurns:true + initialTurnsPage{limit:30, desc, summary})
-// answered 1 RPC 921ms/78611B vs the 2-RPC baseline 1336ms, thread.turns==[]
-// asserted on both probe runs, single live attach, deterministic bytes —
-// measured against the installed Desktop 26.825.41651 / codex-cli
+// resumeInitialTurnsPageVerifiedServers is the allowlist that anchors the
+// owner-approved T0.6 candidate (G0 evidence report "T0.6 resume 候选路径裁
+// 决", adjudication #2, 2026-08-30): thread/resume(excludeTurns:true +
+// initialTurnsPage{limit:30, desc, summary}) answered 1 RPC 921ms/78611B vs
+// the 2-RPC baseline 1336ms, thread.turns==[] asserted on both probe runs,
+// single live attach, deterministic bytes. Keys are the codex app-server
+// workspace version announced by the initialize response userAgent; the entry
+// below is the probe-measured installed Desktop 26.825.41651 / codex-cli
 // 0.151.0-alpha.7.1 (upstream diff to the plan-frozen tag additive-only).
-// Flip to false only with a new probe + owner re-adjudication; a malformed
-// candidate response (thread.turns non-empty) trips the per-process breaker
-// (Agent.resumePageBroken) and every later attach pre-selects the plain
-// excludeTurns form again.
-const resumeInitialTurnsPageVerified = true
+// Every version NOT in this set — newer, older, unparseable, or not yet
+// announced — pre-selects the official 2-RPC baseline for every attach
+// (plan line 379: unverified versions must pre-select baseline). Add an
+// entry only with a fresh probe + owner re-adjudication; a malformed
+// candidate response on a listed version (thread.turns non-empty) still trips
+// the per-process breaker (Agent.resumePageBroken) and every later attach
+// pre-selects the plain excludeTurns form again.
+var resumeInitialTurnsPageVerifiedServers = map[string]struct{}{
+	"0.151.0-alpha.7.1": {},
+}
+
+// serverVersionFromUserAgent extracts the codex app-server workspace version
+// from an initialize userAgent. codex-rs get_codex_user_agent formats it
+// "{originator}/{workspace-version} ({os} {os-version}; {arch}) …" (login
+// crate default_client.rs; every workspace crate shares the version), so the
+// token after the last "/" of the first space-delimited segment is the
+// server version. "" means unreadable — callers treat it as unverified.
+func serverVersionFromUserAgent(userAgent string) string {
+	segment := userAgent
+	if idx := strings.IndexAny(segment, " \t"); idx >= 0 {
+		segment = segment[:idx]
+	}
+	if idx := strings.LastIndex(segment, "/"); idx >= 0 {
+		segment = segment[idx+1:]
+	} else {
+		return ""
+	}
+	return segment
+}
+
+// NoteServerUserAgent records the app-server version announced by the
+// initialize response of the client epoch being bound (activateStream calls
+// it right after a successful initialize). The value is client-epoch-scoped:
+// BindClient clears it, so a version from a previous connection can never
+// gate a new one, and attaches racing ahead of the initialize simply see an
+// unverified server and pre-select the baseline.
+func (a *Agent) NoteServerUserAgent(userAgent string) {
+	version := serverVersionFromUserAgent(userAgent)
+	a.mu.Lock()
+	a.serverVersion = version
+	a.mu.Unlock()
+	if _, verified := resumeInitialTurnsPageVerifiedServers[version]; !verified {
+		slog.Info("codex-remote: server version not probe-verified for resume initialTurnsPage — baseline reads pre-selected",
+			"version", version, "userAgent", userAgent)
+	}
+}
 
 // resumeInitialPage is the one round-trip cold-open artifact cached by the
 // version-gated thread/resume candidate: the thread's authoritative
@@ -539,11 +583,17 @@ func (a *Agent) cacheResumeInitialPage(threadID string, entry *resumeInitialPage
 }
 
 // resumeInitialPageCandidateOn reports whether the next attach should carry
-// initialTurnsPage (frozen verification + per-process breaker).
+// initialTurnsPage: the server version announced by THIS client epoch's
+// initialize must be probe-verified (allowlist above) and the per-process
+// breaker must not have tripped.
 func (a *Agent) resumeInitialPageCandidateOn() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return resumeInitialTurnsPageVerified && !a.resumePageBroken
+	if a.resumePageBroken {
+		return false
+	}
+	_, verified := resumeInitialTurnsPageVerifiedServers[a.serverVersion]
+	return verified
 }
 
 // breakResumeInitialPageCandidate trips the per-process breaker: a response

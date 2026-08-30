@@ -151,8 +151,12 @@ func (a *Agent) BindClient(cl *Client) {
 	a.attached = map[string]*Client{}
 	// Cached resume initial pages are client-epoch-scoped: a rebind re-attaches
 	// every observed thread (which re-caches fresh pages on the new client), so
-	// the old entries must never outlive their connection.
+	// the old entries must never outlive their connection. The server version
+	// gating the initialTurnsPage candidate belongs to the same epoch: clear it
+	// too — activateStream re-announces it after the new initialize, and until
+	// then the gate stays closed (unverified pre-selects baseline).
 	a.resumeInitialPages = map[string]*resumeInitialPage{}
+	a.serverVersion = ""
 	observed := make([]string, 0, len(a.listeners))
 	for threadID := range a.listeners {
 		observed = append(observed, threadID)
@@ -383,10 +387,10 @@ func (a *Agent) attachLiveThreadOn(ctx context.Context, cl *Client, threadID str
 	}
 	a.mu.Unlock()
 	carryInitialPage := a.resumeInitialPageCandidateOn()
-	// Owner-approved T0.6 candidate (resumeInitialTurnsPageVerified): the one
-	// attach this thread needs anyway also returns the first desc summary
-	// turns page, so the paginated cold open costs zero extra RPCs. The
-	// official experimental shape is excludeTurns:true + initialTurnsPage;
+	// Owner-approved T0.6 candidate (version allowlist + per-process breaker):
+	// the one attach this thread needs anyway also returns the first desc
+	// summary turns page, so the paginated cold open costs zero extra RPCs.
+	// The official experimental shape is excludeTurns:true + initialTurnsPage;
 	// omitting excludeTurns would trigger default full hydration.
 	params := map[string]any{
 		"threadId":     threadID,

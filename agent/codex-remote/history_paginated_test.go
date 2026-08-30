@@ -526,6 +526,7 @@ func assertRPCs(t *testing.T, calls *[]rpcCall, method string) []rpcCall {
 
 // The single attach carries the official experimental shape and its page serves
 // the paginated cold open with ZERO extra RPCs (probe: 1 RPC vs baseline 2).
+// Precondition: the initialize-announced server version is probe-verified.
 func TestResumeInitialTurnsPageServesColdOpen(t *testing.T) {
 	agent, calls := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
 		switch call.Method {
@@ -547,6 +548,7 @@ func TestResumeInitialTurnsPageServesColdOpen(t *testing.T) {
 		}
 		return nil, &RPCError{Code: -32601, Message: call.Method}
 	})
+	agent.NoteServerUserAgent(verifiedServerUserAgent)
 	if err := agent.AttachLiveThread(context.Background(), "thread_probe"); err != nil {
 		t.Fatal(err)
 	}
@@ -605,6 +607,7 @@ func TestResumeInitialTurnsPageLegacyPreSelectsBaseline(t *testing.T) {
 		}
 		return nil, &RPCError{Code: -32601, Message: call.Method}
 	})
+	agent.NoteServerUserAgent(verifiedServerUserAgent)
 	if err := agent.AttachLiveThread(context.Background(), "thread_probe"); err != nil {
 		t.Fatal(err)
 	}
@@ -639,6 +642,7 @@ func TestResumeInitialTurnsPageContractViolationTripsBreaker(t *testing.T) {
 		}
 		return nil, &RPCError{Code: -32601, Message: call.Method}
 	})
+	agent.NoteServerUserAgent(verifiedServerUserAgent)
 	if err := agent.AttachLiveThread(context.Background(), "thread_probe"); err != nil {
 		t.Fatal(err)
 	}
@@ -664,4 +668,116 @@ func (a *Agent) resumeInitialPageBrokenForTest() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.resumePageBroken
+}
+
+// verifiedServerUserAgent mirrors the shape codex-rs get_codex_user_agent
+// answers for our initialize: "{originator}/{workspace-version} ({os} {ver};
+// {arch}) {user_agent()} ({clientInfo.name}; {clientInfo.version})" — the
+// token after the first segment's last "/" is the probe-verified version.
+const verifiedServerUserAgent = "codex_remote/0.151.0-alpha.7.1 (Mac OS 26.5; arm64) codex_cli_rs/0.151.0-alpha.7.1 (codex_remote; 0)"
+
+func TestServerVersionFromUserAgent(t *testing.T) {
+	cases := []struct {
+		userAgent string
+		want      string
+	}{
+		{verifiedServerUserAgent, "0.151.0-alpha.7.1"},
+		{"codex_remote/0.150.0-alpha.12.2 (Mac OS 26.1; arm64) codex_cli_rs/0.150.0-alpha.12.2", "0.150.0-alpha.12.2"},
+		{"originator/1.2.3", "1.2.3"},
+		// Unreadable shapes must never accidentally match an allowlist entry.
+		{"no-slash-token", ""},
+		{"", ""},
+		{"originator/ 1.2.3 trailing", ""},
+	}
+	for _, tc := range cases {
+		if got := serverVersionFromUserAgent(tc.userAgent); got != tc.want {
+			t.Errorf("serverVersionFromUserAgent(%q) = %q, want %q", tc.userAgent, got, tc.want)
+		}
+	}
+}
+
+// The version gate is real: a server version that was never announced
+// (initialize not answered yet) or is not in the probe-verified allowlist
+// must pre-select the official 2-RPC baseline — the attach omits
+// initialTurnsPage entirely (plan line 379), it does not probe-and-fallback.
+func TestResumeInitialTurnsPageGateUnverifiedServerPreSelectsBaseline(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		userAgent string
+	}{
+		{"no initialize yet", ""},
+		{"unlisted version", "codex_remote/0.152.0 (Mac OS 26.5; arm64) codex_cli_rs/0.152.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent, calls := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
+				switch call.Method {
+				case "thread/resume":
+					if _, carries := call.Params["initialTurnsPage"]; carries {
+						t.Errorf("unverified server must not receive initialTurnsPage, params = %+v", call.Params)
+					}
+					if call.Params["excludeTurns"] != true {
+						t.Errorf("resume must keep excludeTurns:true, params = %+v", call.Params)
+					}
+					return resumeResult("paginated", nil, nil, []any{}), nil
+				case "thread/read":
+					return threadMetaResult("paginated"), nil
+				case "thread/turns/list":
+					return map[string]any{"data": []any{summaryTurn("turn_new", "completed")}}, nil
+				}
+				return nil, &RPCError{Code: -32601, Message: call.Method}
+			})
+			if tc.userAgent != "" {
+				agent.NoteServerUserAgent(tc.userAgent)
+			}
+			if err := agent.AttachLiveThread(context.Background(), "thread_probe"); err != nil {
+				t.Fatal(err)
+			}
+			cold, err := agent.ReadColdHistory(context.Background(), "thread_probe")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(cold.Page.Turns) != 1 || cold.Page.Turns[0].TurnID != "turn_new" {
+				t.Fatalf("unverified-version cold open must use the baseline: %+v", cold.Page)
+			}
+			if got := assertRPCs(t, calls, "thread/read"); len(got) != 1 {
+				t.Fatalf("baseline metadata read missing: %+v", got)
+			}
+			if got := assertRPCs(t, calls, "thread/turns/list"); len(got) != 1 {
+				t.Fatalf("baseline turns page missing: %+v", got)
+			}
+			if agent.resumeInitialPageCandidateOn() {
+				t.Fatal("gate must stay closed for an unverified server version")
+			}
+		})
+	}
+}
+
+// The gate keys on the client epoch's OWN version: a rebind (BindClient)
+// clears a previously verified version, and the re-announced initialize
+// re-opens it — a stale version from an old connection never gates the new
+// one.
+func TestResumeInitialTurnsPageGateVersionIsClientEpochScoped(t *testing.T) {
+	agent, _ := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
+		return nil, &RPCError{Code: -32601, Message: call.Method}
+	})
+	agent.NoteServerUserAgent(verifiedServerUserAgent)
+	if !agent.resumeInitialPageCandidateOn() {
+		t.Fatal("verified version must open the gate")
+	}
+	clientConn, hostConn := LoopbackPair()
+	stream := NewStream(clientConn, "client_probe2", "env_desktop", "stream_probe_epoch")
+	t.Cleanup(func() { stream.Close() })
+	startEnvelopePeer(t, hostConn, func(_ int64, method string, _ json.RawMessage) (any, *RPCError) {
+		return nil, &RPCError{Code: -32601, Message: method}
+	})
+	cl2 := NewClient(stream, 2)
+	t.Cleanup(func() { cl2.Close() })
+	agent.BindClient(cl2) // rebind clears the epoch-scoped version
+	if agent.resumeInitialPageCandidateOn() {
+		t.Fatal("rebind must close the gate until the new initialize announces a version")
+	}
+	agent.NoteServerUserAgent(verifiedServerUserAgent)
+	if !agent.resumeInitialPageCandidateOn() {
+		t.Fatal("re-announced verified version must re-open the gate")
+	}
 }
