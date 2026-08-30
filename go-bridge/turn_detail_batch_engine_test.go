@@ -786,3 +786,75 @@ func TestSessionTurnItemsV2GenerationRotationDropsStaleStore(t *testing.T) {
 		t.Fatalf("stale cache must be dropped and rebuilt: %+v", manifest.Items)
 	}
 }
+
+// TestSessionTurnItemsV2ToolOnlyPageAnchoring pins the tool-attribution
+// regression: tool hydrate events carry no turnId (they attach to the turn
+// established earlier in the mapped stream), so tool-only pages — mid-batch
+// AND as the first page of a resumed batch (kernel Summary user anchor) —
+// must still map into parts instead of silently dropping.
+func TestSessionTurnItemsV2ToolOnlyPageAnchoring(t *testing.T) {
+	load := func(t *testing.T) (*Handlers, *olderWalkConn, string, *turnDetailAgent) {
+		h, conn, sessionID, agent := turnDetailV2Harness(t)
+		agent.itemPages[""] = itemsPage([]map[string]any{
+			{"type": "userMessage", "id": "u1", "text": "q1"},
+			{"type": "agentMessage", "id": "a1", "text": "anchor"},
+		}, "c2")
+		agent.itemPages["c2"] = itemsPage([]map[string]any{
+			{"type": "commandExecution", "id": "c1", "command": "ls", "aggregatedOutput": "out"},
+		}, "")
+		olderWalkDispatch(h, conn, map[string]any{
+			"direction": "window_0", "backendId": "codex-remote", "sessionId": sessionID, "limit": 10,
+		})
+		quiesceProjectionWrites(t, h)
+		return h, conn, sessionID, agent
+	}
+
+	t.Run("mid-batch tool-only page", func(t *testing.T) {
+		h, conn, sessionID, _ := load(t)
+		wireErr, ack := turnItemsDispatchV2(t, h, conn, sessionID, "T1", nil)
+		if wireErr != nil || ack.DetailLoadState != DetailStateLoaded {
+			t.Fatalf("ack = %+v err = %+v", ack, wireErr)
+		}
+		frames := waitChunkFrames(t, conn, 2)
+		last := frames[len(frames)-1]
+		if len(last.Items) == 0 || last.Items[0].Type != "tool" || last.Items[0].ItemID != "c1" ||
+			last.Items[0].ToolResult != "out" {
+			t.Fatalf("tool-only page dropped its part: %+v", last.Items)
+		}
+	})
+
+	t.Run("resumed batch opens with a tool-only page", func(t *testing.T) {
+		h, conn, sessionID, _ := load(t)
+		// Stage the resumed-batch precondition deterministically: page 1
+		// committed in the store + partial in the kernel, next page is the
+		// tool-only one.
+		if _, err := h.detailStore().AcceptPage(DetailPageAccept{
+			BackendID: "codex-remote", SessionID: sessionID, TurnID: "T1",
+			Generation: 0, Page: 1, NextCursor: "c2",
+			Entries: []DetailPageEntry{{
+				ItemID: "a1",
+				Inline: &ProjectionPart{Type: "text", ItemID: "a1", Text: "anchor"},
+			}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := h.projectionKernel.CommitTurnStateOpsV2("codex-remote", sessionID, []TurnStateOp{{
+			TurnID: "T1", DetailLoadState: DetailStatePartial, TurnGeneration: 0,
+			ManifestRev: 1, ItemCount: 1, TotalBytes: 64,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+
+		wireErr, resumed := turnItemsDispatchV2(t, h, conn, sessionID, "T1", nil)
+		if wireErr != nil || resumed.DetailLoadState != DetailStateLoaded {
+			t.Fatalf("resumed ack = %+v err = %+v", resumed, wireErr)
+		}
+		// The resumed batch's scratch is empty ("resumed" seed) — the kernel
+		// Summary user slot is the only anchor for the tool-only page.
+		frames := waitChunkFrames(t, conn, 1)
+		if len(frames[0].Items) == 0 || frames[0].Items[0].Type != "tool" ||
+			frames[0].Items[0].ItemID != "c1" || frames[0].Items[0].ToolResult != "out" {
+			t.Fatalf("resumed tool-only page dropped its part: %+v", frames[0].Items)
+		}
+	})
+}

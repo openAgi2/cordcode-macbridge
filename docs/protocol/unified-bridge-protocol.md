@@ -1264,6 +1264,23 @@ itemId + chunkIndex）——客户端拒绝任何回显身份与请求不符的�
 - **完整内容可达，永不静默截断**（面向模型上下文的官方 output truncation 语义
   不适用于历史 UI）。
 
+*实现锚点（F5）*：RPC = `go-bridge/turn_output_chunk_handler.go`（方法路由
+`turn_output_chunk`；绑定三层校验——generation 对 Kernel turn、manifestRev +
+itemId+handle 对 store manifest 行、chunkIndex 对落盘偏移表；一切缓存类失配
+[目录被淘汰/损坏/换代/manifestRev 变更/handle 无引用/blob 文件缺失]统一收敛为
+可重试 `blob_evicted`，客户端重调 `session_turn_items` 后用重建身份重取——
+blob handle 绑 generation+内容哈希**不可变**，内容未变的 item 重建后 handle 相同）。
+**淘汰重水化**（引擎 `rehydrate` 模式）：loaded 终态回合的 `session_turn_items`
+在 store manifest 缺失/损坏/换代/**未到 EOF**（重建被打断）时进入重水化批次——
+**不做任何 kernel 状态提交**（loaded 同代终态不可逆；syncRev/manifest 摘要不
+动），仅重建 store + 交付 chunk；交付换新 deliveryId、**chunkSeq 从 1 重启**
+（被淘汰的旧序号不可恢复——单一 delivery 下连续 [1..last] 即完整 overlay 替换，
+F6 契约按此口径）；ack 恒 loaded、manifestRev = 重建 store 的 rev（帧/ref 同源），
+重建失败仅记日志（kernel 真相不变，客户端经 blob_evicted 收敛）。tool hydrate
+事件不带 turnId（靠流内已建回合归属）：引擎每页**全量重映射累计 scratch** 并
+按前缀切片，锚点 = 批次吸收的 user 槽，resumed 批次回退 Kernel Summary user
+身份——tool-only 页（含续批首页）不再丢件。
+
 #### detail store 事务模型（F1.1 P1-5 冻结，F2 实现依据）
 
 存储选型：**文件存储 + 固定提交顺序**（不引入 SQLite/WAL）。理由：go-bridge 现无任何

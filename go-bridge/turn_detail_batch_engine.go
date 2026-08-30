@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -150,18 +151,31 @@ func (h *Handlers) handleSessionTurnItemsV2(
 		return
 	}
 
-	// Idempotent loaded: kernel truth wins; the ack carries the kernel
-	// manifest summary and the store's committed progress (loaded = the
-	// overlay already holds, or can re-pull, every committed chunk).
+	// Loaded terminal (§11.8): with a COMPLETE same-generation cache this is
+	// the idempotent repeat — ack from kernel truth + store progress, no
+	// refetch. An UNUSABLE cache (LRU eviction wiped the turn dir, runtime
+	// corruption, generation rotation, or a re-hydration interrupted
+	// mid-rebuild) takes the re-hydration batch instead (F5): rebuild the
+	// detail cache from official pagination WITHOUT kernel state commits
+	// (loaded is terminal within a generation) and deliver the rebuilt
+	// chunks under a fresh deliveryId with chunkSeq restarting at 1 — the
+	// evicted sequence is unrecoverable, so a contiguous [1..last] under
+	// one delivery means full overlay replacement for the client.
+	rehydrate := false
 	if target.DetailLoadState == DetailStateLoaded {
-		sendAck(&TurnDetailBatchAck{
-			DetailLoadState: DetailStateLoaded,
-			SyncRev:         h.loadedDetailWatermark(msg.BackendID, sessionID, turnID, currentSyncRev),
-			ManifestRev:     target.DetailManifestRev,
-			DeliveryID:      newDeliveryID(),
-			Progress:        h.detailStoreProgress(store, msg.BackendID, sessionID, turnID, target),
-		})
-		return
+		manifest, mErr := store.LoadManifest(msg.BackendID, sessionID, turnID)
+		if mErr == nil && manifest != nil &&
+			manifest.Generation == target.TurnGeneration && manifest.Resume.EOF {
+			sendAck(&TurnDetailBatchAck{
+				DetailLoadState: DetailStateLoaded,
+				SyncRev:         h.loadedDetailWatermark(msg.BackendID, sessionID, turnID, currentSyncRev),
+				ManifestRev:     manifest.ManifestRev,
+				DeliveryID:      newDeliveryID(),
+				Progress:        h.detailStoreProgress(store, msg.BackendID, sessionID, turnID, target),
+			})
+			return
+		}
+		rehydrate = true
 	}
 
 	flightKey := projectionDeliveryKey(msg.BackendID, sessionID) + "|" + turnID
@@ -182,7 +196,7 @@ func (h *Handlers) handleSessionTurnItemsV2(
 		actual, loaded := h.turnDetailChunksFlights.LoadOrStore(flightKey, candidate)
 		flight := actual.(*turnDetailChunksFlight)
 		if !loaded {
-			ack := h.runTurnDetailBatch(conn, msg.BackendID, sessionID, turnID, replaySince, hasReplay, flight)
+			ack := h.runTurnDetailBatch(conn, msg.BackendID, sessionID, turnID, replaySince, hasReplay, rehydrate, flight)
 			flight.ack = ack
 			close(flight.done)
 			h.turnDetailChunksFlights.Delete(flightKey)
@@ -304,10 +318,17 @@ func detailPartOutput(part ProjectionPart) string {
 // runTurnDetailBatch is the singleflight leader. Terminal outcomes:
 // loaded(EOF) / partial(deadline — retryable continuation) / failed(reason
 // from the v2 closed set, progress retained via the carried manifest).
+//
+// rehydrate (F5) = the §11.8 eviction re-hydration batch: the kernel turn is
+// already loaded (terminal — NO state commits happen) while the detail cache
+// is missing/incomplete, so the batch only rebuilds the store + delivers
+// chunks; acks stay loaded with the fresh store manifest identity, and a
+// mid-rebuild failure answers loaded (kernel truth) — the client converges
+// via blob_evicted on the next turn_output_chunk.
 func (h *Handlers) runTurnDetailBatch(
 	requester Connection,
 	backendID, sessionID, turnID string,
-	replaySince int, hasReplay bool,
+	replaySince int, hasReplay, rehydrate bool,
 	flight *turnDetailChunksFlight,
 ) *TurnDetailBatchAck {
 	deliveryID := newDeliveryID()
@@ -339,6 +360,24 @@ func (h *Handlers) runTurnDetailBatch(
 		}
 		manifest, _ := store.LoadManifest(backendID, sessionID, turnID)
 		rev, items, bytes := mergeTurnSummary(turn, manifest)
+		if rehydrate {
+			// Kernel truth stays loaded (terminal); the rebuild failure is
+			// diagnostics-only — progress reflects whatever rebuilt, and the
+			// client converges through blob_evicted on its next pull.
+			slog.Warn("go-bridge: detail cache re-hydration failed",
+				"sessionId", sessionID, "turnId", turnID, "reason", reasonCode,
+				"pages", func() int {
+					if manifest != nil {
+						return manifest.Resume.Pages
+					}
+					return 0
+				}())
+			return &TurnDetailBatchAck{DetailLoadState: DetailStateLoaded,
+				SyncRev:     h.loadedDetailWatermark(backendID, sessionID, turnID, kernelSyncRev(h, backendID, sessionID)),
+				ManifestRev: rev, DeliveryID: deliveryID,
+				FirstChunkSeq: deliveredFirst, LastChunkSeq: deliveredLast,
+				Progress: progressOf(manifest, items, bytes)}
+		}
 		if turn.DetailLoadState == DetailStateLoaded {
 			// A concurrent batch already finished the turn — its truth wins.
 			return &TurnDetailBatchAck{DetailLoadState: DetailStateLoaded,
@@ -383,7 +422,9 @@ func (h *Handlers) runTurnDetailBatch(
 	}
 
 	// 1. Loading admission (v2 op: loading carries the CURRENT summary).
-	{
+	// Skipped in rehydrate mode: the kernel turn is loaded-terminal and no
+	// state commit is legal — the batch rebuilds the STORE only.
+	if !rehydrate {
 		_, patches, err := h.projectionKernel.CommitTurnStateOpsV2(backendID, sessionID, []TurnStateOp{{
 			TurnID: turnID, DetailLoadState: DetailStateLoading, TurnGeneration: generation,
 			ManifestRev: turn.DetailManifestRev, ItemCount: turn.DetailItemCount, TotalBytes: turn.DetailTotalBytes,
@@ -398,10 +439,14 @@ func (h *Handlers) runTurnDetailBatch(
 	// cache (a superseded-generation manifest can never accept this
 	// generation's pages).
 	manifest, err := store.LoadManifest(backendID, sessionID, turnID)
-	if err != nil && !errors.Is(err, ErrDetailStoreNotFound) {
+	if err != nil && !errors.Is(err, ErrDetailStoreNotFound) && !errors.Is(err, ErrDetailStoreCorrupt) {
 		return failTerminal("upstream_error", 0, 0)
 	}
-	if manifest != nil && manifest.Generation != generation {
+	if err != nil || (manifest != nil && manifest.Generation != generation) {
+		// NotFound = fresh/evicted; Corrupt = quarantine (F2.1: a committed-
+		// range defect re-hydrates from official pagination, never "repaired");
+		// generation rotation = a superseded cache can never accept this
+		// generation's pages. All three drop the dir and rebuild.
 		if err := store.DropTurn(backendID, sessionID, turnID); err != nil {
 			return failTerminal("upstream_error", 0, 0)
 		}
@@ -480,6 +525,10 @@ func (h *Handlers) runTurnDetailBatch(
 			acceptedIDs[item.ItemID] = true
 		}
 	}
+	// mappedCount tracks how many Assistant parts of the accumulated
+	// scratch were already classified into PRIOR pages of this batch — each
+	// page re-maps the whole scratch and slices this prefix off (below).
+	mappedCount := 0
 
 	for {
 		if time.Since(batchStart) >= turnDetailBatchDeadline {
@@ -491,6 +540,19 @@ func (h *Handlers) runTurnDetailBatch(
 			}
 			m, _ := store.LoadManifest(backendID, sessionID, turnID)
 			rev, items, bytes := mergeTurnSummary(current, m)
+			if rehydrate {
+				// Kernel stays loaded; the interrupted rebuild resumes on the
+				// next session_turn_items call (store !EOF keeps re-hydration
+				// eligible — the loaded short-circuit requires EOF).
+				mirrorState(store, backendID, sessionID, turnID, generation, DetailStatePartial, "")
+				return &TurnDetailBatchAck{
+					DetailLoadState: DetailStateLoaded,
+					SyncRev:         h.loadedDetailWatermark(backendID, sessionID, turnID, kernelSyncRev(h, backendID, sessionID)),
+					ManifestRev:     rev, DeliveryID: deliveryID,
+					FirstChunkSeq: deliveredFirst, LastChunkSeq: deliveredLast,
+					Progress: progressOf(m, items, bytes),
+				}
+			}
 			_, patches, err := h.projectionKernel.CommitTurnStateOpsV2(backendID, sessionID, []TurnStateOp{{
 				TurnID: turnID, DetailLoadState: DetailStatePartial, TurnGeneration: generation,
 				ManifestRev: rev, ItemCount: items, TotalBytes: bytes,
@@ -561,12 +623,26 @@ func (h *Handlers) runTurnDetailBatch(
 		}
 		var pageEntries []DetailPageEntry
 		if newParts := scratch.Parts[partsBefore:]; len(newParts) > 0 {
-			pageTurn := core.TurnScopedHistoryTurn{TurnID: turnID, Status: "completed", Parts: newParts}
+			// Map the WHOLE accumulated scratch (not the page slice): tool
+			// hydrate events carry no turnId — they attribute to the turn the
+			// stream established earlier — so a tool-only page mapped in
+			// isolation would silently drop its parts. The anchor is the
+			// batch's absorbed user slot, falling back to the kernel turn's
+			// Summary user identity (resumed batches, tool-only first pages).
+			pageTurn := core.TurnScopedHistoryTurn{TurnID: turnID, Status: "completed", Parts: scratch.Parts}
+			if scratch.UserItemID != "" && scratch.UserItemID != "resumed" && strings.TrimSpace(scratch.UserText) != "" {
+				pageTurn.UserItemID, pageTurn.UserText = scratch.UserItemID, scratch.UserText
+			} else if turn.User != nil && len(turn.User.Parts) > 0 {
+				pageTurn.UserItemID, pageTurn.UserText = turn.User.Parts[0].ItemID, turn.User.Parts[0].Text
+			}
 			mapped := upstreamSummaryTurnsToProjection([]core.TurnScopedHistoryTurn{pageTurn})
-			if len(mapped) == 1 && mapped[0].Assistant != nil {
-				if pageEntries, err = classifyDetailParts(mapped[0].Assistant.Parts); err != nil {
+			if len(mapped) == 1 && mapped[0].Assistant != nil && len(mapped[0].Assistant.Parts) > mappedCount {
+				// Deterministic mapper + reducer: the prefix reproduces
+				// byte-identically, the suffix is exactly this page's parts.
+				if pageEntries, err = classifyDetailParts(mapped[0].Assistant.Parts[mappedCount:]); err != nil {
 					return failTerminal("unsupported_item_type", deliveredFirst, deliveredLast)
 				}
+				mappedCount = len(mapped[0].Assistant.Parts)
 			}
 		}
 		// Re-walk skip: only entries past the accepted boundary are new.
@@ -602,18 +678,22 @@ func (h *Handlers) runTurnDetailBatch(
 			return failTerminal("stale_turn", deliveredFirst, deliveredLast)
 		}
 		rev, items, bytes := mergeTurnSummary(current, manifest)
-		state := DetailStatePartial
-		if page.EOF {
-			state = DetailStateLoaded
+		var patches []ProjectionPatch
+		if !rehydrate {
+			state := DetailStatePartial
+			if page.EOF {
+				state = DetailStateLoaded
+			}
+			_, commitPatches, err := h.projectionKernel.CommitTurnStateOpsV2(backendID, sessionID, []TurnStateOp{{
+				TurnID: turnID, DetailLoadState: state, TurnGeneration: generation,
+				ManifestRev: rev, ItemCount: items, TotalBytes: bytes,
+			}})
+			if err != nil {
+				return failTerminal("stale_turn", deliveredFirst, deliveredLast)
+			}
+			patches = commitPatches
+			h.eventPublisher.PublishProjectionDetail(backendID, sessionID, patches, requester)
 		}
-		_, patches, err := h.projectionKernel.CommitTurnStateOpsV2(backendID, sessionID, []TurnStateOp{{
-			TurnID: turnID, DetailLoadState: state, TurnGeneration: generation,
-			ManifestRev: rev, ItemCount: items, TotalBytes: bytes,
-		}})
-		if err != nil {
-			return failTerminal("stale_turn", deliveredFirst, deliveredLast)
-		}
-		h.eventPublisher.PublishProjectionDetail(backendID, sessionID, patches, requester)
 
 		// Deliver this page's chunks (deterministic re-split of the accepted
 		// entries — identical to the store's chunkSeq assignment).
@@ -657,8 +737,18 @@ func (h *Handlers) runTurnDetailBatch(
 
 		if page.EOF {
 			mirrorState(store, backendID, sessionID, turnID, generation, DetailStateLoaded, "")
+			syncRev := 0
+			if rehydrate {
+				// No commit happened: the kernel watermark stands, and the
+				// binding identity is the REBUILT store's (frames/refs carry
+				// it); the kernel's high-water summary rev stays internal.
+				syncRev = h.loadedDetailWatermark(backendID, sessionID, turnID, kernelSyncRev(h, backendID, sessionID))
+				rev = manifest.ManifestRev
+			} else {
+				syncRev = patches[len(patches)-1].SyncRev
+			}
 			return &TurnDetailBatchAck{
-				DetailLoadState: DetailStateLoaded, SyncRev: patches[len(patches)-1].SyncRev,
+				DetailLoadState: DetailStateLoaded, SyncRev: syncRev,
 				ManifestRev: rev, DeliveryID: deliveryID,
 				FirstChunkSeq: deliveredFirst, LastChunkSeq: deliveredLast,
 				Progress: progressOf(manifest, items, bytes),

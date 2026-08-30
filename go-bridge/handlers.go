@@ -1600,6 +1600,8 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleGetSessionProjectionWindow(conn, msg, agent)
 	case "session_turn_items":
 		h.handleSessionTurnItems(conn, msg, agent)
+	case "turn_output_chunk":
+		h.handleTurnOutputChunk(conn, msg, agent)
 	case "delete_session":
 		h.handleDeleteSession(conn, msg, agent)
 	case "resume_session":
