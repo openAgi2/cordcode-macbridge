@@ -1,22 +1,23 @@
 package gobridge
 
+// §11.8 (turn_detail_chunks_v1) contract-freeze spec tests, F1.1 closure
+// (owner review 2026-08-30 night X): dedicated non-replayable overlay frame,
+// full chunk/blob identity binding, ack chunk-range completeness, kernel-state
+// manifest monotonicity, and encoding-aware chunk boundaries. These pin the
+// wire decisions BEFORE the phase5 handlers exist.
+
 import (
 	"context"
-	"errors"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
-
-// §11.8 (turn_detail_chunks_v1) contract-freeze spec tests. These pin the
-// owner-final-ruling wire decisions BEFORE the phase5 handlers exist:
-// v2 reasonCode closed set (max_pages/max_bytes REMOVED), the manifest-op
-// validation/apply semantics, the chunk payload + blob ack shapes, the
-// hello negotiation, and the shared production gate surfaces.
 
 func TestTurnDetailChunksReasonCodeSetV2(t *testing.T) {
 	for _, code := range []string{"upstream_error", "timeout", "stale_turn", "interrupted", "unsupported_item_type", "page_oversize"} {
@@ -30,10 +31,6 @@ func TestTurnDetailChunksReasonCodeSetV2(t *testing.T) {
 		if TurnDetailChunksReasonCodes[banned] {
 			t.Errorf("v2 closed set must NOT contain %q (permanent gates abolished)", banned)
 		}
-	}
-	if core.TurnDetailLazyProductionEnabled && len(TurnStateReasonCodes) < len(TurnDetailChunksReasonCodes) {
-		// sanity only: both sets exist independently; v1 keeps its own frozen set.
-		t.Logf("v1 set %d entries, v2 set %d entries", len(TurnStateReasonCodes), len(TurnDetailChunksReasonCodes))
 	}
 }
 
@@ -70,44 +67,78 @@ func TestTurnStateOpsV2Validation(t *testing.T) {
 	}
 }
 
-func TestTurnStateOpsV2ApplyStampsManifestAndFences(t *testing.T) {
-	proj := &SessionProjection{SessionID: "s", Turns: []TurnProjection{
-		{TurnID: "t1", TurnGeneration: 2, DetailLoadState: DetailStateFailed, DetailReasonCode: "timeout"},
-		{TurnID: "t2", TurnGeneration: 0},
-	}}
-	ops := []TurnStateOp{
-		{TurnID: "t1", DetailLoadState: DetailStatePartial, TurnGeneration: 2, ManifestRev: 5, ItemCount: 40, TotalBytes: 12345},
+// F1.1 P1-4: kernel-state rules — manifest monotonicity within a generation,
+// loaded terminal, failed/retry must carry the retained manifest forward.
+func TestTurnStateOpsV2KernelMonotonicity(t *testing.T) {
+	proj := func() *SessionProjection {
+		return &SessionProjection{SessionID: "s", Turns: []TurnProjection{
+			{TurnID: "t1", TurnGeneration: 2, DetailLoadState: DetailStatePartial,
+				DetailManifestRev: 5, DetailItemCount: 40, DetailTotalBytes: 12345},
+			{TurnID: "t2", TurnGeneration: 0, DetailLoadState: DetailStateLoaded,
+				DetailManifestRev: 9, DetailItemCount: 90, DetailTotalBytes: 999999},
+		}}
 	}
-	if err := ApplyTurnStateOpsV2(proj, ops); err != nil {
-		t.Fatal(err)
+
+	// Advance: partial → partial with grown manifest is fine.
+	if err := ApplyTurnStateOpsV2(proj(), []TurnStateOp{
+		{TurnID: "t1", DetailLoadState: DetailStatePartial, TurnGeneration: 2, ManifestRev: 6, ItemCount: 44, TotalBytes: 13000},
+	}); err != nil {
+		t.Fatalf("manifest advance rejected: %v", err)
 	}
-	turn := proj.Turns[0]
-	if turn.DetailLoadState != DetailStatePartial || turn.DetailReasonCode != "" {
-		t.Fatalf("state/reason = %q/%q, want partial/\"\" (loading-family clears reason)", turn.DetailLoadState, turn.DetailReasonCode)
+	// Retry loading must RETAIN the current manifest (failed → loading with
+	// the same-or-advanced summary).
+	p := proj()
+	p.Turns[0].DetailLoadState = DetailStateFailed
+	p.Turns[0].DetailReasonCode = "upstream_error"
+	if err := ApplyTurnStateOpsV2(p, []TurnStateOp{
+		{TurnID: "t1", DetailLoadState: DetailStateLoading, TurnGeneration: 2, ManifestRev: 5, ItemCount: 40, TotalBytes: 12345},
+	}); err != nil {
+		t.Fatalf("retry retaining manifest rejected: %v", err)
 	}
-	if turn.DetailManifestRev != 5 || turn.DetailItemCount != 40 || turn.DetailTotalBytes != 12345 {
-		t.Fatalf("manifest summary not stamped: %+v", turn)
+
+	regressions := []struct {
+		name string
+		ops  []TurnStateOp
+	}{
+		{"manifestRev decrease", []TurnStateOp{{TurnID: "t1", DetailLoadState: DetailStatePartial, TurnGeneration: 2, ManifestRev: 4, ItemCount: 44, TotalBytes: 13000}}},
+		{"itemCount decrease", []TurnStateOp{{TurnID: "t1", DetailLoadState: DetailStatePartial, TurnGeneration: 2, ManifestRev: 6, ItemCount: 39, TotalBytes: 13000}}},
+		{"totalBytes decrease", []TurnStateOp{{TurnID: "t1", DetailLoadState: DetailStatePartial, TurnGeneration: 2, ManifestRev: 6, ItemCount: 44, TotalBytes: 1}}},
+		{"failed zeroing retained progress", []TurnStateOp{{TurnID: "t1", DetailLoadState: DetailStateFailed, ReasonCode: "timeout", TurnGeneration: 2}}},
+		{"loaded -> partial", []TurnStateOp{{TurnID: "t2", DetailLoadState: DetailStatePartial, TurnGeneration: 0, ManifestRev: 9, ItemCount: 90, TotalBytes: 999999}}},
+		{"loaded -> loading", []TurnStateOp{{TurnID: "t2", DetailLoadState: DetailStateLoading, TurnGeneration: 0, ManifestRev: 9, ItemCount: 90, TotalBytes: 999999}}},
+		{"loaded -> failed", []TurnStateOp{{TurnID: "t2", DetailLoadState: DetailStateFailed, ReasonCode: "upstream_error", TurnGeneration: 0, ManifestRev: 10, ItemCount: 90, TotalBytes: 999999}}},
+		{"loaded -> loaded advanced rev", []TurnStateOp{{TurnID: "t2", DetailLoadState: DetailStateLoaded, TurnGeneration: 0, ManifestRev: 10, ItemCount: 90, TotalBytes: 999999}}},
 	}
-	// Generation fence: stale op must fail typed and leave the projection untouched.
-	stale := []TurnStateOp{{TurnID: "t1", DetailLoadState: DetailStateLoaded, TurnGeneration: 1, ManifestRev: 6}}
-	before := proj.Turns[0]
-	if err := ApplyTurnStateOpsV2(proj, stale); err == nil {
-		t.Fatal("stale generation op must fail")
-	} else if !errors.Is(err, ErrTurnStateStale) {
+	for _, tc := range regressions {
+		if err := ApplyTurnStateOpsV2(proj(), tc.ops); err == nil {
+			t.Errorf("%s: expected kernel-state rejection", tc.name)
+		}
+	}
+
+	// Idempotent loaded repeat (same rev) is the ONLY accepted op on a loaded turn.
+	if err := ApplyTurnStateOpsV2(proj(), []TurnStateOp{
+		{TurnID: "t2", DetailLoadState: DetailStateLoaded, TurnGeneration: 0, ManifestRev: 9, ItemCount: 90, TotalBytes: 999999},
+	}); err != nil {
+		t.Fatalf("idempotent loaded repeat rejected: %v", err)
+	}
+
+	// Generation fence still applies and a failed apply never mutates.
+	p2 := proj()
+	stale := []TurnStateOp{{TurnID: "t1", DetailLoadState: DetailStateLoaded, TurnGeneration: 1, ManifestRev: 9, ItemCount: 90, TotalBytes: 999999}}
+	if err := ApplyTurnStateOpsV2(p2, stale); !errors.Is(err, ErrTurnStateStale) {
 		t.Fatalf("err = %v, want ErrTurnStateStale", err)
 	}
-	if proj.Turns[0] != before {
+	if p2.Turns[0].DetailManifestRev != 5 || p2.Turns[0].DetailLoadState != DetailStatePartial {
 		t.Fatal("failed apply must not mutate the projection")
-	}
-	// Unknown turn fails closed.
-	if err := ApplyTurnStateOpsV2(proj, []TurnStateOp{{TurnID: "nope", DetailLoadState: DetailStateLoading, TurnGeneration: 0}}); err == nil {
-		t.Fatal("unknown turn must fail")
 	}
 }
 
-func TestTurnDetailChunkPayloadWireShape(t *testing.T) {
-	payload := TurnDetailChunkPayload{
-		TurnID: "turn-42", ManifestRev: 7, Seq: 12,
+// F1.1 P0-1: the overlay frame is a DEDICATED envelope — full identity on the
+// wire, no EventMessage sequence fields.
+func TestTurnDetailChunkFrameWireShape(t *testing.T) {
+	frame := TurnDetailChunkFrame{
+		Type: "turn_detail_chunk", BackendID: "codex-remote", SessionID: "sess-1",
+		TurnID: "turn-42", TurnGeneration: 3, DeliveryID: "d-17", ManifestRev: 7, ChunkSeq: 12,
 		Items: []ProjectionPart{{Type: "text", Text: "step"}},
 		Oversize: []TurnDetailOversizeRef{{
 			ItemID: "item-9", Handle: "blob-abc", Type: "commandExecution",
@@ -115,7 +146,7 @@ func TestTurnDetailChunkPayloadWireShape(t *testing.T) {
 		}},
 		Progress: TurnDetailProgress{Pages: 46, Items: 227, Bytes: 937241, EOF: false},
 	}
-	raw, err := json.Marshal(payload)
+	raw, err := json.Marshal(frame)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,10 +154,21 @@ func TestTurnDetailChunkPayloadWireShape(t *testing.T) {
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"turnId", "manifestRev", "seq", "items", "oversize", "progress"} {
+	for _, key := range []string{"type", "backendId", "sessionId", "turnId", "turnGeneration", "deliveryId", "manifestRev", "chunkSeq", "items", "oversize", "progress"} {
 		if _, ok := decoded[key]; !ok {
-			t.Errorf("chunk payload missing wire key %q in %s", key, raw)
+			t.Errorf("overlay frame missing wire key %q in %s", key, raw)
 		}
+	}
+	// Dedicated non-replayable envelope: none of the business EventMessage
+	// identity fields may appear — they would imply buffer/replay semantics
+	// the overlay deliberately does not participate in.
+	for _, banned := range []string{"eventId", "seq", "bridgeEpoch", "perSessionSeq", "event", "replayable", "timestamp"} {
+		if _, ok := decoded[banned]; ok {
+			t.Errorf("overlay frame must NOT carry business-event field %q", banned)
+		}
+	}
+	if decoded["type"] != "turn_detail_chunk" {
+		t.Fatalf("frame type = %v", decoded["type"])
 	}
 	prog := decoded["progress"].(map[string]any)
 	for _, key := range []string{"pages", "items", "bytes", "eof"} {
@@ -142,8 +184,13 @@ func TestTurnDetailChunkPayloadWireShape(t *testing.T) {
 	}
 }
 
-func TestTurnOutputChunkAckWireShape(t *testing.T) {
-	raw, err := json.Marshal(TurnOutputChunkAck{ChunkIndex: 0, TotalChunks: 9, TotalBytes: 1057417, Encoding: "utf-8", Data: "…"})
+// F1.1 P0-3: the batch ack carries the delivered chunk-sequence range.
+func TestTurnDetailBatchAckWireShape(t *testing.T) {
+	raw, err := json.Marshal(TurnDetailBatchAck{
+		DetailLoadState: DetailStatePartial, SyncRev: 130, ManifestRev: 7,
+		DeliveryID: "d-17", FirstChunkSeq: 20, LastChunkSeq: 27,
+		Progress: TurnDetailProgress{Pages: 46, Items: 227, Bytes: 937241, EOF: false},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,41 +198,147 @@ func TestTurnOutputChunkAckWireShape(t *testing.T) {
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"chunkIndex", "totalChunks", "totalBytes", "encoding", "data"} {
+	for _, key := range []string{"detailLoadState", "syncRev", "manifestRev", "deliveryId", "firstChunkSeq", "lastChunkSeq", "progress"} {
 		if _, ok := decoded[key]; !ok {
-			t.Errorf("turn_output_chunk ack missing wire key %q in %s", key, raw)
+			t.Errorf("batch ack missing wire key %q in %s", key, raw)
+		}
+	}
+	// A failed ack also carries reasonCode.
+	rawFailed, _ := json.Marshal(TurnDetailBatchAck{
+		DetailLoadState: DetailStateFailed, SyncRev: 131, ReasonCode: "upstream_error",
+		ManifestRev: 7, DeliveryID: "d-17", FirstChunkSeq: 0, LastChunkSeq: 0,
+		Progress: TurnDetailProgress{Pages: 19, Items: 95, Bytes: 412906},
+	})
+	if !strings.Contains(string(rawFailed), `"reasonCode":"upstream_error"`) {
+		t.Errorf("failed ack must carry reasonCode: %s", rawFailed)
+	}
+}
+
+// F1.1 P0-2: turn_output_chunk request AND ack bind the full blob identity.
+func TestTurnOutputChunkBindingShapes(t *testing.T) {
+	rawReq, err := json.Marshal(TurnOutputChunkParams{
+		SessionID: "sess-1", TurnID: "turn-42", TurnGeneration: 3, ManifestRev: 7,
+		ItemID: "item-9", Handle: "blob-abc", ChunkIndex: 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req map[string]any
+	if err := json.Unmarshal(rawReq, &req); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"sessionId", "turnId", "turnGeneration", "manifestRev", "itemId", "handle", "chunkIndex"} {
+		if _, ok := req[key]; !ok {
+			t.Errorf("turn_output_chunk request missing binding key %q in %s", key, rawReq)
+		}
+	}
+
+	rawAck, err := json.Marshal(TurnOutputChunkAck{
+		TurnGeneration: 3, ManifestRev: 7, ItemID: "item-9", Handle: "blob-abc",
+		ChunkIndex: 0, TotalChunks: 9, TotalBytes: 1057417, Encoding: "utf-8", Data: "…",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ack map[string]any
+	if err := json.Unmarshal(rawAck, &ack); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"turnGeneration", "manifestRev", "itemId", "handle", "chunkIndex", "totalChunks", "totalBytes", "encoding", "data"} {
+		if _, ok := ack[key]; !ok {
+			t.Errorf("turn_output_chunk ack missing binding key %q in %s", key, rawAck)
 		}
 	}
 }
 
-func TestTurnDetailChunkEventEnvelope(t *testing.T) {
-	msg := turnDetailChunkEvent("codex-remote", "sess-1", TurnDetailChunkPayload{TurnID: "t", ManifestRev: 1, Seq: 1, Progress: TurnDetailProgress{Items: 1}}, 1700000000000)
-	if msg.Type != "event" || msg.Event != "turn_detail_chunk" {
-		t.Fatalf("envelope = %q/%q", msg.Type, msg.Event)
-	}
-	if msg.BackendID != "codex-remote" || msg.SessionID != "sess-1" {
-		t.Fatalf("routing = %q/%q", msg.BackendID, msg.SessionID)
-	}
-}
+// F1.1 P1-7: encoding-aware chunk boundaries — no mid-rune cuts, escaped-size
+// respected, count from the actual offset table.
+func TestDetailChunkOffsetsRuneSafety(t *testing.T) {
+	target := int(core.TurnDetailChunkTargetBytes)
+	advisory := int(core.TurnDetailChunkAdvisoryCapBytes)
 
-func TestChunkTotalCountMath(t *testing.T) {
-	target := core.TurnDetailChunkTargetBytes
-	cases := []struct {
-		total int64
-		want  int
-	}{
-		{0, 0},
-		{1, 1},
-		{target, 1},
-		{target + 1, 2},
-		{9 * target, 9},
-		{9*target - 1, 9},
-		{1057417, 9}, // 1.06MB evidence item at 128KB target
+	// ASCII at evidence size: 1,057,417 B / 128 KB target → 9 chunks.
+	ascii := strings.Repeat("a", 1057417)
+	offsets := DetailChunkOffsets(ascii)
+	if count := len(offsets) - 1; count != 9 {
+		t.Fatalf("ASCII evidence-size chunk count = %d, want 9", count)
 	}
-	for _, tc := range cases {
-		if got := ChunkTotalCountFor(tc.total); got != tc.want {
-			t.Errorf("ChunkTotalCountFor(%d) = %d, want %d", tc.total, got, tc.want)
+
+	// Pure 3-byte CJK runes: every boundary must sit on a multiple of 3
+	// (rune start) relative to the string start.
+	cjk := strings.Repeat("好", target) // target runes = 3× target bytes
+	co := DetailChunkOffsets(cjk)
+	for i, off := range co {
+		if off%3 != 0 {
+			t.Fatalf("CJK offset[%d]=%d splits mid-rune", i, off)
 		}
+	}
+	// A greedy target cut at target bytes would land mid-rune; the aligned
+	// cut is target-1 or target-2 — chunk still ≈ target, count unchanged.
+	if count := len(co) - 1; count != 3 && count != 4 {
+		t.Fatalf("CJK chunk count = %d, want 3-4", count)
+	}
+
+	// 4-byte emoji: boundaries on multiples of 4.
+	emoji := strings.Repeat("\U0001F600", target) // target bytes of 4-byte runes
+	eo := DetailChunkOffsets(emoji)
+	for i, off := range eo {
+		if off%4 != 0 {
+			t.Fatalf("emoji offset[%d]=%d splits mid-rune", i, off)
+		}
+	}
+
+	// Escaping-heavy: backslashes double on the wire. With 200 KB of raw
+	// backslashes (escaped 400 KB > advisory 256 KB) each chunk must be split
+	// until its ESCAPED form fits the advisory cap.
+	heavy := strings.Repeat(`\`, 200*1024)
+	ho := DetailChunkOffsets(heavy)
+	if len(ho)-1 < 2 {
+		t.Fatalf("escaping-heavy string must split beyond the raw-target cut (got %d chunks)", len(ho)-1)
+	}
+	for i := 1; i < len(ho); i++ {
+		chunk := heavy[ho[i-1]:ho[i]]
+		if esc := jsonEscapedLen(chunk); esc > advisory {
+			t.Fatalf("chunk[%d] escaped size %d exceeds advisory %d", i-1, esc, advisory)
+		}
+	}
+
+	// Control characters (\n, \t, quotes) escape to \uXXXX / \n forms; every
+	// chunk's escaped size must fit.
+	mixed := strings.Repeat("\n\t\"\\", 40*1024)
+	mo := DetailChunkOffsets(mixed)
+	for i := 1; i < len(mo); i++ {
+		if esc := jsonEscapedLen(mixed[mo[i-1]:mo[i]]); esc > advisory {
+			t.Fatalf("mixed-control chunk[%d] escaped size %d exceeds advisory", i-1, esc)
+		}
+	}
+
+	// Union + monotonicity: chunks reconstruct the original, offsets strictly
+	// increasing, valid rune boundaries everywhere.
+	for _, tc := range []string{ascii, cjk, emoji, heavy, mixed, "", "单", "a\U0001F600b好"} {
+		offs := DetailChunkOffsets(tc)
+		if len(offs) == 0 || offs[0] != 0 || offs[len(offs)-1] != len(tc) {
+			t.Fatalf("offsets must start at 0 and end at len(s): %v (len %d)", offs, len(tc))
+		}
+		for i := 1; i < len(offs); i++ {
+			if offs[i] <= offs[i-1] {
+				t.Fatalf("offsets must be strictly increasing: %v", offs)
+			}
+			if offs[i] < len(tc) && !utf8.RuneStart(tc[offs[i]]) {
+				// offs[i] is a chunk START — must be a rune start.
+				t.Fatalf("offset[%d]=%d starts mid-rune", i, offs[i])
+			}
+		}
+		var rebuilt strings.Builder
+		for i := 1; i < len(offs); i++ {
+			rebuilt.WriteString(tc[offs[i-1]:offs[i]])
+		}
+		if rebuilt.String() != tc {
+			t.Fatal("chunk union must reconstruct the original")
+		}
+	}
+	if DetailChunkCount("") != 0 {
+		t.Fatal("empty string must be zero chunks")
 	}
 }
 
@@ -265,5 +418,30 @@ func TestHelloNegotiatesTurnDetailChunksV1(t *testing.T) {
 	server.eventPublisher.UnregisterConnection(conn)
 	if server.eventPublisher.ConnTurnDetailChunksV1(conn) {
 		t.Fatal("UnregisterConnection must clear the chunks registry mark")
+	}
+}
+
+// PublishTurnDetailChunk sends the dedicated frame (never an EventMessage)
+// and only to connections holding the v2 mark.
+func TestPublishTurnDetailChunkSendsDedicatedFrame(t *testing.T) {
+	h := NewHandlers()
+	t.Cleanup(func() { h.Shutdown(context.Background()) })
+	conn := &olderWalkConn{}
+	h.eventPublisher.RegisterConnection(conn)
+
+	frame := TurnDetailChunkFrame{Type: "turn_detail_chunk", BackendID: "codex-remote",
+		SessionID: "s", TurnID: "t", TurnGeneration: 0, DeliveryID: "d-1",
+		ManifestRev: 1, ChunkSeq: 1, Progress: TurnDetailProgress{Items: 1}}
+	if err := h.eventPublisher.PublishTurnDetailChunk(conn, frame); err == nil {
+		t.Fatal("unmarked connection must be refused")
+	}
+	h.eventPublisher.SetConnTurnDetailChunksV1(conn, true)
+	if err := h.eventPublisher.PublishTurnDetailChunk(conn, frame); err != nil {
+		t.Fatalf("marked connection publish: %v", err)
+	}
+	badType := frame
+	badType.Type = "event"
+	if err := h.eventPublisher.PublishTurnDetailChunk(conn, badType); err == nil {
+		t.Fatal("non-overlay frame type must be refused")
 	}
 }

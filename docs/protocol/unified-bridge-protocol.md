@@ -1129,10 +1129,20 @@ Kernel**——否则大回合加载完成后，后续 snapshot、重连与另一
 | 单次加载批次 deadline | **90s** | 到期保存进度续传，**不是失败** |
 | 页数 / 整回合累计字节 | **均不设永久上限** | 废止 24 页/512KB 永久门 |
 | blob 预览 | 2KB（const 可调） | 折叠行展示 |
-| blob LRU 预算 | 128MB（const 可调，凭真实数据调整） | 淘汰后可从官方分页重建 |
+| **detail cache 总预算** | 128MB（**初始默认值，非证据冻结**） | 覆盖 manifests + item logs + blobs + 临时事务文件**全部**；**淘汰粒度 = 整个回合的 detail cache 目录**（TTL/LRU 按整目录 last-access）；被淘汰回合可从官方分页按需重建 |
 
 达到时间/内存/批次预算 → **保存进度续传**，不得标记 `failed(max_bytes/max_pages)`
 （这两个 reasonCode 从 v2 闭集**移除**）。
+
+#### 分块编码规则（F1.1 冻结）
+
+- chunk 边界**绝不落在 UTF-8 rune 中间**（切断点回退到 rune 起始）；
+- 每个 chunk 的尺寸按 **JSON 转义后的 wire 形态**复核：超过 256KB 建议上限即继续
+  rune 对齐二分，直至转义后 ≤ 256KB（转义密集文本得到更短的原始 chunk，而不是
+  超限帧）；
+- 任何编码后 envelope 绝对 ≤ 512KB 硬顶（帧组装层整体复核）；
+- `totalChunks` 由**实际 chunk 偏移表**计算（`len(offsets)-1`），**禁止**
+  `ceil(totalBytes/128KB)` 近似——rune 对齐与转义复核都会改变切点。
 
 #### 状态机（v2）
 
@@ -1142,60 +1152,114 @@ Kernel**——否则大回合加载完成后，后续 snapshot、重连与另一
 "加载失败"。Kernel turn 上的 manifest 摘要字段（`detailLoadState`/`manifestRev`/
 `itemCount`/`totalBytes`）随 `turnStateOps` 的 manifest op 原子提交。
 
+**Kernel 状态规则（F1.1 P1-4，依当前 Kernel 状态校验，非字段级）**：同一 generation 内
+manifestRev/itemCount/totalBytes **单调不倒退**（failed/重试 op 必须携带保留中的
+manifest 全量，零值清空即拒绝）；`loaded` 在同一 generation 内是**终态**（仅接受同
+manifestRev 的幂等重复；partial/loading/failed 回退全部拒绝）。generation 变更
+（回合重新激活）在 bump 提交点重置 manifest 基线（新 truth = 全新明细状态），故上述
+规则天然按 generation 生效。
+
 #### `session_turn_items`（v2 语义）
 
-请求形状不变。ack = **本批次的终态**（批次期间的增量内容经 `turn_detail_chunk` 事件
-流式交付，不在 ack 里）：
+请求形状不变。ack = **本批次的终态 + 本批交付的 chunk 序列范围**（批次期间的增量内容
+经 `turn_detail_chunk` 帧流式交付，不在 ack 里）：
 
 ```jsonc
 // 批次因 deadline 暂停（续传，不是失败）
 { "detailLoadState": "partial", "syncRev": 130, "manifestRev": 7,
+  "deliveryId": "d-17", "firstChunkSeq": 20, "lastChunkSeq": 27,
   "progress": { "pages": 46, "items": 227, "bytes": 937241, "eof": false } }
 // EOF
 { "detailLoadState": "loaded", "syncRev": 131, "manifestRev": 8,
+  "deliveryId": "d-17", "firstChunkSeq": 20, "lastChunkSeq": 31,
   "progress": { "pages": 52, "items": 260, "bytes": 1020000, "eof": true } }
-// 可重试失败（进度保留在 detail cache 与 manifest）
+// 可重试失败（进度保留在 detail cache 与 manifest；本批未交付 chunk 时范围两端为 0）
 { "detailLoadState": "failed", "syncRev": 132, "reasonCode": "upstream_error",
+  "deliveryId": "d-17", "firstChunkSeq": 0, "lastChunkSeq": 0,
   "progress": { "pages": 19, "items": 95, "bytes": 412906, "eof": false } }
 ```
 
-客户端收到 `partial` 自动再次调用（每次调用 = 一个新 90s 批次，从持久 cursor 续传）。
-请求级错误（`unknown_backend`/`session_not_found`/`turn_not_found`/`invalid_params`）
-与 §11.7 相同。
+- `deliveryId`：本次加载尝试（批次）的 bridge 侧不透明标识，跨批次各不相同；客户端
+  只接受**当前** `(session, turn, generation, deliveryId)` 的 chunk 帧；
+- `firstChunkSeq`/`lastChunkSeq`：本批交付的 chunkSeq 闭区间；本批没有交付任何 chunk
+  时两端为 0（此时客户端只依赖 manifestRev+progress）；
+- **完成条件（F1.1 P0-3）**：客户端只有在收到连续的
+  `[firstChunkSeq, lastChunkSeq]` 帧后才认为本批交付完成；**发现缺口不得假装成功**，
+  必须从 detail cache 重放补齐（重发 `session_turn_items` 走 fast-path）；
+- 客户端收到 `partial` 自动再次调用（每次调用 = 一个新 90s 批次，从持久 cursor 续传）；
+- 请求级错误（`unknown_backend`/`session_not_found`/`turn_not_found`/`invalid_params`）
+  与 §11.7 相同。
 
-#### `turn_detail_chunk` 事件（仅请求连接）
+#### `turn_detail_chunk` 帧（专用非 replayable overlay envelope，仅请求连接）
+
+**不是**业务 EventMessage：不携带 `eventId`/顶层 `seq`/`bridgeEpoch`/`perSessionSeq`，
+**不进事件缓冲、不参与业务 event sequence、recovery 不重放**。overlay 交付是
+连接作用域、可丢失的——丢失由 ack 的 `[firstChunkSeq, lastChunkSeq]` 范围 + detail
+cache 重放修复，而不是靠重放语义。
 
 ```jsonc
-{ "event": "turn_detail_chunk", "backendId": "codex-remote",
-  "sessionId": "sess-1", "turnId": "turn-42", "manifestRev": 7, "seq": 12,
-  "items": [ /* ProjectionPart[]（普通明细 item，≤256KB 建议/512KB 硬顶内可多 item） */ ],
+{ "type": "turn_detail_chunk", "backendId": "codex-remote",
+  "sessionId": "sess-1", "turnId": "turn-42", "turnGeneration": 3,
+  "deliveryId": "d-17", "manifestRev": 7, "chunkSeq": 12,
+  "items": [ /* ProjectionPart[]（普通明细 item，转义后 ≤256KB 建议/512KB 硬顶内可多 item） */ ],
   "oversize": [ { "itemId": "…", "handle": "…", "type": "commandExecution",
                   "totalBytes": 1057417, "preview": "…", "totalChunks": 9 } ],
   "progress": { "pages": 46, "items": 227, "bytes": 937241, "eof": false } }
 ```
 
-- 每个 chunk 对应一个成功接纳的上游页（或页的拆分）；`seq` 在 turn 内单调；
+- **身份绑定（F1.1 P0-2）**：每帧携带 `(sessionId, turnId, turnGeneration, deliveryId,
+  manifestRev)`。客户端只接受与当前持有身份完全一致的帧——回合重新激活
+  （generation 变更）或重试（新 deliveryId）后，旧请求的迟到帧被身份比较丢弃；
+- `chunkSeq`（刻意不叫 `seq`，避免与任何传输层序号混淆）：per-`(session, turn)` 单调
+  递增的 chunk 序号，**跨批次/跨 delivery 连续编号**（全局缺口检测）；
+- 客户端按 `chunkSeq` 去重 + 检测缺口；
+- 每个 chunk 对应一个成功接纳的上游页（或页的拆分）；
 - **只发给请求了该 turn 明细的连接**（per-connection registry）；singleflight follower
-  观察同一批次的事件流；
+  观察同一批次的帧流；
 - 重连后重新调用 `session_turn_items`：manifest 已有持久进度时走 **fast-path**——从
   detail cache 重放 chunk（不重拉上游），再从持久 cursor 续传剩余部分；
-- chunk 事件不进 revision journal、不进 snapshot——overlay 是唯一客户端载体。
+- chunk 帧不进 revision journal、不进 snapshot——overlay 是唯一客户端载体。
 
 #### `turn_output_chunk` RPC（超大输出二级懒加载）
+
+请求与响应**绑定完整 blob 身份**（F1.1 P0-2：generation + manifestRev + handle +
+itemId + chunkIndex）——客户端拒绝任何回显身份与请求不符的响应：
 
 ```jsonc
 // 请求
 { "method": "turn_output_chunk", "backendId": "codex-remote",
-  "params": { "sessionId": "sess-1", "turnId": "turn-42", "itemId": "…", "chunkIndex": 0 } }
-// 成功（data envelope）
-{ "chunkIndex": 0, "totalChunks": 9, "totalBytes": 1057417, "encoding": "utf-8", "data": "…" }
+  "params": { "sessionId": "sess-1", "turnId": "turn-42", "turnGeneration": 3,
+              "manifestRev": 7, "itemId": "…", "handle": "…", "chunkIndex": 0 } }
+// 成功（data envelope，回显完整绑定）
+{ "turnGeneration": 3, "manifestRev": 7, "itemId": "…", "handle": "…",
+  "chunkIndex": 0, "totalChunks": 9, "totalBytes": 1057417,
+  "encoding": "utf-8", "data": "…" }
 ```
 
-- chunk 目标 128KB；按 itemId+chunkIndex 顺序读取 Mac blob cache；
+- chunk 按冻结偏移表（见「分块编码规则」）切分；`totalChunks` 来自实际偏移表；
+- 按 itemId+chunkIndex 顺序读取 Mac blob cache；
 - blob 已被 LRU 淘汰 → UnifiedError `blob_evicted`（可重试）：客户端重新调用
   `session_turn_items`，Mac 从官方分页重建 blob 后再取 chunk；
 - **完整内容可达，永不静默截断**（面向模型上下文的官方 output truncation 语义
   不适用于历史 UI）。
+
+#### detail store 事务模型（F1.1 P1-5 冻结，F2 实现依据）
+
+存储选型：**文件存储 + 固定提交顺序**（不引入 SQLite/WAL）。理由：go-bridge 现无任何
+SQL 依赖；mattn/go-sqlite3 需 cgo（破坏纯 Go runtime 分发），modernc.org/sqlite 为
+append-only 有界负载引入多 MB 依赖；官方 codex 的 SQLite 在 Rust 宿主侧，不构成 Mac
+桥面必须跟随的先例；现有代码库已有原子 rename 纪律（CodexProducerState 模式）。
+**固定提交顺序**（崩溃时最多回滚最后一步，启动扫描兜底）：
+
+1. blob 临时文件写入 → fsync → rename 到最终名；
+2. items 事务记录（本页 items + 事务头）追加写入 → fsync；
+3. manifest 临时文件写入 → fsync → rename（提交点：manifest 指向的 cursor/计数
+   只在前两步完成后推进）；
+4. 启动时扫描：manifest 未指向的 items 尾部记录与无主 blob = 未提交事务，回滚/清除。
+
+**路径安全**：sessionID/turnID **不得**直接拼磁盘路径——目录名一律
+`hex(sha256(rawID))`（防路径穿越/非法字符），manifest 内保留原始 ID 供审计。
+**预算**：见冻结参数表「detail cache 总预算」（整回合目录粒度淘汰，128MB 初始默认）。
 
 #### 断点恢复（owner 终审规则）
 

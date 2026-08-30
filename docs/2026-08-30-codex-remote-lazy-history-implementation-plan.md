@@ -437,17 +437,49 @@ Summary），明细展开按 owner 裁决执行并记录入 fixture 元数据。
    （deprecated）。**G3 终局验收条件：真实 ≥128 页/≥5.7MB 回合最终可完整展开**。
    实现单元见 §3F（exec-plan `phase5-detail-final-*`）。
 
+7. **F1.1 契约闭合裁决（owner 2026-08-30 night X，F1 重开后的小范围修订，全部采纳）**：
+   **P0-1 事件形状与 wire 不一致**——§11.8 原示例是 EventMessage 风格但实际走
+   `EventMessage.Data` 且未盖 eventId/seq/bridgeEpoch/perSessionSeq；定案为
+   **专用非 replayable overlay envelope**（独立帧类型，不参与业务 event
+   sequence、不进事件缓冲、recovery 不重放），payload 序号改名 **`chunkSeq`**
+   避免与传输层 seq 混淆。**P0-2 chunk 身份防串染**——每帧绑定
+   `(sessionId, turnId, turnGeneration, deliveryId, manifestRev)`；iOS 只接受当前
+   身份的帧，按 chunkSeq 去重+缺口检测；`turn_output_chunk` 请求与 ack 同样绑定
+   generation+manifestRev+handle+itemId+chunkIndex（回显校验）。**P0-3 ack 完成条件**
+   ——session_turn_items v2 ack 增加 `deliveryId`/`firstChunkSeq`/`lastChunkSeq`；
+   客户端仅在收到连续 `[firstChunkSeq, lastChunkSeq]` 后认定本批完成，缺口从
+   detail cache 重放补齐、不得假装成功。**P1-4 manifest 状态防倒退**——依当前
+   Kernel 状态校验（非字段级）：同 generation 内 manifestRev/itemCount/totalBytes
+   单调不倒退、failed/重试必须携带保留 manifest 全量、loaded 同 generation 终态
+   （仅同 rev 幂等重复）；generation bump 提交点重置 manifest 基线。**P1-5 存储
+   事务模型冻结**——选型**文件存储 + 固定提交顺序**（blob 临时写+fsync+rename →
+   items 事务记录+fsync → manifest 临时写+fsync+rename 为提交点 → 启动扫描回滚
+   未提交事务）；不引入 SQLite 的理由记录于 §11.8（无既有 SQL 依赖、mattn 需 cgo
+   破坏纯 Go 分发、modernc 为有界 append-only 负载引入多 MB 依赖）；**路径安全**
+   ——目录名一律 `hex(sha256(rawID))`，禁止原始 ID 拼路径。**P1-6 预算覆盖面**——
+   128MB 改为**整个 detail cache**（manifests+item logs+blobs+临时事务文件）的
+   初始默认值（**非证据冻结值**），淘汰粒度 = 整回合 detail cache 目录。**P1-7
+   编码后分块冻结**——绝不切 rune 中间、转义后尺寸复核超 256KB 继续对半、envelope
+   编码后 ≤512KB、`totalChunks` 由实际偏移表计算（禁 ceil 近似）。**Proof closure
+   口径统一**——F1 定义收窄为「冻结 Mac wire schema；iOS contract.json SoT 同步
+   归 F6」，状态回填已按此重填。F2 在 P0×3 + 存储事务模型冻结（本条）完成后解冻。
+
 #### 3F 终案实现单元（phase5，依赖 §11.8 契约冻结）
 
-- **F1 契约冻结**：协议 §11.8 + wire descriptor 声明 `turn_detail_chunks_v1`
+- **F1 契约冻结（含 F1.1 闭合）**：协议 §11.8 + wire descriptor 声明 `turn_detail_chunks_v1`
   （与 deprecated `turn_detail_lazy_v1` 并存一个过渡期）+ `turnStateOps` manifest op
-  形状 + `turn_detail_chunk` 事件形状 + `turn_output_chunk` RPC 形状 + iOS
-  contract.json SoT 同步。先冻结后写 handler（Phase-2 纪律）。
-- **F2 Mac detail store**：`<data-dir>/detail/<backend>/<sessionID>/<turnID>/`
-  manifest（state/generation/manifestRev/item 摘要含 blob handle/resume：
-  nextCursor+lastAcceptedItemID+acceptedCount）+ items 追加日志 + blobs/ 二级存储 +
-  LRU（默认 128MB，const 可调）；**页接纳 = 原子事务**（manifest 重写 + append +
-  fsync）；>256KB item 提取为 blob（预览 2KB + handle + totalBytes + chunk 数）。
+  形状 + 专用非 replayable `turn_detail_chunk` 帧（身份五元组 + chunkSeq）+
+  `turn_output_chunk` RPC 绑定形状 + v2 reasonCode 闭集 + 分块编码规则。
+  **范围 = 冻结 Mac wire schema；iOS contract.json SoT 同步归 F6**（F1.1 口径统一）。
+  先冻结后写 handler（Phase-2 纪律）。
+- **F2 Mac detail store**：`<data-dir>/detail/<backend>/<sha256(sessionID)>/<sha256(turnID)>/`
+  （**路径安全：目录名一律 sha256 hex，禁原始 ID 拼路径**）manifest（state/generation/
+  manifestRev/item 摘要含 blob handle/resume：nextCursor+lastAcceptedItemID+
+  acceptedCount）+ items 事务记录追加 + blobs/ 二级存储 + **全局 cache 预算**
+  （128MB 初始默认、覆盖 manifests+items+blobs+临时文件、整回合目录粒度 LRU/TTL
+  淘汰）；**页接纳 = 固定提交顺序事务**（blob temp+fsync+rename → items 事务记录
+  +fsync → manifest temp+fsync+rename 为提交点 → 启动扫描回滚未提交事务）；
+  >256KB item 提取为 blob（预览 2KB + handle + totalBytes + 实际偏移表 totalChunks）。
 - **F3 Kernel manifest 提交路径**：turn 增量 manifest 字段（不进 parts），
   `partial`/`loading+progress`/`loaded`/`failed(reasonCode)` 状态机，checkpoint
   版本升级；v2 reasonCode 闭集（去 max_pages/max_bytes，增 page_oversize）。

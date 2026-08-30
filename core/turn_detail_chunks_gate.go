@@ -45,8 +45,12 @@ const (
 	TurnDetailBatchDeadline = 90 * time.Second
 	// TurnDetailBlobPreviewBytes: preview length carried beside a blob handle.
 	TurnDetailBlobPreviewBytes int = 2 * 1024
-	// TurnDetailBlobLRUBudgetBytes: default blob store budget (const-tunable;
-	// adjust only on real data). Evicted blobs re-hydrate from official
+	// TurnDetailCacheBudgetBytes: DEFAULT budget for the ENTIRE detail cache —
+	// manifests + item logs + blobs + temp transaction files, not blobs alone
+	// (F1.1 P1-6: a blobs-only LRU leaves item logs unbounded). Eviction
+	// granularity is a WHOLE per-turn detail cache directory, oldest
+	// last-access first. INITIAL DEFAULT, not an evidence-frozen value:
+	// adjust on real cache-usage data. Evicted turns re-hydrate from official
 	// pagination on demand.
-	TurnDetailBlobLRUBudgetBytes int64 = 128 * 1024 * 1024
+	TurnDetailCacheBudgetBytes int64 = 128 * 1024 * 1024
 )

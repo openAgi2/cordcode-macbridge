@@ -1,17 +1,21 @@
 package gobridge
 
 import (
+	"encoding/json"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
-// turn_detail_chunks_v1 (§11.8, owner final ruling 2026-08-30) — v2 of the
-// lazy-detail contract. v1 types/validation in projection_turn_state.go stay
-// FROZEN for the deprecated turn_detail_lazy_v1 path; everything below is the
-// v2 layering: kernel keeps a manifest SUMMARY only, full detail lives in the
-// Mac detail store, and the requesting connection receives bounded
-// turn_detail_chunk events (never kernel patches carrying detail content).
+// turn_detail_chunks_v1 (§11.8, owner final ruling 2026-08-30; F1.1 contract
+// closure 2026-08-30 night X) — v2 of the lazy-detail contract. v1
+// types/validation in projection_turn_state.go stay FROZEN for the deprecated
+// turn_detail_lazy_v1 path; everything below is the v2 layering: kernel keeps
+// a manifest SUMMARY only, full detail lives in the Mac detail store, and the
+// requesting connection receives bounded turn_detail_chunk frames through a
+// DEDICATED non-replayable overlay envelope (never the business
+// EventMessage sequence, never the kernel patch chain).
 
 // DetailStatePartial is the v2-only progress state: persisted progress exists
 // and the next batch resumes from the saved cursor (§11.7 v1 validator
@@ -54,34 +58,86 @@ type TurnDetailOversizeRef struct {
 	TotalChunks int    `json:"totalChunks"`
 }
 
-// TurnDetailChunkPayload is the Data payload of the turn_detail_chunk event.
-// Encoded size discipline: advisory cap core.TurnDetailChunkAdvisoryCapBytes,
-// absolute hard cap core.TurnDetailPatchHardCapBytes (post-encode).
-type TurnDetailChunkPayload struct {
-	TurnID      string                  `json:"turnId"`
-	ManifestRev int                     `json:"manifestRev"`
-	Seq         int                     `json:"seq"`
-	Items       []ProjectionPart        `json:"items,omitempty"`
-	Oversize    []TurnDetailOversizeRef `json:"oversize,omitempty"`
-	Progress    TurnDetailProgress      `json:"progress"`
+// TurnDetailChunkFrame is the DEDICATED overlay envelope (F1.1 P0-1/P0-2).
+// It is NOT an EventMessage: it carries no eventId, no top-level seq, no
+// bridgeEpoch/perSessionSeq, never enters the event buffer, and is never
+// replayed or re-emitted by recovery. Overlay delivery is connection-scoped
+// and loss-tolerant: iOS completes a batch only on the contiguous
+// [firstChunkSeq, lastChunkSeq] range from the batch ack and re-pulls gaps
+// from the detail cache — never by trusting delivery order.
+//
+// Identity (P0-2): every frame binds (sessionId, turnId, turnGeneration,
+// deliveryId). Clients accept content ONLY for the identity they currently
+// hold; a delayed frame from an older delivery/generation is dropped by that
+// comparison. chunkSeq — deliberately NOT "seq", to never alias any transport
+// sequence — is the per-(session, turn) monotonic chunk index; it continues
+// across batches and deliveries so global gap detection works.
+type TurnDetailChunkFrame struct {
+	Type           string                  `json:"type"` // always "turn_detail_chunk"
+	BackendID      string                  `json:"backendId"`
+	SessionID      string                  `json:"sessionId"`
+	TurnID         string                  `json:"turnId"`
+	TurnGeneration int                     `json:"turnGeneration"`
+	DeliveryID     string                  `json:"deliveryId"`
+	ManifestRev    int                     `json:"manifestRev"`
+	ChunkSeq       int                     `json:"chunkSeq"`
+	Items          []ProjectionPart        `json:"items,omitempty"`
+	Oversize       []TurnDetailOversizeRef `json:"oversize,omitempty"`
+	Progress       TurnDetailProgress      `json:"progress"`
 }
 
-// TurnOutputChunkAck is the success data envelope of the turn_output_chunk
-// RPC (§11.8). Data is UTF-8 text chunked at core.TurnDetailChunkTargetBytes.
+// TurnDetailBatchAck is the session_turn_items v2 ack (F1.1 P0-3): the
+// terminal state of THIS batch plus the chunk-sequence range it delivered.
+// firstChunkSeq/lastChunkSeq are both 0 when the batch delivered no chunks
+// (client then relies on manifestRev+progress only). A batch is complete on
+// the client ONLY after the contiguous [firstChunkSeq, lastChunkSeq] frames
+// arrived; a gap re-pulls from the detail cache (fast-path replay), never
+// "pretend success".
+type TurnDetailBatchAck struct {
+	DetailLoadState string             `json:"detailLoadState"` // loading | partial | loaded | failed
+	SyncRev         int                `json:"syncRev"`
+	ReasonCode      string             `json:"reasonCode,omitempty"`
+	ManifestRev     int                `json:"manifestRev"`
+	DeliveryID      string             `json:"deliveryId"`
+	FirstChunkSeq   int                `json:"firstChunkSeq"`
+	LastChunkSeq    int                `json:"lastChunkSeq"`
+	Progress        TurnDetailProgress `json:"progress"`
+}
+
+// TurnOutputChunkParams is the turn_output_chunk request (F1.1 P0-2): the
+// caller binds the FULL blob identity it clicked — generation, manifestRev,
+// itemId AND handle — so a response can be proven to belong to that blob.
+type TurnOutputChunkParams struct {
+	SessionID      string `json:"sessionId"`
+	TurnID         string `json:"turnId"`
+	TurnGeneration int    `json:"turnGeneration"`
+	ManifestRev    int    `json:"manifestRev"`
+	ItemID         string `json:"itemId"`
+	Handle         string `json:"handle"`
+	ChunkIndex     int    `json:"chunkIndex"`
+}
+
+// TurnOutputChunkAck echoes the full binding (F1.1 P0-2): the client rejects
+// any response whose echoed identity does not match its request. Data is a
+// UTF-8 text chunk cut at the frozen boundary table (DetailChunkOffsets).
 type TurnOutputChunkAck struct {
-	ChunkIndex  int    `json:"chunkIndex"`
-	TotalChunks int    `json:"totalChunks"`
-	TotalBytes  int64  `json:"totalBytes"`
-	Encoding    string `json:"encoding"`
-	Data        string `json:"data"`
+	TurnGeneration int    `json:"turnGeneration"`
+	ManifestRev    int    `json:"manifestRev"`
+	ItemID         string `json:"itemId"`
+	Handle         string `json:"handle"`
+	ChunkIndex     int    `json:"chunkIndex"`
+	TotalChunks    int    `json:"totalChunks"`
+	TotalBytes     int64  `json:"totalBytes"`
+	Encoding       string `json:"encoding"` // "utf-8"
+	Data           string `json:"data"`
 }
 
-// ValidateTurnStateOpsV2 enforces the v2 fail-closed invariants: state ∈
-// {loading, partial, loaded, failed}; failed ⇒ reasonCode from the v2 closed
-// set; loading/partial/loaded ⇒ reasonCode absent; manifest summary fields
-// non-negative and mutually consistent (items counted ⇒ a manifest revision
-// exists). v2 ops ride the same turnStateOps wire array as v1 (additive
-// fields); a v1 connection never receives them (gated delivery).
+// ValidateTurnStateOpsV2 enforces the v2 fail-closed field-level invariants:
+// state ∈ {loading, partial, loaded, failed}; failed ⇒ reasonCode from the v2
+// closed set; loading/partial/loaded ⇒ reasonCode absent; manifest summary
+// fields non-negative and mutually consistent (items counted ⇒ a manifest
+// revision exists). Kernel-state monotonicity rules live in
+// ApplyTurnStateOpsV2 (they need the current projection).
 func ValidateTurnStateOpsV2(ops []TurnStateOp) error {
 	for i, op := range ops {
 		if op.TurnID == "" {
@@ -119,6 +175,19 @@ func ValidateTurnStateOpsV2(ops []TurnStateOp) error {
 // target-turn existence + per-turn generation fence) and additionally stamps
 // the manifest SUMMARY fields (manifestRev/itemCount/totalBytes). Detail
 // content NEVER flows through here — that is the §11.8 layering guarantee.
+//
+// F1.1 P1-4 kernel-state rules (checked against the CURRENT projection, not
+// just field-level):
+//
+//   - manifest monotonicity within a generation: every op must restate the
+//     full current-or-advanced manifest (manifestRev/itemCount/totalBytes
+//     each ≥ the kernel's current values). A failed/retry op that zeroes the
+//     summary while progress exists is rejected — the builder must carry the
+//     retained manifest forward;
+//   - loaded is TERMINAL within a generation: once loaded, only the exact
+//     idempotent repeat (loaded, same manifestRev) is accepted. A generation
+//     bump resets the manifest baseline at the bump commit site (new truth =
+//     fresh detail state), so these rules are per-generation by construction.
 func ApplyTurnStateOpsV2(projection *SessionProjection, ops []TurnStateOp) error {
 	if len(ops) == 0 {
 		return nil
@@ -131,12 +200,12 @@ func ApplyTurnStateOpsV2(projection *SessionProjection, ops []TurnStateOp) error
 		index[projection.Turns[i].TurnID] = i
 	}
 	type turnMutation struct {
-		index        int
-		state        string
-		reason       string
-		manifestRev  int
-		itemCount    int
-		totalBytes   int64
+		index       int
+		state       string
+		reason      string
+		manifestRev int
+		itemCount   int
+		totalBytes  int64
 	}
 	mutations := make([]turnMutation, 0, len(ops))
 	for i, op := range ops {
@@ -144,9 +213,23 @@ func ApplyTurnStateOpsV2(projection *SessionProjection, ops []TurnStateOp) error
 		if !ok {
 			return fmt.Errorf("%w: op[%d] unknown turn %q", ErrTurnStateInvalid, i, op.TurnID)
 		}
-		if projection.Turns[at].TurnGeneration != op.TurnGeneration {
+		cur := projection.Turns[at]
+		if cur.TurnGeneration != op.TurnGeneration {
 			return fmt.Errorf("%w: op[%d] turn %s op generation %d != kernel %d",
-				ErrTurnStateStale, i, op.TurnID, op.TurnGeneration, projection.Turns[at].TurnGeneration)
+				ErrTurnStateStale, i, op.TurnID, op.TurnGeneration, cur.TurnGeneration)
+		}
+		if op.ManifestRev < cur.DetailManifestRev || op.ItemCount < cur.DetailItemCount || op.TotalBytes < cur.DetailTotalBytes {
+			return fmt.Errorf("%w: op[%d] turn %s manifest regression (op %d/%d/%d < kernel %d/%d/%d)",
+				ErrTurnStateInvalid, i, op.TurnID,
+				op.ManifestRev, op.ItemCount, op.TotalBytes,
+				cur.DetailManifestRev, cur.DetailItemCount, cur.DetailTotalBytes)
+		}
+		if cur.DetailLoadState == DetailStateLoaded {
+			idempotent := op.DetailLoadState == DetailStateLoaded && op.ManifestRev == cur.DetailManifestRev
+			if !idempotent {
+				return fmt.Errorf("%w: op[%d] turn %s loaded is terminal within a generation (op state %q)",
+					ErrTurnStateInvalid, i, op.TurnID, op.DetailLoadState)
+			}
 		}
 		mutations = append(mutations, turnMutation{
 			index: at, state: op.DetailLoadState, reason: op.ReasonCode,
@@ -164,20 +247,82 @@ func ApplyTurnStateOpsV2(projection *SessionProjection, ops []TurnStateOp) error
 	return nil
 }
 
-// turnDetailChunkEvent wraps a payload into the pushed EventMessage envelope
-// (constructor lives in event_publisher.go — the only blessed business-event
-// egress site, enforced by TestBusinessEventConstructionHasNoProductionBypass).
+// jsonEscapedLen measures the exact JSON-escaped wire length of s (without
+// the surrounding quotes) — the budget that actually matters for envelope
+// size after escaping.
+func jsonEscapedLen(s string) int {
+	quoted, err := json.Marshal(s)
+	if err != nil {
+		// json.Marshal of a string cannot fail; defensive fallback.
+		return len(s) * 6
+	}
+	return len(quoted) - 2
+}
 
-// ChunkTotalBytesFor returns the total chunk count for a blob of size bytes
-// (target-size chunks; the tail chunk may be short).
-func ChunkTotalCountFor(totalBytes int64) int {
-	if totalBytes <= 0 {
-		return 0
+// alignBackToRuneStart moves cut backward to a UTF-8 rune boundary (never
+// splits mid-rune; F1.1 P1-7).
+func alignBackToRuneStart(s string, cut int) int {
+	for cut > 0 && cut < len(s) && !utf8.RuneStart(s[cut]) {
+		cut--
 	}
-	target := core.TurnDetailChunkTargetBytes
-	n := totalBytes / target
-	if totalBytes%target != 0 {
-		n++
+	return cut
+}
+
+// DetailChunkOffsets computes the frozen chunk boundary table (F1.1 P1-7):
+//
+//  1. target-size cuts on raw bytes (core.TurnDetailChunkTargetBytes), each
+//     aligned back to a rune start — a chunk NEVER begins or ends mid-rune;
+//  2. every chunk's JSON-ESCAPED wire length is re-checked against the
+//     advisory cap (core.TurnDetailChunkAdvisoryCapBytes) and split further
+//     (rune-aligned halves) until it fits — escaping-heavy text (backslashes,
+//     quotes, control chars) yields shorter raw chunks, not oversized frames;
+//  3. totalChunks = len(offsets)-1 — computed from the ACTUAL offset table,
+//     never from ceil(totalBytes/target).
+//
+// offsets[0] == 0 and offsets[len-1] == len(s); an empty string yields a
+// zero-chunk table ([]int{0}). Frame-level assembly (F4) additionally
+// enforces the 512KB post-encode hard cap on the WHOLE envelope.
+func DetailChunkOffsets(s string) []int {
+	target := int(core.TurnDetailChunkTargetBytes)
+	advisory := int(core.TurnDetailChunkAdvisoryCapBytes)
+	if len(s) == 0 {
+		return []int{0}
 	}
-	return int(n)
+	offsets := []int{0}
+	for start := 0; start < len(s); {
+		cut := start + target
+		if cut >= len(s) {
+			cut = len(s)
+		} else {
+			cut = alignBackToRuneStart(s, cut)
+			if cut <= start { // pathological: rune longer than target — keep whole rune
+				cut = start + utf8.RuneLen([]rune(s[start : start+1])[0])
+				if cut > len(s) {
+					cut = len(s)
+				}
+			}
+		}
+		// Escaped-size re-check: split rune-aligned halves until the chunk's
+		// escaped wire form fits the advisory cap. A single rune never exceeds
+		// the cap (max escaped rune ≈ 12 bytes), so this terminates.
+		for cut < len(s) && jsonEscapedLen(s[start:cut]) > advisory {
+			half := alignBackToRuneStart(s, start+(cut-start)/2)
+			if half <= start || half >= cut {
+				half = cut - 1
+				half = alignBackToRuneStart(s, half)
+				if half <= start {
+					break
+				}
+			}
+			cut = half
+		}
+		offsets = append(offsets, cut)
+		start = cut
+	}
+	return offsets
+}
+
+// DetailChunkCount returns the chunk count from the ACTUAL offset table.
+func DetailChunkCount(s string) int {
+	return len(DetailChunkOffsets(s)) - 1
 }

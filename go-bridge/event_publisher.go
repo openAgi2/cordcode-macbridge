@@ -429,19 +429,6 @@ func (p *EventPublisher) ActiveRecoveryID(conn Connection) string {
 	return ""
 }
 
-// turnDetailChunkEvent wraps a payload into the pushed EventMessage envelope
-// (§11.8 turn_detail_chunk; conn-scoped overlay delivery).
-func turnDetailChunkEvent(backendID, sessionID string, payload TurnDetailChunkPayload, nowMS int64) EventMessage {
-	return EventMessage{
-		Type:      "event",
-		Event:     "turn_detail_chunk",
-		SessionID: sessionID,
-		BackendID: backendID,
-		Data:      payload,
-		Timestamp: nowMS,
-	}
-}
-
 func (p *EventPublisher) EnqueueControl(conn Connection, frame interface{}, wait bool) error {
 	if conn == nil {
 		return fmt.Errorf("connection is required")

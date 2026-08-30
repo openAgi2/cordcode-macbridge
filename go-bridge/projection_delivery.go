@@ -263,16 +263,22 @@ func (p *EventPublisher) ConnTurnDetailChunksV1(conn Connection) bool {
 	return p.turnDetailChunksV1[conn]
 }
 
-// PublishTurnDetailChunk delivers one bounded turn_detail_chunk event to a
+// PublishTurnDetailChunk delivers one bounded turn_detail_chunk frame to a
 // single connection through the control queue (§11.8: conn-scoped overlay
-// delivery — chunks never enter the kernel patch chain, the revision journal,
-// or any snapshot). Caller owns batch pacing and seq monotonicity.
-func (p *EventPublisher) PublishTurnDetailChunk(conn Connection, backendID, sessionID string, payload TurnDetailChunkPayload) error {
+// delivery — the dedicated frame never enters the kernel patch chain, the
+// revision journal, the event buffer, or any snapshot, and is never
+// replayed; loss is repaired by the client via detail-cache replay using the
+// ack's [firstChunkSeq, lastChunkSeq] range). Caller owns batch pacing and
+// chunkSeq monotonicity.
+func (p *EventPublisher) PublishTurnDetailChunk(conn Connection, frame TurnDetailChunkFrame) error {
 	if p == nil || conn == nil {
 		return fmt.Errorf("event-publisher: nil publisher or connection")
+	}
+	if frame.Type != "turn_detail_chunk" {
+		return fmt.Errorf("event-publisher: overlay frame type %q", frame.Type)
 	}
 	if !p.ConnTurnDetailChunksV1(conn) {
 		return fmt.Errorf("event-publisher: connection lacks turn_detail_chunks_v1")
 	}
-	return p.EnqueueControl(conn, turnDetailChunkEvent(backendID, sessionID, payload, p.now().UnixMilli()), false)
+	return p.EnqueueControl(conn, frame, false)
 }
