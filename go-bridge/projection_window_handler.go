@@ -200,4 +200,11 @@ func (h *Handlers) handleGetSessionProjectionWindow(conn Connection, msg WireMes
 	if err := h.eventPublisher.CompleteProjectionSnapshot(conn, admission, msg.RequestID, response); err != nil {
 		slog.Warn("go-bridge: projection window response enqueue failed", "requestId", msg.RequestID, "error", err)
 	}
+	// turn_detail_lazy_v1 rule 3/4 bookkeeping: the replica now holds these
+	// turns; detail/state commits route content vs no-op by this set.
+	turnIDs := make([]string, 0, len(response.Turns))
+	for _, turn := range response.Turns {
+		turnIDs = append(turnIDs, turn.TurnID)
+	}
+	h.eventPublisher.RecordConnWindowTurns(conn, msg.BackendID, params.SessionID, turnIDs)
 }

@@ -63,8 +63,12 @@ type Handlers struct {
 	// post-commit seed hook and older-walk cursor advances (T2.1): the seed's
 	// lost-update guard must read and write the fact atomically against
 	// concurrent walk saves.
-	producerWritesMu       sync.Mutex
-	hydrateProducerSeeds   sync.Map
+	producerWritesMu     sync.Mutex
+	hydrateProducerSeeds sync.Map
+	// turnDetailFlights is the session_turn_items singleflight registry
+	// (§11.7): key = backend|session|turn; followers mirror the leader's
+	// terminal ack (same terminal syncRev, never a mid-flight loading ack).
+	turnDetailFlights      sync.Map
 	agents                 map[string]core.Agent
 	sessions               *sessionRegistry
 	runningMap             *runningMapCache
@@ -1574,6 +1578,8 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleGetSessionProjection(conn, msg, agent)
 	case "get_session_projection_window":
 		h.handleGetSessionProjectionWindow(conn, msg, agent)
+	case "session_turn_items":
+		h.handleSessionTurnItems(conn, msg, agent)
 	case "delete_session":
 		h.handleDeleteSession(conn, msg, agent)
 	case "resume_session":

@@ -205,3 +205,30 @@ func (p *EventPublisher) ConnProjectionWindowV1(conn Connection) bool {
 	defer p.mu.Unlock()
 	return p.projectionWindowV1[conn]
 }
+
+// SetConnTurnDetailV1 records the authenticated hello negotiation for the
+// turn_detail_lazy_v1 capability (§11.7). Only connections marked here may
+// call session_turn_items; the handler answers everyone else with
+// protocol.capability_required. Replacement connections must negotiate again;
+// UnregisterConnection clears the mark.
+func (p *EventPublisher) SetConnTurnDetailV1(conn Connection, enabled bool) {
+	if p == nil || conn == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if enabled {
+		p.turnDetailV1[conn] = true
+	} else {
+		delete(p.turnDetailV1, conn)
+	}
+}
+
+func (p *EventPublisher) ConnTurnDetailV1(conn Connection) bool {
+	if p == nil || conn == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.turnDetailV1[conn]
+}

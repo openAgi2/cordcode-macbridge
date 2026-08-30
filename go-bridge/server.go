@@ -225,6 +225,7 @@ type Server struct {
 	recoveryEnabled         bool
 	sessionSyncV2Enabled    bool
 	projectionWindowEnabled bool
+	turnDetailLazyEnabled   bool
 }
 
 // K3 enables the Codex-only shadow data plane. The client still owns UI with legacy history;
@@ -250,6 +251,56 @@ const projectionWindowProductionEnabled = false
 // capabilities["projection_window_v1"]=true and the connection may call
 // get_session_projection_window.
 func (s *Server) SetProjectionWindowEnabled(enabled bool) { s.projectionWindowEnabled = enabled }
+
+// turnDetailLazyProductionEnabled stays false until the iOS Phase 3 replica and
+// the release gates ship (same frozen release ordering as projection_window_v1:
+// client first, server flip last). Tests enable the producer through
+// SetTurnDetailLazyEnabled; production must not.
+const turnDetailLazyProductionEnabled = false
+
+// SetTurnDetailLazyEnabled gates the turn_detail_lazy_v1 capability
+// advertisement (unified-bridge-protocol.md §11.7 / bridge-v1.md). When true
+// and the client declares turn_detail_lazy_v1 (plus session_sync_v2), hello_ack
+// echoes capabilities["turn_detail_lazy_v1"]=true and the connection may call
+// session_turn_items.
+func (s *Server) SetTurnDetailLazyEnabled(enabled bool) { s.turnDetailLazyEnabled = enabled }
+
+// helloSupportsTurnDetailLazyV1 returns true when the client advertised
+// turn_detail_lazy_v1 in hello.
+func helloSupportsTurnDetailLazyV1(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "turn_detail_lazy_v1" {
+			return true
+		}
+	}
+	return false
+}
+
+// negotiateTurnDetailLazyV1 applies the hello rules for turn_detail_lazy_v1:
+// the capability REQUIRES session_sync_v2 (detail is a projection-surface
+// feature); a declaration without it fails hello with
+// protocol.invalid_capabilities. The per-session legacy-historyMode gate stays
+// with the handler (§11.7: legacy sessions never expose session_turn_items).
+func (s *Server) negotiateTurnDetailLazyV1(ack *HelloAckMessage, hello *HelloMessage, conn Connection) bool {
+	if !helloSupportsTurnDetailLazyV1(hello) {
+		return true
+	}
+	if !helloSupportsSessionSyncV2(hello) {
+		retryable := false
+		ack.Ok = false
+		ack.Error = &WireError{
+			Code:      "protocol.invalid_capabilities",
+			Message:   "turn_detail_lazy_v1 requires session_sync_v2",
+			Retryable: &retryable,
+		}
+		return false
+	}
+	if s.turnDetailLazyEnabled && ack.Ok {
+		ack.Capabilities["turn_detail_lazy_v1"] = true
+		s.eventPublisher.SetConnTurnDetailV1(conn, true)
+	}
+	return true
+}
 
 // helloSupportsProjectionWindowV1 returns true when the client advertised
 // projection_window_v1 in hello.
@@ -668,6 +719,12 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 	// projection_window_v1 (frozen §Projection Window): prerequisite validation may fail
 	// hello; echo + per-conn mark only when the rollout flag is enabled.
 	if !s.negotiateProjectionWindowV1(ack, &hello, connection) {
+		conn.SendJSON(ack)
+		return
+	}
+	// turn_detail_lazy_v1 (§11.7): same hello discipline; the per-session
+	// legacy-historyMode gate stays with the session_turn_items handler.
+	if !s.negotiateTurnDetailLazyV1(ack, &hello, connection) {
 		conn.SendJSON(ack)
 		return
 	}

@@ -407,3 +407,57 @@ func (a *Agent) turnScopedHistoryPaginated(ctx context.Context, threadID string,
 	}
 	return out, nil
 }
+
+// ReadColdHistory is the mode-aware cold-open baseline (owner T0.5 ruling, T2.3):
+// the AGENT owns the historyMode dispatch so the bridge never guesses and never
+// auto-falls-back a legacy thread onto paginated reads. paginated → ONE summary
+// page (asc) + upstream cursor fact; legacy → the explicit compat full read with
+// an EOF cursor fact (legacy sessions never run the producer older-walk).
+func (a *Agent) ReadColdHistory(ctx context.Context, threadID string) (*core.ColdHistoryResult, error) {
+	meta, err := a.readThreadMeta(ctx, threadID)
+	if err != nil {
+		return nil, err
+	}
+	switch meta.HistoryMode {
+	case "paginated":
+		page, err := a.readTurnsPage(ctx, threadID, "")
+		if err != nil {
+			return nil, err
+		}
+		turns := mapRemoteHistoryTurns(&remoteThread{ID: threadID, Turns: page.Turns}, len(page.Turns))
+		for i, j := 0, len(turns)-1; i < j; i, j = i+1, j-1 {
+			turns[i], turns[j] = turns[j], turns[i]
+		}
+		return &core.ColdHistoryResult{HistoryMode: "paginated", Page: &core.UpstreamHistoryPage{
+			Turns: turns, NextCursor: page.NextCursor,
+		}}, nil
+	case "legacy":
+		turns, err := a.readThreadFullCompat(ctx, threadID)
+		if err != nil {
+			return nil, err
+		}
+		return &core.ColdHistoryResult{HistoryMode: "legacy", Page: &core.UpstreamHistoryPage{
+			Turns: mapRemoteHistoryTurns(turns, 0), NextCursor: "",
+		}}, nil
+	default:
+		return nil, ErrUnknownHistoryMode
+	}
+}
+
+// ReadTurnDetail (T2.3): one turn's items to EOF under the frozen gates, mapped
+// through the SAME mapRemoteHistoryItem discipline as the rich-history path
+// (one mapper, one identity rule — official item ids stamped on parts). Decoding
+// failures surface the agent's typed errors (ErrUnknownThreadItem etc.) for the
+// bridge reasonCode mapping; SkippedTypes stays diagnostic — the bridge fails
+// closed on a non-empty value.
+func (a *Agent) ReadTurnDetail(ctx context.Context, sessionID, turnID string) (core.TurnScopedHistoryTurn, error) {
+	entries, err := a.ReadTurnItems(ctx, sessionID, turnID)
+	if err != nil {
+		return core.TurnScopedHistoryTurn{}, err
+	}
+	turn := core.TurnScopedHistoryTurn{TurnID: turnID, Status: "completed"}
+	for _, entry := range entries {
+		mapRemoteHistoryItem(&turn, entry.Item)
+	}
+	return turn, nil
+}

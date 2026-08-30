@@ -245,24 +245,37 @@ func (h *Handlers) saveProducerStateLocked(backendID, sessionID string, state Co
 	return h.projectionKernel.SaveCodexProducerState(backendID, sessionID, state)
 }
 
-// streamCodexRemoteSummaryProjectionEvents is the T2.1 cold-hydrate source for
-// codex-remote: ONE Summary page (plan §2.1 — desc network page 1, page size =
-// the agent's frozen turns/list limit 30, already reversed ascending by the
-// pager). This is where includeTurns=true finally leaves the production path;
-// the agent's compat full read remains for probe/baseline use only. The
-// upstream cursor fact is recorded as a producer seed and persisted AFTER the
-// hydrate commits (persistCodexProducerSeed) so a failed hydrate never leaves a
-// stale "older upstream" claim behind.
-func (h *Handlers) streamCodexRemoteSummaryProjectionEvents(
+// streamCodexRemoteColdHistoryEvents is the T2.1/T2.3 cold-hydrate source for
+// codex-remote, mode-aware per the owner T0.5 ruling: paginated threads serve
+// ONE Summary page (plan §2.1 — desc network page 1, page size = the agent's
+// frozen turns/list limit 30, already reversed ascending; this is where
+// includeTurns=true finally leaves the production path), legacy threads serve
+// the explicit compat full read with an EOF producer fact (no older-walk). The
+// recorded historyMode persists as the per-session turn_detail_lazy_v1 gate.
+// The upstream cursor fact is recorded as a producer seed and persisted AFTER
+// the hydrate commits (persistCodexProducerSeed) so a failed hydrate never
+// leaves a stale "older upstream" claim behind.
+func (h *Handlers) streamCodexRemoteColdHistoryEvents(
 	ctx context.Context,
-	pager core.UpstreamHistoryPager,
+	reader core.ColdHistoryReader,
 	backendID, sessionID string,
 	emit func(projectionHydrateEvent) bool,
 ) error {
-	page, err := pager.ReadUpstreamHistoryPage(ctx, sessionID, "")
+	result, err := reader.ReadColdHistory(ctx, sessionID)
 	if err != nil {
 		return err
 	}
+	return h.streamCodexRemoteColdHistoryFromResult(result, backendID, sessionID, emit)
+}
+
+// streamCodexRemoteColdHistoryFromResult streams the cold page's events and
+// records the producer seed (cursor fact + historyMode gate).
+func (h *Handlers) streamCodexRemoteColdHistoryFromResult(
+	result *core.ColdHistoryResult,
+	backendID, sessionID string,
+	emit func(projectionHydrateEvent) bool,
+) error {
+	page := result.Page
 	for _, ev := range turnScopedHistoryTurnToProjectionEvents(page.Turns) {
 		if !emit(ev) {
 			return nil
@@ -271,6 +284,7 @@ func (h *Handlers) streamCodexRemoteSummaryProjectionEvents(
 	seed := CodexProducerState{
 		HasOlderUpstream:   page.NextCursor != "",
 		UpstreamNextCursor: page.NextCursor,
+		HistoryMode:        result.HistoryMode,
 		UpdatedAt:          time.Now().UTC(),
 	}
 	// Boundary = the oldest MAPPED turn (the kernel front after commit).
@@ -345,4 +359,22 @@ func (h *Handlers) persistCodexProducerSeed(backendID, sessionID string, committ
 	// continuously visible across the Done-release/persist window. CompareAndDelete
 	// leaves a newer hydrate's seed intact if one raced in.
 	h.hydrateProducerSeeds.CompareAndDelete(key, raw)
+}
+
+// streamCodexRemotePagerColdHistoryEvents adapts pager-only agents (T2.0-era
+// surfaces without the mode-aware reader) onto the cold-history stream: one
+// ascending page, cursor fact, historyMode left empty (the per-session
+// turn_detail_lazy_v1 gate then fails closed for such agents).
+func (h *Handlers) streamCodexRemotePagerColdHistoryEvents(
+	ctx context.Context,
+	pager core.UpstreamHistoryPager,
+	backendID, sessionID string,
+	emit func(projectionHydrateEvent) bool,
+) error {
+	page, err := pager.ReadUpstreamHistoryPage(ctx, sessionID, "")
+	if err != nil {
+		return err
+	}
+	result := &core.ColdHistoryResult{Page: page}
+	return h.streamCodexRemoteColdHistoryFromResult(result, backendID, sessionID, emit)
 }

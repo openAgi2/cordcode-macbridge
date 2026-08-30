@@ -1166,13 +1166,16 @@ func (h *Handlers) produceProjectionHydrateRange(
 		// turn-scoped surface to merge on one identity (design §9.1 live/cold row).
 		return h.streamTurnScopedRichHistoryProjectionEvents(ctx, "codex-web", sessionID, emit)
 	case "codex-remote":
-		// T2.1 lazy history: when the agent exposes the upstream pager, cold
-		// hydrate consumes ONE Summary page instead of the full turn-scoped
-		// read (includeTurns leaves the production path). Agents without the
-		// pager keep the legacy turn-scoped surface.
+		// T2.3 lazy history: the agent's mode-aware cold surface owns the T0.5
+		// dispatch (paginated → ONE Summary page, legacy → explicit compat full
+		// read). The bare pager branch covers pager-only fakes (T2.0-era test
+		// surfaces); agents with neither keep the legacy turn-scoped surface.
 		if agent, ok := h.getFirstAgentByName("codex-remote"); ok {
+			if reader, readerOK := agent.(core.ColdHistoryReader); readerOK {
+				return h.streamCodexRemoteColdHistoryEvents(ctx, reader, "codex-remote", sessionID, emit)
+			}
 			if pager, pagerOK := agent.(core.UpstreamHistoryPager); pagerOK {
-				return h.streamCodexRemoteSummaryProjectionEvents(ctx, pager, "codex-remote", sessionID, emit)
+				return h.streamCodexRemotePagerColdHistoryEvents(ctx, pager, "codex-remote", sessionID, emit)
 			}
 		}
 		return h.streamTurnScopedRichHistoryProjectionEvents(ctx, "codex-remote", sessionID, emit)

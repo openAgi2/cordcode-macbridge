@@ -237,6 +237,12 @@ func (p *EventPublisher) completeProjectionSnapshot(
 }
 
 func (p *EventPublisher) enqueueProjectionInvalidateLocked(conn Connection, backendID, sessionID string) {
+	// turn_detail_lazy_v1 rule 4 bookkeeping: an invalidated connection
+	// re-pulls from scratch, so its held-turn set is stale — forget it now;
+	// it re-records from its own window/snapshot pulls.
+	if per := p.projectionHeldTurns[conn]; per != nil {
+		delete(per, projectionDeliveryKey(backendID, sessionID))
+	}
 	sink := p.sinkLocked(conn)
 	if sink == nil {
 		return

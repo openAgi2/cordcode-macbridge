@@ -262,9 +262,13 @@ func (a *olderWalkPagerAgent) ReadUpstreamHistoryPage(ctx context.Context, sessi
 
 func olderWalkHarness(t *testing.T, pages map[string]*core.UpstreamHistoryPage) (*Handlers, *olderWalkConn, string, *olderWalkPagerAgent) {
 	t.Helper()
+	// TempDir registers its cleanup FIRST so it runs LAST (LIFO) — the
+	// handlers Shutdown (registered after) must quiesce the hydrate runner's
+	// post-commit checkpoint writes BEFORE the data dir disappears.
+	dataDir := t.TempDir()
 	h := NewHandlers()
 	t.Cleanup(func() { h.Shutdown(context.Background()) })
-	h.SetDataDir(t.TempDir())
+	h.SetDataDir(dataDir)
 	agent := &olderWalkPagerAgent{
 		fakeAgent: &fakeAgent{name: "codex-remote"},
 		baseTurns: []core.TurnScopedHistoryTurn{

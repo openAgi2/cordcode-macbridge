@@ -271,6 +271,30 @@ type UpstreamHistoryPager interface {
 	ReadUpstreamHistoryPage(ctx context.Context, sessionID, cursor string) (*UpstreamHistoryPage, error)
 }
 
+// ColdHistoryResult is the mode-aware cold-open baseline (owner T0.5 ruling):
+// paginated threads serve ONE summary page plus the upstream cursor fact;
+// legacy threads serve the explicit compat full read with an EOF cursor fact
+// (no producer walk for legacy — hasOlderUpstream stays false).
+type ColdHistoryResult struct {
+	HistoryMode string // "paginated" | "legacy"
+	Page        *UpstreamHistoryPage
+}
+
+// ColdHistoryReader is the T0.5-compliant cold-open surface: the AGENT owns the
+// historyMode dispatch (thread/read metadata, single writer) so the bridge never
+// guesses a mode and never auto-falls-back a legacy thread onto paginated reads.
+type ColdHistoryReader interface {
+	ReadColdHistory(ctx context.Context, sessionID string) (*ColdHistoryResult, error)
+}
+
+// TurnDetailReader fetches ONE completed turn's items to EOF under the frozen
+// resource gates and maps them through the same item mapper as the rich-history
+// path (canonical official item ids on parts). Typed errors map to the
+// session_turn_items reasonCodes at the bridge ack layer.
+type TurnDetailReader interface {
+	ReadTurnDetail(ctx context.Context, sessionID, turnID string) (TurnScopedHistoryTurn, error)
+}
+
 type TurnScopedHistoryTurn struct {
 	TurnID       string
 	Status       string

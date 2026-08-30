@@ -250,8 +250,14 @@ type EventPublisher struct {
 	projectionFences         map[projectionFenceKey]*projectionSnapshotFence
 	projectionSnapshotCuts   map[projectionFenceKey]int
 	projectionDeliveryModes  map[Connection]map[string]ProjectionDeliveryMode
-	projectionInvalidated    map[projectionFenceKey]bool
-	projectionJournal        *ProjectionRevisionJournal
+	// projectionHeldTurns tracks, per window-mode connection and session, the
+	// turn ids its replica holds (from served window pages). Detail/state
+	// commits route by it (turn_detail_lazy_v1 delivery rules 3/4): holders get
+	// the content patch, non-holders the no-op revision patch.
+	projectionHeldTurns   map[Connection]map[string]map[string]struct{}
+	turnDetailV1          map[Connection]bool
+	projectionInvalidated map[projectionFenceKey]bool
+	projectionJournal     *ProjectionRevisionJournal
 	// rebindLastAttempt throttles zero-target recovery. A stream can emit many
 	// timeline events per second while a device is offline; rescanning the
 	// device registry for every token only repeats the same failed lookup.
@@ -309,6 +315,8 @@ func NewEventPublisher(bridgeEpoch string, broadcaster ...*Broadcaster) *EventPu
 		projectionFences:        make(map[projectionFenceKey]*projectionSnapshotFence),
 		projectionSnapshotCuts:  make(map[projectionFenceKey]int),
 		projectionDeliveryModes: make(map[Connection]map[string]ProjectionDeliveryMode),
+		projectionHeldTurns:     make(map[Connection]map[string]map[string]struct{}),
+		turnDetailV1:            make(map[Connection]bool),
 		projectionInvalidated:   make(map[projectionFenceKey]bool),
 		projectionJournal:       NewProjectionRevisionJournal(0, 0),
 		rebindLastAttempt:       make(map[string]time.Time),
@@ -472,6 +480,8 @@ func (p *EventPublisher) UnregisterConnection(conn Connection) {
 	delete(p.projectionWindowV1, conn)
 	delete(p.connectionGenerations, conn)
 	delete(p.projectionDeliveryModes, conn)
+	delete(p.projectionHeldTurns, conn)
+	delete(p.turnDetailV1, conn)
 	for key := range p.projectionFences {
 		if key.conn == conn {
 			delete(p.projectionFences, key)
@@ -1567,4 +1577,151 @@ func (p *EventPublisher) FlushLiveFrameBufferForDevice(conn Connection) {
 			break
 		}
 	}
+}
+
+// RecordConnWindowTurns records the turn ids a window response delivered to a
+// connection (turn_detail_lazy_v1 delivery rule 3/4 bookkeeping). Idempotent;
+// bounded by the session's turn count per connection.
+func (p *EventPublisher) RecordConnWindowTurns(conn Connection, backendID, sessionID string, turnIDs []string) {
+	if p == nil || conn == nil || len(turnIDs) == 0 {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	key := projectionDeliveryKey(backendID, sessionID)
+	if p.projectionHeldTurns[conn] == nil {
+		p.projectionHeldTurns[conn] = make(map[string]map[string]struct{})
+	}
+	if p.projectionHeldTurns[conn][key] == nil {
+		p.projectionHeldTurns[conn][key] = make(map[string]struct{}, len(turnIDs))
+	}
+	for _, id := range turnIDs {
+		if id != "" {
+			p.projectionHeldTurns[conn][key][id] = struct{}{}
+		}
+	}
+}
+
+// ClearConnWindowTurns forgets a connection's held-turn set for one session —
+// used when the connection is invalidated (sync_invalidate) so it re-records
+// from its own re-pull.
+func (p *EventPublisher) ClearConnWindowTurns(conn Connection, backendID, sessionID string) {
+	if p == nil || conn == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if per := p.projectionHeldTurns[conn]; per != nil {
+		delete(per, projectionDeliveryKey(backendID, sessionID))
+	}
+}
+
+func (p *EventPublisher) connHoldsAnyTurnLocked(conn Connection, backendID, sessionID string, turnIDs []string) bool {
+	per := p.projectionHeldTurns[conn]
+	if per == nil {
+		return false
+	}
+	held := per[projectionDeliveryKey(backendID, sessionID)]
+	if held == nil {
+		return false
+	}
+	for _, id := range turnIDs {
+		if _, ok := held[id]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// patchTurnIDs unions the turn ids a patch mutates (turnStateOps + partOps +
+// upsertTurns) — the routing predicate for detail/state commits.
+func patchTurnIDs(patch ProjectionPatch) []string {
+	seen := make(map[string]struct{}, len(patch.TurnStateOps)+len(patch.PartOps)+len(patch.UpsertTurns))
+	ids := make([]string, 0, len(seen))
+	add := func(id string) {
+		if id == "" {
+			return
+		}
+		if _, dup := seen[id]; dup {
+			return
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	for _, op := range patch.TurnStateOps {
+		add(op.TurnID)
+	}
+	for _, op := range patch.PartOps {
+		add(op.TurnID)
+	}
+	for _, turn := range patch.UpsertTurns {
+		add(turn.TurnID)
+	}
+	return ids
+}
+
+// PublishProjectionDetail routes a detail/state commit (turn_detail_lazy_v1
+// delivery rules, bridge-v1.md):
+//  1. the REQUESTING connection always receives the commit patches — its
+//     completion condition is appliedRev >= ack.syncRev (patch-before-ack and
+//     ack-before-patch are both valid);
+//  2. full-projection connections always receive them (full-truth obligation);
+//  3. other WINDOW connections that hold one of the patch's turns receive the
+//     full commit patch;
+//  4. window connections that do NOT hold any of them receive the
+//     connection-specific no-op revision patch that keeps the single revision
+//     chain intact (they obtain the turn, with its current detailLoadState,
+//     through their own window pull).
+func (p *EventPublisher) PublishProjectionDetail(backendID, sessionID string, patch ProjectionPatch, requester Connection) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.broadcaster == nil || len(p.syncV2) == 0 || patch.SyncRev <= patch.BaseRev {
+		return
+	}
+	p.projectionJournal.Record(backendID, sessionID, patch, p.now())
+	targets := p.broadcaster.Targets(backendID, sessionID, "")
+	turnIDs := patchTurnIDs(patch)
+	for _, conn := range targets {
+		if !p.syncV2[conn] {
+			continue
+		}
+		if conn == requester ||
+			p.connDeliveryModeLocked(conn, backendID, sessionID) != ProjectionDeliveryWindow ||
+			p.connHoldsAnyTurnLocked(conn, backendID, sessionID, turnIDs) {
+			p.deliverSingleConnPatchLocked(conn, backendID, sessionID, patch)
+			continue
+		}
+		key := projectionFenceKey{conn: conn, backendID: backendID, sessionID: sessionID}
+		base := p.projectionSnapshotCuts[key]
+		if fence := p.projectionFences[key]; fence != nil && !fence.invalidated {
+			base = fence.expectedRev
+		}
+		if base == 0 || base >= patch.SyncRev {
+			continue
+		}
+		p.deliverSingleConnPatchLocked(conn, backendID, sessionID, ProjectionPatch{BaseRev: base, SyncRev: patch.SyncRev})
+	}
+}
+
+// LoadedDetailRev recovers the syncRev of the commit that set a turn's terminal
+// loaded state (for §11.7 idempotent repeats: "携带原 commit 的 syncRev"). The
+// journal is process-scoped and bounded — when the entry has aged out the
+// caller falls back to the current syncRev (a conservative watermark: appliedRev
+// >= current implies appliedRev >= original).
+func (p *EventPublisher) LoadedDetailRev(backendID, sessionID, turnID string) (int, bool) {
+	if p == nil {
+		return 0, false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	key := projectionJournalKey{backendID: backendID, sessionID: sessionID}
+	entries := p.projectionJournal.entries[key]
+	for i := len(entries) - 1; i >= 0; i-- {
+		for _, op := range entries[i].patch.TurnStateOps {
+			if op.TurnID == turnID && op.DetailLoadState == DetailStateLoaded {
+				return entries[i].patch.SyncRev, true
+			}
+		}
+	}
+	return 0, false
 }

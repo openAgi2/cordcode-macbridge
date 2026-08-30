@@ -132,7 +132,12 @@ type CodexProducerState struct {
 	HasOlderUpstream   bool      `json:"hasOlderUpstream"`
 	UpstreamNextCursor string    `json:"upstreamNextCursor,omitempty"`
 	BoundaryTurnID     string    `json:"boundaryTurnId,omitempty"`
-	UpdatedAt          time.Time `json:"updatedAt"`
+	// HistoryMode records the upstream thread's declared mode at cold open
+	// ("paginated" | "legacy"; empty = pre-T2.3 files). It gates the
+	// turn_detail_lazy_v1 capability per session (§11.7: legacy never exposes
+	// session_turn_items) — bridge-private, not a wire shape.
+	HistoryMode string    `json:"historyMode,omitempty"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // ValidateCodexProducerState enforces the checkpoint-side invariants: claiming
@@ -966,7 +971,14 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 				// startCursor becomes source.Cursor (EOF cut). Skipping Restore here yields
 				// an empty projection (headRev=0) and empty iOS Claude sessions.
 				// Only true pathless full rebuilds (no Path, no Segments) skip Restore.
-				tx.reducer.Restore(backendID, sessionID, checkpoint.Projection)
+				restored := checkpoint.Projection
+				if backendID == "codex-remote" {
+					// §11.7 orphan recovery: a loading turn whose leader died with
+					// the previous bridge epoch is atomically failed(interrupted);
+					// the rev bump journals as a gap (dead-epoch conns are gone).
+					RecoverOrphanDetailLoading(&restored)
+				}
+				tx.reducer.Restore(backendID, sessionID, restored)
 			}
 			if len(source.Segments) > 0 {
 				startCursor = source.Cursor
@@ -1634,4 +1646,27 @@ func NewReadyCompositeProjectionCheckpoint(
 		HydrateState:  ProjectionHydrateReady,
 		UpdatedAt:     now,
 	}
+}
+
+// MergeHistoricalTurnDetail (T2.2) is the Kernel gate for the dedicated
+// historical detail merge: requires a READY session (hydrated truth), then
+// delegates to the reducer's atomic replace_parts + loaded turnStateOp commit.
+func (k *ProjectionKernel) MergeHistoricalTurnDetail(
+	backendID, sessionID, turnID string,
+	generation int,
+	detailParts []ProjectionPart,
+) (SessionProjection, ProjectionPatch, error) {
+	if k == nil {
+		return SessionProjection{}, ProjectionPatch{}, errors.New("projection kernel nil")
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	session := k.sessionLocked(backendID, sessionID)
+	if session.status.Phase != ProjectionHydrateReady {
+		return SessionProjection{}, ProjectionPatch{}, fmt.Errorf(
+			"projection: detail merge requires ready session, %s/%s is %s",
+			backendID, sessionID, session.status.Phase,
+		)
+	}
+	return k.reducer.MergeHistoricalTurnDetail(backendID, sessionID, turnID, generation, detailParts)
 }
