@@ -74,5 +74,16 @@
     "@gmail.com",
     "@icloud.com"
   ],
-  "gate_rule": "The contract alone is preparation. Gate P0 evidence exists only after a real fixture set passes validation and its external/manual observations remain self-attested unless independently replayed."
+  "gate_rule": "The contract alone is preparation. Gate P0 evidence exists only after a real fixture set passes validation and its external/manual observations remain self-attested unless independently replayed.",
+  "history_probe": {
+    "fixture_kind": "G0 lazy-history evidence captured by probe/history_probe.mjs (schema_version 2)",
+    "required_top_level_fields": ["schema_version", "classification", "gate_effect", "target", "metadata", "probe", "observations", "data", "adjudication"],
+    "gate_effect": "g0-evidence-input",
+    "required_data_sections": ["inventory", "discovery", "longestThread", "secondaryThreads", "legacyBattery"],
+    "required_longest_thread_sections": ["readMeta", "controlFullRead", "summaryChain", "notLoadedPage", "backwardsChain", "itemsSamples", "illegalTurnId", "resumeCandidate"],
+    "pseudonym_policy": "id-N for id-shaped strings, cur-N for opaque cursors; mapping stable within one capture and never reversible from the fixture",
+    "content_policy": "item text, paths and error bodies appear only as lengths; enum values survive only for whitelisted keys (type/status/itemsView/historyMode/sortDirection/sortKey/code and similar)",
+    "assertion_harness": "agent/codex-remote/validate/history-fixture-assert.mjs --fixture <file> (offline; §3.0.7 negatives + §3.0.5 checklist); --self-test must stay green",
+    "negative_result_rule": "any §3.0.7 negative in the harness report means G0 FAIL, not evidence captured; adjudication of T0.5/T0.6/G0.5 and resource gate values stays with the owner"
+  }
 }

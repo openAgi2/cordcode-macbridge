@@ -21,6 +21,8 @@ A probe must stop before a network mutation unless all automatic preflight check
 
 ## Current probes
 
+`lib/controller_session.mjs` is the shared enrollment/WSS machinery extracted from the proven `live_controller.mjs` flow (that file keeps its own inline copy and stays untouched). It performs the same enroll/start → step-up → enroll/finish → refresh round trip, opens the controller WSS with the device-key challenge flow, exposes a promise-based `rpc()` session, and provides deterministic `cleanupController` (revoke only client_probe → verify rejection → delete probe key → remove the temp helper). New probes import it instead of duplicating the flow.
+
 `preflight.mjs` is the non-mutating entry point. It verifies the exact ASAR contract, embedded helper binaries, device-key addon ABI, ChatGPT login-status availability and the two frozen OAuth callback ports. It does not request a bearer token, create a key, open a browser, contact controller endpoints or change pairing state:
 
 ```bash
@@ -43,10 +45,13 @@ The target is ChatGPT Desktop `26.825.32147` (bundle `7303`), embedded Codex `0.
 
 The overall human-input timeout is ten minutes for step-up and ten minutes for pairing; network operations use 15-second timeouts and the WSS initialization uses 30 seconds. Output is restricted to status codes, structural field names, counts, pseudonyms and cleanup results. The operator must not paste an OAuth code or pairing code into chat.
 
+`history_probe.mjs` is the owner-authorized G0 lazy-history probe (read-only against thread history; the owner never needs to send a chat message). Evidence question: plan §3.0.5 nine-item fixture set, §3.0.6 type-grouped stats + summary↔items id mapping, §3.0.7 negative-result assertions, T0.2 bytes/wall-time baselines grouped by `historyMode`, and the T0.6 `thread/resume(excludeTurns=true, initialTurnsPage)` candidate where `thread.turns == []` is mandatory. Calls, all over the same controller WSS: `thread/list` (historyMode inventory), bounded discovery paging, `thread/read` metadata + `includeTurns=true` control inventory (probe-only, never a product path), `thread/turns/list` summary/notLoaded desc chains to EOF plus the asc backwards round-trip anchored on the last desc page's `backwardsCursor`, `thread/items/list` turnId-filtered asc pages on sampled turns plus an illegal-turnId error probe, and the T0.6 resume candidate last (resume attaches live state). Human action: fresh step-up in the opened browser page; pairing code (if required) only through the one-time localhost form. Timeouts: per-RPC 30 s (control full-read 180 s, resume candidate 60 s), WSS idle 120 s, total 20 min; every pagination loop bounded by the CAPS recorded in the fixture. Redaction boundary and output schema: `../testdata/phase0/live-fixture-contract.json` `history_probe` section — pseudonyms `id-N`/`cur-N`, text/paths/error bodies as lengths only, enum values only for whitelisted keys, timestamps as relative offsets. Expected failure classifications: HTTP 409/single-owner stops the run; `thread/items/list` method-not-found on legacy threads is a legitimate §2.5 observation; an rpc error for the illegal turnId is expected; §3.0.7 negative findings are recorded and adjudicated offline. Artifacts: one `REDACTED_FIXTURE=` JSON line on stdout, saved by the operator as `../testdata/phase0/live/attempt-XXX-history-*.json` after the owner attestation and a gitleaks PASS; assertions run offline via `../validate/history-fixture-assert.mjs --fixture <file>` (its `--self-test` must stay green).
+
 Run only after explicit owner authorization:
 
 ```bash
 node agent/codex-remote/probe/live_controller.mjs
+node agent/codex-remote/probe/history_probe.mjs
 ```
 
 Every attempt revokes its own controller automatically. If a process is interrupted before cleanup can run, use the official Remote Connections UI to revoke the controller named for the Phase 0 probe; never revoke the ChatGPT iOS controller. Evidence artifacts live under `../testdata/phase0/live/` and must pass `../validate/controller-fixtures.mjs` plus the repository gitleaks policy.
