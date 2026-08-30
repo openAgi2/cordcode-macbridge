@@ -1043,6 +1043,9 @@ type DiagnosticCheck = {
   terminal commit** 并返回**相同 terminal `syncRev`**（loaded 或 failed）；**不得**返回中间
   loading ack。
 - 已 `loaded` 的重复请求直接返回当前 loaded ack（携带原 commit 的 `syncRev`），不重新拉取。
+  实现细则（T2.3 落地时定案）：原 commit rev 从进程内 revision journal 恢复；journal 因
+  有界保留（128 patches/2MB/30min）淘汰该条目时，退回**当前 `syncRev`** 作为保守水位——
+  `appliedRev >= 当前` 蕴含 `appliedRev >= 原 commit rev`，永不提前，只可能多等。
 
 #### orphan loading 恢复
 
@@ -1066,6 +1069,9 @@ interrupted`。producer 不得发送闭集外值；iOS 对未知 code 按通用�
 
 - **空明细也是 `loaded`**：空明细 = 去除与 Summary 槽位重复的 user/final-agent 后，没有
   reasoning/tool/fileChange 等明细 item（上游 items 数组为空只是其子集）。
+  实现细则（T2.2 落地时定案）：空明细的 loaded 是 **state-only commit**（patch 只携带
+  `turnStateOps`，无 `partOps`）——绝不执行会把 Summary final-agent 正文抹掉的空
+  `replace_parts`。
 - 未知/不可映射 item 类型 → **整回合原子失败** `unsupported_item_type`：中止本回合 commit、
   保留原 Summary parts、不执行部分 `replace_parts`、不标 `loaded`（`SkippedTypes` 仅为诊断
   字段，不是"丢弃后继续成功"的开关）；修复/升级后允许重试。
