@@ -2,6 +2,7 @@ package gobridge
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"unicode/utf8"
 
@@ -325,4 +326,70 @@ func DetailChunkOffsets(s string) []int {
 // DetailChunkCount returns the chunk count from the ACTUAL offset table.
 func DetailChunkCount(s string) int {
 	return len(DetailChunkOffsets(s)) - 1
+}
+
+// ErrDetailChunkTooLarge: a single content entry (inline part or oversize ref)
+// exceeds the post-encode hard cap even alone — the page cannot be chunked
+// without violating §11.8.
+var ErrDetailChunkTooLarge = errors.New("detail: single content entry exceeds hard cap")
+
+// DetailChunkContent is one frame's worth of page content (the items/oversize
+// arrays of a TurnDetailChunkFrame). SplitDetailChunks is the SINGLE
+// deterministic packing used both on the accept path (chunkSeq assignment) and
+// on detail-cache replay (rebuilding identical frames without upstream).
+type DetailChunkContent struct {
+	Items    []ProjectionPart        `json:"items,omitempty"`
+	Oversize []TurnDetailOversizeRef `json:"oversize,omitempty"`
+}
+
+// SplitDetailChunks greedily packs page content into chunks whose ENCODED
+// (JSON) size stays within the advisory cap (256KB). A single entry larger
+// than the advisory cap may occupy a chunk alone, but never beyond the hard
+// cap (512KB) — envelope identity/progress fields leave ample margin against
+// the advisory measurement of content only.
+func SplitDetailChunks(items []ProjectionPart, oversize []TurnDetailOversizeRef) ([]DetailChunkContent, error) {
+	advisory := int(core.TurnDetailChunkAdvisoryCapBytes)
+	hard := int(core.TurnDetailPatchHardCapBytes)
+	measure := func(c DetailChunkContent) int {
+		raw, err := json.Marshal(c)
+		if err != nil {
+			return 1 << 30
+		}
+		return len(raw)
+	}
+	var out []DetailChunkContent
+	var cur DetailChunkContent
+	curSize := 0
+	flush := func() {
+		if len(cur.Items)+len(cur.Oversize) > 0 {
+			out = append(out, cur)
+			cur = DetailChunkContent{}
+			curSize = 0
+		}
+	}
+	addItem := func(single DetailChunkContent) error {
+		sz := measure(single)
+		if sz > hard {
+			return fmt.Errorf("%w: entry %d bytes", ErrDetailChunkTooLarge, sz)
+		}
+		if curSize > 0 && curSize+sz > advisory {
+			flush()
+		}
+		cur.Items = append(cur.Items, single.Items...)
+		cur.Oversize = append(cur.Oversize, single.Oversize...)
+		curSize += sz
+		return nil
+	}
+	for _, part := range items {
+		if err := addItem(DetailChunkContent{Items: []ProjectionPart{part}}); err != nil {
+			return nil, err
+		}
+	}
+	for _, ref := range oversize {
+		if err := addItem(DetailChunkContent{Oversize: []TurnDetailOversizeRef{ref}}); err != nil {
+			return nil, err
+		}
+	}
+	flush()
+	return out, nil
 }
