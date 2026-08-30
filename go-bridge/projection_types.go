@@ -102,6 +102,11 @@ type TurnProjection struct {
 	User        *MessageProjection `json:"user,omitempty"`
 	Assistant   *MessageProjection `json:"assistant,omitempty"`
 	System      *MessageProjection `json:"system,omitempty"`
+	// turn_detail_lazy_v1 (bridge-v1.md, frozen 2026-08-30): turn-level lazy-detail
+	// state. Absent decodes as DetailStateNotRequested (old snapshots stay valid).
+	DetailLoadState  string `json:"detailLoadState,omitempty"`  // "" (notRequested) | loading | loaded | failed
+	DetailReasonCode string `json:"detailReasonCode,omitempty"` // non-empty iff failed
+	TurnGeneration   int    `json:"generation,omitempty"`       // per-turn fence counter; bumps on post-completion content mutation
 }
 
 // ExecutionView is the session-level execution state. isExecuting = phase ∈ {running, requires_action}.
@@ -139,5 +144,17 @@ type ProjectionPatch struct {
 	Execution         *ExecutionView   `json:"execution,omitempty"`
 	UpsertTurns       []TurnProjection `json:"upsertTurns,omitempty"`
 	PartOps           []PartOp         `json:"partOps,omitempty"`
+	TurnStateOps      []TurnStateOp    `json:"turnStateOps,omitempty"`
 	ReplacesClientIDs []string         `json:"replacesClientIds,omitempty"`
+}
+
+// TurnStateOp is one turnStateOps entry of ProjectionPatch (turn_detail_lazy_v1,
+// bridge-v1.md). Applied AFTER upsertTurns and BEFORE partOps; state ops never
+// carry content and never bump TurnGeneration (the content mutation's
+// replace_parts admission does, committed with T2.2).
+type TurnStateOp struct {
+	TurnID          string `json:"turnId"`
+	DetailLoadState string `json:"detailLoadState"` // loading | loaded | failed (never "" or notRequested on the wire)
+	ReasonCode      string `json:"reasonCode,omitempty"`
+	TurnGeneration  int    `json:"generation"`
 }

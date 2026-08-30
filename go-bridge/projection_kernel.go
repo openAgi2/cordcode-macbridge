@@ -38,7 +38,11 @@ import (
 // and a pending transcript-owned question keeps execution in requires_action. v9 checkpoints
 // can contain allowsCustomAnswer=false and execution.phase=idle, so they must be rebuilt from
 // the canonical transcript instead of being restored as a permanently stale observe-only card.
-const projectionCheckpointSchemaVersion = 10
+// v11: turn_detail_lazy_v1 (frozen 2026-08-30) — turns gain detailLoadState/detailReasonCode/
+// generation (turnStateOps patch op), and the checkpoint gains the backend-private
+// CodexProducerState (lazy-history producer checkpoint, bridge-v1.md R11d). v10 checkpoints
+// lack the turn fence/state fields and must be rebuilt so cold hydrate re-reduces with them.
+const projectionCheckpointSchemaVersion = 11
 
 var (
 	ErrProjectionCheckpointInvalid  = errors.New("projection checkpoint invalid")
@@ -105,16 +109,45 @@ type ProjectionSourceCheckpoint struct {
 }
 
 type ProjectionCheckpoint struct {
-	SchemaVersion     int                          `json:"schemaVersion"`
-	BackendID         string                       `json:"backendId"`
-	SessionID         string                       `json:"sessionId"`
-	Source            ProjectionSourceCheckpoint   `json:"source"`
-	Sources           []ProjectionSourceCheckpoint `json:"sources,omitempty"`
-	Projection        SessionProjection            `json:"projection"`
-	ProjectionRev     int                          `json:"projectionRev"`
-	HydrateState      ProjectionHydratePhase       `json:"hydrateState"`
-	UpdatedAt         time.Time                    `json:"updatedAt"`
-	ClaudeSourceState *ClaudeSourceState           `json:"claudeSourceState,omitempty"`
+	SchemaVersion      int                          `json:"schemaVersion"`
+	BackendID          string                       `json:"backendId"`
+	SessionID          string                       `json:"sessionId"`
+	Source             ProjectionSourceCheckpoint   `json:"source"`
+	Sources            []ProjectionSourceCheckpoint `json:"sources,omitempty"`
+	Projection         SessionProjection            `json:"projection"`
+	ProjectionRev      int                          `json:"projectionRev"`
+	HydrateState       ProjectionHydratePhase       `json:"hydrateState"`
+	UpdatedAt          time.Time                    `json:"updatedAt"`
+	ClaudeSourceState  *ClaudeSourceState           `json:"claudeSourceState,omitempty"`
+	CodexProducerState *CodexProducerState          `json:"codexProducerState,omitempty"`
+}
+
+// CodexProducerState is the backend-private lazy-history producer checkpoint for
+// codex-remote (bridge-v1.md R11d; unified-bridge-protocol.md §11.7). It records the
+// "more upstream history exists" fact and the INTERNAL upstream cursor so an `older`
+// window request can hydrate one page at a time across restarts. It never crosses the
+// bridge and is never embedded in a wire cursor (R2). Restart validation is by target
+// RPC (T2.0), not file digest.
+type CodexProducerState struct {
+	HasOlderUpstream   bool      `json:"hasOlderUpstream"`
+	UpstreamNextCursor string    `json:"upstreamNextCursor,omitempty"`
+	BoundaryTurnID     string    `json:"boundaryTurnId,omitempty"`
+	UpdatedAt          time.Time `json:"updatedAt"`
+}
+
+// ValidateCodexProducerState enforces the checkpoint-side invariants: a cursor
+// claim requires the cursor and the kernel boundary turn it was observed at.
+func ValidateCodexProducerState(state CodexProducerState) error {
+	if !state.HasOlderUpstream {
+		return nil
+	}
+	if state.UpstreamNextCursor == "" {
+		return fmt.Errorf("%w: codex producer state claims older upstream without cursor", ErrProjectionCheckpointInvalid)
+	}
+	if state.BoundaryTurnID == "" {
+		return fmt.Errorf("%w: codex producer state claims older upstream without boundary turn", ErrProjectionCheckpointInvalid)
+	}
+	return nil
 }
 
 type projectionCheckpointPersistence interface {
@@ -253,6 +286,11 @@ func (s *ProjectionCheckpointStore) LoadValidated(
 	}
 	if checkpoint.ClaudeSourceState != nil {
 		if err := ValidateClaudeSourceState(*checkpoint.ClaudeSourceState); err != nil {
+			return ProjectionCheckpoint{}, err
+		}
+	}
+	if checkpoint.CodexProducerState != nil {
+		if err := ValidateCodexProducerState(*checkpoint.CodexProducerState); err != nil {
 			return ProjectionCheckpoint{}, err
 		}
 	}
