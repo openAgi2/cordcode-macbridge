@@ -204,6 +204,7 @@ export type BridgeRPCMethod =
   | "get_session"
   | "get_session_messages"
   | "get_session_projection"
+  | "session_turn_items"   // turn_detail_lazy_v1 (unified-bridge-protocol.md §11.7; v1 codex-remote only)
   | "delete_session"
   | "resume_session"
   | "switch_model"
@@ -647,6 +648,27 @@ export interface BridgeTurnProjection {
   assistant?: BridgeMessageProjection;
   /** Transcript lifecycle milestone such as a Claude compact boundary. */
   system?: BridgeMessageProjection;
+  /**
+   * turn_detail_lazy_v1 (bridge-v1.md "Capability: turn_detail_lazy_v1", frozen 2026-08-30).
+   * Absent decodes as "notRequested" (backward compatible). Present iff the backend
+   * supports per-turn lazy detail; carries through snapshot/window/upsertTurns.
+   */
+  detailLoadState?: "notRequested" | "loading" | "loaded" | "failed";
+  /** Present iff detailLoadState === "failed"; non-empty. Frozen closed set in bridge-v1.md. */
+  detailReasonCode?: string;
+  /** Per-turn monotonic generation; bumps on every post-completion mutation. Absent => 0. */
+  generation?: number;
+}
+
+/** One turnStateOps entry of a BridgeProjectionPatch (turn_detail_lazy_v1). */
+export interface BridgeTurnStateOp {
+  turnId: string;
+  /** "notRequested" is a decode-only default and is never emitted on the wire. */
+  detailLoadState: "loading" | "loaded" | "failed";
+  /** REQUIRED non-empty iff failed; MUST be absent otherwise. */
+  reasonCode?: string;
+  /** Turn generation at commit time (stale-write fence component). */
+  generation: number;
 }
 
 export type BridgeExecutionPhase = "idle" | "running" | "requires_action";
@@ -683,6 +705,8 @@ export interface BridgeProjectionPatch {
   upsertTurns?: BridgeTurnProjection[];
   /** Main path: incremental part ops. Clients append/replace the named part; never merge with another source. */
   partOps?: BridgePartOp[];
+  /** turn_detail_lazy_v1: turn-level detail-load state ops; applied AFTER upsertTurns, BEFORE partOps. */
+  turnStateOps?: BridgeTurnStateOp[];
   /** Phase 3: authoritative ids that invalidate local optimistic ids (absent in Phase 1–2). */
   replacesClientIds?: string[];
 }

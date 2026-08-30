@@ -1290,7 +1290,7 @@ the projection and must be compared only with `appliedRev`.
 
 | Event | `data` shape | Client action |
 | --- | --- | --- |
-| `projection_patch` | `BridgeProjectionPatch` | if `baseRev == appliedRev`, apply `partOps`/`upsertTurns`/`execution` and set `appliedRev = syncRev`; else call `get_session_projection(sinceRev=appliedRev)` |
+| `projection_patch` | `BridgeProjectionPatch` | if `baseRev == appliedRev`, apply `execution`/`upsertTurns`/`turnStateOps`/`partOps` in that frozen order (`turn_detail_lazy_v1`) and set `appliedRev = syncRev`; else call `get_session_projection(sinceRev=appliedRev)` |
 | `projection_snapshot` | `BridgeProjectionSnapshot` | if `syncRev > appliedRev`, replace the whole projection and set `appliedRev = syncRev` |
 | `sync_invalidate` | `BridgeSyncInvalidate` | call `get_session_projection` (full) |
 
@@ -1659,6 +1659,114 @@ exists yet because no producer ships). Schema/decoder tests on both platforms MU
 and assert the frozen field set; when the first real producer capture lands (S4B), it
 replaces the synthetic fixture under the same README discipline as
 `session-projection-v2` (raw hashes + sanitization boundary).
+
+### Capability: `turn_detail_lazy_v1` (on-demand turn detail; frozen 2026-08-30, lazy-history §3.2.0)
+
+`turn_detail_lazy_v1` adds a backend-scoped lazy-detail surface for backends whose history is
+paginated upstream (v1: ONLY `codex-remote`, kind `codex-remote`). The first screen ships turn
+summaries; per-turn detail (reasoning summaries, tool calls and outputs) is fetched on demand,
+committed to the projection Kernel, and delivered through the EXISTING
+`projection_snapshot`/`projection_patch` pipes — there is no second content channel.
+
+The method surface (`session_turn_items`), the success-shaped ack, the request-level vs
+process-level error split, the state machine, singleflight, orphan recovery, and the frozen
+resource gates live in `docs/protocol/unified-bridge-protocol.md` §11.7. THIS section freezes
+the projection-side wire shapes and delivery rules (bridge-v1 owns `projection_patch` and
+`BridgeTurnProjection`); per R10 discipline they are frozen here BEFORE any handler ships.
+Open semantics discovered later are BLOCKERS to be re-frozen here first.
+
+#### Turn additive fields (`BridgeTurnProjection`)
+
+```ts
+detailLoadState?: "notRequested" | "loading" | "loaded" | "failed"  // absent => notRequested
+detailReasonCode?: string   // present iff detailLoadState === "failed"; non-empty when present
+generation?: number   // per-turn monotonic counter; absent => 0
+```
+
+(The turn-level field is `detailReasonCode` to stay unambiguous next to a possible future
+turn-error code; the PATCH-OP-level field keeps the plan-frozen name `reasonCode`.)
+
+- `detailLoadState` is a TURN-level field (not part-level, not session-level). Snapshots,
+  window responses, and `upsertTurns` carry it on the turn. Absence decodes as `notRequested`,
+  so old-bridge snapshots and pre-feature turns stay valid (restore is backward compatible).
+- `generation` bumps on EVERY post-completion mutation of that turn (detail replace, upstream
+  correction) and persists with the Kernel snapshot. It is the turn-scoped component of the
+  `replace_parts` admission token `(backendId, sessionId, turnId, turnGeneration)`. The fence
+  is per-turn BY DESIGN: a global baseRev would let a live append on ANOTHER turn kill an
+  in-flight detail load.
+- Frozen `reasonCode` closed set (v1): `upstream_error | unsupported_item_type | max_pages |
+  max_bytes | timeout | stale_turn | interrupted`. Producers MUST NOT emit values outside the
+  set; clients MUST render an unknown code as a generic failure (forward compatibility).
+
+#### Patch op: `turnStateOps` (`BridgeProjectionPatch` additive field)
+
+```ts
+turnStateOps?: Array<{
+  turnId: string
+  detailLoadState: "loading" | "loaded" | "failed"   // "notRequested" is never emitted on the wire
+  reasonCode?: string   // REQUIRED non-empty iff failed; MUST be absent otherwise
+  generation: number    // turn generation at commit time
+}>
+```
+
+- `notRequested` exists only as the decode default for absence; it is never written back over
+  the network.
+- Applying `loading`/`loaded` unconditionally CLEARS any previously stored `detailReasonCode`
+  on that turn (not "absent field keeps the old value"); `failed` sets state and code atomically.
+- Illegal combinations (failed without reasonCode, loading/loaded with reasonCode, unknown
+  state value) are decode failures: the client discards the whole patch and realigns via the
+  existing `get_session_projection(sinceRev = appliedRev)` path — never guess-apply.
+- An op whose `turnId` is not present in the replica applies as a per-turn no-op (no error, no
+  revision stall): the state materializes when the turn itself arrives via snapshot or window.
+
+#### Apply order (frozen)
+
+`execution → upsertTurns → turnStateOps → partOps` — state first, parts after, atomic within
+one patch. `replace_parts + loaded` share ONE patch: the `partOps` entry swaps in the detail
+parts, the `turnStateOps` entry sets the terminal state, both at the same `syncRev`. `loading`
+and `failed` normally travel as state-only patches (no partOps).
+
+#### Change-set visibility
+
+`changedTurnIDs(from:)` MUST union `turnStateOps.map(turnId)`. A state-only patch yields
+`orderChanged = false` with the target turn in the change-set; `turnStateOps` +
+`replace_parts` for the same turn in one patch yields exactly ONE change-set entry. State
+writes must reach the replica's render layer without reordering the turn list.
+
+#### Journal & exact-shape rules
+
+`turnStateOps` follows the existing patch payload rules: journal entries preserve the
+canonical payload unchanged; key absence is preserved (never normalized to an empty array).
+
+#### Backward compatibility
+
+Old clients whose decoders skip unknown keys silently ignore `turnStateOps` and the turn-level
+additive fields; their `appliedRev` still advances through state-only commits, which carry no
+content. Old bridges never emit the field. No undeclared behavior change on either side.
+
+#### Per-connection delivery of state/detail commits
+
+Detail and state commits are Kernel commits and ride the existing `projection_patch` ordered
+sink (no second pipe). Delivery per `(conn, backend, session)`:
+
+1. The requesting connection always receives the commit patches (its completion condition is
+   `appliedRev >= ack.syncRev`; patch-before-ack and ack-before-patch are both valid).
+2. Full-projection connections always receive them (full-truth obligation unchanged).
+3. Other window connections that ALREADY hold the `turnId` receive the full commit patch
+   (their replica converges to Kernel truth).
+4. Window connections that do NOT hold the turn do not receive its content: they receive the
+   connection-specific no-op revision patch that keeps the single revision chain intact, and
+   obtain the turn — with its current `detailLoadState` — through their own window pull.
+
+Historical page hydration (window `older` chains) keeps the delivery rules of the
+`projection_window_v1` section; its producer-on-demand extension and delivery-mode registry
+are reviewed/added by T2.0 under the same R10 discipline.
+
+#### Ship discipline
+
+Go/Swift types, the backend producer-checkpoint schema bump, and decoder tests land in ONE
+batch with the first implementing build (go-bridge T2.2/T2.3, iOS Phase 3); the wire shapes
+above are frozen NOW. Implementing agents MUST NOT guess them in code.
 
 ## Session Pinning
 

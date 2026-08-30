@@ -171,6 +171,7 @@ type UnifiedError = {
 | code | 含义 | recoverBy |
 |------|------|-----------|
 | `session_not_found` | Session 不存在或已过期 | `resume_session` |
+| `turn_not_found` | 目标 turn 不在该 session 的已提交投影 Kernel 中（`session_turn_items`，§11.7） | — |
 | `session_busy` | Session 正在处理另一请求 | — (retryable) |
 | `backend_unavailable` | Backend 进程不可达 | `reconfigure_backend` |
 | `unsupported_capability` | Backend 不支持该功能 | — |
@@ -266,6 +267,7 @@ code，capability 字符串为 extensible addition，无 major version bump。
 | `read_memory_file` | `backendId`, `fileId` | (Phase 2b+) |
 | `update_memory_file` | `backendId`, `fileId`, `content`, `expectedVersion`, `dryRun?` | (Phase 5D) |
 | `run_diagnostics` | `backendId` | (Phase 2b+) |
+| `session_turn_items` | `backendId`, `sessionId`, `turnId` | `turn_detail_lazy_v1`（§11.7；v1 仅 codex-remote descriptor 声明） |
 
 ### 4.3 方法参数详细 Schema
 
@@ -979,6 +981,96 @@ type DiagnosticCheck = {
 ```
 
 所有事件通过 `diagnosticRunId` 关联，支持连续多次诊断。
+
+### 11.7 Session Turn Detail 按需加载（`session_turn_items`，2026-08-30 冻结）
+
+适用 backend：**v1 仅 `codex-remote`**（BackendKind `codex-remote`，上游历史为 paginated
+`historyMode`）。目标：首屏只载 Summary；回合明细（reasoning 摘要、工具调用与执行步骤）按需
+拉取、经投影 Kernel 原子提交、由既有 `projection_snapshot`/`projection_patch` 管道交付——
+**不新增第二条内容管道**。投影侧 wire 形状（`turnStateOps` patch op、turn 级
+`detailLoadState`/`detailReasonCode`/`generation`、apply 顺序、per-connection 交付规则）冻结于
+`docs/protocol/bridge-v1.md`（Capability: `turn_detail_lazy_v1`）。
+
+#### 方法归属与门控
+
+- `session_turn_items` 仅在 backend descriptor `capabilities` 含 `turn_detail_lazy_v1` 时可
+  调用（v1 只有 codex-remote 的 paginated historyMode 声明）；客户端以 descriptor 列表门控，
+  不以全局 echo 门控（与 `projection_window_v1` 同规）。
+- 其他 backend、或未声明该 capability 的 codex-remote（如 legacy historyMode）调用 →
+  `unsupported_capability`（不可重试），不触发任何上游拉取。
+
+#### 请求与响应
+
+```jsonc
+// 请求
+{ "method": "session_turn_items", "backendId": "codex-remote",
+  "params": { "sessionId": "sess-1", "turnId": "turn-42" } }
+
+// 成功形状 ack —— loaded 与 failed 都是 success 形状
+{ "detailLoadState": "loaded", "syncRev": 128 }
+{ "detailLoadState": "failed", "syncRev": 129, "reasonCode": "timeout" }
+```
+
+- **canonical items 永不进入 result**：投影 snapshot/patch 是唯一内容写者。
+- **过程性失败一律 success-shaped failed ack**（携带该失败 commit 的 `syncRev` 与
+  `reasonCode`）：上游 RPC 错误、资源门超限、不可映射 item、fence stale、orphan 恢复。
+- 仅**请求级错误**返回 UnifiedError：`unknown_backend` / `session_not_found` /
+  `turn_not_found`（`turnId` 不在该 session 已提交 Kernel 中——**以 Kernel 裁决，不询问
+  上游**）/ `invalid_params`（参数缺失或目标 turn 非 completed——不触发拉取）。
+- **与上游过滤语义的消解记录**：G0 实测官方 `thread/items/list` 对未知 turnId 返回**空成功
+  页**（`thread_processor.rs` 过滤语义，rust-v0.150.0-alpha.12.2）。bridge 的
+  `turn_not_found` 以 Kernel 为准：进入 Kernel 的 turnId 均来自上游 Summary 页，"Kernel 已知
+  而上游未知"正常不出现；若上游对 Kernel 已知 turn 返回空页，按空明细处理（见下），绝不当
+  notFound、也不当错误。
+
+#### 状态机与顺序无关完成条件
+
+1. 请求受理后，Mac 先把该 turn 的 `detailLoadState=loading` 提交进投影 SoT（singleflight
+   follower 观察同一状态，不发第二次拉取）；
+2. 成功时在**同一 Kernel transaction** 提交 `replace_parts + loaded`，得 `syncRev=N`；ack 只
+   在该 commit 成功后返回；
+3. iOS 完成条件 = replica `appliedRev >= N`；patch 先于/后于 ack 均可；**不得从 RPC result
+   渲染内容**；断线后只收到 snapshot 也能恢复（`detailLoadState` 随 turn 下发）；
+4. 失败时提交 `failed + reasonCode`（同样得到 commit `syncRev`），再返回 failed ack；
+   重试迁移 `failed → loading`；
+5. fence：会话删除 → `session_not_found`（请求级）；archive / turn generation 改变 / 目标不再
+   是同一 completed turn → failed ack `reasonCode=stale_turn`（typed stale，保留新 truth，
+   旧请求不覆盖）。
+
+#### 幂等与 singleflight
+
+- singleflight 键 = `(sessionId, turnId)`；leader 处于 loading 时，follower **等待同一
+  terminal commit** 并返回**相同 terminal `syncRev`**（loaded 或 failed）；**不得**返回中间
+  loading ack。
+- 已 `loaded` 的重复请求直接返回当前 loaded ack（携带原 commit 的 `syncRev`），不重新拉取。
+
+#### orphan loading 恢复
+
+- bridge 在 loading commit 后崩溃/重启时，restore 必须把**没有 active leader** 的 orphan
+  loading **原子恢复为 `failed(reasonCode=interrupted)`**，不得永久停在 loading。
+
+#### 资源门（G0 owner 裁决冻结值，2026-08-30）
+
+- turns page limit **30**；items request limit **5**；单回合 **24 页或 512KB** 任一先到即
+  **原子失败**；单 RPC **30 秒**；整个单回合拉取 **90 秒总 deadline**（不是 24 × 30s）。
+- 超限分别返回 `max_pages` / `max_bytes` / `timeout`；**不截断、不提交部分明细、不以
+  placeholder 代替超大 tool output**；后续只能依据真实 `resource_limit` 触发数据调整，
+  不得自动扩大。
+
+#### reasonCode 冻结闭集（v1）
+
+`upstream_error | unsupported_item_type | max_pages | max_bytes | timeout | stale_turn |
+interrupted`。producer 不得发送闭集外值；iOS 对未知 code 按通用失败渲染（前向兼容）。
+
+#### 明细口径
+
+- **空明细也是 `loaded`**：空明细 = 去除与 Summary 槽位重复的 user/final-agent 后，没有
+  reasoning/tool/fileChange 等明细 item（上游 items 数组为空只是其子集）。
+- 未知/不可映射 item 类型 → **整回合原子失败** `unsupported_item_type`：中止本回合 commit、
+  保留原 Summary parts、不执行部分 `replace_parts`、不标 `loaded`（`SkippedTypes` 仅为诊断
+  字段，不是"丢弃后继续成功"的开关）；修复/升级后允许重试。
+- 产品承诺口径（G0.5 裁决）：按需加载**服务端实际提供的** reasoning 摘要与工具调用；不承诺
+  "完整思维链/思考原文"。
 
 ---
 
