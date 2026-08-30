@@ -152,10 +152,11 @@ func TestTurnItemsRetryAfterFailureCommitsOnce(t *testing.T) {
 	}
 }
 
-// Codex-remote is a PATHLESS backend (no projection checkpoint on disk): a
-// bridge restart re-hydrates from a fresh Summary page, so a loading turn can
-// never survive the restart — orphan recovery's restart hook
-// (RecoverOrphanDetailLoading at checkpoint restore) guards the future
-// checkpoint-adoption path, and the in-place lazy recovery (no in-flight
-// leader) is covered by TestSessionTurnItemsOrphanLoadingRecovery. Both
-// primitives are unit-pinned in session_turn_items_test.go.
+// Codex-remote has NO full Projection checkpoint (pathless hydration rebuilds
+// from a fresh Summary page), but the CodexProducerState side-file DOES persist
+// (upstream cursor / historyMode facts). Under the current topology a loading
+// turn therefore cannot survive a bridge restart, so the checkpoint-restore
+// orphan hook (RecoverOrphanDetailLoading) is exercised only as a future-hook
+// unit test (TestRecoverOrphanDetailLoading); the in-place lazy recovery (no
+// in-flight leader) is covered end to end by
+// TestSessionTurnItemsOrphanLoadingRecovery.

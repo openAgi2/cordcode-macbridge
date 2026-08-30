@@ -35,13 +35,29 @@ type turnDetailAgent struct {
 	detailErr error
 	fetches   int64 // atomic fetch counter
 	gate      chan struct{}
+	coldGate  chan struct{} // blocks ReadColdHistory when set
+	walkGate  chan struct{} // blocks cursor != "" upstream pages when set
+	pages     map[string]*core.UpstreamHistoryPage
+	walkFetch int64 // atomic cursor-page counter
 }
 
 func (a *turnDetailAgent) ReadColdHistory(ctx context.Context, sessionID string) (*core.ColdHistoryResult, error) {
+	if a.coldGate != nil {
+		<-a.coldGate
+	}
 	return a.cold, nil
 }
 
 func (a *turnDetailAgent) ReadUpstreamHistoryPage(ctx context.Context, sessionID, cursor string) (*core.UpstreamHistoryPage, error) {
+	if cursor != "" {
+		atomic.AddInt64(&a.walkFetch, 1)
+		if a.walkGate != nil {
+			<-a.walkGate
+		}
+	}
+	if page, ok := a.pages[cursor]; ok {
+		return page, nil
+	}
 	return &core.UpstreamHistoryPage{}, nil
 }
 
