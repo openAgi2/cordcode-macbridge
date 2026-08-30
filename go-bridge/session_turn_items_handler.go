@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/agent/codex-remote"
@@ -37,9 +38,27 @@ func sessionTurnItemsAck(state string, syncRev int, reasonCode string) map[strin
 }
 
 func (h *Handlers) handleSessionTurnItems(conn Connection, msg WireMessage, agent core.Agent) {
+	var params struct {
+		SessionID string `json:"sessionId"`
+		TurnID    string `json:"turnId"`
+	}
+	// G3 #10 诊断（owner 2026-08-30）：request-level 错误与终态 ack 此前均无结果日志，
+	// 真机「点击无反应 / 加载失败」无法与 iOS 端 memo/catch 集合对账。每个出口都留痕。
 	sendErr := func(code, message string, retryable bool) {
+		slog.Info("go-bridge: session_turn_items error",
+			"requestId", msg.RequestID, "backendId", msg.BackendID,
+			"sessionId", params.SessionID, "turnId", params.TurnID,
+			"code", code, "message", message)
 		r := retryable
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: code, Message: message, Retryable: &r})
+	}
+	sendAck := func(ack map[string]interface{}) {
+		slog.Info("go-bridge: session_turn_items ack",
+			"requestId", msg.RequestID, "backendId", msg.BackendID,
+			"sessionId", params.SessionID, "turnId", params.TurnID,
+			"detailLoadState", ack["detailLoadState"],
+			"syncRev", ack["syncRev"], "reasonCode", ack["reasonCode"])
+		conn.SendResult(msg.RequestID, ack, nil)
 	}
 
 	// Capability gate: hello-negotiated turn_detail_lazy_v1 (same discipline as
@@ -56,10 +75,6 @@ func (h *Handlers) handleSessionTurnItems(conn Connection, msg WireMessage, agen
 		return
 	}
 
-	var params struct {
-		SessionID string `json:"sessionId"`
-		TurnID    string `json:"turnId"`
-	}
 	if len(msg.Params) > 0 {
 		if err := json.Unmarshal(msg.Params, &params); err != nil {
 			sendErr("invalid_params", "session_turn_items params decode: "+err.Error(), false)
@@ -122,7 +137,7 @@ func (h *Handlers) handleSessionTurnItems(conn Connection, msg WireMessage, agen
 	// (§11.7). The journal recovers the original commit rev when still
 	// retained; otherwise the current syncRev is a conservative watermark.
 	if target.DetailLoadState == DetailStateLoaded {
-		conn.SendResult(msg.RequestID, sessionTurnItemsAck(DetailStateLoaded, h.loadedDetailWatermark(msg.BackendID, params.SessionID, params.TurnID, proj.SyncRev), ""), nil)
+		sendAck(sessionTurnItemsAck(DetailStateLoaded, h.loadedDetailWatermark(msg.BackendID, params.SessionID, params.TurnID, proj.SyncRev), ""))
 		return
 	}
 
@@ -150,11 +165,11 @@ func (h *Handlers) handleSessionTurnItems(conn Connection, msg WireMessage, agen
 			flight.ack = ack
 			close(flight.done)
 			h.turnDetailFlights.Delete(flightKey)
-			conn.SendResult(msg.RequestID, ack, nil)
+			sendAck(ack)
 			return
 		}
 		<-flight.done
-		conn.SendResult(msg.RequestID, flight.ack, nil)
+		sendAck(flight.ack)
 		return
 	}
 }
