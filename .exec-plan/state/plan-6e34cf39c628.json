@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-30T18:34:05",
+  "updated_at": "2026-08-30T18:50:00+08:00",
   "todos": [
     {
       "id": "phase0-probe-impl",
@@ -883,13 +883,18 @@
       "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree:/Users/jacklee/Projects/cordcode-ios-codex-remote@codex/codex-remote-backend-ios | VERIFIED 2026-08-30: turnStateOps decode/apply frozen order (execution→upsertTurns→turnStateOps→partOps), effectiveDetailLoadState absent→notRequested, changedTurnIDs(from:) unions turnStateOps with held-turn no-op rule (replica §11.7 comment), state-only patch orderChanged=false, failed→loading→loaded clears reasonCode, old patches without field ignored — committed d6e1515f (decode batch) + cacb77ee (canonical itemId retention); waitForAppliedRevision helper committed dc2a35ff.",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "present",
+        "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "turnStateOps wire contract + state machine landed on the iOS worktree: frozen apply order execution→upsertTurns→turnStateOps→partOps; turn-level detailLoadState with effectiveDetailLoadState defaulting absent→notRequested; ProjectionReplica.changedTurnIDs(from:) unions turnStateOps turn ids under the held-turn no-op rule (§11.7: an op naming an unheld turn reports no change); state-only patch yields orderChanged=false with the target turn in changedTurns; failed→loading→loaded clears reasonCode; old patches without the field decode-and-ignore (live zero-change); waitForAppliedRevision(sessionId:atLeast:timeout:) 30ms-poll completion helper; snapshot restore carries detailLoadState + canonical itemIds (decode-retention). Committed across three iOS commits (decode batch, canonical itemId batch, Phase 3 UX batch).",
+        "artifacts": [
+          "commit:d6e1515f",
+          "commit:cacb77ee",
+          "commit:dc2a35ff",
+          "iOS suites: ProjectionTurnStateOpsTests (d6e1515f, 27/27 at land time), ProjectionPartItemIdTests (cacb77ee)"
+        ],
+        "checked_at": "2026-08-30T18:50:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -907,13 +912,17 @@
       "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree | VERIFIED 2026-08-30: ProjectionTurnStateOpsTests (earlier committed decode/apply-order suite) + TurnDetailLazyPhase3Tests 11/11 green on iPhone 17 Pro Max simulator (state-only remap, changedTurnIDs/orderChanged via enum facts, reasonCode carry, wait immediate/deferred/honest-timeout) — commit dc2a35ff.",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "pass",
+        "method": "tests",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "T3.4 state-layer unit tests green on iPhone 17 Pro Max simulator: turnStateOps decode + apply order, state-only patch drives UI refresh (remap carries loaded state + new reasoning part), changedTurnIDs/orderChanged semantics, reasonCode carry/clear path, old-patch compat, snapshot restore of detailLoadState; completion-condition tests (patch-before-ack immediate, ack-before-patch waits then succeeds, honest timeout <2s). TurnDetailLazyPhase3Tests 11/11 (xcodebuild test-without-building, 2026-08-30, latest run 0.16s slowest).",
+        "artifacts": [
+          "commit:dc2a35ff (OpenCodeiOS/OpenCodeiOSTests/TurnDetailLazyPhase3Tests.swift, 11 cases)",
+          "commit:d6e1515f (state-layer decode suite, 27/27 at land)",
+          "run 2026-08-30 18:32: xcodebuild test-without-building -only-testing:CCCodeTests/TurnDetailLazyPhase3Tests — 11 passed / 0 failed"
+        ],
+        "checked_at": "2026-08-30T18:50:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -931,13 +940,19 @@
       "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree | VERIFIED 2026-08-30: full CCCodeTests stash-comparison against baseline HEAD cacb77ee — this batch adds ZERO new failures; 12 failures identical at baseline (guardrails ×2, handrace ×1, reconnect ×3, SSV2 send ×1, highlight samples ×1, perf fixtures ×1, directory selection ×1, todo route ×2; plus hello-capabilities ×1 pre-existing which this batch REPAIRED to current truth). Simulator build-for-testing green. iPhone not connected during batch → device install deferred to G3 (todo phase3-ios-ux-regression) per its conditional wording.",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "pass",
+        "method": "regression",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "Full-suite stash-compare regression (persisted artifact below): with-batch full CCCodeTests = 2192 passed / 14 failed; baseline HEAD cacb77ee (batch stashed) re-run of the failing suites = 13 failed — 12 identical pre-existing failures (guardrails ×2, handrace ×1, reconnect ×3, SSV2 send ×1, highlight samples ×1, perf fixtures ×1, directory selection ×1, todo route ×2) + 1 pre-existing (hello-capabilities stale literal, missing projection_window_v1 since S4C) which this batch REPAIRED to current truth; the single batch-introduced failure (web-event fixture coverage list missing turnDetailAction) was fixed in-batch and re-verified green. Net: batch adds ZERO new failures. Simulator build-for-testing green. iPhone not connected during the batch → device install deferred to G3 per this todo's conditional wording (\"If iPhone connected\").",
+        "artifacts": [
+          "commit:dc2a35ff",
+          "artifact:docs/2026-08-30-phase3-ios-regression-baseline-comparison.md (commands, timestamps, full 14-row attribution table)",
+          "run 2026-08-30 18:13–18:18 with-batch full CCCodeTests (2192/14)",
+          "run 2026-08-30 18:20 baseline cacb77ee failing-suites rerun (13 failed)",
+          "run 2026-08-30 18:32 post-fix targeted Transport+ContractFixture+TurnDetailLazyPhase3 (29 passed / 0 failed)"
+        ],
+        "checked_at": "2026-08-30T18:50:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -955,13 +970,19 @@
       "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree | VERIFIED 2026-08-30 commit dc2a35ff: entry stamped on ALL completed paginated turns via mapping (never Summary metadata inference), gated by descriptor capability + per-session unsupported memo at snapshot builder (fields absent when off); tap→session_turn_items→completion = replica appliedRev>=ack.syncRev (order-independent, tested); loaded→local expand/collapse no refetch; live turns never stamped (T3.3); T3.1 window chain verified by replica test (page adopt→no-op revision patch→producer-hydrated older prepend→live append; chain order chronological, head=oldest boundary per go-bridge projection_window.go), protocol surface unchanged. SERVER FLIP LANDED AFTER CLIENT: Mac 0808a7e (descriptor StaticCapabilities=[turn_detail_lazy_v1], const→true, single main.go enable, relay negotiate mirror + spec gate tests).",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "present",
+        "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "T3.1–T3.3 landed (iOS dc2a35ff, committed BEFORE the server flip per frozen client-first ordering): unified 加载详细过程 entry stamped by mapping on ALL completed paginated turns (never inferred from Summary metadata; live turns never stamped), gated at the snapshot builder by descriptor-derived supportsTurnDetailLazy AND per-session unsupported memo — three web fields entirely ABSENT when gated off (old-bundle compatible); tap → session_turn_items → completion = replica appliedRev >= ack.syncRev (order-independent; render driven by projection changeset, never by RPC result); loaded → local expand/collapse with NO refetch; failed → reason-label + retry; T3.1 window machine VERIFIED not rebuilt (replica-level chain test: first-page adopt → per-connection no-op revision patch → producer-hydrated older prepend → live append, no dup/gap; protocol surface unchanged). Server side: Mac 0808a7e flip + owner-review fix a6c6609 — ONE shared production gate core.TurnDetailLazyProductionEnabled now suppresses BOTH the hello echo (main.go single const-wired enable, direct+relay negotiateTurnDetailLazyV1) AND the backend descriptor StaticCapabilities, so rollback withdraws the iOS entry before any request (true byte-identical rollback).",
+        "artifacts": [
+          "commit:dc2a35ff (iOS client batch)",
+          "commit:0808a7e (Mac flip)",
+          "commit:a6c6609 (shared rollback gate)",
+          "Mac gate tests: TestTurnDetailLazyProductionFlipGate + TestTurnDetailLazyDescriptorRidesSameGate (go-bridge suite ok 68.3s)",
+          "run 2026-08-30: go test ./go-bridge/ ./agent/codex-remote/ -count=1 ok"
+        ],
+        "checked_at": "2026-08-30T18:50:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -979,13 +1000,17 @@
       "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree | VERIFIED 2026-08-30: TurnDetailLazyPhase3Tests covers entry rules (mapping/gate on-off), completion condition + no-content-from-RPC-result (render path is projection changeset driven), no-duplicate-fetch after loaded, window-chain surface unchanged, failure/retry (reasonCode labels + unsupported_capability session memo hides entries) — 11/11 green, commit dc2a35ff.",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": null,
+        "status": "pass",
+        "method": "tests",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "T3.4 UX unit tests green (11/11, TurnDetailLazyPhase3Tests): entry rules (mapping stamps completed assistant only, live zero-impact, snapshot gate on/off fields absent); completion condition + no-content-from-RPC-result (render path is projection changeset driven; waitForAppliedRevision immediate/deferred/honest-timeout); no-duplicate-fetch after loaded (projection-truth guard) and gate-off never requests; window-chain protocol surface unchanged (T3.1 replica chain test); failure/retry flow (failed reasonCode stamping + session-level unsupported_capability memo hides entries, other sessions unaffected).",
+        "artifacts": [
+          "commit:dc2a35ff (OpenCodeiOS/OpenCodeiOSTests/TurnDetailLazyPhase3Tests.swift, 11 cases)",
+          "run 2026-08-30 18:32: TurnDetailLazyPhase3Tests 11 passed / 0 failed (iPhone 17 Pro Max simulator)",
+          "contract fixtures round-trip: MessageWebContractFixtureTests.testWebEventFixturesDecodeEncodeAndCoverEveryCase green with turnDetailAction (same run)"
+        ],
+        "checked_at": "2026-08-30T18:50:00+08:00",
         "upstream_anchor": null
       }
     },
