@@ -755,7 +755,7 @@
     {
       "id": "phase2-detail-merge-regression",
       "title": "turnStateOps Go-side semantics tests",
-      "description": "turnStateOps rows (Go side): old-bridge patch without the field → decode+behavior unchanged (live zero-change); state-only loading/failed patch → change-set contains target turn AND orderChanged=false; same-turn state+parts in one patch → exactly one changedTurnID; failed→loading→loaded explicitly clears old reasonCode; illegal state/reasonCode combos fail-closed; orphan loading → bridge restart restore → failed(interrupted), no permanent loading.",
+      "description": "turnStateOps rows (Go side): old-bridge patch without the field → decode+behavior unchanged (live zero-change); state-only loading/failed patch → change-set contains target turn AND orderChanged=false; same-turn state+parts in one patch → exactly one changedTurnID; failed→loading→loaded explicitly clears old reasonCode; illegal state/reasonCode combos fail-closed; orphan loading → IN-PROCESS no-leader recovery commits failed(interrupted) before retry, no permanent loading (restart restore applies ONLY to topologies with a persisted full Projection checkpoint: current codex-remote is pathless — restart re-hydrates from upstream Summary and detail states reset to notRequested; RecoverOrphanDetailLoading + its unit test are the frozen future-checkpoint admission hook, NOT a current real-device must-test).",
       "status": "done",
       "phase": "phase2",
       "kind": "regression",

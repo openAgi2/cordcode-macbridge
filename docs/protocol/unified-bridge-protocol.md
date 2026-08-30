@@ -1049,8 +1049,15 @@ type DiagnosticCheck = {
 
 #### orphan loading 恢复
 
-- bridge 在 loading commit 后崩溃/重启时，restore 必须把**没有 active leader** 的 orphan
-  loading **原子恢复为 `failed(reasonCode=interrupted)`**，不得永久停在 loading。
+- **进程内恢复（当前必测）**：loading commit 后 leader 消失（请求取消、连接断开、fetch 异常
+  退出）而 bridge 存活时，下一次请求路径发现 loading 且无 in-flight leader，必须**先**原子提交
+  `failed(reasonCode=interrupted)` 再重试，不得永久停在 loading。
+- **restore 扫描（仅适用于持久化完整 Projection checkpoint 的拓扑）**：bridge 在 loading
+  commit 后崩溃/重启、且重启会从持久化 checkpoint restore 投影时，restore 必须把**没有
+  active leader** 的 orphan loading **原子恢复为 `failed(reasonCode=interrupted)`**。当前
+  codex-remote 拓扑 pathless（无完整 Projection checkpoint）：重启后由上游重新 Summary
+  hydrate 重建，`detailLoadState` 回到 `notRequested`——该条款不是当前真机必测项，
+  `RecoverOrphanDetailLoading` 是未来引入 checkpoint 后的准入钩子。
 
 #### 资源门（G0 owner 裁决冻结值，2026-08-30）
 
