@@ -269,14 +269,17 @@ func alignBackToRuneStart(s string, cut int) int {
 	return cut
 }
 
-// DetailChunkOffsets computes the frozen chunk boundary table (F1.1 P1-7):
+// DetailChunkOffsets computes the frozen chunk boundary table (F1.1 P1-7,
+// F2.1 P1 fix: the escaped-size re-check covers EVERY chunk, including the
+// final one):
 //
 //  1. target-size cuts on raw bytes (core.TurnDetailChunkTargetBytes), each
 //     aligned back to a rune start — a chunk NEVER begins or ends mid-rune;
-//  2. every chunk's JSON-ESCAPED wire length is re-checked against the
-//     advisory cap (core.TurnDetailChunkAdvisoryCapBytes) and split further
-//     (rune-aligned halves) until it fits — escaping-heavy text (backslashes,
-//     quotes, control chars) yields shorter raw chunks, not oversized frames;
+//  2. every chunk's JSON-ESCAPED wire length — tail included — is re-checked
+//     against the advisory cap (core.TurnDetailChunkAdvisoryCapBytes) and
+//     split further (rune-aligned halves) until it fits; escaping-heavy text
+//     (backslashes, quotes, control chars) yields shorter raw chunks, never
+//     oversized frames;
 //  3. totalChunks = len(offsets)-1 — computed from the ACTUAL offset table,
 //     never from ceil(totalBytes/target).
 //
@@ -303,10 +306,12 @@ func DetailChunkOffsets(s string) []int {
 				}
 			}
 		}
-		// Escaped-size re-check: split rune-aligned halves until the chunk's
-		// escaped wire form fits the advisory cap. A single rune never exceeds
-		// the cap (max escaped rune ≈ 12 bytes), so this terminates.
-		for cut < len(s) && jsonEscapedLen(s[start:cut]) > advisory {
+		// Escaped-size re-check on EVERY chunk (the tail is not exempt: a
+		// control-char-heavy tail can escape 128KB raw into >512KB wire).
+		// Reduce the cut — below len(s) when needed so the outer loop emits
+		// the remainder as further chunks — until the escaped form fits.
+		// A single rune never exceeds the cap (max escaped rune ≈ 12 bytes).
+		for cut > start+1 && jsonEscapedLen(s[start:cut]) > advisory {
 			half := alignBackToRuneStart(s, start+(cut-start)/2)
 			if half <= start || half >= cut {
 				half = cut - 1
@@ -328,26 +333,38 @@ func DetailChunkCount(s string) int {
 	return len(DetailChunkOffsets(s)) - 1
 }
 
-// ErrDetailChunkTooLarge: a single content entry (inline part or oversize ref)
-// exceeds the post-encode hard cap even alone — the page cannot be chunked
-// without violating §11.8.
+// ErrDetailChunkTooLarge: a single content entry (inline part or oversize
+// entry) exceeds the post-encode hard cap even alone — the page cannot be
+// chunked without violating §11.8.
 var ErrDetailChunkTooLarge = errors.New("detail: single content entry exceeds hard cap")
 
+// DetailChunkEntry is ONE item of an accepted page in OFFICIAL upstream
+// order (F2.1 P0-1: a single ordered array — never two arrays that would
+// reorder inline items ahead of oversize ones). For an oversize entry the
+// Part is the SLIM tool card (metadata intact, huge output stripped — F2.1
+// P0-2) and Ref is non-nil; the ref rides the SAME chunk as its slim card so
+// iOS renders the full card in position with the output as a lazy entry.
+type DetailChunkEntry struct {
+	Part ProjectionPart
+	Ref  *TurnDetailOversizeRef // nil for pure inline items
+}
+
 // DetailChunkContent is one frame's worth of page content (the items/oversize
-// arrays of a TurnDetailChunkFrame). SplitDetailChunks is the SINGLE
-// deterministic packing used both on the accept path (chunkSeq assignment) and
-// on detail-cache replay (rebuilding identical frames without upstream).
+// arrays of a TurnDetailChunkFrame). Items preserve official page order;
+// Oversize refs attach to their slim cards by itemId. SplitDetailChunks is
+// the SINGLE deterministic packing used both on the accept path (chunkSeq
+// assignment) and on detail-cache replay (rebuilding identical frames).
 type DetailChunkContent struct {
 	Items    []ProjectionPart        `json:"items,omitempty"`
 	Oversize []TurnDetailOversizeRef `json:"oversize,omitempty"`
 }
 
-// SplitDetailChunks greedily packs page content into chunks whose ENCODED
-// (JSON) size stays within the advisory cap (256KB). A single entry larger
+// SplitDetailChunks greedily packs ORDERED page entries into chunks whose
+// ENCODED (JSON) size stays within the advisory cap (256KB). An entry larger
 // than the advisory cap may occupy a chunk alone, but never beyond the hard
 // cap (512KB) — envelope identity/progress fields leave ample margin against
 // the advisory measurement of content only.
-func SplitDetailChunks(items []ProjectionPart, oversize []TurnDetailOversizeRef) ([]DetailChunkContent, error) {
+func SplitDetailChunks(entries []DetailChunkEntry) ([]DetailChunkContent, error) {
 	advisory := int(core.TurnDetailChunkAdvisoryCapBytes)
 	hard := int(core.TurnDetailPatchHardCapBytes)
 	measure := func(c DetailChunkContent) int {
@@ -367,28 +384,23 @@ func SplitDetailChunks(items []ProjectionPart, oversize []TurnDetailOversizeRef)
 			curSize = 0
 		}
 	}
-	addItem := func(single DetailChunkContent) error {
+	for _, entry := range entries {
+		single := DetailChunkContent{Items: []ProjectionPart{entry.Part}}
+		if entry.Ref != nil {
+			single.Oversize = []TurnDetailOversizeRef{*entry.Ref}
+		}
 		sz := measure(single)
 		if sz > hard {
-			return fmt.Errorf("%w: entry %d bytes", ErrDetailChunkTooLarge, sz)
+			return nil, fmt.Errorf("%w: entry %d bytes", ErrDetailChunkTooLarge, sz)
 		}
 		if curSize > 0 && curSize+sz > advisory {
 			flush()
 		}
-		cur.Items = append(cur.Items, single.Items...)
-		cur.Oversize = append(cur.Oversize, single.Oversize...)
+		cur.Items = append(cur.Items, entry.Part)
+		if entry.Ref != nil {
+			cur.Oversize = append(cur.Oversize, *entry.Ref)
+		}
 		curSize += sz
-		return nil
-	}
-	for _, part := range items {
-		if err := addItem(DetailChunkContent{Items: []ProjectionPart{part}}); err != nil {
-			return nil, err
-		}
-	}
-	for _, ref := range oversize {
-		if err := addItem(DetailChunkContent{Oversize: []TurnDetailOversizeRef{ref}}); err != nil {
-			return nil, err
-		}
 	}
 	flush()
 	return out, nil

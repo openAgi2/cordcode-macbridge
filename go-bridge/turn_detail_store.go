@@ -1,23 +1,28 @@
 package gobridge
 
 // Mac-side detail store (§11.8 "detail store 事务模型", frozen F1.1 2026-08-30;
-// plan §3F-F2). Owns persistence for turn-detail content: manifest (summary +
+// F2.1 revision 2026-08-31: ordered-entry model, slim tool cards, strict
+// recovery). Owns persistence for turn-detail content: manifest (summary +
 // resume), an append-only items transaction log, blob files, and the global
-// cache budget. The batch engine (F4) maps and classifies upstream pages; this
-// store atomically accepts them under the FROZEN commit order:
+// cache budget. The batch engine (F4) maps upstream pages into ORDERED
+// entries; this store atomically accepts them under the FROZEN commit order:
 //
 //   1. blob temp write → fsync → rename (into blobs/);
 //   2. items transaction record append → fsync (items.log);
 //   3. manifest temp write → fsync → rename  ← COMMIT POINT (resume state
 //      only ever advances past steps 1-2);
-//   4. startup sweep (SweepUncommitted) rolls back records/blobs the manifest
-//      never committed.
+//   4. startup sweep (SweepUncommitted): only a LEGAL uncommitted suffix
+//      (tx > TxApplied, or one torn FINAL line) is rolled back; ANY defect in
+//      the committed range 1..TxApplied quarantines the whole turn dir —
+//      the turn re-hydrates from official pagination, never "repaired".
 //
 // Path safety (F1.1 P1-5): disk segments are ALWAYS hex(sha256(rawID)) — raw
-// session/turn IDs never appear in paths. The manifest keeps raw IDs for
-// audit. Budget (P1-6): core.TurnDetailCacheBudgetBytes covers manifests +
-// item logs + blobs + temp files of the WHOLE store; eviction granularity is
-// a whole per-turn directory (LRU by manifest UpdatedAtMs).
+// session/turn IDs never appear in paths; the manifest keeps raw IDs for
+// audit. Blob handles additionally bind generation + content hash (F2.1):
+// blobs are immutable; a stale handle can never overwrite a newer blob.
+// Budget (P1-6): core.TurnDetailCacheBudgetBytes covers the WHOLE store;
+// eviction granularity is a whole per-turn directory (LRU by manifest
+// UpdatedAtMs).
 
 import (
 	"crypto/sha256"
@@ -25,10 +30,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -39,41 +46,42 @@ import (
 
 var (
 	ErrDetailStoreNotFound  = errors.New("detail-store: turn detail not found")
+	ErrDetailStoreCorrupt   = errors.New("detail-store: turn detail cache corrupt")
 	ErrDetailDuplicateItem  = errors.New("detail-store: duplicate canonical item id")
 	ErrDetailPageOrder      = errors.New("detail-store: page out of order")
 	ErrDetailGeneration     = errors.New("detail-store: turn generation mismatch")
 	ErrDetailBlobMissing    = errors.New("detail-store: blob file missing")
 	ErrDetailBlobUnref      = errors.New("detail-store: handle not referenced by manifest")
-	ErrDetailInlineOversize = errors.New("detail-store: inline item exceeds blob threshold; stage as oversize")
+	ErrDetailInlineOversize = errors.New("detail-store: item exceeds blob threshold; stage as oversize")
 	ErrDetailChunkIndex     = errors.New("detail-store: chunk index out of range")
 	ErrDetailBadID          = errors.New("detail-store: unsafe id segment")
 )
 
-// safeBackendSeg / safeHandleSeg: the only two raw-ish segments allowed in
-// paths (backend ids come from internal config, handles are store-derived —
-// both still validated; session/turn segments are always sha256 hex).
-var (
-	safeBackendSeg = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
-	safeHandleSeg  = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
-)
+// safeBackendSeg: the only raw-ish segment allowed in paths (backend ids come
+// from internal config; handles are store-derived hex — both still validated;
+// session/turn segments are always sha256 hex).
+var safeBackendSeg = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 func hashSeg(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
 }
 
-// TurnDetailItemSummary is one accepted item's manifest entry.
+// TurnDetailItemSummary is one accepted entry's manifest row, in official
+// page order. Oversize rows carry the persisted blob offset table so chunk
+// reads never rescan content (F2.1 P1-3).
 type TurnDetailItemSummary struct {
-	ItemID     string `json:"itemId"`
-	Type       string `json:"type"`
-	Bytes      int64  `json:"bytes"`
-	Page       int    `json:"page"`
-	BlobHandle string `json:"blobHandle,omitempty"`
+	ItemID      string `json:"itemId"`
+	Type        string `json:"type"`
+	Bytes       int64  `json:"bytes"`
+	Page        int    `json:"page"`
+	BlobHandle  string `json:"blobHandle,omitempty"`
+	BlobOffsets []int  `json:"blobOffsets,omitempty"`
 }
 
 // TurnDetailResume is the owner-frozen resume state, advanced only at the
 // manifest commit point: upstream next cursor, accepted boundary (count +
-// last canonical item id), page count, EOF.
+// LAST entry's canonical item id — official page order), page count, EOF.
 type TurnDetailResume struct {
 	NextCursor         string `json:"nextCursor"`
 	LastAcceptedItemID string `json:"lastAcceptedItemId"`
@@ -102,33 +110,48 @@ type TurnDetailManifest struct {
 	UpdatedAtMs  int64                   `json:"updatedAtMs"`
 }
 
-// detailTxRecord is one line of items.log — the complete content needed to
-// REBUILD the accepted page's chunk frames deterministically (same splitter,
-// same chunkSeq range) without upstream.
-type detailTxRecord struct {
-	Tx            int                     `json:"tx"`
-	Page          int                     `json:"page"`
-	NextCursor    string                  `json:"nextCursor"`
-	EOF           bool                    `json:"eof"`
-	ChunkSeqFirst int                     `json:"chunkSeqFirst"`
-	ChunkSeqLast  int                     `json:"chunkSeqLast"`
-	Items         []ProjectionPart        `json:"items,omitempty"`
-	Oversize      []TurnDetailOversizeRef `json:"oversize,omitempty"`
+// detailStoredEntry is one ordered entry of a committed page — the complete
+// content needed to REBUILD its chunk frames deterministically (same
+// splitter, same chunkSeq range) without upstream.
+type detailStoredEntry struct {
+	ItemID      string                 `json:"itemId"`
+	Part        ProjectionPart         `json:"part"` // slim tool card for oversize entries
+	Ref         *TurnDetailOversizeRef `json:"ref,omitempty"`
+	BlobOffsets []int                  `json:"blobOffsets,omitempty"`
 }
 
-// DetailOversizeStaged is one oversize item (>256KB serialized) handed to the
-// store WITHOUT a handle: the store derives the handle deterministically and
-// computes TotalBytes/TotalChunks from the ACTUAL content offset table.
+// detailTxRecord is one line of items.log.
+type detailTxRecord struct {
+	Tx            int                 `json:"tx"`
+	Page          int                 `json:"page"`
+	NextCursor    string              `json:"nextCursor"`
+	EOF           bool                `json:"eof"`
+	ChunkSeqFirst int                 `json:"chunkSeqFirst"`
+	ChunkSeqLast  int                 `json:"chunkSeqLast"`
+	Entries       []detailStoredEntry `json:"entries,omitempty"`
+}
+
+// DetailOversizeStaged is one oversize entry (>256KB serialized output)
+// handed to the store: the SLIM tool card (command/cwd/status/exitCode/
+// duration/title intact, huge output stripped — F2.1 P0-2) plus the full
+// blob content. iOS renders the full card in position; only the output is a
+// lazy load.
 type DetailOversizeStaged struct {
-	ItemID  string
-	Type    string
-	Preview string // store truncates to the frozen preview budget, rune-aligned
-	Content string // full content; persisted only into blobs/<handle>.bin
+	Part    ProjectionPart // slim card; ItemID/Type must be set
+	Preview string         // store truncates to the frozen preview budget, rune-aligned
+	Content string         // full output; persisted only into blobs/<handle>.bin
+}
+
+// DetailPageEntry is ONE item of an accepted page in OFFICIAL upstream order
+// (F2.1 P0-1). Exactly one of Inline/Oversize is set.
+type DetailPageEntry struct {
+	ItemID   string
+	Inline   *ProjectionPart       // pure inline item (≤ blob threshold)
+	Oversize *DetailOversizeStaged // slim card + blob content
 }
 
 // DetailPageAccept is one successfully fetched upstream page, already mapped
-// and classified by the batch engine (F4): inline items each ≤ the blob
-// threshold, oversize items staged with full content.
+// and classified by the batch engine (F4) into ordered entries.
 type DetailPageAccept struct {
 	BackendID  string
 	SessionID  string
@@ -137,26 +160,28 @@ type DetailPageAccept struct {
 	Page       int // 1-based; must be Resume.Pages+1
 	NextCursor string
 	EOF        bool
-	Items      []ProjectionPart
-	Oversize   []DetailOversizeStaged
+	Entries    []DetailPageEntry // official page order
 }
 
 // DetailAcceptedPage returns everything the batch engine needs after a
 // committed accept: the new manifest revision, the chunkSeq range the page
-// occupies (both 0 when the page packed into zero chunks), the completed
-// oversize refs (handle/totalBytes/totalChunks filled by the store), and the
-// manifest snapshot for the kernel manifest op.
+// occupies (both 0 when the page packed into zero chunks), and the manifest
+// snapshot for the kernel manifest op.
 type DetailAcceptedPage struct {
 	ManifestRev   int
 	ChunkSeqFirst int
 	ChunkSeqLast  int
-	OversizeRefs  []TurnDetailOversizeRef
 	Manifest      *TurnDetailManifest
 }
 
+// blobChunkTouchMinInterval throttles LRU manifest rewrites on chunk reads
+// (F2.1 P1-3: 9 chunk reads must not mean 9 manifest rewrites).
+const blobChunkTouchMinInterval = 10 * time.Second
+
 // TurnDetailStore is the process-wide detail cache. One mutex serializes
-// accepts/sweeps/evictions — page accepts are ~500ms apart per turn and chunk
-// reads are user-driven, so contention is not a concern at evidence scale.
+// accepts/sweeps/evictions — page accepts are ~500ms apart per turn, and
+// blob chunk reads hold the lock only for the manifest lookup (file reads
+// happen outside it).
 type TurnDetailStore struct {
 	root   string
 	budget int64
@@ -183,8 +208,6 @@ func (s *TurnDetailStore) turnDir(backendID, sessionID, turnID string) (string, 
 	return filepath.Join(s.root, backendID, hashSeg(sessionID), hashSeg(turnID)), nil
 }
 
-func syncFile(f *os.File) error { return f.Sync() }
-
 func syncDir(path string) {
 	dir, err := os.Open(filepath.Dir(path))
 	if err != nil {
@@ -192,6 +215,35 @@ func syncDir(path string) {
 	}
 	_ = dir.Sync()
 	_ = dir.Close()
+}
+
+// writeFileSynced is the crash-safe replace primitive: temp write → fsync
+// (file) → rename → fsync (dir).
+func writeFileSynced(final string, data []byte) error {
+	tmp := filepath.Join(filepath.Dir(final), "tmp", filepath.Base(final)+".tmp")
+	if err := os.MkdirAll(filepath.Join(filepath.Dir(final), "tmp"), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, final); err != nil {
+		return err
+	}
+	syncDir(final)
+	return nil
 }
 
 func (s *TurnDetailStore) loadManifestLocked(dir string) (*TurnDetailManifest, error) {
@@ -204,7 +256,7 @@ func (s *TurnDetailStore) loadManifestLocked(dir string) (*TurnDetailManifest, e
 	}
 	var m TurnDetailManifest
 	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, fmt.Errorf("detail-store: manifest corrupt: %w", err)
+		return nil, fmt.Errorf("%w: manifest: %v", ErrDetailStoreCorrupt, err)
 	}
 	return &m, nil
 }
@@ -214,31 +266,7 @@ func (s *TurnDetailStore) persistManifestLocked(dir string, m *TurnDetailManifes
 	if err != nil {
 		return err
 	}
-	tmp := filepath.Join(dir, "tmp", "manifest.json.tmp")
-	if err := os.MkdirAll(filepath.Join(dir, "tmp"), 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(raw); err != nil {
-		f.Close()
-		return err
-	}
-	if err := syncFile(f); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	final := filepath.Join(dir, "manifest.json")
-	if err := os.Rename(tmp, final); err != nil {
-		return err
-	}
-	syncDir(final)
-	return nil
+	return writeFileSynced(filepath.Join(dir, "manifest.json"), raw)
 }
 
 // LoadManifest reads the committed manifest for a turn.
@@ -260,14 +288,20 @@ func partSize(p ProjectionPart) int64 {
 	return int64(len(raw))
 }
 
-func itemIDOfPart(p ProjectionPart) string { return p.ItemID }
-
 func truncateRuneAligned(s string, limit int) string {
 	if len(s) <= limit {
 		return s
 	}
-	cut := alignBackToRuneStart(s, limit)
-	return s[:cut]
+	return s[:alignBackToRuneStart(s, limit)]
+}
+
+// blobHandle derives the immutable blob handle: generation + content hash
+// are part of the identity (F2.1 P1-5) so a re-accepted item under a new
+// generation or with changed content can never overwrite an older blob and
+// a stale handle simply stops resolving.
+func blobHandle(backendID, sessionID, turnID string, generation int, itemID, content string) string {
+	return hashSeg(backendID + "|" + sessionID + "|" + turnID + "|" +
+		strconv.Itoa(generation) + "|" + itemID + "|" + hashSeg(content))
 }
 
 // AcceptPage runs the frozen-commit-order transaction for one page and
@@ -298,56 +332,68 @@ func (s *TurnDetailStore) AcceptPage(acc DetailPageAccept) (*DetailAcceptedPage,
 		return nil, fmt.Errorf("%w: accept %d, manifest at %d", ErrDetailPageOrder, acc.Page, manifest.Resume.Pages)
 	}
 
+	// Single ordered validation + classification pass (F2.1 P0-1/P0-2).
 	known := make(map[string]bool, len(manifest.Items))
 	for _, item := range manifest.Items {
 		known[item.ItemID] = true
 	}
 	threshold := core.TurnDetailBlobThresholdBytes
-	refs := make([]TurnDetailOversizeRef, 0, len(acc.Oversize))
-	stagedByID := make(map[string]DetailOversizeStaged, len(acc.Oversize))
+	stagedContent := make(map[string]string, len(acc.Entries))
+	stored := make([]detailStoredEntry, 0, len(acc.Entries))
+	packEntries := make([]DetailChunkEntry, 0, len(acc.Entries))
 	var pageBytes int64
-	for i := range acc.Items {
-		part := acc.Items[i]
-		id := itemIDOfPart(part)
-		if id == "" {
-			return nil, fmt.Errorf("%w: inline item[%d] missing canonical itemId", ErrDetailBadID, i)
+	lastItemID := manifest.Resume.LastAcceptedItemID
+	for i, entry := range acc.Entries {
+		inlineSet := entry.Inline != nil
+		oversizeSet := entry.Oversize != nil
+		if inlineSet == oversizeSet || entry.ItemID == "" {
+			return nil, fmt.Errorf("%w: entry[%d] must set exactly one of Inline/Oversize with an id", ErrDetailBadID, i)
 		}
-		if known[id] {
-			return nil, fmt.Errorf("%w: %s", ErrDetailDuplicateItem, id)
+		if known[entry.ItemID] {
+			return nil, fmt.Errorf("%w: %s", ErrDetailDuplicateItem, entry.ItemID)
 		}
-		known[id] = true
-		if sz := partSize(part); sz > threshold {
-			return nil, fmt.Errorf("%w: %s is %d bytes", ErrDetailInlineOversize, id, sz)
-		} else {
-			pageBytes += sz
+		known[entry.ItemID] = true
+		lastItemID = entry.ItemID
+		if inlineSet {
+			if entry.Inline.ItemID != entry.ItemID {
+				return nil, fmt.Errorf("%w: entry[%d] id %q != part id %q", ErrDetailBadID, i, entry.ItemID, entry.Inline.ItemID)
+			}
+			if sz := partSize(*entry.Inline); sz > threshold {
+				return nil, fmt.Errorf("%w: %s is %d bytes", ErrDetailInlineOversize, entry.ItemID, sz)
+			} else {
+				pageBytes += sz
+			}
+			stored = append(stored, detailStoredEntry{ItemID: entry.ItemID, Part: *entry.Inline})
+			packEntries = append(packEntries, DetailChunkEntry{Part: *entry.Inline})
+			continue
 		}
-	}
-	for i, staged := range acc.Oversize {
-		if staged.ItemID == "" || !utf8.ValidString(staged.Content) {
-			return nil, fmt.Errorf("%w: oversize[%d] bad id/content", ErrDetailBadID, i)
+		card := entry.Oversize.Part
+		if card.ItemID != entry.ItemID || !utf8.ValidString(entry.Oversize.Content) {
+			return nil, fmt.Errorf("%w: oversize[%d] card id / content", ErrDetailBadID, i)
 		}
-		if known[staged.ItemID] {
-			return nil, fmt.Errorf("%w: %s", ErrDetailDuplicateItem, staged.ItemID)
+		if sz := partSize(card); sz > threshold {
+			return nil, fmt.Errorf("%w: oversize[%d] slim card is %d bytes — strip the output", ErrDetailInlineOversize, i, sz)
 		}
-		known[staged.ItemID] = true
-		handle := hashSeg(acc.BackendID + "|" + acc.SessionID + "|" + acc.TurnID + "|" + staged.ItemID)
-		if !safeHandleSeg.MatchString(handle) {
-			return nil, fmt.Errorf("%w: handle %q", ErrDetailBadID, handle)
-		}
-		totalBytes := int64(len(staged.Content))
-		pageBytes += totalBytes
-		refs = append(refs, TurnDetailOversizeRef{
-			ItemID:      staged.ItemID,
+		content := entry.Oversize.Content
+		offsets := DetailChunkOffsets(content)
+		handle := blobHandle(acc.BackendID, acc.SessionID, acc.TurnID, acc.Generation, entry.ItemID, content)
+		ref := TurnDetailOversizeRef{
+			ItemID:      entry.ItemID,
 			Handle:      handle,
-			Type:        staged.Type,
-			TotalBytes:  totalBytes,
-			Preview:     truncateRuneAligned(staged.Preview, core.TurnDetailBlobPreviewBytes),
-			TotalChunks: DetailChunkCount(staged.Content),
+			Type:        card.Type,
+			TotalBytes:  int64(len(content)),
+			Preview:     truncateRuneAligned(entry.Oversize.Preview, core.TurnDetailBlobPreviewBytes),
+			TotalChunks: len(offsets) - 1,
+		}
+		pageBytes += ref.TotalBytes
+		stagedContent[entry.ItemID] = content
+		stored = append(stored, detailStoredEntry{
+			ItemID: entry.ItemID, Part: card, Ref: &ref, BlobOffsets: offsets,
 		})
-		stagedByID[staged.ItemID] = staged
+		packEntries = append(packEntries, DetailChunkEntry{Part: card, Ref: &ref})
 	}
 
-	chunks, err := SplitDetailChunks(acc.Items, refs)
+	chunks, err := SplitDetailChunks(packEntries)
 	if err != nil {
 		return nil, err
 	}
@@ -358,38 +404,19 @@ func (s *TurnDetailStore) AcceptPage(acc DetailPageAccept) (*DetailAcceptedPage,
 	}
 	tx := manifest.TxApplied + 1
 
-	// Step 1: blobs — temp write, fsync, rename.
-	if len(acc.Oversize) > 0 {
+	// Step 1: blobs — temp write, fsync, rename (immutable handles: a redo
+	// of the same page writes byte-identical content under the same name).
+	for _, entry := range stored {
+		if entry.Ref == nil {
+			continue
+		}
 		if err := os.MkdirAll(filepath.Join(dir, "blobs"), 0o755); err != nil {
 			return nil, err
 		}
-		if err := os.MkdirAll(filepath.Join(dir, "tmp"), 0o755); err != nil {
+		final := filepath.Join(dir, "blobs", entry.Ref.Handle+".bin")
+		if err := writeFileSynced(final, []byte(stagedContent[entry.ItemID])); err != nil {
 			return nil, err
 		}
-	}
-	for _, ref := range refs {
-		staged := stagedByID[ref.ItemID]
-		tmp := filepath.Join(dir, "tmp", ref.Handle+".tmp")
-		f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := f.WriteString(staged.Content); err != nil {
-			f.Close()
-			return nil, err
-		}
-		if err := syncFile(f); err != nil {
-			f.Close()
-			return nil, err
-		}
-		if err := f.Close(); err != nil {
-			return nil, err
-		}
-		final := filepath.Join(dir, "blobs", ref.Handle+".bin")
-		if err := os.Rename(tmp, final); err != nil {
-			return nil, err
-		}
-		syncDir(final)
 	}
 
 	// Step 2: items transaction record — append, fsync.
@@ -399,7 +426,7 @@ func (s *TurnDetailStore) AcceptPage(acc DetailPageAccept) (*DetailAcceptedPage,
 	record := detailTxRecord{
 		Tx: tx, Page: acc.Page, NextCursor: acc.NextCursor, EOF: acc.EOF,
 		ChunkSeqFirst: chunkSeqFirst, ChunkSeqLast: chunkSeqLast,
-		Items: acc.Items, Oversize: refs,
+		Entries: stored,
 	}
 	line, err := json.Marshal(record)
 	if err != nil {
@@ -413,7 +440,7 @@ func (s *TurnDetailStore) AcceptPage(acc DetailPageAccept) (*DetailAcceptedPage,
 		logF.Close()
 		return nil, err
 	}
-	if err := syncFile(logF); err != nil {
+	if err := logF.Sync(); err != nil {
 		logF.Close()
 		return nil, err
 	}
@@ -422,33 +449,27 @@ func (s *TurnDetailStore) AcceptPage(acc DetailPageAccept) (*DetailAcceptedPage,
 	}
 
 	// Step 3: manifest — temp write, fsync, rename (COMMIT POINT).
-	for i := range acc.Items {
-		part := acc.Items[i]
-		manifest.Items = append(manifest.Items, TurnDetailItemSummary{
-			ItemID: itemIDOfPart(part), Type: part.Type, Bytes: partSize(part), Page: acc.Page,
-		})
-	}
-	for _, ref := range refs {
-		manifest.Items = append(manifest.Items, TurnDetailItemSummary{
-			ItemID: ref.ItemID, Type: ref.Type, Bytes: ref.TotalBytes, Page: acc.Page, BlobHandle: ref.Handle,
-		})
+	for _, entry := range stored {
+		summary := TurnDetailItemSummary{
+			ItemID: entry.ItemID, Type: entry.Part.Type, Bytes: partSize(entry.Part), Page: acc.Page,
+		}
+		if entry.Ref != nil {
+			summary.Bytes = entry.Ref.TotalBytes
+			summary.BlobHandle = entry.Ref.Handle
+			summary.BlobOffsets = entry.BlobOffsets
+		}
+		manifest.Items = append(manifest.Items, summary)
 	}
 	manifest.ManifestRev++
 	manifest.TxApplied = tx
 	if len(chunks) > 0 {
 		manifest.ChunkSeqNext = chunkSeqLast + 1
 	}
-	manifest.ItemCount += len(acc.Items) + len(acc.Oversize)
+	manifest.ItemCount += len(acc.Entries)
 	manifest.TotalBytes += pageBytes
-	lastID := manifest.Resume.LastAcceptedItemID
-	if n := len(acc.Items); n > 0 {
-		lastID = itemIDOfPart(acc.Items[n-1])
-	} else if n := len(acc.Oversize); n > 0 {
-		lastID = acc.Oversize[n-1].ItemID
-	}
 	manifest.Resume = TurnDetailResume{
-		NextCursor: acc.NextCursor, LastAcceptedItemID: lastID,
-		AcceptedCount: manifest.Resume.AcceptedCount + len(acc.Items) + len(acc.Oversize),
+		NextCursor: acc.NextCursor, LastAcceptedItemID: lastItemID,
+		AcceptedCount: manifest.Resume.AcceptedCount + len(acc.Entries),
 		Pages:         acc.Page, EOF: acc.EOF,
 	}
 	manifest.UpdatedAtMs = s.now().UnixMilli()
@@ -456,20 +477,74 @@ func (s *TurnDetailStore) AcceptPage(acc DetailPageAccept) (*DetailAcceptedPage,
 		return nil, err
 	}
 
-	// Budget enforcement is best-effort and never evicts the turn just committed.
-	_ = s.enforceBudgetLocked(dir)
+	// Budget enforcement is best-effort: the page is COMMITTED — failing the
+	// accept here would mislead the caller into retrying a committed page.
+	// Eviction errors surface in logs instead of being swallowed (F2.1 P1).
+	if err := s.enforceBudgetLocked(dir); err != nil {
+		slog.Warn("detail-store: budget enforcement failed after commit", "dir", dir, "err", err)
+	}
 
 	return &DetailAcceptedPage{
 		ManifestRev:   manifest.ManifestRev,
 		ChunkSeqFirst: chunkSeqFirst,
 		ChunkSeqLast:  chunkSeqLast,
-		OversizeRefs:  refs,
 		Manifest:      manifest,
 	}, nil
 }
 
-// ReadRecords returns the COMMITTED transaction records (Tx ≤ TxApplied) in
-// accept order — the deterministic replay source.
+// validateCommittedRecords enforces the fail-closed recovery invariants on
+// the COMMITTED range (F2.1 P0-3 / P1-4): tx 1..TxApplied contiguous and
+// complete, page continuity from 1, chunkSeq continuity from 1, and the
+// deterministic re-split reproduces each record's recorded span.
+func validateCommittedRecords(manifest *TurnDetailManifest, records []detailTxRecord) error {
+	if len(records) != manifest.TxApplied {
+		return fmt.Errorf("%w: %d committed records, manifest TxApplied=%d",
+			ErrDetailStoreCorrupt, len(records), manifest.TxApplied)
+	}
+	lastSeq := 0
+	for i, rec := range records {
+		if rec.Tx != i+1 {
+			return fmt.Errorf("%w: record[%d].tx=%d, want %d", ErrDetailStoreCorrupt, i, rec.Tx, i+1)
+		}
+		if rec.Page != i+1 {
+			return fmt.Errorf("%w: record[%d].page=%d, want %d", ErrDetailStoreCorrupt, i, rec.Page, i+1)
+		}
+		span := 0
+		if len(rec.Entries) > 0 {
+			entries := make([]DetailChunkEntry, 0, len(rec.Entries))
+			for _, entry := range rec.Entries {
+				entries = append(entries, DetailChunkEntry{Part: entry.Part, Ref: entry.Ref})
+			}
+			chunks, err := SplitDetailChunks(entries)
+			if err != nil {
+				return fmt.Errorf("%w: record[%d] re-split: %v", ErrDetailStoreCorrupt, i, err)
+			}
+			span = len(chunks)
+		}
+		if span == 0 {
+			if rec.ChunkSeqFirst != 0 || rec.ChunkSeqLast != 0 {
+				return fmt.Errorf("%w: record[%d] empty page must record 0-0", ErrDetailStoreCorrupt, i)
+			}
+		} else {
+			if rec.ChunkSeqFirst != lastSeq+1 || rec.ChunkSeqLast != rec.ChunkSeqFirst+span-1 {
+				return fmt.Errorf("%w: record[%d] chunkSeq %d-%d, want %d-%d",
+					ErrDetailStoreCorrupt, i, rec.ChunkSeqFirst, rec.ChunkSeqLast, lastSeq+1, lastSeq+span)
+			}
+			lastSeq = rec.ChunkSeqLast
+		}
+	}
+	if lastSeq != manifest.ChunkSeqNext-1 {
+		return fmt.Errorf("%w: chunkSeq ends at %d, manifest ChunkSeqNext=%d",
+			ErrDetailStoreCorrupt, lastSeq, manifest.ChunkSeqNext)
+	}
+	return nil
+}
+
+// ReadRecords returns the COMMITTED transaction records in accept order —
+// the deterministic replay source — after fail-closed validation (F2.1 P1-4).
+// A parseable uncommitted suffix (tx > TxApplied) is tolerated and skipped
+// here; any unparseable line is NOT (post-sweep runtime state must be clean)
+// — both fail closed.
 func (s *TurnDetailStore) ReadRecords(backendID, sessionID, turnID string) ([]detailTxRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -481,70 +556,119 @@ func (s *TurnDetailStore) ReadRecords(backendID, sessionID, turnID string) ([]de
 	if err != nil {
 		return nil, err
 	}
+	records, err := readLogRecords(dir)
+	if err != nil {
+		return nil, err
+	}
+	if records.unparsed != 0 {
+		return nil, fmt.Errorf("%w: items.log carries %d unparseable line(s)", ErrDetailStoreCorrupt, records.unparsed)
+	}
+	committed := make([]detailTxRecord, 0, len(records.committed))
+	for _, rec := range records.committed {
+		if rec.Tx <= manifest.TxApplied {
+			committed = append(committed, rec)
+		}
+	}
+	if err := validateCommittedRecords(manifest, committed); err != nil {
+		return nil, err
+	}
+	return committed, nil
+}
+
+type logRecords struct {
+	committed []detailTxRecord // parseable records, file order
+	unparsed  int              // count of unparseable lines
+	tornAtEnd bool             // the single unparseable line is the FINAL line
+}
+
+// readLogRecords parses items.log and classifies lines. A torn append can
+// only ever damage the LAST line — an unparseable line anywhere else (or
+// more than one) is corruption, and the caller must quarantine, not roll
+// back (F2.1 P0-3).
+func readLogRecords(dir string) (*logRecords, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, "items.log"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return &logRecords{}, nil
 		}
 		return nil, err
 	}
-	var records []detailTxRecord
-	for _, line := range strings.Split(string(raw), "\n") {
+	lines := strings.Split(string(raw), "\n")
+	lastNonEmpty, unparsedIdx := -1, -1
+	out := &logRecords{}
+	for i, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
+		lastNonEmpty = i
 		var rec detailTxRecord
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			return nil, fmt.Errorf("detail-store: items.log corrupt: %w", err)
+		if json.Unmarshal([]byte(line), &rec) != nil {
+			out.unparsed++
+			unparsedIdx = i
+			continue
 		}
-		if rec.Tx <= manifest.TxApplied {
-			records = append(records, rec)
-		}
+		out.committed = append(out.committed, rec)
 	}
-	return records, nil
+	out.tornAtEnd = out.unparsed == 1 && unparsedIdx == lastNonEmpty
+	return out, nil
 }
 
-// ReadBlobChunk serves one chunk of a manifest-referenced blob, cut by the
-// frozen offset table (deterministic across reads). Binding (generation/
-// manifestRev/itemId/handle) is the caller's job against LoadManifest; this
-// validates handle ∈ manifest.
+// ReadBlobChunk serves one chunk of a manifest-referenced blob, cut at the
+// offsets PERSISTED at accept time (F2.1 P1-3: ReadAt the target range, no
+// full-file read, no content rescan; the store mutex covers only the
+// manifest lookup; the LRU touch is throttled). Binding (generation/
+// manifestRev/itemId/handle) is the caller's job against LoadManifest.
 func (s *TurnDetailStore) ReadBlobChunk(backendID, sessionID, turnID, handle string, chunkIndex int) (string, int, int64, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	dir, err := s.turnDir(backendID, sessionID, turnID)
 	if err != nil {
+		s.mu.Unlock()
 		return "", 0, 0, err
 	}
 	manifest, err := s.loadManifestLocked(dir)
 	if err != nil {
+		s.mu.Unlock()
 		return "", 0, 0, err
 	}
-	referenced := false
+	var offsets []int
+	var totalBytes int64
 	for _, item := range manifest.Items {
 		if item.BlobHandle == handle {
-			referenced = true
+			offsets = item.BlobOffsets
+			totalBytes = item.Bytes
 			break
 		}
 	}
-	if !referenced {
+	if offsets == nil {
+		s.mu.Unlock()
 		return "", 0, 0, fmt.Errorf("%w: %s", ErrDetailBlobUnref, handle)
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, "blobs", handle+".bin"))
+	// Throttled LRU touch: 9 chunk reads ≈ 1 manifest rewrite, not 9.
+	if now := s.now(); now.UnixMilli()-manifest.UpdatedAtMs >= blobChunkTouchMinInterval.Milliseconds() {
+		manifest.UpdatedAtMs = now.UnixMilli()
+		if err := s.persistManifestLocked(dir, manifest); err != nil {
+			s.mu.Unlock()
+			return "", 0, 0, err
+		}
+	}
+	s.mu.Unlock()
+
+	if chunkIndex < 0 || chunkIndex >= len(offsets)-1 {
+		return "", 0, 0, fmt.Errorf("%w: %d of %d", ErrDetailChunkIndex, chunkIndex, len(offsets)-1)
+	}
+	f, err := os.Open(filepath.Join(dir, "blobs", handle+".bin"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", 0, 0, fmt.Errorf("%w: %s", ErrDetailBlobMissing, handle)
 		}
 		return "", 0, 0, err
 	}
-	content := string(raw)
-	offsets := DetailChunkOffsets(content)
-	if chunkIndex < 0 || chunkIndex >= len(offsets)-1 {
-		return "", 0, 0, fmt.Errorf("%w: %d of %d", ErrDetailChunkIndex, chunkIndex, len(offsets)-1)
+	defer f.Close()
+	buf := make([]byte, offsets[chunkIndex+1]-offsets[chunkIndex])
+	if _, err := f.ReadAt(buf, int64(offsets[chunkIndex])); err != nil {
+		return "", 0, 0, err
 	}
-	// LRU honesty: a chunk read refreshes the turn's eviction priority.
-	manifest.UpdatedAtMs = s.now().UnixMilli()
-	_ = s.persistManifestLocked(dir, manifest)
-	return content[offsets[chunkIndex]:offsets[chunkIndex+1]], len(offsets) - 1, int64(len(content)), nil
+	return string(buf), len(offsets) - 1, totalBytes, nil
 }
 
 // UpdateState mirrors a terminal kernel state into the store manifest (no
@@ -569,11 +693,20 @@ func (s *TurnDetailStore) UpdateState(backendID, sessionID, turnID string, gener
 	return s.persistManifestLocked(dir, manifest)
 }
 
-// SweepUncommitted is the startup recovery pass (frozen step 4): every turn
-// dir is reconciled to its manifest commit point — items.log lines beyond
-// TxApplied are truncated; blobs referenced by no committed record are
-// deleted; a dir with content but no manifest is uncommitted garbage and
-// removed whole.
+// SweepUncommitted is the startup recovery pass (frozen step 4, strict F2.1
+// P0-3):
+//
+//   - a turn dir WITHOUT a manifest is uncommitted garbage — removed whole
+//     (a crash after blob rename but before items.log/manifest leaves such
+//     dirs; nothing is committed without the manifest rename);
+//   - within the committed range 1..TxApplied, ANY defect (missing/
+//     duplicate/corrupt record, page or chunkSeq discontinuity) quarantines
+//     the whole dir — the turn re-hydrates from official pagination;
+//   - only a LEGAL uncommitted suffix is rolled back: parseable records with
+//     tx > TxApplied, plus AT MOST ONE unparseable line, and only as the
+//     FINAL line (a torn append cannot produce anything after it);
+//   - the log rewrite itself is crash-safe (temp → fsync → rename → dir
+//     fsync); blob/sync errors propagate, never swallowed.
 func (s *TurnDetailStore) SweepUncommitted() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -588,69 +721,89 @@ func (s *TurnDetailStore) SweepUncommitted() error {
 		manifest, mErr := s.loadManifestLocked(path)
 		if mErr != nil {
 			if errors.Is(mErr, ErrDetailStoreNotFound) {
-				if _, statErr := os.Stat(filepath.Join(path, "items.log")); statErr == nil {
-					return os.RemoveAll(path)
-				}
-				return nil
+				// Unconditional: no manifest ⇒ nothing committed ⇒ garbage.
+				return os.RemoveAll(path)
 			}
 			return mErr
 		}
-		raw, readErr := os.ReadFile(filepath.Join(path, "items.log"))
-		if readErr != nil && !os.IsNotExist(readErr) {
-			return readErr
+		records, err := readLogRecords(path)
+		if err != nil {
+			return err
 		}
-		var kept []string
-		for _, line := range strings.Split(string(raw), "\n") {
-			if strings.TrimSpace(line) == "" {
-				continue
-			}
-			var rec detailTxRecord
-			if json.Unmarshal([]byte(line), &rec) != nil {
-				continue // torn tail write — uncommitted by definition
-			}
+		// A torn append damages only the FINAL line. Anything else unparseable
+		// — more than one bad line, or a bad line with content after it — is
+		// corruption of the log's structure: quarantine, never roll back.
+		if records.unparsed > 1 || (records.unparsed == 1 && !records.tornAtEnd) {
+			slog.Warn("detail-store: quarantining turn cache (unparseable line is not a final torn tail)",
+				"dir", path, "unparsed", records.unparsed, "tornAtEnd", records.tornAtEnd)
+			return os.RemoveAll(path)
+		}
+		kept := make([]detailTxRecord, 0, len(records.committed))
+		suffix := 0
+		for _, rec := range records.committed {
 			if rec.Tx <= manifest.TxApplied {
-				kept = append(kept, line)
+				kept = append(kept, rec)
+			} else {
+				suffix++
 			}
 		}
-		want := strings.Join(kept, "\n")
-		got := strings.TrimRight(string(raw), "\n")
-		if want != got {
-			tmp := filepath.Join(path, "tmp", "items.log.tmp")
-			if err := os.MkdirAll(filepath.Join(path, "tmp"), 0o755); err != nil {
-				return err
-			}
-			if err := os.WriteFile(tmp, []byte(want+"\n"), 0o644); err != nil {
-				return err
-			}
-			final := filepath.Join(path, "items.log")
-			if err := os.Rename(tmp, final); err != nil {
-				return err
-			}
-			syncDir(final)
+		if err := validateCommittedRecords(manifest, kept); err != nil {
+			// Committed range defective: quarantine whole dir (re-hydrate later).
+			slog.Warn("detail-store: quarantining corrupt turn cache", "dir", path, "err", err)
+			return os.RemoveAll(path)
 		}
-		committedHandles := make(map[string]bool)
-		for _, line := range kept {
-			var rec detailTxRecord
-			_ = json.Unmarshal([]byte(line), &rec)
-			for _, ref := range rec.Oversize {
-				committedHandles[ref.Handle] = true
-			}
-		}
-		blobDir := filepath.Join(path, "blobs")
-		entries, globErr := os.ReadDir(blobDir)
-		if globErr == nil {
-			for _, entry := range entries {
-				if entry.IsDir() {
-					continue
+		if suffix > 0 || records.unparsed == 1 {
+			slog.Info("detail-store: rolling back uncommitted suffix", "dir", path,
+				"records", suffix, "tornTail", records.tornAtEnd)
+			var buf strings.Builder
+			for _, rec := range kept {
+				line, err := json.Marshal(rec)
+				if err != nil {
+					return err
 				}
-				handle := strings.TrimSuffix(entry.Name(), ".bin")
-				if !committedHandles[handle] {
-					_ = os.Remove(filepath.Join(blobDir, entry.Name()))
-				}
+				buf.Write(line)
+				buf.WriteByte('\n')
+			}
+			if err := writeFileSynced(filepath.Join(path, "items.log"), []byte(buf.String())); err != nil {
+				return err
 			}
 		}
-		return nil
+		return s.sweepOrphanBlobs(path, kept)
 	})
+}
+
+// sweepOrphanBlobs deletes blobs referenced by no committed record (step-1
+// leftovers of rolled-back transactions). Errors propagate.
+func (s *TurnDetailStore) sweepOrphanBlobs(dir string, committed []detailTxRecord) error {
+	committedHandles := make(map[string]bool)
+	for _, rec := range committed {
+		for _, entry := range rec.Entries {
+			if entry.Ref != nil {
+				committedHandles[entry.Ref.Handle] = true
+			}
+		}
+	}
+	blobDir := filepath.Join(dir, "blobs")
+	entries, err := os.ReadDir(blobDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		handle := strings.TrimSuffix(entry.Name(), ".bin")
+		if committedHandles[handle] {
+			continue
+		}
+		if err := os.Remove(filepath.Join(blobDir, entry.Name())); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func dirSize(path string) int64 {

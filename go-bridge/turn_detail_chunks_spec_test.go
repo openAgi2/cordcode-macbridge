@@ -342,6 +342,34 @@ func TestDetailChunkOffsetsRuneSafety(t *testing.T) {
 	}
 }
 
+// F2.1 P1 fix: the escaped-size re-check covers the FINAL chunk too. A tail
+// whose raw size is under the target but whose escaped form blows past the
+// advisory cap (control chars escape to \uXXXX, 6× expansion) must be split
+// further — before F2.1 the tail was exempt and could ship ~600KB encoded.
+func TestDetailChunkOffsetsTailEscapedOverflow(t *testing.T) {
+	advisory := int(core.TurnDetailChunkAdvisoryCapBytes)
+	// 135KB plain 'a' (one target chunk) + 100KB of \x01 (raw tail < target,
+	// escaped tail ≈ 621KB > advisory).
+	content := strings.Repeat("a", 135*1024) + strings.Repeat("\x01", 100*1024)
+	offsets := DetailChunkOffsets(content)
+	if count := len(offsets) - 1; count < 3 {
+		t.Fatalf("escaping-heavy tail must split beyond the target cut (got %d chunks)", count)
+	}
+	for i := 1; i < len(offsets); i++ {
+		chunk := content[offsets[i-1]:offsets[i]]
+		if esc := jsonEscapedLen(chunk); esc > advisory {
+			t.Fatalf("chunk[%d] escaped size %d exceeds advisory %d (tail is not exempt)", i-1, esc, advisory)
+		}
+	}
+	var rebuilt strings.Builder
+	for i := 1; i < len(offsets); i++ {
+		rebuilt.WriteString(content[offsets[i-1]:offsets[i]])
+	}
+	if rebuilt.String() != content {
+		t.Fatal("chunk union must reconstruct the original")
+	}
+}
+
 func TestTurnDetailChunksDescriptorRidesOwnGate(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "agent", "codex-remote", "wire_descriptor.go"))
 	if err != nil {
