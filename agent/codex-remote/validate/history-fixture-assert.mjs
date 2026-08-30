@@ -557,9 +557,23 @@ function syntheticFixture() {
   return {
     schema_version: 2,
     classification: "LIVE-REDACTED-OBSERVATION",
+    gate_effect: "g0-evidence-input",
+    target: {
+      detected: { chatgptDesktopVersion: "26.825.41651", bundleVersion: "7345", embeddedCodexVersion: "codex-cli 0.151.0-alpha.7.1", controllerProtocolVersion: 3 },
+      planFrozenBaseline: { chatgptDesktopVersion: "26.825.32147", embeddedCodexVersion: "codex-cli 0.150.0-alpha.12.2", upstreamTag: "rust-v0.150.0-alpha.12.2" },
+      driftAssessment: { drifted: true, note: "synthetic self-test fixture" },
+    },
+    metadata: {
+      captured_at: "2026-08-30T00:00:00Z", capture_purpose: "synthetic self-test", source_classification: "synthetic",
+      operator_attestation: "PENDING-OWNER", redaction_procedure: "synthetic", secret_scan_command: "synthetic",
+      secret_scan_result: "PENDING", cleanup_result: "synthetic",
+    },
     probe: { caps: { turnsChainPages: 80 } },
+    observations: [{ kind: "rpc", t_ms: 1 }],
+    adjudication: { result: "CAPTURED-PENDING-ASSERTIONS", note: "synthetic self-test" },
     data: {
       inventory: { threads: [{ thread: "id-1", historyMode: "paginated" }], counts: { total: 1, paginated: 1, legacy: 0, unknownMode: 0 } },
+      discovery: [{ thread: "id-1", historyMode: "paginated", turnsSeen: 35, pagesWalked: 2, reachedEofWithinCap: true }],
       longestThread: {
         thread: "id-1",
         historyMode: "paginated",
