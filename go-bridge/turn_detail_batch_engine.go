@@ -169,6 +169,7 @@ func (h *Handlers) handleSessionTurnItemsV2(
 			sendAck(&TurnDetailBatchAck{
 				DetailLoadState: DetailStateLoaded,
 				SyncRev:         h.loadedDetailWatermark(msg.BackendID, sessionID, turnID, currentSyncRev),
+				TurnGeneration:  target.TurnGeneration,
 				ManifestRev:     manifest.ManifestRev,
 				DeliveryID:      newDeliveryID(),
 				Progress:        h.detailStoreProgress(store, msg.BackendID, sessionID, turnID, target),
@@ -332,6 +333,7 @@ func (h *Handlers) runTurnDetailBatch(
 	flight *turnDetailChunksFlight,
 ) *TurnDetailBatchAck {
 	deliveryID := newDeliveryID()
+	generation := 0
 	store := h.detailStore()
 	findTurn := func(proj SessionProjection) *TurnProjection {
 		for i := range proj.Turns {
@@ -358,6 +360,7 @@ func (h *Handlers) runTurnDetailBatch(
 				ReasonCode: "stale_turn", DeliveryID: deliveryID,
 				FirstChunkSeq: deliveredFirst, LastChunkSeq: deliveredLast}
 		}
+		generation = turn.TurnGeneration
 		manifest, _ := store.LoadManifest(backendID, sessionID, turnID)
 		rev, items, bytes := mergeTurnSummary(turn, manifest)
 		if rehydrate {
@@ -373,16 +376,18 @@ func (h *Handlers) runTurnDetailBatch(
 					return 0
 				}())
 			return &TurnDetailBatchAck{DetailLoadState: DetailStateLoaded,
-				SyncRev:     h.loadedDetailWatermark(backendID, sessionID, turnID, kernelSyncRev(h, backendID, sessionID)),
-				ManifestRev: rev, DeliveryID: deliveryID,
+				SyncRev:        h.loadedDetailWatermark(backendID, sessionID, turnID, kernelSyncRev(h, backendID, sessionID)),
+				TurnGeneration: generation,
+				ManifestRev:    rev, DeliveryID: deliveryID,
 				FirstChunkSeq: deliveredFirst, LastChunkSeq: deliveredLast,
 				Progress: progressOf(manifest, items, bytes)}
 		}
 		if turn.DetailLoadState == DetailStateLoaded {
 			// A concurrent batch already finished the turn — its truth wins.
 			return &TurnDetailBatchAck{DetailLoadState: DetailStateLoaded,
-				SyncRev:     h.loadedDetailWatermark(backendID, sessionID, turnID, kernelSyncRev(h, backendID, sessionID)),
-				ManifestRev: rev, DeliveryID: deliveryID,
+				SyncRev:        h.loadedDetailWatermark(backendID, sessionID, turnID, kernelSyncRev(h, backendID, sessionID)),
+				TurnGeneration: generation,
+				ManifestRev:    rev, DeliveryID: deliveryID,
 				FirstChunkSeq: deliveredFirst, LastChunkSeq: deliveredLast,
 				Progress: progressOf(manifest, items, bytes)}
 		}
@@ -392,16 +397,18 @@ func (h *Handlers) runTurnDetailBatch(
 		}})
 		if err != nil {
 			return &TurnDetailBatchAck{DetailLoadState: DetailStateFailed,
-				SyncRev:    kernelSyncRev(h, backendID, sessionID),
-				ReasonCode: "stale_turn", ManifestRev: rev, DeliveryID: deliveryID,
+				SyncRev:        kernelSyncRev(h, backendID, sessionID),
+				TurnGeneration: generation,
+				ReasonCode:     "stale_turn", ManifestRev: rev, DeliveryID: deliveryID,
 				FirstChunkSeq: deliveredFirst, LastChunkSeq: deliveredLast,
 				Progress: progressOf(manifest, items, bytes)}
 		}
 		h.eventPublisher.PublishProjectionDetail(backendID, sessionID, patches, requester)
 		mirrorState(store, backendID, sessionID, turnID, turn.TurnGeneration, DetailStateFailed, reasonCode)
 		return &TurnDetailBatchAck{DetailLoadState: DetailStateFailed,
-			SyncRev:    patches[len(patches)-1].SyncRev,
-			ReasonCode: reasonCode, ManifestRev: rev, DeliveryID: deliveryID,
+			SyncRev:        patches[len(patches)-1].SyncRev,
+			TurnGeneration: generation,
+			ReasonCode:     reasonCode, ManifestRev: rev, DeliveryID: deliveryID,
 			FirstChunkSeq: deliveredFirst, LastChunkSeq: deliveredLast,
 			Progress: progressOf(manifest, items, bytes)}
 	}
@@ -410,7 +417,7 @@ func (h *Handlers) runTurnDetailBatch(
 	if turn == nil || turn.Status != "completed" {
 		return failTerminal("stale_turn", 0, 0)
 	}
-	generation := turn.TurnGeneration
+	generation = turn.TurnGeneration
 
 	agent, haveAgent := h.getFirstAgentByName(backendID)
 	if !haveAgent {
@@ -548,6 +555,7 @@ func (h *Handlers) runTurnDetailBatch(
 				return &TurnDetailBatchAck{
 					DetailLoadState: DetailStateLoaded,
 					SyncRev:         h.loadedDetailWatermark(backendID, sessionID, turnID, kernelSyncRev(h, backendID, sessionID)),
+					TurnGeneration:  generation,
 					ManifestRev:     rev, DeliveryID: deliveryID,
 					FirstChunkSeq: deliveredFirst, LastChunkSeq: deliveredLast,
 					Progress: progressOf(m, items, bytes),
@@ -564,7 +572,8 @@ func (h *Handlers) runTurnDetailBatch(
 			mirrorState(store, backendID, sessionID, turnID, generation, DetailStatePartial, "")
 			return &TurnDetailBatchAck{
 				DetailLoadState: DetailStatePartial, SyncRev: patches[len(patches)-1].SyncRev,
-				ManifestRev: rev, DeliveryID: deliveryID,
+				TurnGeneration: generation,
+				ManifestRev:    rev, DeliveryID: deliveryID,
 				FirstChunkSeq: deliveredFirst, LastChunkSeq: deliveredLast,
 				Progress: progressOf(m, items, bytes),
 			}
@@ -749,7 +758,8 @@ func (h *Handlers) runTurnDetailBatch(
 			}
 			return &TurnDetailBatchAck{
 				DetailLoadState: DetailStateLoaded, SyncRev: syncRev,
-				ManifestRev: rev, DeliveryID: deliveryID,
+				TurnGeneration: generation,
+				ManifestRev:    rev, DeliveryID: deliveryID,
 				FirstChunkSeq: deliveredFirst, LastChunkSeq: deliveredLast,
 				Progress: progressOf(manifest, items, bytes),
 			}

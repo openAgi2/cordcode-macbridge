@@ -1171,21 +1171,24 @@ failed(interrupted)` **携带保留 manifest**（partial 不是孤儿——进�
 
 ```jsonc
 // 批次因 deadline 暂停（续传，不是失败）
-{ "detailLoadState": "partial", "syncRev": 130, "manifestRev": 7,
+{ "detailLoadState": "partial", "syncRev": 130, "turnGeneration": 3, "manifestRev": 7,
   "deliveryId": "d-17", "firstChunkSeq": 20, "lastChunkSeq": 27,
   "progress": { "pages": 46, "items": 227, "bytes": 937241, "eof": false } }
 // EOF
-{ "detailLoadState": "loaded", "syncRev": 131, "manifestRev": 8,
+{ "detailLoadState": "loaded", "syncRev": 131, "turnGeneration": 3, "manifestRev": 8,
   "deliveryId": "d-17", "firstChunkSeq": 20, "lastChunkSeq": 31,
   "progress": { "pages": 52, "items": 260, "bytes": 1020000, "eof": true } }
 // 可重试失败（进度保留在 detail cache 与 manifest；本批未交付 chunk 时范围两端为 0）
-{ "detailLoadState": "failed", "syncRev": 132, "reasonCode": "upstream_error",
+{ "detailLoadState": "failed", "syncRev": 132, "reasonCode": "upstream_error", "turnGeneration": 3,
   "deliveryId": "d-17", "firstChunkSeq": 0, "lastChunkSeq": 0,
   "progress": { "pages": 19, "items": 95, "bytes": 412906, "eof": false } }
 ```
 
 - `deliveryId`：本次加载尝试（批次）的 bridge 侧不透明标识，跨批次各不相同；客户端
   只接受**当前** `(session, turn, generation, deliveryId)` 的 chunk 帧；
+- `turnGeneration`：本批次所属的 turn generation；客户端必须把 ack 与 overlay 的
+  generation、deliveryId、manifestRev、chunk 闭区间和 progress 一起核对，任何缺字段或
+  身份不一致均 fail-closed，不得回落为 v1 成功；
 - `firstChunkSeq`/`lastChunkSeq`：本批交付的 chunkSeq 闭区间；本批没有交付任何 chunk
   时两端为 0（此时客户端只依赖 manifestRev+progress）；
 - **完成条件（F1.1 P0-3）**：客户端只有在收到连续的

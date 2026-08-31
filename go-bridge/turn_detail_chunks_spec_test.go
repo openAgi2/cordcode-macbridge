@@ -198,7 +198,7 @@ func TestTurnDetailBatchAckWireShape(t *testing.T) {
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"detailLoadState", "syncRev", "manifestRev", "deliveryId", "firstChunkSeq", "lastChunkSeq", "progress"} {
+	for _, key := range []string{"detailLoadState", "syncRev", "turnGeneration", "manifestRev", "deliveryId", "firstChunkSeq", "lastChunkSeq", "progress"} {
 		if _, ok := decoded[key]; !ok {
 			t.Errorf("batch ack missing wire key %q in %s", key, raw)
 		}

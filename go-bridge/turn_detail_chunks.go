@@ -98,6 +98,7 @@ type TurnDetailBatchAck struct {
 	DetailLoadState string             `json:"detailLoadState"` // loading | partial | loaded | failed
 	SyncRev         int                `json:"syncRev"`
 	ReasonCode      string             `json:"reasonCode,omitempty"`
+	TurnGeneration  int                `json:"turnGeneration"`
 	ManifestRev     int                `json:"manifestRev"`
 	DeliveryID      string             `json:"deliveryId"`
 	FirstChunkSeq   int                `json:"firstChunkSeq"`

@@ -9,6 +9,9 @@ package gobridge
 
 import (
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +36,38 @@ func turnOutputChunkDispatch(t *testing.T, h *Handlers, conn *olderWalkConn, par
 		t.Fatalf("turn_output_chunk ack decode: %v (%s)", err, encoded)
 	}
 	return nil, &ack
+}
+
+// A missing blob with an intact EOF manifest must invalidate that manifest;
+// otherwise the client's session_turn_items retry would take the loaded
+// short-circuit and remain trapped in blob_evicted forever.
+func TestTurnOutputChunkMissingBlobInvalidatesCacheForRehydration(t *testing.T) {
+	h, conn, sessionID, agent := turnDetailV2Harness(t)
+	ref, manifestRev, _ := outputChunkFixture(t, h, conn, sessionID, agent)
+	blobPath := filepath.Join(h.dataDir, "detail", "codex-remote", hashSeg(sessionID), hashSeg("T1"), "blobs", ref.Handle+".bin")
+	if err := os.Remove(blobPath); err != nil {
+		t.Fatal(err)
+	}
+
+	wireErr, _ := turnOutputChunkDispatch(t, h, conn, map[string]any{
+		"sessionId": sessionID, "turnId": "T1", "turnGeneration": 0,
+		"manifestRev": manifestRev, "itemId": ref.ItemID, "handle": ref.Handle, "chunkIndex": 0,
+	})
+	if wireErr == nil || wireErr.Code != "blob_evicted" {
+		t.Fatalf("missing blob err = %+v", wireErr)
+	}
+	if _, err := h.detailStore().LoadManifest("codex-remote", sessionID, "T1"); !errors.Is(err, ErrDetailStoreNotFound) {
+		t.Fatalf("missing blob must invalidate complete cache, got %v", err)
+	}
+
+	agent.pageFetches = 0
+	wireErr, ack := turnItemsDispatchV2(t, h, conn, sessionID, "T1", nil)
+	if wireErr != nil || ack.DetailLoadState != DetailStateLoaded || !ack.Progress.EOF {
+		t.Fatalf("rehydration ack = %+v err = %+v", ack, wireErr)
+	}
+	if agent.pageFetches == 0 {
+		t.Fatal("invalidated cache must re-walk official pagination")
+	}
 }
 
 // outputChunkFixture loads one oversize turn via the v2 batch and returns

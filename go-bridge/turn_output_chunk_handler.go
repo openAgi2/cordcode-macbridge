@@ -153,7 +153,19 @@ func (h *Handlers) handleTurnOutputChunk(conn Connection, msg WireMessage, _ cor
 	data, totalChunks, total, err := store.ReadBlobChunk(
 		msg.BackendID, params.SessionID, params.TurnID, params.Handle, params.ChunkIndex)
 	if err != nil {
-		if errors.Is(err, ErrDetailBlobMissing) || errors.Is(err, ErrDetailBlobUnref) {
+		if errors.Is(err, ErrDetailBlobMissing) {
+			// A complete manifest that references a missing blob is not a usable
+			// loaded cache. Invalidate the whole turn so the client's documented
+			// session_turn_items retry enters the real re-hydration path instead
+			// of short-circuiting forever on manifest.Resume.EOF.
+			if dropErr := store.DropTurn(msg.BackendID, params.SessionID, params.TurnID); dropErr != nil {
+				slog.Warn("go-bridge: failed to invalidate detail cache after missing blob",
+					"sessionId", params.SessionID, "turnId", params.TurnID, "err", dropErr)
+			}
+			sendErr("blob_evicted", "blob file is gone (evicted): "+err.Error(), true)
+			return
+		}
+		if errors.Is(err, ErrDetailBlobUnref) {
 			sendErr("blob_evicted", "blob file is gone (evicted): "+err.Error(), true)
 			return
 		}
