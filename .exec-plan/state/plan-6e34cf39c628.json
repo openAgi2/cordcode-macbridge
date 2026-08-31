@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-31T11:44:00+08:00",
+  "updated_at": "2026-08-31T16:33:00+08:00",
   "todos": [
     {
       "id": "phase0-probe-impl",
@@ -1070,20 +1070,113 @@
         "phase3-ios-ux-tests"
       ],
       "source": "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md",
-      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree; owner-hands-required | 2026-08-30: client batch dc2a35ff + server flip 0808a7e both committed; install this pair to device for G3. Preregistered baseline caveat: 12 pre-existing CCCodeTests failures at HEAD cacb77ee (inventory in phase3-ios-state-regression notes) are NOT G3 blockers; G3 matrix is §4 #1–#10.\n\n[G3 UX loop 2026-08-30 night] Owner real-device feedback rounds 1-4, all fixed + device-installed, awaiting remaining matrix items (#3-#10):\n- r1 entry at END of session + no official duration: official Turn.durationMs chain Mac 1e1dcd7 (codec/history/reducer/hydrate/live payload) + iOS 9ac0dfa8 (ChatGPT-style header row at turn top, auto-expand on load, duplicate-duration suppression).\n- r2 only-last-turn duration + dead tap: per-turn contract field WebAssistantTurn.turnDurationSeconds (footer only attaches to last assistant item) + missing TurnDetailFetching conformance on CCCodeBridgeBackendClient (silent no_fetcher per tap) — iOS 3f0a0e26, regression test uses REAL client.\n- r3 collapse left tools aggregated + thinking visible: entry is now the single switch for the WHOLE process area — toggle-all groups, collapsed hides every process group incl. summary rows — iOS f9f357c3.\n- r4 interleaved progress agentMessages stayed after collapse: tailAnswerNarrativeIDs (answer = narratives after last process block, mirroring official turns/list summary semantics = first userMessage + LAST agentMessage per thread_processor.rs apply_thread_turns_items_view) — iOS 4236f028. Known boundary: turn with tool calls AFTER the final answer; exact fix = upstream MessagePhase(commentary|final_answer) wiring, proposed as follow-up.\nDevices current: iPhone 16 Pro reinstalled at 4236f028; Mac runtime 1e1dcd77961a. | 2026-08-30 deep-night G3 matrix round1+#7/#10 round2: #1-#6 pass (#5 closes iPhone sync regression), #9 owner-pending; #7 ghost-entry + #10 legacy-memo render-chain fixed iOS c7851dae (installed, awaiting re-test); #8 owner FINAL adjudication: 512KB/24p whole-turn cap is a TEMPORARY safety gate not a product limit — final design = official cursor pagination + bounded incremental commit + transient resource gates (single page/patch/RPC/memory/spillage/cancel), NEVER a bare 512KB raise (fence/journal/relay 2MB limits shift the failure point); evidence step LANDED: agent-level per-page 'turn items metrics' slog (pageCount/rawResponseBytes/decodedItemBytes/itemCount/type dist/maxItem+type/per-page+total timing/failGate; no content) + tests; Mac runtime rebuilt+cover-installed (built 2026-08-30T15:31:19Z); G3 acceptance amended: matrix gains 'one real >512KB/24p turn expands detail successfully' row — G3 NOT fully passed until final design lands; plan §3.0 adjudication item 5 + unified-bridge-protocol §11.7 resource-gate section updated accordingly; final-design implementation queued (kernel incremental merge + transient gates + iOS progressive display) pending metrics data from 3-10 real 8-15min turns | BLOCKED 2026-08-31: matrix remains owner-hands-required; only one iPhone is online, second iPhone is offline, and UI/XCUITest execution has not been explicitly authorized",
+      "notes": "parent-plan:docs/2026-08-26-codex-remote-backend-implementation-plan.md | parent-state:.exec-plan/state/plan-bb4683ae3ec1.json | parent-status:proved-complete | ios-worktree; owner-hands-required | 2026-08-30: client batch dc2a35ff + server flip 0808a7e both committed; install this pair to device for G3. Preregistered baseline caveat: 12 pre-existing CCCodeTests failures at HEAD cacb77ee (inventory in phase3-ios-state-regression notes) are NOT G3 blockers; G3 matrix is §4 #1–#10.\n\n[G3 UX loop 2026-08-30 night] Owner real-device feedback rounds 1-4, all fixed + device-installed, awaiting remaining matrix items (#3-#10):\n- r1 entry at END of session + no official duration: official Turn.durationMs chain Mac 1e1dcd7 (codec/history/reducer/hydrate/live payload) + iOS 9ac0dfa8 (ChatGPT-style header row at turn top, auto-expand on load, duplicate-duration suppression).\n- r2 only-last-turn duration + dead tap: per-turn contract field WebAssistantTurn.turnDurationSeconds (footer only attaches to last assistant item) + missing TurnDetailFetching conformance on CCCodeBridgeBackendClient (silent no_fetcher per tap) — iOS 3f0a0e26, regression test uses REAL client.\n- r3 collapse left tools aggregated + thinking visible: entry is now the single switch for the WHOLE process area — toggle-all groups, collapsed hides every process group incl. summary rows — iOS f9f357c3.\n- r4 interleaved progress agentMessages stayed after collapse: tailAnswerNarrativeIDs (answer = narratives after last process block, mirroring official turns/list summary semantics = first userMessage + LAST agentMessage per thread_processor.rs apply_thread_turns_items_view) — iOS 4236f028. Known boundary: turn with tool calls AFTER the final answer; exact fix = upstream MessagePhase(commentary|final_answer) wiring, proposed as follow-up.\nDevices current: iPhone 16 Pro reinstalled at 4236f028; Mac runtime 1e1dcd77961a. | 2026-08-30 deep-night G3 matrix round1+#7/#10 round2: #1-#6 pass (#5 closes iPhone sync regression), #9 owner-pending; #7 ghost-entry + #10 legacy-memo render-chain fixed iOS c7851dae (installed, awaiting re-test); #8 owner FINAL adjudication: 512KB/24p whole-turn cap is a TEMPORARY safety gate not a product limit — final design = official cursor pagination + bounded incremental commit + transient resource gates (single page/patch/RPC/memory/spillage/cancel), NEVER a bare 512KB raise (fence/journal/relay 2MB limits shift the failure point); evidence step LANDED: agent-level per-page 'turn items metrics' slog (pageCount/rawResponseBytes/decodedItemBytes/itemCount/type dist/maxItem+type/per-page+total timing/failGate; no content) + tests; Mac runtime rebuilt+cover-installed (built 2026-08-30T15:31:19Z); G3 acceptance amended: matrix gains 'one real >512KB/24p turn expands detail successfully' row — G3 NOT fully passed until final design lands; plan §3.0 adjudication item 5 + unified-bridge-protocol §11.7 resource-gate section updated accordingly; final-design implementation queued (kernel incremental merge + transient gates + iOS progressive display) pending metrics data from 3-10 real 8-15min turns | BLOCKED 2026-08-31 owner regression: duration/detail entry appears seconds after page load; tapping can jump the vertical viewport instead of expanding downward; historical sessions show partial detail for untouched turns; collapse control is absent/unstable. Double-iPhone validation explicitly deprioritized by owner. review-fix-for:phase3-ios-ux-regression",
       "verification": {
         "required": true,
         "status": "failed",
         "method": "manual",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "External blocker: §4 requires owner-hands acceptance. Both required iPhones are now online (00008140-001E69503453001C and 00008030-00112C6E0C44802E), so device availability is no longer the blocker. Existing notes attest #1–#6 only; #7/#10 require post-fix retest, #8 requires the generated long-session substitute or owner acceptance of unit evidence, and #9 remains unexecuted. Automated UI interaction is intentionally not substituted without explicit authorization.",
+        "summary": "Repairable-heavy owner regression failure: recent-session duration/detail entry appears only after a visible delay; tapping it intermittently changes the vertical viewport instead of expanding content downward; old sessions materialize partial process content for turns the owner never opened; expanded state/collapse controls are inconsistent. This invalidates G3 UX closure. Double-iPhone validation is explicitly deprioritized by owner.",
         "artifacts": [
           "docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md#4-owner-真机验收矩阵",
-          "device-online:00008140-001E69503453001C",
-          "device-online:00008030-00112C6E0C44802E"
+          "/Users/jacklee/Downloads/picture/2026-08-31 11.57.56.jpg",
+          "/Users/jacklee/Downloads/picture/2026-08-31 11.58.55.jpg",
+          "/Users/jacklee/Downloads/picture/2026-08-31 11.59.40.jpg",
+          "/Users/jacklee/Downloads/picture/2026-08-31 12.11.18.jpg"
         ],
-        "checked_at": "2026-08-31T11:44:00+08:00",
+        "checked_at": "2026-08-31T12:18:00+08:00",
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase3-ios-ux-review-fix-impl",
+      "title": "G3 review fix — stable per-turn expansion and scroll anchoring",
+      "description": "Diagnose and fix the owner-reported iOS Codex Desktop message-page regressions: delayed duration/detail entry, tap-induced vertical jump, untouched historical turns showing partial detail, and missing/unstable collapse. Before implementation, audit the official /Users/jacklee/Projects/codex message-page source and record exact upstream anchors; preserve per-turn identity and stable viewport semantics; double-iPhone behavior is out of this repair's priority scope. review-fix-for:phase3-ios-ux-regression",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "owner-real-device-regression-2026-08-31",
+      "notes": "review-fix-for:phase3-ios-ux-regression | official Codex source audited before edit; iOS private ChatGPT UI is not in that repo, but ThreadItem identity/order, official MessagePhase, duration and final separator were reused | ios-worktree | no-ui-automation-without-owner-authorization | 2026-08-31 implementation closed; owner interaction regression remains pending",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Removed the persistent ResizeObserver/scrollTop anchor writer; session-scoped Virtuoso keys and stable pre-split detail row topology prevent cross-session measurement reuse and whole-turn to row hot replacement. Finalized detail expansion is isolated per turn, ignores global reasoning preference, supports partial/failed progressive content, merges Summary final text until canonical replacement, and keeps one collapse control/divider. Mac projection now preserves official Codex commentary/final_answer phase with reducer-local provenance so legacy live deltas still receive terminal classification.",
+        "artifacts": [
+          "/Users/jacklee/Projects/cordcode-ios-codex-remote/message-web/src/components/Timeline.tsx",
+          "/Users/jacklee/Projects/cordcode-ios-codex-remote/message-web/src/components/turns/TurnDetailEntry.tsx",
+          "/Users/jacklee/Projects/cordcode-ios-codex-remote/message-web/src/components/turns/AssistantTurn.tsx",
+          "/Users/jacklee/Projects/cordcode-ios-codex-remote/message-web/src/components/turns/SplitAssistantTurnRows.tsx",
+          "/Users/jacklee/Projects/cordcode-ios-codex-remote/message-web/src/components/turns/renderRowStore.ts",
+          "/Users/jacklee/Projects/cordcode-ios-codex-remote/message-web/contract/schema/contract.json",
+          "/Users/jacklee/Projects/cordcode-ios-codex-remote/OpenCodeiOS/OpenCodeiOS/Models/SessionProjectionMapping.swift",
+          "agent/codex-remote/history.go",
+          "go-bridge/projection_reducer.go",
+          "/Users/jacklee/Projects/codex/codex-rs/tui/src/thread_transcript.rs",
+          "/Users/jacklee/Projects/codex/codex-rs/tui/src/history_cell/separators.rs"
+        ],
+        "checked_at": "2026-08-31T16:25:00+08:00",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server/src/request_processors/thread_processor.rs"
+      }
+    },
+    {
+      "id": "phase3-ios-ux-review-fix-tests",
+      "title": "G3 review fix — expansion identity and viewport unit tests",
+      "description": "Add focused automated coverage for per-turn expansion isolation, delayed projection updates, collapse restoration, summary/detail merge, and deterministic scroll-anchor decisions. review-fix-for:phase3-ios-ux-regression",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "tests",
+      "depends_on": [
+        "phase3-ios-ux-review-fix-impl"
+      ],
+      "source": "owner-real-device-regression-2026-08-31",
+      "notes": "review-fix-for:phase3-ios-ux-regression | targeted unit/static/build tests completed; UI tests were not run because owner authorization is required",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Web full suite passed 298/298 with 2 existing skips; focused detail/row suite passed 37/37; TypeScript and production bundle build passed. contract.json now owns the materialized-content marker and partial state, generated quicktype Swift/TypeScript models, and passed the Swift decode/encode round-trip gate. iOS F6 targeted suite passed 57/57. Full codex-remote + go-bridge packages passed, including official phase preservation and legacy terminal classification. Final Debug app built, installed and launched on the connected iPhone; interaction acceptance is intentionally not claimed here.",
+        "artifacts": [
+          "cmd:npm test => 298 passed / 2 skipped across 36 passed files",
+          "cmd:npx vitest run Timeline.rows AssistantTurn TurnDetailEntry => 37 passed",
+          "cmd:npm run build:ios => PASS (index-uyNCLToc.js / index-CVlfhpWt.css)",
+          "cmd:npm run contract:verify:swift => PASS (native commands + web events idempotent)",
+          "cmd:xcodebuild selected F6 suites => 57 passed / 0 failed",
+          "/tmp/cordcode-turn-detail-tests/Logs/Test/Test-CordCode-2026.08.31_16-21-46-+0800.xcresult",
+          "cmd:go test ./agent/codex-remote ./go-bridge => PASS (go-bridge 76.971s)",
+          "device:00008140-001E69503453001C installed+launched org.openagi.cordcode databaseSequenceNumber=2604"
+        ],
+        "checked_at": "2026-08-31T16:33:00+08:00",
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "phase3-ios-ux-review-fix-regression",
+      "title": "G3 review fix — owner real-device expansion regression",
+      "description": "Build/install to the connected iPhone and re-run the owner-reported recent/old-session expansion cases: entry timing, downward expansion without viewport jump, untouched-turn isolation, collapse, and ChatGPT-style process/body divider. No double-iPhone requirement for this repair. review-fix-for:phase3-ios-ux-regression",
+      "status": "ready",
+      "phase": "phase3",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-ios-ux-review-fix-tests"
+      ],
+      "source": "owner-real-device-regression-2026-08-31",
+      "notes": "review-fix-for:phase3-ios-ux-regression | owner-hands final verification | final bundle installed+launched 2026-08-31 on iPhone 00008140-001E69503453001C (databaseSequenceNumber=2604); recent/old-session tap/scroll/collapse interaction still requires owner ruling",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null,
         "upstream_anchor": null
       }
     },

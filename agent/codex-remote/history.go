@@ -147,6 +147,10 @@ type remoteThreadItem struct {
 
 	Content []remoteUserContentPart
 	Text    string
+	// Phase is the official agentMessage phase: commentary or final_answer.
+	// It is kept on the history item so the iOS presentation layer can separate
+	// progress narration from the final answer without guessing from position.
+	Phase   string
 	Summary []string
 	Tail    []string
 
@@ -189,10 +193,11 @@ func decodeRemoteThreadItem(raw json.RawMessage) remoteThreadItem {
 		it.Text, it.Content = value.Text, value.Content
 	case "agentMessage", "plan":
 		var value struct {
-			Text string `json:"text"`
+			Text  string `json:"text"`
+			Phase string `json:"phase"`
 		}
 		_ = json.Unmarshal(raw, &value)
-		it.Text = value.Text
+		it.Text, it.Phase = value.Text, value.Phase
 	case "reasoning":
 		var value struct {
 			Summary []string `json:"summary"`
@@ -351,7 +356,14 @@ func mapRemoteHistoryItem(turn *core.TurnScopedHistoryTurn, item remoteThreadIte
 		}
 	case "agentMessage":
 		if item.Text != "" {
-			turn.Parts = append(turn.Parts, map[string]any{"type": "text", "content": item.Text, "itemId": item.ID})
+			part := map[string]any{"type": "text", "content": item.Text, "itemId": item.ID}
+			switch item.Phase {
+			case "commentary":
+				part["presentation"] = "progress"
+			case "final_answer":
+				part["presentation"] = "final"
+			}
+			turn.Parts = append(turn.Parts, part)
 		}
 	case "reasoning":
 		// G0.5 (owner 2026-08-30): history serves only the reasoning

@@ -1387,9 +1387,13 @@ func turnScopedHistoryTurnToProjectionEvents(turns []core.TurnScopedHistoryTurn)
 				if chunk == "" || chunk == "<nil>" {
 					continue
 				}
+				data := map[string]interface{}{"itemId": itemID, "turnId": t.TurnID, "delta": chunk}
+				if presentation := strings.TrimSpace(fmt.Sprint(part["presentation"])); presentation == "progress" || presentation == "final" {
+					data["presentation"] = presentation
+				}
 				out = append(out, projectionHydrateEvent{
 					Event: "text_delta",
-					Data:  map[string]interface{}{"itemId": itemID, "turnId": t.TurnID, "delta": chunk},
+					Data:  data,
 				})
 			case "reasoning":
 				chunk := strings.TrimSpace(fmt.Sprint(part["content"]))

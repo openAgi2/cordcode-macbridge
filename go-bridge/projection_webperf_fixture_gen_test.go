@@ -68,6 +68,17 @@ func writeOrVerifyFixture(t *testing.T, path string, projection SessionProjectio
 		t.Fatalf("marshal projection: %v", err)
 	}
 	data = append(data, '\n')
+	// Deliberate regeneration path for reviewed mapping/kernel changes. Normal test
+	// runs remain byte-equality verification and can never rewrite committed truth.
+	if os.Getenv("CORDCODE_UPDATE_WEBPERF_FIXTURES") == "1" {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatalf("update fixture: %v", err)
+		}
+		return
+	}
 	if existing, err := os.ReadFile(path); err == nil {
 		if string(existing) != string(data) {
 			t.Fatalf("committed fixture %s diverged from real-pipeline regeneration — mapping/kernel drift", path)

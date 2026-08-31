@@ -90,6 +90,26 @@ func TestHistoryReadFailClosedWithoutClient(t *testing.T) {
 	}
 }
 
+func TestRemoteHistoryCarriesOfficialAgentMessagePhase(t *testing.T) {
+	thread := &remoteThread{ID: "thread_phase", Turns: []remoteTurn{{
+		ID: "turn_phase", Status: remoteTurnStatusCompleted,
+		Items: []json.RawMessage{
+			json.RawMessage(`{"type":"agentMessage","id":"progress-1","phase":"commentary","text":"正在检查。"}`),
+			json.RawMessage(`{"type":"agentMessage","id":"final-1","phase":"final_answer","text":"检查完成。"}`),
+		},
+	}}}
+	turn := mapRemoteHistoryTurns(thread, 0)[0]
+	if len(turn.Parts) != 2 {
+		t.Fatalf("parts=%d, want 2: %+v", len(turn.Parts), turn.Parts)
+	}
+	if got := turn.Parts[0]["presentation"]; got != "progress" {
+		t.Fatalf("commentary presentation=%v, want progress", got)
+	}
+	if got := turn.Parts[1]["presentation"]; got != "final" {
+		t.Fatalf("final_answer presentation=%v, want final", got)
+	}
+}
+
 func TestRemoteHistoryMapsOfficialItemVariants(t *testing.T) {
 	thread := &remoteThread{ID: "thread_variants", Turns: []remoteTurn{{
 		ID: "turn_variants", Status: remoteTurnStatusCompleted,

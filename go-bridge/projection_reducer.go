@@ -552,7 +552,7 @@ func (m *MessageProjection) trailingTextPartForItem(itemID string) *ProjectionPa
 
 func (m *MessageProjection) ensureTrailingTextPart() *ProjectionPart {
 	if len(m.Parts) == 0 || m.Parts[len(m.Parts)-1].Type != "text" {
-		m.Parts = append(m.Parts, ProjectionPart{Type: "text", Presentation: "progress"})
+		m.Parts = append(m.Parts, ProjectionPart{Type: "text"})
 	}
 	return &m.Parts[len(m.Parts)-1]
 }
@@ -562,10 +562,25 @@ func classifyProjectionTextPresentation(message *MessageProjection, completed bo
 		return
 	}
 	lastText := -1
+	hasExplicitPresentation := false
 	for index := range message.Parts {
 		if message.Parts[index].Type == "text" && strings.TrimSpace(message.Parts[index].Text) != "" {
 			lastText = index
+			if message.Parts[index].presentationExplicit {
+				hasExplicitPresentation = true
+			}
 		}
+	}
+	if hasExplicitPresentation {
+		// Official history phase is authoritative. Preserve it and only give an
+		// unannotated text part the neutral progress classification; never promote
+		// an official commentary item to final by array position.
+		for index := range message.Parts {
+			if message.Parts[index].Type == "text" && message.Parts[index].Presentation == "" {
+				message.Parts[index].Presentation = "progress"
+			}
+		}
+		return
 	}
 	for index := range message.Parts {
 		if message.Parts[index].Type != "text" {
@@ -725,10 +740,14 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			t.Assistant = &MessageProjection{ID: turnID, Role: "assistant"}
 		}
 		itemID := dataString(data, "itemId")
+		presentation := dataString(data, "presentation")
+		if presentation != "progress" && presentation != "final" {
+			presentation = ""
+		}
 		var tp *ProjectionPart
 		newPart, _ := data["newPart"].(bool)
 		if newPart {
-			t.Assistant.Parts = append(t.Assistant.Parts, ProjectionPart{Type: "text", Presentation: "progress", ItemID: itemID})
+			t.Assistant.Parts = append(t.Assistant.Parts, ProjectionPart{Type: "text", Presentation: presentation, ItemID: itemID})
 			tp = &t.Assistant.Parts[len(t.Assistant.Parts)-1]
 		} else if trailing := t.Assistant.trailingTextPartForItem(itemID); trailing != nil {
 			tp = trailing
@@ -739,13 +758,17 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			// Canonical official item boundary (T2.1): the trailing part belongs to
 			// a DIFFERENT item — never merge across the boundary. Whole-turn upsert
 			// publishes the split; append_text PartOps cannot express it.
-			t.Assistant.Parts = append(t.Assistant.Parts, ProjectionPart{Type: "text", ItemID: itemID})
+			t.Assistant.Parts = append(t.Assistant.Parts, ProjectionPart{Type: "text", Presentation: presentation, ItemID: itemID})
 			tp = &t.Assistant.Parts[len(t.Assistant.Parts)-1]
 			newPart = true
 		} else {
 			// First text part: keep the legacy append_text path, now item-stamped.
 			tp = t.Assistant.ensureTrailingTextPart()
 			tp.ItemID = itemID
+		}
+		if presentation != "" {
+			tp.Presentation = presentation
+			tp.presentationExplicit = true
 		}
 		tp.Text += delta
 		if newPart {

@@ -919,6 +919,50 @@ func TestTurnScopedHydrateCarriesDurationMs(t *testing.T) {
 	}
 }
 
+func TestTurnScopedHydrateCarriesOfficialTextPresentation(t *testing.T) {
+	events := turnScopedHistoryTurnToProjectionEvents([]core.TurnScopedHistoryTurn{{
+		TurnID: "t-phase", Status: "completed",
+		Parts: []map[string]any{
+			{"type": "text", "itemId": "progress-1", "content": "正在检查。", "presentation": "progress"},
+			{"type": "text", "itemId": "final-1", "content": "检查完成。", "presentation": "final"},
+		},
+	}})
+	presentations := map[string]string{}
+	for _, event := range events {
+		if event.Event != "text_delta" {
+			continue
+		}
+		presentations[dataString(event.Data, "itemId")] = dataString(event.Data, "presentation")
+	}
+	if presentations["progress-1"] != "progress" || presentations["final-1"] != "final" {
+		t.Fatalf("hydrate text presentations = %+v, want official progress/final", presentations)
+	}
+}
+
+func TestExplicitTextPresentationSurvivesTurnCompletion(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex", "s1", "text_delta", map[string]interface{}{
+		"turnId": "T1", "itemId": "progress-1", "delta": "正在检查。", "newPart": true, "presentation": "progress",
+	}))
+	r.Apply(ev(3, "codex", "s1", "text_delta", map[string]interface{}{
+		"turnId": "T1", "itemId": "final-1", "delta": "检查完成。", "newPart": true, "presentation": "final",
+	}))
+	r.Apply(ev(4, "codex", "s1", "turn_completed", map[string]interface{}{"turnId": "T1", "done": true}))
+
+	proj, _ := r.Snapshot("codex", "s1")
+	if len(proj.Turns) != 1 || proj.Turns[0].Assistant == nil {
+		t.Fatalf("projection = %+v", proj)
+	}
+	parts := proj.Turns[0].Assistant.Parts
+	if len(parts) != 2 {
+		t.Fatalf("parts = %+v, want two text items", parts)
+	}
+	if parts[0].Presentation != "progress" || parts[1].Presentation != "final" {
+		t.Fatalf("presentations = [%q, %q], want [progress, final]", parts[0].Presentation, parts[1].Presentation)
+	}
+}
+
 func TestLiveTurnCompletedPayloadCarriesDurationMs(t *testing.T) {
 	name, data, done := mapAgentEvent(core.Event{
 		Type:       core.EventResult,
