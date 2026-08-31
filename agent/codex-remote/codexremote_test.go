@@ -3,6 +3,7 @@ package codexremote
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -51,11 +52,11 @@ func TestWireDescriptorDoesNotAdvertiseUnprovenCapabilities(t *testing.T) {
 	if desc.RequiresExternalTurnPolling {
 		t.Fatal("controller stream must not require external-turn polling once wired")
 	}
-	// Phase 3 flip (2026-08-30): turn_detail_lazy_v1 graduated from unproven to the
-	// single proven static capability (§11.7; iOS client shipped + G2 closed before the
-	// server advertised it). Exact-singleton assertion lives in wire_descriptor_test.go.
-	if len(desc.StaticCapabilities) != 1 || desc.StaticCapabilities[0] != "turn_detail_lazy_v1" {
-		t.Fatalf("StaticCapabilities = %v, want exactly [turn_detail_lazy_v1]", desc.StaticCapabilities)
+	// The two production-proven turn detail capabilities are the only static
+	// declarations. Exact-list coverage lives in wire_descriptor_test.go.
+	want := []string{"turn_detail_lazy_v1", "turn_detail_chunks_v1"}
+	if !reflect.DeepEqual(desc.StaticCapabilities, want) {
+		t.Fatalf("StaticCapabilities = %v, want exactly %v", desc.StaticCapabilities, want)
 	}
 }
 

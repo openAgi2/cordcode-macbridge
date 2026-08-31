@@ -34,6 +34,12 @@ func TestTurnDetailChunksReasonCodeSetV2(t *testing.T) {
 	}
 }
 
+func TestTurnDetailChunksProductionGateEnabled(t *testing.T) {
+	if !core.TurnDetailChunksProductionEnabled {
+		t.Fatal("turn_detail_chunks_v1 production gate must stay enabled after the client-first rollout")
+	}
+}
+
 func TestTurnStateOpsV2Validation(t *testing.T) {
 	valid := []TurnStateOp{
 		{TurnID: "t1", DetailLoadState: DetailStateLoading, TurnGeneration: 0},

@@ -13,11 +13,11 @@ import "time"
 //   - backend descriptor: agent/codex-remote WireDescriptor gates its
 //     StaticCapabilities entry on this const.
 //
-// The v2 path ships client-first (iOS overlay lands before the flip), so the
-// const stays false until the phase5 units are installed on both ends — the
-// same ordering discipline as the Phase 3 v1 flip. v1
+// Release gate flipped after the phase5 client and server units were installed
+// and their unit/regression gates closed. Rollback = set this one const false;
+// both advertisement surfaces are withdrawn together. v1
 // (turn_detail_lazy_v1) remains advertised (deprecated) during the transition.
-const TurnDetailChunksProductionEnabled = false
+const TurnDetailChunksProductionEnabled = true
 
 // Owner-frozen v2 resource parameters (§11.8 冻结参数表, 2026-08-30 终审).
 // These are TRANSIENT/structural gates only — the v1 permanent per-turn
