@@ -57,7 +57,26 @@ const (
 )
 
 type Handlers struct {
-	mu                     sync.Mutex
+	mu                  sync.Mutex
+	olderHydrateFlights sync.Map
+	// producerWritesMu serializes producer-state persistence between the
+	// post-commit seed hook and older-walk cursor advances (T2.1): the seed's
+	// lost-update guard must read and write the fact atomically against
+	// concurrent walk saves.
+	producerWritesMu     sync.Mutex
+	hydrateProducerSeeds sync.Map
+	// turnDetailFlights is the session_turn_items singleflight registry
+	// (§11.7): key = backend|session|turn; followers mirror the leader's
+	// terminal ack (same terminal syncRev, never a mid-flight loading ack).
+	turnDetailFlights sync.Map
+	// turnDetailChunksFlights is the session_turn_items v2 singleflight
+	// registry (§11.8): same key discipline as turnDetailFlights; the leader
+	// also fans its turn_detail_chunk frames out to follower connections.
+	turnDetailChunksFlights sync.Map
+	// turnDetailStore is the process-wide §11.8 detail store (lazy init,
+	// rooted at <dataDir>/detail with a one-shot startup sweep).
+	turnDetailStore        *TurnDetailStore
+	turnDetailStoreOnce    sync.Once
 	agents                 map[string]core.Agent
 	sessions               *sessionRegistry
 	runningMap             *runningMapCache
@@ -138,6 +157,12 @@ type Handlers struct {
 	bridgeOwnedTurns map[string]struct{}
 	relayEnabled     bool
 	sessionListLimit int
+	// turnItemsDiagnostic routes session_turn_items through the closed-evidence
+	// walk (owner 2026-08-30 deep night): high bounds to the real EOF, full
+	// per-item metrics, NO projection commit — the ack replays the frozen
+	// gates' reasonCode so the client shows the same retry affordance. Set
+	// from CORDCODE_TURN_ITEMS_DIAGNOSTIC=1 in main; never a production flag.
+	turnItemsDiagnostic bool
 
 	// pinStore persists MacBridge-owned session pin (置顶) metadata. Injected from main()
 	// (under the bridge data dir) via SetPinStore; nil in tests that don't exercise pinning.
@@ -395,10 +420,38 @@ func (h *Handlers) publishEvent(logical LogicalEvent) EventMessage {
 	if h.eventPublisher == nil {
 		panic("event publisher is not configured")
 	}
+	logical = h.decorateLegacyInlineTurnCompletion(logical)
 	if len(logical.Targets) > 0 && len(logical.WaitTargets) == 0 {
 		logical.WaitTargets = logical.Targets
 	}
 	return h.eventPublisher.PublishLogical(logical)
+}
+
+// decorateLegacyInlineTurnCompletion carries the cold-open history-mode truth into
+// later live completions. A legacy codex-remote thread has no turn-items endpoint;
+// its file/live projection already contains the full process body, so every completed
+// turn in that session is locally expandable, including turns created after resume.
+// Clone the payload before decorating it because mapper-owned maps may be reused by
+// notification or raw-frame delivery after this call.
+func (h *Handlers) decorateLegacyInlineTurnCompletion(logical LogicalEvent) LogicalEvent {
+	if logical.BackendID != "codex-remote" || logical.Event != "turn_completed" {
+		return logical
+	}
+	state := h.loadProducerState(logical.BackendID, logical.SessionID)
+	if state == nil || state.HistoryMode != "legacy" {
+		return logical
+	}
+	data, ok := logical.Data.(map[string]interface{})
+	if !ok {
+		return logical
+	}
+	decorated := make(map[string]interface{}, len(data)+1)
+	for key, value := range data {
+		decorated[key] = value
+	}
+	decorated["detailPreloaded"] = true
+	logical.Data = decorated
+	return logical
 }
 
 func (h *Handlers) registerConnection(conn Connection) {
@@ -481,8 +534,15 @@ func (h *Handlers) rebindLiveTargetsForSession(backendID, sessionID string) int 
 	if h == nil || h.broadcaster == nil || backendID == "" || sessionID == "" {
 		return 0
 	}
+	deviceIDs := globalDeviceConnRegistry.AllDeviceIDs()
+	if len(deviceIDs) == 0 {
+		// No device transport exists, so there is nothing to rebind. Keep this
+		// path silent at normal log levels; PublishLogical may call it while a
+		// remote turn continues after the last iPhone disconnects.
+		return 0
+	}
 	rebound := 0
-	for _, deviceID := range globalDeviceConnRegistry.AllDeviceIDs() {
+	for _, deviceID := range deviceIDs {
 		// Observation scope is the authoritative watch list. A connected device that does
 		// not observe this session must not be subscribed as a recovery side effect.
 		shouldBind := false
@@ -543,17 +603,23 @@ func (h *Handlers) rebindLiveTargetsForSession(backendID, sessionID string) int 
 		// Forensic: PublishLogical zero-target recovery found nothing to rebind.
 		// Common when device registry is empty while an RPC conn still answers
 		// (registry/broadcaster desync) — pull still works, live push does not.
-		deviceN := len(globalDeviceConnRegistry.AllDeviceIDs())
 		hasSub := false
 		if h.broadcaster != nil {
 			hasSub = h.broadcaster.HasSessionSubscriber(backendID, sessionID)
 		}
-		slog.Warn("go-bridge: rebind live targets found zero conns",
-			"backendID", backendID,
-			"sessionID", sessionID,
-			"registryDevices", deviceN,
-			"hasSessionSubscriber", hasSub,
-		)
+		if len(deviceIDs) > 0 || hasSub {
+			slog.Warn("go-bridge: rebind live targets found zero conns",
+				"backendID", backendID,
+				"sessionID", sessionID,
+				"registryDevices", len(deviceIDs),
+				"hasSessionSubscriber", hasSub,
+			)
+		} else {
+			slog.Debug("go-bridge: rebind skipped; no live device connections",
+				"backendID", backendID,
+				"sessionID", sessionID,
+			)
+		}
 	}
 	return rebound
 }
@@ -598,6 +664,12 @@ func (h *Handlers) effectiveSessionListLimit(requested int) int {
 		return requested
 	}
 	return configured
+}
+
+// SetTurnItemsDiagnostic wires the closed-evidence diagnostic route (main
+// reads CORDCODE_TURN_ITEMS_DIAGNOSTIC). Evidence collection only.
+func (h *Handlers) SetTurnItemsDiagnostic(enabled bool) {
+	h.turnItemsDiagnostic = enabled
 }
 
 func (h *Handlers) SetRelayEnabled(enabled bool) {
@@ -1373,6 +1445,9 @@ func (h *Handlers) SetWebPushPipeline(pipeline *WebPushCandidatePipeline) {
 // markHydrateFailed 统一 MarkFailed 调用点：kernel 失败后把未提交的 deferred
 // web push candidate 显式丢弃（§8.1：不假发送，记脱敏诊断）。
 func (h *Handlers) markHydrateFailed(backendID, sessionID, code, message string, retryable bool) {
+	// A failed hydrate must not leave its page-1 producer seed behind (T2.1):
+	// the seed is a claim about a baseline that never committed.
+	h.hydrateProducerSeeds.Delete(projectionDeliveryKey(backendID, sessionID))
 	_, deferred := h.projectionKernel.MarkFailed(backendID, sessionID, code, message, retryable)
 	if len(deferred) > 0 {
 		h.mu.Lock()
@@ -1551,6 +1626,10 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleGetSessionProjection(conn, msg, agent)
 	case "get_session_projection_window":
 		h.handleGetSessionProjectionWindow(conn, msg, agent)
+	case "session_turn_items":
+		h.handleSessionTurnItems(conn, msg, agent)
+	case "turn_output_chunk":
+		h.handleTurnOutputChunk(conn, msg, agent)
 	case "delete_session":
 		h.handleDeleteSession(conn, msg, agent)
 	case "resume_session":
@@ -1802,7 +1881,7 @@ func modelProviderForAgent(agent core.Agent, raw string) (id, provider, provider
 			return id, active.Name, active.Name
 		}
 	}
-	if agent.Name() == "codex" {
+	if agent.Name() == "codex" || agent.Name() == "codex-remote" {
 		return id, "openai", "openai"
 	}
 	// claudecode 后端的所有模型都经 claude CLI，属 claude provider。显式标 "claude"，
@@ -2386,16 +2465,38 @@ func (h *Handlers) handleCreateSession(conn Connection, msg WireMessage, agent c
 		sessionID = fmt.Sprintf("pending-%s", generateShortID())
 	}
 
+	var authoritativeSession *core.AgentSessionInfo
+	if title := strings.TrimSpace(params.Title); title != "" {
+		if renamer, ok := agent.(core.SessionRenamer); ok {
+			authoritativeSession, err = renamer.RenameSession(h.ctx, sessionID, title)
+			if err != nil {
+				_ = sess.Close()
+				conn.SendResult(msg.RequestID, nil, &WireError{Code: "create_failed", Message: err.Error()})
+				return
+			}
+			if authoritativeSession == nil {
+				_ = sess.Close()
+				conn.SendResult(msg.RequestID, nil, &WireError{Code: "create_failed", Message: "backend returned no session after setting title"})
+				return
+			}
+		}
+	}
+
 	h.mu.Lock()
 	h.putSession(sessionID, sess)
 	h.mu.Unlock()
 
-	result := map[string]interface{}{
-		"id":    sessionID,
-		"title": params.Title,
-	}
-	if params.Directory != "" {
-		result["directory"] = params.Directory
+	var result map[string]interface{}
+	if authoritativeSession != nil {
+		result = sessionsToWire([]core.AgentSessionInfo{*authoritativeSession})[0]
+	} else {
+		result = map[string]interface{}{
+			"id":    sessionID,
+			"title": params.Title,
+		}
+		if params.Directory != "" {
+			result["directory"] = params.Directory
+		}
 	}
 	if params.AgentPreset != "" {
 		result["agentPreset"] = params.AgentPreset
@@ -2953,13 +3054,13 @@ func (h *Handlers) sendSessionEventWithPushIntentPreview(sessionID, backendID, e
 	dir := h.sessions.directoryForSession(sessionID)
 	h.mu.Unlock()
 	h.publishEvent(LogicalEvent{
-		SessionID: sessionID,
-		BackendID: backendID,
-		Event:     eventName,
-		Data:      data,
-		Directory: dir,
-		Broadcast: true,
-		Offline:   IsDurableMilestone(eventName),
+		SessionID:  sessionID,
+		BackendID:  backendID,
+		Event:      eventName,
+		Data:       data,
+		Directory:  dir,
+		Broadcast:  true,
+		Offline:    IsDurableMilestone(eventName),
 		PushIntent: pushIntentForRelayTerminal(h.projectionKernel, backendID, sessionID, eventName, data, h.webPushTitles.get(backendID, sessionID), previewOverride),
 	})
 }
@@ -3127,6 +3228,10 @@ func (h *Handlers) handleAbortGeneration(conn Connection, msg WireMessage) {
 func sharedDaemonCodexBackend(backendID string, codexBackendMode string) bool {
 	switch backendID {
 	case "codex-web":
+		return true
+	case "codex-remote":
+		// Desktop holds the private app-server writer. Close() only drops our
+		// listener; interrupt must wait for official turn/completed.
 		return true
 	case "codex":
 		return normalizeCodexBackend(codexBackendMode) == "app_server"
@@ -3390,7 +3495,7 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 	// negotiation. Claude intentionally keeps its declared v1-shaped compatibility cursor.
 	// Capability 断言而非 Name()=="codex"：codex-web 与 codex 共用 thread/list 富 catalog
 	// seam（P0-4），Mac 新建 session 时两端的 list_sessions / discovery 同源同新。
-	if _, ok := agent.(codexThreadLister); ok {
+	if usesCodexWorkspaceCatalog(agent) {
 		h.codexHandleListSessions(conn, msg, agent)
 		return
 	}

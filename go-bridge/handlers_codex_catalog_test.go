@@ -220,6 +220,37 @@ func TestCodexCatalog_V2Declared_RoutesCodexWebToThreadFetch(t *testing.T) {
 	}
 }
 
+// TestCodexRemoteListSessionsSkipsWorkspaceCatalog：codex-remote 虽实现
+// FetchThreadList，但不得进入 Codex/Codex Web 的 10m cache + workspace-root 过滤路径。
+func TestCodexRemoteListSessionsSkipsWorkspaceCatalog(t *testing.T) {
+	ws := t.TempDir()
+	agent := &fakeCodexCatalogAgent{
+		fakeAgent: &fakeAgent{name: "codex-remote", sessionInfos: []core.AgentSessionInfo{
+			{ID: "desktop_list", Directory: ws, Summary: "from ListSessions"},
+		}},
+		fetchFn:  func(context.Context, string) ([]core.AgentSessionInfo, error) { return threadFixtureSessions(ws), nil },
+		workDirV: ws,
+	}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex-remote", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+	handlers.eventPublisher.SetConnCatalogCursorEpochV2(serverConn, true)
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex-remote", Method: "list_sessions", RequestID: "r1",
+		Params: mustJSONRaw(t, map[string]any{}),
+	})
+	msgs := readJSONMaps(t, clientConn, 1)
+	ids := resultSessionIDs(t, msgs[0])
+	if len(ids) != 1 || ids[0] != "desktop_list" {
+		t.Fatalf("codex-remote sessions = %v, want generic ListSessions 产物 [desktop_list]", ids)
+	}
+	if agent.fetchN != 0 {
+		t.Fatalf("FetchThreadList calls=%d, want 0（不得走 workspace catalog cache）", agent.fetchN)
+	}
+}
+
 // TestCodexCatalog_FetchFailureReturnsExplicitError_NoSilentFallback：DECLARED 连接 +
 // FetchThreadList 失败 → list_failed 显式错误（§5.1 step 6：删除 catalog 失败时静默回退
 // JSONL 的路径）。断言 envelope ok=false + error.code=list_failed，且不返回任何 session。

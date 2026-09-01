@@ -20,6 +20,17 @@ struct BackendAgentStatus: Identifiable {
     var isAvailable: Bool { status == "available" }
 }
 
+enum CodexDesktopPairingError: LocalizedError {
+    case runtimeNotReady
+
+    var errorDescription: String? {
+        switch self {
+        case .runtimeNotReady:
+            return L10n.codexDesktopPairRuntimeNotReady
+        }
+    }
+}
+
 /// 后端管理页 ViewModel
 @MainActor
 class BackendStatusViewModel: ObservableObject {
@@ -34,12 +45,31 @@ class BackendStatusViewModel: ObservableObject {
     /// 配置 API 客户端
     func configure(apiClient: ManagementAPIClient) {
         self.apiClient = apiClient
+        startAvailabilityPolling()
+    }
+
+    /// Codex Desktop restore is async. Keep GET /internal/agents until that row becomes available.
+    private func startAvailabilityPolling() {
+        refreshTask?.cancel()
+        refreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard let self, !Task.isCancelled else { return }
+                let recovering = self.agents.contains {
+                    ($0.id == "codex-remote" || $0.kind.lowercased() == "codex-remote") && !$0.isAvailable
+                }
+                guard recovering else { continue }
+                await self.loadAgents(showLoading: false)
+            }
+        }
     }
 
     /// 从 management API 加载后端列表
-    func loadAgents() async {
+    func loadAgents(showLoading: Bool = true) async {
         guard let client = apiClient else { return }
-        isLoading = true
+        if showLoading {
+            isLoading = true
+        }
         errorMessage = nil
         do {
             let agentList = try await client.getAgents()
@@ -130,5 +160,26 @@ class BackendStatusViewModel: ObservableObject {
     /// 是否所有后端都不可用
     var allUnavailable: Bool {
         !agents.isEmpty && agents.allSatisfy { !$0.isAvailable }
+    }
+
+    func startCodexDesktopPairing() async throws -> CodexRemotePairingStatus {
+        guard let client = apiClient else {
+            throw CodexDesktopPairingError.runtimeNotReady
+        }
+        return try await client.startCodexRemotePairing()
+    }
+
+    func submitCodexDesktopPairingCode(_ code: String) async throws -> CodexRemotePairingStatus {
+        guard let client = apiClient else {
+            throw CodexDesktopPairingError.runtimeNotReady
+        }
+        return try await client.submitCodexRemotePairingCode(code)
+    }
+
+    func codexDesktopPairingStatus() async throws -> CodexRemotePairingStatus {
+        guard let client = apiClient else {
+            throw CodexDesktopPairingError.runtimeNotReady
+        }
+        return try await client.codexRemotePairingStatus()
     }
 }

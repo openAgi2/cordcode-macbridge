@@ -1,6 +1,9 @@
 package gobridge
 
-import "log/slog"
+import (
+	"fmt"
+	"log/slog"
+)
 
 // Session Projection Stream v2-marking (session_sync_v2). The projection_patch envelope
 // construction + delivery live in event_publisher.go, which is the single blessed site for
@@ -204,4 +207,78 @@ func (p *EventPublisher) ConnProjectionWindowV1(conn Connection) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.projectionWindowV1[conn]
+}
+
+// SetConnTurnDetailV1 records the authenticated hello negotiation for the
+// turn_detail_lazy_v1 capability (§11.7). Only connections marked here may
+// call session_turn_items; the handler answers everyone else with
+// protocol.capability_required. Replacement connections must negotiate again;
+// UnregisterConnection clears the mark.
+func (p *EventPublisher) SetConnTurnDetailV1(conn Connection, enabled bool) {
+	if p == nil || conn == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if enabled {
+		p.turnDetailV1[conn] = true
+	} else {
+		delete(p.turnDetailV1, conn)
+	}
+}
+
+func (p *EventPublisher) ConnTurnDetailV1(conn Connection) bool {
+	if p == nil || conn == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.turnDetailV1[conn]
+}
+
+// SetConnTurnDetailChunksV1 records the authenticated hello negotiation for
+// the turn_detail_chunks_v1 capability (§11.8). Only connections marked here
+// may call session_turn_items in v2 mode / turn_output_chunk; v2 chunks are
+// delivered to these connections only. Replacement connections must negotiate
+// again; UnregisterConnection clears the mark.
+func (p *EventPublisher) SetConnTurnDetailChunksV1(conn Connection, enabled bool) {
+	if p == nil || conn == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if enabled {
+		p.turnDetailChunksV1[conn] = true
+	} else {
+		delete(p.turnDetailChunksV1, conn)
+	}
+}
+
+func (p *EventPublisher) ConnTurnDetailChunksV1(conn Connection) bool {
+	if p == nil || conn == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.turnDetailChunksV1[conn]
+}
+
+// PublishTurnDetailChunk delivers one bounded turn_detail_chunk frame to a
+// single connection through the control queue (§11.8: conn-scoped overlay
+// delivery — the dedicated frame never enters the kernel patch chain, the
+// revision journal, the event buffer, or any snapshot, and is never
+// replayed; loss is repaired by the client via detail-cache replay using the
+// ack's [firstChunkSeq, lastChunkSeq] range). Caller owns batch pacing and
+// chunkSeq monotonicity.
+func (p *EventPublisher) PublishTurnDetailChunk(conn Connection, frame TurnDetailChunkFrame) error {
+	if p == nil || conn == nil {
+		return fmt.Errorf("event-publisher: nil publisher or connection")
+	}
+	if frame.Type != "turn_detail_chunk" {
+		return fmt.Errorf("event-publisher: overlay frame type %q", frame.Type)
+	}
+	if !p.ConnTurnDetailChunksV1(conn) {
+		return fmt.Errorf("event-publisher: connection lacks turn_detail_chunks_v1")
+	}
+	return p.EnqueueControl(conn, frame, false)
 }

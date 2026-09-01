@@ -1,0 +1,7 @@
+command=node agent/codex-remote/validate/source-baseline.mjs --ios-candidate d0762cb9a05997b615ef4589f39afad8f4b4db04^
+checked_at=2026-08-29T05:35:11Z
+exit_code=1
+result=EXPECTED_FAIL
+reason=The candidate predates the immutable Phase 0 iOS baseline, so git merge-base --is-ancestor rejects it.
+baseline=d0762cb9a05997b615ef4589f39afad8f4b4db04
+candidate=3ccf96c3c719d9f997132f1e79a4fc130bcc18a6

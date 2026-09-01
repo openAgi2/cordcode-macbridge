@@ -294,6 +294,14 @@ enum L10n {
     static var statusPortConflict: String { tr("status_port_conflict") }
     static var statusVersionIncompatible: String { tr("status_version_incompatible") }
     static var statusPermissionDenied: String { tr("status_permission_denied") }
+    static var pairCodexDesktop: String { tr("pair_codex_desktop") }
+    static var codexDesktopPairTitle: String { tr("codex_desktop_pair_title") }
+    static var codexDesktopPairBody: String { tr("codex_desktop_pair_body") }
+    static var codexDesktopPairCode: String { tr("codex_desktop_pair_code") }
+    static var codexDesktopPairSubmit: String { tr("codex_desktop_pair_submit") }
+    static var codexDesktopPairGuidance: String { tr("codex_desktop_pair_guidance") }
+    static var codexDesktopPairRuntimeNotReady: String { tr("codex_desktop_pair_runtime_not_ready") }
+    static var codexDesktopPairWaitingAuth: String { tr("codex_desktop_pair_waiting_auth") }
 
     // MARK: - Diagnostics
 
@@ -523,6 +531,14 @@ enum L10n {
             "logs_diagnostics": "Logs & Diagnostics",
             "configured": "Configured",
             "not_configured": "Not configured",
+            "pair_codex_desktop": "Pair",
+            "codex_desktop_pair_title": "Pair ChatGPT Desktop",
+            "codex_desktop_pair_body": "A browser window will open for authorization. In ChatGPT Desktop, open “Control this Mac”, switch to Computer, then paste the pairing code here. Do not send the code in chat.",
+            "codex_desktop_pair_code": "Computer pairing code",
+            "codex_desktop_pair_submit": "Connect",
+            "codex_desktop_pair_guidance": "Open ChatGPT Desktop → Control this Mac → Computer, then tap Pair.",
+            "codex_desktop_pair_runtime_not_ready": "CordCode Link is still starting. Wait until it is ready, then pair again.",
+            "codex_desktop_pair_waiting_auth": "Waiting for browser authorization…",
             "edit": "Edit",
             "connection_mode": "Connection Mode",
             "local_only": "Local only",
@@ -884,6 +900,14 @@ enum L10n {
             "logs_diagnostics": "日志与诊断",
             "configured": "已配置",
             "not_configured": "未配置",
+            "pair_codex_desktop": "配对",
+            "codex_desktop_pair_title": "配对 ChatGPT Desktop",
+            "codex_desktop_pair_body": "会打开浏览器完成授权。然后在 ChatGPT Desktop 打开「控制这台 Mac」，切换到「电脑」，把配对码填在这里。不要把配对码发到聊天里。",
+            "codex_desktop_pair_code": "电脑配对码",
+            "codex_desktop_pair_submit": "连接",
+            "codex_desktop_pair_guidance": "打开 ChatGPT Desktop → 控制这台 Mac → 电脑，然后点配对。",
+            "codex_desktop_pair_runtime_not_ready": "CordCode Link 还在启动，等就绪后再配对。",
+            "codex_desktop_pair_waiting_auth": "正在等待浏览器授权…",
             "edit": "编辑",
             "connection_mode": "连接模式",
             "local_only": "仅局域网",

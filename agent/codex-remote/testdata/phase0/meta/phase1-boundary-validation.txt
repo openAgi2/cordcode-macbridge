@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "phase": 1,
+  "productBackendRegistered": true,
+  "gateP0Passed": "first-connect-live-with-known-gaps",
+  "ignoredTopLevelMetadata": [
+    ".DS_Store"
+  ],
+  "frozenBackendDiff": "clean",
+  "pairedIOS": "authorized-descendant-clean"
+}

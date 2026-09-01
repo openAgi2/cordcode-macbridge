@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "classification": "LIVE-REDACTED-OBSERVATION-BLOCKED",
+  "gate_effect": "evidence-only",
+  "target": {
+    "chatgpt_desktop_version": "26.825.32147",
+    "chatgpt_bundle_version": "7303",
+    "embedded_codex_version": "codex-cli 0.150.0-alpha.12.2",
+    "controller_protocol_version": 3
+  },
+  "metadata": {
+    "captured_at": "2026-08-28T11:09:00Z",
+    "capture_purpose": "After initialize, send official initialized notification and thread/list on the live Desktop app-server stream; observe whether reconnect cursor appears on any WSS envelope, including the thread/list server_message, not only idle pongs.",
+    "source_classification": "target binary plus official live service",
+    "operator_attestation": "Owner authorized an agent-driven live run, completed fresh step-up in the auto-opened browser, and entered a fresh Computer-tab pairing code only through the localhost form. The agent selected the current Mac ChatGPT Desktop environment.",
+    "redaction_procedure": "Removed credentials, pairing material, signatures, raw identifiers, host names, thread titles and response bodies; retained status codes, field sets, counts, routing comparisons and cleanup outcomes.",
+    "secret_scan_command": "gitleaks dir --redact --config .gitleaks.toml .",
+    "secret_scan_result": "PASS: no leaks found after fixture and probe write",
+    "cleanup_result": "The probe revoked only client_probe with HTTP 204, observed post-revoke refresh_start HTTP 403, deleted probe_key, and self-exited with code 1. No official mobile-controller mutation was issued."
+  },
+  "observations": [
+    {
+      "kind": "enroll_start",
+      "http_status": 200
+    },
+    {
+      "kind": "enroll_finish",
+      "http_status": 200,
+      "scopes": ["remote_control_controller_websocket"]
+    },
+    {
+      "kind": "refresh_start",
+      "http_status": 200,
+      "device_identity_hash_present": true
+    },
+    {
+      "kind": "refresh_finish",
+      "http_status": 200,
+      "scopes": ["remote_control_controller_websocket"]
+    },
+    {
+      "kind": "environment_list",
+      "stage": "before_pair",
+      "count": 0,
+      "result": "pairing-required"
+    },
+    {
+      "kind": "controller_pair",
+      "http_status": 200,
+      "result": "claimed-current-desktop"
+    },
+    {
+      "kind": "environment_selected",
+      "environment": "env_desktop",
+      "selected_index": 1,
+      "online": true,
+      "client_type": "CODEX_DESKTOP_APP"
+    },
+    {
+      "kind": "websocket_handshake",
+      "status": "open",
+      "protocol_version": 3,
+      "cursor_header_present": false
+    },
+    {
+      "kind": "device_key_challenge",
+      "target_origin": "https://chatgpt.com",
+      "target_path": "/backend-api/codex/remote/control/client",
+      "scopes": ["remote_control_controller_websocket"]
+    },
+    {
+      "kind": "device_key_proof",
+      "algorithm": "ecdsa_p256_sha256",
+      "key": "probe_key"
+    },
+    {
+      "kind": "client_message",
+      "method": "initialize",
+      "environment": "env_desktop",
+      "stream": "stream_primary",
+      "seq_id": 1
+    },
+    {
+      "kind": "server_message",
+      "rpc": "initialize",
+      "environment_matches": true,
+      "stream_matches": true,
+      "cursor_present": false,
+      "initialize_result_fields": ["codexHome", "platformFamily", "platformOs", "userAgent"]
+    },
+    {
+      "kind": "client_message",
+      "method": "initialized",
+      "environment": "env_desktop",
+      "stream": "stream_primary",
+      "seq_id": 2
+    },
+    {
+      "kind": "client_message",
+      "method": "thread/list",
+      "environment": "env_desktop",
+      "stream": "stream_primary",
+      "seq_id": 3
+    },
+    {
+      "kind": "thread_list",
+      "error": false,
+      "result_fields": ["backwardsCursor", "data", "nextCursor"],
+      "data_count": 5,
+      "envelope_cursor_present": false,
+      "result_pagination_cursor_present": false
+    },
+    {
+      "kind": "pong",
+      "bounded_count": 3,
+      "statuses": ["active", "active", "active"],
+      "cursor_present": false,
+      "fields": ["client_id", "env_id", "seq_id", "status", "stream_id", "type"]
+    },
+    {
+      "kind": "reconnect_blocked",
+      "reason": "No WSS envelope cursor after initialize, initialized, successful thread/list, and three active pongs.",
+      "cursor_header_present": false
+    },
+    {
+      "kind": "revoke",
+      "http_status": 204,
+      "controller": "client_probe"
+    },
+    {
+      "kind": "revoked_identity_rejected",
+      "operation": "refresh_start",
+      "http_status": 403,
+      "result": "rejected"
+    },
+    {
+      "kind": "cleanup",
+      "controller_revoked": true,
+      "device_key_deleted": true,
+      "probe_self_exited": true,
+      "exit_code": 1,
+      "operator_interrupt": false,
+      "official_mobile_controller_mutated": false
+    }
+  ],
+  "semantic_assertions": {
+    "all_rest_and_websocket_origins_are_official_allowlisted_origins": true,
+    "selected_environment_is_the_current_desktop": true,
+    "environment_binding_is_observed_not_inferred": true,
+    "cursor_delivery_location_is_observed_not_inferred": false,
+    "controller_identity_is_independent_and_revocable": true,
+    "cleanup_targets_only_the_probe_controller": true,
+    "official_mobile_controller_is_never_automatically_disconnected_or_revoked": false
+  },
+  "adjudication": {
+    "result": "BLOCKED",
+    "proven": "The independent controller completed initialize, initialized, and a real thread/list (5 items) on the selected Desktop private app-server. Envelope cursor was absent on initialize, thread/list and three active pongs. Pagination fields backwardsCursor/nextCursor on thread/list are not the reconnect cursor.",
+    "blocking_condition": "x-codex-subscribe-cursor still cannot be populated from real WSS envelopes.",
+    "forbidden_inference": "thread/list pagination cursors and host-side subscribe-cursor must not be treated as controller reconnect evidence.",
+    "phase0_gate": "FAIL-BLOCKED"
+  }
+}

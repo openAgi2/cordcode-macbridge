@@ -115,7 +115,7 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 			msg.BackendID == "grokbuild" ||
 			msg.BackendID == "claude" || msg.BackendID == "claudecode" ||
 			msg.BackendID == "deepseek" || msg.BackendID == "dsh-web" ||
-			msg.BackendID == "codex-web")
+			msg.BackendID == "codex-web" || msg.BackendID == "codex-remote")
 	// Claude cold open starts the live file relay BEFORE the hydrate wait (aligned with
 	// codex/opencode above) so in-flight terminal events can feed the commit gate, and passes
 	// the hydrate admission cut so the relay's initial scan range is disjoint from the
@@ -275,6 +275,29 @@ func (h *Handlers) startProjectionLiveRelay(
 	h.mu.Lock()
 	sess, hasSess := h.getSession(sessionID)
 	h.mu.Unlock()
+	if (!hasSess || sess == nil) && sessionID != "" {
+		if attacher, ok := agent.(core.ProjectionLiveSessionAttacher); ok {
+			newSession, err := attacher.AttachProjectionLiveSession(h.ctx, sessionID)
+			if err != nil {
+				slog.Warn("go-bridge: projection live session attach failed",
+					"backendID", backendID, "sessionID", sessionID, "error", err)
+			} else if newSession != nil {
+				// Double-checked ownership: concurrent projection opens must share
+				// one upstream listener and one relay.
+				h.mu.Lock()
+				existing, exists := h.getSession(sessionID)
+				if exists && existing != nil {
+					sess, hasSess = existing, true
+					h.mu.Unlock()
+					_ = newSession.Close()
+				} else {
+					h.putSessionWithMeta(sessionID, backendID, directory, newSession)
+					sess, hasSess = newSession, true
+					h.mu.Unlock()
+				}
+			}
+		}
+	}
 	if hasSess && sess != nil {
 		h.startRelayIfNotRunning(sessionID, sess, conn, backendID)
 	} else {
@@ -345,7 +368,7 @@ var errProjectionSessionNotFound = errors.New("live-only session has no kernel s
 // dsh web instance (dsh-web design §4.3.2).
 func backendSupportsProjectionHydrate(backendID string) bool {
 	switch backendID {
-	case "codex", "claude", "claudecode", "opencode", "grokbuild", "deepseek", "dsh-web", "opencode-web", "codex-web":
+	case "codex", "claude", "claudecode", "opencode", "grokbuild", "deepseek", "dsh-web", "opencode-web", "codex-web", "codex-remote":
 		// K5: Codex/Claude use JSONL transcript hydrate; OpenCode uses HTTP rich-history
 		// full rebuild (no transcript file / no file-prefix checkpoint); grokbuild and
 		// deepseek use the same pathless rich-history rebuild from local session logs;
@@ -502,7 +525,7 @@ func (h *Handlers) ensureProjectionHydrated(
 	// identity — a daemon restart/endpoint change or official archive/source change
 	// invalidates any carried checkpoint (design §9.1 request-level forceCold).
 	sourceChanged := forceColdInspection && ready &&
-		(backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" || backendID == "dsh-web" || backendID == "opencode-web" || backendID == "codex-web") && source.Path == ""
+		(backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" || backendID == "dsh-web" || backendID == "opencode-web" || backendID == "codex-web" || backendID == "codex-remote") && source.Path == ""
 	// Hydrate owns the source cut. Hand it to any pre-hydrate hook (Claude cold-open starts
 	// its live file relay here so in-flight terminal events can feed the commit gate; the relay
 	// inherits the admission cut so its initial scan is disjoint from the cold-source baseline).
@@ -530,7 +553,7 @@ func (h *Handlers) ensureProjectionHydrated(
 			sourceIsLive = true
 		}
 	}
-	if backendID == "opencode-web" {
+	if backendID == "opencode-web" || backendID == "codex-remote" {
 		// opencode-web's real session id exists only after the first Send creates
 		// it server-side (create_session returns a pending id), so the first
 		// projection pull always lands mid-turn. Without a live signal the commit
@@ -605,6 +628,8 @@ func (h *Handlers) prepareProjectionHydrateSource(
 		agentName = "opencode-web"
 	case "codex-web":
 		agentName = "codex-web"
+	case "codex-remote":
+		agentName = "codex-remote"
 	default:
 		return ProjectionSourceDescriptor{}, errProjectionBackendNotMigrated
 	}
@@ -687,7 +712,7 @@ func (h *Handlers) prepareProjectionHydrateSource(
 	// (Cursor=0, Path empty). Checkpoint file-prefix validation does not apply; re-open
 	// always rebuilds from GetRichSessionHistory. codex-web MUST NOT generate, look up,
 	// or borrow a rollout path here (design §9.1 hydrate-source row).
-	if backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" || backendID == "dsh-web" || backendID == "opencode-web" || backendID == "codex-web" {
+	if backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" || backendID == "dsh-web" || backendID == "opencode-web" || backendID == "codex-web" || backendID == "codex-remote" {
 		if _, ok := agent.(core.RichHistoryProvider); !ok {
 			if h.eventPublisher.ProjectionTurnCount(backendID, sessionID) > 0 {
 				return ProjectionSourceDescriptor{Identity: sessionID}, nil
@@ -950,6 +975,11 @@ func (h *Handlers) runProjectionHydrateTransaction(
 	if commit.PendingPatch != nil {
 		h.eventPublisher.PublishProjectionPatch(backendID, sessionID, *commit.PendingPatch)
 	}
+	// T2.1: persist the cold-open producer seed (upstream cursor fact) now that
+	// the summary baseline is committed.
+	if backendID == "codex-remote" {
+		h.persistCodexProducerSeed(backendID, sessionID, commit.Projection)
+	}
 	// Install a fresh Mac-private Claude source ledger now that hydrate owns the source cut, so
 	// the live file relay can route content through the source-batch transaction. No-op when a
 	// checkpoint already restored one. Must run before the live relay's startup correlation.
@@ -1065,6 +1095,7 @@ func (h *Handlers) produceProjectionHydrateRange(
 ) error {
 	if backendID != "opencode" && backendID != "grokbuild" && backendID != "deepseek" &&
 		backendID != "dsh-web" && backendID != "opencode-web" && backendID != "codex-web" &&
+		backendID != "codex-remote" &&
 		backendID != "claude" && backendID != "claudecode" &&
 		(path == "" || startOffset == endOffset) {
 		return nil
@@ -1133,7 +1164,21 @@ func (h *Handlers) produceProjectionHydrateRange(
 		// through the OpenCode flat convention (user message id as turnId). codex-web
 		// live events carry OFFICIAL turn ids, so the cold baseline must use the
 		// turn-scoped surface to merge on one identity (design §9.1 live/cold row).
-		return h.streamCodexWebRichHistoryProjectionEvents(ctx, sessionID, emit)
+		return h.streamTurnScopedRichHistoryProjectionEvents(ctx, "codex-web", sessionID, emit)
+	case "codex-remote":
+		// T2.3 lazy history: the agent's mode-aware cold surface owns the T0.5
+		// dispatch (paginated → ONE Summary page, legacy → explicit compat full
+		// read). The bare pager branch covers pager-only fakes (T2.0-era test
+		// surfaces); agents with neither keep the legacy turn-scoped surface.
+		if agent, ok := h.getFirstAgentByName("codex-remote"); ok {
+			if reader, readerOK := agent.(core.ColdHistoryReader); readerOK {
+				return h.streamCodexRemoteColdHistoryEvents(ctx, reader, "codex-remote", sessionID, emit)
+			}
+			if pager, pagerOK := agent.(core.UpstreamHistoryPager); pagerOK {
+				return h.streamCodexRemotePagerColdHistoryEvents(ctx, pager, "codex-remote", sessionID, emit)
+			}
+		}
+		return h.streamTurnScopedRichHistoryProjectionEvents(ctx, "codex-remote", sessionID, emit)
 	default:
 		return errProjectionBackendNotMigrated
 	}
@@ -1278,10 +1323,18 @@ func (h *Handlers) streamCodexWebRichHistoryProjectionEvents(
 	sessionID string,
 	emit func(projectionHydrateEvent) bool,
 ) error {
+	return h.streamTurnScopedRichHistoryProjectionEvents(ctx, "codex-web", sessionID, emit)
+}
+
+func (h *Handlers) streamTurnScopedRichHistoryProjectionEvents(
+	ctx context.Context,
+	agentName, sessionID string,
+	emit func(projectionHydrateEvent) bool,
+) error {
 	if h == nil {
 		return errProjectionSourceUnavailable
 	}
-	agent, ok := h.getFirstAgentByName("codex-web")
+	agent, ok := h.getFirstAgentByName(agentName)
 	if !ok {
 		return errProjectionSourceUnavailable
 	}
@@ -1334,9 +1387,13 @@ func turnScopedHistoryTurnToProjectionEvents(turns []core.TurnScopedHistoryTurn)
 				if chunk == "" || chunk == "<nil>" {
 					continue
 				}
+				data := map[string]interface{}{"itemId": itemID, "turnId": t.TurnID, "delta": chunk}
+				if presentation := strings.TrimSpace(fmt.Sprint(part["presentation"])); presentation == "progress" || presentation == "final" {
+					data["presentation"] = presentation
+				}
 				out = append(out, projectionHydrateEvent{
 					Event: "text_delta",
-					Data:  map[string]interface{}{"itemId": itemID, "turnId": t.TurnID, "delta": chunk},
+					Data:  data,
 				})
 			case "reasoning":
 				chunk := strings.TrimSpace(fmt.Sprint(part["content"]))
@@ -1368,9 +1425,16 @@ func turnScopedHistoryTurnToProjectionEvents(turns []core.TurnScopedHistoryTurn)
 		// §9.2：只按官方 turn status 封口。
 		switch t.Status {
 		case "completed":
+			completedData := map[string]interface{}{"turnId": t.TurnID, "done": true, "reason": "official_turn_status"}
+			if t.DurationMs > 0 {
+				completedData["durationMs"] = t.DurationMs
+			}
+			if t.DetailPreloaded {
+				completedData["detailPreloaded"] = true
+			}
 			out = append(out, projectionHydrateEvent{
 				Event:    "turn_completed",
-				Data:     map[string]interface{}{"turnId": t.TurnID, "done": true, "reason": "official_turn_status"},
+				Data:     completedData,
 				TurnDone: true,
 			})
 		case "failed":

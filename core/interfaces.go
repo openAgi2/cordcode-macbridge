@@ -254,6 +254,81 @@ type RichHistoryProvider interface {
 // producers must not locally guess a terminal state the official source did
 // not report. Parts follow the projection step conventions (text/reasoning/
 // tool with nested step map).
+// UpstreamHistoryPage is one bounded page of upstream summary history for lazy
+// hydration (lazy-history plan §2.4 / bridge-v1.md R11a). Turns are ASCENDING
+// (oldest→newest, already reversed from the network's desc order). NextCursor is
+// the INTERNAL upstream cursor (never crosses the bridge); empty means upstream
+// EOF for the walked direction.
+type UpstreamHistoryPage struct {
+	Turns      []TurnScopedHistoryTurn
+	NextCursor string
+}
+
+// UpstreamHistoryPager is implemented by paginated-history agents (codex-remote)
+// so the bridge's window producer can hydrate exactly one bounded page per older
+// request (R11a) instead of full-reading a thread.
+type UpstreamHistoryPager interface {
+	ReadUpstreamHistoryPage(ctx context.Context, sessionID, cursor string) (*UpstreamHistoryPage, error)
+}
+
+// ColdHistoryResult is the mode-aware cold-open baseline (owner T0.5 ruling):
+// paginated threads serve ONE summary page plus the upstream cursor fact;
+// legacy threads serve the explicit compat full read with an EOF cursor fact
+// (no producer walk for legacy — hasOlderUpstream stays false).
+type ColdHistoryResult struct {
+	HistoryMode string // "paginated" | "legacy"
+	Page        *UpstreamHistoryPage
+}
+
+// ColdHistoryReader is the T0.5-compliant cold-open surface: the AGENT owns the
+// historyMode dispatch (thread/read metadata, single writer) so the bridge never
+// guesses a mode and never auto-falls-back a legacy thread onto paginated reads.
+type ColdHistoryReader interface {
+	ReadColdHistory(ctx context.Context, sessionID string) (*ColdHistoryResult, error)
+}
+
+// TurnDetailReader fetches ONE completed turn's items to EOF under the frozen
+// resource gates and maps them through the same item mapper as the rich-history
+// path (canonical official item ids on parts). Typed errors map to the
+// session_turn_items reasonCodes at the bridge ack layer.
+type TurnDetailReader interface {
+	ReadTurnDetail(ctx context.Context, sessionID, turnID string) (TurnScopedHistoryTurn, error)
+}
+
+// TurnItemsEntry is one decoded official items entry of a thread/items/list
+// page (§11.8 v2 batch engine). Item stays the decoded official item map so
+// identity is item["id"] all the way through; mapping into parts is the
+// agent's single-mapper discipline (MapTurnItemsPage).
+type TurnItemsEntry struct {
+	TurnID string
+	Item   map[string]any
+}
+
+// TurnItemsPage is ONE items page for the v2 batch engine: cursor-driven,
+// nextCursor=nil as the only EOF (official invariant), raw-bytes footprint for
+// the 4MB single-response backstop. NO page-count/byte caps — the owner final
+// ruling abolished permanent gates.
+type TurnItemsPage struct {
+	Entries    []TurnItemsEntry
+	NextCursor string
+	EOF        bool
+	RawBytes   int
+}
+
+// TurnItemsPager is the §11.8 v2 batch-engine surface: one official
+// thread/items/list request per call (fixed turnId filter, asc, page limit),
+// with the per-page validation discipline of ReadTurnItems (foreign turn item
+// and unknown item variant fail the page atomically; a repeated cursor fails
+// immediately). The per-call RPC timeout belongs to the CALLER
+// (core.TurnDetailPageRPCTimeout). MapTurnItemsPage mutates the CALLER's
+// scratch turn through the same mapRemoteHistoryItem discipline so detail
+// part identity stays official item ids across pages (first-user absorption
+// included).
+type TurnItemsPager interface {
+	ReadTurnItemsPage(ctx context.Context, sessionID, turnID, cursor string) (*TurnItemsPage, error)
+	MapTurnItemsPage(turn *TurnScopedHistoryTurn, page *TurnItemsPage) error
+}
+
 type TurnScopedHistoryTurn struct {
 	TurnID       string
 	Status       string
@@ -261,6 +336,15 @@ type TurnScopedHistoryTurn struct {
 	StartedAt    time.Time
 	CompletedAt  time.Time
 	HasTime      bool
+	// DurationMs mirrors the official Turn.durationMs when the source provides it
+	// (0 = unknown). Carried through the kernel TurnProjection so clients render the
+	// official "用时" value instead of recomputing from timestamps.
+	DurationMs int64
+	// DetailPreloaded is authoritative provenance from a legacy full-read cold
+	// baseline: every item for this turn is already carried in Parts, so clients
+	// must expand it locally and must not call the paginated session_turn_items
+	// method. False is the paginated summary/lazy-detail default.
+	DetailPreloaded bool
 
 	UserItemID string
 	UserText   string
@@ -844,6 +928,15 @@ var ErrObserverNotReady = errors.New("observer connection not ready")
 // (not ready, ownership, transport) must surface to the RPC result.
 type ThreadLiveAttacher interface {
 	AttachLiveThread(ctx context.Context, threadID string) error
+}
+
+// ProjectionLiveSessionAttacher is optional for broadcast transports whose
+// central event pump only fans a thread's events into a registered
+// AgentSession listener. Projection-only opens use it to create that listener
+// without waiting for the first send_message. Implementations must attach to
+// the real upstream thread; a synthetic or polling session is not allowed.
+type ProjectionLiveSessionAttacher interface {
+	AttachProjectionLiveSession(ctx context.Context, threadID string) (AgentSession, error)
 }
 
 // CatalogRefreshSignaler is an optional interface for backends that can detect

@@ -1,0 +1,7 @@
+command=node --test agent/codex-remote/validate/boundary-policy.test.mjs
+checked_at=2026-08-29T05:37:34Z
+exit_code=0
+result=PASS
+pass=1
+policy=.DS_Store is the only ignored OS metadata entry; unknown files and directories remain rejected.
+paired_ios_policy=authorized branch, clean worktree, and descendant of frozen commit 932f5fd61fc029aa63db333e3cb6d2eb6889ea38

@@ -1,6 +1,7 @@
 package gobridge
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -93,6 +94,23 @@ func TestProjectionPatchDeliveredToV2ConnOnly(t *testing.T) {
 	}
 }
 
+func TestPublishLogicalDropsPatchWhenNoV2Observer(t *testing.T) {
+	broadcaster := NewBroadcaster()
+	ep := NewEventPublisher("epoch-no-v2", broadcaster)
+	ep.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s-no-v2", Event: "turn_started", Data: map[string]interface{}{"turnId": "T1"}, Broadcast: true})
+	ep.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s-no-v2", Event: "tool_started", Data: map[string]interface{}{
+		"itemId": "call-1", "toolResult": strings.Repeat("x", 300<<10),
+	}, Broadcast: true})
+
+	if _, ok := ep.projection.FlushPatch("codex", "s-no-v2"); ok {
+		t.Fatal("publisher must discard pending patch when no v2 observer exists")
+	}
+	projection, ok := ep.projection.Snapshot("codex", "s-no-v2")
+	if !ok || projection.SyncRev != 1 || len(projection.Turns) != 1 {
+		t.Fatalf("authoritative projection lost after discard: %+v ok=%v", projection, ok)
+	}
+}
+
 func TestProjectionOnlyConnStillReceivesControlPlaneRawEvents(t *testing.T) {
 	ep := NewEventPublisher("epoch-control")
 	v2 := newPublisherCaptureConn(nil)
@@ -152,6 +170,36 @@ func TestProjectionOnlyRawTimelineEventDoesNotTriggerLegacyRebind(t *testing.T) 
 
 	if rebinds != 0 {
 		t.Fatalf("projection-only raw event triggered %d legacy rebinds, want 0", rebinds)
+	}
+}
+
+func TestZeroTargetRebindIsRateLimitedPerSession(t *testing.T) {
+	ep := NewEventPublisher("epoch-rebind-cooldown")
+	now := time.Unix(1_700_000_000, 0)
+	ep.now = func() time.Time { return now }
+	rebinds := 0
+	ep.SetRebindTargets(func(_, _ string) int {
+		rebinds++
+		return 0
+	})
+	publish := func() {
+		ep.PublishLogical(LogicalEvent{
+			BackendID: "codex-remote",
+			SessionID: "session-rebind-cooldown",
+			Event:     "text_delta",
+			Data:      map[string]interface{}{"itemId": "turn-1", "delta": "x"},
+		})
+	}
+
+	publish()
+	publish()
+	if rebinds != 1 {
+		t.Fatalf("adjacent zero-target events attempted %d rebinds, want 1", rebinds)
+	}
+	now = now.Add(rebindAttemptCooldown)
+	publish()
+	if rebinds != 2 {
+		t.Fatalf("rebind was not retried after cooldown: attempts=%d", rebinds)
 	}
 }
 

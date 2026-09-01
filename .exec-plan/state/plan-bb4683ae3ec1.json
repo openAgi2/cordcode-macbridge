@@ -1,0 +1,3127 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge-codex-remote",
+  "plan_file": "docs/2026-08-26-codex-remote-backend-implementation-plan.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-bb4683ae3ec1.json",
+    "legacy_path": ".claude/exec-plans/plan-bb4683ae3ec1.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "none-codex-json-sole-truth",
+    "invocation_policy": "slash-or-natural-language-equivalent",
+    "persistence_rule": "persist-on-every-status-transition",
+    "phase_gate_rule": "phase1-depends-on-real-phase0-gate-regression; phase3-depends-on-phase2-gate; phase5-requires-explicit-owner-authorization"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-08-28-2026-08-26-codex-remote-backend-implementation-plan完成情况.md",
+    "completion_report_status": "current",
+    "last_generated_at": "2026-08-29T16:57:13Z",
+    "based_on_queue_hash": "f149dcf32b8f1842760715b9f3714421f29d7b981b047946b7e80cfe9eb5f28e"
+  },
+  "updated_at": "2026-08-29T16:57:13Z",
+  "todos": [
+    {
+      "id": "phase0-source-baseline-impl",
+      "title": "Phase 0 source and binary provenance — impl",
+      "description": "Re-run and archive the dual-repository source manifest; freeze ChatGPT Desktop/App, embedded Codex, upstream tag/peeled commit/HEAD distance and target-version diff; index official host/server/protocol sources and both controller path families without asserting unsampled controller shapes.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "Phase 0 tasks 1-2",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Archived the dual-worktree P0 manifest, preserved-plan commit, current ChatGPT 26.825.32147 / embedded Codex alpha.12.2 hashes, upstream tag and 97-commit distance, official host source index, and target-ASAR /codex plus /wham controller call-site index. Explicitly classified all controller findings as static-only and non-gating.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/source-baseline.md",
+          "agent/codex-remote/testdata/phase0/meta/source-baseline.json",
+          "git:4ae201b2db485394d623c86d7ee178061147c932"
+        ],
+        "checked_at": "2026-08-28T08:39:11Z"
+      }
+    },
+    {
+      "id": "phase0-source-baseline-tests",
+      "title": "Phase 0 source and binary provenance — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Re-run and archive the dual-repository source manifest; freeze ChatGPT Desktop/App, embedded Codex, upstream tag/peeled commit/HEAD distance and target-version diff; index official host/server/protocol sources and both controller path families without asserting unsampled controller shapes.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-source-baseline-impl"
+      ],
+      "source": "Phase 0 tasks 1-2",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0. resolved-via:phase0-source-baseline-audit-review-fix-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Re-verified the complete source and binary provenance baseline against the current clean authorized iOS descendant cafadc8; the immutable d0762cb9 Phase 0 baseline remains an enforced ancestor, and a pre-baseline candidate fails closed.",
+        "artifacts": [
+          "agent/codex-remote/validate/source-baseline.mjs",
+          "agent/codex-remote/testdata/phase0/meta/source-baseline-validation.txt",
+          "agent/codex-remote/testdata/phase0/meta/source-baseline-ancestry-negative.txt",
+          "cmd:node --check agent/codex-remote/validate/source-baseline.mjs",
+          "cmd:node agent/codex-remote/validate/source-baseline.mjs => PASS",
+          "git:3e3854321e40a9d51c524f90509bdd850e08c6d4"
+        ],
+        "checked_at": "2026-08-29T05:35:11Z"
+      }
+    },
+    {
+      "id": "phase0-source-baseline-regression",
+      "title": "Phase 0 source and binary provenance — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-source-baseline-tests"
+      ],
+      "source": "Phase 0 tasks 1-2",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Verified both the current worktree and frozen-start delivery diff leave agent/codex-web and agent/codex unchanged, the paired iOS worktree remains at the frozen clean commit, Phase 0 contains no Go product backend files, the static validator replays, and gitleaks plus targeted token/device-key scans find no leaks. This evidence is intentionally non-gating for the real controller chain.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/source-baseline-regression.txt",
+          "git:29d20d03f1629d39f60b20e63b5b1970715da41a"
+        ],
+        "checked_at": "2026-08-28T08:43:10Z"
+      }
+    },
+    {
+      "id": "phase0-probe-scaffold-impl",
+      "title": "Phase 0 isolated probe scaffold — impl",
+      "description": "Create only agent/codex-remote/{README.md,probe/,testdata/phase0/,validate/}; document Phase-0-only status, timeouts, redaction and revoke cleanup; do not register a backend or import old lifecycle/ownership code.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-source-baseline-regression"
+      ],
+      "source": "§5.1; Phase 0",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Created the Phase-0-only directory contract under agent/codex-remote with an explicit 14-row Gate ledger, non-product probe rules, redacted fixture policy, validator contract, timeout/revoke/redaction requirements and frozen legacy-directory boundary. No Go backend or runtime registration exists.",
+        "artifacts": [
+          "agent/codex-remote/README.md",
+          "agent/codex-remote/probe/README.md",
+          "agent/codex-remote/testdata/phase0/README.md",
+          "agent/codex-remote/validate/README.md",
+          "git:281103c75a6abf2efc6ac1e6bd6443c524803b47"
+        ],
+        "checked_at": "2026-08-28T08:45:12Z"
+      }
+    },
+    {
+      "id": "phase0-probe-scaffold-tests",
+      "title": "Phase 0 isolated probe scaffold — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Create only agent/codex-remote/{README.md,probe/,testdata/phase0/,validate/}; document Phase-0-only status, timeouts, redaction and revoke cleanup; do not register a backend or import old lifecycle/ownership code.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-probe-scaffold-impl"
+      ],
+      "source": "§5.1; Phase 0",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0. resolved-via:phase0-boundary-metadata-audit-review-fix-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Re-verified the Phase 0/1 directory boundary with an explicit .DS_Store-only metadata policy; isolated tests prove unknown files and directories still fail closed.",
+        "artifacts": [
+          "agent/codex-remote/validate/phase0-boundary.mjs",
+          "agent/codex-remote/testdata/phase0/meta/phase0-boundary-validation.txt",
+          "agent/codex-remote/testdata/phase0/meta/boundary-policy-test.txt",
+          "git:1d411040bc622f0faf0387f3a23e7c428e08b511"
+        ],
+        "checked_at": "2026-08-29T05:37:34Z"
+      }
+    },
+    {
+      "id": "phase0-probe-scaffold-regression",
+      "title": "Phase 0 isolated probe scaffold — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-probe-scaffold-tests"
+      ],
+      "source": "§5.1; Phase 0",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Replayed both Phase 0 validators, verified frozen worktree and delivery diffs for agent/codex-web and agent/codex, confirmed the paired iOS worktree is still at its clean frozen commit, found no probe registration/init path, passed gitleaks and git diff checks, and retained explicit false product/Gate state.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/phase0-scaffold-regression.txt",
+          "git:1085987fc4a25a3b4f33272a0796f864d2d5f062"
+        ],
+        "checked_at": "2026-08-28T09:21:49Z"
+      }
+    },
+    {
+      "id": "phase0-controller-fixtures-impl",
+      "title": "Controller call-site and wire fixtures — impl",
+      "description": "From target ChatGPT App call sites and real redacted observations, freeze enroll/refresh, WSS challenge, envelope, environment binding/switching and reconnect cursor placement; distinguish /codex and /wham bases and versions.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-probe-scaffold-regression"
+      ],
+      "source": "Phase 0 tasks 2-3",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "attempt-008 plus prior 001-007 freeze enroll/refresh/WSS/env binding. Reconnect cursor is observed absent (not missing evidence). Live turn/item stream is proven after thread/resume.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json",
+          "agent/codex-remote/testdata/phase0/static-26.825.32147-alpha.12.2/controller-call-sites.json",
+          "git:6b6b0689349deaa9f5b19830e2b303d6733042ce"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
+      }
+    },
+    {
+      "id": "phase0-controller-fixtures-tests",
+      "title": "Controller call-site and wire fixtures — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: From target ChatGPT App call sites and real redacted observations, freeze enroll/refresh, WSS challenge, envelope, environment binding/switching and reconnect cursor placement; distinguish /codex and /wham bases and versions.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-controller-fixtures-impl"
+      ],
+      "source": "Phase 0 tasks 2-3",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker. resolved-via:phase0-boundary-metadata-audit-review-fix-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Re-ran controller-fixtures.mjs against the installed ASAR and eight live fixtures, then passed the repaired boundary replay with frozen backend directories and authorized clean iOS ancestry.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/controller-fixture-preflight.txt",
+          "agent/codex-remote/testdata/phase0/meta/phase1-boundary-validation.txt",
+          "cmd:node agent/codex-remote/validate/controller-fixtures.mjs => PASS",
+          "cmd:node agent/codex-remote/validate/phase0-boundary.mjs => PASS"
+        ],
+        "checked_at": "2026-08-29T05:37:34Z"
+      }
+    },
+    {
+      "id": "phase0-controller-fixtures-regression",
+      "title": "Controller call-site and wire fixtures — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-controller-fixtures-tests"
+      ],
+      "source": "Phase 0 tasks 2-3",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Frozen agent/codex-web and agent/codex diffs remain empty. gitleaks PASS. Paired iOS worktree frozen at 932f5fd6.",
+        "artifacts": [
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => PASS"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
+      }
+    },
+    {
+      "id": "phase0-controller-enrollment-impl",
+      "title": "Temporary independent controller enrollment — impl",
+      "description": "Implement the bounded Phase 0 probe path for a temporary device key and independently revocable controller enrollment; no long-lived Desktop/Codex raw token storage, App modification, proxy, injection or fake relay.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-controller-fixtures-regression"
+      ],
+      "source": "Phase 0 tasks 4-5; §4",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Bounded probe live_controller.mjs already implements independent Keychain P-256 key, enroll/refresh, Computer-tab pairing, and probe-only revoke. Product Go enrollment ports in Phase 1 transport-rpc.",
+        "artifacts": [
+          "agent/codex-remote/probe/live_controller.mjs",
+          "agent/codex-remote/probe/device_key_helper.swift"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
+      }
+    },
+    {
+      "id": "phase0-controller-enrollment-tests",
+      "title": "Temporary independent controller enrollment — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Implement the bounded Phase 0 probe path for a temporary device key and independently revocable controller enrollment; no long-lived Desktop/Codex raw token storage, App modification, proxy, injection or fake relay.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-controller-enrollment-impl"
+      ],
+      "source": "Phase 0 tasks 4-5; §4",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "node --check on live_controller.mjs and controller-fixtures validator pass on the enroll/pair/revoke fixture set.",
+        "artifacts": [
+          "cmd:node --check agent/codex-remote/probe/live_controller.mjs",
+          "agent/codex-remote/testdata/phase0/meta/controller-fixture-preflight.txt"
+        ],
+        "checked_at": "2026-08-29T05:33:56Z"
+      }
+    },
+    {
+      "id": "phase0-controller-enrollment-regression",
+      "title": "Temporary independent controller enrollment — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-controller-enrollment-tests"
+      ],
+      "source": "Phase 0 tasks 4-5; §4",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "attempt-008: enroll/finish 200, Computer-tab pair 200, probe revoke 204 then refresh_start 403. Official mobile controller was not mutated.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
+      }
+    },
+    {
+      "id": "phase0-host-live-interrupt-impl",
+      "title": "Desktop host identity live and interrupt proof — impl",
+      "description": "Select the paired Desktop environment, initialize its real app-server stream, list/read, observe a uniquely marked Desktop long turn live with deltas and one completion, then interrupt that same active turn through the official app-server.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-controller-enrollment-regression"
+      ],
+      "source": "Phase 0 tasks 5-6,8-11",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker. Interrupt remains unproven.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "attempt-008: thread/loaded/list 4, thread/resume 4/4, then turn/started, 36 item/agentMessage/delta, turn/completed on the selected Desktop env/stream. turn/interrupt was not exercised.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
+      }
+    },
+    {
+      "id": "phase0-host-live-interrupt-tests",
+      "title": "Desktop host identity live and interrupt proof — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Select the paired Desktop environment, initialize its real app-server stream, list/read, observe a uniquely marked Desktop long turn live with deltas and one completion, then interrupt that same active turn through the official app-server.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-host-live-interrupt-impl"
+      ],
+      "source": "Phase 0 tasks 5-6,8-11",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "attempt-008 fixture records turn/started, item/agentMessage/delta x36, turn/completed and forbids treating cursor as proven.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"
+        ],
+        "checked_at": "2026-08-29T05:00:37Z"
+      }
+    },
+    {
+      "id": "phase0-host-live-interrupt-regression",
+      "title": "Desktop host identity live and interrupt proof — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-host-live-interrupt-tests"
+      ],
+      "source": "Phase 0 tasks 5-6,8-11",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Live Desktop turn stream is self-attested from attempt-008. Interrupt is an owner-accepted known gap and must fail closed in product capability ads.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
+      }
+    },
+    {
+      "id": "phase0-controller-ownership-impl",
+      "title": "Official iOS controller coexistence proof — impl",
+      "description": "With ChatGPT iOS already paired and connected, connect/disconnect the MacBridge controller and record concurrent-controller, HTTP 409/single-owner, kick-out, ownership recovery and no-silent-takeover semantics.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-host-live-interrupt-regression"
+      ],
+      "source": "Phase 0 task 7; Gate P0",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": "Owner accepted Phase 1 without official iOS controller coexistence evidence. Product must not auto-kick the official mobile controller. Covered later by phase1-minimal-vertical fail-closed ownership and Phase 3.",
+        "summary": "Not run. Owner-accepted known gap. Probe never issued revoke against the official mobile controller.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
+      }
+    },
+    {
+      "id": "phase0-controller-ownership-tests",
+      "title": "Official iOS controller coexistence proof — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: With ChatGPT iOS already paired and connected, connect/disconnect the MacBridge controller and record concurrent-controller, HTTP 409/single-owner, kick-out, ownership recovery and no-silent-takeover semantics.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-controller-ownership-impl"
+      ],
+      "source": "Phase 0 task 7; Gate P0",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": "No live 409/coexistence sample exists; automated checks cannot invent it. Ownership fail-closed is enforced by probe/product policy and later Phase 3 tests.",
+        "summary": "N/A: no coexistence fixture. Validator still forbids auto-revoking the official mobile controller.",
+        "artifacts": [
+          "agent/codex-remote/probe/README.md"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
+      }
+    },
+    {
+      "id": "phase0-controller-ownership-regression",
+      "title": "Official iOS controller coexistence proof — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-controller-ownership-tests"
+      ],
+      "source": "Phase 0 task 7; Gate P0",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": "Owner accepted starting Phase 1 without a ChatGPT iOS coexistence run.",
+        "summary": "N/A pending a later owner-authorized iOS coexistence live run.",
+        "artifacts": [
+          "docs/2026-08-26-codex-remote-backend-implementation-plan.md"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
+      }
+    },
+    {
+      "id": "phase0-reconnect-revoke-security-impl",
+      "title": "Reconnect revoke and secret-scan proof — impl",
+      "description": "Exercise controlled network loss/reconnect with seq/ACK/cursor and cold reconciliation, revoke the temporary controller, prove the old identity fails and official pairings remain intact, then secret-scan all fixtures and logs.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-controller-ownership-regression"
+      ],
+      "source": "Phase 0 tasks 12-14",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Revoke and secret-scan proven (attempt-008 204 then 403, gitleaks PASS). Cursor reconnect cannot be constructed; owner accepted this as a known gap.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => PASS"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
+      }
+    },
+    {
+      "id": "phase0-reconnect-revoke-security-tests",
+      "title": "Reconnect revoke and secret-scan proof — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Exercise controlled network loss/reconnect with seq/ACK/cursor and cold reconciliation, revoke the temporary controller, prove the old identity fails and official pairings remain intact, then secret-scan all fixtures and logs.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-reconnect-revoke-security-impl"
+      ],
+      "source": "Phase 0 tasks 12-14",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "gitleaks PASS; fixture records cursor_reconnect_skipped and revoked_identity_rejected HTTP 403.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"
+        ],
+        "checked_at": "2026-08-29T05:33:56Z"
+      }
+    },
+    {
+      "id": "phase0-reconnect-revoke-security-regression",
+      "title": "Reconnect revoke and secret-scan proof — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-reconnect-revoke-security-tests"
+      ],
+      "source": "Phase 0 tasks 12-14",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Revoke path self-attested from attempt-008. Cursor reconnect remains a known gap and must fail closed.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
+      }
+    },
+    {
+      "id": "phase0-gate-impl",
+      "title": "Gate P0 adjudication — impl",
+      "description": "Audit all 14 real-evidence requirements as one non-dilutable gate. Classify only-list/read or ownership conflict as EVIDENCE-ONLY and forbidden credential/App/proxy requirements as BLOCKED. Do not unlock Phase 1 without real host/live/interrupt/coexistence proof.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-reconnect-revoke-security-regression"
+      ],
+      "source": "Gate P0; §§8-13",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Owner rewrote Gate P0 on 2026-08-28: first-connect live PASS via thread/resume; cursor reconnect, interrupt, iOS coexistence, unique marker are known gaps. Phase 1 unlocked.",
+        "artifacts": [
+          "docs/2026-08-26-codex-remote-backend-implementation-plan.md",
+          "docs/2026-08-28-codex-remote-phase0-fail-blocked.md",
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
+      }
+    },
+    {
+      "id": "phase0-gate-tests",
+      "title": "Gate P0 adjudication — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Audit all 14 real-evidence requirements as one non-dilutable gate. Classify only-list/read or ownership conflict as EVIDENCE-ONLY and forbidden credential/App/proxy requirements as BLOCKED. Do not unlock Phase 1 without real host/live/interrupt/coexistence proof.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-gate-impl"
+      ],
+      "source": "Gate P0; §§8-13",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker. resolved-via:phase0-boundary-metadata-audit-review-fix-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "The repaired boundary validator re-verifies the owner-rewritten Gate P0 result, frozen backend directories, explicit known-gap classification, and authorized clean iOS descendant.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/phase1-boundary-validation.txt"
+        ],
+        "checked_at": "2026-08-29T05:37:34Z"
+      }
+    },
+    {
+      "id": "phase0-gate-regression",
+      "title": "Gate P0 adjudication — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-gate-tests"
+      ],
+      "source": "Gate P0; §§8-13",
+      "notes": "OWNER REWRITE 2026-08-28: Phase 1 started. Known gaps fail-closed: interrupt, cursor reconnect, official iOS controller coexistence, unique thread marker.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Rewritten Gate P0 unlocks Phase 1. Frozen backend dirs unchanged. iOS product wiring still frozen until Phase 3.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/phase1-boundary-validation.txt",
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex"
+        ],
+        "checked_at": "2026-08-28T12:44:28Z"
+      }
+    },
+    {
+      "id": "phase1-identity-lifecycle-impl",
+      "title": "Independent codex-remote identity and lifecycle — impl",
+      "description": "After Gate P0 only, register a distinct codex-remote identity and implement auth/device-key/enrollment/environment lifecycle and truthful diagnostics, without sharing codex/codex-web ownership or lifecycle state.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-gate-regression"
+      ],
+      "source": "Phase 1 tasks 1-2,6",
+      "notes": "Phase 1 identity: BackendID=codex-remote registered, fail-closed, not in default Mac drivers.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Registered independent codex-remote Agent with fail-closed ListSessions/StartSession, truthful not_configured diagnostics, empty StaticCapabilities, go-bridge blank import. Did not add to default Mac drivers or iOS kinds.",
+        "artifacts": [
+          "agent/codex-remote/codexremote.go",
+          "agent/codex-remote/agent.go",
+          "agent/codex-remote/wire_descriptor.go",
+          "agent/codex-remote/diagnostics.go",
+          "agent/codex-remote/lifecycle.go",
+          "go-bridge/main.go"
+        ],
+        "checked_at": "2026-08-28T12:45:00Z"
+      }
+    },
+    {
+      "id": "phase1-identity-lifecycle-tests",
+      "title": "Independent codex-remote identity and lifecycle — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: After Gate P0 only, register a distinct codex-remote identity and implement auth/device-key/enrollment/environment lifecycle and truthful diagnostics, without sharing codex/codex-web ownership or lifecycle state.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "tests",
+      "depends_on": [
+        "phase1-identity-lifecycle-impl"
+      ],
+      "source": "Phase 1 tasks 1-2,6",
+      "notes": "Phase 1 identity: BackendID=codex-remote registered, fail-closed, not in default Mac drivers. resolved-via:phase0-boundary-metadata-audit-review-fix-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Re-ran the codex-remote race suite and repaired boundary validator; identity/lifecycle tests, frozen backend isolation, secret scan, and authorized clean iOS ancestry all pass.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/phase1-identity-test.txt",
+          "agent/codex-remote/testdata/phase0/meta/phase1-boundary-validation.txt",
+          "cmd:go test ./agent/codex-remote -count=1 => PASS"
+        ],
+        "checked_at": "2026-08-29T05:37:34Z"
+      }
+    },
+    {
+      "id": "phase1-identity-lifecycle-regression",
+      "title": "Independent codex-remote identity and lifecycle — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "regression",
+      "depends_on": [
+        "phase1-identity-lifecycle-tests"
+      ],
+      "source": "Phase 1 tasks 1-2,6",
+      "notes": "Phase 1 identity: BackendID=codex-remote registered, fail-closed, not in default Mac drivers.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "agent/codex-web and agent/codex remain unmodified. gitleaks PASS. Default Mac drivers unchanged. iOS worktree frozen without Phase 3 wiring.",
+        "artifacts": [
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => PASS",
+          "MacBridge/MacBridge/Services/RuntimeManager.swift"
+        ],
+        "checked_at": "2026-08-28T12:45:00Z"
+      }
+    },
+    {
+      "id": "phase1-transport-rpc-impl",
+      "title": "Minimal Remote Transport and JSON-RPC — impl",
+      "description": "Implement controller WSS, validated envelope/ACK/cursor/chunk/backpressure/epoch semantics and one environment stream as app-server Transport; whitelist-migrate only minimal rpc.go with provenance and Remote parity evidence.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [
+        "phase1-identity-lifecycle-regression"
+      ],
+      "source": "Phase 1 tasks 3-4; §6",
+      "notes": "Envelope stream Transport + whitelist rpc.go + Phase 1 text vertical on fake host. Live Desktop batched in OWNER_MANUAL_CHECKLIST.md.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Implemented controller envelope Stream as app-server Transport (seq, ACK, chunk, env/stream mismatch disconnect, fail-closed subscribe cursor). Whitelist-copied rpc.go from agent/codex-web@c6fa9b85 with Remote provenance.",
+        "artifacts": [
+          "agent/codex-remote/envelope.go",
+          "agent/codex-remote/stream.go",
+          "agent/codex-remote/rpc.go",
+          "agent/codex-remote/codec.go",
+          "agent/codex-remote/session.go",
+          "agent/codex-remote/loopback.go",
+          "agent/codex-remote/testdata/phase1/rpc-provenance.md"
+        ],
+        "checked_at": "2026-08-28T13:10:05Z"
+      }
+    },
+    {
+      "id": "phase1-transport-rpc-tests",
+      "title": "Minimal Remote Transport and JSON-RPC — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Implement controller WSS, validated envelope/ACK/cursor/chunk/backpressure/epoch semantics and one environment stream as app-server Transport; whitelist-migrate only minimal rpc.go with provenance and Remote parity evidence.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "tests",
+      "depends_on": [
+        "phase1-transport-rpc-impl"
+      ],
+      "source": "Phase 1 tasks 3-4; §6",
+      "notes": "Envelope stream Transport + whitelist rpc.go + Phase 1 text vertical on fake host. Live Desktop batched in OWNER_MANUAL_CHECKLIST.md.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Package tests cover wrap/unwrap, chunk reassembly, cursor fail-closed, RPC initialize/thread/list, turn/started notifications.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase1/transport-rpc-test.txt",
+          "cmd:go test ./agent/codex-remote -count=1 -timeout 15s => PASS"
+        ],
+        "checked_at": "2026-08-29T05:33:56Z"
+      }
+    },
+    {
+      "id": "phase1-transport-rpc-regression",
+      "title": "Minimal Remote Transport and JSON-RPC — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "regression",
+      "depends_on": [
+        "phase1-transport-rpc-tests"
+      ],
+      "source": "Phase 1 tasks 3-4; §6",
+      "notes": "Envelope stream Transport + whitelist rpc.go + Phase 1 text vertical on fake host. Live Desktop batched in OWNER_MANUAL_CHECKLIST.md.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Frozen agent/codex-web and agent/codex unchanged. gitleaks PASS. Live controller WSS enroll is owner-batched.",
+        "artifacts": [
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => PASS",
+          "agent/codex-remote/testdata/phase1/OWNER_MANUAL_CHECKLIST.md"
+        ],
+        "checked_at": "2026-08-28T13:10:05Z"
+      }
+    },
+    {
+      "id": "phase1-minimal-vertical-impl",
+      "title": "Minimal backend vertical slice — impl",
+      "description": "Wire initialize, thread list/read/start/resume, turn start/interrupt and text delta through bridge-v1; prove a real Desktop bidirectional slice and codex-web behavior isolation.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [
+        "phase1-transport-rpc-regression"
+      ],
+      "source": "Phase 1 tasks 5-7",
+      "notes": "Envelope stream Transport + whitelist rpc.go + Phase 1 text vertical on fake host. Live Desktop batched in OWNER_MANUAL_CHECKLIST.md.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Wired thread/list, thread/resume(excludeTurns), turn/start, turn/interrupt, and text delta/completion through BindClient + LiveCodec. Capabilities still unadvertised.",
+        "artifacts": [
+          "agent/codex-remote/session.go",
+          "agent/codex-remote/codec.go",
+          "agent/codex-remote/diagnostics.go"
+        ],
+        "checked_at": "2026-08-28T13:10:05Z"
+      }
+    },
+    {
+      "id": "phase1-minimal-vertical-tests",
+      "title": "Minimal backend vertical slice — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Wire initialize, thread list/read/start/resume, turn start/interrupt and text delta through bridge-v1; prove a real Desktop bidirectional slice and codex-web behavior isolation.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "tests",
+      "depends_on": [
+        "phase1-minimal-vertical-impl"
+      ],
+      "source": "Phase 1 tasks 5-7",
+      "notes": "Envelope stream Transport + whitelist rpc.go + Phase 1 text vertical on fake host. Live Desktop batched in OWNER_MANUAL_CHECKLIST.md.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Fake-host vertical test lists/resumes/sends, interrupts after turn/started, and observes text + result events. thread/status/changed is counted unknown, not treated as a turn.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase1/transport-rpc-test.txt",
+          "cmd:go test ./agent/codex-remote -count=1 -timeout 15s => PASS"
+        ],
+        "checked_at": "2026-08-29T05:33:56Z"
+      }
+    },
+    {
+      "id": "phase1-minimal-vertical-regression",
+      "title": "Minimal backend vertical slice — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "regression",
+      "depends_on": [
+        "phase1-minimal-vertical-tests"
+      ],
+      "source": "Phase 1 tasks 5-7",
+      "notes": "Envelope stream Transport + whitelist rpc.go + Phase 1 text vertical on fake host. Live Desktop batched in OWNER_MANUAL_CHECKLIST.md.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Automated isolation via fake host. Real Desktop bidirectional cut is batched for the owner at testdata/phase1/OWNER_MANUAL_CHECKLIST.md; not claimed as live-proven.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase1/OWNER_MANUAL_CHECKLIST.md",
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => PASS"
+        ],
+        "checked_at": "2026-08-28T13:10:05Z"
+      }
+    },
+    {
+      "id": "phase1-gate-impl",
+      "title": "Gate P1 adjudication — impl",
+      "description": "Require MacBridge targeted automated evidence plus a real Desktop bidirectional minimal slice and the frozen-directory regression gate; do not connect the full iOS product surface.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [
+        "phase1-minimal-vertical-regression"
+      ],
+      "source": "Gate P1",
+      "notes": "Envelope stream Transport + whitelist rpc.go + Phase 1 text vertical on fake host. Live Desktop batched in OWNER_MANUAL_CHECKLIST.md.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Gate P1 automated slice exists (transport+RPC+vertical tests). Full iOS product surface not connected. Manual Desktop remaining.",
+        "artifacts": [
+          "docs/2026-08-26-codex-remote-backend-implementation-plan.md",
+          "agent/codex-remote/testdata/phase1/OWNER_MANUAL_CHECKLIST.md"
+        ],
+        "checked_at": "2026-08-28T13:10:05Z"
+      }
+    },
+    {
+      "id": "phase1-gate-tests",
+      "title": "Gate P1 adjudication — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Require MacBridge targeted automated evidence plus a real Desktop bidirectional minimal slice and the frozen-directory regression gate; do not connect the full iOS product surface.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "tests",
+      "depends_on": [
+        "phase1-gate-impl"
+      ],
+      "source": "Gate P1",
+      "notes": "Envelope stream Transport + whitelist rpc.go + Phase 1 text vertical on fake host. Live Desktop evidence now includes owner-confirmed iOS↔Desktop bidirectional synchronization. resolved-via:phase0-boundary-metadata-audit-review-fix-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Re-ran the codex-remote race suite and repaired boundary gate; automated Phase 1 transport checks pass, with owner-confirmed bidirectional iOS↔Codex Desktop messaging reserved for the regression todo.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/phase1-boundary-validation.txt",
+          "agent/codex-remote/testdata/phase1/transport-rpc-test.txt",
+          "cmd:go test ./agent/codex-remote -count=1 -timeout 15s => PASS"
+        ],
+        "checked_at": "2026-08-29T05:37:34Z"
+      }
+    },
+    {
+      "id": "phase1-gate-regression",
+      "title": "Gate P1 adjudication — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "regression",
+      "depends_on": [
+        "phase1-gate-tests"
+      ],
+      "source": "Gate P1",
+      "notes": "Owner-batched real Desktop checklist. resolved-via:phase1-event-backpressure-review-fix-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Re-verified the repaired runtime build and management status after resolving the event-backpressure failure; owner-confirmed iOS↔Codex Desktop bidirectional synchronization remains recorded, and the app-server event pump now follows the upstream non-blocking invariant.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase1/OWNER_MANUAL_CHECKLIST.md",
+          "/Users/jacklee/Library/Application Support/CordCode Link/logs/go-bridge.log",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/lib.rs",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs"
+          ,"agent/codex-remote/testdata/phase1/event-backpressure-regression.txt"
+        ],
+        "checked_at": "2026-08-29T05:52:00Z"
+      }
+    },
+    {
+      "id": "phase2-history-ssv2-impl",
+      "title": "Catalog history codec and SSV2 parity — impl",
+      "description": "Whitelist-migrate catalog/history/session/Thread-Turn-Item codec and SSV2/pathless behavior file by file, recording source commit/file/reason and proving official app-server payload plus Remote envelope plus bridge mapping parity.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase1-gate-regression"
+      ],
+      "source": "Phase 2; §5.3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Implemented a Remote-specific official Thread/Turn/Item cold baseline and full live codec. It preserves official turn/item identities and statuses, maps sampled and schema-backed tool/reasoning/context variants, keeps unknown types fail-closed, reads authoritative thread status for hydrate activity, rejects unsampled attachments, and adds text steer using the official expectedTurnId contract. No codex-web or legacy codex files were changed.",
+        "artifacts": [
+          "agent/codex-remote/history.go",
+          "agent/codex-remote/codec.go",
+          "agent/codex-remote/session.go",
+          "agent/codex-remote/testdata/phase2/history-ssv2-provenance.md",
+          "agent/codex-remote/testdata/phase2/thread-read-app-server.json",
+          "agent/codex-remote/testdata/phase2/thread-read-remote-envelope.json"
+        ],
+        "checked_at": "2026-08-29T06:12:00Z"
+      }
+    },
+    {
+      "id": "phase2-history-ssv2-tests",
+      "title": "Catalog history codec and SSV2 parity — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Whitelist-migrate catalog/history/session/Thread-Turn-Item codec and SSV2/pathless behavior file by file, recording source commit/file/reason and proving official app-server payload plus Remote envelope plus bridge mapping parity.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-history-ssv2-impl"
+      ],
+      "source": "Phase 2; §5.3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Remote package race tests pass, including schema-variant history mapping, official status/notLoaded semantics, authoritative activity probing, full live item/turn codec, retry/usage/plan events, malformed completion fail-closed, text steer, and unsampled attachment rejection. Repeated focused replay also passes.",
+        "artifacts": [
+          "agent/codex-remote/history_test.go",
+          "agent/codex-remote/codec_test.go",
+          "agent/codex-remote/session_test.go",
+          "cmd:go test -race ./agent/codex-remote -count=1 -timeout 120s => PASS",
+          "cmd:go test -race ./agent/codex-remote -run 'TestRemote(History|Codec|Session|IsSession)' -count=5 -timeout 120s => PASS",
+          "agent/codex-remote/testdata/audit/2026-08-29-phase2-phase4-rerun.txt"
+        ],
+        "checked_at": "2026-08-29T06:45:46Z"
+      }
+    },
+    {
+      "id": "phase2-history-ssv2-regression",
+      "title": "Catalog history codec and SSV2 parity — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-history-ssv2-tests"
+      ],
+      "source": "Phase 2; §5.3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Regression gate passes: legacy codex-web/codex directories have no diff, Remote source passes gitleaks, the full Remote race suite and focused bridge projection/catalog/SSV2/pairing tests pass. Live owner evidence remains self-attested; schema-only item variants are explicitly not capability-advertised until a payload-preserving Remote capture exists.",
+        "artifacts": [
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex => PASS",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => PASS",
+          "cmd:go test -race ./go-bridge -run 'Test(CodexRemoteListSessionsSkipsWorkspaceCatalog|HandleGetSessionProjectionRunningCodexSessionWithinBudget|HandleGetSessionProjectionRunningCodexSessionTranscriptFallback|MgmtCodexRemotePairingRoutes|CodexRemoteProduceHydrateRangeUsesThreadRead|CodexRemoteJoinsSessionSyncV2)$' -count=3 -timeout 180s => PASS",
+          "agent/codex-remote/testdata/phase2/history-ssv2-provenance.md"
+        ],
+        "checked_at": "2026-08-29T06:14:00Z"
+      }
+    },
+    {
+      "id": "phase2-live-interactions-impl",
+      "title": "Live lifecycle and interaction parity — impl",
+      "description": "Add steer/interrupt/reconnect plus approval, requestUserInput and MCP elicitation only where real Remote samples exist; preserve server-request identity and fail closed for unknown shapes.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-history-ssv2-regression"
+      ],
+      "source": "Phase 2",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Implemented source-backed text steer and strict interrupt identity handling. Reconnects remain epoch-scoped with no cursor advertisement. Unsupported approval, requestUserInput, and MCP elicitation requests are actively drained and rejected with their original JSON-RPC request id; no unsampled interaction capability is advertised or optimistically resolved.",
+        "artifacts": [
+          "agent/codex-remote/session.go",
+          "agent/codex-remote/codec.go",
+          "agent/codex-remote/testdata/phase2/live-interactions-provenance.md"
+        ],
+        "checked_at": "2026-08-29T06:17:00Z"
+      }
+    },
+    {
+      "id": "phase2-live-interactions-tests",
+      "title": "Live lifecycle and interaction parity — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Add steer/interrupt/reconnect plus approval, requestUserInput and MCP elicitation only where real Remote samples exist; preserve server-request identity and fail closed for unknown shapes.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-live-interactions-impl"
+      ],
+      "source": "Phase 2",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Race-tested the Remote live codec and control boundary. Tests cover official turn/item identity, tool results, retry/plan/usage notifications, malformed completion drop, text steer request shape, attachment fail-closed behavior, replacement event pumps, unsupported server-request rejection with original id, and foreground RPC under request backlog.",
+        "artifacts": [
+          "agent/codex-remote/codec_test.go",
+          "agent/codex-remote/session_test.go",
+          "cmd:go test -race ./agent/codex-remote -count=1 -timeout 120s => PASS",
+          "cmd:go test -race ./agent/codex-remote -run 'Test(ServerRequestBacklogDoesNotBlockRPCResponse|UnsupportedRemoteServerRequestIsRejectedByOriginalID|RemoteSessionSteerUsesOfficialTurnIdentity|RemoteCodec)' -count=10 -timeout 120s => PASS",
+          "agent/codex-remote/testdata/audit/2026-08-29-phase2-phase4-rerun.txt"
+        ],
+        "checked_at": "2026-08-29T06:45:46Z"
+      }
+    },
+    {
+      "id": "phase2-live-interactions-regression",
+      "title": "Live lifecycle and interaction parity — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-live-interactions-tests"
+      ],
+      "source": "Phase 2",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Legacy backend boundary, secret scan, focused Remote race tests and bridge regressions all pass. Real target evidence is intentionally limited to the owner-attested Phase 0 turn stream; unsupported server requests remain fail-closed, so this gate does not claim approval or structured-input support.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase2/live-interactions-provenance.md",
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex => PASS",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => PASS",
+          "cmd:go test -race ./go-bridge -run 'Test(CodexRemoteListSessionsSkipsWorkspaceCatalog|HandleGetSessionProjectionRunningCodexSessionWithinBudget|HandleGetSessionProjectionRunningCodexSessionTranscriptFallback|MgmtCodexRemotePairingRoutes|CodexRemoteProduceHydrateRangeUsesThreadRead|CodexRemoteJoinsSessionSyncV2)$' -count=3 -timeout 180s => PASS"
+        ],
+        "checked_at": "2026-08-29T06:21:00Z"
+      }
+    },
+    {
+      "id": "phase2-capabilities-impl",
+      "title": "Models config permissions and mutation capabilities — impl",
+      "description": "Add models/config/permission profiles and archive/rename/delete/fork capabilities individually from sampled official payloads; never inherit codex-web advertising wholesale.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-live-interactions-regression"
+      ],
+      "source": "Phase 2",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Audited Remote capability advertising against concrete interfaces and target evidence. Remote exposes only session_state and session_history; model/provider, approvals/structured input, mutation, pagination, compression and question capabilities remain absent until payload-preserving Remote samples and adapters exist. Removed the generic model_switch advertisement for codex-remote and added a negative descriptor regression.",
+        "artifacts": [
+          "go-bridge/backend_capabilities.go",
+          "agent/codex-remote/wire_descriptor.go",
+          "go-bridge/agent_descriptor_test.go",
+          "agent/codex-remote/testdata/phase2/capabilities-provenance.md"
+        ],
+        "checked_at": "2026-08-29T06:29:00Z"
+      }
+    },
+    {
+      "id": "phase2-capabilities-tests",
+      "title": "Models config permissions and mutation capabilities — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Add models/config/permission profiles and archive/rename/delete/fork capabilities individually from sampled official payloads; never inherit codex-web advertising wholesale.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-capabilities-impl"
+      ],
+      "source": "Phase 2",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Targeted race tests pass for Remote and go-bridge capability wiring. The descriptor test proves the positive session state/history set and the negative unsampled model, interaction, mutation, pagination, compression and question set.",
+        "artifacts": [
+          "go-bridge/agent_descriptor_test.go",
+          "cmd:go test -race ./go-bridge -run 'TestCodexRemoteDescriptorOnlyAdvertisesImplementedCapabilities|TestCodexWebDescriptorUsesIndependentIdentityAndTruthfulCapabilities|TestBackendListMatchesBuildAgentDescriptorCapabilities' -count=5 -timeout 180s => PASS",
+          "cmd:go test -race ./agent/codex-remote -count=1 -timeout 120s => PASS",
+          "agent/codex-remote/testdata/audit/2026-08-29-phase2-phase4-rerun.txt"
+        ],
+        "checked_at": "2026-08-29T06:45:46Z"
+      }
+    },
+    {
+      "id": "phase2-capabilities-regression",
+      "title": "Models config permissions and mutation capabilities — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-capabilities-tests"
+      ],
+      "source": "Phase 2",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Capability regression passes with codex-web/codex unchanged and no secrets. Focused bridge descriptor, catalog, projection, pairing and SSV2 tests pass; the capability provenance records why every unsampled Remote operation remains hidden.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase2/capabilities-provenance.md",
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex => PASS",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => PASS",
+          "cmd:go test -race ./go-bridge -run 'TestCodexRemoteDescriptorOnlyAdvertisesImplementedCapabilities|TestBackendListMatchesBuildAgentDescriptorCapabilities|Test(CodexRemoteListSessionsSkipsWorkspaceCatalog|HandleGetSessionProjectionRunningCodexSessionWithinBudget|HandleGetSessionProjectionRunningCodexSessionTranscriptFallback|MgmtCodexRemotePairingRoutes|CodexRemoteProduceHydrateRangeUsesThreadRead|CodexRemoteJoinsSessionSyncV2)$' -count=3 -timeout 180s => PASS"
+        ],
+        "checked_at": "2026-08-29T06:31:00Z"
+      }
+    },
+    {
+      "id": "phase2-gate-impl",
+      "title": "Gate P2 adjudication — impl",
+      "description": "Audit every advertised capability for source call site, target fixture, Remote envelope, bridge/SSV2 mapping, targeted tests, provenance, and codex/codex-web zero-modification evidence.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-capabilities-regression"
+      ],
+      "source": "Phase 2 Gate; §9",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "P2 gate report audits every Remote advertisement against source, fixture, envelope unwrapping, bridge/SSV2 mapping and focused tests. It records the two truthful capabilities and the explicit unadvertised sample gaps; no codex-web or legacy codex behavior is used as proof.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase2/gate-p2.md",
+          "agent/codex-remote/testdata/phase2/history-ssv2-provenance.md",
+          "agent/codex-remote/testdata/phase2/live-interactions-provenance.md",
+          "agent/codex-remote/testdata/phase2/capabilities-provenance.md"
+        ],
+        "checked_at": "2026-08-29T06:34:00Z"
+      }
+    },
+    {
+      "id": "phase2-gate-tests",
+      "title": "Gate P2 adjudication — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Audit every advertised capability for source call site, target fixture, Remote envelope, bridge/SSV2 mapping, targeted tests, provenance, and codex/codex-web zero-modification evidence.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-gate-impl"
+      ],
+      "source": "Phase 2 Gate; §9",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "P2 gate checks pass under race detection for the full Remote package and focused bridge descriptor/catalog/projection/SSV2/pairing suites; legacy backend diff and Remote secret scan also pass.",
+        "artifacts": [
+          "cmd:go test -race ./agent/codex-remote -count=1 -timeout 120s => PASS",
+          "cmd:go test -race ./go-bridge -run 'TestCodexRemoteDescriptorOnlyAdvertisesImplementedCapabilities|Test(CodexRemoteListSessionsSkipsWorkspaceCatalog|HandleGetSessionProjectionRunningCodexSessionWithinBudget|HandleGetSessionProjectionRunningCodexSessionTranscriptFallback|MgmtCodexRemotePairingRoutes|CodexRemoteProduceHydrateRangeUsesThreadRead|CodexRemoteJoinsSessionSyncV2)$' -count=3 -timeout 180s => PASS",
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex => PASS",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => PASS",
+          "agent/codex-remote/testdata/audit/2026-08-29-phase2-phase4-rerun.txt"
+        ],
+        "checked_at": "2026-08-29T06:45:46Z"
+      }
+    },
+    {
+      "id": "phase2-gate-regression",
+      "title": "Gate P2 adjudication — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-gate-tests"
+      ],
+      "source": "Phase 2 Gate; §9",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "P2 regression closes with the required frozen-directory and secret-scan checks, targeted Remote/bridge race tests, and explicit owner-attested live evidence classification. The gate is complete for the implemented surface, with unsampled interactions and mutations documented as unavailable rather than overstated.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase2/gate-p2.md",
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex => PASS",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => PASS"
+        ],
+        "checked_at": "2026-08-29T06:37:00Z"
+      }
+    },
+    {
+      "id": "phase3-ios-kind-audit-impl",
+      "title": "iOS codexRemote kind and exhaustive audit — impl",
+      "description": "Re-run the dual-worktree source gate, add BackendKind.codexRemote, and separately audit compiler-exhaustive switches versus if/guard/string-kind/allowlist/cache/SSV2/hydrate/reconnect paths with an include-or-exclude rationale for every match.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-gate-regression"
+      ],
+      "source": "Phase 3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Audited every production codexRemote kind/string/allowlist/cache/SSV2/hydrate/reconnect path, added the missing Codex runtime-status classification, and documented intentional exclusions for creation, model, permission and legacy daemon surfaces.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase3/ios-kind-audit.md",
+          "agent/codex-remote/testdata/phase3/ios-identity-state.md",
+          "agent/codex-remote/validate/ios-codex-remote-audit.mjs",
+          "iOS git:7667a80"
+        ],
+        "checked_at": "2026-08-29T06:32:10Z"
+      }
+    },
+    {
+      "id": "phase3-ios-kind-audit-tests",
+      "title": "iOS codexRemote kind and exhaustive audit — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Re-run the dual-worktree source gate, add BackendKind.codexRemote, and separately audit compiler-exhaustive switches versus if/guard/string-kind/allowlist/cache/SSV2/hydrate/reconnect paths with an include-or-exclude rationale for every match.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "tests",
+      "depends_on": [
+        "phase3-ios-kind-audit-impl"
+      ],
+      "source": "Phase 3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Static validator and a target iOS compile passed after the Remote runtime-source fix; no UI/simulator automation was invoked.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase3/validation.txt",
+          "cmd:node --check agent/codex-remote/validate/ios-codex-remote-audit.mjs",
+          "cmd:node agent/codex-remote/validate/ios-codex-remote-audit.mjs => PASS",
+          "cmd:xcodebuild -project OpenCodeiOS/CordCode.xcodeproj -scheme CordCode -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO build => BUILD SUCCEEDED"
+        ],
+        "checked_at": "2026-08-29T06:32:35Z"
+      }
+    },
+    {
+      "id": "phase3-ios-kind-audit-regression",
+      "title": "iOS codexRemote kind and exhaustive audit — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-ios-kind-audit-tests"
+      ],
+      "source": "Phase 3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Frozen legacy directories remain unchanged; the paired iOS branch is clean and descendant-verified; diff check and gitleaks pass. Physical-device and UI automation rows remain explicitly unclaimed.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase3/gate-p3.md",
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex => PASS",
+          "cmd:git diff --check => PASS",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => no leaks",
+          "cmd:node agent/codex-remote/validate/ios-codex-remote-audit.mjs => PASS"
+        ],
+        "checked_at": "2026-08-29T06:33:05Z"
+      }
+    },
+    {
+      "id": "phase3-ios-identity-state-impl",
+      "title": "iOS independent identity cache and states — impl",
+      "description": "Implement distinct wire/backend/cache/SSV2 identity and truthful authorization, pairing, environment-offline, revoked and protocol-incompatible states; never merge codexRemote and codexWeb thread IDs.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [
+        "phase3-ios-kind-audit-regression"
+      ],
+      "source": "Phase 3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Verified separate wire/backend/cache/SSV2 identity and truthful lifecycle states; no cross-kind session merge or synthetic projection is introduced.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase3/ios-identity-state.md",
+          "iOS git:7667a80",
+          "agent/codex-remote/validate/ios-codex-remote-audit.mjs"
+        ],
+        "checked_at": "2026-08-29T06:33:35Z"
+      }
+    },
+    {
+      "id": "phase3-ios-identity-state-tests",
+      "title": "iOS independent identity cache and states — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Implement distinct wire/backend/cache/SSV2 identity and truthful authorization, pairing, environment-offline, revoked and protocol-incompatible states; never merge codexRemote and codexWeb thread IDs.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "tests",
+      "depends_on": [
+        "phase3-ios-identity-state-impl"
+      ],
+      "source": "Phase 3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Source validator replayed baseline ancestry, clean-worktree and identity/capability assertions; iOS target compile succeeded.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase3/validation.txt",
+          "cmd:node agent/codex-remote/validate/ios-codex-remote-audit.mjs => PASS",
+          "cmd:xcodebuild -project OpenCodeiOS/CordCode.xcodeproj -scheme CordCode -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO build => BUILD SUCCEEDED"
+        ],
+        "checked_at": "2026-08-29T06:34:05Z"
+      }
+    },
+    {
+      "id": "phase3-ios-identity-state-regression",
+      "title": "iOS independent identity cache and states — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-ios-identity-state-tests"
+      ],
+      "source": "Phase 3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Identity/state evidence is source-verified and legacy directories remain frozen; offline/revoked live behavior remains an explicit observation gap rather than a fabricated pass.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase3/ios-identity-state.md",
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex => PASS",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => no leaks"
+        ],
+        "checked_at": "2026-08-29T06:34:35Z"
+      }
+    },
+    {
+      "id": "phase3-ios-capability-ui-impl",
+      "title": "iOS capability-driven product wiring — impl",
+      "description": "Wire Codex Desktop display and capability-driven session/history/turn/interaction UI without daemon/path/cache semantic inheritance. Run targeted D3 tests and, when a physical iPhone is available, one final incremental build/install/launch only.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [
+        "phase3-ios-identity-state-regression"
+      ],
+      "source": "Phase 3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Remote product chrome, live/session routing, SSV2 gate and capability-driven unsupported-control hiding are wired without inheriting daemon/path semantics; runtime status now uses the Codex presentation source.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase3/ios-capability-ui.md",
+          "iOS git:7667a80",
+          "iOS git:cafadc8d"
+        ],
+        "checked_at": "2026-08-29T06:35:05Z"
+      }
+    },
+    {
+      "id": "phase3-ios-capability-ui-tests",
+      "title": "iOS capability-driven product wiring — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Wire Codex Desktop display and capability-driven session/history/turn/interaction UI without daemon/path/cache semantic inheritance. Run targeted D3 tests and, when a physical iPhone is available, one final incremental build/install/launch only.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "tests",
+      "depends_on": [
+        "phase3-ios-capability-ui-impl"
+      ],
+      "source": "Phase 3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Capability UI source assertions and bridge capability derivation were replayed by the static validator; target iOS compile passed.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase3/ios-capability-ui.md",
+          "agent/codex-remote/testdata/phase3/validation.txt",
+          "cmd:node agent/codex-remote/validate/ios-codex-remote-audit.mjs => PASS",
+          "cmd:xcodebuild -project OpenCodeiOS/CordCode.xcodeproj -scheme CordCode -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO build => BUILD SUCCEEDED"
+        ],
+        "checked_at": "2026-08-29T06:35:35Z"
+      }
+    },
+    {
+      "id": "phase3-ios-capability-ui-regression",
+      "title": "iOS capability-driven product wiring — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-ios-capability-ui-tests"
+      ],
+      "source": "Phase 3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Capability negative rows remain fail-closed, bridge legacy directories remain untouched, secret scan passes, and owner-confirmed bidirectional projection is documented without overclaiming unobserved matrix rows.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase3/ios-capability-ui.md",
+          "agent/codex-remote/testdata/phase3/gate-p3.md",
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex => PASS",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => no leaks"
+        ],
+        "checked_at": "2026-08-29T06:36:05Z"
+      }
+    },
+    {
+      "id": "phase3-gate-impl",
+      "title": "Gate P3 owner matrix — impl",
+      "description": "Present and preserve the one-shot owner matrix for Desktop↔iPhone live relay, cancel, approval/question, LAN/Relay, reconnect, controller coexistence and backend isolation. UI tests, snapshots, simulator automation and device auto-click remain unauthorized.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [
+        "phase3-ios-capability-ui-regression"
+      ],
+      "source": "Gate P3; §9.2",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Preserved the one-shot P3 owner matrix with observed bidirectional projection, capability-negative rows, and explicit observation gaps; no unauthorized UI automation was introduced.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase3/gate-p3.md"
+        ],
+        "checked_at": "2026-08-29T06:36:35Z"
+      }
+    },
+    {
+      "id": "phase3-gate-tests",
+      "title": "Gate P3 owner matrix — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Present and preserve the one-shot owner matrix for Desktop↔iPhone live relay, cancel, approval/question, LAN/Relay, reconnect, controller coexistence and backend isolation. UI tests, snapshots, simulator automation and device auto-click remain unauthorized.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "tests",
+      "depends_on": [
+        "phase3-gate-impl"
+      ],
+      "source": "Gate P3; §9.2",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "The matrix artifact and static/target-build evidence were replayed; automated checks cover the implemented reducer/control boundaries while live-only rows remain clearly labeled.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase3/gate-p3.md",
+          "agent/codex-remote/testdata/phase3/validation.txt",
+          "cmd:node agent/codex-remote/validate/ios-codex-remote-audit.mjs => PASS"
+        ],
+        "checked_at": "2026-08-29T06:37:05Z"
+      }
+    },
+    {
+      "id": "phase3-gate-regression",
+      "title": "Gate P3 owner matrix — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-gate-tests"
+      ],
+      "source": "Gate P3; §9.2",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "P3 implementation surface is source-verified and owner-confirmed for bidirectional send/projection; pending cancel/reconnect/controller-coexistence rows are explicitly not promoted to live PASS.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase3/gate-p3.md",
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex => PASS",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => no leaks"
+        ],
+        "checked_at": "2026-08-29T06:37:35Z"
+      }
+    },
+    {
+      "id": "phase4-topology-health-impl",
+      "title": "Independent topology health monitoring — impl",
+      "description": "Represent codex-web local-daemon and codex-remote Desktop-environment health independently; private stdio plus Remote connected is healthy and split_present alone is not a product failure.",
+      "status": "done",
+      "phase": "phase4",
+      "kind": "impl",
+      "depends_on": [
+        "phase3-gate-regression"
+      ],
+      "source": "Phase 4 tasks 1-4",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Documented and verified the independent codex-web topology snapshot, codex-remote pairing/environment status, and LAN/Relay diagnostic surfaces; split_present remains local-daemon degradation, not a global failure.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase4/topology-health.md",
+          "go-bridge/topology_dto.go",
+          "go-bridge/topology_aggregate.go",
+          "go-bridge/topology_service.go",
+          "go-bridge/management_api.go"
+        ],
+        "checked_at": "2026-08-29T06:38:15Z"
+      }
+    },
+    {
+      "id": "phase4-topology-health-tests",
+      "title": "Independent topology health monitoring — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Represent codex-web local-daemon and codex-remote Desktop-environment health independently; private stdio plus Remote connected is healthy and split_present alone is not a product failure.",
+      "status": "done",
+      "phase": "phase4",
+      "kind": "tests",
+      "depends_on": [
+        "phase4-topology-health-impl"
+      ],
+      "source": "Phase 4 tasks 1-4",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Focused race suite passes for aggregation, debounce, stale/epoch semantics, topology management, Remote status and codex-remote endpoints.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase4/validation.txt",
+          "cmd:go test -race ./go-bridge -run 'Test(AggregateDesktopTruthTable|DeriveSyncHealthFullTable|Display|Service|TopologySnapshot|MgmtRemoteStatus|MgmtCodexRemote|CodexRemote)' -count=1 -timeout 120s => PASS"
+        ],
+        "checked_at": "2026-08-29T06:38:45Z"
+      }
+    },
+    {
+      "id": "phase4-topology-health-regression",
+      "title": "Independent topology health monitoring — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase4",
+      "kind": "regression",
+      "depends_on": [
+        "phase4-topology-health-tests"
+      ],
+      "source": "Phase 4 tasks 1-4",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Focused health evidence, secret scan, diff-check and legacy-directory freeze all pass; live long-window behavior is explicitly separated from source/test proof.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase4/topology-health.md",
+          "agent/codex-remote/testdata/phase4/validation.txt",
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex => PASS",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => no leaks"
+        ],
+        "checked_at": "2026-08-29T06:39:15Z"
+      }
+    },
+    {
+      "id": "phase4-coexistence-migration-impl",
+      "title": "Coexistence observation and rollback — impl",
+      "description": "Keep backend/session identities separate when both paths are available; retain codex-web and rollback entry through the observation window; do not retire any backend without separate owner adjudication.",
+      "status": "done",
+      "phase": "phase4",
+      "kind": "impl",
+      "depends_on": [
+        "phase4-topology-health-regression"
+      ],
+      "source": "Phase 4 tasks 5-6; §12",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Retained separate agent/session/cache/epoch identities and documented additive rollback that removes only Remote enrollment while leaving codex-web and Desktop state intact.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase4/coexistence-rollback.md",
+          "agent/codex-remote/codexremote.go",
+          "agent/codex-remote/pairing.go",
+          "go-bridge/main.go"
+        ],
+        "checked_at": "2026-08-29T06:39:45Z"
+      }
+    },
+    {
+      "id": "phase4-coexistence-migration-tests",
+      "title": "Coexistence observation and rollback — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Keep backend/session identities separate when both paths are available; retain codex-web and rollback entry through the observation window; do not retire any backend without separate owner adjudication.",
+      "status": "done",
+      "phase": "phase4",
+      "kind": "tests",
+      "depends_on": [
+        "phase4-coexistence-migration-impl"
+      ],
+      "source": "Phase 4 tasks 5-6; §12",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Focused race tests cover backend descriptor coexistence, Remote status and topology management boundaries; zero-diff legacy check and formatting checks pass.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase4/validation.txt",
+          "cmd:go test -race ./go-bridge -run 'Test(CodexRemote|MgmtCodexRemote|MgmtRemoteStatus|TopologySnapshot|AggregateDesktopTruthTable|DeriveSyncHealthFullTable|Display|Service)' -count=1 -timeout 120s => PASS",
+          "cmd:git diff --check => PASS",
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex => PASS"
+        ],
+        "checked_at": "2026-08-29T06:40:20Z"
+      }
+    },
+    {
+      "id": "phase4-coexistence-migration-regression",
+      "title": "Coexistence observation and rollback — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase4",
+      "kind": "regression",
+      "depends_on": [
+        "phase4-coexistence-migration-tests"
+      ],
+      "source": "Phase 4 tasks 5-6; §12",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Coexistence/rollback contract and focused endpoint tests are in place; no backend retirement or shared-state mutation is present, while long-window ownership observation remains open.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase4/coexistence-rollback.md",
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex => PASS",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => no leaks"
+        ],
+        "checked_at": "2026-08-29T06:40:50Z"
+      }
+    },
+    {
+      "id": "phase4-gate-impl",
+      "title": "Gate P4 observation-window adjudication — impl",
+      "description": "Require versioned topology/coexistence/rollback evidence, targeted tests, real observation-window results, secret scan and frozen-directory regression before declaring first delivery complete.",
+      "status": "done",
+      "phase": "phase4",
+      "kind": "impl",
+      "depends_on": [
+        "phase4-coexistence-migration-regression"
+      ],
+      "source": "Phase 4; Definition of Done",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Recorded P4 adjudication criteria and separated source/test proof from the still-required real observation window; no retirement is allowed by the current evidence.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase4/gate-p4.md"
+        ],
+        "checked_at": "2026-08-29T06:41:20Z"
+      }
+    },
+    {
+      "id": "phase4-gate-tests",
+      "title": "Gate P4 observation-window adjudication — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Require versioned topology/coexistence/rollback evidence, targeted tests, real observation-window results, secret scan and frozen-directory regression before declaring first delivery complete.",
+      "status": "done",
+      "phase": "phase4",
+      "kind": "tests",
+      "depends_on": [
+        "phase4-gate-impl"
+      ],
+      "source": "Phase 4; Definition of Done",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Focused topology/coexistence race suite and secret/frozen-directory checks pass; the gate report records the missing long observation window as pending.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase4/gate-p4.md",
+          "agent/codex-remote/testdata/phase4/validation.txt",
+          "cmd:go test -race ./go-bridge -run 'Test(AggregateDesktopTruthTable|DeriveSyncHealthFullTable|Display|Service|TopologySnapshot|MgmtRemoteStatus|MgmtCodexRemote|CodexRemote)' -count=1 -timeout 120s => PASS"
+        ],
+        "checked_at": "2026-08-29T06:41:50Z"
+      }
+    },
+    {
+      "id": "phase4-gate-regression",
+      "title": "Gate P4 observation-window adjudication — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase4",
+      "kind": "regression",
+      "depends_on": [
+        "phase4-gate-tests"
+      ],
+      "source": "Phase 4; Definition of Done",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "P4 source/test gate is adjudicated with focused race, redaction and frozen-directory evidence; the long real observation window remains explicitly pending and no backend retirement is claimed.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase4/gate-p4.md",
+          "agent/codex-remote/testdata/phase4/topology-health.md",
+          "agent/codex-remote/testdata/phase4/coexistence-rollback.md",
+          "agent/codex-remote/testdata/phase4/validation.txt"
+        ],
+        "checked_at": "2026-08-29T06:42:20Z"
+      }
+    },
+    {
+      "id": "phase5-authorization-audit-impl",
+      "title": "Phase 5 authorization and duplication audit — impl",
+      "description": "After both backends have real E2E and a stable observation window, obtain explicit owner authorization for the separate common-core task and audit only proven duplication. Without authorization, do not enter Phase 5.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase4-gate-regression"
+      ],
+      "source": "Phase 5; §5.5",
+      "notes": "Owner authorization and a 53-minute stable observation window are present. Audit permits only the proven transport-neutral RPC extraction; codec/history/sessions/interactions/models remain backend-owned.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Opened the Phase 5 gate after owner-confirmed bidirectional E2E, a 53-minute stable runtime window and repeated explicit instructions to execute the remaining tasks. Audited duplication and limited extraction scope to the shared RPC algorithm.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase5/authorization-gate.md",
+          "agent/codex-remote/testdata/phase5/authorization-audit.md",
+          "docs/2026-08-26-codex-remote-backend-implementation-plan.md §5.5"
+        ],
+        "checked_at": "2026-08-29T07:44:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs:216"
+      }
+    },
+    {
+      "id": "phase5-authorization-audit-tests",
+      "title": "Phase 5 authorization and duplication audit — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: After both backends have real E2E and a stable observation window, obtain explicit owner authorization for the separate common-core task and audit only proven duplication. Without authorization, do not enter Phase 5.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-authorization-audit-impl"
+      ],
+      "source": "Phase 5; §5.5",
+      "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Static authorization audit validates the plan gate, opened-gate evidence, rpc-only duplication decision, negative extraction decisions, and official Codex app-server client anchors.",
+        "artifacts": [
+          "agent/codex-appserver/validate/phase5-authorization.mjs",
+          "agent/codex-remote/testdata/phase5/authorization-audit.md",
+          "cmd:node --check agent/codex-appserver/validate/phase5-authorization.mjs => PASS",
+          "cmd:node agent/codex-appserver/validate/phase5-authorization.mjs => PHASE5-AUTHORIZATION-AUDIT PASS"
+        ],
+        "checked_at": "2026-08-29T07:45:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs:216"
+      }
+    },
+    {
+      "id": "phase5-authorization-audit-regression",
+      "title": "Phase 5 authorization and duplication audit — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-authorization-audit-tests"
+      ],
+      "source": "Phase 5; §5.5",
+      "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Rechecked the live installed Remote controller as ready/online after the stable window, validated frozen pre-extraction backend boundaries, formatting and secret scans, and preserved owner E2E evidence as self-attested.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase5/authorization-audit.md",
+          "cmd:git diff --check => PASS",
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex => PASS before extraction",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-appserver agent/codex-remote => no leaks",
+          "cmd:authenticated remote-control status => ready, online=true"
+        ],
+        "checked_at": "2026-08-29T07:46:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs:216"
+      }
+    },
+    {
+      "id": "phase5-common-core-impl",
+      "title": "Transport-neutral common core extraction — impl",
+      "description": "Only after the authorization gate, extract proven transport-neutral rpc/codec/sessions/interactions/models while keeping identities, epochs, capabilities and diagnostics independent; do not fold lifecycle/auth/ownership together.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-authorization-audit-regression"
+      ],
+      "source": "Phase 5; §5.5",
+      "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Extracted the proven transport-neutral JSON-RPC algorithm into agent/codex-appserver/rpc and replaced both backend copies with thin policy adapters. Preserved backend-specific error text, lifecycle, transport ownership and distinct IsClosed semantics; left codec/history/sessions/interactions/models separate after the negative duplication audit.",
+        "artifacts": [
+          "agent/codex-appserver/rpc/client.go",
+          "agent/codex-appserver/README.md",
+          "agent/codex-web/rpc.go",
+          "agent/codex-remote/rpc.go",
+          "agent/codex-remote/testdata/phase5/common-core-extraction.md"
+        ],
+        "checked_at": "2026-08-29T07:52:38Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs:216; /Users/jacklee/Projects/codex/codex-rs/app-server-client/src/lib.rs:333"
+      }
+    },
+    {
+      "id": "phase5-common-core-tests",
+      "title": "Transport-neutral common core extraction — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Only after the authorization gate, extract proven transport-neutral rpc/codec/sessions/interactions/models while keeping identities, epochs, capabilities and diagnostics independent; do not fold lifecycle/auth/ownership together.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-common-core-impl"
+      ],
+      "source": "Phase 5; §5.5",
+      "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Race tests pass for the shared RPC core, the complete codex-web and codex-remote packages, repeated backend RPC/cancellation/reconnect/server-request cases, and focused go-bridge projection/topology/capability integration.",
+        "artifacts": [
+          "agent/codex-appserver/rpc/client_test.go",
+          "agent/codex-remote/testdata/phase5/validation.txt",
+          "cmd:go test -race ./agent/codex-appserver/... ./agent/codex-web ./agent/codex-remote -count=1 -timeout 240s => PASS",
+          "cmd:repeated shared/web/remote RPC race suites => PASS",
+          "cmd:focused go-bridge Remote/topology/projection race suite => PASS"
+        ],
+        "checked_at": "2026-08-29T07:55:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs:216; /Users/jacklee/Projects/codex/codex-rs/app-server-client/src/lib.rs:333"
+      }
+    },
+    {
+      "id": "phase5-common-core-regression",
+      "title": "Transport-neutral common core extraction — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-common-core-tests"
+      ],
+      "source": "Phase 5; §5.5",
+      "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Boundary regression proves the common package contains only transport-neutral RPC, does not import either backend, preserves each backend's distinct close/error policy, leaves agent/codex unchanged, limits codex-web changes to the authorized wrapper set, keeps the iOS worktree clean and passes secret scans.",
+        "artifacts": [
+          "agent/codex-appserver/validate/phase5-boundary.mjs",
+          "agent/codex-remote/validate/ios-codex-remote-audit.mjs --phase5",
+          "agent/codex-remote/testdata/phase5/validation.txt",
+          "cmd:git diff --exit-code -- agent/codex => PASS",
+          "cmd:gitleaks detect --no-git --source agent/codex-appserver agent/codex-remote agent/codex-web => no leaks"
+        ],
+        "checked_at": "2026-08-29T07:57:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs:216; /Users/jacklee/Projects/codex/codex-rs/app-server-client/src/lib.rs:333"
+      }
+    },
+    {
+      "id": "phase5-gate-impl",
+      "title": "Gate P5 adjudication — impl",
+      "description": "Prove both backends retain their real E2E semantics, independent rollback and frozen legacy behavior after the separately authorized extraction; otherwise leave Phase 5 incomplete.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-common-core-regression"
+      ],
+      "source": "Phase 5",
+      "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Gate P5 adjudication records the owner authorization and stable observation window, proves both backends retain separate identity, lifecycle, transport, error, capability and diagnostics contracts, and documents a source-only independently reversible rollback.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase5/gate-p5.md",
+          "agent/codex-remote/testdata/phase5/authorization-audit.md",
+          "agent/codex-remote/testdata/phase5/common-core-extraction.md"
+        ],
+        "checked_at": "2026-08-29T08:00:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs:216; /Users/jacklee/Projects/codex/codex-rs/app-server-client/src/lib.rs:333"
+      }
+    },
+    {
+      "id": "phase5-gate-tests",
+      "title": "Gate P5 adjudication — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Prove both backends retain their real E2E semantics, independent rollback and frozen legacy behavior after the separately authorized extraction; otherwise leave Phase 5 incomplete.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-gate-impl"
+      ],
+      "source": "Phase 5",
+      "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Gate P5 automated re-verification passes the full common/web/remote race suite, focused bridge Remote/topology/projection race suite, every Go package test, authorization and boundary validators, and the Phase 5-aware iOS source audit.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase5/validation.txt",
+          "cmd:go test -race ./agent/codex-appserver/... ./agent/codex-web ./agent/codex-remote -count=1 -timeout 240s => PASS",
+          "cmd:focused go-bridge Remote/topology/projection race suite => PASS",
+          "cmd:go test ./... -count=1 -timeout 300s => PASS",
+          "cmd:Phase 5 authorization/boundary/iOS source validators => PASS"
+        ],
+        "checked_at": "2026-08-29T08:02:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs:216; /Users/jacklee/Projects/codex/codex-rs/app-server-client/src/lib.rs:333"
+      }
+    },
+    {
+      "id": "phase5-gate-regression",
+      "title": "Gate P5 adjudication — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-gate-tests"
+      ],
+      "source": "Phase 5",
+      "notes": "AUDIT REPAIRED 2026-08-30. Live subscription, model selection, session mutation, selected-project cwd, title persistence, catalog discovery, and runtime CPU review-fix chains are proven; review-fix-for:phase5-gate-regression.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Owner physical-device acceptance closes the iOS↔Mac bidirectional streaming, model/effort, session mutation, selected-project directory, and title regressions. Automated Go/iOS focused suites pass; the installed Release runtime c0e26fe has event-driven Remote discovery and a 60-second idle sample averaging 0.48% CPU with no reconnect storm.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase5/gate-p5.md",
+          "agent/codex-remote/testdata/phase5/validation.txt",
+          "git:ca9c223e47df",
+          "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED",
+          "runtime:/Applications/CordCodeLink.app PID 41727 TCP 8777 commit ca9c223e47df",
+          "cmd:authenticated management status => runtime ready; codex-remote ready/online",
+          "owner-device:open session without sending, then Desktop send => iOS did not update",
+          "owner-device:2026-08-29 bidirectional iOS↔Mac send/sync and turn handoff => PASS",
+          "owner-device:2026-08-29 Codex Desktop model catalog and effort controls visible on iOS => PASS",
+          "owner-device:2026-08-29 rename/archive/delete => PASS",
+          "owner-device:2026-08-29 new session under selected project => PASS",
+          "owner-device:2026-08-29 iOS-created title persists across message page/list/Codex Desktop => PASS",
+          "runtime:2026-08-30 c0e26fe idle CPU sample avg 0.48% (0.20..1.70), sole 8777 listener, no Remote reconnect storm",
+          "upstream:/Users/jacklee/Projects/codex/codex-rs/app-server/src/thread_state.rs:61"
+        ],
+      "checked_at": "2026-08-29T16:57:13Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:532; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:537; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:566; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs:62"
+      }
+    },
+    {
+      "id": "phase5-session-open-live-subscription-review-fix-impl",
+      "title": "Attach Remote live subscription when a session is opened — review fix impl",
+      "description": "review-fix-for:phase5-gate-regression. When get_session_projection opens an existing codex-remote thread, use the official thread/resume path to atomically subscribe the app-server connection and register a backend listener before relying on projection push. Keep the attachment idempotent and connection-epoch owned; do not use cursor, polling, transcript fallback or a fake live source.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-gate-tests"
+      ],
+      "source": "Owner device regression 2026-08-29; official thread_state.rs ThreadListenerCommand",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+            "summary": "Projection-only open now creates one real codex-remote AgentSession listener before hydration, thread/resume is idempotent per Client epoch, the listener is registered before resume to close the first-frame race, and BindClient re-resumes observed threads after reconnect. No cursor, polling, transcript fallback, or synthetic events were added.",
+            "artifacts": [
+              "git:2de5189a8bfd",
+              "core/interfaces.go:ProjectionLiveSessionAttacher",
+              "agent/codex-remote/session.go:AttachLiveThread/AttachProjectionLiveSession",
+              "go-bridge/handlers_projection.go:startProjectionLiveRelay"
+            ],
+            "checked_at": "2026-08-29T09:53:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server/src/thread_state.rs:61; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs:335"
+      }
+    },
+    {
+      "id": "phase5-session-open-live-subscription-review-fix-tests",
+      "title": "Attach Remote live subscription when a session is opened — review fix tests",
+      "description": "review-fix-for:phase5-gate-regression. Prove projection-open attaches exactly one official Remote session listener, Desktop-originated events flow before any iOS send, repeated opens are idempotent, and reconnect replaces stale epoch attachment without duplicate delivery.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-session-open-live-subscription-review-fix-impl"
+      ],
+      "source": "Owner device regression 2026-08-29",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+            "summary": "Targeted tests prove cold projection open attaches once, warm pulls reuse the listener, Desktop-originated events arrive before any iOS send, replacement Client epochs re-resume the observed thread, and the codex-remote race suite passes.",
+            "artifacts": [
+              "go-bridge/projection_live_session_attach_test.go",
+              "agent/codex-remote/session_test.go:TestProjectionAttachReceivesDesktopTurnBeforeAnySend",
+              "agent/codex-remote/session_test.go:TestBindClientStartsEventPumpForReplacementEpoch",
+              "cmd:go test ./... -count=1 -timeout 300s => PASS",
+              "cmd:go test -race ./agent/codex-remote -count=1 => PASS",
+              "cmd:go test ./go-bridge -run Test(ProjectionOpenAttachesLiveSessionBeforeFirstSend|CodexRemoteDescriptorOnlyAdvertisesImplementedCapabilities) -count=1 => PASS"
+            ],
+            "checked_at": "2026-08-29T09:53:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server/src/thread_state.rs:61"
+      }
+    },
+    {
+      "id": "phase5-session-open-live-subscription-review-fix-regression",
+      "title": "Attach Remote live subscription when a session is opened — review fix regression",
+      "description": "review-fix-for:phase5-gate-regression. Build/install the repaired Mac app and require owner-device verification: open a session without sending, send from Codex Desktop, and observe the user turn and reply on iOS without reopening or polling fallback.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-session-open-live-subscription-review-fix-tests"
+      ],
+      "source": "Owner device regression 2026-08-29",
+      "notes": "review-fix-for:phase5-gate-regression",
+    "verification": {
+      "required": true,
+      "status": "present",
+      "method": "mixed",
+      "attestation": "self-attested",
+      "na_reason": null,
+      "summary": "Owner verified on a physical iPhone that an opened Codex Desktop session supports bidirectional send/sync and cross-device turn handoff in both directions, including Desktop-originated updates without requiring an iOS-first send.",
+      "artifacts": [
+        "git:2de5189a8bfd",
+        "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED",
+        "runtime:/Applications/CordCodeLink.app PID 47431 TCP 8777 commit cd5ff9b18c80",
+        "cmd:management status => runtime ready; codex-remote ready/online; relay connected",
+        "cmd:./scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05 => blocked: Xcode No Accounts / missing provisioning profiles",
+        "cmd:unsigned iOS xcodebuild build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO => BUILD SUCCEEDED",
+        "owner-device:2026-08-29 bidirectional iOS↔Mac send/sync and turn handoff => PASS"
+      ],
+      "checked_at": "2026-08-29T14:04:30Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server/src/thread_state.rs:61"
+      }
+    },
+    {
+      "id": "phase5-model-catalog-selection-review-fix-impl",
+      "title": "Expose official Remote model catalog and per-turn selection — review fix impl",
+      "description": "review-fix-for:phase5-gate-regression. Implement model/list pagination and typed mapping from the official app-server response, expose ModelSwitcher/effort catalog truth to Bridge, and pass the selected model/effort through official thread/resume or turn/start fields without inventing defaults or cached catalogs.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-gate-tests"
+      ],
+      "source": "Owner device regression 2026-08-29; official model.rs and turn.rs",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+            "summary": "codex-remote now maps the live official model/list pages, exposes per-model reasoning efforts and default/current selection, restores per-thread model truth from thread/resume, and sends user choices atomically in turn/start model/effort fields. Catalog failures remain empty and logged; there is no built-in or cached fallback.",
+            "artifacts": [
+              "git:2de5189a8bfd",
+              "agent/codex-remote/models.go",
+              "agent/codex-remote/session.go:SendWithOptions",
+              "go-bridge/backend_capabilities.go",
+          "upstream:/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/model.rs",
+          "upstream:/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/turn.rs"
+        ],
+            "checked_at": "2026-08-29T09:53:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:1038; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/model.rs:53; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/turn.rs:152"
+      }
+    },
+    {
+      "id": "phase5-model-catalog-selection-review-fix-tests",
+      "title": "Expose official Remote model catalog and per-turn selection — review fix tests",
+      "description": "review-fix-for:phase5-gate-regression. Prove multi-page model/list mapping, default/current selection, per-model reasoning efforts, error preservation, and selected model/effort framing on turn/start with official response fixtures.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-model-catalog-selection-review-fix-impl"
+      ],
+      "source": "Owner device regression 2026-08-29",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+            "summary": "Targeted tests cover two-page official catalog mapping, hidden-row exclusion, default model, per-model efforts, repeated-cursor rejection, thread/resume current selection, and exact turn/start model/effort framing.",
+            "artifacts": [
+              "agent/codex-remote/models_test.go",
+              "cmd:go test ./... -count=1 -timeout 300s => PASS",
+              "cmd:go test -race ./agent/codex-remote -count=1 => PASS",
+              "cmd:go vet ./... => PASS"
+            ],
+            "checked_at": "2026-08-29T09:53:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/model.rs:53; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/turn.rs:152"
+      }
+    },
+    {
+      "id": "phase5-model-catalog-selection-review-fix-regression",
+      "title": "Expose official Remote model catalog and per-turn selection — review fix regression",
+      "description": "review-fix-for:phase5-gate-regression. Build/install and require owner-device verification that Codex Desktop mode shows the official model choices and a selected model is honored on a real iOS-started turn.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-model-catalog-selection-review-fix-tests"
+      ],
+      "source": "Owner device regression 2026-08-29",
+      "notes": "review-fix-for:phase5-gate-regression",
+    "verification": {
+      "required": true,
+      "status": "present",
+      "method": "mixed",
+      "attestation": "self-attested",
+      "na_reason": null,
+      "summary": "Owner verified on a physical iPhone that Codex Desktop mode now exposes the live model catalog and reasoning-effort choices while bidirectional turns continue to stream and synchronize correctly.",
+      "artifacts": [
+        "git:2de5189a8bfd",
+        "git-ios:ed60f99",
+        "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED",
+        "cmd:unsigned iOS xcodebuild build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO => BUILD SUCCEEDED",
+        "cmd:./scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05 => blocked: Xcode No Accounts / missing provisioning profiles",
+        "owner-device:2026-08-29 Codex Desktop model catalog and effort controls visible on iOS => PASS",
+        "owner-device:2026-08-29 signed CordCode iOS installation restored => PASS"
+      ],
+      "checked_at": "2026-08-29T14:04:30Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/model.rs:53; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/turn.rs:152"
+      }
+    },
+    {
+      "id": "phase0-source-baseline-audit-review-fix-impl",
+      "title": "Make the Phase 0 source-baseline validator progression-safe — review fix impl",
+      "description": "review-fix-for:phase0-source-baseline-tests. Preserve the immutable Phase 0 iOS baseline and provenance checks while allowing the authorized companion branch to advance after Phase 3; validate clean branch plus baseline ancestry instead of permanently requiring current HEAD equality.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-source-baseline-impl"
+      ],
+      "source": "2026-08-29 exec-plan audit",
+      "notes": "review-fix-for:phase0-source-baseline-tests",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Changed the source-baseline validator to preserve the frozen Phase 0 iOS commit as an ancestry floor while accepting the current clean authorized descendant branch; added an explicit candidate revision input for fail-closed verification.",
+        "artifacts": [
+          "agent/codex-remote/validate/source-baseline.mjs",
+          "agent/codex-remote/testdata/phase0/meta/source-baseline-validation.txt"
+        ],
+        "checked_at": "2026-08-29T05:35:11Z"
+      }
+    },
+    {
+      "id": "phase0-source-baseline-audit-review-fix-tests",
+      "title": "Re-verify the progression-safe source-baseline validator — review fix tests",
+      "description": "review-fix-for:phase0-source-baseline-tests. Run the validator against the current clean cafadc8-descended iOS worktree and add a negative fixture or isolated check proving an unrelated or non-descendant iOS HEAD still fails.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-source-baseline-audit-review-fix-impl"
+      ],
+      "source": "2026-08-29 exec-plan audit",
+      "notes": "review-fix-for:phase0-source-baseline-tests",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Re-ran the complete source-baseline validator against clean iOS HEAD cafadc8 descended from frozen baseline d0762cb9; a deterministic baseline-parent candidate failed the ancestry gate as expected.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/source-baseline-validation.txt",
+          "agent/codex-remote/testdata/phase0/meta/source-baseline-ancestry-negative.txt",
+          "cmd:node agent/codex-remote/validate/source-baseline.mjs => PASS"
+        ],
+        "checked_at": "2026-08-29T05:35:11Z"
+      }
+    },
+    {
+      "id": "phase0-source-baseline-audit-review-fix-regression",
+      "title": "Close the source-baseline audit repair — review fix regression",
+      "description": "review-fix-for:phase0-source-baseline-tests. Re-run the full source-baseline validator, confirm the archived baseline metadata is unchanged, and only then restore the original blocked todo with resolved-via evidence.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-source-baseline-audit-review-fix-tests"
+      ],
+      "source": "2026-08-29 exec-plan audit",
+      "notes": "review-fix-for:phase0-source-baseline-tests",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "The complete source-baseline validator passes, the archived source-baseline.json remains byte-for-byte unmodified in git diff, and the negative ancestry evidence remains fail-closed.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/source-baseline.json",
+          "agent/codex-remote/testdata/phase0/meta/source-baseline-validation.txt",
+          "agent/codex-remote/testdata/phase0/meta/source-baseline-ancestry-negative.txt"
+        ],
+        "checked_at": "2026-08-29T05:35:11Z"
+      }
+    },
+    {
+      "id": "phase0-boundary-metadata-audit-review-fix-impl",
+      "title": "Define a safe OS-metadata policy for the Phase 0 boundary validator — review fix impl",
+      "description": "review-fix-for:phase0-probe-scaffold-tests. Make phase0-boundary.mjs ignore only explicitly enumerated non-product OS metadata such as .DS_Store while continuing to reject every unrecognized source, product, executable, or directory entry.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-probe-scaffold-impl"
+      ],
+      "source": "2026-08-29 exec-plan audit",
+      "notes": "review-fix-for:phase0-probe-scaffold-tests; shared root cause also blocks phase0-controller-fixtures-tests, phase0-gate-tests, phase1-identity-lifecycle-tests, and phase1-gate-tests.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Extracted an explicit fail-closed top-level boundary policy that permits only .DS_Store as OS metadata, and made the iOS boundary progression-safe by requiring the authorized branch, a clean worktree, and ancestry from the frozen pre-Phase-3 commit.",
+        "artifacts": [
+          "agent/codex-remote/validate/boundary-policy.mjs",
+          "agent/codex-remote/validate/phase0-boundary.mjs"
+        ],
+        "checked_at": "2026-08-29T05:37:34Z"
+      }
+    },
+    {
+      "id": "phase0-boundary-metadata-audit-review-fix-tests",
+      "title": "Test the Phase 0 boundary metadata policy — review fix tests",
+      "description": "review-fix-for:phase0-probe-scaffold-tests. Re-run phase0-boundary.mjs with .DS_Store present and add an isolated negative case proving a non-enumerated file still fails closed.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-boundary-metadata-audit-review-fix-impl"
+      ],
+      "source": "2026-08-29 exec-plan audit",
+      "notes": "review-fix-for:phase0-probe-scaffold-tests",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "The isolated Node test proves .DS_Store is accepted while unknown source files and directories fail closed; the complete boundary validator passes with the clean cafadc8 iOS descendant.",
+        "artifacts": [
+          "agent/codex-remote/validate/boundary-policy.test.mjs",
+          "agent/codex-remote/testdata/phase0/meta/boundary-policy-test.txt",
+          "agent/codex-remote/testdata/phase0/meta/phase1-boundary-validation.txt",
+          "cmd:node --test agent/codex-remote/validate/boundary-policy.test.mjs => PASS"
+        ],
+        "checked_at": "2026-08-29T05:37:34Z"
+      }
+    },
+    {
+      "id": "phase0-boundary-metadata-audit-review-fix-regression",
+      "title": "Close all boundary-validator audit failures — review fix regression",
+      "description": "review-fix-for:phase0-probe-scaffold-tests. Re-run every done todo that depends on phase0-boundary.mjs, then restore each original blocked todo only with fresh resolved-via evidence.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-boundary-metadata-audit-review-fix-tests"
+      ],
+      "source": "2026-08-29 exec-plan audit",
+      "notes": "review-fix-for:phase0-probe-scaffold-tests; resolves the shared validator cause for five blocked test todos.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Replayed the complete boundary validator, controller fixture validator, codex-remote race suite, frozen-backend diff gate, and gitleaks scan; every shared dependent gate now passes.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/phase1-boundary-validation.txt",
+          "agent/codex-remote/testdata/phase0/meta/boundary-policy-test.txt",
+          "cmd:go test -race ./agent/codex-remote -count=1 -timeout 120s => PASS",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => PASS"
+        ],
+        "checked_at": "2026-08-29T05:37:34Z"
+      }
+    },
+    {
+      "id": "phase1-event-backpressure-review-fix-impl",
+      "title": "Prevent app-server events from blocking RPC responses — review fix impl",
+      "description": "review-fix-for:phase1-gate-regression. Match official codex app-server-client semantics: unread notifications or server requests must not block foreground RPC responses; start an event pump for every connection epoch and fail closed on unsupported server requests.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [
+        "phase1-gate-tests"
+      ],
+      "source": "2026-08-29 real-device regression and upstream codex app-server-client",
+      "notes": "review-fix-for:phase1-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Aligned the Go client with upstream codex app-server-client's non-blocking event invariant: every Client epoch owns a fresh event pump, and unsupported Phase 1 server requests are explicitly rejected instead of filling an unread bounded queue and hiding later RPC responses.",
+        "artifacts": [
+          "agent/codex-remote/agent.go",
+          "agent/codex-remote/rpc.go",
+          "agent/codex-remote/session.go",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/lib.rs",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server-client/src/remote.rs"
+        ],
+        "checked_at": "2026-08-29T05:43:47Z"
+      }
+    },
+    {
+      "id": "phase1-event-backpressure-review-fix-tests",
+      "title": "Reproduce and test event backpressure isolation — review fix tests",
+      "description": "review-fix-for:phase1-gate-regression. Flood server requests and replace a bound client epoch, then prove foreground RPC responses and notification delivery continue without bounded-channel deadlock.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "tests",
+      "depends_on": [
+        "phase1-event-backpressure-review-fix-impl"
+      ],
+      "source": "2026-08-29 real-device regression and upstream codex app-server-client",
+      "notes": "review-fix-for:phase1-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Race tests flooded 100 unsupported server requests ahead of a foreground response and replaced Client epochs repeatedly; RPC response delivery and new-epoch notifications remained live. The full codex-remote race suite and six relevant go-bridge tests passed repeatedly.",
+        "artifacts": [
+          "agent/codex-remote/session_test.go",
+          "agent/codex-remote/testdata/phase1/event-backpressure-test.txt",
+          "cmd:go test -race ./agent/codex-remote -count=1 -timeout 120s => PASS"
+        ],
+        "checked_at": "2026-08-29T05:47:45Z"
+      }
+    },
+    {
+      "id": "phase1-event-backpressure-review-fix-regression",
+      "title": "Close the app-server event backpressure regression — review fix regression",
+      "description": "review-fix-for:phase1-gate-regression. Build and install the repaired runtime, verify real Remote Control RPC remains responsive, preserve the owner bidirectional device evidence, and restore the original gate only with resolved-via evidence.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "regression",
+      "depends_on": [
+        "phase1-event-backpressure-review-fix-tests"
+      ],
+      "source": "2026-08-29 real-device regression and upstream codex app-server-client",
+      "notes": "review-fix-for:phase1-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "The repaired runtime was built and installed from commit 0cc2467; management status is ready/online for CODEX_DESKTOP_APP, and owner confirmed both iOS→Mac reply synchronization and Mac→iOS synchronization. The prior full go-bridge race failure remains an unrelated Claude relay test failure.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase1/OWNER_MANUAL_CHECKLIST.md",
+          "agent/codex-remote/testdata/phase1/event-backpressure-regression.txt",
+          "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED",
+          "cmd:GET /internal/agents/codex-remote/remote-control/status => ready/online",
+          "git:0cc2467edc87"
+        ],
+        "checked_at": "2026-08-29T05:52:00Z"
+      }
+    },
+    {
+      "id": "phase5-session-mutation-review-fix-impl",
+      "title": "Implement official Codex Desktop session mutations — review fix impl",
+      "description": "review-fix-for:phase5-gate-regression. Implement core.SessionRenamer, SessionArchiver, and SessionDeleter on codex-remote using official thread/name/set, thread/archive, and thread/delete. Rename/archive must re-read authoritative thread metadata; deletion must accept only a valid official object acknowledgement.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-gate-tests"
+      ],
+      "source": "2026-08-29 owner physical-device regression and upstream Codex app-server protocol",
+      "notes": "review-fix-for:phase5-gate-regression; reuse the proven codex-web official-RPC pattern without importing or coupling the adapters.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "codex-remote now implements the existing Bridge mutation interfaces with official thread/name/set, thread/archive, and thread/delete RPCs; rename/archive return only a subsequent authoritative thread/read row and delete clears only derived model-selection state after official acknowledgement.",
+        "artifacts": [
+          "agent/codex-remote/mutations.go",
+          "agent/codex-remote/history.go",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs"
+        ],
+        "checked_at": "2026-08-29T14:31:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:532; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:537; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:566"
+      }
+    },
+    {
+      "id": "phase5-session-mutation-review-fix-tests",
+      "title": "Verify official Codex Desktop session mutations — review fix tests",
+      "description": "review-fix-for:phase5-gate-regression. Prove exact official parameter shapes, authoritative post-mutation thread/read, RPC and transport error propagation, interface-derived capabilities, and bridge rename/archive/delete responses.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-session-mutation-review-fix-impl"
+      ],
+      "source": "2026-08-29 owner physical-device regression and upstream Codex app-server protocol",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Loopback app-server tests pin exact mutation method/parameter shapes, authoritative read-after-write ordering, official RPC error propagation, all four implemented interfaces, and production-derived Bridge capability advertisement.",
+        "artifacts": [
+          "agent/codex-remote/mutations_test.go",
+          "go-bridge/codex_remote_mutation_capabilities_test.go",
+          "cmd:go test ./agent/codex-remote -count=1 -timeout 120s => PASS",
+          "cmd:go test ./go-bridge -run TestCodexRemoteAdvertisesMutationAndWorkDirCapabilities|TestHandleRenameSessionReturnsUpdatedSession|TestHandleArchiveSessionReturnsArchivedSession -count=1 -timeout 120s => PASS",
+          "cmd:go test -race ./agent/codex-remote -count=1 -timeout 120s => PASS"
+        ],
+        "checked_at": "2026-08-29T14:33:00Z"
+      }
+    },
+    {
+      "id": "phase5-session-mutation-review-fix-regression",
+      "title": "Close Codex Desktop session mutation regression — review fix regression",
+      "description": "review-fix-for:phase5-gate-regression. Build and install the repaired runtime, then require owner physical-device proof that rename, archive, and delete persist and the session list reflects authoritative Desktop state.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-session-mutation-review-fix-tests"
+      ],
+      "source": "2026-08-29 owner physical-device regression",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Owner physical-device regression confirms rename, archive, and delete all persist successfully and synchronize with Codex Desktop. The remaining delayed iOS visibility is tracked as a separate performance review-fix rather than weakening this functional result.",
+        "artifacts": [
+          "git:4a0db630f9b0",
+          "cmd:go test ./go-bridge -count=1 -timeout 180s => PASS (68.605s)",
+          "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED",
+          "runtime:/Applications/CordCodeLink.app PID 62174 TCP 8777 commit 4a0db630f9b0",
+          "cmd:authenticated management status => phase ready; online true; clientType CODEX_DESKTOP_APP",
+          "owner-report:2026-08-29 rename/archive/delete all normal and synchronized to Codex Desktop"
+        ],
+        "checked_at": "2026-08-29T15:15:00Z"
+      }
+    },
+    {
+      "id": "phase5-new-session-project-directory-review-fix-impl",
+      "title": "Propagate selected project directory into Codex Desktop thread/start — review fix impl",
+      "description": "review-fix-for:phase5-gate-regression. Implement core.WorkDirSwitcher on codex-remote so create_session and send_message directory selection reaches official thread/start.cwd, and keep catalog directory truth sourced from the resulting official thread row.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-gate-tests"
+      ],
+      "source": "2026-08-29 owner physical-device regression and upstream Codex ThreadStartParams",
+      "notes": "review-fix-for:phase5-gate-regression; iOS already sends the selected directory, so repair the missing Mac adapter interface rather than adding an iOS fallback.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "codex-remote now implements core.WorkDirSwitcher and atomically snapshots the Bridge-selected directory with the bound client before serializing official thread/start.cwd. The iOS directory-carrying path remains unchanged and no home-directory fallback was added.",
+        "artifacts": [
+          "agent/codex-remote/agent.go",
+          "agent/codex-remote/session.go",
+          "go-bridge/handlers.go",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs"
+        ],
+        "checked_at": "2026-08-29T14:34:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs:62; /Users/jacklee/Projects/codex/codex-rs/app-server/src/request_processors/thread_processor.rs:1110"
+      }
+    },
+    {
+      "id": "phase5-new-session-project-directory-review-fix-tests",
+      "title": "Verify selected project directory propagation — review fix tests",
+      "description": "review-fix-for:phase5-gate-regression. Prove Bridge create_session/send_message directory switching and exact thread/start cwd serialization, including concurrent work-dir access and official catalog directory mapping.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-new-session-project-directory-review-fix-impl"
+      ],
+      "source": "2026-08-29 owner physical-device regression and upstream Codex ThreadStartParams",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "The selected-work-dir loopback test proves core.WorkDirSwitcher updates the adapter and exact official thread/start serialization contains only cwd=/Projects/selected. Race testing covers concurrent adapter access; the full Bridge suite verifies production capability descriptors after replacing the obsolete negative assertion.",
+        "artifacts": [
+          "agent/codex-remote/mutations_test.go",
+          "go-bridge/agent_descriptor_test.go",
+          "go-bridge/codex_remote_mutation_capabilities_test.go",
+          "cmd:go test -race ./agent/codex-remote -count=1 -timeout 120s => PASS",
+          "cmd:go test ./go-bridge -count=1 -timeout 180s => PASS (68.605s)",
+          "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED"
+        ],
+        "checked_at": "2026-08-29T14:41:00Z"
+      }
+    },
+    {
+      "id": "phase5-new-session-project-directory-review-fix-regression",
+      "title": "Close new-session project directory regression — review fix regression",
+      "description": "review-fix-for:phase5-gate-regression. Build and install the repaired runtime, then require owner physical-device proof that a session created with + inside a project is cataloged under that project rather than the user home directory.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-new-session-project-directory-review-fix-tests"
+      ],
+      "source": "2026-08-29 owner physical-device regression",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Owner physical-device regression confirms creating a session from a selected project directory, sending a turn, and synchronizing to Codex Desktop all work; the session is cataloged under the selected project instead of the user home directory.",
+        "artifacts": [
+          "git:4a0db630f9b0",
+          "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED",
+          "owner-report:2026-08-29 selected-directory create/send normal and synchronized to Codex Desktop"
+        ],
+        "checked_at": "2026-08-29T15:17:00Z"
+      }
+    },
+    {
+      "id": "phase5-remote-catalog-discovery-backpressure-review-fix-impl",
+      "title": "Stop Codex Desktop catalog discovery self-excitation — review fix impl",
+      "description": "review-fix-for:phase5-gate-regression. Consume official thread lifecycle notifications through the existing CatalogRefreshSignaler contract, prevent a failed authoritative refresh from retriggering on the same stale head fingerprint, and add bounded discovery-specific retry backoff so an 8-second thread/list timeout cannot create a permanent polling loop.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-gate-tests"
+      ],
+      "source": "2026-08-29 runtime CPU investigation and official Codex app-server notifications",
+      "notes": "review-fix-for:phase5-gate-regression; follow the existing agent/codex-web CatalogRefreshSignaler pattern without coupling adapters; use discovery-specific backoff rather than transport reconnect state.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "codex-remote now follows the existing CatalogRefreshSignaler pattern for official thread lifecycle notifications and successful mutations. Bridge discovery uses a Remote-specific 15-second safety head cadence plus a 15s→2m discovery retry backoff, so a failed authoritative refresh cannot self-excite from a stale head. The Remote catalog now uses the official thread/list maximum page size of 100, halving envelope round trips.",
+        "artifacts": [
+          "agent/codex-remote/agent.go",
+          "agent/codex-remote/session.go",
+          "agent/codex-remote/mutations.go",
+          "agent/codex-remote/catalog.go",
+          "go-bridge/session_discovery.go",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server/src/request_processors/thread_processor.rs"
+        ],
+        "checked_at": "2026-08-29T15:39:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:1839"
+      }
+    },
+    {
+      "id": "phase5-remote-catalog-discovery-backpressure-review-fix-tests",
+      "title": "Verify Codex Desktop catalog discovery backpressure — review fix tests",
+      "description": "review-fix-for:phase5-gate-regression. Prove lifecycle notifications coalesce refresh signals, repeated head probes do not repeat a failed full refresh before backoff expires, retry state resets after success, and real connection-loss reconnect behavior remains unchanged.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-remote-catalog-discovery-backpressure-review-fix-impl"
+      ],
+      "source": "2026-08-29 runtime CPU investigation",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Race tests prove lifecycle notification signaling/coalescing, official max-page serialization, failed full-refresh backoff, successful retry reset, unchanged event-pump/replacement-epoch behavior, and unaffected Grok/generic discovery paths.",
+        "artifacts": [
+          "agent/codex-remote/catalog_test.go",
+          "agent/codex-remote/session_test.go",
+          "go-bridge/session_discovery_test.go",
+          "cmd:go test -race ./agent/codex-remote -count=1 -timeout 180s => PASS",
+          "cmd:go test -race ./go-bridge -run TestSessionDiscovery(Codex|UsesGeneric|Grok|BlockedBackend) -count=1 -timeout 180s => PASS"
+        ],
+        "checked_at": "2026-08-29T15:43:00Z"
+      }
+    },
+    {
+      "id": "phase5-remote-catalog-discovery-backpressure-review-fix-regression",
+      "title": "Close Codex Desktop catalog CPU regression — review fix regression",
+      "description": "review-fix-for:phase5-gate-regression. Build and install the repaired runtime, observe a bounded live window with an attached iPhone, and prove CPU no longer remains elevated from repeated fingerprint timeout/head-changed/full-refresh cycles while bidirectional messaging still works.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-remote-catalog-discovery-backpressure-review-fix-tests"
+      ],
+      "source": "2026-08-29 runtime CPU investigation",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Unsigned Release ebdcd68552d6 was built, moved into /Applications, and launched under the product supervisor. The startup log proves the 15s Remote hint interval and 15s..2m discovery retry configuration. Across 30 samples over 60 seconds, the installed runtime averaged 1.34% CPU (min 0.30%, max 8.80%) versus the reported persistent 18-26%; the same window had zero head-change full-refresh triggers, zero refresh backoffs, zero stream losses, and the runtime remained the sole 8777 listener.",
+        "artifacts": [
+          "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED; runtime commit ebdcd68552d6",
+          "/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime -version => commit ebdcd68552d6",
+          "runtime-log:session discovery watcher started interval=1m0s codexRemoteHintInterval=15s codexDiscoveryRetryBase=15s codexDiscoveryRetryMax=2m0s",
+          "runtime-sample:60s/30 samples avg CPU 1.34%, min 0.30%, max 8.80%; head_changed=0, backed_off=0, stream_lost=0",
+          "runtime-process:/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime; sole TCP 8777 listener"
+        ],
+        "checked_at": "2026-08-29T14:56:13Z"
+      }
+    },
+    {
+      "id": "phase5-session-mutation-visible-latency-review-fix-impl",
+      "title": "Make session mutations visible immediately on iOS — review fix impl",
+      "description": "review-fix-for:phase5-gate-regression. Decode and use the authoritative rename/archive session already returned by Bridge instead of discarding it and issuing a second full catalog-dependent get_session request; preserve delete/create local truth and reconcile later lifecycle events without fallback data.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-gate-tests"
+      ],
+      "source": "2026-08-29 owner physical-device latency regression",
+      "notes": "review-fix-for:phase5-gate-regression; consume the existing authoritative mutation response rather than inventing cached or optimistic backend data.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "The paired iOS bridge protocol now returns CCCodeBridgeSession from rename/archive, decodes the existing {session: ...} mutation envelope with method-specific errors, and maps that authoritative response directly to BackendThread. It removes the redundant get_session request while retaining the pin refetch because pin remains a void wire operation.",
+        "artifacts": [
+          "/Users/jacklee/Projects/cordcode-ios-codex-remote/OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeClient.swift",
+          "/Users/jacklee/Projects/cordcode-ios-codex-remote/OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeBackendClient.swift"
+        ],
+        "checked_at": "2026-08-29T15:59:00Z"
+      }
+    },
+    {
+      "id": "phase5-session-mutation-visible-latency-review-fix-tests",
+      "title": "Verify immediate iOS session mutation visibility — review fix tests",
+      "description": "review-fix-for:phase5-gate-regression. Prove rename/archive decode the Bridge mutation envelope, map the returned authoritative session, avoid the redundant get_session refetch, preserve errors, and update existing mutation-refetch tests to pin the corrected request count.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-session-mutation-visible-latency-review-fix-impl"
+      ],
+      "source": "2026-08-29 owner physical-device latency regression",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "The focused iOS test class passes six cases covering rename/archive zero-refetch behavior, direct authoritative mapping, real mutation envelope decode, method-specific missing-session errors, preserved pin refetch, and no refetch after mutation failure.",
+        "artifacts": [
+          "/Users/jacklee/Projects/cordcode-ios-codex-remote/OpenCodeiOS/OpenCodeiOSTests/CCCodeBridgeMutationRefetchTests.swift",
+          "cmd:scripts/run.sh test --only CCCodeBridgeMutationRefetchTests => 6 tests PASS in 0.043s; xcodebuild wall 37.114s"
+        ],
+        "checked_at": "2026-08-29T16:01:00Z"
+      }
+    },
+    {
+      "id": "phase5-session-mutation-visible-latency-review-fix-regression",
+      "title": "Close iOS session mutation latency regression — review fix regression",
+      "description": "review-fix-for:phase5-gate-regression. Install the iOS app on the connected iPhone and require physical-device proof that rename/archive/delete/create effects appear without the prior ten-second catalog delay and remain synchronized with Codex Desktop.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-session-mutation-visible-latency-review-fix-tests"
+      ],
+      "source": "2026-08-29 owner physical-device latency regression",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Owner physical-device acceptance confirms rename, archive, delete, and new-directory effects are visible on iOS and reconcile with Codex Desktop; the earlier delayed-refresh regression is closed. The authoritative mutation response path remains covered by the focused six-test suite.",
+        "artifacts": [
+          "cmd:scripts/run.sh device --device <connected-iphone> => build succeeded, installed, launched org.openagi.cordcode",
+          "ios-commit:5565a8612c0b700949ffd9761f4a47d1f3acada1",
+          "owner-device:rename/archive/delete/create-directory effects visible and synchronized"
+        ],
+        "checked_at": "2026-08-29T16:42:00Z"
+      }
+    },
+    {
+      "id": "phase5-new-session-title-persistence-review-fix-impl",
+      "title": "Persist iOS-created Codex Desktop session titles — review fix impl",
+      "description": "review-fix-for:phase5-gate-regression. Honor create_session.title by applying official thread/name/set after thread/start and returning authoritative thread metadata, so iOS and Codex Desktop converge on the same title instead of independently falling back to cwd or its basename.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-gate-tests"
+      ],
+      "source": "2026-08-29 owner physical-device title regression and official Codex thread/name/set protocol",
+      "notes": "review-fix-for:phase5-gate-regression; official ThreadStartParams has no title field, so persist through the already implemented SessionRenamer capability and authoritative readback.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "The Bridge create_session path now treats a non-empty requested title as a persistence operation: after thread/start materializes the real session, it invokes the existing SessionRenamer capability (official thread/name/set plus thread/read for codex-remote), rejects any failed/empty readback, and returns the authoritative title/directory metadata instead of an optimistic request echo.",
+        "artifacts": [
+          "go-bridge/handlers.go",
+          "agent/codex-remote/mutations.go",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+          "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs"
+        ],
+        "checked_at": "2026-08-29T15:50:00Z",
+        "upstream_anchor": "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/common.rs:532; /Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs:62"
+      }
+    },
+    {
+      "id": "phase5-new-session-title-persistence-review-fix-tests",
+      "title": "Verify iOS-created Codex Desktop title persistence — review fix tests",
+      "description": "review-fix-for:phase5-gate-regression. Prove create_session performs thread/start then official thread/name/set with the requested title, returns authoritative metadata, preserves rename failures, and keeps empty-title behavior truthful.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-new-session-title-persistence-review-fix-impl"
+      ],
+      "source": "2026-08-29 owner physical-device title regression",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Race tests pin create_session title trimming, real-session-id rename ordering, authoritative readback response mapping, fail-closed title persistence errors, absent registry insertion on failure, and the codex-remote exact official mutation/read protocol.",
+        "artifacts": [
+          "go-bridge/handlers_test.go",
+          "agent/codex-remote/mutations_test.go",
+          "cmd:go test -race ./go-bridge -run Test(CreateSessionPersistsAndReturnsAuthoritativeTitle|CreateSessionTitleFailureIsExposed|HandleRenameSessionReturnsUpdatedSession|CodexRemoteAdvertisesMutationAndWorkDirCapabilities) -count=1 -timeout 180s => PASS",
+          "cmd:go test -race ./agent/codex-remote -run Test(SessionMutationsUseOfficialRPCsAndAuthoritativeRead|SessionMutationErrorsFailClosed) -count=1 -timeout 120s => PASS"
+        ],
+        "checked_at": "2026-08-29T15:53:00Z"
+      }
+    },
+    {
+      "id": "phase5-new-session-title-persistence-review-fix-regression",
+      "title": "Close iOS-created Codex Desktop title regression — review fix regression",
+      "description": "review-fix-for:phase5-gate-regression. Build/install both products and require physical-device proof that an iOS-created prompted title remains stable in the message page, iOS session list, and Codex Desktop after catalog refresh/reconnect.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-new-session-title-persistence-review-fix-tests"
+      ],
+      "source": "2026-08-29 owner physical-device title regression",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Owner physical-device acceptance confirms an iOS-created prompted session keeps its generated title in the message page and session list, and the same title is synchronized to Codex Desktop after catalog refresh.",
+        "artifacts": [
+          "owner-device:iOS-created session title stable across message page, session list, and Codex Desktop"
+        ],
+        "checked_at": "2026-08-29T16:43:00Z"
+      }
+    },
+    {
+      "id": "phase5-runtime-cpu-no-observer-patch-review-fix-impl",
+      "title": "Stop no-observer projection patch churn — review fix impl",
+      "description": "review-fix-for:phase5-gate-regression. Preserve the authoritative reducer snapshot while avoiding expensive whole-turn patch construction, journaling, and device-registry rebinding when no live session_sync_v2 observer exists.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-remote-catalog-discovery-backpressure-review-fix-regression"
+      ],
+      "source": "2026-08-30 owner runtime CPU regression",
+      "notes": "review-fix-for:phase5-gate-regression; full snapshots remain the recovery source of truth; no mock or synthetic data path added.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "EventPublisher now detects eligible session_sync_v2 observers before flushing; large whole-turn tool/input patches are discarded without deep-copy/journal work when no observer exists, while the reducer snapshot remains authoritative. No live connection skips per-token device rebind scans, and high-frequency zero-target diagnostics are Debug-level.",
+        "artifacts": [
+          "go-bridge/event_publisher.go",
+          "go-bridge/projection_reducer.go",
+          "go-bridge/handlers.go",
+          "CHANGELOG.md",
+          "git:c0e26fe901ca"
+        ],
+        "checked_at": "2026-08-29T16:50:17Z"
+      }
+    },
+    {
+      "id": "phase5-runtime-cpu-no-observer-patch-review-fix-tests",
+      "title": "Verify no-observer projection patch suppression — review fix tests",
+      "description": "review-fix-for:phase5-gate-regression. Prove large no-observer patches are discarded without losing authoritative state, small journal deltas remain continuous, v2 delivery is unchanged, and the reducer changes are race-safe.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-runtime-cpu-no-observer-patch-review-fix-impl"
+      ],
+      "source": "2026-08-30 owner runtime CPU regression",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Focused and full regression coverage passes: large pending tool turns suppress unsent copies while snapshots survive; small journal deltas preserve BaseRev continuity; v2 patch delivery remains intact; the complete Go module suite and targeted race tests pass.",
+        "artifacts": [
+          "go-bridge/projection_coalesce_test.go",
+          "go-bridge/projection_delivery_test.go",
+          "cmd:go test ./... -count=1 -timeout 300s => PASS",
+          "cmd:go test -race ./go-bridge -run 'TestDropPendingPatchWithoutObserverRetainsSnapshot|TestPendingPatchExceedsDetectsLargeToolTurn|TestPublishLogicalDropsPatchWhenNoV2Observer|TestProjectionPatchDeliveredToV2ConnOnly|TestProjectionOnlyRawTimelineEventDoesNotTriggerLegacyRebind' -count=1 -timeout 180s => PASS",
+          "cmd:gitleaks detect --no-banner --redact --source . => no leaks found"
+        ],
+        "checked_at": "2026-08-29T16:50:17Z"
+      }
+    },
+    {
+      "id": "phase5-runtime-cpu-no-observer-patch-review-fix-regression",
+      "title": "Close no-observer projection patch CPU regression — review fix regression",
+      "description": "review-fix-for:phase5-gate-regression. Deploy the Mac Release runtime and collect a real-process idle sample proving the Remote catalog remains event-driven, the runtime is the sole 8777 listener, and no reconnect/scan storm returns.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-runtime-cpu-no-observer-patch-review-fix-tests"
+      ],
+      "source": "2026-08-30 owner runtime CPU regression",
+      "notes": "review-fix-for:phase5-gate-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Release commit c0e26fe was built and installed at /Applications/CordCodeLink.app. The installed runtime is the sole TCP 8777 listener; startup reports codexRemoteHintInterval=0s and a 60s safety scan. A 60-second process sample averaged 0.48% CPU (min 0.20%, max 1.70%); the only Remote discovery activity was the expected one safety poll, with no reconnect storm. Existing bidirectional iOS↔Mac acceptance remains recorded in the dependent review-fix chains.",
+        "artifacts": [
+          "runtime:/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime -version => 0.1.0 commit c0e26fe901ca",
+          "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED",
+          "runtime:PID 46611 sole listener on TCP 8777",
+          "sample:/tmp/cordcode-runtime-cpu sample window => avg 0.48%, min 0.20%, max 1.70%, n=12",
+          "log:startup session discovery interval=1m0s codexRemoteHintInterval=0s"
+        ],
+        "checked_at": "2026-08-29T16:57:13Z"
+      }
+    }
+  ]
+}

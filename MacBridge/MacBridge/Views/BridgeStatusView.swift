@@ -322,6 +322,9 @@ struct BridgeStatusView: View {
         if reason.contains("not found in PATH") { return String(format: L10n.notInstalled, kind) }
         if reason.contains("not running") { return L10n.serviceNotRunning }
         if reason.contains("not logged in") { return L10n.loginRequired }
+        if kind.lowercased() == "codex-remote" || reason.contains("尚未配对") || reason.contains("ChatGPT Desktop") {
+            return L10n.codexDesktopPairGuidance
+        }
         if reason.contains("timed out") { return L10n.detectionTimedOut }
         if reason.contains("unreachable") { return L10n.cannotReachService }
         return reason
@@ -332,6 +335,7 @@ enum BackendStatusText {
     static func display(_ status: String) -> String {
         switch status {
         case "available": return L10n.statusReady
+        case "not_configured": return L10n.notConfigured
         case "not_detected": return L10n.statusNotFound
         case "not_logged_in": return L10n.statusLoginRequired
         case "service_not_running": return L10n.statusNotRunning

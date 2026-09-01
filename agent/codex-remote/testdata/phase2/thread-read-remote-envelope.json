@@ -1,0 +1,18 @@
+{
+  "type": "server_message",
+  "clientId": "client_fixture",
+  "envId": "env_fixture",
+  "streamId": "stream_fixture",
+  "seqId": 7,
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 7,
+    "result": {
+      "thread": {
+        "id": "thread_fixture",
+        "status": {"type": "idle"},
+        "turns": [{"id": "turn_fixture", "status": "completed", "itemsView": "full", "items": []}]
+      }
+    }
+  }
+}

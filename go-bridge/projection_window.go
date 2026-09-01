@@ -216,6 +216,19 @@ func sliceProjectionWindow(
 	proj SessionProjection,
 	params GetSessionProjectionWindowParams,
 ) (ProjectionWindowResponse, error) {
+	return sliceProjectionWindowWithUpstream(backendID, sessionID, bridgeEpoch, proj, params, false)
+}
+
+// sliceProjectionWindowWithUpstream is the R11d-honest slice: hasOlderUpstream is
+// the backend-private producer fact ("more upstream history exists but is not yet
+// hydrated"). When the kernel slice reaches its own front but upstream is not at
+// EOF, hasOlder MUST be true (never report "session start" for "not loaded").
+func sliceProjectionWindowWithUpstream(
+	backendID, sessionID, bridgeEpoch string,
+	proj SessionProjection,
+	params GetSessionProjectionWindowParams,
+	hasOlderUpstream bool,
+) (ProjectionWindowResponse, error) {
 	turns := proj.Turns
 	limit := params.Limit
 	if limit <= 0 {
@@ -232,6 +245,9 @@ func sliceProjectionWindow(
 	nextOlderAnchor := ""
 	nextNewerAnchor := ""
 	empty := len(turns) == 0
+	// Set only by the older direction when its page is empty (anchor == kernel
+	// front): the resume anchor for the newer-side cursor of that empty page.
+	pageEmptyNewerAnchor := ""
 
 	switch params.Direction {
 	case projectionWindowDirectionWindow0, projectionWindowDirectionLatest:
@@ -256,6 +272,9 @@ func sliceProjectionWindow(
 		// The boundary turn itself follows this page in the chain.
 		hasOlder = slice.start > 0
 		hasNewer = true
+		// Anchor == kernel front yields an honest EMPTY page (nothing committed
+		// below); the newer chain resumes at the anchor itself.
+		pageEmptyNewerAnchor = cursor.AnchorTurnID
 	case projectionWindowDirectionNewer:
 		cursor, err := decodeProjectionWindowCursor(params.Cursor)
 		if err != nil {
@@ -313,11 +332,23 @@ func sliceProjectionWindow(
 		slice.start, slice.end = 0, 0
 		hasOlder, hasNewer = false, false
 	}
+	if !empty && !hasOlder && hasOlderUpstream && slice.start == 0 {
+		// R11d honesty: the kernel front is not the session start when the producer
+		// still holds an unexhausted upstream cursor. The nextOlderCursor anchors at
+		// the current kernel front; the older walk hydrates from there.
+		hasOlder = true
+	}
 
 	page := turns[slice.start:slice.end]
-	if !empty {
+	if slice.end > slice.start {
 		nextOlderAnchor = turns[slice.start].TurnID
 		nextNewerAnchor = turns[slice.end-1].TurnID
+	} else if !empty {
+		// Zero-length older page pinned at the committed front. nextOlderCursor
+		// (when the producer fact claims upstream) anchors at the kernel front;
+		// the newer chain resumes at the walk anchor. head/tail stay unset.
+		nextOlderAnchor = turns[0].TurnID
+		nextNewerAnchor = pageEmptyNewerAnchor
 	}
 
 	generation := projectionWindowGeneration.Add(1)
@@ -331,10 +362,12 @@ func sliceProjectionWindow(
 	if empty {
 		descriptor.Coverage = "full"
 	} else {
-		head := turns[slice.start].TurnID
-		tail := turns[slice.end-1].TurnID
-		descriptor.HeadTurnID = &head
-		descriptor.TailTurnID = &tail
+		if slice.end > slice.start {
+			head := turns[slice.start].TurnID
+			tail := turns[slice.end-1].TurnID
+			descriptor.HeadTurnID = &head
+			descriptor.TailTurnID = &tail
+		}
 		if !hasOlder {
 			descriptor.Coverage = "full"
 		}

@@ -2,6 +2,8 @@ package gobridge
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,6 +38,16 @@ type projectionSession struct {
 	projection     SessionProjection
 	lastAppliedRev int // highest committed input PerSessionSeq (idempotency guard)
 	lastFlushedRev int // highest rev emitted in a patch (delta base for next patch)
+	// largePatchObserved is a monotonic hint for the current active turn. Once a
+	// whole-turn upsert crossed the no-observer threshold, subsequent tool/input
+	// events can skip another full-turn walk until a new turn starts.
+	largePatchObserved bool
+	// publishedTurnShells records turn IDs whose current authoritative shell has
+	// already been published in a snapshot or an upsertTurns patch. Tool and
+	// user-input events can then use their compact PartOps on subsequent events;
+	// replaying the complete growing turn for every tool transition made an active
+	// stream quadratic on the wire.
+	publishedTurnShells map[string]struct{}
 
 	// pending deltas accumulated since lastFlushedRev; cleared by FlushPatch.
 	textAppends map[string][]string         // assistant messageId -> delta chunks (append_text)
@@ -59,14 +71,19 @@ func cloneProjectionSessionState(source *projectionSession) *projectionSession {
 		return nil
 	}
 	cloned := &projectionSession{
-		projection:     cloneSessionProjection(source.projection),
-		lastAppliedRev: source.lastAppliedRev,
-		lastFlushedRev: source.lastFlushedRev,
-		textAppends:    make(map[string][]string, len(source.textAppends)),
-		thinking:       make(map[string]string, len(source.thinking)),
-		tools:          make(map[string]ProjectionPart, len(source.tools)),
-		upsertTurns:    make(map[string]TurnProjection, len(source.upsertTurns)),
-		userInputs:     make(map[string]userInputPending, len(source.userInputs)),
+		projection:          cloneSessionProjection(source.projection),
+		lastAppliedRev:      source.lastAppliedRev,
+		lastFlushedRev:      source.lastFlushedRev,
+		largePatchObserved:  source.largePatchObserved,
+		publishedTurnShells: make(map[string]struct{}, len(source.publishedTurnShells)),
+		textAppends:         make(map[string][]string, len(source.textAppends)),
+		thinking:            make(map[string]string, len(source.thinking)),
+		tools:               make(map[string]ProjectionPart, len(source.tools)),
+		upsertTurns:         make(map[string]TurnProjection, len(source.upsertTurns)),
+		userInputs:          make(map[string]userInputPending, len(source.userInputs)),
+	}
+	for turnID := range source.publishedTurnShells {
+		cloned.publishedTurnShells[turnID] = struct{}{}
 	}
 	for key, chunks := range source.textAppends {
 		cloned.textAppends[key] = append([]string(nil), chunks...)
@@ -227,6 +244,9 @@ func (ps *projectionSession) upsertTurn(turn TurnProjection) {
 		if turn.CompletedAt != 0 {
 			t.CompletedAt = turn.CompletedAt
 		}
+		if turn.DurationMs != 0 {
+			t.DurationMs = turn.DurationMs
+		}
 		if turn.User != nil {
 			t.User = turn.User
 		}
@@ -263,6 +283,9 @@ func (ps *projectionSession) upsertTurnPersistOnly(turn TurnProjection) {
 		}
 		if turn.CompletedAt != 0 {
 			t.CompletedAt = turn.CompletedAt
+		}
+		if turn.DurationMs != 0 {
+			t.DurationMs = turn.DurationMs
 		}
 		if turn.User != nil {
 			t.User = turn.User
@@ -345,6 +368,9 @@ func (ps *projectionSession) settleOtherOpenTurns(activeTurnID string, completed
 // or iOS applyingPartOps skips upsert_tool / upsert_user_input (no matching turnId).
 func (ps *projectionSession) stageTurnForFlush(turnID string) {
 	if ps == nil || turnID == "" || ps.upsertTurns == nil {
+		return
+	}
+	if _, published := ps.publishedTurnShells[turnID]; published {
 		return
 	}
 	if t := ps.turnByID(turnID); t != nil {
@@ -506,9 +532,27 @@ func (ps *projectionSession) applyUserInputExecution(turnID string) {
 
 // ensureAssistantTextPart returns the assistant message's trailing text part, creating one if
 // the last part is not text. Used by append_text accumulation.
+// trailingTextPartForItem returns the trailing text part only when it belongs to
+// the same canonical item (either side may lack an id — legacy live frames carry
+// the turn id as itemId, cold Summary frames carry real item ids). A different
+// canonical itemId forces a new part (T2.1 item-boundary rule).
+func (m *MessageProjection) trailingTextPartForItem(itemID string) *ProjectionPart {
+	if len(m.Parts) == 0 {
+		return nil
+	}
+	trailing := &m.Parts[len(m.Parts)-1]
+	if trailing.Type != "text" {
+		return nil
+	}
+	if itemID != "" && trailing.ItemID != "" && trailing.ItemID != itemID {
+		return nil
+	}
+	return trailing
+}
+
 func (m *MessageProjection) ensureTrailingTextPart() *ProjectionPart {
 	if len(m.Parts) == 0 || m.Parts[len(m.Parts)-1].Type != "text" {
-		m.Parts = append(m.Parts, ProjectionPart{Type: "text", Presentation: "progress"})
+		m.Parts = append(m.Parts, ProjectionPart{Type: "text"})
 	}
 	return &m.Parts[len(m.Parts)-1]
 }
@@ -518,10 +562,25 @@ func classifyProjectionTextPresentation(message *MessageProjection, completed bo
 		return
 	}
 	lastText := -1
+	hasExplicitPresentation := false
 	for index := range message.Parts {
 		if message.Parts[index].Type == "text" && strings.TrimSpace(message.Parts[index].Text) != "" {
 			lastText = index
+			if message.Parts[index].presentationExplicit {
+				hasExplicitPresentation = true
+			}
 		}
+	}
+	if hasExplicitPresentation {
+		// Official history phase is authoritative. Preserve it and only give an
+		// unannotated text part the neutral progress classification; never promote
+		// an official commentary item to final by array position.
+		for index := range message.Parts {
+			if message.Parts[index].Type == "text" && message.Parts[index].Presentation == "" {
+				message.Parts[index].Presentation = "progress"
+			}
+		}
+		return
 	}
 	for index := range message.Parts {
 		if message.Parts[index].Type != "text" {
@@ -552,11 +611,12 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 				SessionID: msg.SessionID,
 				Execution: ExecutionView{Phase: "idle"},
 			},
-			textAppends: make(map[string][]string),
-			thinking:    make(map[string]string),
-			tools:       make(map[string]ProjectionPart),
-			upsertTurns: make(map[string]TurnProjection),
-			userInputs:  make(map[string]userInputPending),
+			publishedTurnShells: make(map[string]struct{}),
+			textAppends:         make(map[string][]string),
+			thinking:            make(map[string]string),
+			tools:               make(map[string]ProjectionPart),
+			upsertTurns:         make(map[string]TurnProjection),
+			userInputs:          make(map[string]userInputPending),
 		}
 		r.sessions[key] = ps
 	}
@@ -582,6 +642,9 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		turnID := dataString(data, "turnId")
 		if turnID == "" {
 			return // no source-proven turnId; skip identityless lifecycle frames
+		}
+		if activeTurnID := ps.projection.Execution.ActiveTurnID; activeTurnID != "" && activeTurnID != turnID {
+			ps.largePatchObserved = false
 		}
 		// No commit / no flush-buffer writes on turn_started: at this point the turn has no
 		// user/assistant content yet. Publishing a skeleton projection (rev advances while the
@@ -609,7 +672,11 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		ps.upsertTurn(TurnProjection{
 			TurnID: turnID,
 			Status: "running",
-			User:   &MessageProjection{ID: itemID, Role: "user", Parts: []ProjectionPart{{Type: "text", Text: text}}},
+			// Canonical official item id (T2.1): the Summary user slot dedups against
+			// detail items by this part-level id, mirroring the upstream mapper.
+			User: &MessageProjection{ID: itemID, Role: "user", Parts: []ProjectionPart{
+				{Type: "text", Text: text, ItemID: itemID},
+			}},
 		})
 		// Design §7.4: any in-flight content must keep execution.running. After cold
 		// hydrate the last completed turn leaves phase=idle; a new user_message without
@@ -672,13 +739,36 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if t.Assistant == nil {
 			t.Assistant = &MessageProjection{ID: turnID, Role: "assistant"}
 		}
+		itemID := dataString(data, "itemId")
+		presentation := dataString(data, "presentation")
+		if presentation != "progress" && presentation != "final" {
+			presentation = ""
+		}
 		var tp *ProjectionPart
 		newPart, _ := data["newPart"].(bool)
 		if newPart {
-			t.Assistant.Parts = append(t.Assistant.Parts, ProjectionPart{Type: "text", Presentation: "progress"})
+			t.Assistant.Parts = append(t.Assistant.Parts, ProjectionPart{Type: "text", Presentation: presentation, ItemID: itemID})
 			tp = &t.Assistant.Parts[len(t.Assistant.Parts)-1]
+		} else if trailing := t.Assistant.trailingTextPartForItem(itemID); trailing != nil {
+			tp = trailing
+			if tp.ItemID == "" {
+				tp.ItemID = itemID
+			}
+		} else if len(t.Assistant.Parts) > 0 && t.Assistant.Parts[len(t.Assistant.Parts)-1].Type == "text" {
+			// Canonical official item boundary (T2.1): the trailing part belongs to
+			// a DIFFERENT item — never merge across the boundary. Whole-turn upsert
+			// publishes the split; append_text PartOps cannot express it.
+			t.Assistant.Parts = append(t.Assistant.Parts, ProjectionPart{Type: "text", Presentation: presentation, ItemID: itemID})
+			tp = &t.Assistant.Parts[len(t.Assistant.Parts)-1]
+			newPart = true
 		} else {
+			// First text part: keep the legacy append_text path, now item-stamped.
 			tp = t.Assistant.ensureTrailingTextPart()
+			tp.ItemID = itemID
+		}
+		if presentation != "" {
+			tp.Presentation = presentation
+			tp.presentationExplicit = true
 		}
 		tp.Text += delta
 		if newPart {
@@ -721,9 +811,12 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 				break
 			}
 		}
+		rItemID := dataString(data, "itemId")
 		if rpart == nil {
-			t.Assistant.Parts = append(t.Assistant.Parts, ProjectionPart{Type: "reasoning"})
+			t.Assistant.Parts = append(t.Assistant.Parts, ProjectionPart{Type: "reasoning", ItemID: rItemID})
 			rpart = &t.Assistant.Parts[len(t.Assistant.Parts)-1]
+		} else if rpart.ItemID == "" {
+			rpart.ItemID = rItemID
 		}
 		rpart.Text += delta
 		ps.thinking[turnID] = rpart.Text
@@ -1207,8 +1300,19 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			return
 		}
 		commit()
-		ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "completed", CompletedAt: ps.projection.UpdatedAt})
+		completed := TurnProjection{TurnID: turnID, Status: "completed", CompletedAt: ps.projection.UpdatedAt}
+		if durationMs := dataInt64(data, "durationMs"); durationMs > 0 {
+			// Official Turn.durationMs when the source provides it; absent keeps the
+			// timestamp-derived value clients compute as fallback.
+			completed.DurationMs = durationMs
+		}
+		ps.upsertTurn(completed)
 		if turn := ps.turnByID(turnID); turn != nil {
+			if dataBool(data, "detailPreloaded") {
+				turn.DetailLoadState = DetailStateLoaded
+				turn.DetailReasonCode = ""
+				turn.DetailInline = true
+			}
 			classifyProjectionTextPresentation(turn.Assistant, true)
 			ps.upsertTurns[turnID] = *turn
 		}
@@ -1350,10 +1454,19 @@ func (r *ProjectionReducer) Restore(backendID, sessionID string, projection Sess
 		projection:     projection,
 		lastAppliedRev: 0,
 		lastFlushedRev: projection.SyncRev,
-		textAppends:    make(map[string][]string),
-		thinking:       make(map[string]string),
-		tools:          make(map[string]ProjectionPart),
-		upsertTurns:    make(map[string]TurnProjection),
+		publishedTurnShells: func() map[string]struct{} {
+			published := make(map[string]struct{}, len(projection.Turns))
+			for _, turn := range projection.Turns {
+				if turn.TurnID != "" {
+					published[turn.TurnID] = struct{}{}
+				}
+			}
+			return published
+		}(),
+		textAppends: make(map[string][]string),
+		thinking:    make(map[string]string),
+		tools:       make(map[string]ProjectionPart),
+		upsertTurns: make(map[string]TurnProjection),
 	}
 }
 
@@ -1401,6 +1514,16 @@ func (r *ProjectionReducer) FlushPatch(backendID, sessionID string) (ProjectionP
 	if ps == nil {
 		return ProjectionPatch{}, false
 	}
+	return r.flushLocked(ps)
+}
+
+// flushLocked drains the staged live delta into one patch and advances the
+// flush fence to the head. It backs both the live publisher flush AND the
+// pre-commit drain inside the detail/state commit primitives
+// (projection_detail_merge.go): a commit that pushes lastFlushedRev past a
+// staged delta would strand it into a later zero-span patch that journal and
+// delivery drop (audit P0-1). Caller MUST hold r.mu; ps must be non-nil.
+func (r *ProjectionReducer) flushLocked(ps *projectionSession) (ProjectionPatch, bool) {
 	ps.stageOwningTurnsForPendingParts()
 	headRev := ps.projection.SyncRev
 	if headRev == ps.lastFlushedRev && len(ps.textAppends) == 0 && len(ps.thinking) == 0 &&
@@ -1414,6 +1537,9 @@ func (r *ProjectionReducer) FlushPatch(backendID, sessionID string) (ProjectionP
 	}
 	for _, t := range ps.upsertTurns {
 		patch.UpsertTurns = append(patch.UpsertTurns, cloneTurn(t))
+	}
+	for turnID := range ps.upsertTurns {
+		ps.publishedTurnShells[turnID] = struct{}{}
 	}
 	for msgID, chunks := range ps.textAppends {
 		combined := ""
@@ -1445,6 +1571,198 @@ func (r *ProjectionReducer) FlushPatch(backendID, sessionID string) (ProjectionP
 	ps.execution = nil
 	ps.lastFlushedRev = headRev
 	return patch, true
+}
+
+// DropPendingPatch advances the patch fence to the authoritative head without
+// constructing or journaling a patch. It is used when no session_sync_v2
+// observer can receive the live delta: the reducer snapshot remains the source
+// of truth, and a later observer must pull that snapshot before resuming live
+// patches. Clearing the pending accumulator here is important for long-running
+// turns with no clients; otherwise every token would keep accumulating copies
+// of patch data that can never be delivered.
+func (r *ProjectionReducer) DropPendingPatch(backendID, sessionID string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ps := r.sessions[projectionSessionKey(backendID, sessionID)]
+	if ps == nil {
+		return false
+	}
+	headRev := ps.projection.SyncRev
+	if headRev == ps.lastFlushedRev && len(ps.textAppends) == 0 && len(ps.thinking) == 0 &&
+		len(ps.tools) == 0 && len(ps.upsertTurns) == 0 && len(ps.userInputs) == 0 && ps.execution == nil {
+		return false
+	}
+	ps.textAppends = make(map[string][]string)
+	ps.thinking = make(map[string]string)
+	ps.tools = make(map[string]ProjectionPart)
+	// A dropped pending turn upsert is still represented by the authoritative
+	// reducer snapshot. Future observers pull that snapshot before receiving
+	// compact PartOps, so treat those shells as published and avoid rebuilding
+	// them on every subsequent tool event while no observer is attached.
+	for turnID := range ps.upsertTurns {
+		ps.publishedTurnShells[turnID] = struct{}{}
+	}
+	ps.upsertTurns = make(map[string]TurnProjection)
+	ps.userInputs = make(map[string]userInputPending)
+	ps.execution = nil
+	ps.lastFlushedRev = headRev
+	return true
+}
+
+// PendingPatchExceeds reports whether the next patch would carry a large whole
+// turn snapshot. It deliberately inspects only pending tool/input/turn upserts:
+// text and reasoning deltas are already compact append/set operations, while
+// those upserts cause FlushPatch to deep-copy the complete active turn. The
+// bounded estimate lets the publisher avoid that copy when nobody can receive
+// the patch; callers may then serve a full authoritative snapshot on reconnect.
+func (r *ProjectionReducer) PendingPatchExceeds(backendID, sessionID string, limit int) bool {
+	if r == nil || limit <= 0 {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ps := r.sessions[projectionSessionKey(backendID, sessionID)]
+	if ps == nil || (len(ps.tools) == 0 && len(ps.userInputs) == 0 && len(ps.upsertTurns) == 0) {
+		return false
+	}
+	if ps.largePatchObserved {
+		return true
+	}
+	for _, turn := range ps.upsertTurns {
+		if projectionTurnExceeds(&turn, limit) {
+			ps.largePatchObserved = true
+			return true
+		}
+	}
+	if len(ps.tools) > 0 {
+		if turn := ps.turnByID(ps.projection.Execution.ActiveTurnID); turn != nil && projectionTurnExceeds(turn, limit) {
+			ps.largePatchObserved = true
+			return true
+		}
+	}
+	for _, pending := range ps.userInputs {
+		if turn := ps.turnByID(pending.turnID); turn != nil && projectionTurnExceeds(turn, limit) {
+			ps.largePatchObserved = true
+			return true
+		}
+	}
+	return false
+}
+
+// projectionTurnExceeds is a bounded, allocation-free size estimate for the
+// JSON-like values carried by projection parts. It is intentionally conservative
+// about unknown scalar types (they are not expanded), and stops as soon as the
+// configured budget is exhausted.
+func projectionTurnExceeds(turn *TurnProjection, limit int) bool {
+	if turn == nil {
+		return false
+	}
+	budget := limit
+	consume := func(value string) bool {
+		budget -= len(value)
+		return budget <= 0
+	}
+	var consumePart func(ProjectionPart) bool
+	consumePart = func(part ProjectionPart) bool {
+		if consume(part.Type) || consume(part.Text) || consume(part.Presentation) ||
+			consume(part.ItemID) || consume(part.ToolName) || consume(part.ToolStatus) ||
+			consume(part.Title) || consume(part.Path) || consume(part.Kind) ||
+			consume(part.Diff) || consume(part.MovePath) || consume(part.AgentID) ||
+			consume(part.ParentAgentID) || consume(part.SpawnToolUseID) ||
+			consume(part.SubagentType) || consume(part.SubagentStatus) ||
+			consume(part.SubagentError) || consume(part.SubagentDiagnostic) ||
+			consume(part.UserInputInteractionID) || consume(part.UserInputStatus) ||
+			consume(part.UserInputResolutionSource) || consume(part.UserInputDiagnosticCode) {
+			return true
+		}
+		for _, nested := range part.SubagentBlocks {
+			if consumePart(nested) {
+				return true
+			}
+		}
+		if projectionValueExceeds(part.ToolInput, &budget) ||
+			projectionValueExceeds(part.ToolResult, &budget) ||
+			projectionValueExceeds(part.Matches, &budget) ||
+			projectionValueExceeds(part.FileChanges, &budget) ||
+			projectionValueExceeds(part.UserInputQuestions, &budget) {
+			return true
+		}
+		for _, action := range part.PermissionActions {
+			if consume(action) {
+				return true
+			}
+		}
+		for _, pattern := range part.PermissionPatterns {
+			if consume(pattern) {
+				return true
+			}
+		}
+		return budget <= 0
+	}
+	consumeMessage := func(message *MessageProjection) bool {
+		if message == nil {
+			return false
+		}
+		if consume(message.ID) || consume(message.ClientID) || consume(message.Role) {
+			return true
+		}
+		for _, part := range message.Parts {
+			if consumePart(part) {
+				return true
+			}
+		}
+		return false
+	}
+	if consume(turn.TurnID) || consume(turn.Status) || consumeMessage(turn.User) ||
+		consumeMessage(turn.Assistant) || consumeMessage(turn.System) {
+		return true
+	}
+	return budget <= 0
+}
+
+// projectionValueExceeds walks the JSON-compatible containers used by tool and
+// structured-input payloads without marshaling or allocating a second copy.
+func projectionValueExceeds(value interface{}, budget *int) bool {
+	if value == nil || budget == nil || *budget <= 0 {
+		return budget != nil && *budget <= 0
+	}
+	switch typed := value.(type) {
+	case string:
+		*budget -= len(typed)
+	case []byte:
+		*budget -= len(typed)
+	case []interface{}:
+		for _, item := range typed {
+			if projectionValueExceeds(item, budget) {
+				return true
+			}
+		}
+	case []string:
+		for _, item := range typed {
+			*budget -= len(item)
+			if *budget <= 0 {
+				return true
+			}
+		}
+	case map[string]interface{}:
+		for key, item := range typed {
+			*budget -= len(key)
+			if *budget <= 0 || projectionValueExceeds(item, budget) {
+				return true
+			}
+		}
+	case map[string]string:
+		for key, item := range typed {
+			*budget -= len(key) + len(item)
+			if *budget <= 0 {
+				return true
+			}
+		}
+	}
+	return *budget <= 0
 }
 
 // LastAppliedRev exposes the current head syncRev (for diagnostics / RPC headRev).
@@ -1642,4 +1960,73 @@ func cloneProjectionJSONValue(value interface{}) interface{} {
 	default:
 		return value
 	}
+}
+
+var (
+	// ErrProjectionPrependInvalid rejects a structural historical prepend: empty or
+	// duplicate turn ids, or a turn already committed (inclusive-cursor dedup is the
+	// caller's contract; the reducer re-asserts it).
+	ErrProjectionPrependInvalid = errors.New("projection: historical prepend invalid")
+)
+
+// PrependHistoricalTurns atomically inserts strictly-older historical turns (given in
+// ASCENDING order) at the front of the committed projection, advancing syncRev by
+// exactly one (lazy-history §2.4 / bridge-v1.md R11a). It deliberately produces NO
+// pending content patch: this rev is journaled as a GAP on purpose — journal catch-up
+// conns crossing it fall back to the authoritative {projection} form, which is the only
+// order-correct carrier of a structural prepend (replica upsertTurns appends unknown
+// turns at the tail and cannot express a front insert). Per-connection frames are the
+// caller's job (no-op revision patch for window conns, sync_invalidate for
+// full-projection conns; the requester sees the page inside its window result).
+func (r *ProjectionReducer) PrependHistoricalTurns(
+	backendID, sessionID string,
+	turns []TurnProjection,
+) (SessionProjection, error) {
+	if r == nil {
+		return SessionProjection{}, errors.New("projection reducer nil")
+	}
+	if backendID == "" || sessionID == "" {
+		return SessionProjection{}, fmt.Errorf("%w: empty backend/session id", ErrProjectionPrependInvalid)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ps := r.sessions[projectionSessionKey(backendID, sessionID)]
+	if ps == nil {
+		return SessionProjection{}, fmt.Errorf("%w: session %s/%s not present", ErrProjectionPrependInvalid, backendID, sessionID)
+	}
+	if len(turns) == 0 {
+		return cloneSessionProjection(ps.projection), nil
+	}
+	existing := make(map[string]struct{}, len(ps.projection.Turns))
+	for i := range ps.projection.Turns {
+		if ps.projection.Turns[i].TurnID != "" {
+			existing[ps.projection.Turns[i].TurnID] = struct{}{}
+		}
+	}
+	prepared := make([]TurnProjection, 0, len(turns))
+	for i := range turns {
+		turn := cloneTurn(turns[i])
+		if turn.TurnID == "" {
+			return SessionProjection{}, fmt.Errorf("%w: empty turnId at %d", ErrProjectionPrependInvalid, i)
+		}
+		if _, dup := existing[turn.TurnID]; dup {
+			return SessionProjection{}, fmt.Errorf("%w: turn %s already committed", ErrProjectionPrependInvalid, turn.TurnID)
+		}
+		if _, dup := existing[""]; dup {
+			delete(existing, "")
+		}
+		existing[turn.TurnID] = struct{}{}
+		if turn.Status == "" {
+			turn.Status = "completed"
+		}
+		prepared = append(prepared, turn)
+	}
+	ps.projection.Turns = append(prepared, ps.projection.Turns...)
+	ps.projection.SyncRev++
+	for i := range prepared {
+		ps.publishedTurnShells[prepared[i].TurnID] = struct{}{}
+	}
+	// No patch for this rev — journal gap by design (see doc comment).
+	ps.lastFlushedRev = ps.projection.SyncRev
+	return cloneSessionProjection(ps.projection), nil
 }

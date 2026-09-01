@@ -57,6 +57,10 @@ type discoveryHintCodexAgent struct {
 	state *discoveryHintState
 }
 
+func (a *discoveryHintCodexAgent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, error) {
+	return a.FetchThreadList(ctx, "")
+}
+
 type discoveryFastGrokState struct {
 	mu        sync.Mutex
 	expanded  bool
@@ -317,8 +321,12 @@ func TestSessionDiscoveryBlockedBackendDoesNotStarveCodex(t *testing.T) {
 func TestSessionDiscoveryCodexHeadHintTriggersAuthoritativeRefresh(t *testing.T) {
 	previousInterval := sessionDiscoveryInterval
 	previousHintInterval := codexDiscoveryHintInterval
+	previousRetryBase := codexDiscoveryRetryBase
+	previousRetryMax := codexDiscoveryRetryMax
 	sessionDiscoveryInterval = time.Hour
 	codexDiscoveryHintInterval = 10 * time.Millisecond
+	codexDiscoveryRetryBase = 5 * time.Millisecond
+	codexDiscoveryRetryMax = 20 * time.Millisecond
 	withCodexRootsDisabled(t)
 
 	state := &discoveryHintState{
@@ -359,6 +367,8 @@ func TestSessionDiscoveryCodexHeadHintTriggersAuthoritativeRefresh(t *testing.T)
 		}
 		sessionDiscoveryInterval = previousInterval
 		codexDiscoveryHintInterval = previousHintInterval
+		codexDiscoveryRetryBase = previousRetryBase
+		codexDiscoveryRetryMax = previousRetryMax
 	})
 
 	select {
@@ -388,14 +398,123 @@ func TestSessionDiscoveryCodexHeadHintTriggersAuthoritativeRefresh(t *testing.T)
 	}
 }
 
+func TestSessionDiscoveryCodexFailedFullRefreshBacksOffAndResets(t *testing.T) {
+	previousInterval := sessionDiscoveryInterval
+	previousHintInterval := codexDiscoveryHintInterval
+	previousRetryBase := codexDiscoveryRetryBase
+	previousRetryMax := codexDiscoveryRetryMax
+	sessionDiscoveryInterval = time.Hour
+	codexDiscoveryHintInterval = 10 * time.Millisecond
+	codexDiscoveryRetryBase = 200 * time.Millisecond
+	codexDiscoveryRetryMax = 400 * time.Millisecond
+	withCodexRootsDisabled(t)
+
+	state := &discoveryHintState{headSeeded: make(chan struct{}), workspace: t.TempDir()}
+	fullErrors := 0
+	base := &fakeCodexCatalogAgent{fakeAgent: &fakeAgent{name: "codex-remote"}}
+	base.fetchFn = func(context.Context, string) ([]core.AgentSessionInfo, error) {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		state.fullCalls++
+		if fullErrors > 0 {
+			fullErrors--
+			return nil, errors.New("authoritative thread/list timeout")
+		}
+		infos := []core.AgentSessionInfo{{ID: "s1", Summary: "one", Directory: state.workspace}}
+		if state.expanded {
+			infos = append([]core.AgentSessionInfo{{ID: "s2", Summary: "two", Directory: state.workspace}}, infos...)
+		}
+		return infos, nil
+	}
+	agent := &discoveryHintCodexAgent{fakeCodexCatalogAgent: base, state: state}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex-remote", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex-remote", SessionID: "list-view"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handlers.runBackendSessionDiscovery(ctx, "codex-remote", agent, time.Hour, codexDiscoveryHintInterval, time.Hour)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+		sessionDiscoveryInterval = previousInterval
+		codexDiscoveryHintInterval = previousHintInterval
+		codexDiscoveryRetryBase = previousRetryBase
+		codexDiscoveryRetryMax = previousRetryMax
+	})
+
+	select {
+	case <-state.headSeeded:
+	case <-time.After(time.Second):
+		t.Fatal("Codex native head probe did not seed")
+	}
+	state.mu.Lock()
+	state.expanded = true
+	fullErrors = 1
+	state.mu.Unlock()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		state.mu.Lock()
+		calls := state.fullCalls
+		state.mu.Unlock()
+		if calls >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("changed head did not attempt authoritative refresh")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(80 * time.Millisecond)
+	state.mu.Lock()
+	callsDuringBackoff := state.fullCalls
+	state.mu.Unlock()
+	if callsDuringBackoff != 2 {
+		t.Fatalf("failed fingerprint retriggered %d full refreshes before backoff expired, want 2 total", callsDuringBackoff)
+	}
+
+	msg := readJSONMaps(t, clientConn, 1)[0]
+	if msg["event"] != "sessions_changed" || msg["backendId"] != "codex-remote" {
+		t.Fatalf("recovered refresh event=%#v", msg)
+	}
+	state.mu.Lock()
+	if state.fullCalls != 3 {
+		state.mu.Unlock()
+		t.Fatalf("recovery full calls=%d want seed/failure/success", state.fullCalls)
+	}
+	state.expanded = false
+	state.mu.Unlock()
+
+	msg = readJSONMaps(t, clientConn, 1)[0]
+	if msg["event"] != "sessions_changed" {
+		t.Fatalf("post-success refresh event=%#v", msg)
+	}
+	state.mu.Lock()
+	finalCalls := state.fullCalls
+	state.mu.Unlock()
+	if finalCalls != 4 {
+		t.Fatalf("successful refresh did not reset retry state: calls=%d want 4", finalCalls)
+	}
+}
+
 // TestSessionDiscoveryHintArmsForCodexWebBackend：3s recency-head hint 对
 // codex-web（thread/list 富 catalog seam）同样生效——能力断言而非 id=="codex"，
 // Mac 新建 session 后 hint 立即触发 authoritative 全量刷新（P0-4）。
 func TestSessionDiscoveryHintArmsForCodexWebBackend(t *testing.T) {
 	previousInterval := sessionDiscoveryInterval
 	previousHintInterval := codexDiscoveryHintInterval
+	previousRetryBase := codexDiscoveryRetryBase
+	previousRetryMax := codexDiscoveryRetryMax
 	sessionDiscoveryInterval = time.Hour
 	codexDiscoveryHintInterval = 10 * time.Millisecond
+	codexDiscoveryRetryBase = 5 * time.Millisecond
+	codexDiscoveryRetryMax = 20 * time.Millisecond
 	withCodexRootsDisabled(t)
 
 	state := &discoveryHintState{
@@ -436,6 +555,8 @@ func TestSessionDiscoveryHintArmsForCodexWebBackend(t *testing.T) {
 		}
 		sessionDiscoveryInterval = previousInterval
 		codexDiscoveryHintInterval = previousHintInterval
+		codexDiscoveryRetryBase = previousRetryBase
+		codexDiscoveryRetryMax = previousRetryMax
 	})
 
 	select {
@@ -464,6 +585,60 @@ func TestSessionDiscoveryHintArmsForCodexWebBackend(t *testing.T) {
 	}
 }
 
+func TestSessionDiscoveryCodexHeadProbeErrorsBackOff(t *testing.T) {
+	previousInterval := sessionDiscoveryInterval
+	previousHintInterval := codexDiscoveryHintInterval
+	previousRetryBase := codexDiscoveryRetryBase
+	previousRetryMax := codexDiscoveryRetryMax
+	sessionDiscoveryInterval = time.Hour
+	codexDiscoveryHintInterval = 10 * time.Millisecond
+	codexDiscoveryRetryBase = 50 * time.Millisecond
+	codexDiscoveryRetryMax = 100 * time.Millisecond
+	withCodexRootsDisabled(t)
+
+	state := &discoveryHintState{
+		headErrors: 100,
+		headSeeded: make(chan struct{}),
+		workspace:  t.TempDir(),
+	}
+	base := &fakeCodexCatalogAgent{fakeAgent: &fakeAgent{name: "codex-remote"}}
+	base.fetchFn = func(context.Context, string) ([]core.AgentSessionInfo, error) {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		state.fullCalls++
+		return []core.AgentSessionInfo{{ID: "s1", Summary: "one", Directory: state.workspace}}, nil
+	}
+	agent := &discoveryHintCodexAgent{fakeCodexCatalogAgent: base, state: state}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex-remote", agent)
+	serverConn, _, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex-remote", SessionID: "list-view"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handlers.runBackendSessionDiscovery(ctx, "codex-remote", agent, time.Hour, codexDiscoveryHintInterval, time.Hour)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+		sessionDiscoveryInterval = previousInterval
+		codexDiscoveryHintInterval = previousHintInterval
+		codexDiscoveryRetryBase = previousRetryBase
+		codexDiscoveryRetryMax = previousRetryMax
+	})
+
+	time.Sleep(130 * time.Millisecond)
+	state.mu.Lock()
+	headCalls := state.headCalls
+	state.mu.Unlock()
+	if headCalls < 1 || headCalls > 3 {
+		t.Fatalf("head probe errors made %d calls in 130ms, want bounded 1..3 with retry backoff", headCalls)
+	}
+}
+
 // TestCodexDiscoveryHintIgnoresUpdatedAtChurn：流式 turn 期间 daemon thread 的
 // updatedAt 随每个 delta 变化，head 提示只覆盖顺序+id 时不得误触发全量刷新
 // （2026-08-23 真机：语义指纹让 codex-web 每 3s 一次全量刷新 + sessions_changed
@@ -476,7 +651,7 @@ func TestCodexDiscoveryHintIgnoresUpdatedAtChurn(t *testing.T) {
 	withCodexRootsDisabled(t)
 
 	state := &discoveryHintState{
-		headChurn: 1, // 每次探测 ModifiedAt 都变化（模拟流式 delta）
+		headChurn:  1, // 每次探测 ModifiedAt 都变化（模拟流式 delta）
 		headSeeded: make(chan struct{}),
 		workspace:  t.TempDir(),
 	}

@@ -18,7 +18,10 @@
 // descriptor/diagnostics 在 wire_descriptor.go/diagnostics.go。
 package codexweb
 
-import "github.com/openAgi2/cordcode-macbridge/core"
+import (
+	appserverrpc "github.com/openAgi2/cordcode-macbridge/agent/codex-appserver/rpc"
+	"github.com/openAgi2/cordcode-macbridge/core"
+)
 
 // BackendID 是 wire/backend identity（设计 §5.1，独立于旧 "codex"）。
 const BackendID = "codex-web"
@@ -46,4 +49,4 @@ type Identity struct {
 }
 
 // ConnectionEpoch 标识一次 transport 连接代际（§7.2：断线清理旧 epoch pending）。
-type ConnectionEpoch int64
+type ConnectionEpoch = appserverrpc.Epoch

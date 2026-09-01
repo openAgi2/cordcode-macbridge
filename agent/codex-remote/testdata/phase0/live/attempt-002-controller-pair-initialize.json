@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "classification": "LIVE-REDACTED-OBSERVATION-PARTIAL",
+  "gate_effect": "evidence-only",
+  "target": {
+    "chatgpt_desktop_version": "26.825.32147",
+    "chatgpt_bundle_version": "7303",
+    "embedded_codex_version": "codex-cli 0.150.0-alpha.12.2",
+    "controller_protocol_version": 3
+  },
+  "metadata": {
+    "captured_at": "2026-08-28T09:59:19Z",
+    "capture_purpose": "Prove that an independently enrolled and manually paired controller can bind the current ChatGPT Desktop environment and exchange initialize traffic with its ordinary app-server stream.",
+    "source_classification": "target binary plus official live service",
+    "operator_attestation": "Owner authorized the bounded real-account probe, completed fresh step-up, entered a fresh Computer-tab pairing code only through the localhost one-time form, and had ChatGPT iOS connected before the attempt. Post-attempt mobile coexistence is not yet attested.",
+    "redaction_procedure": "Kept all credentials, codes, QR data, signatures, raw identifiers, host names and raw bodies out of the fixture; retained only status codes, structural field names, relative timing, pseudonyms and cleanup outcomes.",
+    "secret_scan_command": "gitleaks dir --redact --config .gitleaks.toml .",
+    "secret_scan_result": "PASS: no leaks found after fixture and probe write",
+    "cleanup_result": "Both bounded identities were revoked with HTTP 204, both independently created keys were deleted, and no official mobile-controller delete or disconnect endpoint was called."
+  },
+  "observations": [
+    {
+      "kind": "pairing_direction_correction",
+      "result": "observed",
+      "detail": "An initial code input returned HTTP 404. Target-bundle UI text established that a controller-computer must use a fresh manual code from the host authorization dialog's Computer tab. That failed probe identity was immediately revoked before retrying."
+    },
+    {
+      "kind": "enroll_start",
+      "http_status": 200,
+      "response_fields": ["account_user_id", "client_id", "device_key_challenge"]
+    },
+    {
+      "kind": "enroll_finish",
+      "http_status": 200,
+      "response_fields": ["account_user_id", "client_id", "expires_at", "remote_control_token", "scopes"],
+      "scopes": ["remote_control_controller_websocket"]
+    },
+    {
+      "kind": "environment_list",
+      "stage": "before_pair",
+      "http_status": 200,
+      "count": 0,
+      "result": "pairing-required"
+    },
+    {
+      "kind": "controller_pair",
+      "http_status": 200,
+      "result": "claimed-current-desktop"
+    },
+    {
+      "kind": "environment_list",
+      "stage": "after_pair",
+      "http_status": 200,
+      "count": 1,
+      "environment": "env_desktop",
+      "online": true,
+      "busy": false,
+      "os": "Mac OS",
+      "client_type": "CODEX_DESKTOP_APP",
+      "app_server_version": "0.150.0-alpha.12.2"
+    },
+    {
+      "kind": "environment_selected",
+      "environment": "env_desktop",
+      "selected_index": 1,
+      "online": true
+    },
+    {
+      "kind": "websocket_handshake",
+      "result": "open-and-challenge-received",
+      "origin": "https://chatgpt.com",
+      "path": "/backend-api/codex/remote/control/client",
+      "protocol_version": 3,
+      "reconnect_cursor_present": false
+    },
+    {
+      "kind": "device_key_challenge",
+      "fields": ["accountUserId", "audience", "clientId", "nonce", "purpose", "scopes", "sessionId", "targetOrigin", "targetPath", "tokenExpiresAt", "tokenSha256Base64url", "type"],
+      "target_origin": "https://chatgpt.com",
+      "target_path": "/backend-api/codex/remote/control/client",
+      "scopes": ["remote_control_controller_websocket"]
+    },
+    {
+      "kind": "device_key_proof",
+      "result": "sent-before-app-server-traffic",
+      "algorithm": "ecdsa_p256_sha256",
+      "key": "probe_key"
+    },
+    {
+      "kind": "client_message",
+      "method": "initialize",
+      "environment": "env_desktop",
+      "stream": "stream_primary",
+      "seq_id": 1,
+      "skip_history": false
+    },
+    {
+      "kind": "ack",
+      "environment_matches": true,
+      "stream_matches": true,
+      "seq_id": 1
+    },
+    {
+      "kind": "server_message",
+      "environment_matches": true,
+      "stream_matches": true,
+      "seq_ids": [1, 2],
+      "initialize_result_fields": ["codexHome", "platformFamily", "platformOs", "userAgent"]
+    },
+    {
+      "kind": "revoke",
+      "http_status": 204,
+      "controller": "client_probe"
+    },
+    {
+      "kind": "cleanup",
+      "controller_revoked": true,
+      "device_key_deleted": true,
+      "official_mobile_controller_mutated": false
+    }
+  ],
+  "semantic_assertions": {
+    "all_rest_and_websocket_origins_are_official_allowlisted_origins": true,
+    "selected_environment_is_the_current_desktop": true,
+    "environment_binding_is_observed_not_inferred": true,
+    "cursor_delivery_location_is_observed_not_inferred": false,
+    "controller_identity_is_independent_and_revocable": true,
+    "cleanup_targets_only_the_probe_controller": true,
+    "official_mobile_controller_is_never_automatically_disconnected_or_revoked": false
+  },
+  "adjudication": {
+    "result": "EVIDENCE-ONLY",
+    "proven": "Official relay pairing and an independently signed controller WSS reached the selected Desktop ordinary app-server stream and completed initialize with matching environment and stream routing.",
+    "not_proven": ["controller refresh", "pong semantics", "cursor reconnect", "revoked identity rejection", "iOS post-connect coexistence", "single-owner HTTP 409 and kick-out semantics"],
+    "phase0_gate": "FAIL-INCOMPLETE"
+  }
+}

@@ -1,10 +1,20 @@
 package gobridge
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"time"
 )
+
+// projectionDiagnosticsEnabled keeps the high-cardinality patch diagnostics out
+// of the default Info path. A projection patch is already JSON-encoded by the
+// outbound sink; measuring it again (and formatting a log record) for every
+// token can dominate a real-time turn. Debug logging remains an explicit opt-in
+// for forensic captures and tests.
+func projectionDiagnosticsEnabled() bool {
+	return slog.Default().Enabled(context.Background(), slog.LevelDebug)
+}
 
 // PERF-S0A（iOS 仓 docs/2026-08-23-message-web-gpuix-borrowing-realistic-assessment.md §13）：
 // projection 性能指标 schema 版本。字段变化时递增并记录；before/after 对比必须同版本。
@@ -74,6 +84,9 @@ func logProjectionResponseMetrics(
 	startedAt time.Time,
 	projection *SessionProjection,
 ) {
+	if !projectionDiagnosticsEnabled() {
+		return
+	}
 	response := map[string]interface{}{
 		"type":      "result",
 		"requestId": msg.RequestID,
@@ -118,6 +131,9 @@ func logProjectionResponseMetrics(
 }
 
 func logProjectionPatchMetrics(backendID, sessionID, recoveryID string, patch ProjectionPatch) {
+	if !projectionDiagnosticsEnabled() {
+		return
+	}
 	upsertBytes := encodedJSONSize(patch.UpsertTurns)
 	partOpsBytes := encodedJSONSize(patch.PartOps)
 	slog.Info("go-bridge: projection patch metrics",

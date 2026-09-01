@@ -103,6 +103,37 @@ func listSemanticFingerprint(maps []map[string]interface{}) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// remoteCatalogFingerprint covers the metadata that can change the Codex Desktop
+// session row, while deliberately excluding updatedAtMillis. Remote Control sends
+// live turn deltas on the same stream; its recency timestamp changes during every
+// turn and must not turn the discovery safety poll into a sessions_changed storm.
+// Lifecycle notifications remain the fast path for create/name/archive/delete,
+// and the periodic safety scan still detects membership or presentation changes.
+func remoteCatalogFingerprint(maps []map[string]interface{}) string {
+	var b strings.Builder
+	for index, item := range maps {
+		id, _ := item["id"].(string)
+		title, _ := item["title"].(string)
+		dir := sessionDirectoryKey(item)
+		if normalized, ok := normalizeCatalogDirectory(dir); ok {
+			dir = normalized
+		}
+		project, _ := item["projectId"].(string)
+		b.WriteString(strconv.Itoa(index))
+		b.WriteByte('|')
+		b.WriteString(id)
+		b.WriteByte('|')
+		b.WriteString(dir)
+		b.WriteByte('|')
+		b.WriteString(project)
+		b.WriteByte('|')
+		b.WriteString(title)
+		b.WriteByte('\n')
+	}
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
+}
+
 // listOrderFingerprint 只覆盖原生顺序 + 成员 id，供 3s head 提示使用。提示的职责是
 // 廉价决定「是否跑一次权威全量刷新」：新增/删除/recency 变化都会体现为成员集合或
 // id 顺序的变化；而 updatedAt 在流式 turn 中随每个 text_delta 变化，语义指纹会让

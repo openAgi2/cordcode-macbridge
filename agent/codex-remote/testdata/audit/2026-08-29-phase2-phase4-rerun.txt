@@ -1,0 +1,28 @@
+Exec-plan audit replay (2026-08-29T06:45:46Z)
+
+go test -race ./agent/codex-remote -count=1 -timeout 120s
+PASS (3.308s)
+
+go test -race ./agent/codex-remote -run 'TestRemote(History|Codec|Session|IsSession)' -count=5 -timeout 120s
+PASS (1.021s)
+
+go test -race ./go-bridge -run 'Test(CodexRemoteListSessionsSkipsWorkspaceCatalog|HandleGetSessionProjectionRunningCodexSessionWithinBudget|HandleGetSessionProjectionRunningCodexSessionTranscriptFallback|MgmtCodexRemotePairingRoutes|CodexRemoteProduceHydrateRangeUsesThreadRead|CodexRemoteJoinsSessionSyncV2)$' -count=3 -timeout 180s
+PASS (1.062s)
+
+go test -race ./go-bridge -run 'TestCodexRemoteDescriptorOnlyAdvertisesImplementedCapabilities|TestCodexWebDescriptorUsesIndependentIdentityAndTruthfulCapabilities|TestBackendListMatchesBuildAgentDescriptorCapabilities' -count=5 -timeout 180s
+PASS (1.847s)
+
+go test -race ./agent/codex-remote -run 'Test(ServerRequestBacklogDoesNotBlockRPCResponse|UnsupportedRemoteServerRequestIsRejectedByOriginalID|RemoteSessionSteerUsesOfficialTurnIdentity|RemoteCodec)' -count=10 -timeout 120s
+PASS (1.073s)
+
+go test -race ./go-bridge -run 'Test(CodexRemote|MgmtCodexRemote|MgmtRemoteStatus|TopologySnapshot|AggregateDesktopTruthTable|DeriveSyncHealthFullTable|Display|Service)' -count=1 -timeout 120s
+PASS (1.044s)
+
+git diff --check
+PASS
+
+git diff --exit-code -- agent/codex-web agent/codex
+PASS
+
+gitleaks dir --redact --config .gitleaks.toml agent/codex-remote
+PASS: no leaks found

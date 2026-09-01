@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -557,7 +558,7 @@ func enrichGrokCatalogTitles(grokHome string, sessions []core.AgentSessionInfo) 
 		// placeholder filter trims anyway, but the wire value should not carry
 		// blank filler.
 		sessions[i].Summary = ""
-		dir := findSessionDir(grokHome, sessions[i].ID)
+		dir := findGrokCatalogSessionDir(grokHome, sessions[i].Directory, sessions[i].ID)
 		if dir == "" {
 			continue
 		}
@@ -565,6 +566,26 @@ func enrichGrokCatalogTitles(grokHome string, sessions []core.AgentSessionInfo) 
 			sessions[i].Summary = title
 		}
 	}
+}
+
+// findGrokCatalogSessionDir resolves the native catalog's cwd/session-id layout
+// directly before falling back to the legacy recursive scan.  Grok stores each
+// session under sessions/<url.PathEscape(cwd)>/<sessionID>; session/list already
+// gives us cwd, so walking the entire sessions tree for every untitled row turns
+// a five-second catalog refresh into O(rows * files).  The fallback preserves
+// compatibility with older catalogs and fixtures whose cwd is absent or stale.
+func findGrokCatalogSessionDir(grokHome, directory, sessionID string) string {
+	directory = strings.TrimSpace(directory)
+	sessionID = strings.TrimSpace(sessionID)
+	if grokHome == "" || directory == "" || sessionID == "" ||
+		filepath.Base(sessionID) != sessionID || sessionID == "." || sessionID == ".." {
+		return findSessionDir(grokHome, sessionID)
+	}
+	candidate := filepath.Join(grokHome, "sessions", url.PathEscape(directory), sessionID)
+	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		return candidate
+	}
+	return findSessionDir(grokHome, sessionID)
 }
 
 func readGrokGeneratedTitle(summaryPath string) string {

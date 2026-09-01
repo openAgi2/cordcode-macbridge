@@ -160,6 +160,9 @@ func TestDisablesRelayIdleTimeoutIncludesOpenCode(t *testing.T) {
 	if !disablesRelayIdleTimeout("codex-web") {
 		t.Fatal("codex-web relay idle timeout should be disabled so Mac turns stay live after an iOS turn")
 	}
+	if !disablesRelayIdleTimeout("codex-remote") {
+		t.Fatal("codex-remote relay idle timeout should be disabled so Desktop turns stay live after an iOS turn")
+	}
 }
 
 func TestRelaySurvivesTurnBoundaryForDSHWeb(t *testing.T) {
@@ -168,6 +171,9 @@ func TestRelaySurvivesTurnBoundaryForDSHWeb(t *testing.T) {
 	}
 	if !relaySurvivesTurnBoundary("codex-web") {
 		t.Fatal("codex-web relay must stay up after turn_completed so Mac Desktop turns keep streaming")
+	}
+	if !relaySurvivesTurnBoundary("codex-remote") {
+		t.Fatal("codex-remote relay must stay up after turn_completed so later Desktop turns reach iOS")
 	}
 	if relaySurvivesTurnBoundary("codex") {
 		t.Fatal("codex relay still exits on EventResult (historical contract)")

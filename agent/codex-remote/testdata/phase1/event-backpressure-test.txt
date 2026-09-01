@@ -1,0 +1,9 @@
+checked_at=2026-08-29T05:47:45Z
+result=PASS
+command=go test -race ./agent/codex-remote -count=1 -timeout 120s
+command=go test -race ./agent/codex-remote -run Test(ServerRequestBacklogDoesNotBlockRPCResponse|BindClientStartsEventPumpForReplacementEpoch)$ -count=10 -timeout 120s
+command=go test -race ./go-bridge -run Test(CodexRemoteListSessionsSkipsWorkspaceCatalog|HandleGetSessionProjectionRunningCodexSessionWithinBudget|HandleGetSessionProjectionRunningCodexSessionTranscriptFallback|MgmtCodexRemotePairingRoutes|CodexRemoteProduceHydrateRangeUsesThreadRead|CodexRemoteJoinsSessionSyncV2)$ -count=3 -timeout 120s
+stress_server_requests=100
+replacement_epochs=2
+upstream_invariant=Unread notifications or server requests cannot prevent foreground request responses from being delivered.
+full_go_bridge_race=FAILED_OUTSIDE_SCOPE: existing claudeFileRelay timing globals race in claude_file_relay_test.go and TestSessionDiscoveryClaudeUsesGlobalCatalog timed out; no stack passed through agent/codex-remote.

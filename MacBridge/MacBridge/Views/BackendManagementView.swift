@@ -4,6 +4,7 @@ import SwiftUI
 struct BackendManagementView: View {
     @ObservedObject var viewModel: BackendStatusViewModel
     @EnvironmentObject private var dependencies: AppDependencies
+    @State private var showCodexDesktopPairing = false
 
     var body: some View {
         ScrollView {
@@ -67,6 +68,9 @@ struct BackendManagementView: View {
         .task {
             await viewModel.loadAgents()
         }
+        .sheet(isPresented: $showCodexDesktopPairing) {
+            CodexDesktopPairingSheet(viewModel: viewModel)
+        }
     }
 
     // MARK: - 全后端未检测引导
@@ -110,6 +114,14 @@ struct BackendManagementView: View {
                 Text(agent.displayStatus)
                     .font(.caption)
                     .foregroundColor(agent.isAvailable ? .green : .orange)
+
+                if (agent.id == "codex-remote" || agent.kind.lowercased() == "codex-remote"), !agent.isAvailable {
+                    Button(L10n.pairCodexDesktop) {
+                        showCodexDesktopPairing = true
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
 
                 // 测试按钮
                 Button(L10n.test) {
@@ -160,6 +172,9 @@ struct BackendManagementView: View {
         }
         if reason.contains("not logged in") {
             return L10n.loginRequired
+        }
+        if kind.lowercased() == "codex-remote" || reason.contains("尚未配对") || reason.contains("ChatGPT Desktop") {
+            return L10n.codexDesktopPairGuidance
         }
         if reason.contains("timed out") {
             return L10n.detectionTimedOut

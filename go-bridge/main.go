@@ -20,6 +20,7 @@ import (
 	// Register cc-connect agents via init()
 	_ "github.com/openAgi2/cordcode-macbridge/agent/claudecode"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/codex"
+	_ "github.com/openAgi2/cordcode-macbridge/agent/codex-remote"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/codex-web"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/dsh"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/dsh-web"
@@ -131,6 +132,15 @@ func Main() {
 	handlers.SetRelayEnabled(*relayEnabled)
 	handlers.SetSessionListLimit(*sessionListLimit)
 	handlers.SetDataDir(*dataDirPath)
+	// 封闭取证开关（owner 2026-08-30 深夜裁决）：TURN_ITEMS_DIAGNOSTIC=1 时
+	// session_turn_items 走高门限诊断拉取（128 页/16MB/90s 到真实 EOF、逐 item 计量、
+	// 不 commit 投影、ack 回放冻结门 reasonCode）。只取证，不是生产行为。
+	// 注意：必须用无 CORDCODE_ 前缀的名字——clearControlPlaneEnv 的 sweep 会清掉
+	// 全部 CORDCODE_* 变量（本调用点在 sweep 之后，前缀名永远读到空值）。
+	if os.Getenv("TURN_ITEMS_DIAGNOSTIC") == "1" {
+		handlers.SetTurnItemsDiagnostic(true)
+		slog.Warn("go-bridge: turn-items closed-evidence diagnostic route ENABLED (no projection commits)")
+	}
 	// 真实样本采集钩子（设计 delta §3）：CCCODE_WEB_PUSH_SAMPLE_CAPTURE=1 才启用，缺省零行为差异。
 	initWebPushSampleCapture(*dataDirPath)
 	var webPushPipeline *WebPushCandidatePipeline
@@ -403,6 +413,18 @@ func Main() {
 	// returns to the frozen full-projection path, no data is touched, no legacy writer
 	// returns. Undeclared/flag-off peers are byte-identical to today by contract.
 	server.SetProjectionWindowEnabled(true)
+	// turn_detail_lazy_v1 release gate (unified-bridge-protocol §11.7; frozen release
+	// ordering — client first, server flip last): the iOS Phase 3 client shipped on
+	// 2026-08-30 (descriptor-gated entry, session_turn_items state machine, completion =
+	// appliedRev >= ack.syncRev). The SAME const also gates the codex-remote backend
+	// descriptor StaticCapabilities (see core.TurnDetailLazyProductionEnabled) so
+	// rollback withdraws the echo AND the descriptor together — iOS hides the entry
+	// before any request. Rollback = set that one const false.
+	server.SetTurnDetailLazyEnabled(core.TurnDetailLazyProductionEnabled)
+	// turn_detail_chunks_v1 (§11.8, phase5): same const-wired discipline; the
+	// const stays false until the client-first rollout completes (iOS overlay
+	// installed), so production peers see only the deprecated v1 until then.
+	server.SetTurnDetailChunksEnabled(core.TurnDetailChunksProductionEnabled)
 	serverDisplayName := "CordCode Link"
 	if mgmtSrv != nil {
 		serverDisplayName = mgmtSrv.DisplayName()
@@ -511,6 +533,20 @@ func Main() {
 		}
 		// projection_window_v1 relay path mirrors the direct hello negotiation exactly.
 		if !server.negotiateProjectionWindowV1(ack, &hello, conn) {
+			conn.SendJSON(ack)
+			return
+		}
+		// turn_detail_lazy_v1 relay path mirrors the direct hello negotiation exactly
+		// (§11.7: echo only when the rollout flag is on and the client declared the
+		// capability with its session_sync_v2 prerequisite).
+		if !server.negotiateTurnDetailLazyV1(ack, &hello, conn) {
+			conn.SendJSON(ack)
+			return
+		}
+		// turn_detail_chunks_v1 relay path mirrors the direct hello negotiation
+		// exactly (§11.8; relay is the iPhone production path — the mirror is
+		// mandatory, not optional).
+		if !server.negotiateTurnDetailChunksV1(ack, &hello, conn) {
 			conn.SendJSON(ack)
 			return
 		}

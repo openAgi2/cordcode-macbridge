@@ -1,0 +1,27 @@
+{
+  "thread": {
+    "id": "thread_fixture",
+    "status": {"type": "idle"},
+    "turns": [
+      {
+        "id": "turn_fixture",
+        "status": "completed",
+        "startedAt": 1700000000,
+        "completedAt": 1700000002,
+        "itemsView": "full",
+        "items": [
+          {"type": "userMessage", "id": "item_user", "content": [{"type": "text", "text": "fixture prompt"}]},
+          {"type": "reasoning", "id": "item_reasoning", "summary": ["fixture reasoning"], "content": []},
+          {"type": "agentMessage", "id": "item_agent", "text": "fixture response"},
+          {"type": "commandExecution", "id": "item_command", "command": "printf fixture", "cwd": "/tmp", "status": "completed", "aggregatedOutput": "fixture\n", "exitCode": 0, "durationMs": 1},
+          {"type": "fileChange", "id": "item_patch", "status": "completed", "changes": [{"path": "fixture.txt", "kind": {"type": "add"}, "diff": "+fixture\n"}]},
+          {"type": "mcpToolCall", "id": "item_mcp", "server": "fixture-server", "tool": "lookup", "status": "completed", "arguments": {"q": "fixture"}, "result": {"content": [{"type": "text", "text": "fixture"}]}, "error": null},
+          {"type": "dynamicToolCall", "id": "item_dynamic", "tool": "fixture_tool", "status": "failed", "arguments": {"value": 1}},
+          {"type": "plan", "id": "item_plan", "text": "fixture plan"},
+          {"type": "webSearch", "id": "item_search", "query": "fixture query"},
+          {"type": "contextCompaction", "id": "item_compaction"}
+        ]
+      }
+    ]
+  }
+}

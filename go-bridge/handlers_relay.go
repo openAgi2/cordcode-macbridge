@@ -2605,7 +2605,7 @@ var (
 
 func disablesRelayIdleTimeout(backendID string) bool {
 	switch backendID {
-	case "claude", "claudecode", "codex", "codex-web", "opencode", "dsh-web", "opencode-web":
+	case "claude", "claudecode", "codex", "codex-web", "codex-remote", "opencode", "dsh-web", "opencode-web":
 		// dsh-web mux 在审批等待期间不再吐 text_delta。60s 空闲超时会
 		// auto-complete 并退出 relayEvents（真机 18:10:41，审批已 surface
 		// 仍被收口），iOS 权限卡来不及停留。opencode-web 同理：审批等待期
@@ -2636,7 +2636,7 @@ func (h *Handlers) agentRelayRunningFor(sessionID string) bool {
 // object while startRelayIfNotRunning no-ops, and iOS misses later approvals.
 func relaySurvivesTurnBoundary(backendID string) bool {
 	switch backendID {
-	case "claude", "claudecode", "dsh-web", "codex-web":
+	case "claude", "claudecode", "dsh-web", "codex-web", "codex-remote":
 		return true
 	default:
 		return false

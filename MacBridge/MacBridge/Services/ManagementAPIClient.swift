@@ -114,6 +114,18 @@ struct AgentInfo: Codable, Equatable {
     let requiresPollingForExternalTurns: Bool
 }
 
+struct CodexRemotePairingStatus: Codable, Equatable {
+    let phase: String
+    let stepUpUrl: String?
+    let message: String?
+    let online: Bool?
+    let clientType: String?
+}
+
+private struct CodexRemotePairingCode: Codable {
+    let manualPairingCode: String
+}
+
 /// POST /internal/shutdown 响应
 struct ShutdownResponse: Codable {
     let shuttingDown: Bool?
@@ -160,6 +172,9 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
     /// Pairing status/approval can synchronously cross the public Relay. Keep those requests
     /// separate from the 2-second local health-check budget.
     private let pairingSession: URLSession
+    /// ChatGPT Desktop Remote Control enroll/pair talks to official HTTPS and may wait for
+    /// browser step-up. Keep it off the 2-second local health-check budget.
+    private let remoteControlSession: URLSession
 
     init(baseURL: String, token: String) throws {
         guard let url = URL(string: baseURL), !baseURL.isEmpty else {
@@ -180,6 +195,12 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
         pairingConfig.timeoutIntervalForResource = 20
         pairingConfig.waitsForConnectivity = false
         self.pairingSession = URLSession(configuration: pairingConfig)
+
+        let remoteControlConfig = URLSessionConfiguration.ephemeral
+        remoteControlConfig.timeoutIntervalForRequest = 60
+        remoteControlConfig.timeoutIntervalForResource = 90
+        remoteControlConfig.waitsForConnectivity = false
+        self.remoteControlSession = URLSession(configuration: remoteControlConfig)
     }
 
     private func request(_ path: String, method: String = "GET") -> URLRequest {
@@ -252,6 +273,34 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
     func getAgents() async throws -> [AgentInfo] {
         let data = try await performRequest("/internal/agents")
         return try JSONDecoder().decode([AgentInfo].self, from: data)
+    }
+
+    func startCodexRemotePairing() async throws -> CodexRemotePairingStatus {
+        let data = try await performRequest(
+            "/internal/agents/codex-remote/remote-control/start",
+            method: "POST",
+            using: remoteControlSession
+        )
+        return try JSONDecoder().decode(CodexRemotePairingStatus.self, from: data)
+    }
+
+    func submitCodexRemotePairingCode(_ code: String) async throws -> CodexRemotePairingStatus {
+        let body = try JSONEncoder().encode(CodexRemotePairingCode(manualPairingCode: code))
+        let data = try await performRequest(
+            "/internal/agents/codex-remote/remote-control/pair",
+            method: "POST",
+            body: body,
+            using: remoteControlSession
+        )
+        return try JSONDecoder().decode(CodexRemotePairingStatus.self, from: data)
+    }
+
+    func codexRemotePairingStatus() async throws -> CodexRemotePairingStatus {
+        let data = try await performRequest(
+            "/internal/agents/codex-remote/remote-control/status",
+            using: remoteControlSession
+        )
+        return try JSONDecoder().decode(CodexRemotePairingStatus.self, from: data)
     }
 
     func shutdown() async throws {

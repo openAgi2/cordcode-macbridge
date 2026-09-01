@@ -45,6 +45,18 @@ type codexThreadHeadLister interface {
 	FetchThreadListHead(ctx context.Context, dir string, limit int) ([]core.AgentSessionInfo, error)
 }
 
+// usesCodexWorkspaceCatalog reports whether this agent should take the shared
+// Codex/Codex Web list_sessions path (10m wire cache + Mac Codex workspace-root
+// filter). Codex Desktop is a different host: it implements the same
+// thread/list methods but must not inherit that cache/filter.
+func usesCodexWorkspaceCatalog(agent core.Agent) bool {
+	if agent == nil || agent.Name() == "codex-remote" {
+		return false
+	}
+	_, ok := agent.(codexThreadLister)
+	return ok
+}
+
 // codexCatalogWireCache 复用 generic catalogWireSnapshotCache（与 OpenCode 共享同一实例：
 // scope-keyed，codexCatalogScopeKey 与 openCodeCatalogScopeKey 互斥，互不复用快照）。
 func (h *Handlers) codexCatalogWireCache() *catalogWireSnapshotCache {

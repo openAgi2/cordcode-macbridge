@@ -1,0 +1,2 @@
+ok  	github.com/openAgi2/cordcode-macbridge/agent/codex-remote	0.334s
+ok  	github.com/openAgi2/cordcode-macbridge/go-bridge	0.543s

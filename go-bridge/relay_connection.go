@@ -63,6 +63,14 @@ func (d *directConnAdapter) IsRevoked() bool {
 	return d.inner.revoked
 }
 
+// isClosed forwards the stale-socket check to the wrapped direct connection.
+// Broadcaster/Publisher use this optional seam for both direct and relay paths;
+// without forwarding it, a closed direct socket can remain a candidate target
+// until its cleanup callback happens to run.
+func (d *directConnAdapter) isClosed() bool {
+	return d == nil || d.inner == nil || d.inner.isClosed()
+}
+
 func (d *directConnAdapter) Close() error {
 	return d.inner.Close()
 }

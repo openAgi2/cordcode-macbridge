@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "classification": "LIVE-REDACTED-OBSERVATION-PARTIAL",
+  "gate_effect": "evidence-only",
+  "target": {
+    "chatgpt_desktop_version": "26.825.32147",
+    "chatgpt_bundle_version": "7303",
+    "embedded_codex_version": "codex-cli 0.150.0-alpha.12.2",
+    "controller_protocol_version": 3
+  },
+  "metadata": {
+    "captured_at": "2026-08-28T10:09:57Z",
+    "capture_purpose": "Exercise refresh and application-level ping before cursor reconnect, preserving the first live divergence from the target's optional cursor schema.",
+    "source_classification": "target binary plus official live service",
+    "operator_attestation": "Owner completed fresh step-up and entered a fresh Computer-tab pairing code through the localhost form; owner saw the newly paired controller in the Mac ChatGPT connection module during the attempt.",
+    "redaction_procedure": "Removed all credentials, pairing material, QR data, signatures, raw identifiers, host names and response bodies; retained status codes, structural field names, routing comparisons and cleanup outcomes.",
+    "secret_scan_command": "gitleaks dir --redact --config .gitleaks.toml .",
+    "secret_scan_result": "PASS: no leaks found after fixture and probe write",
+    "cleanup_result": "The probe stopped at the cursor divergence, revoked only its own controller with HTTP 204 and deleted its independently created key."
+  },
+  "observations": [
+    {
+      "kind": "refresh_start",
+      "http_status": 200,
+      "response_fields": ["account_user_id", "client_id", "device_key_challenge"],
+      "device_identity_hash_present": true
+    },
+    {
+      "kind": "refresh_finish",
+      "http_status": 200,
+      "response_fields": ["account_user_id", "client_id", "expires_at", "remote_control_token", "scopes"],
+      "scopes": ["remote_control_controller_websocket"]
+    },
+    {
+      "kind": "controller_visibility",
+      "result": "owner-observed-during-paired-window"
+    },
+    {
+      "kind": "websocket_handshake",
+      "result": "open",
+      "protocol_version": 3,
+      "cursor_header_present": false
+    },
+    {
+      "kind": "client_message",
+      "method": "initialize",
+      "environment": "env_desktop",
+      "stream": "stream_primary",
+      "seq_id": 1
+    },
+    {
+      "kind": "pong",
+      "status": "active",
+      "environment_matches": true,
+      "stream_matches": true,
+      "seq_id": 3,
+      "cursor_present": false,
+      "fields": ["client_id", "env_id", "seq_id", "status", "stream_id", "type"]
+    },
+    {
+      "kind": "reconnect_blocked",
+      "reason": "The first real active pong omitted the optional cursor field, so a cursor-bearing reconnect header could not be constructed without fabrication."
+    },
+    {
+      "kind": "revoke",
+      "http_status": 204,
+      "controller": "client_probe"
+    },
+    {
+      "kind": "cleanup",
+      "controller_revoked": true,
+      "device_key_deleted": true,
+      "official_mobile_controller_mutated": false
+    }
+  ],
+  "adjudication": {
+    "result": "EVIDENCE-ONLY",
+    "proven": "The independently enrolled identity refreshed successfully and received an active app-level pong on the selected Desktop stream.",
+    "first_divergence": "The active pong contained no cursor, matching the target schema's optional cursor shape but preventing real cursor-header reconnect evidence.",
+    "phase0_gate": "FAIL-INCOMPLETE"
+  }
+}

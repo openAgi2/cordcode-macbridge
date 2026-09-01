@@ -151,6 +151,22 @@ func TestMapAgentEventTextDelta(t *testing.T) {
 	if got := payload["delta"]; got != "hello" {
 		t.Fatalf("delta = %#v, want hello", got)
 	}
+	if _, ok := payload["turnId"]; ok {
+		t.Fatal("turnId must be absent when the event carries no TurnID")
+	}
+}
+
+// turnId 让 iOS 把 text_delta 归到正确回合：live 用户消息修复前，回复
+// 会 append 到上一回合之后，就是因为投影里缺回合归属。
+func TestMapAgentEventTextDeltaCarriesTurnID(t *testing.T) {
+	_, data, _ := mapAgentEvent(core.Event{Type: core.EventText, Content: "hi", TurnID: "turn_9"})
+	payload, ok := data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("payload type = %T, want map[string]interface{}", data)
+	}
+	if got := payload["turnId"]; got != "turn_9" {
+		t.Fatalf("turnId = %#v, want turn_9", got)
+	}
 }
 
 // session_retry_status is control-plane only: it must not be a durable

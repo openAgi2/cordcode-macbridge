@@ -3,6 +3,8 @@ package gobridge
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // ev builds a stamped EventMessage shaped like the Codex rollout path feeds into PublishLogical.
@@ -296,6 +298,64 @@ func TestReducerToolUpsert(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("tool part count = %d, want 1 (upsert)", count)
 	}
+}
+
+// TestReducerToolPartOpsDoNotRepeatPublishedTurnShell proves that a live turn
+// sends its complete shell once, then carries subsequent tool transitions as
+// compact upsert_tool operations. Re-copying the growing turn for every
+// tool_started/tool_finished event made long active streams unnecessarily
+// expensive for both JSON encoding and iOS projection application.
+func TestReducerToolPartOpsDoNotRepeatPublishedTurnShell(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex", "s1", "tool_started", map[string]interface{}{
+		"itemId": "call_1", "toolName": "shell", "toolInput": "pwd",
+	}))
+
+	first, ok := r.FlushPatch("codex", "s1")
+	if !ok {
+		t.Fatal("first tool event should produce a patch")
+	}
+	if len(first.UpsertTurns) != 1 || first.UpsertTurns[0].TurnID != "T1" {
+		t.Fatalf("first tool patch must publish T1 shell once: %+v", first.UpsertTurns)
+	}
+
+	r.Apply(ev(3, "codex", "s1", "tool_finished", map[string]interface{}{
+		"itemId": "call_1", "toolResult": "ok",
+	}))
+	second, ok := r.FlushPatch("codex", "s1")
+	if !ok {
+		t.Fatal("tool completion should produce a patch")
+	}
+	if len(second.UpsertTurns) != 0 {
+		t.Fatalf("tool completion repeated the published turn shell: %+v", second.UpsertTurns)
+	}
+	if !hasPartOpFor(second, "upsert_tool", "call_1") {
+		t.Fatalf("tool completion missing compact upsert_tool op: %+v", second.PartOps)
+	}
+
+	r.Apply(ev(4, "codex", "s1", "tool_started", map[string]interface{}{
+		"itemId": "call_2", "toolName": "shell", "toolInput": "ls",
+	}))
+	third, ok := r.FlushPatch("codex", "s1")
+	if !ok {
+		t.Fatal("second tool start should produce a patch")
+	}
+	if len(third.UpsertTurns) != 0 {
+		t.Fatalf("second tool start repeated the published turn shell: %+v", third.UpsertTurns)
+	}
+	if !hasPartOpFor(third, "upsert_tool", "call_2") {
+		t.Fatalf("second tool start missing compact upsert_tool op: %+v", third.PartOps)
+	}
+}
+
+func hasPartOpFor(patch ProjectionPatch, opName, itemID string) bool {
+	for _, op := range patch.PartOps {
+		if op.Op == opName && op.Part != nil && op.Part.ItemID == itemID {
+			return true
+		}
+	}
+	return false
 }
 
 func findTool(proj SessionProjection, callID string) *ProjectionPart {
@@ -789,5 +849,160 @@ func TestTurnStartedRepeatedNoExtraCommit(t *testing.T) {
 	}
 	if patch.SyncRev != 1 {
 		t.Fatalf("SyncRev = %d, want 1 (duplicated turn_started must not commit)", patch.SyncRev)
+	}
+}
+
+// 官方 Turn.durationMs（app-server-protocol v2："Duration between turn start and
+// completion in milliseconds, if known"）接线锁定：live turn/completed 与冷 hydrate
+// 两条路都把官方值送进 TurnProjection.DurationMs（零值不覆盖）；客户端渲染官方
+// 「用时」值，不再自行用时间戳相减重算。
+
+func TestTurnCompletedStampsOfficialDurationMs(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "Hello"}))
+	r.Apply(ev(3, "codex", "s1", "turn_completed", map[string]interface{}{
+		"turnId": "T1", "done": true, "durationMs": int64(86_000),
+	}))
+	proj, ok := r.Snapshot("codex", "s1")
+	if !ok {
+		t.Fatal("no projection")
+	}
+	turn := proj.Turns[0]
+	if turn.Status != "completed" || turn.DurationMs != 86_000 {
+		t.Fatalf("turn = %+v, want completed with DurationMs 86000", turn)
+	}
+
+	// 后续不含 duration 的整 turn upsert（如 state-only 路径重建）不清零已落官方值。
+	r.Apply(ev(4, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T2"}))
+	r.Apply(ev(5, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T2", "delta": "x"}))
+	r.Apply(ev(6, "codex", "s1", "turn_completed", map[string]interface{}{"turnId": "T2", "done": true}))
+	proj2, _ := r.Snapshot("codex", "s1")
+	var t1 *TurnProjection
+	for i := range proj2.Turns {
+		if proj2.Turns[i].TurnID == "T1" {
+			t1 = &proj2.Turns[i]
+		}
+	}
+	if t1 == nil || t1.DurationMs != 86_000 {
+		t.Fatalf("T1 DurationMs clobbered by later events: %+v", t1)
+	}
+}
+
+func TestTurnCompletedWithoutDurationMsStaysZero(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex", "s1", "turn_completed", map[string]interface{}{"turnId": "T1", "done": true}))
+	proj, _ := r.Snapshot("codex", "s1")
+	if proj.Turns[0].DurationMs != 0 {
+		t.Fatalf("DurationMs = %d, want 0 when source does not provide it", proj.Turns[0].DurationMs)
+	}
+}
+
+func TestTurnScopedHydrateCarriesDurationMs(t *testing.T) {
+	events := turnScopedHistoryTurnToProjectionEvents([]core.TurnScopedHistoryTurn{
+		{TurnID: "t-hist", Status: "completed", DurationMs: 22},
+		{TurnID: "t-hist-old", Status: "completed"},
+	})
+	byTurn := map[string]map[string]interface{}{}
+	for _, e := range events {
+		if e.Event == "turn_completed" {
+			byTurn[dataString(e.Data, "turnId")] = e.Data
+		}
+	}
+	if got, ok := byTurn["t-hist"]["durationMs"]; !ok || got != int64(22) {
+		t.Fatalf("hydrate turn_completed durationMs = %v (%T), want int64(22)", got, got)
+	}
+	if _, present := byTurn["t-hist-old"]["durationMs"]; present {
+		t.Fatal("absent DurationMs must not appear in the hydrate event")
+	}
+}
+
+func TestTurnScopedLegacyDetailPreloadedBecomesInlineLoaded(t *testing.T) {
+	events := turnScopedHistoryTurnToProjectionEvents([]core.TurnScopedHistoryTurn{{
+		TurnID: "legacy-turn", Status: "completed", DetailPreloaded: true,
+		Parts: []map[string]any{
+			{"type": "reasoning", "itemId": "reason-1", "content": "already inline"},
+			{"type": "text", "itemId": "answer-1", "content": "answer", "presentation": "final"},
+		},
+	}})
+	r := newTestReducer()
+	for index, event := range events {
+		r.Apply(ev(index+1, "codex-remote", "legacy-session", event.Event, event.Data))
+	}
+	projection, ok := r.Snapshot("codex-remote", "legacy-session")
+	if !ok || len(projection.Turns) != 1 {
+		t.Fatalf("projection = %+v", projection)
+	}
+	turn := projection.Turns[0]
+	if turn.DetailLoadState != DetailStateLoaded || !turn.DetailInline {
+		t.Fatalf("legacy inline detail state = %+v", turn)
+	}
+	if turn.Assistant == nil || len(turn.Assistant.Parts) != 2 {
+		t.Fatalf("legacy inline parts = %+v", turn.Assistant)
+	}
+}
+
+func TestTurnScopedHydrateCarriesOfficialTextPresentation(t *testing.T) {
+	events := turnScopedHistoryTurnToProjectionEvents([]core.TurnScopedHistoryTurn{{
+		TurnID: "t-phase", Status: "completed",
+		Parts: []map[string]any{
+			{"type": "text", "itemId": "progress-1", "content": "正在检查。", "presentation": "progress"},
+			{"type": "text", "itemId": "final-1", "content": "检查完成。", "presentation": "final"},
+		},
+	}})
+	presentations := map[string]string{}
+	for _, event := range events {
+		if event.Event != "text_delta" {
+			continue
+		}
+		presentations[dataString(event.Data, "itemId")] = dataString(event.Data, "presentation")
+	}
+	if presentations["progress-1"] != "progress" || presentations["final-1"] != "final" {
+		t.Fatalf("hydrate text presentations = %+v, want official progress/final", presentations)
+	}
+}
+
+func TestExplicitTextPresentationSurvivesTurnCompletion(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex", "s1", "text_delta", map[string]interface{}{
+		"turnId": "T1", "itemId": "progress-1", "delta": "正在检查。", "newPart": true, "presentation": "progress",
+	}))
+	r.Apply(ev(3, "codex", "s1", "text_delta", map[string]interface{}{
+		"turnId": "T1", "itemId": "final-1", "delta": "检查完成。", "newPart": true, "presentation": "final",
+	}))
+	r.Apply(ev(4, "codex", "s1", "turn_completed", map[string]interface{}{"turnId": "T1", "done": true}))
+
+	proj, _ := r.Snapshot("codex", "s1")
+	if len(proj.Turns) != 1 || proj.Turns[0].Assistant == nil {
+		t.Fatalf("projection = %+v", proj)
+	}
+	parts := proj.Turns[0].Assistant.Parts
+	if len(parts) != 2 {
+		t.Fatalf("parts = %+v, want two text items", parts)
+	}
+	if parts[0].Presentation != "progress" || parts[1].Presentation != "final" {
+		t.Fatalf("presentations = [%q, %q], want [progress, final]", parts[0].Presentation, parts[1].Presentation)
+	}
+}
+
+func TestLiveTurnCompletedPayloadCarriesDurationMs(t *testing.T) {
+	name, data, done := mapAgentEvent(core.Event{
+		Type:       core.EventResult,
+		SessionID:  "s1",
+		TurnID:     "T1",
+		Done:       true,
+		DurationMs: 86_000,
+	})
+	if name != "turn_completed" || !done {
+		t.Fatalf("event = %q done=%v, want turn_completed terminal", name, done)
+	}
+	payload, ok := data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("payload type = %T, want map", data)
+	}
+	if got := dataInt64(payload, "durationMs"); got != 86_000 {
+		t.Fatalf("payload durationMs = %d, want 86000", got)
 	}
 }

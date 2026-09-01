@@ -20,7 +20,7 @@ import (
 func TestProjectionMetricsAreContentFreeAndCorrelatable(t *testing.T) {
 	var logs bytes.Buffer
 	previousLogger := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	defer slog.SetDefault(previousLogger)
 
 	// 唯一标记内容：若任何指标行泄漏正文，会在输出中被捕获。
@@ -44,11 +44,11 @@ func TestProjectionMetricsAreContentFreeAndCorrelatable(t *testing.T) {
 				ID:   "msg-asst-metrics-1",
 				Role: "assistant",
 				Parts: []ProjectionPart{{
-					Type:         "tool",
-					ItemID:       "call-metrics-1",
-					ToolName:     "Bash",
-					ToolResult:   marker,
-					ToolStatus:   "completed",
+					Type:       "tool",
+					ItemID:     "call-metrics-1",
+					ToolName:   "Bash",
+					ToolResult: marker,
+					ToolStatus: "completed",
 				}},
 			},
 		}},

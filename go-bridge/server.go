@@ -193,6 +193,19 @@ func (c *Conn) CloseWithControl(code int, reason string) error {
 	return closeErr
 }
 
+// isClosed lets the shared Connection plumbing reject stale direct sockets in
+// exactly the same way as relay connections. Direct connections are wrapped by
+// directConnAdapter before entering the broadcaster, so this small read-side
+// seam is intentionally unexported and only used inside go-bridge.
+func (c *Conn) isClosed() bool {
+	if c == nil {
+		return true
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closed
+}
+
 // Server manages WebSocket connections.
 type Server struct {
 	authMiddleware          *AuthMiddleware
@@ -212,6 +225,8 @@ type Server struct {
 	recoveryEnabled         bool
 	sessionSyncV2Enabled    bool
 	projectionWindowEnabled bool
+	turnDetailLazyEnabled   bool
+	turnDetailChunksEnabled bool
 }
 
 // K3 enables the Codex-only shadow data plane. The client still owns UI with legacy history;
@@ -237,6 +252,109 @@ const projectionWindowProductionEnabled = false
 // capabilities["projection_window_v1"]=true and the connection may call
 // get_session_projection_window.
 func (s *Server) SetProjectionWindowEnabled(enabled bool) { s.projectionWindowEnabled = enabled }
+
+// turn_detail_lazy_v1 production truth lives in ONE place:
+// core.TurnDetailLazyProductionEnabled (see that const's doc). It gates the
+// hello echo (main.go wires it into SetTurnDetailLazyEnabled below) AND the
+// codex-remote backend descriptor StaticCapabilities that the iOS entry gates
+// on — so flipping it withdraws both surfaces at once (byte-identical
+// rollback). Tests toggle the runtime switch via SetTurnDetailLazyEnabled.
+
+// SetTurnDetailLazyEnabled gates the turn_detail_lazy_v1 capability
+// advertisement (unified-bridge-protocol.md §11.7 / bridge-v1.md). When true
+// and the client declares turn_detail_lazy_v1 (plus session_sync_v2), hello_ack
+// echoes capabilities["turn_detail_lazy_v1"]=true and the connection may call
+// session_turn_items.
+func (s *Server) SetTurnDetailLazyEnabled(enabled bool) { s.turnDetailLazyEnabled = enabled }
+
+// helloSupportsTurnDetailChunksV1 returns true when the client advertised
+// turn_detail_chunks_v1 in hello.
+func helloSupportsTurnDetailChunksV1(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "turn_detail_chunks_v1" {
+			return true
+		}
+	}
+	return false
+}
+
+// negotiateTurnDetailChunksV1 applies the hello rules for
+// turn_detail_chunks_v1 (§11.8): same session_sync_v2 prerequisite as v1;
+// echo + per-conn registry only when the production gate is on. A v2 client
+// typically also declares v1 (fallback during transition) — both marks may
+// coexist on one connection; the handler prefers the v2 path.
+func (s *Server) negotiateTurnDetailChunksV1(ack *HelloAckMessage, hello *HelloMessage, conn Connection) bool {
+	if !helloSupportsTurnDetailChunksV1(hello) {
+		return true
+	}
+	if !helloSupportsSessionSyncV2(hello) {
+		retryable := false
+		ack.Ok = false
+		ack.Error = &WireError{
+			Code:      "protocol.invalid_capabilities",
+			Message:   "turn_detail_chunks_v1 requires session_sync_v2",
+			Retryable: &retryable,
+		}
+		return false
+	}
+	if s.turnDetailChunksEnabled && ack.Ok {
+		ack.Capabilities["turn_detail_chunks_v1"] = true
+		s.eventPublisher.SetConnTurnDetailChunksV1(conn, true)
+	}
+	return true
+}
+
+// turn_detail_chunks_v1 production truth lives in ONE place:
+// core.TurnDetailChunksProductionEnabled (see that const's doc). Same
+// two-surface discipline as v1: main.go wires the const into
+// SetTurnDetailChunksEnabled (hello echo, direct + relay) and the
+// codex-remote descriptor gates StaticCapabilities on it. Stays false until
+// the phase5 client-first rollout completes (iOS overlay installed), then
+// flips once — v1 stays advertised (deprecated) during the transition.
+//
+// SetTurnDetailChunksEnabled gates the turn_detail_chunks_v1 capability
+// advertisement (unified-bridge-protocol.md §11.8). When true and the client
+// declares turn_detail_chunks_v1 (plus session_sync_v2), hello_ack echoes
+// capabilities["turn_detail_chunks_v1"]=true and the connection may use the
+// v2 incremental path.
+func (s *Server) SetTurnDetailChunksEnabled(enabled bool) { s.turnDetailChunksEnabled = enabled }
+
+// helloSupportsTurnDetailLazyV1 returns true when the client advertised
+// turn_detail_lazy_v1 in hello.
+func helloSupportsTurnDetailLazyV1(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "turn_detail_lazy_v1" {
+			return true
+		}
+	}
+	return false
+}
+
+// negotiateTurnDetailLazyV1 applies the hello rules for turn_detail_lazy_v1:
+// the capability REQUIRES session_sync_v2 (detail is a projection-surface
+// feature); a declaration without it fails hello with
+// protocol.invalid_capabilities. The per-session legacy-historyMode gate stays
+// with the handler (§11.7: legacy sessions never expose session_turn_items).
+func (s *Server) negotiateTurnDetailLazyV1(ack *HelloAckMessage, hello *HelloMessage, conn Connection) bool {
+	if !helloSupportsTurnDetailLazyV1(hello) {
+		return true
+	}
+	if !helloSupportsSessionSyncV2(hello) {
+		retryable := false
+		ack.Ok = false
+		ack.Error = &WireError{
+			Code:      "protocol.invalid_capabilities",
+			Message:   "turn_detail_lazy_v1 requires session_sync_v2",
+			Retryable: &retryable,
+		}
+		return false
+	}
+	if s.turnDetailLazyEnabled && ack.Ok {
+		ack.Capabilities["turn_detail_lazy_v1"] = true
+		s.eventPublisher.SetConnTurnDetailV1(conn, true)
+	}
+	return true
+}
 
 // helloSupportsProjectionWindowV1 returns true when the client advertised
 // projection_window_v1 in hello.
@@ -333,7 +451,8 @@ func advertiseSessionSyncV2Backend(backends []AgentProviderDescriptor) {
 			id == "grokbuild" || kind == "grokbuild" ||
 			id == "deepseek" || kind == "deepseek" ||
 			id == "dsh-web" || kind == "deepseek-web" ||
-			id == "codex-web" || kind == "codex-web" {
+			id == "codex-web" || kind == "codex-web" ||
+			id == "codex-remote" || kind == "codex-remote" {
 			backends[i].Capabilities = appendUniqueCapability(
 				backends[i].Capabilities,
 				"session_sync_v2",
@@ -461,7 +580,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	conn.onCleanup = func() {
 		s.handlers.unregisterConnection(directConnection)
 		if authedDevice != nil {
-			globalDeviceConnRegistry.Unregister(authedDevice.DeviceID, conn)
+			globalDeviceConnRegistry.Unregister(authedDevice.DeviceID, directConnection)
 		}
 		if s.activeConns != nil {
 			s.activeConns.Unregister(conn)
@@ -478,7 +597,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 注册设备连接，用于 revoke 时主动断开
 	if authedDevice != nil {
-		globalDeviceConnRegistry.Register(authedDevice.DeviceID, conn)
+		globalDeviceConnRegistry.Register(authedDevice.DeviceID, directConnection)
 	}
 
 	// pong handler: 更新 lastPong
@@ -654,6 +773,18 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 	// projection_window_v1 (frozen §Projection Window): prerequisite validation may fail
 	// hello; echo + per-conn mark only when the rollout flag is enabled.
 	if !s.negotiateProjectionWindowV1(ack, &hello, connection) {
+		conn.SendJSON(ack)
+		return
+	}
+	// turn_detail_lazy_v1 (§11.7): same hello discipline; the per-session
+	// legacy-historyMode gate stays with the session_turn_items handler.
+	if !s.negotiateTurnDetailLazyV1(ack, &hello, connection) {
+		conn.SendJSON(ack)
+		return
+	}
+	// turn_detail_chunks_v1 (§11.8): v2 incremental path, gated on the
+	// phase5 production const; coexists with the deprecated v1 mark.
+	if !s.negotiateTurnDetailChunksV1(ack, &hello, connection) {
 		conn.SendJSON(ack)
 		return
 	}

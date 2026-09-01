@@ -38,7 +38,20 @@ import (
 // and a pending transcript-owned question keeps execution in requires_action. v9 checkpoints
 // can contain allowsCustomAnswer=false and execution.phase=idle, so they must be rebuilt from
 // the canonical transcript instead of being restored as a permanently stale observe-only card.
-const projectionCheckpointSchemaVersion = 10
+// v11: turn_detail_lazy_v1 (frozen 2026-08-30) — turns gain detailLoadState/detailReasonCode/
+// generation (turnStateOps patch op), and the checkpoint gains the backend-private
+// CodexProducerState (lazy-history producer checkpoint, bridge-v1.md R11d). v10 checkpoints
+// lack the turn fence/state fields and must be rebuilt so cold hydrate re-reduces with them.
+// v12: turn_detail_chunks_v1 §11.8 (F3) — turns gain the detail manifest SUMMARY
+// (detailManifestRev/detailItemCount/detailTotalBytes) and the v2-only partial
+// detailLoadState, produced exclusively by the V2 manifest commit path
+// (CommitTurnStateOpsV2) and the generation-bump baseline reset. v11 checkpoints
+// predate that bookkeeping — restoring them would crown zero-manifest turns as
+// authoritative under v2 semantics — so they rebuild from the canonical source.
+// v13: legacy full-read Codex turns carry detailInline + loaded provenance.
+// Rebuild v12 checkpoints so old sessions never probe paginated detail and
+// remove every disclosure row after unsupported_capability.
+const projectionCheckpointSchemaVersion = 13
 
 var (
 	ErrProjectionCheckpointInvalid  = errors.New("projection checkpoint invalid")
@@ -105,16 +118,50 @@ type ProjectionSourceCheckpoint struct {
 }
 
 type ProjectionCheckpoint struct {
-	SchemaVersion     int                          `json:"schemaVersion"`
-	BackendID         string                       `json:"backendId"`
-	SessionID         string                       `json:"sessionId"`
-	Source            ProjectionSourceCheckpoint   `json:"source"`
-	Sources           []ProjectionSourceCheckpoint `json:"sources,omitempty"`
-	Projection        SessionProjection            `json:"projection"`
-	ProjectionRev     int                          `json:"projectionRev"`
-	HydrateState      ProjectionHydratePhase       `json:"hydrateState"`
-	UpdatedAt         time.Time                    `json:"updatedAt"`
-	ClaudeSourceState *ClaudeSourceState           `json:"claudeSourceState,omitempty"`
+	SchemaVersion      int                          `json:"schemaVersion"`
+	BackendID          string                       `json:"backendId"`
+	SessionID          string                       `json:"sessionId"`
+	Source             ProjectionSourceCheckpoint   `json:"source"`
+	Sources            []ProjectionSourceCheckpoint `json:"sources,omitempty"`
+	Projection         SessionProjection            `json:"projection"`
+	ProjectionRev      int                          `json:"projectionRev"`
+	HydrateState       ProjectionHydratePhase       `json:"hydrateState"`
+	UpdatedAt          time.Time                    `json:"updatedAt"`
+	ClaudeSourceState  *ClaudeSourceState           `json:"claudeSourceState,omitempty"`
+	CodexProducerState *CodexProducerState          `json:"codexProducerState,omitempty"`
+}
+
+// CodexProducerState is the backend-private lazy-history producer checkpoint for
+// codex-remote (bridge-v1.md R11d; unified-bridge-protocol.md §11.7). It records the
+// "more upstream history exists" fact and the INTERNAL upstream cursor so an `older`
+// window request can hydrate one page at a time across restarts. It never crosses the
+// bridge and is never embedded in a wire cursor (R2). Restart validation is by target
+// RPC (T2.0), not file digest.
+type CodexProducerState struct {
+	HasOlderUpstream   bool   `json:"hasOlderUpstream"`
+	UpstreamNextCursor string `json:"upstreamNextCursor,omitempty"`
+	BoundaryTurnID     string `json:"boundaryTurnId,omitempty"`
+	// HistoryMode records the upstream thread's declared mode at cold open
+	// ("paginated" | "legacy"; empty = pre-T2.3 files). It gates the
+	// turn_detail_lazy_v1 capability per session (§11.7: legacy never exposes
+	// session_turn_items) — bridge-private, not a wire shape.
+	HistoryMode string    `json:"historyMode,omitempty"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+// ValidateCodexProducerState enforces the checkpoint-side invariants: claiming
+// older upstream requires the kernel boundary turn the fact was observed at.
+// UpstreamNextCursor may be empty ONLY as the explicit head re-walk state written
+// by typed stale-cursor recovery (R11d): the next older request fetches upstream
+// page 1 and walks back down to the boundary.
+func ValidateCodexProducerState(state CodexProducerState) error {
+	if !state.HasOlderUpstream {
+		return nil
+	}
+	if state.BoundaryTurnID == "" {
+		return fmt.Errorf("%w: codex producer state claims older upstream without boundary turn", ErrProjectionCheckpointInvalid)
+	}
+	return nil
 }
 
 type projectionCheckpointPersistence interface {
@@ -256,6 +303,14 @@ func (s *ProjectionCheckpointStore) LoadValidated(
 			return ProjectionCheckpoint{}, err
 		}
 	}
+	if err := validateTurnDetailCheckpointFields(checkpoint.Projection.Turns); err != nil {
+		return ProjectionCheckpoint{}, err
+	}
+	if checkpoint.CodexProducerState != nil {
+		if err := ValidateCodexProducerState(*checkpoint.CodexProducerState); err != nil {
+			return ProjectionCheckpoint{}, err
+		}
+	}
 	if source.Identity == "" {
 		return ProjectionCheckpoint{}, fmt.Errorf("%w: source identity mismatch", ErrProjectionCheckpointInvalid)
 	}
@@ -288,6 +343,46 @@ func (s *ProjectionCheckpointStore) LoadValidated(
 	return checkpoint, nil
 }
 
+// validateTurnDetailCheckpointFields enforces the §11.8 fail-closed rules on
+// restored turns (v12 checkpoints): the detail state stays inside the frozen
+// closed set (v2 adds partial), reasonCode exists iff failed, and the manifest
+// summary is internally consistent (items counted ⇒ a manifest revision
+// exists — mirrors ValidateTurnStateOpsV2). Reason-code SET membership is
+// deliberately not checked here: a restored turn may predate a set revision.
+func validateTurnDetailCheckpointFields(turns []TurnProjection) error {
+	for i := range turns {
+		turn := &turns[i]
+		switch turn.DetailLoadState {
+		case DetailStateNotRequested, DetailStateLoading, DetailStatePartial, DetailStateLoaded, DetailStateFailed:
+		default:
+			return fmt.Errorf("%w: turn %s detailLoadState %q",
+				ErrProjectionCheckpointInvalid, turn.TurnID, turn.DetailLoadState)
+		}
+		if turn.DetailLoadState == DetailStateFailed {
+			if turn.DetailReasonCode == "" {
+				return fmt.Errorf("%w: turn %s failed without reasonCode",
+					ErrProjectionCheckpointInvalid, turn.TurnID)
+			}
+		} else if turn.DetailReasonCode != "" {
+			return fmt.Errorf("%w: turn %s state %q carries reasonCode",
+				ErrProjectionCheckpointInvalid, turn.TurnID, turn.DetailLoadState)
+		}
+		if turn.DetailInline && turn.DetailLoadState != DetailStateLoaded {
+			return fmt.Errorf("%w: turn %s inline detail state %q",
+				ErrProjectionCheckpointInvalid, turn.TurnID, turn.DetailLoadState)
+		}
+		if turn.DetailManifestRev < 0 || turn.DetailItemCount < 0 || turn.DetailTotalBytes < 0 {
+			return fmt.Errorf("%w: turn %s negative manifest summary",
+				ErrProjectionCheckpointInvalid, turn.TurnID)
+		}
+		if (turn.DetailItemCount > 0 || turn.DetailTotalBytes > 0) && turn.DetailManifestRev <= 0 {
+			return fmt.Errorf("%w: turn %s item summary without manifestRev",
+				ErrProjectionCheckpointInvalid, turn.TurnID)
+		}
+	}
+	return nil
+}
+
 func validateProjectionSourceCheckpoint(path string, checkpoint ProjectionSourceCheckpoint) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -314,6 +409,79 @@ func validateProjectionSourceCheckpoint(path string, checkpoint ProjectionSource
 		return fmt.Errorf("%w: consumed prefix digest mismatch", ErrProjectionCheckpointInvalid)
 	}
 	return nil
+}
+
+// LoadCodexProducerState reads the backend-private lazy-history producer
+// checkpoint side file (R11d). Missing file is (nil, nil) — first use. The state
+// is validated; an invalid file is a typed error, never a silent zero state.
+func (s *ProjectionCheckpointStore) LoadCodexProducerState(
+	backendID, sessionID string,
+) (*CodexProducerState, error) {
+	path, err := s.producerStatePath(backendID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var envelope struct {
+		SchemaVersion int                 `json:"schemaVersion"`
+		State         *CodexProducerState `json:"state"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, fmt.Errorf("%w: producer state decode: %v", ErrProjectionCheckpointInvalid, err)
+	}
+	if envelope.SchemaVersion != 1 {
+		return nil, fmt.Errorf("%w: producer state schema %d", ErrProjectionCheckpointInvalid, envelope.SchemaVersion)
+	}
+	if envelope.State == nil {
+		return nil, fmt.Errorf("%w: producer state envelope without state", ErrProjectionCheckpointInvalid)
+	}
+	if err := ValidateCodexProducerState(*envelope.State); err != nil {
+		return nil, err
+	}
+	return envelope.State, nil
+}
+
+// SaveCodexProducerState atomically persists the producer checkpoint side file.
+func (s *ProjectionCheckpointStore) SaveCodexProducerState(
+	backendID, sessionID string,
+	state CodexProducerState,
+) error {
+	if err := ValidateCodexProducerState(state); err != nil {
+		return err
+	}
+	path, err := s.producerStatePath(backendID, sessionID)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(struct {
+		SchemaVersion int                `json:"schemaVersion"`
+		State         CodexProducerState `json:"state"`
+	}{SchemaVersion: 1, State: state})
+	if err != nil {
+		return err
+	}
+	temp := path + ".tmp"
+	if err := os.WriteFile(temp, raw, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(temp, path)
+}
+
+func (s *ProjectionCheckpointStore) producerStatePath(backendID, sessionID string) (string, error) {
+	path, err := s.checkpointPath(backendID, sessionID)
+	if err != nil {
+		return "", err
+	}
+	return path + ".producer.json", nil
 }
 
 func (s *ProjectionCheckpointStore) Save(checkpoint ProjectionCheckpoint) error {
@@ -855,7 +1023,16 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 				// startCursor becomes source.Cursor (EOF cut). Skipping Restore here yields
 				// an empty projection (headRev=0) and empty iOS Claude sessions.
 				// Only true pathless full rebuilds (no Path, no Segments) skip Restore.
-				tx.reducer.Restore(backendID, sessionID, checkpoint.Projection)
+				restored := checkpoint.Projection
+				if backendID == "codex-remote" {
+					// §11.8 orphan recovery (V2 semantics supersede the §11.7
+					// hook here): a loading turn whose batch leader died with the
+					// previous bridge epoch is atomically failed(interrupted)
+					// CARRYING the retained manifest summary; the rev bump
+					// journals as a gap (dead-epoch conns are gone).
+					RecoverOrphanDetailLoadingV2(&restored)
+				}
+				tx.reducer.Restore(backendID, sessionID, restored)
 			}
 			if len(source.Segments) > 0 {
 				startCursor = source.Cursor
@@ -1256,6 +1433,60 @@ func projectionSourceDescriptorsEqual(lhs, rhs ProjectionSourceDescriptor) bool 
 	return true
 }
 
+// LoadCodexProducerState reads the backend-private producer checkpoint through
+// the installed store; a nil/foreign store means no persistence (session-lifetime
+// producer state only).
+func (k *ProjectionKernel) LoadCodexProducerState(backendID, sessionID string) (*CodexProducerState, error) {
+	if k == nil {
+		return nil, nil
+	}
+	k.mu.Lock()
+	store := k.store
+	k.mu.Unlock()
+	concrete, ok := store.(*ProjectionCheckpointStore)
+	if !ok {
+		return nil, nil
+	}
+	return concrete.LoadCodexProducerState(backendID, sessionID)
+}
+
+// SaveCodexProducerState persists through the installed store (no-op without one).
+func (k *ProjectionKernel) SaveCodexProducerState(backendID, sessionID string, state CodexProducerState) error {
+	if k == nil {
+		return nil
+	}
+	k.mu.Lock()
+	store := k.store
+	k.mu.Unlock()
+	concrete, ok := store.(*ProjectionCheckpointStore)
+	if !ok {
+		return nil
+	}
+	return concrete.SaveCodexProducerState(backendID, sessionID, state)
+}
+
+// PrependHistoricalTurns commits a structural historical prepend (R11a) on a
+// READY session; see ProjectionReducer.PrependHistoricalTurns for the journal-gap
+// and delivery contract.
+func (k *ProjectionKernel) PrependHistoricalTurns(
+	backendID, sessionID string,
+	turns []TurnProjection,
+) (SessionProjection, error) {
+	if k == nil {
+		return SessionProjection{}, errors.New("projection kernel nil")
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	session := k.sessionLocked(backendID, sessionID)
+	if session.status.Phase != ProjectionHydrateReady {
+		return SessionProjection{}, fmt.Errorf(
+			"projection: prepend requires ready session, %s/%s is %s",
+			backendID, sessionID, session.status.Phase,
+		)
+	}
+	return k.reducer.PrependHistoricalTurns(backendID, sessionID, turns)
+}
+
 func (k *ProjectionKernel) Snapshot(backendID, sessionID string) (SessionProjection, bool) {
 	k.mu.Lock()
 	status := k.sessionLocked(backendID, sessionID).status
@@ -1469,4 +1700,28 @@ func NewReadyCompositeProjectionCheckpoint(
 		HydrateState:  ProjectionHydrateReady,
 		UpdatedAt:     now,
 	}
+}
+
+// MergeHistoricalTurnDetail (T2.2) is the Kernel gate for the dedicated
+// historical detail merge: requires a READY session (hydrated truth), then
+// delegates to the reducer's atomic replace_parts + loaded turnStateOp commit
+// (P0-1 chain: staged-live flush patch first, then the detail commit patch).
+func (k *ProjectionKernel) MergeHistoricalTurnDetail(
+	backendID, sessionID, turnID string,
+	generation int,
+	detailParts []ProjectionPart,
+) (SessionProjection, []ProjectionPatch, error) {
+	if k == nil {
+		return SessionProjection{}, nil, errors.New("projection kernel nil")
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	session := k.sessionLocked(backendID, sessionID)
+	if session.status.Phase != ProjectionHydrateReady {
+		return SessionProjection{}, nil, fmt.Errorf(
+			"projection: detail merge requires ready session, %s/%s is %s",
+			backendID, sessionID, session.status.Phase,
+		)
+	}
+	return k.reducer.MergeHistoricalTurnDetail(backendID, sessionID, turnID, generation, detailParts)
 }

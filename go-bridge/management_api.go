@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/openAgi2/cordcode-macbridge/agent/codex-remote"
 	"github.com/openAgi2/cordcode-macbridge/core"
 	"github.com/openAgi2/cordcode-macbridge/go-bridge/admission"
 )
@@ -262,6 +263,12 @@ func (s *ManagementServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleAgentsRefresh(w, r)
 	case strings.HasPrefix(path, "/internal/agents/") && strings.HasSuffix(path, "/test") && r.Method == http.MethodPost:
 		s.handleAgentTest(w, r)
+	case strings.HasPrefix(path, "/internal/agents/") && strings.HasSuffix(path, "/remote-control/start") && r.Method == http.MethodPost:
+		s.handleCodexRemoteStart(w, r)
+	case strings.HasPrefix(path, "/internal/agents/") && strings.HasSuffix(path, "/remote-control/pair") && r.Method == http.MethodPost:
+		s.handleCodexRemotePair(w, r)
+	case strings.HasPrefix(path, "/internal/agents/") && strings.HasSuffix(path, "/remote-control/status") && r.Method == http.MethodGet:
+		s.handleCodexRemoteStatus(w, r)
 	case path == "/internal/shutdown" && r.Method == http.MethodPost:
 		s.handleShutdown(w, r)
 	case path == "/internal/devices" && r.Method == http.MethodGet:
@@ -540,7 +547,27 @@ func (s *ManagementServer) handleRuntimeAbort(w http.ResponseWriter, r *http.Req
 
 // ── GET /internal/agents ─────────────────────────────────────────────────────
 func (s *ManagementServer) handleAgents(w http.ResponseWriter, _ *http.Request) {
-	writeMgmtJSON(w, http.StatusOK, s.cachedAgentDescriptors())
+	writeMgmtJSON(w, http.StatusOK, s.liveAgentDescriptors())
+}
+
+// liveAgentDescriptors returns the cached descriptors with instance-prober
+// backends re-read from the driver. Codex Desktop restore/bind is async; a
+// startup snapshot would otherwise stay not_configured after the stream is up.
+func (s *ManagementServer) liveAgentDescriptors() []AgentProviderDescriptor {
+	descs := s.cachedAgentDescriptors()
+	for i := range descs {
+		agent, ok := s.cfg.Agents[descs[i].ID]
+		if !ok {
+			continue
+		}
+		if _, ok := agent.(instanceStatusProber); !ok {
+			continue
+		}
+		status, reason := detectInstanceStatusProber(descs[i].ID, agent)
+		descs[i].Status = status
+		descs[i].Reason = reason
+	}
+	return descs
 }
 
 // ── POST /internal/agents/refresh ────────────────────────────────────────────
@@ -570,6 +597,69 @@ func (s *ManagementServer) handleAgentTest(w http.ResponseWriter, r *http.Reques
 	desc := BuildAgentDescriptor(agentID, agent, s.cfg.CodexBackendMode, s.cfg.DetectionCfg)
 	s.updateAgentDescriptor(desc)
 	writeMgmtJSON(w, http.StatusOK, desc)
+}
+
+type remoteControlAgent interface {
+	StartRemoteControl(ctx context.Context, token, accountID string) (codexremote.PairingSnapshot, error)
+	SubmitRemoteControlCode(ctx context.Context, code string) (codexremote.PairingSnapshot, error)
+	RemoteControlStatus() codexremote.PairingSnapshot
+}
+
+func (s *ManagementServer) lookupRemoteControl(agentID string) (remoteControlAgent, bool) {
+	agent, ok := s.cfg.Agents[agentID]
+	if !ok {
+		return nil, false
+	}
+	pairer, ok := agent.(remoteControlAgent)
+	return pairer, ok
+}
+
+func (s *ManagementServer) handleCodexRemoteStart(w http.ResponseWriter, r *http.Request) {
+	agentID := extractPathSegment(r.URL.Path, "/internal/agents/", "/remote-control/start")
+	pairer, ok := s.lookupRemoteControl(agentID)
+	if !ok {
+		writeMgmtJSON(w, http.StatusNotFound, map[string]interface{}{"error": "not_found", "message": "codex-remote is not enabled"})
+		return
+	}
+	snap, err := pairer.StartRemoteControl(r.Context(), "", "")
+	if err != nil && snap.Phase == "" {
+		writeMgmtJSON(w, http.StatusBadGateway, map[string]interface{}{"error": "start_failed", "message": snap.Message})
+		return
+	}
+	writeMgmtJSON(w, http.StatusOK, snap)
+}
+
+func (s *ManagementServer) handleCodexRemotePair(w http.ResponseWriter, r *http.Request) {
+	agentID := extractPathSegment(r.URL.Path, "/internal/agents/", "/remote-control/pair")
+	pairer, ok := s.lookupRemoteControl(agentID)
+	if !ok {
+		writeMgmtJSON(w, http.StatusNotFound, map[string]interface{}{"error": "not_found", "message": "codex-remote is not enabled"})
+		return
+	}
+	var body struct {
+		ManualPairingCode string `json:"manualPairingCode"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&body)
+	snap, err := pairer.SubmitRemoteControlCode(r.Context(), body.ManualPairingCode)
+	if err != nil && snap.Phase == "" {
+		writeMgmtJSON(w, http.StatusBadRequest, snap)
+		return
+	}
+	if snap.Phase == codexremote.PairPhaseReady {
+		desc := BuildAgentDescriptor(agentID, s.cfg.Agents[agentID], s.cfg.CodexBackendMode, s.cfg.DetectionCfg)
+		s.updateAgentDescriptor(desc)
+	}
+	writeMgmtJSON(w, http.StatusOK, snap)
+}
+
+func (s *ManagementServer) handleCodexRemoteStatus(w http.ResponseWriter, r *http.Request) {
+	agentID := extractPathSegment(r.URL.Path, "/internal/agents/", "/remote-control/status")
+	pairer, ok := s.lookupRemoteControl(agentID)
+	if !ok {
+		writeMgmtJSON(w, http.StatusNotFound, map[string]interface{}{"error": "not_found"})
+		return
+	}
+	writeMgmtJSON(w, http.StatusOK, pairer.RemoteControlStatus())
 }
 
 func (s *ManagementServer) updateAgentDescriptor(desc AgentProviderDescriptor) {

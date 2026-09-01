@@ -10,12 +10,17 @@ import (
 )
 
 const (
-	eventOutboundQueueCapacity = 2048
-	recoveryPendingMaxEvents   = 1000
-	recoveryPendingMaxBytes    = 2 << 20
-	recoveryPendingTimeout     = 30 * time.Second
-	projectionFenceMaxPatches  = 128
-	projectionFenceMaxBytes    = 2 << 20
+	eventOutboundQueueCapacity        = 2048
+	recoveryPendingMaxEvents          = 1000
+	recoveryPendingMaxBytes           = 2 << 20
+	recoveryPendingTimeout            = 30 * time.Second
+	projectionFenceMaxPatches         = 128
+	projectionFenceMaxBytes           = 2 << 20
+	projectionNoObserverDropThreshold = 256 << 10
+	// A failed rebind cannot become more useful on the next token. Keep a
+	// short retry window so path-thrash recovery remains responsive without
+	// turning a long stream into a registry scan/logging loop.
+	rebindAttemptCooldown = time.Second
 )
 
 type BridgeSessionCutMap map[string]map[string]BridgeSessionCut
@@ -118,17 +123,19 @@ func (s *eventOutboundSink) run() {
 			projProbe := false
 			probeRev := 0
 			probeMarshalErr := ""
-			if em, ok := frame.value.(EventMessage); ok && em.Event == "projection_patch" {
-				projProbe = true
-				if patch, perr := em.Data.(ProjectionPatch); perr {
-					probeRev = patch.SyncRev
-				}
-				if _, merr := json.Marshal(frame.value); merr != nil {
-					probeMarshalErr = merr.Error()
+			if projectionDiagnosticsEnabled() {
+				if em, ok := frame.value.(EventMessage); ok && em.Event == "projection_patch" {
+					projProbe = true
+					if patch, perr := em.Data.(ProjectionPatch); perr {
+						probeRev = patch.SyncRev
+					}
+					if _, merr := json.Marshal(frame.value); merr != nil {
+						probeMarshalErr = merr.Error()
+					}
 				}
 			}
 			if projProbe {
-				slog.Info("go-bridge: [K4Patch] write_pre",
+				slog.Debug("go-bridge: [K4Patch] write_pre",
 					"sink", fmt.Sprintf("%p", s),
 					"remote", s.conn.RemoteAddr(),
 					"syncRev", probeRev,
@@ -165,7 +172,7 @@ func (s *eventOutboundSink) run() {
 				if b, merr := json.Marshal(frame.value); merr == nil {
 					payloadSize = len(b)
 				}
-				slog.Info("go-bridge: [K4Patch] write_post",
+				slog.Debug("go-bridge: [K4Patch] write_post",
 					"sink", fmt.Sprintf("%p", s),
 					"remote", s.conn.RemoteAddr(),
 					"syncRev", probeRev,
@@ -242,8 +249,20 @@ type EventPublisher struct {
 	nextProjectionFenceID    uint64
 	projectionFences         map[projectionFenceKey]*projectionSnapshotFence
 	projectionSnapshotCuts   map[projectionFenceKey]int
-	projectionInvalidated    map[projectionFenceKey]bool
-	projectionJournal        *ProjectionRevisionJournal
+	projectionDeliveryModes  map[Connection]map[string]ProjectionDeliveryMode
+	// projectionHeldTurns tracks, per window-mode connection and session, the
+	// turn ids its replica holds (from served window pages). Detail/state
+	// commits route by it (turn_detail_lazy_v1 delivery rules 3/4): holders get
+	// the content patch, non-holders the no-op revision patch.
+	projectionHeldTurns   map[Connection]map[string]map[string]struct{}
+	turnDetailV1          map[Connection]bool
+	turnDetailChunksV1    map[Connection]bool
+	projectionInvalidated map[projectionFenceKey]bool
+	projectionJournal     *ProjectionRevisionJournal
+	// rebindLastAttempt throttles zero-target recovery. A stream can emit many
+	// timeline events per second while a device is offline; rescanning the
+	// device registry for every token only repeats the same failed lookup.
+	rebindLastAttempt map[string]time.Time
 	// rebindTargets is invoked (without p.mu) when a live event has zero online
 	// targets. Handlers rebinds broadcaster subscriptions from device registry +
 	// observation so mid-turn EMITs are not permanently dropped after path thrash.
@@ -296,8 +315,13 @@ func NewEventPublisher(bridgeEpoch string, broadcaster ...*Broadcaster) *EventPu
 		connectionGenerations:   make(map[Connection]uint64),
 		projectionFences:        make(map[projectionFenceKey]*projectionSnapshotFence),
 		projectionSnapshotCuts:  make(map[projectionFenceKey]int),
+		projectionDeliveryModes: make(map[Connection]map[string]ProjectionDeliveryMode),
+		projectionHeldTurns:     make(map[Connection]map[string]map[string]struct{}),
+		turnDetailV1:            make(map[Connection]bool),
+		turnDetailChunksV1:      make(map[Connection]bool),
 		projectionInvalidated:   make(map[projectionFenceKey]bool),
 		projectionJournal:       NewProjectionRevisionJournal(0, 0),
+		rebindLastAttempt:       make(map[string]time.Time),
 	}
 	if len(broadcaster) > 0 {
 		p.broadcaster = broadcaster[0]
@@ -457,6 +481,10 @@ func (p *EventPublisher) UnregisterConnection(conn Connection) {
 	delete(p.catalogCursorEpochV2, conn)
 	delete(p.projectionWindowV1, conn)
 	delete(p.connectionGenerations, conn)
+	delete(p.projectionDeliveryModes, conn)
+	delete(p.projectionHeldTurns, conn)
+	delete(p.turnDetailV1, conn)
+	delete(p.turnDetailChunksV1, conn)
 	for key := range p.projectionFences {
 		if key.conn == conn {
 			delete(p.projectionFences, key)
@@ -643,6 +671,173 @@ func projectionInvalidateEvent(bridgeEpoch, backendID, sessionID string) EventMe
 	}
 }
 
+// ProjectionDeliveryMode is the R11b per-(conn, backend, session) delivery mode,
+// registered at the connection's FIRST window-RPC hit (observed behavior, not a
+// declared capability).
+type ProjectionDeliveryMode string
+
+const (
+	ProjectionDeliveryWindow ProjectionDeliveryMode = "window"
+	ProjectionDeliveryFull   ProjectionDeliveryMode = "full"
+)
+
+// SetConnProjectionDeliveryMode registers the R11b delivery mode for
+// (conn, backend, session). Window RPCs register window mode; connections that
+// only ever pull full projections stay on the full default.
+func (p *EventPublisher) SetConnProjectionDeliveryMode(conn Connection, backendID, sessionID string, mode ProjectionDeliveryMode) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	key := projectionDeliveryKey(backendID, sessionID)
+	if p.projectionDeliveryModes[conn] == nil {
+		p.projectionDeliveryModes[conn] = make(map[string]ProjectionDeliveryMode)
+	}
+	p.projectionDeliveryModes[conn][key] = mode
+}
+
+// ConnProjectionDeliveryMode reports the registered mode; absent = full
+// (today's behavior for every non-window connection).
+func (p *EventPublisher) ConnProjectionDeliveryMode(conn Connection, backendID, sessionID string) ProjectionDeliveryMode {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.connDeliveryModeLocked(conn, backendID, sessionID)
+}
+
+func (p *EventPublisher) connDeliveryModeLocked(conn Connection, backendID, sessionID string) ProjectionDeliveryMode {
+	if modes := p.projectionDeliveryModes[conn]; modes != nil {
+		if mode, ok := modes[projectionDeliveryKey(backendID, sessionID)]; ok {
+			return mode
+		}
+	}
+	return ProjectionDeliveryFull
+}
+
+func projectionDeliveryKey(backendID, sessionID string) string {
+	return backendID + "|" + sessionID
+}
+
+// PublishProjectionPrepend routes a structural historical prepend commit (R11a)
+// per delivery mode (R11b):
+//   - the REQUESTING connection receives nothing — its page rides the window
+//     result admitted at the new cut (R3 unique page ownership);
+//   - other WINDOW connections receive a connection-specific no-op revision
+//     patch (R11c) advancing their appliedRev along the single chain without
+//     content; the prepended turns reach them through their own window pulls;
+//   - FULL-projection connections receive sync_invalidate so their next
+//     get_session_projection re-syncs order-correct complete truth (a replica
+//     cannot express a front insert via upsertTurns).
+//
+// No content patch is broadcast or journaled for this revision (journal gap by
+// design — see ProjectionReducer.PrependHistoricalTurns).
+func (p *EventPublisher) PublishProjectionPrepend(backendID, sessionID string, syncRev int, requester Connection) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.broadcaster == nil || len(p.syncV2) == 0 {
+		return
+	}
+	targets := p.broadcaster.Targets(backendID, sessionID, "")
+	for _, conn := range targets {
+		if !p.syncV2[conn] || conn == requester {
+			continue
+		}
+		key := projectionFenceKey{conn: conn, backendID: backendID, sessionID: sessionID}
+		if p.connDeliveryModeLocked(conn, backendID, sessionID) == ProjectionDeliveryWindow {
+			base := p.projectionSnapshotCuts[key]
+			if fence := p.projectionFences[key]; fence != nil && !fence.invalidated {
+				base = fence.expectedRev
+			}
+			if base == 0 || base >= syncRev {
+				// Not yet synced onto this chain (or already past it): its own
+				// snapshot/window pull will land at the new head — no frame needed.
+				continue
+			}
+			p.deliverSingleConnPatchLocked(conn, backendID, sessionID, ProjectionPatch{BaseRev: base, SyncRev: syncRev})
+			continue
+		}
+		p.enqueueProjectionInvalidateLocked(conn, backendID, sessionID)
+	}
+}
+
+// deferProjectionPatchForFenceLocked queues a rule-4-routed detail commit
+// behind an in-flight window fence as UNDECIDED (audit P0-2): whether the
+// connection holds the patch's turns only becomes known when the fence
+// completes and the response's turns are registered — the completion
+// transaction then resolves content vs no-op. Deciding no-op here (as the
+// pre-fix code did) would strand the detail behind the stale response.
+// Caller MUST hold p.mu.
+func (p *EventPublisher) deferProjectionPatchForFenceLocked(
+	backendID, sessionID string,
+	fence *projectionSnapshotFence, patch ProjectionPatch,
+) {
+	p.appendFencePatchLocked(backendID, sessionID, fence, patch, true)
+}
+
+// appendFencePatchLocked admits one patch into an active snapshot fence: chain
+// and byte guards invalidate the fence on mismatch/overflow (the client then
+// re-syncs from the authoritative snapshot), otherwise the patch queues behind
+// the response in arrival (= revision chain) order. decide marks a rule-4
+// deferral whose content-vs-no-op routing resolves at fence completion.
+// Caller MUST hold p.mu.
+func (p *EventPublisher) appendFencePatchLocked(
+	backendID, sessionID string,
+	fence *projectionSnapshotFence, patch ProjectionPatch, decide bool,
+) {
+	if patch.SyncRev <= fence.expectedRev || fence.invalidated {
+		return
+	}
+	if patch.BaseRev != fence.expectedRev {
+		slog.Info("go-bridge: [K4Patch] drop",
+			"sessionPrefix", projectionSessionLogPrefix(sessionID),
+			"reason", "fence_base_mismatch",
+			"baseRev", patch.BaseRev, "expectedRev", fence.expectedRev,
+		)
+		fence.pending = nil
+		fence.pendingBytes = 0
+		fence.invalidated = true
+		return
+	}
+	encoded, _ := json.Marshal(patch)
+	if len(fence.pending)+1 > projectionFenceMaxPatches ||
+		fence.pendingBytes+len(encoded) > projectionFenceMaxBytes {
+		slog.Info("go-bridge: [K4Patch] drop",
+			"sessionPrefix", projectionSessionLogPrefix(sessionID),
+			"reason", "fence_overflow", "pending", len(fence.pending),
+		)
+		fence.pending = nil
+		fence.pendingBytes = 0
+		fence.invalidated = true
+		return
+	}
+	fence.pending = append(fence.pending, projectionFencePendingPatch{patch: patch, decide: decide})
+	fence.pendingBytes += len(encoded)
+	fence.expectedRev = patch.SyncRev
+}
+
+// deliverSingleConnPatchLocked sends ONE patch to ONE connection through the same
+// fence/cut/sink machinery as the broadcast path. Caller MUST hold p.mu.
+func (p *EventPublisher) deliverSingleConnPatchLocked(conn Connection, backendID, sessionID string, patch ProjectionPatch) {
+	msg := projectionPatchEvent(p.bridgeEpoch, backendID, sessionID, patch)
+	classHint := classifyRelayEvent("projection_patch")
+	key := projectionFenceKey{conn: conn, backendID: backendID, sessionID: sessionID}
+	if fence := p.projectionFences[key]; fence != nil {
+		p.appendFencePatchLocked(backendID, sessionID, fence, patch, false)
+		return
+	}
+	if p.projectionInvalidated[key] {
+		return
+	}
+	if patch.SyncRev <= p.projectionSnapshotCuts[key] {
+		return
+	}
+	if cut := p.projectionSnapshotCuts[key]; cut != 0 && patch.BaseRev != cut {
+		p.enqueueProjectionInvalidateLocked(conn, backendID, sessionID)
+		p.projectionInvalidated[key] = true
+		return
+	}
+	if ok, _, _ := p.sinkLocked(conn).tryEnqueue(eventOutboundFrame{value: msg, classHint: classHint, classified: true}); ok {
+		p.projectionSnapshotCuts[key] = patch.SyncRev
+	}
+}
+
 // deliverProjectionPatchLocked delivers a projection_patch frame to the v2 (session_sync_v2)
 // observers of a session. Caller MUST hold p.mu. Targets come from the broadcaster — the same
 // target table raw dispatch uses (design §6.5 — no separate delivery network); only conns marked
@@ -652,7 +847,7 @@ func projectionInvalidateEvent(bridgeEpoch, backendID, sessionID string) EventMe
 // path; it reuses sinks + broadcaster, adding no new transport (design §6.2, N8).
 func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID string, patch ProjectionPatch) {
 	if p.broadcaster == nil || len(p.syncV2) == 0 {
-		slog.Info("go-bridge: [K4Patch] drop",
+		slog.Debug("go-bridge: [K4Patch] drop",
 			"sessionPrefix", projectionSessionLogPrefix(sessionID),
 			"reason", "no_v2_conns", "syncRev", patch.SyncRev,
 		)
@@ -660,7 +855,7 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 	}
 	targets := p.broadcaster.Targets(backendID, sessionID, "")
 	if len(targets) == 0 {
-		slog.Info("go-bridge: [K4Patch] drop",
+		slog.Debug("go-bridge: [K4Patch] drop",
 			"sessionPrefix", projectionSessionLogPrefix(sessionID),
 			"reason", "no_targets", "syncRev", patch.SyncRev,
 		)
@@ -699,37 +894,13 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 				)
 				continue
 			}
-			if patch.BaseRev != fence.expectedRev {
-				slog.Info("go-bridge: [K4Patch] drop",
+			p.appendFencePatchLocked(backendID, sessionID, fence, patch, false)
+			if !fence.invalidated {
+				slog.Info("go-bridge: [K4Patch] held_in_fence",
 					"sessionPrefix", projectionSessionLogPrefix(sessionID),
-					"reason", "fence_base_mismatch",
-					"baseRev", patch.BaseRev, "expectedRev", fence.expectedRev,
+					"syncRev", patch.SyncRev, "pending", len(fence.pending),
 				)
-				fence.pending = nil
-				fence.pendingBytes = 0
-				fence.invalidated = true
-				continue
 			}
-			encoded, _ := json.Marshal(patch)
-			if len(fence.pending)+1 > projectionFenceMaxPatches ||
-				fence.pendingBytes+len(encoded) > projectionFenceMaxBytes {
-				slog.Info("go-bridge: [K4Patch] drop",
-					"sessionPrefix", projectionSessionLogPrefix(sessionID),
-					"reason", "fence_overflow",
-					"pending", len(fence.pending),
-				)
-				fence.pending = nil
-				fence.pendingBytes = 0
-				fence.invalidated = true
-				continue
-			}
-			fence.pending = append(fence.pending, patch)
-			fence.pendingBytes += len(encoded)
-			fence.expectedRev = patch.SyncRev
-			slog.Info("go-bridge: [K4Patch] held_in_fence",
-				"sessionPrefix", projectionSessionLogPrefix(sessionID),
-				"syncRev", patch.SyncRev, "pending", len(fence.pending),
-			)
 			continue
 		}
 		if p.projectionInvalidated[key] {
@@ -747,7 +918,7 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 		// (projection frames are reconstructable, not live-bufferable).
 		if ok, reason, queued := sink.tryEnqueue(eventOutboundFrame{value: msg, classHint: classHint, classified: true}); ok {
 			p.projectionSnapshotCuts[key] = patch.SyncRev
-			slog.Info("go-bridge: [K4Patch] delivered",
+			slog.Debug("go-bridge: [K4Patch] delivered",
 				"sessionPrefix", projectionSessionLogPrefix(sessionID),
 				"syncRev", patch.SyncRev,
 				"remote", conn.RemoteAddr(),
@@ -767,6 +938,30 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 			)
 		}
 	}
+}
+
+// hasProjectionPatchTargetLocked reports whether a live projection patch has
+// at least one eligible v2 observer. Caller must hold p.mu. It intentionally
+// uses the same broadcaster/observation gates as delivery, so a session with no
+// eligible observer can discard its pending patch and retain only authoritative
+// reducer state until the next snapshot pull.
+func (p *EventPublisher) hasProjectionPatchTargetLocked(backendID, sessionID string) bool {
+	if p == nil || p.broadcaster == nil || len(p.syncV2) == 0 {
+		return false
+	}
+	for _, conn := range p.broadcaster.Targets(backendID, sessionID, "") {
+		if !p.syncV2[conn] {
+			continue
+		}
+		if p.observation != nil {
+			if device := conn.AuthedDevice(); device != nil &&
+				!p.observation.ShouldSendEvent(device.DeviceID, backendID, sessionID, "projection_patch") {
+				continue
+			}
+		}
+		return true
+	}
+	return false
 }
 
 type eventPublishMode uint8
@@ -1008,13 +1203,33 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 	// observation, then retry delivery once for this stamped event (projection
 	// already applied; do not re-Apply). Fixes mid-turn candidateTargets=0 after
 	// path thrash while the device still has an open transport.
-	if enqueued == 0 && len(overflowed) == 0 && (len(targets) == 0 || len(rawEligible) > 0) && !logical.Offline &&
-		p.rebindTargets != nil && logical.BackendID != "" && logical.SessionID != "" {
+	canRebind := p.rebindTargets != nil && logical.BackendID != "" && logical.SessionID != ""
+	if canRebind && p.broadcaster != nil && !p.broadcaster.HasConnections() {
+		// There is no live connection to recover. Skipping the callback avoids
+		// scanning the device registry once per token while an external turn is
+		// still producing events with every client offline.
+		canRebind = false
+	}
+	if enqueued == 0 && len(overflowed) == 0 && (len(targets) == 0 || len(rawEligible) > 0) && !logical.Offline && canRebind {
+		// A missing target is stable across adjacent stream events. Reserve one
+		// retry slot per session for the cooldown window; this preserves quick
+		// recovery after a path switch while avoiding a registry scan on every
+		// token when the device is actually gone.
+		rebindKey := logical.BackendID + "\x00" + logical.SessionID
+		now := p.now()
+		if last, ok := p.rebindLastAttempt[rebindKey]; ok && now.Before(last.Add(rebindAttemptCooldown)) {
+			canRebind = false
+		} else {
+			p.rebindLastAttempt[rebindKey] = now
+		}
+	}
+	if enqueued == 0 && len(overflowed) == 0 && (len(targets) == 0 || len(rawEligible) > 0) && !logical.Offline && canRebind {
 		rebind := p.rebindTargets
 		p.mu.Unlock()
 		n := rebind(logical.BackendID, logical.SessionID)
 		p.mu.Lock()
 		if n > 0 {
+			delete(p.rebindLastAttempt, logical.BackendID+"\x00"+logical.SessionID)
 			if logical.Broadcast && p.broadcaster != nil {
 				for _, conn := range p.broadcaster.Targets(logical.BackendID, logical.SessionID, logical.Directory) {
 					targets[conn] = struct{}{}
@@ -1073,10 +1288,21 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 	// Phase 1 flushes per-event for live correctness; timed coalesce remains an optional
 	// bandwidth optimization (design §2.3 / §10 item 3).
 	if projectionApplied && p.projection != nil && logical.BackendID != "" && logical.SessionID != "" {
-		patch, flushOk := p.projection.FlushPatch(logical.BackendID, logical.SessionID)
-		if flushOk {
+		noObserver := !p.hasProjectionPatchTargetLocked(logical.BackendID, logical.SessionID)
+		if noObserver && p.projection.PendingPatchExceeds(logical.BackendID, logical.SessionID, projectionNoObserverDropThreshold) {
+			// No v2 observer can receive a live patch. Keep the reducer's
+			// authoritative state, but discard only the unsent delta accumulator;
+			// a later get_session_projection supplies the complete current state.
+			if p.projection.DropPendingPatch(logical.BackendID, logical.SessionID) {
+				slog.Debug("go-bridge: [K4Patch] discard_without_observer",
+					"sessionPrefix", projectionSessionLogPrefix(logical.SessionID),
+					"event", logical.Event,
+					"syncRev", p.projection.LastAppliedRev(logical.BackendID, logical.SessionID),
+				)
+			}
+		} else if patch, flushOk := p.projection.FlushPatch(logical.BackendID, logical.SessionID); flushOk {
 			p.recordProjectionPatchLocked(logical.BackendID, logical.SessionID, patch)
-			slog.Info("go-bridge: [K4Patch] flush",
+			slog.Debug("go-bridge: [K4Patch] flush",
 				"sessionPrefix", projectionSessionLogPrefix(logical.SessionID),
 				"event", logical.Event,
 				"syncRev", patch.SyncRev,
@@ -1087,12 +1313,6 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 			// Always deliver live projection patches from PublishLogical. Offline only
 			// controls raw durable mailbox routing below, not the projection SoT stream.
 			p.deliverProjectionPatchLocked(logical.BackendID, logical.SessionID, patch)
-		} else {
-			slog.Info("go-bridge: [K4Patch] flush_empty_after_apply",
-				"sessionPrefix", projectionSessionLogPrefix(logical.SessionID),
-				"event", logical.Event,
-				"kernelMode", p.kernel != nil,
-			)
 		}
 	}
 
@@ -1103,7 +1323,7 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 	if enqueued == 0 && len(overflowed) == 0 {
 		switch logical.Event {
 		case "text_delta", "reasoning_delta", "turn_started", "turn_completed", "tool_started", "tool_finished":
-			slog.Warn("event-publisher: live event has zero online targets",
+			slog.Debug("event-publisher: live event has zero online targets",
 				"event", logical.Event,
 				"backendID", logical.BackendID,
 				"sessionID", logical.SessionID,
@@ -1372,4 +1592,187 @@ func (p *EventPublisher) FlushLiveFrameBufferForDevice(conn Connection) {
 			break
 		}
 	}
+}
+
+// RecordConnWindowTurns records the turn ids a window response delivered to a
+// connection (turn_detail_lazy_v1 delivery rule 3/4 bookkeeping). Idempotent;
+// bounded by the session's turn count per connection.
+func (p *EventPublisher) RecordConnWindowTurns(conn Connection, backendID, sessionID string, turnIDs []string) {
+	if p == nil || conn == nil || len(turnIDs) == 0 {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.recordConnWindowTurnsLocked(conn, backendID, sessionID, turnIDs)
+}
+
+// recordConnWindowTurnsLocked is the p.mu-held core of RecordConnWindowTurns,
+// shared with the snapshot-fence completion transaction (P0-2).
+func (p *EventPublisher) recordConnWindowTurnsLocked(conn Connection, backendID, sessionID string, turnIDs []string) {
+	key := projectionDeliveryKey(backendID, sessionID)
+	if p.projectionHeldTurns[conn] == nil {
+		p.projectionHeldTurns[conn] = make(map[string]map[string]struct{})
+	}
+	if p.projectionHeldTurns[conn][key] == nil {
+		p.projectionHeldTurns[conn][key] = make(map[string]struct{}, len(turnIDs))
+	}
+	for _, id := range turnIDs {
+		if id != "" {
+			p.projectionHeldTurns[conn][key][id] = struct{}{}
+		}
+	}
+}
+
+// ClearConnWindowTurns forgets a connection's held-turn set for one session —
+// used when the connection is invalidated (sync_invalidate) so it re-records
+// from its own re-pull.
+func (p *EventPublisher) ClearConnWindowTurns(conn Connection, backendID, sessionID string) {
+	if p == nil || conn == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.clearConnWindowTurnsLocked(conn, backendID, sessionID)
+}
+
+func (p *EventPublisher) clearConnWindowTurnsLocked(conn Connection, backendID, sessionID string) {
+	if per := p.projectionHeldTurns[conn]; per != nil {
+		delete(per, projectionDeliveryKey(backendID, sessionID))
+	}
+}
+
+func (p *EventPublisher) connHoldsAnyTurnLocked(conn Connection, backendID, sessionID string, turnIDs []string) bool {
+	per := p.projectionHeldTurns[conn]
+	if per == nil {
+		return false
+	}
+	held := per[projectionDeliveryKey(backendID, sessionID)]
+	if held == nil {
+		return false
+	}
+	for _, id := range turnIDs {
+		if _, ok := held[id]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// patchTurnIDs unions the turn ids a patch mutates (turnStateOps + partOps +
+// upsertTurns) — the routing predicate for detail/state commits.
+func patchTurnIDs(patch ProjectionPatch) []string {
+	seen := make(map[string]struct{}, len(patch.TurnStateOps)+len(patch.PartOps)+len(patch.UpsertTurns))
+	ids := make([]string, 0, len(seen))
+	add := func(id string) {
+		if id == "" {
+			return
+		}
+		if _, dup := seen[id]; dup {
+			return
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	for _, op := range patch.TurnStateOps {
+		add(op.TurnID)
+	}
+	for _, op := range patch.PartOps {
+		add(op.TurnID)
+	}
+	for _, turn := range patch.UpsertTurns {
+		add(turn.TurnID)
+	}
+	return ids
+}
+
+// PublishProjectionDetail routes a detail/state commit (turn_detail_lazy_v1
+// delivery rules, bridge-v1.md) through ONE serial publisher transaction:
+//   1. the REQUESTING connection always receives the commit patches — its
+//      completion condition is appliedRev >= ack.syncRev (patch-before-ack and
+//      ack-before-patch are both valid);
+//   2. full-projection connections always receive them (full-truth obligation);
+//   3. other WINDOW connections that hold one of the patch's turns receive the
+//      full commit patch;
+//   4. window connections that do NOT hold any of them receive the
+//      connection-specific no-op revision patch that keeps the single revision
+//      chain intact (they obtain the turn, with its current detailLoadState,
+//      through their own window pull).
+//
+// patches is the P0-1 atomic chain from the reducer: [staged-live patch?] +
+// [commit patch]. The staged-live prefixes publish FIRST through the normal
+// live broadcast path (content to every v2 connection — same semantics as any
+// live delta), then the final commit patch routes by rules 1-4. Journal order
+// matches publication order.
+func (p *EventPublisher) PublishProjectionDetail(backendID, sessionID string, patches []ProjectionPatch, requester Connection) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.broadcaster == nil || len(p.syncV2) == 0 || len(patches) == 0 {
+		return
+	}
+	commit := patches[len(patches)-1]
+	if commit.SyncRev <= commit.BaseRev {
+		return
+	}
+	for _, patch := range patches {
+		if patch.SyncRev <= patch.BaseRev {
+			continue
+		}
+		p.projectionJournal.Record(backendID, sessionID, patch, p.now())
+	}
+	for _, live := range patches[:len(patches)-1] {
+		p.deliverProjectionPatchLocked(backendID, sessionID, live)
+	}
+	targets := p.broadcaster.Targets(backendID, sessionID, "")
+	turnIDs := patchTurnIDs(commit)
+	for _, conn := range targets {
+		if !p.syncV2[conn] {
+			continue
+		}
+		if conn == requester ||
+			p.connDeliveryModeLocked(conn, backendID, sessionID) != ProjectionDeliveryWindow ||
+			p.connHoldsAnyTurnLocked(conn, backendID, sessionID, turnIDs) {
+			p.deliverSingleConnPatchLocked(conn, backendID, sessionID, commit)
+			continue
+		}
+		key := projectionFenceKey{conn: conn, backendID: backendID, sessionID: sessionID}
+		base := p.projectionSnapshotCuts[key]
+		if fence := p.projectionFences[key]; fence != nil && !fence.invalidated {
+			// The connection's window response is still being built — whether it
+			// "holds" the patch's turns is decided when that fence completes
+			// (CompleteProjectionSnapshotWithHeldTurns registers the response's
+			// turns and resolves the deferral). Queue the FULL patch as
+			// undecided so the completion transaction can pick content vs no-op
+			// (audit P0-2: a no-op decided here would permanently strand the
+			// detail behind the not-yet-sent stale response).
+			p.deferProjectionPatchForFenceLocked(backendID, sessionID, fence, commit)
+			continue
+		}
+		if base == 0 || base >= commit.SyncRev {
+			continue
+		}
+		p.deliverSingleConnPatchLocked(conn, backendID, sessionID, ProjectionPatch{BaseRev: base, SyncRev: commit.SyncRev})
+	}
+}
+
+// LoadedDetailRev recovers the syncRev of the commit that set a turn's terminal
+// loaded state (for §11.7 idempotent repeats: "携带原 commit 的 syncRev"). The
+// journal is process-scoped and bounded — when the entry has aged out the
+// caller falls back to the current syncRev (a conservative watermark: appliedRev
+// >= current implies appliedRev >= original).
+func (p *EventPublisher) LoadedDetailRev(backendID, sessionID, turnID string) (int, bool) {
+	if p == nil {
+		return 0, false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	key := projectionJournalKey{backendID: backendID, sessionID: sessionID}
+	entries := p.projectionJournal.entries[key]
+	for i := len(entries) - 1; i >= 0; i-- {
+		for _, op := range entries[i].patch.TurnStateOps {
+			if op.TurnID == turnID && op.DetailLoadState == DetailStateLoaded {
+				return entries[i].patch.SyncRev, true
+			}
+		}
+	}
+	return 0, false
 }

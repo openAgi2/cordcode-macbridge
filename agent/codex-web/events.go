@@ -52,7 +52,8 @@ func (a *Agent) ensurePump() {
 	go func() {
 		for n := range cl.Notifications() {
 			if n.Method == "thread/started" || n.Method == "thread/name/updated" ||
-				n.Method == "thread/archived" || n.Method == "thread/deleted" {
+				n.Method == "thread/archived" || n.Method == "thread/deleted" ||
+				n.Method == "thread/status/changed" {
 				a.signalCatalogRefresh()
 			}
 			var extra []core.Event
@@ -777,7 +778,7 @@ func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 				continue
 			}
 			if n.Method == "thread/name/updated" || n.Method == "thread/archived" ||
-				n.Method == "thread/deleted" {
+				n.Method == "thread/deleted" || n.Method == "thread/status/changed" {
 				a.signalCatalogRefresh()
 			}
 			// 收口信号与中央泵同一套：审批/提问的 resolved 与 item/completed。

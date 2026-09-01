@@ -14,6 +14,9 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		payload := map[string]interface{}{
 			"delta": ev.Content,
 		}
+		if ev.TurnID != "" {
+			payload["turnId"] = ev.TurnID
+		}
 		if ev.ItemID != "" {
 			payload["itemId"] = ev.ItemID
 		} else if ev.TurnID != "" {
@@ -136,6 +139,11 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 			}
 			if ev.TurnID != "" {
 				payload["turnId"] = ev.TurnID
+			}
+			if ev.DurationMs > 0 {
+				// Official Turn.durationMs (app-server-protocol v2): clients render the
+				// "用时" header from this instead of recomputing from timestamps.
+				payload["durationMs"] = ev.DurationMs
 			}
 			return "turn_completed", eventData(ev, payload), true
 		}

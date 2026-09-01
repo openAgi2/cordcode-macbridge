@@ -1,0 +1,12 @@
+checked_at=2026-08-28T08:43:00Z
+result=PASS
+scope=phase0-source-baseline
+git_diff_worktree_agent_codex_web_and_agent_codex=PASS
+git_diff_from_frozen_start_agent_codex_web_and_agent_codex=PASS
+ios_branch_commit_and_clean_status=PASS
+phase0_no_go_product_backend_files=PASS
+source_baseline_validator_replay=PASS
+gitleaks_target=agent/codex-remote
+gitleaks_result=no leaks found
+targeted_token_and_device_key_pattern_scan=PASS
+gate_effect=none; this regression proves only source/provenance isolation, not the real controller chain

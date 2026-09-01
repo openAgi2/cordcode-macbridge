@@ -449,7 +449,45 @@ brief `连接中` blip on iOS clients.
 涉及 iOS 连接、配对、重连或 session 同步时，同时读取相邻
 `../cordcode-ios/IOS_MAC_INTERACTION_FLOW.md`；不要只看 Mac 侧推断客户端行为。
 
-## 外部 Web/API backend 的 source-first 纪律（必须）
+## 上游源码优先门（必须）
+
+实现 agent/backend 的新功能，或排查协议、session/history、事件流、状态机、重连、分页、
+权限交互、模型配置等问题时，**必须先在对应产品的官方源码中查找现成实现、协议定义和测试，
+再设计或修改 CordCode**。禁止先凭经验自建一套行为，等真机或线上出错后才回头对照官方源码。
+
+本机优先使用以下只读上游 checkout；GitHub 地址用于核对来源、提交和本机缺失内容：
+
+| 产品 | 本机官方源码 | GitHub |
+| --- | --- | --- |
+| Codex / Codex app-server / Remote Control | `/Users/jacklee/Projects/codex` | <https://github.com/openai/codex> |
+| Grok Build | `/Users/jacklee/Projects/grok-build` | <https://github.com/xai-org/grok-build> |
+| DeepSeek Harness（dsh） | `/Users/jacklee/Projects/deepseek-harness` | <https://github.com/deepseek-ai/deepseek-harness> |
+| OpenCode | `/Users/jacklee/Projects/opencode` | <https://github.com/anomalyco/opencode> |
+
+执行规则：
+
+1. 开工前先确定目标产品及目标运行版本，在对应 checkout 中记录精确 commit/tag，并检索生产
+   call site、协议/schema、状态机、错误与恢复路径及官方测试；不能只读 README、类型名或当前
+   `main` 后凭印象实现。目标二进制与 checkout 不同版本时，以目标版本源码和真实样本为准。
+2. 官方已有实现时，优先复用可复用模块；因语言、进程或桥接边界不能直接复用时，逐项镜像
+   官方不变量、结束条件、排序、identity、重试/取消和错误语义。不得另造近似协议、轮询状态机、
+   fallback parser 或“效果差不多”的实现。
+3. 计划、实现说明或修复证据必须写明：上游仓库路径、commit/tag、对应符号/call site、官方
+   测试，以及 CordCode 有意保留的差异。只有“参考了官方源码”而无可复核锚点，不算完成
+   source-first 核验。
+4. 遇到 bug 时，先把 CordCode 与目标版本官方调用链/事件时间线并排，定位第一处分歧；修复该
+   分歧后重新验证。禁止在根因未明时连续叠加退避、轮询、缓存、容错或兼容补丁来压住现象。
+5. 只有确认上游没有可复用实现，或该部分属于 CordCode 私有 bridge/SSV2/iOS 产品语义时，才
+   允许自建。此时必须记录检索范围、无法复用原因、自建边界和验证方式；未知协议或闭源一侧
+   必须用目标版本真实 fixture 证明并 fail closed，不得从开源另一侧猜测，更不得制造假成功。
+6. 本仓 legacy adapter 只能提供 CordCode 接线点和历史事故参考，不能覆盖对应产品的官方源码。
+   若两者冲突，先按目标版本官方实现修正语义，再显式完成 bridge-v1/SSV2 映射和回归测试。
+
+该门不要求把无关上游仓库全部通读：只读取与当前 backend 和功能相关的源码；一项功能跨越
+多个产品时，分别核验每个实际拥有该语义的上游。源码核验是实现前置条件，不能用“单测已过”
+或“当前看起来能用”代替。
+
+### 外部 Web/API backend 的附加 source-first 纪律
 
 接入 OpenCode Web、dsh Web 或其他外部工具的官方 Web/API 时，目标是翻译官方产品语义，
 不是把本仓旧 adapter 改成 HTTP。设计、实施和评审必须按以下证据顺序：

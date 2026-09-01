@@ -1,7 +1,9 @@
 # codex-remote Backend 实施方案（ChatGPT Desktop Remote Control 接力）
 
 - 日期：2026-08-26
-- 状态：**2026-08-28 Phase 0 Gate FAIL-BLOCKED。按原门禁停止产品 backend / iOS 接线。不得把本方案当可实施队列继续 `start`。**
+- 状态：**已完成（proved-complete，2026-08-29）。全计划 111/111 done+proven，Phase 0–5 全部 proven-done，完成报告见 [2026-08-28-2026-08-26-codex-remote-backend-implementation-plan完成情况.md](2026-08-28-2026-08-26-codex-remote-backend-implementation-plan完成情况.md)。**
+  历史裁决：2026-08-28 Owner 改写 Gate P0（接受无 cursor 的首连 live 流，进入 Phase 1），当日曾短暂标记 FAIL-BLOCKED（见下方停工说明与 §13 尾部回填）。cursor 断线续传 / interrupt / 官方 iOS controller 共存为**按设计保留的已知缺口**，产品路径 fail-closed，不广告为已实现。
+- 上下游：**本计划是 codex-remote 产品线的根方案（无母方案）。** 下游派生：懒加载历史方案 [2026-08-30-codex-remote-lazy-history-implementation-plan.md](2026-08-30-codex-remote-lazy-history-implementation-plan.md) 建立在本计划 Phase 0/1 的配对/WSS/envelope/live 基础设施上；iOS 仓 `docs/2026-08-31-remote-web-ios-feature-parity-gap-analysis.md` 为浏览器端平行产品线（写于本计划交付前，矩阵未覆盖 codex-remote）。
 - 停工说明：[2026-08-28-codex-remote-phase0-fail-blocked.md](2026-08-28-codex-remote-phase0-fail-blocked.md)
 - 目标仓库：`cordcode-macbridge`，后续涉及 `cordcode-ios`
 - 相关既有方案：[2026-08-21-codex-web-backend-design.md](2026-08-21-codex-web-backend-design.md)
@@ -583,22 +585,27 @@ controller，判 `EVIDENCE-ONLY` 并重新裁决产品语义，不得把“先�
 读取并长期冒用 Desktop 原始 token、修改 App 包或代理全部 ChatGPT 流量，判 `BLOCKED`，重新打开
 认证/宿主设计。
 
-> [!CAUTION]
-> **2026-08-28 实测结案（FAIL-BLOCKED）。** 冻结目标 ChatGPT Desktop `26.825.32147` /
-> Codex `0.150.0-alpha.12.2` 上，独立 controller 的 enrollment、电脑标签配对、WSS、
-> `initialize`/`initialized`、`thread/list`、Desktop 发消息后的 `thread/status/changed`、
-> 探针自 revoke（204→403）均已取证。官方 **从未** 在 controller WSS envelope 上交付
-> reconnect `cursor`（含 initialize、thread/list、active pong、Desktop-turn live 帧），
-> 因此任务 3/12 的 `x-codex-subscribe-cursor` 无法真实构造；任务 10 也未观察到
-> `turn/started` / item delta / `turn/completed`。Owner 确认按本门禁停止。后续 agent
-> **不得进入 Phase 1–5**，不得注册 backend、不得接 iOS，除非官方 target 真的给出
-> cursor，或 owner 明确改写本 Gate。证据见
-> [2026-08-28-codex-remote-phase0-fail-blocked.md](2026-08-28-codex-remote-phase0-fail-blocked.md)
-> 与 `agent/codex-remote/testdata/phase0/live/attempt-001`…`attempt-007`。
+> [!IMPORTANT]
+> **2026-08-28 Owner 改写 Gate P0。** 冻结目标 ChatGPT Desktop `26.825.32147` /
+> Codex `0.150.0-alpha.12.2`。attempt-008 证明：独立 controller 在
+> `thread/resume(excludeTurns)` 之后能收到 Desktop 当前线程的 `turn/started`、
+> `item/agentMessage/delta`、`turn/completed`。官方 **仍然不** 在 controller WSS
+> envelope 上交付 reconnect `cursor`。Owner 明确开始 Phase 1，接受无 cursor 的
+> 首连 live 流，并把下列项列为已知缺口（产品 fail-closed，不得广告）：
+>
+> - 任务 6 唯一标记 thread（partial：env/stream 已绑定，未盖探针标记）
+> - 任务 7 官方 iOS controller 共存 / HTTP 409
+> - 任务 11 `turn/interrupt`
+> - 任务 12 seq/ACK/cursor 重连
+>
+> 证据见 [2026-08-28-codex-remote-phase0-fail-blocked.md](2026-08-28-codex-remote-phase0-fail-blocked.md)
+> 与 `agent/codex-remote/testdata/phase0/live/attempt-001`…`attempt-008`。
+> 不得合入 `main`，不得提前做 Phase 3 iOS 接线，除非后续任务明确开始。
 
 ### Phase 1：codex-remote 骨架与最小 app-server Transport
 
-> 2026-08-28：Phase 0 Gate 未过，本节不得实施。
+> 2026-08-28：Owner 已改写 Gate P0，本节可实施。已知缺口见上，不得在 diagnostics
+> 或 capability 中广告 interrupt / cursor 重连 / iOS 共存。
 
 1. 从空目录注册独立 backend identity；
 2. 实现 auth/device key/enrollment/environment/controller WSS；
@@ -766,6 +773,14 @@ Gate P3 PASS：owner 按一次性测试矩阵验证 Desktop ↔ iPhone 双向实
 在 Phase 0 认证与真实 live/interrupt Gate 通过之前，本计划只能标记“研究中”，不得用历史可读、
 fake relay、共享 store 或独立 standalone app-server冒充 Desktop Remote 接力已经实现。
 2026-08-28 起本计划标记为 **FAIL-BLOCKED / 按原门禁停工**，不是“研究中可继续实施”。
+
+> [!NOTE]
+> **2026-09-01 状态回填**：上一段的 FAIL-BLOCKED 是 2026-08-28 时点的历史裁决记录。Owner
+> 当日改写 Gate P0（接受无 cursor 首连 live 流）后实施继续，本计划已于 2026-08-29 以
+> **proved-complete** 收口：111/111 done+proven，Phase 0–5 全部 proven-done（完成报告见文首
+> 链接）。改写 Gate P0 时列出的已知缺口（cursor 断线续传、interrupt、官方 iOS controller
+> 共存）按设计保留 fail-closed，完成定义第 10 条的验收口径为“缺口如实呈现、不伪装并存”，
+> 已随完成报告通过。
 
 ## 14. audit-plan 评审意见处置记录
 

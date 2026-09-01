@@ -15,9 +15,16 @@ type ProjectionPart struct {
 	// text / reasoning
 	Text         string `json:"text,omitempty"`
 	Presentation string `json:"presentation,omitempty"` // text: progress | final
+	// presentationExplicit is reducer-local provenance. A live legacy delta has no
+	// official phase even though the reducer may classify it for rendering later;
+	// history text_delta frames carrying Codex MessagePhase set this bit so terminal
+	// classification never promotes official commentary by array position.
+	presentationExplicit bool
 
-	// tool
-	ItemID     string      `json:"itemId,omitempty"` // rollout call_id (authoritative tool identity)
+	// canonical official item id. Tool parts: rollout call_id (authoritative tool
+	// identity). Text/reasoning/user parts: upstream item id, used by detail merge
+	// dedup (T2.1; agent Summary mapper and reducer both stamp it).
+	ItemID     string      `json:"itemId,omitempty"`
 	ToolName   string      `json:"toolName,omitempty"`
 	ToolInput  interface{} `json:"toolInput,omitempty"`
 	ToolResult interface{} `json:"toolResult,omitempty"`
@@ -95,13 +102,31 @@ type MessageProjection struct {
 
 // TurnProjection is one turn's projection. TurnID is the Codex rollout lifecycle turn_id.
 type TurnProjection struct {
-	TurnID      string             `json:"turnId"`
-	Status      string             `json:"status"` // pending | running | completed | aborted | error
-	StartedAt   int64              `json:"startedAt,omitempty"`
-	CompletedAt int64              `json:"completedAt,omitempty"`
-	User        *MessageProjection `json:"user,omitempty"`
-	Assistant   *MessageProjection `json:"assistant,omitempty"`
-	System      *MessageProjection `json:"system,omitempty"`
+	TurnID      string `json:"turnId"`
+	Status      string `json:"status"` // pending | running | completed | aborted | error
+	StartedAt   int64  `json:"startedAt,omitempty"`
+	CompletedAt int64  `json:"completedAt,omitempty"`
+	// Official Turn.durationMs (app-server-protocol v2, "if known"). 0/absent = unknown;
+	// clients fall back to completedAt−startedAt. Additive to bridge-v1 TurnProjection.
+	DurationMs int64              `json:"durationMs,omitempty"`
+	User       *MessageProjection `json:"user,omitempty"`
+	Assistant  *MessageProjection `json:"assistant,omitempty"`
+	System     *MessageProjection `json:"system,omitempty"`
+	// turn_detail_lazy_v1 (bridge-v1.md, frozen 2026-08-30): turn-level lazy-detail
+	// state. Absent decodes as DetailStateNotRequested (old snapshots stay valid).
+	DetailLoadState  string `json:"detailLoadState,omitempty"`  // "" (notRequested) | loading | loaded | failed
+	DetailReasonCode string `json:"detailReasonCode,omitempty"` // non-empty iff failed
+	// True only for codex-remote legacy full-read turns. Their complete process
+	// body is inline in Assistant.Parts, so expansion is local and never needs
+	// the paginated session_turn_items transport.
+	DetailInline   bool `json:"detailInline,omitempty"`
+	TurnGeneration int  `json:"generation,omitempty"` // per-turn fence counter; bumps on post-completion content mutation
+	// turn_detail_chunks_v1 (§11.8, owner final ruling 2026-08-30): manifest
+	// SUMMARY only — detail content never enters the projection. Additive;
+	// absent decodes as zero (v1 snapshots stay valid).
+	DetailManifestRev int   `json:"detailManifestRev,omitempty"` // 0 = no manifest yet
+	DetailItemCount   int   `json:"detailItemCount,omitempty"`
+	DetailTotalBytes  int64 `json:"detailTotalBytes,omitempty"`
 }
 
 // ExecutionView is the session-level execution state. isExecuting = phase ∈ {running, requires_action}.
@@ -139,5 +164,23 @@ type ProjectionPatch struct {
 	Execution         *ExecutionView   `json:"execution,omitempty"`
 	UpsertTurns       []TurnProjection `json:"upsertTurns,omitempty"`
 	PartOps           []PartOp         `json:"partOps,omitempty"`
+	TurnStateOps      []TurnStateOp    `json:"turnStateOps,omitempty"`
 	ReplacesClientIDs []string         `json:"replacesClientIds,omitempty"`
+}
+
+// TurnStateOp is one turnStateOps entry of ProjectionPatch (turn_detail_lazy_v1,
+// bridge-v1.md). Applied AFTER upsertTurns and BEFORE partOps; state ops never
+// carry content and never bump TurnGeneration (the content mutation's
+// replace_parts admission does, committed with T2.2).
+type TurnStateOp struct {
+	TurnID          string `json:"turnId"`
+	DetailLoadState string `json:"detailLoadState"` // loading | loaded | failed (never "" or notRequested on the wire)
+	ReasonCode      string `json:"reasonCode,omitempty"`
+	TurnGeneration  int    `json:"generation"`
+	// turn_detail_chunks_v1 manifest op (§11.8): additive summary fields. A
+	// v2 op may set DetailLoadState=partial and carries the manifest summary
+	// (validated by ValidateTurnStateOpsV2; v1 conns never receive v2 ops).
+	ManifestRev int   `json:"manifestRev,omitempty"`
+	ItemCount   int   `json:"itemCount,omitempty"`
+	TotalBytes  int64 `json:"totalBytes,omitempty"`
 }

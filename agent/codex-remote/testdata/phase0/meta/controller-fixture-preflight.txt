@@ -1,0 +1,14 @@
+{
+  "result": "PASS",
+  "mode": "static-preflight",
+  "classification": "STATIC-CALLSITE-ONLY",
+  "checkedTarget": {
+    "chatgpt_desktop_version": "26.825.32147",
+    "chatgpt_bundle_version": "7303",
+    "embedded_codex_version": "codex-cli 0.150.0-alpha.12.2",
+    "app_asar_sha256": "0462b03e878f0e78b223b849ee14cbba0de043f2c16acebee163cb95daa622ef"
+  },
+  "liveFixtureCount": 8,
+  "gateEffect": "does-not-pass-phase0",
+  "note": "Static call sites and live capture contract are ready; real controller observations remain missing."
+}

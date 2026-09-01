@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "classification": "LIVE-REDACTED-OBSERVATION",
+  "required_target": {
+    "chatgpt_desktop_version": "26.825.32147",
+    "chatgpt_bundle_version": "7303",
+    "embedded_codex_version": "codex-cli 0.150.0-alpha.12.2",
+    "controller_protocol_version": 3
+  },
+  "required_metadata_fields": [
+    "captured_at",
+    "capture_purpose",
+    "source_classification",
+    "operator_attestation",
+    "redaction_procedure",
+    "secret_scan_command",
+    "secret_scan_result",
+    "cleanup_result"
+  ],
+  "required_observation_kinds": [
+    "enroll_start",
+    "enroll_finish",
+    "refresh_start",
+    "refresh_finish",
+    "websocket_handshake",
+    "device_key_challenge",
+    "device_key_proof",
+    "environment_list",
+    "environment_selected",
+    "client_message",
+    "ack",
+    "server_message",
+    "pong",
+    "reconnect_handshake",
+    "revoke",
+    "revoked_identity_rejected"
+  ],
+  "required_semantic_assertions": [
+    "all_rest_and_websocket_origins_are_official_allowlisted_origins",
+    "selected_environment_is_the_current_desktop",
+    "environment_binding_is_observed_not_inferred",
+    "cursor_delivery_location_is_observed_not_inferred",
+    "controller_identity_is_independent_and_revocable",
+    "cleanup_targets_only_the_probe_controller",
+    "official_mobile_controller_is_never_automatically_disconnected_or_revoked"
+  ],
+  "identifier_policy": {
+    "allowed": "stable pseudonyms local to one fixture set",
+    "examples": ["client_probe", "env_desktop", "stream_primary", "thread_probe", "turn_probe"],
+    "forbidden": "raw client, environment, account, workspace, session, stream, thread or turn identifiers"
+  },
+  "time_policy": "relative milliseconds from capture start unless wall clock is required for expiry validation",
+  "content_policy": "method names and structural field names only; user and assistant content must be removed",
+  "forbidden_field_name_patterns": [
+    "authorization",
+    "cookie",
+    "access_token",
+    "refresh_token",
+    "remote_control_token",
+    "session_token",
+    "step_up_token",
+    "manual_pairing_code",
+    "mfa_code",
+    "signature_der_base64",
+    "signed_payload_base64",
+    "private_key",
+    "public_key_spki_der_base64"
+  ],
+  "forbidden_value_markers": [
+    "Bearer ",
+    "eyJ",
+    "-----BEGIN",
+    "@openai.com",
+    "@gmail.com",
+    "@icloud.com"
+  ],
+  "gate_rule": "The contract alone is preparation. Gate P0 evidence exists only after a real fixture set passes validation and its external/manual observations remain self-attested unless independently replayed.",
+  "history_probe": {
+    "fixture_kind": "G0 lazy-history evidence captured by probe/history_probe.mjs (schema_version 2)",
+    "required_top_level_fields": ["schema_version", "classification", "gate_effect", "target", "metadata", "probe", "observations", "data", "adjudication"],
+    "gate_effect": "g0-evidence-input",
+    "required_data_sections": ["inventory", "discovery", "longestThread", "secondaryThreads", "legacyBattery"],
+    "required_longest_thread_sections": ["readMeta", "controlFullRead", "summaryChain", "notLoadedPage", "backwardsChain", "itemsSamples", "illegalTurnId", "resumeCandidate"],
+    "pseudonym_policy": "id-N for id-shaped strings, cur-N for opaque cursors; mapping stable within one capture and never reversible from the fixture",
+    "content_policy": "item text, paths and error bodies appear only as lengths; enum values survive only for whitelisted keys (type/status/itemsView/historyMode/sortDirection/sortKey/code and similar)",
+    "assertion_harness": "agent/codex-remote/validate/history-fixture-assert.mjs --fixture <file> (offline; §3.0.7 negatives + §3.0.5 checklist); --self-test must stay green",
+    "negative_result_rule": "any §3.0.7 negative in the harness report means G0 FAIL, not evidence captured; adjudication of T0.5/T0.6/G0.5 and resource gate values stays with the owner"
+  }
+}

@@ -7,7 +7,21 @@
 版本号对齐 MacBridge Release 构建的 `MARKETING_VERSION`（见 `MacBridge/project.yml`）。日期为协调世界时（UTC）。
 
 ## [Unreleased]
+- **改进：Codex Desktop 会话打开与历史明细改为官方懒加载路径**：打开会话不再一次拉取全量回合与全部 items，首屏走官方 `thread/turns/list` Summary 视图，点「加载详细过程」再按 `thread/items/list` 分页拉取该回合明细（`turn_detail_chunks_v1`：明细按页渐进加载，超长输出按 128KB chunk 二级懒加载，断线后按 chunk 续载）；滚动到顶加载更早历史复用既有窗口链，上游分页游标不暴露给客户端。长会话首屏可交互时间明显缩短（owner 真机矩阵确认），单个超大回合不再整段占用传输与内存。
+- **修复：旧版 Codex Desktop 会话的「用时」详情行不再整段消失**：旧会话（legacy historyMode）点「用时xx分xx秒」此前会触发必然失败的 `session_turn_items` 分页请求，iOS 按不支持处理并把整个会话的详情入口全部移除、列表锚点上跳。现 legacy 全量读到的完成回合直接标记为本地已加载（投影 v13 `detailInline`），点击只做本地展开/收起、零分页请求；legacy 会话恢复后新完成的回合同样适用。旧会话展开内容按官方 legacy 视图如实显示（官方对 legacy 线程不下发思考/工具明细，属官方面有意限制，不做补造）。
+- **修复：Codex Desktop 历史详情不再把过程叙述当最终正文**：详情分页保留官方 `commentary` / `final_answer` phase；旧运行时生成的错误详情缓存由 mapper 版本栅栏按回合自动失效并从官方分页重建，避免升级后继续复用错误分类。
 
+- **继续降低 Codex Desktop runtime 热路径 CPU**：Grok 会话标题优先按目录直接定位，避免每次目录刷新递归扫描整个 sessions 树；失效的直连 socket 不再继续作为广播目标，离线期间的重绑定尝试按会话节流；Codex Web 已接入官方目录生命周期信号并保留低频安全扫描；投影诊断改为 Debug 才计算，大回合已发布的 turn shell 后续只发送工具增量。
+- **降低无客户端长回合的 runtime CPU**：当没有可接收 `session_sync_v2` patch 的观察者时，仍保留 reducer 的权威投影，但不再为超过阈值的整回合工具/问答增量深拷贝和记录大 patch；后续连接通过现有完整投影快照恢复。没有任何 live connection 时跳过逐 token 的设备重绑定扫描；无在线目标日志降为 Debug，避免流式回合产生高频日志 I/O。
+- **进一步降低 Codex Desktop runtime 空闲 CPU**：Remote 不再按固定 15 秒发送 `thread/list` head 请求；改由官方 `thread/started`、线程名称/归档/删除以及 `turn/started`/`turn/completed` 通知触发权威目录刷新，并保留 60 秒安全扫描。这样目录即时性来自官方事件，空闲连接不再持续解析目录 JSON。
+- **进一步降低 Codex Desktop runtime CPU**：head probe 超时现在进入独立指数退避；Remote 目录指纹忽略流式回合不断变化的 recency 时间戳，仅由会改变会话行的标题、目录、项目和成员变化触发目录事件，避免后台探测和流式事件互相放大。
+- **修复：Codex Desktop 会话操作即时可见、标题一致，并消除目录轮询高 CPU**：Remote 目录发现改用官方 thread 生命周期通知触发，失败的全量刷新按独立指数退避，不再被同一旧 head 自激；安全探测降频并按官方最大页长拉取。iPhone 新建会话的标题会通过官方 thread/name/set 持久化并以 thread/read 回读，Mac/iPhone 不再分别显示 cwd 与 basename；重命名/归档响应直接携带权威 session，客户端无需再发一次慢回拉。
+- **修复：Codex Desktop 配对一次即可跨重启使用**：此前配对成功时还没把 Desktop 环境写进状态，本地文件被静默跳过，重启后又变「未配置」。现配对成功即写入 Link 数据目录（0600）；下次启动刷新官方 controller token 并自动接回 Desktop，不必再填电脑配对码。恢复完成后管理状态会刷新成「就绪」；数据面断开后自动重连。Desktop 没开时保持已配对、等它上线。只有官方判定撤销才要求重新配对。
+- **修复：iPhone 打开 Codex Desktop 会话显示「还没有消息」**：会话投影把该后端当成空源，1ms 内提交了 0 条 turn。现按官方 `thread/read` 的 turn 身份冷拉历史。
+- **修复：iPhone 在 Codex Desktop 发消息能到 Mac App，但手机停在「正在生成」**：该后端未加入会话投影，iPhone 看不到 Desktop 的实时回复。现 Mac 用官方 `thread/read` 冷基线并广告 `session_sync_v2`，live 文本进入投影。模型目录仍未广告，输入条不弹出空模型面板。
+- **改进：Codex Desktop 补齐 Mac 会话目录、历史和中断**：目录走官方 `thread/list`（分页、按工作区 cwd），历史走 `thread/read(includeTurns)`，停止走 `turn/interrupt`（含观察会话）。这条路径不套用 Codex Web 的 workspace-root 缓存过滤。iPhone 接线仍等这层在 Mac 上可测后再做。
+- **修复：Codex Desktop 打开会话不再报不支持历史**：配对后的 Remote Control 数据面补上官方 `thread/read(includeTurns)` 冷基线（用户/助手正文；未取样的工具类型跳过），iPhone 点开会话可加载已有对话。模型目录仍未广告，输入条不再弹出空的「后端未提供」模型面板。
+- **新功能：AI 工具新增「Codex Desktop」配对入口**：在 CordCode Link 的 AI 工具列表中出现独立的 Codex Desktop 行；未配对时显示「未配置」和「配对」。点配对后走 ChatGPT 浏览器授权，再在本机窗口填入 Desktop「控制这台 Mac → 电脑」配对码（不要把码发到聊天里）。配对成功后该行变为就绪。iPhone 产品面尚未接线。
 - **安全：依赖与工具链漏洞清零（govulncheck 全绿）**：web push 依赖 webpush-go v1.3.0 间接引入的 golang-jwt v3.2.2 存在头解析内存放大漏洞（GO-2025-3553），升级到 v1.4.0（改用 golang-jwt/v5 v5.2.1，推送行为不变）；Go toolchain 升至 go1.26.6，修复 go-bridge 与 relay-server 共 13 处可达的标准库 CVE（crypto/tls、encoding/asn1、net/http、net/url 等）。升级后两模块 `govulncheck` 均 0 受影响漏洞。
 - **修复：iPhone 打开正在执行的 Claude Code 会话时不再显示内部 `<task-notification>` XML**：Claude Code 的后台命令完成后会写入带 `origin.kind=task-notification` 的 synthetic user row；此前 projection/history 把它当作用户消息同步，导致任务 ID、临时输出路径和内部标签出现在聊天页。现按结构化 origin 将其作为 control-plane row 消费：source cursor 与后续执行连续性保持不变，但不生成可见用户气泡；普通用户输入即使包含相似 XML 文本也不受影响。
 - **修复：Claude 任务在跑时「重启共享 Codex 服务」按钮被误禁用（2026-08-28 真机反馈）**：管理状态里的活跃 turn 计数是全局（所有 backend 合计），Mac 端却直接当作 codex 专属计数——任一 backend（如 Claude）有任务就禁用 codex 重启按钮、预检也拒绝。现 status 增加 per-backend 活跃 turn / pending 交互明细（可选新增键，旧版 runtime 仍可解码并保守回退全局计数），重启门控只数 codex / codex-web 自己的活动；全局计数继续服务于跨 backend 的 quiesce 排空语义，不受影响。

@@ -1,0 +1,78 @@
+Phase 5 common-core validation (2026-08-29)
+
+go test -race ./agent/codex-appserver/... ./agent/codex-web ./agent/codex-remote -count=1 -timeout 240s
+PASS
+codex-appserver/rpc 1.053s
+codex-web 2.005s
+codex-remote 3.302s
+
+go test -race ./agent/codex-appserver/rpc -count=20 -timeout 180s
+PASS (1.714s)
+
+go test -race ./agent/codex-web -run 'Test(RPC|CatalogCtxCancel)' -count=10 -timeout 180s
+PASS (3.908s)
+
+go test -race ./agent/codex-remote -run 'Test(RPC|ClientIsClosedAfterRemoteDeath|ServerRequestBacklogDoesNotBlockRPCResponse|UnsupportedRemoteServerRequestIsRejectedByOriginalID)' -count=10 -timeout 180s
+PASS (1.185s)
+
+go test -race ./go-bridge -run 'Test(CodexRemote|MgmtCodexRemote|MgmtRemoteStatus|TopologySnapshot|AggregateDesktopTruthTable|DeriveSyncHealthFullTable|Display|Service|CodexRemoteDescriptorOnlyAdvertisesImplementedCapabilities|HandleGetSessionProjectionRunningCodexSessionWithinBudget|HandleGetSessionProjectionRunningCodexSessionTranscriptFallback)' -count=1 -timeout 180s
+PASS (1.044s)
+
+node agent/codex-appserver/validate/phase5-boundary.mjs
+PASS (shared=rpc; backendPolicies=independent)
+
+node agent/codex-appserver/validate/phase5-authorization.mjs
+PASS (scope=rpc-only)
+
+node agent/codex-remote/validate/ios-codex-remote-audit.mjs --phase5
+PASS (iOS worktree clean; agent/codex unchanged; codex-web changes limited to the authorized RPC wrapper set)
+
+git diff --check
+PASS
+
+git diff --exit-code -- agent/codex
+PASS
+
+gitleaks detect --no-git --source agent/codex-appserver
+gitleaks detect --no-git --source agent/codex-remote
+gitleaks detect --no-git --source agent/codex-web
+PASS (no leaks)
+
+Gate P5 re-verification (2026-08-29)
+
+go test -race ./agent/codex-appserver/... ./agent/codex-web ./agent/codex-remote -count=1 -timeout 240s
+PASS
+
+go test -race ./go-bridge -run 'Test(CodexRemote|MgmtCodexRemote|MgmtRemoteStatus|TopologySnapshot|AggregateDesktopTruthTable|DeriveSyncHealthFullTable|Display|Service|CodexRemoteDescriptorOnlyAdvertisesImplementedCapabilities|HandleGetSessionProjectionRunningCodexSessionWithinBudget|HandleGetSessionProjectionRunningCodexSessionTranscriptFallback)' -count=1 -timeout 180s
+PASS
+
+go test ./... -count=1 -timeout 300s
+PASS (all Go packages)
+
+Phase 5 authorization validator, boundary validator and iOS source audit
+PASS
+
+Release deployment regression (2026-08-29)
+
+./scripts/build-unsigned-release.sh
+PASS (** BUILD SUCCEEDED **)
+runtime: cordcode-bridge-runtime 0.1.0, commit ca9c223e47df
+
+Release coverage install
+PASS
+application: /Applications/CordCodeLink.app
+runtime PID: 41727
+listener: PID 41727, TCP *:8777
+prior application preserved at: /tmp/cordcode-install.0A529m/CordCodeLink.app
+
+Authenticated management checks after install
+PASS
+runtime status: ready
+codex-remote phase: ready
+codex-remote online: true
+observation: 51.8 seconds uptime; stream_bound/restored once; no stream_lost,
+2-second death, stale-stream loop or reconnect storm after binding
+
+Exec-plan final internal audit
+PASS (87/87 done; all required proof present; 3 justified n/a; queue hash
+65b2188455ba; completion report current)

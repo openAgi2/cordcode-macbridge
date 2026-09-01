@@ -140,6 +140,29 @@ func (h *Handlers) handleGetSessionProjectionWindow(conn Connection, msg WireMes
 		h.startProjectionLiveRelay(params.SessionID, conn, msg.BackendID, agent, params.Directory)
 	}
 
+	// R11b delivery-mode registry: a connection's FIRST window RPC registers it as
+	// a window-mode consumer of this (backend, session); structural commits route
+	// per-connection from here on. Full-projection connections stay on the default.
+	h.eventPublisher.SetConnProjectionDeliveryMode(conn, msg.BackendID, params.SessionID, ProjectionDeliveryWindow)
+
+	// R11a/R11d: bounded producer hydration + honest hasOlder fact.
+	hasOlderUpstream := h.producerHasOlderUpstreamFact(msg.BackendID, params.SessionID)
+	if params.Direction == projectionWindowDirectionOlder {
+		hydrated, hydrateErr := h.hydrateOlderFromUpstream(conn, msg.BackendID, params.SessionID, params.Cursor, agent)
+		if hydrateErr != nil {
+			wireErr := &WireError{Code: "projection.hydrate_failed", Message: hydrateErr.Error()}
+			if errors.Is(hydrateErr, ErrUpstreamCursorStale) {
+				// R11d typed recovery: the client discards its cursor chain and
+				// re-issues window_0 (shared cursor_stale contract).
+				retryable := true
+				wireErr = &WireError{Code: "cursor_stale", Message: hydrateErr.Error(), Retryable: &retryable}
+			}
+			conn.SendResult(msg.RequestID, nil, wireErr)
+			return
+		}
+		hasOlderUpstream = hydrated
+	}
+
 	// R4: admit at one kernel cut through the shared snapshot fence — the sliced window
 	// and any post-cut patches share the connection's ordered sink.
 	proj, admission, snapshotErr := h.eventPublisher.BeginProjectionSnapshot(
@@ -155,7 +178,7 @@ func (h *Handlers) handleGetSessionProjectionWindow(conn Connection, msg WireMes
 		return
 	}
 
-	response, sliceErr := sliceProjectionWindow(msg.BackendID, params.SessionID, bridgeEpoch, proj, params)
+	response, sliceErr := sliceProjectionWindowWithUpstream(msg.BackendID, params.SessionID, bridgeEpoch, proj, params, hasOlderUpstream)
 	if sliceErr != nil {
 		// Release the fence with a typed error result (R9: explicit typed failure, never a
 		// fabricated or empty success window; the fence must not dangle for the next pull).
@@ -174,7 +197,17 @@ func (h *Handlers) handleGetSessionProjectionWindow(conn Connection, msg WireMes
 		return
 	}
 
-	if err := h.eventPublisher.CompleteProjectionSnapshot(conn, admission, msg.RequestID, response); err != nil {
+	// turn_detail_lazy_v1 rule 3/4 bookkeeping rides the SAME completion
+	// transaction (audit P0-2): the held-turn set registers inside the fence
+	// release, before the response can race a concurrent detail commit on
+	// another connection — a post-hoc registration window would route this
+	// connection a no-op revision patch and permanently strand the detail
+	// behind the stale response. Completion failure rolls the set back.
+	turnIDs := make([]string, 0, len(response.Turns))
+	for _, turn := range response.Turns {
+		turnIDs = append(turnIDs, turn.TurnID)
+	}
+	if err := h.eventPublisher.CompleteProjectionSnapshotWithHeldTurns(conn, admission, msg.RequestID, response, turnIDs); err != nil {
 		slog.Warn("go-bridge: projection window response enqueue failed", "requestId", msg.RequestID, "error", err)
 	}
 }
