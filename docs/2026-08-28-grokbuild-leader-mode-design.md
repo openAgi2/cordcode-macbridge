@@ -31,6 +31,13 @@
   本设计覆盖
   "Mac 端开关 + 官方配置写入 + 状态可视化 + 观察通道自动升级 + 两处受控 Go 改动"；
   follower 交互升级是后续另案。
+- **2026-09-02 漂移复核（re-pin）**：两仓 main 前进（MacBridge `2bb415b`，+123 commit
+  codex-remote 线；grok-build `bc7f02e`，+1 monorepo sync）后逐项核对：**设计方向、
+  D-G1/D-G2 语义、Phase 0 门全部不变，无需重新评审；本文仅重灌来源 pin 与漂移行号
+  （§0–§11 语义与 §12–§22 评审记录未改动）**。上游同步后 grok 实际安装版与源码 pin 的
+  版本差距可能进一步扩大——**Phase 0 第 1 步（实际安装版 grok 版本与 flag/config key
+  核对，评审时实测 1.0.12 / 源码 pin 1.0.10）重要性上升**；有利变化：chat 互斥已抽为
+  可单测函数（§2.1-5）。
 - 背景裁决：2026-08-28 跨仓源码评审确认，Grok Build 官方架构下通往 codex-web 式
   "共享会话 server 实时接力"的唯一有效路径是 leader 模式；workspace daemon 不承载对话、
   code.grok.com 是与本地初衷无关的云端滞后镜像、`grok agent serve` 单活跃客户端。
@@ -46,23 +53,17 @@
 ```text
 仓库路径=/Users/jacklee/Projects/cordcode-macbridge
 分支=main
-提交=032fdd8105ce41d4e41063922eb8eae39aaed0e5
-未提交状态=未跟踪（均为本轮设计/评审过程新增文档，逐项列出）：
-  docs/2026-08-28-grokbuild-leader-mode-design.md
-  docs/2026-08-28-grokbuild-leader-mode-design-review.md
-  docs/2026-08-28-grokbuild-leader-mode-design-review-r2.md
-  docs/2026-08-28-grokbuild-leader-mode-design-review-r3.md
-  docs/2026-08-28-grokbuild-leader-mode-design-review-r4.md
-  docs/2026-08-29-grokbuild-leader-mode-design-review-r5.md
-  docs/2026-08-29-grokbuild-leader-mode-design-review-r6.md
-  docs/2026-08-29-grokbuild-leader-mode-design-review-r7.md
-  docs/2026-08-29-grokbuild-leader-mode-design-review-r8.md
-  docs/2026-08-29-grokbuild-leader-mode-design-review-r9.md
-  docs/2026-08-29-grokbuild-leader-mode-design-review-r10.md
+提交=2bb415b399e41fe688a4b898a8457d28cda0afd9（2026-09-02 漂移重灌时复核；
+十轮评审 pin 为 032fdd8105ce41d4e41063922eb8eae39aaed0e5，经 codex-remote 线
+123 commit 合并前进，设计核心资产零改动、少数锚点行号漂移，已逐项重锚）
+未提交状态=复核时工作树干净；设计稿与 r1–r10 评审报告已随 d3980ef 提交入库，
+本次漂移重灌编辑为唯一未提交变更
 任务预期分支=main
 配套仓库路径=/Users/jacklee/Projects/grok-build
 配套分支=main
-配套提交=9684fa3cdbf2995e30ea8b9b637f1db008f144fc
+配套提交=bc7f02eddd3d84085849dc19ed216f11c23b0571（漂移重灌时复核；十轮评审
+pin 为 9684fa3cdbf2995e30ea8b9b637f1db008f144fc，前进 1 个 monorepo sync commit，
+核心语义全部存活、仅行号漂移，已逐项重锚）
 配套未提交状态=干净
 预期产品特性=MacBridge 工作站 grok build 行内「Leader 模式」开关（当前未实现）
 ```
@@ -142,7 +143,7 @@ Toggle、文案、诊断做完，把"配置写入是否真的让官方 TUI 变 l
       TUI，核对 INFO 行
       `pager TUI leader mode resolved` 的字段：`use_leader=true`、`policy_disable_reason`
       无、`leader_disabled_by_sandbox=false`（日志通道 `debug_log.rs:8,81-82,414-421`，
-      默认 DEBUG 级；字段定义 `app/mod.rs:717-726`）；
+      默认 DEBUG 级；字段定义 `app/mod.rs:680-689`）；
    b. `grok inspect --json` **仅用于证明参与层路径**（config_sources 含 user 层；
       `inspect/mod.rs:55-82,265-290,1067-1175`——它只输出 config_sources 与 warnings，
       **不输出 effective 值**，不得当作生效证据）；
@@ -302,15 +303,19 @@ binding、协议翻译、capability 组织——在本设计中**不是待实施
    eligibility → **effective 分层配置**（见第 2 条）→ cli-chat-proxy
    `RemoteSettings.leader_mode`（服务器推荐，仅本地未设置时生效）→ 默认 `false`；**随后**
    `requested_confinement`（sandbox/confinement profile）对已解析出的 leader 结果做**最终
-   veto**（`xai-grok-pager/src/app/mod.rs:431-481`，precedence 注释 :433-441 + veto :470）。
+   veto**（`xai-grok-pager/src/app/mod.rs:394-437`，precedence 注释 :394-398 +
+   `requested_confinement` veto 含于同段）。
    confinement veto 不是 eligibility 的一部分——两者位置不同，诊断"开了开关但 leader
    不生效"时必须分别排查。
-   - flag 定义与默认取配置的说明：`xai-grok-pager/src/app/cli.rs:296-303`；
+   - flag 定义与默认取配置的说明：`xai-grok-pager/src/app/cli.rs:290-294`
+     （leader/no_leader 定义；`--no-leader` 引用点 :1187）；
    - `--leader-socket` 可覆盖默认 socket 路径（仅影响 grok 自身进程，且就是转为
-     `GROK_LEADER_SOCKET` env，`pager-bin/src/main.rs:2007-2009`）：`cli.rs:438-445`；
-   - config 解析函数：`xai-grok-shell/src/util/config/mcp.rs:1876-1891`（未设置默认
-     false，默认值测试在 `mcp.rs:2230-2253`，官方 fixture 含 canonical true/false 形态
-     `mcp.rs:2256-2273`）；
+     `GROK_LEADER_SOCKET` env，`pager-bin/src/main.rs:2007-2009`）：`cli.rs:433`
+     （`leader_socket` 字段；flag 字符串引用点 :1265）；
+   - config 解析函数：`xai-grok-shell/src/util/config/mcp.rs:1841-1861`（重构为
+     `use_leader_from_toml_opt` / `use_leader_from_toml` 两函数，未设置默认
+     false 不变；默认值测试在 `mcp.rs:2199-2223`，官方 fixture 含 canonical true/false
+     形态 `mcp.rs:2177-2196`）；
    - 服务器推荐 fallback：`xai-grok-config-types/src/lib.rs:448-450`。
 2. **配置分层事实**：官方 `ConfigLayers`（`xai-grok-config/src/config_layers.rs:20-75`）
    按"lowest→highest priority"逐层 deep-merge（`config_layers.rs:177-197`）：
@@ -327,7 +332,7 @@ binding、协议翻译、capability 组织——在本设计中**不是待实施
      语义变化）。managed 层**不是**原因（被 user 覆盖）。项目级 `.grok/config.toml`
      不影响该键。
    - TUI 实际使用 global effective config 而非 MCP 专用加载器：
-     `xai-grok-pager/src/app/mod.rs:431-481,665-716`。
+     `xai-grok-pager/src/app/mod.rs:394-437,680-689`。
 3. **leader 进程模型与 observer 生命周期（现状事实；D-G2 实施后行为改变，见 §3.5.2）**：
    `connect_or_spawn`——第一个 leader 模式客户端若无 live leader 则选出/拉起 leader
    （flock 单例），自己作为 follower 附着；leader 内 IPC server 做会话路由与 ownership
@@ -352,7 +357,10 @@ binding、协议翻译、capability 组织——在本设计中**不是待实施
    macbridge observer 收到但明确不答（`leader_subscriber.go:319-334`）——若其他客户端全部
    关闭，interaction 可能长期无人应答、turn 长期等待（§6-6）。
 5. **chat 模式冲突**：`--chat` 与 leader 模式互斥，grok 启动时直接报错并提示 `--no-leader`
-   或关闭配置（`xai-grok-pager/src/app/session_startup.rs:282` 起）。
+   或关闭配置（`xai-grok-pager/src/app/session_startup.rs:280-286`；上游 monorepo 同步
+   （bc7f02e）已将其抽为 `CHAT_MODE_LEADER_CONFLICT` 常量 + 可独立单测的
+   `chat_mode_conflicts_with_leader` 函数——对该冲突的官方语义更有把握，Phase 0 负例
+   可直接对照常量文案）。
 6. **版本契约**：macbridge 现行门槛 grok ≥ 0.2.93（`agent/grokbuild/diagnostics.go:97-105`）；
    `--leader` / `--no-leader` / `--leader-socket` 三 flag 已记录于
    [2026-07-12-grok-cli-compatibility-evidence.md](2026-07-12-grok-cli-compatibility-evidence.md)；
@@ -361,7 +369,7 @@ binding、协议翻译、capability 组织——在本设计中**不是待实施
    症状 = 开关打开但"未检测到 socket"提示永不转变（fail visible，处置见 §3.4/§11），
    不得加 fallback 伪装生效。
 7. **官方自身的配置写入串行化**：官方 `save_config` 持有**进程级** `SAVE_LOCK`
-   （`xai-grok-shell/src/util/config/persist.rs:7-13,91-95,206-216`）串行化同进程内的读改写。
+   （`xai-grok-shell/src/util/config/persist.rs:11,103,219`）串行化同进程内的读改写。
    它不能协调 CordCode 这个外部进程，但说明官方写入侧存在串行化竞争者——CordCode 的
    并发保护按 §3.3-7 的 best-effort 语义设计，不承诺绝对互斥。
 8. **官方日志与 effective 证据通道（r3-B2 核实，r4 补 append 事实）**：grok 支持单文件
@@ -370,7 +378,7 @@ binding、协议翻译、capability 组织——在本设计中**不是待实施
    `appender.rs:13-25`；`--debug-file` flag 等效设置 `GROK_DEBUG_LOG=<path>`，
    `pager-bin/src/main.rs:2010-2015`）。TUI 启动时输出 INFO 行 **`pager TUI leader mode
    resolved`**，字段含 `use_leader`、`policy_disable_reason`、`sandbox_profile`、
-   `leader_disabled_by_sandbox`（`xai-grok-pager/src/app/mod.rs:717-726`）——这是 pin 源码
+   `leader_disabled_by_sandbox`（`xai-grok-pager/src/app/mod.rs:680-689`）——这是 pin 源码
    中**可观察的最终解析结果**，是 Phase 0 第 2 步的 effective 值证据；因 append 语义，
    每次启动必须用独立文件或按 PID/时间窗取行（§0.2）。`grok inspect` 只输出
    `config_sources`（层 role/path）与 warnings（`inspect/mod.rs:55-82,265-290,1067-1175`），
@@ -542,7 +550,7 @@ manager，单实例，避免多窗口竞态）。
      | 形态 | 样本 | 分级 |
      | --- | --- | --- |
      | 真实安装样本：普通 `[cli]`（installer/auto_update/channel）、无 `use_leader`、0644、LF、558B、SHA-256 `c78c74d2b63b801c6f591c291a5df2425fc83d7edd7c5d82f928b29b4d8ea464` | 本机 `~/.grok/config.toml`（r2/r3/r4 评审 + 设计方多轮核实一致） | **真实** |
-     | canonical `true` / `false` / absent 解析行为 | 官方 fixture `mcp.rs:2208-2293` | **官方 fixture**（契约证据，非现场样本） |
+     | canonical `true` / `false` / absent 解析行为 | 官方 fixture `mcp.rs:2177-2265` | **官方 fixture**（契约证据，非现场样本） |
      | CRLF、节头尾随注释、行内注释（T12–T14） | 自造输入 | **synthetic**：仅冻结实现行为，不宣称现场支持 |
      | dotted / quoted / inline table 等价形态（T15） | 自造输入（语义归一行为另有官方 deep-merge 源码佐证） | **synthetic** |
      | multiline string/array 内伪 token、未闭合结构（T27–T30，r4 新增） | 自造输入——验证的是仓内 locator 的保守行为，synthetic 在此正合适 | **synthetic** |
@@ -687,9 +695,9 @@ LeaderSubscriber 竞争单活连接"，而是**新增一条会扰动 leader clie
   客户端 + observer）离开后即可正常退出；不再按 session 无界累积。
 - **主动取消与 source 断开分流（r5-B1，阻断级修正）**：现有 defer
   （`handlers_relay.go:225-243`）在 `turnArmed` 时无条件 `sendSessionEvent`，而该事件
-  **并非只发给在线客户端**——`handlers.go:2923-2935` 走统一 `publishEvent`（`Offline:
-  IsDurableMilestone`），`event_publisher.go:782-831` 中 timeline event 在解析目标连接
-  **之前**先进入 Projection Kernel，`projection_reducer.go:1222-1245` 把 `turn_aborted`
+  **并非只发给在线客户端**——`handlers.go:3035,3063` 走统一 `publishEvent`（`Offline:
+  IsDurableMilestone`），`event_publisher.go:1059-1072` 中 timeline event 在解析目标连接
+  **之前**先进入 Projection Kernel，`projection_reducer.go:1326-1328` 把 `turn_aborted`
   持久化为 aborted 终态。"当前无订阅者"只意味着没有在线接收者，**不意味着无副作用**。
   因此 D-G2 必须在 `handlers_relay.go` 内维护取消原因标志（如 `selfCancelled`，触发
   cancel 前置位）：**主动无订阅取消 → defer 不合成 `turn_aborted(leader_disconnect)`**
@@ -719,7 +727,7 @@ LeaderSubscriber 竞争单活连接"，而是**新增一条会扰动 leader clie
      布尔只证明"过去调用过一次 markRunning"，不能证明 registry 当前 running 仍属于本
      relay（正常 terminal 后 grace 到期的 defer 会把已正确的 idle 覆盖成 unknown；
      其他路径的较新更新也会被过期 defer 覆盖）。改为仿现成先例 `agentRelayGen`
-     （`handlers_relay.go:2684-2707`，relayEvents 的所有权 token/CAS）：
+     （`handlers_relay.go:2687`，relayEvents `:2679` 起的所有权 token/CAS）：
      - `types.go`：registry 维护**全局单调 generation 计数器**，`put/putRaw/markRunning/
        markIdle/markUnknown` 每次变更都给条目盖上**全局唯一**的新 gen（全局而非每条目
        自增，保证任何替换/重建后旧 token 必然失配）；
@@ -740,7 +748,7 @@ LeaderSubscriber 竞争单活连接"，而是**新增一条会扰动 leader clie
        `applyListRuntimeState` 本来就输出 `runtimeState="unknown"`（F-8），删除即达到
        "无徽标"且**不留下永久条目**（否则把 D-G2 要消除的按 session 无界累积从
        goroutine 转移成 registry map 累积——`cleanupIdleSessions` 只清 `state==idle`
-       （`handlers.go:857-883`），unknown 条目永不回收）；
+       （`handlers.go:929`），unknown 条目永不回收）；
      - **真实会话行（`session != nil`）→ 转 `sessionStateUnknown`**，保留句柄；该行
        生命周期由 session open/close（deleteIfSame 等）管理，不属 D-G2 回收范围；
   4. **unknown 态消费者安全（r7-B1 第 3 条 + r8-B2 修正）**：registry **并非二态**——
@@ -754,16 +762,17 @@ LeaderSubscriber 竞争单活连接"，而是**新增一条会扰动 leader clie
      active；把 `!isIdle` 当 active 使用的全部六处消费点替换为 `isKnownActive`：
      `handlers_relay.go:324`（codex Live 判定）、`:449,457`（codex hardCap 的
      process_death abort 合成 + broadcastIdleState）、`:905`（claude TTL
-     broadcastIdleState）、`:2717-2742`（relayEvents channel-close 合成
-     **`turn_completed(reason=events_channel_closed)`**——r8-M1 修正：v8 误写为
-     aborted）、`:2859-2872`（relayEvents idleTimer 自动合成 **`turn_completed`**）。
+     broadcastIdleState）、`:2728`（relayEvents channel-close 合成
+     **`turn_completed(reason=events_channel_closed)`**，事件体 `:2737`——r8-M1 修正：
+     v8 误写为 aborted）、`:2863-2864`（relayEvents idleTimer 自动合成
+     **`turn_completed`**）。
      unknown 态下从"自动收口"降为"不动作"——unknown 不得触发任何 running-only
      自动终态或 idle 广播。六处全部位于 `handlers_relay.go`，**无需触碰 `handlers.go`**；
   5. **wire/持久化语义**：release（删除或转 unknown）只改 registry——不产生任何 wire
      event、不写 durable 终态；catalog 下一次 list 输出 unknown → 客户端不渲染徽标，
      即既有 **F-8"不知道就不亮灯"语义**（owner 2026-08-15 拍板，
      `handlers_opencode.go:273-277`）在 Grok 的自然延伸。`onStateChange` 消费方
-     （`handlers.go:264-273`）对 unknown 态安全：只做 Claude running map 无条件失效；
+     （`handlers.go:289-298`）对 unknown 态安全：只做 Claude running map 无条件失效；
      newState≠idle 不触发 `completeBridgeTurn`（主动取消本就不应结算 bridge turn）；
   6. **真值重建**：iOS 重开后新 relay 若见 turn 仍在跑（首个内容事件）→ claimRunning
      重建 running 徽标；若 turn 在无观察期间已完成，冷拉显示真实历史、registry 无该
@@ -773,11 +782,11 @@ LeaderSubscriber 竞争单活连接"，而是**新增一条会扰动 leader clie
   7. **catalog 快照穿透（r8-B1，裁决：现成 fence 方案）**：v8 声称"catalog 下一次 list
      输出 unknown"**不成立**——Grok catalog 的 builder 在富化时把当时 registry 状态写进
      wire map（`handlers_grok_catalog.go:75-81`），缓存的是**已富化快照**，page-0 走
-     `FetchOrReuse` 不会重新 overlay registry（`catalog_wire_snapshot.go:232-305`）；快照
+     `FetchOrReuse` 不会重新 overlay registry（`catalog_wire_snapshot.go:232-318`）；快照
      TTL **10 分钟**（`catalog_cursor_v2.go:31`）；runtime overlay 被
      `listSemanticFingerprint` 排除在语义指纹外（`catalog_native_membership.go:78-99`，
      指纹只含 id/updatedAt/title/dir/project）；registry `onStateChange` 只失效 Claude
-     running map，不失效 Grok catalog wire cache（`handlers.go:264-273`）。只改 registry
+     running map，不失效 Grok catalog wire cache（`handlers.go:289-298`）。只改 registry
      会双向陈旧（缓存 running → 取消后继续亮 ≤10min；缓存 unknown → reclaim 后继续无
      徽标 ≤10min），与第 12 行验收承诺冲突，**不接受"10 分钟内最终一致"**。裁决采用
      **最小范围方案**：relay 在 Grok registry 的**四类有效状态变化成功后**调用现成的
@@ -785,8 +794,8 @@ LeaderSubscriber 竞争单活连接"，而是**新增一条会扰动 leader clie
      **① claim running；② 正常 terminal → idle；③ 真 source 断开 → idle（F-7 defer 的
      `markIdle`，`handlers_relay.go:225-243`——v9 遗漏该分支：armed turn 真断开同样改
      registry，无 fence 时已缓存的 running 快照可继续复用 ≤10 分钟）；④ self-cancel
-     release → unknown/delete**（`catalog_wire_snapshot.go:
-     200-221`：同锁推进 backend 级 generation、删除已提交 scope、完成并丢弃 in-flight
+     release → unknown/delete**（`catalog_wire_snapshot.go:202`：同锁推进 backend 级
+     generation、删除已提交 scope、完成并丢弃 in-flight
      构建）→ 下一次 page-0 重建并按当前 registry 富化。**已披露代价（r8 要求）**：fence
      使该 backend 存量分页 cursor 的 page-N `Peek` 返回 nil → **`cursor_stale`**，客户端
      需回到 page-0 重取；fence 仅由 Grok 状态变化触发、频率 = 外部 turn 生命周期节奏，
@@ -808,7 +817,7 @@ LeaderSubscriber 竞争单活连接"，而是**新增一条会扰动 leader clie
   不改 `leader_subscriber.go`、不改能力声明、**不改 catalog/enrich 代码**（unknown
   消费走 `applyListRuntimeState` 既有分支、fence 走现成 `FenceBackend`，均无需改动）、
   无需改 `handlers.go`（六处消费点均在 handlers_relay.go；cleanupIdleSessions 为
-  `handlers.go:857-883`，不触碰）。
+  `handlers.go:929`，不触碰）。
 - **测试**：G5–G8（§7.1 Go 表，含 registry 定向测试）。
 - **级别**：D3；与 D-G1 分开提交。二者均为本设计新增，但行为判据独立：D-G1 = 建立失败
   恢复；D-G2 = 无订阅回收。
@@ -1198,9 +1207,9 @@ runtime 日志 `~/Library/Application Support/CordCode Link/logs/go-bridge.log`�
 - 官方配置分层与解析链：`xai-grok-config/src/config_layers.rs:20-75,177-197`（层定义与
   merge 方向：user 覆盖 managed；requirements/MDM 覆盖 user；env overlay allowlist 排除
   `cli`，`:44-48`；无 project slot）、`xai-grok-shell/src/config/tests.rs:3040-3043`、
-  `xai-grok-pager/src/app/mod.rs:431-481`（precedence 注释 + `requested_confinement`
-  最终 veto）、`mod.rs:665-716`（TUI 走 global effective config）
-- 官方 leader 解析日志（effective 值证据）：`xai-grok-pager/src/app/mod.rs:717-726`
+  `xai-grok-pager/src/app/mod.rs:394-437`（precedence 注释 + `requested_confinement`
+  最终 veto + TUI 走 global effective config 的解析链）
+- 官方 leader 解析日志（effective 值证据）：`xai-grok-pager/src/app/mod.rs:680-689`
   （INFO `pager TUI leader mode resolved`：`use_leader` / `policy_disable_reason` /
   `sandbox_profile` / `leader_disabled_by_sandbox`）；日志通道
   `xai-grok-telemetry/src/debug_log.rs:8,81-82,365,414-421`（`GROK_LOG_FILE` 单文件、
@@ -1208,11 +1217,12 @@ runtime 日志 `~/Library/Application Support/CordCode Link/logs/go-bridge.log`�
   flag → `GROK_DEBUG_LOG`：`pager-bin/src/main.rs:2010-2015`
 - `grok inspect` 的边界（只列层来源，不输出 effective 值）：`xai-grok-shell/src/inspect/mod.rs:55-82,265-290,1067-1175`
 - requirements 层（自由 TOML、可覆盖 `[cli]`、负例文件）：`xai-grok-config/src/validation.rs:68,78-79,117-164`
-- 官方配置写入串行化：`xai-grok-shell/src/util/config/persist.rs:7-13,91-95,206-216`（进程级 SAVE_LOCK）
+- 官方配置写入串行化：`xai-grok-shell/src/util/config/persist.rs:11,103,219`（进程级 SAVE_LOCK）
 - 官方 user config 可含凭据：`xai-grok-pager/docs/user-guide/05-configuration.md:275,282-287`
 - `--leader-socket` flag → env 转换：`pager-bin/src/main.rs:2007-2009`
-- 官方 flag / config：`xai-grok-pager/src/app/cli.rs:296-303,438-445`、
-  `xai-grok-shell/src/util/config/mcp.rs:1876-1891,2208-2293`
+- 官方 flag / config：`xai-grok-pager/src/app/cli.rs:290-294,433`（leader/no_leader 定义
+  与 leader_socket 字段；`--no-leader` 引用点 :1187、`--leader-socket` :1265）、
+  `xai-grok-shell/src/util/config/mcp.rs:1841-1861,2177-2265`
 - 官方服务器推荐：`xai-grok-config-types/src/lib.rs:448-450`
 - confinement veto 判定：`xai-grok-sandbox/src/lib.rs:113-133`（requested_confinement_profile）
 - macbridge 观察路径与只读纪律：`agent/grokbuild/grokbuild.go:143-198`（`forward` 闭包
@@ -1220,10 +1230,10 @@ runtime 日志 `~/Library/Application Support/CordCode Link/logs/go-bridge.log`�
 - macbridge relay 生命周期：`go-bridge/handlers_relay.go:154-186`（`grok-leader:<id>` key
   与 relayRunning 门）、`:206-250`（grok observer 无 subscriber 取消路径，D-G2 改动点）、
   `:225-243`（F-7 defer）、`:365-374`（codex `HasSessionSubscriber` 先例，D-G2 参照）
-- D-G2 取消分流的事实依据（r5-B1）：`go-bridge/handlers.go:2923-2935`（sendSessionEvent →
-  统一 publishEvent，`Offline: IsDurableMilestone`）、`go-bridge/event_publisher.go:782-831`
+- D-G2 取消分流的事实依据（r5-B1）：`go-bridge/handlers.go:3035,3063`（sendSessionEvent →
+  统一 publishEvent，`Offline: IsDurableMilestone`）、`go-bridge/event_publisher.go:1059-1072`
   （timeline event 先进 Projection Kernel 再解析目标连接）、
-  `go-bridge/projection_reducer.go:1222-1245`（turn_aborted 持久化为 aborted 终态）
+  `go-bridge/projection_reducer.go:1326-1328`（turn_aborted 持久化为 aborted 终态）
 - D-G2 registry 收口的事实依据（r6-B1，逐项独立核实）：`go-bridge/types.go:226-230,243-377`
   （registry 实为 idle/running/closing 三态；条目可携带真实 AgentSession，直接删除会丢句柄）、
   `go-bridge/handlers_relay.go:266-280,290-307`（relay markRunning 与正常终态/defer
@@ -1231,27 +1241,28 @@ runtime 日志 `~/Library/Application Support/CordCode Link/logs/go-bridge.log`�
   `go-bridge/handlers_opencode.go:220-235`（getRunningMap 对非 RunningSessionLister 返回
   nil——grokbuild 未实现该接口）、`:238-297`（enrichSessionStatesForList never mutates
   registry；applyListRuntimeState 的 F-8"不知道就不亮灯"：无记录 → `runtimeState=
-  "unknown"`，客户端不渲染徽标）、`go-bridge/handlers.go:264-273`（onStateChange 消费方
+  "unknown"`，客户端不渲染徽标）、`go-bridge/handlers.go:289-298`（onStateChange 消费方
   对 unknown 态安全：仅无条件失效 Claude running map，newState=idle 才 completeBridgeTurn）
 - D-G2 claim 所有权与 unknown 态消费者的事实依据（r7-B1；r8-M1/B2 修正后）：
   `go-bridge/types.go:226-230`（registry 实为 idle/running/**closing** 三态——closing
   无生产写点但在语义域内）、`types.go:373-377`（isIdle = !ok || state==idle →
   unknown/closing 会被判 "active"）、`go-bridge/types.go:321-335`（markRunning 对无条目
-  session 创建 session=nil 的 passive synthetic row）、`go-bridge/handlers.go:857-883`
+  session 创建 session=nil 的 passive synthetic row）、`go-bridge/handlers.go:929`
   （cleanupIdleSessions 只清 state==idle → unknown 条目永不回收）、
-  `go-bridge/handlers_relay.go:2684-2707`（agentRelayGen 所有权 token/CAS 先例）、
-  `!isIdle` 全部六处消费点 `handlers_relay.go:324,449,457,905,2717-2742,2859-2872`
+  `go-bridge/handlers_relay.go:2687`（agentRelayGen 所有权 token/CAS 先例；relayEvents
+  定义 :2679）、
+  `!isIdle` 全部六处消费点 `handlers_relay.go:324,449,457,905,2728,2864`
   （relayEvents 两处均合成 durable `turn_completed`——channel-close 带
   reason=events_channel_closed；v8 曾误写为 aborted，r8-M1 修正）
 - D-G2 catalog 快照穿透的事实依据（r8-B1，逐项独立核实）：
   `go-bridge/handlers_grok_catalog.go:75-81`（富化发生在 builder 内，registry 状态被
-  写进 wire map）、`go-bridge/catalog_wire_snapshot.go:232-305`（FetchOrReuse 缓存已
-  富化 wire maps，page-0 不重新 overlay registry）、`:200-221`（**FenceBackend**：
+  写进 wire map）、`go-bridge/catalog_wire_snapshot.go:232-318`（FetchOrReuse 缓存已
+  富化 wire maps，page-0 不重新 overlay registry）、`:202`（**FenceBackend**：
   同锁推进 backend 级 generation、删除已提交 scope、完成并丢弃 in-flight 构建）、
   `go-bridge/catalog_cursor_v2.go:31`（快照 TTL = 10 分钟）、
   `go-bridge/catalog_native_membership.go:78-99`（listSemanticFingerprint 只含
   id/updatedAt/title/dir/project，runtime overlay 被排除在语义指纹外）、
-  `go-bridge/handlers.go:264-273`（onStateChange 只失效 Claude running map，不失效
+  `go-bridge/handlers.go:289-298`（onStateChange 只失效 Claude running map，不失效
   Grok catalog wire cache）
 - macbridge UI 槽位先例：`MacBridge/MacBridge/Views/WorkspaceView.swift:496,506-513,528-545`
 - TOML 依赖：https://github.com/mattt/swift-toml（tag 2.0.0 = commit `827506c90475e82d5a7f191f950fb3025cbdc0d6`；
