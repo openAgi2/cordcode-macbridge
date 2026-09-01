@@ -7,6 +7,12 @@
 > 2026-08-17 按当前树校正：默认 drivers 含 `deepseek`/`dsh-web`；补 SSV2 投影、
 > 目录 catalog、Grok `session/list`、dsh-web 官方 API 转发模型。设计细节仍以
 > `docs/2026-08-16-dsh-web-backend-design.md` 为准，本文只记现行结构。
+>
+> 2026-09-02 按当前树校正：backend 名册扩到 9 个注册 backend（新增
+> `codex-web` / `opencode-web` / `codex-remote`，见各自设计文档）；根目录
+> `config/` 已不存在；默认 drivers 按「产品 lineup vs runtime fallback」双真值
+> 记录；SSV2 冷加载家族、relay 空闲/turn 边界开关、capability 表与 turn detail
+> 懒加载（2026-08-30 终案）同步到现行源码。
 
 ## 边界
 
@@ -20,19 +26,31 @@ iPhone / iPad
 cordcode-bridge-runtime
   ├─ protocol/auth/pairing/relay/projection: go-bridge/
   ├─ agent interfaces: core/
-  ├─ agent implementations: agent/{claudecode,codex,grokbuild,opencode,dsh,dsh-web}/
-  └─ local configuration: config/
+  ├─ transcript page index: transcriptindex/
+  ├─ session pin store: pinstore/
+  └─ agent implementations: agent/{claudecode,codex,codex-remote,codex-web,grokbuild,opencode,opencode-web,dsh,dsh-web}/
 ```
 
-`core/`、`config/`、`agent/` 已迁入本仓库，不再依赖原一体仓库或本机绝对路径
+`core/`、`agent/`、`transcriptindex/` 已迁入本仓库，不再依赖原一体仓库或本机绝对路径
 `replace`。wire 协议适配留在 `go-bridge/`，agent 的进程、历史、模型和能力实现放在
-`agent/` 与 `core/`。
+`agent/` 与 `core/`。根目录已无 `config/` 目录（2026-09-02 校正）。`agent/codex-appserver/`
+只是 app-server JSON-RPC 客户端库（无 `RegisterAgent`），不是 backend；
+`agent/providerseedtest/` 是测试辅助包。
 
-产品 runtime 默认 `-drivers` 为
-`claude,opencode,codex,grokbuild,dsh-web`。flag 里的 id 与 Go 包名
-不完全相同：`claude` → `agent/claudecode`，`dsh-web` 包名是 `dshweb`、
-wire kind 是 `deepseek-web`。旧 `deepseek` → `agent/dsh` 仍可显式挂上，
-但默认不再注册（2026-08-17 产品入口退役，源码保留）。
+**默认 drivers 是双真值（2026-09-02 校正）：**
+
+- **产品 lineup**（`MacBridge/MacBridge/Services/RuntimeManager.swift` 默认传给
+  runtime 的 `-drivers`）：`claude,codex-web,codex-remote,grokbuild,dsh-web,opencode-web`。
+- **go-bridge fallback**（`go-bridge/main.go` `defaultDrivers`，无 Swift 传参时）：
+  `claude,codex,codex-web,grokbuild,dsh-web,opencode-web`。
+
+两者差异：产品 lineup 不含旧 `codex`（exec/app_server）与 `opencode`、`deepseek`；
+runtime fallback 仍含旧 `codex` 但不含 `codex-remote`。以产品实际传入为准排查。
+
+flag 里的 id 与 Go 包名/注册名不完全相同：`claude` → 注册名 `claudecode`，
+`deepseek` → 注册名 `dsh`（别名表在 `go-bridge/main.go`），其余同名注册；
+`dsh-web` 包名是 `dshweb`、wire kind 是 `deepseek-web`。旧 `deepseek` → `agent/dsh`
+源码保留、仍可显式挂上，但产品 lineup 已退役（2026-08-17）。
 
 ## 为什么不再使用旧 Node Unified Bridge
 
@@ -48,8 +66,8 @@ go-bridge 的边界来自旧实现暴露出的四类问题：
 - agent 数据面能力放进 `core/agent`；
 - wire、auth、pairing、relay adaptation 放进 `go-bridge/`；
 - 只有 OpenCode server 独有的 HTTP 语义保留 proxy；
-- DeepSeek Web 是官方 `dsh web` HTTP/WebSocket 的转发器 + bridge-v1 翻译器，
-  不发明模型名、标题或工作区归组；
+- DeepSeek Web、Codex Web、OpenCode Web、Codex Desktop 都是官方服务的
+  转发器 + bridge-v1 翻译器，不发明模型名、标题或工作区归组；
 - 真实路径失败时暴露错误，不增加假结果或 fallback backend。
 
 ## 三个网络面
@@ -89,6 +107,13 @@ agent read loop
   → go-bridge relay/broadcast loop
   → mutex-protected direct WebSocket 或 per-device relay queue
 ```
+
+publisher 在 ordering lock 内做两件事（`go-bridge/event_publisher.go`）：为事件打
+`perSessionSeq`/bridgeEpoch 时间戳，并经 `kernel.IngestLive` 摄入 SSV2 投影
+kernel——revision 只在 reducer 提交变更时前进（与 transport perSessionSeq 是两个
+序列）；live 路径的 patch flush 只在 `ProjectionIngestApplied` 时触发，NoChange
+（重复/空转）不 flush。catalog 控制面事件与 pre-reduced timeline 事件有意不进
+timeline；derived-legacy `question_asked` 永远不能成为第二个 projection writer。
 
 `EventResult{Done:true}` 和 `EventError` 是 turn 收口信号。映射层发送
 `turn_completed`/`error`，随后 session runtime state 回到 idle。中间 delta、tool 或
@@ -152,15 +177,25 @@ turn 完成时，在线订阅设备收到事件；未在线设备的通知写入
 
 > [!NOTE]
 > `relayEvents` 对会跨 turn 存活的 backend 不在 `turn_completed` / 空闲时退出：
-> `relaySurvivesTurnBoundary` 当前覆盖 `claude` / `claudecode` / `dsh-web`。
-> Claude 是长生命周期 CLI；dsh-web 是常驻 mux 绑定，下一轮审批/问答仍走同一
-> `Events()` 通道。`Close()` 必须关闭 `Events()`，否则下一轮 send 会新建 session
-> 对象而 `startRelayIfNotRunning` 空转，iOS 收不到后续审批。
-> 另：`disablesRelayIdleTimeout` 对 claude / claudecode / codex / opencode /
-> dsh-web 关闭 60s 空闲收口——dsh-web 审批等待期间 mux 不再吐 `text_delta`，
-> 空闲超时会把还在等权限的 turn 提前封口。
+> `relaySurvivesTurnBoundary` 当前覆盖 `claude` / `claudecode` / `dsh-web` /
+> `codex-web` / `codex-remote`。Claude 是长生命周期 CLI；dsh-web 是常驻 mux 绑定，
+> codex-web / codex-remote 是常驻官方连接（daemon 订阅 / Remote Control
+> controller），下一轮审批/问答仍走同一 `Events()` 通道。`Close()` 必须关闭
+> `Events()`，否则下一轮 send 会新建 session 对象而 `startRelayIfNotRunning`
+> 空转，iOS 收不到后续审批。
+> 另：`disablesRelayIdleTimeout` 对 claude / claudecode / codex / codex-web /
+> codex-remote / opencode / dsh-web / opencode-web 关闭 60s 空闲收口——dsh-web
+> 审批等待期间 mux 不再吐 `text_delta`，空闲超时会把还在等权限的 turn 提前封口；
+> opencode-web 同理（评审 M2-2，审批等待期无 text_delta）；codex-web 的官方 turn
+> 事件只发给仍订阅的 connection，idle timeout 拆掉观察连接会让 Mac Desktop 的
+> 后续 delta 在补订阅完成前被丢弃（owner 2026-08-22 阶段 A）。
 
-### Codex
+### Codex（`codex`，产品 lineup 已退役；runtime fallback 仍默认注册）
+
+> 2026-09-02 定位注记：产品 lineup 已不含 `codex`——iPhone 产品面由
+> `codex-web`（官方 Codex Web daemon）与 `codex-remote`（Codex Desktop /
+> Remote Control）承接。本节描述的 exec/app_server 双模式仅在显式挂载或
+> runtime fallback 下生效，是排查旧部署时的参考路径。
 
 支持两种模式：
 
@@ -195,6 +230,49 @@ ps aux | grep '[c]odex app-server'
 MacBridge Restart 只重启 Bridge runtime，不负责重启外部共享 Codex app-server。
 共享服务的启动归属和本机常驻约束见
 [BUILD_INSTALL_AND_RUNTIME.md](BUILD_INSTALL_AND_RUNTIME.md#codex-app-server-的启动归属)。
+
+### Codex Web（`codex-web` → `agent/codex-web`，产品 lineup 默认）
+
+官方 Codex Web 共享 daemon 的 JSON-RPC 客户端 backend。独立身份、独立注册
+（不覆盖、不别名到旧 `codex`——2026-08-24 事故红线：iOS 映射器把两个类型当未知
+类型跳过，曾导致两个后端同时从真机消失）。
+
+- **来源**：产品默认空 URL = 复用官方 daemon（managed start），失败可见，禁止回落
+  到 Desktop 无法连接的第二个 loopback app-server；显式 `-codex-web-app-server-url`
+  仅用于隔离测试。它与旧 `codex` 的 `-codex-app-server-url` 是不同键、不同回退语义，
+  绝不共用。
+- **事件模型**：共享 daemon 上的订阅连接收到同一官方 thread 的全量 turn/item
+  事件；Mac 官方客户端（默认配置 TUI）发起的外部 turn 实时旁观成立。kind
+  `codex-web`，`LiveEventBroadcast`，`requiresPollingForExternalTurns=false`。
+- **StaticCapabilities**：`external_turn_streaming`、
+  `usage-source: rollout-tail-experimental`（冷用量读官方 thread/read 返回的 rollout
+  尾部 token_count；官方提供冷用量 RPC 后退役）。
+- **结构化输入**：`StructuredUserInputProvider`（request adapter + 官方 v2
+  responder + canonical interaction producer 同开才宣告）。
+- **冷投影**：官方 app-server `thread/read(includeTurns)`（官方 identity，无
+  rollout 路径）。
+- 设计与证据：`docs/2026-08-21-codex-web-backend-design.md`（Phase 0 Gate 实证）。
+
+### Codex Desktop（`codex-remote` → `agent/codex-remote`，产品 lineup 默认）
+
+官方 Remote Control 链路的 backend，显示名 **Codex Desktop**（Mac App 与 iOS
+一致）：
+
+```text
+ChatGPT Desktop 私有 app-server
+  → OpenAI Remote Control relay
+  → 独立 enrollment 的 MacBridge controller
+  → 普通 app-server JSON-RPC 流
+```
+
+- 独立 controller enrollment：ChatGPT「电脑」页配对（device key + JWT，可独立
+  撤销），绝不修改 ChatGPT Desktop 本体；standalone app-server、fake relay、
+  rollout/JSONL tail、同账号 history polling 都不能替代这条链路。
+- kind `codex-remote`，`LiveEventBroadcast`，`requiresPollingForExternalTurns=false`。
+- 历史/turn 明细走官方分页远程 API；turn detail 懒加载能力见
+  [Session Projection（SSV2）](#session-projectionssv2) 一节。
+- 设计与阶段证据：`docs/2026-08-26-codex-remote-backend-implementation-plan.md`、
+  懒加载终案 `docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md`。
 
 ### Grok Build
 
@@ -321,7 +399,12 @@ shadow-tree 启动）子进程，协议是 SDK JSON-RPC 2.0 over stdio，不是�
 - 投影：pathless 家族，冷基线 = 官方 `session.history`，**不进** deepseek
   的 store-file 分支。live/kernel 会话以 kernel 为基线，重建只服务冷开。
 
-### OpenCode
+### OpenCode（`opencode`，产品 lineup 已退役；显式挂载仍可用）
+
+> 2026-09-02 定位注记：产品 lineup 已不含 `opencode`——iPhone 产品面由
+> `opencode-web`（官方 `opencode serve` Web API）承接。本节的 managed_local /
+> server source / proxy 混合路径描述的是该 legacy backend，显式 `-drivers` 挂载
+> 或旧部署排查时适用。
 
 OpenCode 不再隐式硬编码 `127.0.0.1:64667`。MacBridge 在 Swift 端解析出明确的
 **Server Source**（`managed_local` / `external_http` / `legacy_64667` /
@@ -367,6 +450,28 @@ MacBridge 仍为 OpenCode 管理本地 Basic Auth：`managed_local` 的运行态
 为了省事把所有读写重新塞回 HTTP proxy，也不要删除 server-side abort/create 语义后假装
 agent session 等价。
 
+### OpenCode Web（`opencode-web` → `agent/opencode-web`，产品 lineup 默认）
+
+官方 `opencode serve` Web API backend，与 legacy `opencode` 并行、独立身份。配置读
+自己的键（`opencode_web_url` / `opencode_web_user` / `opencode_web_pass`），**绝不
+复用** `opencode_url` 作为来源。
+
+- **事件模型**：`/global/event` SSE 是 server 级广播，覆盖每一个 session——包括
+  用户在 Mac web UI 上发起的 turn。单一 backend 实例的全局订阅者直播外部 turn：
+  kind `opencode-web`，`LiveEventBroadcast`，`requiresPollingForExternalTurns=false`，
+  StaticCapabilities `external_turn_streaming`。
+- **能力全部接口推导（负先于正）**：todos（`TodoProvider`）、
+  `structured_user_input_v1`（`UserInputResponder` + `StructuredUserInputProvider`）、
+  session mutation（`SessionRenamer`+`SessionArchiver`）、session delete
+  （`SessionDeleter`）、`permission_resolve`（`ToolAuthorizer`，审批经 SSE
+  `permission.asked` 浮出、按 §3.4 folding 应答）。legacy `question_reply` **故意
+  不宣告**——结构化问答只走 `resolve_user_input`。
+- **附件**：`AttachmentSupporter` 声明 image + file，都走官方 prompt file part
+  （`{type:"file", mime, filename?, url:"data:<mime>;base64,…"}`）。
+- **冷投影**：官方 `GET /session/:id/message` 重建（pathless）。
+- 设计与证据：`docs/2026-08-18-opencode-web-backend-design.md` 及其
+  source-first convergence / gate B 系列。
+
 ## 能力不是手写产品矩阵
 
 `go-bridge/agent_descriptor.go` 根据 `core/interfaces.go` 的可选接口推导 capability。
@@ -388,12 +493,13 @@ agent session 等价。
 | `session_delete` | `SessionDeleter` |
 | `session_pin` | `SessionPinner`（独立于 mutation；Codex/OpenCode/dsh-web 可只有 pin） |
 | `content_chunking` | Claude `StaticCapabilities`，配合 `fetch_content_chunk` |
-| `permission_resolve` | `ToolAuthorizer`；OpenCode/Codex 不宣告；dsh-web 宣告（`/api/respond`） |
+| `permission_resolve` | `ToolAuthorizer`；dsh-web（`/api/respond`）、opencode-web（SSE `permission.asked` + folding）宣告；OpenCode/Codex 不宣告 |
 | `todos` | `TodoProvider` |
 | `compression` | Codex `app_server` |
-| `question_reply` | Codex `app_server` 在 derive 里加；Claude / dsh-web 走 `StaticCapabilities` |
-| `structured_user_input_v1` | Codex `app_server`，或 `StructuredUserInputProvider`；dsh-web 也在 StaticCapabilities |
-| `external_turn_streaming` | 各 driver `StaticCapabilities`（Claude transcript / Codex file-relay / dsh-web mux） |
+| `question_reply` | Codex `app_server` 在 derive 里加；Claude / dsh-web 走 `StaticCapabilities`；opencode-web **故意不宣告**（结构化问答只走 `resolve_user_input`） |
+| `structured_user_input_v1` | Codex `app_server`，或 `StructuredUserInputProvider`（codex-web / opencode-web）；dsh-web 也在 StaticCapabilities |
+| `external_turn_streaming` | 各 driver `StaticCapabilities`（dsh-web mux / codex-web 共享 daemon 订阅 / opencode-web SSE 广播） |
+| `turn_detail_lazy_v1` / `turn_detail_chunks_v1` | 仅 codex-remote `StaticCapabilities`；门控 `session_turn_items` / `turn_output_chunk`（unified-bridge-protocol §11.7/§11.8），见 SSV2 一节 |
 | `supports_checkpoint` / `supports_commit_message` / `supports_pull_requests` | 对应 opt-in 接口；未实现则不宣告 |
 
 `session_sync_v2` 是 **连接级** capability（hello 里声明、hello_ack 回显），不是
@@ -458,6 +564,9 @@ running-session polling、session switch 之间的互斥与优先级。MacBridge
   external-turn polling。iOS 必须把它放进 SSV2 投影族；空 kernel 时先用官方
   history 播种，不得把 live 会话收成空基线。审批等待期无 text_delta，relay 不得
   因空闲超时封口。
+- **Codex Web / OpenCode Web / Codex Desktop**：同属官方服务端广播 backend
+  （`LiveEventBroadcast` + `requiresPollingForExternalTurns=false`），外部 turn
+  直播，不需要 external-turn polling；冷基线见 SSV2 家族表。
 
 ownership 的读写与 history apply 前复核均在 iOS `@MainActor` 边界内完成，并有定向
 交错测试覆盖（`RemoteRunningSessionTests.testClaudeCodeInterleave_*`）。MacBridge 的
@@ -473,17 +582,26 @@ Codex 产品路径多见 `item.completed` 整段落地；Grok ACP `agent_message
 协商到 `session_sync_v2` 的客户端以投影为消息页真相源：`get_session_projection`
 拉基线，`projection_patch` 推增量。kernel + reducer 在 `go-bridge/projection_*.go`。
 
-冷加载家族：
+冷加载家族（`backendSupportsProjectionHydrate`，当前覆盖全部注册 backend）：
 
 | 家族 | backend | 基线 |
 | --- | --- | --- |
-| transcript JSONL | claude / claudecode / Codex | `TranscriptLocator` + transcriptindex |
-| pathless HTTP/rich-history | opencode / grokbuild / deepseek / **dsh-web** | OpenCode HTTP、本地 grok/dsh 日志、或官方 `session.history` |
+| transcript JSONL | claude / claudecode / codex | `TranscriptLocator` + transcriptindex |
+| pathless 本地日志 | grokbuild / deepseek | 本地 grok/dsh 会话日志 |
+| pathless 官方 API | opencode（HTTP rich-history）/ **dsh-web** / **opencode-web** / **codex-web** / **codex-remote** | OpenCode HTTP；官方 `session.history`；官方 `GET /session/:id/message`；官方 `thread/read(includeTurns)`；官方分页远程历史 |
 
 规则：live/kernel 已有状态的会话以 kernel 为基线，file/HTTP 重建只服务冷开或脱活
 会话。forceCold 集合与 `backendSupportsProjectionHydrate` 必须同时列入新 backend，
 漏一处对应机制静默失效。dsh-web **不进** deepseek 的 store-file / live-only
 admission 回退（会话在官方服务端常驻，mux 即时到达）。
+
+**turn detail 懒加载（2026-08-30 终案）**：仅 codex-remote 的分页远程会话声明
+`turn_detail_lazy_v1`（§11.7，整回合原子 `replace_parts` 进 Kernel，已 deprecated）
+与 `turn_detail_chunks_v1`（§11.8 终案，增量分层加载：`session_turn_items` 首层 +
+`turn_output_chunk` blob 二级懒加载）。声明挂在 codex-remote descriptor 上而不是
+全局 echo——iOS「加载详细过程」入口以 descriptor capability 为门。两个 production
+gate（`core/turn_detail_lazy_gate.go` / `core/turn_detail_chunks_gate.go`，当前均
+开）与 hello echo 共用同一 const，翻转即同时撤回两个面。
 
 ## 会话目录（list_sessions）
 
@@ -521,9 +639,7 @@ admission 回退（会话在官方服务端常驻，mux 即时到达）。
 
 ```bash
 go test ./go-bridge/... -count=1
-go test ./agent/claudecode/... ./agent/codex/... ./agent/grokbuild/... ./agent/opencode/... -count=1
-go test ./agent/dsh-web/... ./agent/dsh/... -count=1
-go test ./core/... ./config/... -count=1
+go test ./agent/... ./core/... ./transcriptindex/... ./pinstore/... -count=1
 (cd relay-server && go test ./... -count=1)
 ```
 
@@ -534,7 +650,8 @@ Release 覆盖安装。需要 iOS 真机交互验证时，按相邻仓库规则�
 
 端到端同步异常时按边界取证：
 
-1. MacBridge runtime 日志中是否收到 backend 原始事件（dsh-web 还要看 mux/host 是否连上 3080）；
+1. MacBridge runtime 日志中是否收到 backend 原始事件（dsh-web 还要看 mux/host 是否连上 3080；
+   codex-web 看官方 daemon 订阅是否建立；codex-remote 看 controller enrollment/链路是否在线）；
 2. `events.go` / codec 是否映射出正确 wire event（dsh-web 审批看 `permission_request`，问答看 `user_input_requested`）；
 3. 投影 kernel 是否 ingest、SSV2 客户端是否吃 patch 而不是只等 raw live；
 4. broadcaster 是否有目标订阅，`relayEvents` 是否因空闲/turn 边界提前退出；
