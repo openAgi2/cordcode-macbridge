@@ -152,9 +152,14 @@ its embedded WebSocket runtime, the public Relay server source, and the agent
 drivers. The app users see is **CordCode Link**; the iOS client lives in a
 separate repo (`../cordcode-ios/`).
 
-It exposes locally-installed AI coding agent backends (Claude Code CLI, OpenCode
-server, Codex app-server) to iPhone/iPad clients over a direct LAN WebSocket or
-an end-to-end-encrypted public Relay.
+It exposes AI coding agent backends to iPhone/iPad clients over a direct LAN
+WebSocket or an end-to-end-encrypted public Relay. Product lineup
+([RuntimeManager.swift](MacBridge/MacBridge/Services/RuntimeManager.swift)):
+Claude Code CLI, Codex Web (official shared daemon), Codex Desktop
+(`codex-remote`, ChatGPT Remote Control), Grok Build (ACP driver), DeepSeek
+Harness (`dsh-web`, official `dsh web`), and OpenCode Web (official
+`opencode serve`). Legacy `codex` (exec/app_server), `opencode`, and
+`deepseek` drivers remain in-tree but are off the product lineup.
 
 **Two distinct deployment units share this repo:**
 
@@ -180,9 +185,9 @@ an end-to-end-encrypted public Relay.
   必须先读 [RELAY_SERVER_OPERATIONS.md](RELAY_SERVER_OPERATIONS.md)。
 - 修改与 iOS 的配对、hello、重连、撤销、session/turn 同步：同时读
   `../cordcode-ios/IOS_MAC_INTERACTION_FLOW.md`。
-- 排查 Claude/Codex/OpenCode 的 session、history、live stream、执行态、列表分页或端到端
-  同步异常：必须先检索本仓 `think.md` 和相邻 iOS 仓 `../cordcode-ios/think.md`，复用已有
-  复盘结论；不要在已有结论覆盖的问题上从零重复调查。
+- 排查 Claude/Codex/OpenCode/Grok/DeepSeek 任一 backend 的 session、history、live stream、
+  执行态、列表分页或端到端同步异常：必须先检索本仓 `think.md` 和相邻 iOS 仓
+  `../cordcode-ios/think.md`，复用已有复盘结论；不要在已有结论覆盖的问题上从零重复调查。
 
 这些是持续更新的架构/运维真值；`docs/YYYY-MM-DD-*.md` 主要是方案、评审和完成报告，
 不能代替根目录活文档。`think.md` 是已知问题与复盘经验库，排障时作为活文档入口的一部分。
@@ -432,9 +437,10 @@ brief `连接中` blip on iOS clients.
 | --- | --- |
 | `MacBridge/` | SwiftUI macOS app. Owns the go-bridge process lifecycle, UI, settings, pairing UI. |
 | `go-bridge/` | Go WebSocket runtime — the actual bridge. Entry: [go-bridge/cmd/cordcode-bridge-runtime/main.go](go-bridge/cmd/cordcode-bridge-runtime/main.go) → `gobridge.Main()` in [go-bridge/main.go](go-bridge/main.go). |
-| `core/`, `config/` | Agent abstraction + config. Imported by go-bridge. |
-| `agent/{claudecode,codex,opencode}` | Agent backends. Each registers itself via `init()` → `core.RegisterAgent`. |
+| `core/` | Agent abstraction + shared interfaces. Imported by go-bridge. 根目录已无 `config/` 目录。 |
+| `agent/{claudecode,codex,codex-remote,codex-web,grokbuild,opencode,opencode-web,dsh,dsh-web}` | Agent backends. Each registers itself via `init()` → `core.RegisterAgent`. `agent/codex-appserver/` 是 app-server RPC 客户端库（非 backend），`agent/providerseedtest/` 是测试辅助包。 |
 | `transcriptindex/` | Boundary-safe transcript page index for paginated session loading (see `docs/2026-06-13-session-loading-systemic-redesign.md`). |
+| `pinstore/` | Session pin 持久化（`session_pin` capability 的后端存储）。 |
 | `relay-server/` | **Independent Go module** for the public encrypted relay (VPS deployment). Deliberately separate per CONTRIBUTING. |
 | `docs/protocol/` | Canonical protocol compatibility pack. This copy is the source of truth over the iOS repo's copy. |
 
@@ -443,7 +449,7 @@ brief `连接中` blip on iOS clients.
 从原一体仓库迁移并按当前拆分架构校正的长期文档：
 
 - [构建、安装与运行态排查](BUILD_INSTALL_AND_RUNTIME.md)：Release 构建、覆盖安装、端口、日志、Management API 与常见故障。
-- [go-bridge 当前架构与 backend 进程模型](GO_BRIDGE_ARCHITECTURE.md)：Claude/Codex/OpenCode 的事件与轮询边界、capability 和调试分层。
+- [go-bridge 当前架构与 backend 进程模型](GO_BRIDGE_ARCHITECTURE.md)：全部 backend（含 codex-web / codex-remote / opencode-web）的事件与轮询边界、capability 和调试分层。
 - [Relay Server 部署与运维](RELAY_SERVER_OPERATIONS.md)：独立 module 的构建、VPS 部署、验证与回滚。
 
 涉及 iOS 连接、配对、重连或 session 同步时，同时读取相邻
@@ -512,17 +518,37 @@ capability，不能用“实现期再确认”放行编码。
 
 ## Backend runtime model (必须理解)
 
-iOS 只连接 Bridge `8777` / `8778` 或 Relay，不直连下面的 backend 端口。
+iOS 只连接 Bridge `8777` / `8778` 或 Relay，不直连下面的 backend 端口/服务。
+
+产品 lineup（`RuntimeManager.swift` 默认 `drivers`，2026-09-02 校正）：
 
 | Backend | 运行模型 | 本地依赖 | 外部 turn 如何到 iOS |
 | --- | --- | --- | --- |
 | Claude Code | 每个活跃 session 一个独立 `claude` CLI 子进程，stdin/stdout stream-json | `claude` 在 runtime PATH 且已登录 | 其他 Terminal 中的 Claude 进程没有共享事件总线；iOS 必须用历史变化 polling 旁观 |
-| Codex | 产品默认 `app_server` 模式；默认 stdio 启动每个 session 的 app-server，显式 URL 时连接共享 WebSocket service | app-server 可启动/可连接；`codex exec` CLI 只属于 `exec` backend | 默认由 iOS 历史变化 polling 旁观外部 turn；显式共享 URL 时 `EventSubscriber` 被动订阅并广播 |
-| OpenCode | CordCode Link 默认托管 loopback-only `opencode serve`，Bridge 同时使用 agent 与 HTTP proxy | 新装默认 `managed_local`（端口 `4096...4196`，Basic Auth 写入 `opencode-managed-server.json`）；`64667` 仅为存量 legacy source | 有 resolved URL 时订阅 `/global/event` SSE；无 URL 时 fail-closed 不退避重连 64667，iOS 保留低频 polling 兜底 |
+| Codex Web（`codex-web`） | 官方 Codex Web 共享 daemon 的 JSON-RPC 客户端；产品默认空 URL = 复用官方 daemon（managed start），失败可见 | 官方 daemon 可连接 | 订阅连接直播官方 thread 的 turn/item 事件；Mac 官方客户端的外部 turn 实时旁观，无需 polling |
+| Codex Desktop（`codex-remote`） | ChatGPT Desktop 私有 app-server → OpenAI Remote Control relay → 独立 enrollment 的 controller → app-server JSON-RPC 流 | ChatGPT「电脑」页完成设备配对（device key + JWT，可独立撤销） | turn/item 事件直播 + 官方分页远程历史；turn detail 懒加载（`turn_detail_lazy/chunks_v1`）；无需 polling |
+| Grok Build（`grokbuild`） | 每 turn 独立 `grok agent` stdio 子进程（ACP）+ 进程级单例 catalog 子进程（`grok agent --no-leader stdio`） | `grok` 可启动 | 外部 turn 靠 polling / `updates.jsonl` tailer 兜底（leader-socket 订阅尚未取代该声明） |
+| DeepSeek Harness（`dsh-web`） | 官方 `dsh web` 的请求转发器 + 常驻 mux/host WebSocket（座位 `127.0.0.1:3080`，端口即身份） | `dsh` CLI（座位实例冷启动/补拉用） | mux 是 agent 级广播，Mac web 端发起的外部 turn 直播；无需 polling |
+| OpenCode Web（`opencode-web`） | 官方 `opencode serve` Web API 客户端；`/global/event` SSE 是 server 级广播 | resolved `opencode_web_url` 与凭据（独立配置键，不复用 `opencode_url`） | SSE 覆盖所有 session，外部 turn 直播；无需 polling |
 
-### Codex app-server
+Legacy（源码保留、产品 lineup 不挂载，回滚 = 在 drivers 列表加回 id；详见
+GO_BRIDGE_ARCHITECTURE.md 对应节）：
 
-产品 `RuntimeConfig` 默认传：
+- `codex`（exec / app_server 双模式）——2026-08-25 owner 裁决退役：codex-web 通过
+  owner 矩阵验收，app_server 驱动不再启动。
+- `opencode`（managed_local / external_http / legacy_64667 server source 模型）——
+  2026-08-19 owner 裁决退役：与 opencode-web 双订阅同一 serve，事件/投影双流互相
+  覆盖，干扰 opencode-web。
+- `deepseek`（SDK stdio 路线，`agent/dsh`）——更早退役，新接入走 dsh-web。
+
+### Codex app-server（legacy `codex` backend，产品 lineup 已退役）
+
+> 2026-08-25 owner 裁决：codex-web 通过 owner 矩阵验收后，app_server 驱动不再启动；
+> 本节适用于显式把 `codex` 加回 drivers 的场景（回滚 = 加回该 id）。产品 Codex 面由
+> `codex-web`（共享 daemon）与 `codex-remote`（Codex Desktop / Remote Control）承接，
+> 后者复用同一套 app-server JSON-RPC 语义但走 Remote Control 链路。
+
+挂载该 backend 时 `RuntimeConfig` 默认传：
 
 ```text
 -codex-backend app_server
@@ -530,7 +556,7 @@ iOS 只连接 Bridge `8777` / `8778` 或 Relay，不直连下面的 backend 端�
 
 不要把 Codex backend 误判成“必须安装/查找 `codex exec` CLI”。当前有两个不同概念：
 
-- **app-server backend（产品默认）**：Bridge 讲 JSON-RPC app-server 协议。未显式配置
+- **app-server backend（挂载时默认）**：Bridge 讲 JSON-RPC app-server 协议。未显式配置
   `-codex-app-server-url` 时使用 stdio transport 启动 `codex app-server`；显式 URL 时连接已有
   共享 WebSocket service。
 - **exec backend（历史/显式模式）**：Bridge 才运行 `codex exec --json`，这一路才需要把
@@ -565,7 +591,12 @@ codex app-server --help >/dev/null 2>&1 || true
 Codex lazy create 可能先返回
 `pending-*`，第一次 send 后必须把 registry 与订阅 rebind 到真实 thread id。
 
-### OpenCode server
+### OpenCode server（legacy `opencode` backend，产品 lineup 已退役）
+
+> 2026-08-19 owner 裁决：legacy `opencode` 与 `opencode-web` 双订阅同一
+> `opencode serve`，事件/投影双流互相覆盖、干扰 opencode-web，因此从 drivers 列表
+> 移除（代码保留，回滚 = 加回 id）。产品 OpenCode 面由 `opencode-web` 承接：读独立
+> 配置键 `opencode_web_url/user/pass`，绝不复用下面这套 `-opencode-url` 来源。
 
 新装默认 **Automatic / managed_local**：CordCode Link 自己启动并保活
 loopback-only `opencode serve`，从 `4096...4196` 选择端口，生成随机 Basic Auth，
@@ -651,7 +682,7 @@ together. Canonical versions are tracked in [docs/protocol/README.md](docs/proto
 
 ## Conventions (from CONTRIBUTING / SECURITY)
 
-- Runtime logic belongs in `core/`, `config/`, `agent/`; wire protocol adaptation belongs in `go-bridge/`.
+- Runtime logic belongs in `core/`, `agent/`, `transcriptindex/`, `pinstore/`（根目录已无 `config/`）; wire protocol adaptation belongs in `go-bridge/`.
 - `relay-server/` stays a separate Go module unless a deliberate migration decision changes that boundary.
 - **Do not add fallback/mock paths to production runtime code to hide real failures.**
 - Never commit credentials, route IDs, provisioning tokens, passwords, private keys, or Apple Team IDs.
