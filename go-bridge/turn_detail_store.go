@@ -57,6 +57,13 @@ var (
 	ErrDetailBadID          = errors.New("detail-store: unsafe id segment")
 )
 
+// turnDetailMappingVersion fences persisted ProjectionPart semantics. Version 1
+// is the first cache generation that preserves the official agentMessage phase
+// (commentary -> progress, final_answer -> final). Manifests written before the
+// field existed decode as zero and are rebuilt from official pagination instead
+// of replaying incorrectly classified text forever after a runtime upgrade.
+const turnDetailMappingVersion = 1
+
 // safeBackendSeg: the only raw-ish segment allowed in paths (backend ids come
 // from internal config; handles are store-derived hex — both still validated;
 // session/turn segments are always sha256 hex).
@@ -94,20 +101,21 @@ type TurnDetailResume struct {
 // authoritative detailLoadState lives in the kernel; State/ReasonCode here
 // mirror the last committed terminal state for restart fast-path decisions.
 type TurnDetailManifest struct {
-	BackendID    string                  `json:"backendId"`
-	SessionID    string                  `json:"sessionId"` // raw, audit only (path is hashed)
-	TurnID       string                  `json:"turnId"`    // raw, audit only
-	Generation   int                     `json:"generation"`
-	ManifestRev  int                     `json:"manifestRev"`
-	TxApplied    int                     `json:"txApplied"`
-	ChunkSeqNext int                     `json:"chunkSeqNext"`
-	State        string                  `json:"state,omitempty"`
-	ReasonCode   string                  `json:"reasonCode,omitempty"`
-	ItemCount    int                     `json:"itemCount"`
-	TotalBytes   int64                   `json:"totalBytes"`
-	Items        []TurnDetailItemSummary `json:"items"`
-	Resume       TurnDetailResume        `json:"resume"`
-	UpdatedAtMs  int64                   `json:"updatedAtMs"`
+	MappingVersion int                     `json:"mappingVersion"`
+	BackendID      string                  `json:"backendId"`
+	SessionID      string                  `json:"sessionId"` // raw, audit only (path is hashed)
+	TurnID         string                  `json:"turnId"`    // raw, audit only
+	Generation     int                     `json:"generation"`
+	ManifestRev    int                     `json:"manifestRev"`
+	TxApplied      int                     `json:"txApplied"`
+	ChunkSeqNext   int                     `json:"chunkSeqNext"`
+	State          string                  `json:"state,omitempty"`
+	ReasonCode     string                  `json:"reasonCode,omitempty"`
+	ItemCount      int                     `json:"itemCount"`
+	TotalBytes     int64                   `json:"totalBytes"`
+	Items          []TurnDetailItemSummary `json:"items"`
+	Resume         TurnDetailResume        `json:"resume"`
+	UpdatedAtMs    int64                   `json:"updatedAtMs"`
 }
 
 // detailStoredEntry is one ordered entry of a committed page — the complete
@@ -337,10 +345,15 @@ func (s *TurnDetailStore) AcceptPage(acc DetailPageAccept) (*DetailAcceptedPage,
 			return nil, err
 		}
 		manifest = &TurnDetailManifest{
-			BackendID: acc.BackendID, SessionID: acc.SessionID, TurnID: acc.TurnID,
+			MappingVersion: turnDetailMappingVersion,
+			BackendID:      acc.BackendID, SessionID: acc.SessionID, TurnID: acc.TurnID,
 			Generation: acc.Generation, ChunkSeqNext: 1,
 			UpdatedAtMs: s.now().UnixMilli(),
 		}
+	}
+	if manifest.MappingVersion != turnDetailMappingVersion {
+		return nil, fmt.Errorf("%w: mapping version %d != runtime %d",
+			ErrDetailStoreCorrupt, manifest.MappingVersion, turnDetailMappingVersion)
 	}
 	if manifest.Generation != acc.Generation {
 		return nil, fmt.Errorf("%w: manifest %d != accept %d", ErrDetailGeneration, manifest.Generation, acc.Generation)

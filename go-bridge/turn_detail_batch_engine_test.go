@@ -62,7 +62,14 @@ func (a *turnDetailAgent) MapTurnItemsPage(turn *core.TurnScopedHistoryTurn, pag
 			}
 		case "agentMessage":
 			text, _ := entry.Item["text"].(string)
-			turn.Parts = append(turn.Parts, map[string]any{"type": "text", "content": text, "itemId": id})
+			part := map[string]any{"type": "text", "content": text, "itemId": id}
+			switch entry.Item["phase"] {
+			case "commentary":
+				part["presentation"] = "progress"
+			case "final_answer":
+				part["presentation"] = "final"
+			}
+			turn.Parts = append(turn.Parts, part)
 		case "commandExecution":
 			command, _ := entry.Item["command"].(string)
 			step := map[string]any{
@@ -313,6 +320,60 @@ func TestSessionTurnItemsV2IdempotentLoadedAck(t *testing.T) {
 	}
 	if got := atomic.LoadInt64(&agent.pageFetches); got != fetches {
 		t.Fatalf("idempotent repeat refetched upstream: %d → %d", fetches, got)
+	}
+}
+
+// A cache created by the pre-phase mapper must never remain the loaded
+// fast-path forever. The runtime rebuilds it from official pagination and the
+// replacement chunks preserve commentary/final provenance.
+func TestSessionTurnItemsV2RebuildsPrePhaseMappingCache(t *testing.T) {
+	h, conn, sessionID, agent := turnDetailV2Harness(t)
+	agent.itemPages[""] = itemsPage([]map[string]any{
+		{"type": "agentMessage", "id": "commentary-1", "text": "working", "phase": "commentary"},
+		{"type": "agentMessage", "id": "final-1", "text": "done", "phase": "final_answer"},
+	}, "")
+	olderWalkDispatch(h, conn, map[string]any{
+		"direction": "window_0", "backendId": "codex-remote", "sessionId": sessionID, "limit": 10,
+	})
+	quiesceProjectionWrites(t, h)
+	_, first := turnItemsDispatchV2(t, h, conn, sessionID, "T1", nil)
+	if first.DetailLoadState != DetailStateLoaded {
+		t.Fatalf("first ack = %+v", first)
+	}
+
+	store := h.detailStore()
+	store.mu.Lock()
+	dir, err := store.turnDir("codex-remote", sessionID, "T1")
+	if err != nil {
+		store.mu.Unlock()
+		t.Fatal(err)
+	}
+	manifest, err := store.loadManifestLocked(dir)
+	if err == nil {
+		manifest.MappingVersion = 0
+		err = store.persistManifestLocked(dir, manifest)
+	}
+	store.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn.mu.Lock()
+	conn.frames = nil
+	conn.mu.Unlock()
+	fetches := atomic.LoadInt64(&agent.pageFetches)
+	_, rebuilt := turnItemsDispatchV2(t, h, conn, sessionID, "T1", nil)
+	if rebuilt.DetailLoadState != DetailStateLoaded || atomic.LoadInt64(&agent.pageFetches) <= fetches {
+		t.Fatalf("stale mapping cache was not rebuilt: ack=%+v fetches=%d->%d",
+			rebuilt, fetches, atomic.LoadInt64(&agent.pageFetches))
+	}
+	frames := waitChunkFrames(t, conn, 1)
+	if got := frames[0].Items; len(got) != 2 || got[0].Presentation != "progress" || got[1].Presentation != "final" {
+		t.Fatalf("rebuilt phase mapping = %+v", got)
+	}
+	manifest, err = store.LoadManifest("codex-remote", sessionID, "T1")
+	if err != nil || manifest.MappingVersion != turnDetailMappingVersion {
+		t.Fatalf("rebuilt manifest = %+v err=%v", manifest, err)
 	}
 }
 

@@ -7,6 +7,7 @@
 版本号对齐 MacBridge Release 构建的 `MARKETING_VERSION`（见 `MacBridge/project.yml`）。日期为协调世界时（UTC）。
 
 ## [Unreleased]
+- **修复：Codex Desktop 历史详情不再把过程叙述当最终正文**：详情分页保留官方 `commentary` / `final_answer` phase；旧运行时生成的错误详情缓存由 mapper 版本栅栏按回合自动失效并从官方分页重建，避免升级后继续复用错误分类。
 
 - **继续降低 Codex Desktop runtime 热路径 CPU**：Grok 会话标题优先按目录直接定位，避免每次目录刷新递归扫描整个 sessions 树；失效的直连 socket 不再继续作为广播目标，离线期间的重绑定尝试按会话节流；Codex Web 已接入官方目录生命周期信号并保留低频安全扫描；投影诊断改为 Debug 才计算，大回合已发布的 turn shell 后续只发送工具增量。
 - **降低无客户端长回合的 runtime CPU**：当没有可接收 `session_sync_v2` patch 的观察者时，仍保留 reducer 的权威投影，但不再为超过阈值的整回合工具/问答增量深拷贝和记录大 patch；后续连接通过现有完整投影快照恢复。没有任何 live connection 时跳过逐 token 的设备重绑定扫描；无在线目标日志降为 Debug，避免流式回合产生高频日志 I/O。

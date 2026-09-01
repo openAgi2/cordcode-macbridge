@@ -165,6 +165,7 @@ func (h *Handlers) handleSessionTurnItemsV2(
 	if target.DetailLoadState == DetailStateLoaded {
 		manifest, mErr := store.LoadManifest(msg.BackendID, sessionID, turnID)
 		if mErr == nil && manifest != nil &&
+			manifest.MappingVersion == turnDetailMappingVersion &&
 			manifest.Generation == target.TurnGeneration && manifest.Resume.EOF {
 			sendAck(&TurnDetailBatchAck{
 				DetailLoadState: DetailStateLoaded,
@@ -449,11 +450,13 @@ func (h *Handlers) runTurnDetailBatch(
 	if err != nil && !errors.Is(err, ErrDetailStoreNotFound) && !errors.Is(err, ErrDetailStoreCorrupt) {
 		return failTerminal("upstream_error", 0, 0)
 	}
-	if err != nil || (manifest != nil && manifest.Generation != generation) {
+	if err != nil || (manifest != nil &&
+		(manifest.Generation != generation || manifest.MappingVersion != turnDetailMappingVersion)) {
 		// NotFound = fresh/evicted; Corrupt = quarantine (F2.1: a committed-
 		// range defect re-hydrates from official pagination, never "repaired");
 		// generation rotation = a superseded cache can never accept this
-		// generation's pages. All three drop the dir and rebuild.
+		// generation's pages; mapping-version rotation = persisted presentation
+		// semantics changed. All cases drop the dir and rebuild.
 		if err := store.DropTurn(backendID, sessionID, turnID); err != nil {
 			return failTerminal("upstream_error", 0, 0)
 		}
