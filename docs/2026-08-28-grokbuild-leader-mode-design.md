@@ -1185,6 +1185,20 @@ runtime 日志 `~/Library/Application Support/CordCode Link/logs/go-bridge.log`�
   source-first 纪律冻结 leader 协议的 request 方向真实样本（interjection / cancel /
   permission response 的 follower 可用性），并处理 writer 仲裁；本文不预支其结论
   （§15 D-3 维持另案）。
+  - **为什么另案而非并入本文（2026-09-02 Owner 问询补记，四条流程红线）**：
+    1. **证据未冻结（source-first 红线）**：本文十轮评审通过的根基是**观察方向**
+       （leader → 订阅者推送）的源码证据已逐条 pin 死；follower 要走的 **request
+       方向**（follower 能不能发 interjection / cancel / 答权限、发什么形状、writer
+       仲裁怎么定）在真实样本里未证明。把未证明的协议假设塞进已 APPROVE 的文档，
+       等于让评审结论作废重来，总进度反而变慢。
+    2. **读写风险不对称，且拆分是 Owner 已签裁决**：只读 observer 最坏是"看漏了"；
+       写路径最坏是打断 / 答错用户真实工作里的 turn。§15 D-3（2026-08-28）明确签了
+       "保持只读边界，follower 应答另案"——合并等于推翻已签署的裁决门。
+    3. **交付节奏**：观察侧改进（实时流、不掐长任务、徽标准确）独立有价值、低风险，
+       可先落地先用上；follower 是高风险写路径开发，捆在一起会让前者陪跑等后者。
+    4. **Phase 0 的产出正好是 follower 设计的输入**：十步拓扑证明会拿到 leader 实际
+       交互广播的真实形状，直接喂给 follower 另案——顺序不浪费。
+    另案跟踪：Mac 仓 `think.md` 顶部「后续计划索引」follower 行（2026-09-02 建）。
 - **不消费 `x.ai/sessions/changed` roster 通知**（§4.1）：官方 leader 已广播、官方 Pager
   已消费，macbridge 消费需 go-bridge 改动——列为未来改进另案（D-G1/D-G2 均不触碰
   `leader_subscriber.go` 的方法过滤器）。
