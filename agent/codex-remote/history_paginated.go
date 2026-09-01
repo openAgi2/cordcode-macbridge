@@ -781,6 +781,38 @@ func (a *Agent) turnScopedHistoryPaginated(ctx context.Context, threadID string,
 	return out, nil
 }
 
+// mapColdPage hydrates the already-running turn to its current authoritative
+// item prefix. A summary page is sufficient for completed turns because their
+// detail remains lazy, but turn/started carries an empty item list and live
+// notifications begin only after attachment. Without this bounded-to-EOF
+// items/list walk, opening a 15-minute-old running turn permanently loses its
+// first 15 minutes and can only display notifications observed after entry.
+func (a *Agent) mapColdPage(ctx context.Context, threadID string, rawTurns []remoteTurn) ([]core.TurnScopedHistoryTurn, error) {
+	turns := mapRemoteHistoryTurns(&remoteThread{ID: threadID, Turns: rawTurns}, len(rawTurns))
+	for index, envelope := range rawTurns {
+		if envelope.Status != remoteTurnStatusInProgress || envelope.ID == "" {
+			continue
+		}
+		active := mapRemoteTurnShell(envelope)
+		cursor := ""
+		for {
+			page, err := a.ReadTurnItemsPage(ctx, threadID, envelope.ID, cursor)
+			if err != nil {
+				return nil, err
+			}
+			if err := a.MapTurnItemsPage(&active, page); err != nil {
+				return nil, err
+			}
+			if page.EOF {
+				break
+			}
+			cursor = page.NextCursor
+		}
+		turns[index] = active
+	}
+	return turns, nil
+}
+
 // ReadColdHistory is the mode-aware cold-open baseline (owner T0.5 ruling, T2.3):
 // the AGENT owns the historyMode dispatch so the bridge never guesses and never
 // auto-falls-back a legacy thread onto paginated reads. paginated → ONE summary
@@ -789,14 +821,19 @@ func (a *Agent) turnScopedHistoryPaginated(ctx context.Context, threadID string,
 //
 // T0.6 owner-approved fast path: when this connection's single thread/resume
 // attach carried initialTurnsPage (resumeInitialTurnsPageVerified, version
-// gated) the cached first page serves the paginated cold open with ZERO extra
-// RPCs — the attach that the live relay performs anyway already paid for it.
+// gated) the cached first page serves completed turns with ZERO extra RPCs —
+// the attach that the live relay performs anyway already paid for it. An
+// in-progress turn additionally walks thread/items/list to EOF so its prefix
+// predating this attachment is not omitted.
 // Every other case (no cached page, legacy/unknown mode in the cached meta,
 // candidate breaker tripped) PRE-SELECTS the official baseline below:
 // thread/read metadata + thread/turns/list — never a try-then-silent-full-read.
 func (a *Agent) ReadColdHistory(ctx context.Context, threadID string) (*core.ColdHistoryResult, error) {
 	if cached := a.takeResumeInitialPage(threadID); cached != nil && cached.mode == "paginated" {
-		turns := mapRemoteHistoryTurns(&remoteThread{ID: threadID, Turns: cached.page.Turns}, len(cached.page.Turns))
+		turns, err := a.mapColdPage(ctx, threadID, cached.page.Turns)
+		if err != nil {
+			return nil, err
+		}
 		for i, j := 0, len(turns)-1; i < j; i, j = i+1, j-1 {
 			turns[i], turns[j] = turns[j], turns[i]
 		}
@@ -814,7 +851,10 @@ func (a *Agent) ReadColdHistory(ctx context.Context, threadID string) (*core.Col
 		if err != nil {
 			return nil, err
 		}
-		turns := mapRemoteHistoryTurns(&remoteThread{ID: threadID, Turns: page.Turns}, len(page.Turns))
+		turns, err := a.mapColdPage(ctx, threadID, page.Turns)
+		if err != nil {
+			return nil, err
+		}
 		for i, j := 0, len(turns)-1; i < j; i, j = i+1, j-1 {
 			turns[i], turns[j] = turns[j], turns[i]
 		}

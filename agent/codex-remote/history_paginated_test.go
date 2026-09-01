@@ -785,6 +785,57 @@ func TestResumeInitialTurnsPageServesColdOpen(t *testing.T) {
 	}
 }
 
+// A cached resume summary cannot represent the prefix of a turn that was
+// already running before this client attached. Cold hydration must walk that
+// turn's official items pages before publishing it, while completed neighbors
+// stay summary-only and lazy.
+func TestResumeInitialTurnsPageHydratesRunningTurnPrefix(t *testing.T) {
+	agent, calls := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
+		switch call.Method {
+		case "thread/resume":
+			return resumeResult("paginated", []any{
+				summaryTurn("turn_live", remoteTurnStatusInProgress),
+				summaryTurn("turn_done", remoteTurnStatusCompleted),
+			}, nil, []any{}), nil
+		case "thread/items/list":
+			if call.Params["turnId"] != "turn_live" || call.Params["sortDirection"] != "asc" {
+				t.Fatalf("active prefix params = %+v", call.Params)
+			}
+			if call.Params["cursor"] == nil {
+				return map[string]any{
+					"data": []any{
+						itemEntry("turn_live", map[string]any{"type": "userMessage", "id": "u-live", "text": "continue"}),
+						itemEntry("turn_live", map[string]any{"type": "reasoning", "id": "r-live", "summary": []string{"prior reasoning"}}),
+					},
+					"nextCursor": "active-page-2",
+				}, nil
+			}
+			return map[string]any{"data": []any{
+				itemEntry("turn_live", map[string]any{"type": "agentMessage", "id": "a-live", "text": "prior progress", "phase": "commentary"}),
+			}}, nil
+		}
+		return nil, &RPCError{Code: -32601, Message: call.Method}
+	})
+	agent.NoteServerUserAgent(verifiedServerUserAgent)
+	if err := agent.AttachLiveThread(context.Background(), "thread_probe"); err != nil {
+		t.Fatal(err)
+	}
+	cold, err := agent.ReadColdHistory(context.Background(), "thread_probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cold.Page.Turns) != 2 || cold.Page.Turns[0].TurnID != "turn_done" || cold.Page.Turns[1].TurnID != "turn_live" {
+		t.Fatalf("cold order = %+v", cold.Page.Turns)
+	}
+	live := cold.Page.Turns[1]
+	if live.UserItemID != "u-live" || live.UserText != "continue" || len(live.Parts) != 2 {
+		t.Fatalf("running prefix not fully hydrated = %+v", live)
+	}
+	if itemCalls := assertRPCs(t, calls, "thread/items/list"); len(itemCalls) != 2 {
+		t.Fatalf("active prefix page count = %d, calls = %+v", len(itemCalls), itemCalls)
+	}
+}
+
 func coldTurnIDs(cold *core.ColdHistoryResult) []string {
 	ids := make([]string, 0, len(cold.Page.Turns))
 	for _, turn := range cold.Page.Turns {
@@ -1050,10 +1101,10 @@ func TestReadTurnItemsPageParamsChainingAndEOF(t *testing.T) {
 // atomically (no partial entries), and a repeated cursor fails immediately.
 func TestReadTurnItemsPageAtomicFailures(t *testing.T) {
 	cases := []struct {
-		name  string
-		page  map[string]any
+		name   string
+		page   map[string]any
 		cursor string
-		want  error
+		want   error
 	}{
 		{"foreign turn item", itemsListPage([]map[string]any{
 			itemEntry("turn_items", map[string]any{"type": "agentMessage", "id": "a1", "text": "x"}),
