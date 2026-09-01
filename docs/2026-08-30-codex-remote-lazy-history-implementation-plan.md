@@ -1,11 +1,21 @@
 # codex-remote 懒加载会话历史实施方案（对齐官方分页协议）
 
 - 日期：2026-08-30（r6 收敛终版，已吸收最终评审的四项定向修订）
-- 状态：**设计阶段收敛（audit-r4 为终审；r5 合规核验与 r6 最终评审均已闭环，
-  后续新问题仅由 G0 fixture、定向测试或真机证据触发并在对应 gate 内修复）。Phase 0 = APPROVED，
-  可立即开工**；G1 BLOCKED（G0 fixtures + identity/shape 断言 + 未知 item 原子失败规则落地）；
-  G2 BLOCKED（等待 per-connection delivery / `turnStateOps` canonical wire、实现与测试落地；
-  设计契约已在 §3.2.0 收口）。
+- 状态：**2026-09-02 收口：G0–G4 全部完成（含 owner 真机验收），完成报告见
+  [2026-09-02-2026-08-30-codex-remote-lazy-history-implementation-plan完成情况.md](2026-09-02-2026-08-30-codex-remote-lazy-history-implementation-plan完成情况.md)
+  （verdict proved-complete，队列 60/60）。**
+  G0 ✅ 已执行（8 项 owner 裁决记录于 §3.0，含终案数据分层 `turn_detail_chunks_v1`）；
+  G1 ✅、G2 ✅ 已落地——本文原有的 BLOCKED 标记是 r6 设计收敛时点（G0 未执行前）的历史
+  状态，实际实施经 iOS 仓收敛计划
+  `docs/2026-08-31-chatgpt-message-stream-reasoning-architecture-convergence.md`
+  （工作树 `cordcode-ios-codex-remote`，exec-plan `plan-3cce22315d37`，33/33 done）完成；
+  G3 ✅ owner 真机矩阵全过（2026-09-02：§4 十行矩阵 + fix1/fix2 失效模式专项全部通过，
+  部署对 Mac `24ee4c8` + iOS `2f138b5b`；fix3 的 legacy detailInline 本地展开此前已于
+  2026-09-01 单独验收，Owner 裁决 A：诚实显示）；G4 ✅（Release `24ee4c8` 已装
+  `/Applications`、iOS `2f138b5b` 已装真机、全量套件 2026-09-02 复跑全绿、完成报告已出）。
+  设计评审本身已收敛（audit-r4 终审 + r5 合规核验 + r6 最终评审闭环；后续新问题仅由
+  fixture、定向测试或真机证据触发并在对应 gate 内修复）。
+- 上下游：母方案 = [2026-08-26-codex-remote-backend-implementation-plan.md](2026-08-26-codex-remote-backend-implementation-plan.md)（已 proved-complete；本方案建立在其 Phase 0/1 的配对、WSS、envelope、live 投影基础设施上）。**下游实施真值** = iOS 仓 `docs/2026-08-31-chatgpt-message-stream-reasoning-architecture-convergence.md`（收敛计划，本文 G1/G2/G3 的实施驱动队列）。
 - 评审报告：[r1](2026-08-30-codex-remote-lazy-history-plan-audit.md) /
   [r2](2026-08-30-codex-remote-lazy-history-plan-audit-r2.md) /
   [r3](2026-08-30-codex-remote-lazy-history-plan-audit-r3.md) /
@@ -877,7 +887,11 @@ control inventory 改为**链路后暖态重试**（turns/items 分页链已把�
 
 ## 8. 交付物清单
 
-- [ ] `agent/codex-remote/testdata/phase0/live/`：turns/list（**多页 turns 全链 fixture 按
+> [!NOTE]
+> **2026-09-01 回填**：前五项已随 G0–G2 实施落地（详见状态行的下游收敛计划与 exec-plan
+> `plan-3cce22315d37`）；末项（真机矩阵）剩 3 个 owner 验收门，见各项行尾标注。
+
+- [x] `agent/codex-remote/testdata/phase0/live/`：turns/list（**多页 turns 全链 fixture 按
       2026-08-30 owner 裁决由 app-server 测试环境生成或复用官方分页测试基线——live 采集已证明
       账号无 >30 回合线程；control inventory 对照以"不可获得（paginated 经 WSS 240s×3）+
       legacy 对照 + 链内证据"的替代记录形式交付**）、items/list（paginated 必测；legacy 按
@@ -885,21 +899,32 @@ control inventory 改为**链路后暖态重试**（turns/items 分页链已把�
       脱敏 fixtures + 分层体积/耗时基线 + 单回合资源画像 + 资源门裁决值 + §3.0.7 负结果判定记录 +
       T0.6 `excludeTurns=true + initialTurnsPage` 候选裁决记录（含 `thread.turns == []` 断言）+
       legacy 裁决或 inventory-backed N/A 记录
-- [ ] `agent/codex-remote/history.go` 拆分（**镜像 `paginated_turn_full_items` 六项不变量**）+
+      **（已落地：`testdata/phase0/live/` attempt-001…007 + G0 证据报告）**
+- [x] `agent/codex-remote/history.go` 拆分（**镜像 `paginated_turn_full_items` 六项不变量**）+
       兼容路径显式化（默认仅探针/裁决范围）+ 页元数据与 item id 传递保留 + Reasoning 映射按
       G0.5 裁决重写（非 summary-first）+ 未知 item 原子失败
-- [ ] `go-bridge` 投影 Summary 化（正序化/prepend/去重）+ **上游分页 ↔ `projection_window_v1`
+      **（已落地：`history_paginated.go` / `history_paginated_test.go`）**
+- [x] `go-bridge` 投影 Summary 化（正序化/prepend/去重）+ **上游分页 ↔ `projection_window_v1`
       接线（T2.0：producer 补水合、per-connection delivery、诚实 hasOlder、backend-private
       checkpoint 与有界恢复）** + canonical `ProjectionPart.ItemID` 已映射 variant 持久化 +
       **per-turn generation** stale fence + **`turnStateOps` patch op（Go/Swift schema 同步、
       changedTurnIDs/change-set、reasonCode 清除不变量）** +
       专用历史明细 merge（`replace_parts` 通道 + 未知 item 原子失败）+ 并发归属测试矩阵
-- [ ] `docs/protocol/unified-bridge-protocol.md`：`session_turn_items` wire contract
+      **（已落地：R11b `ProjectionDeliveryMode`（event_publisher.go）、projection kernel/reducer
+      v13（含 2026-09-01 增补的 `detailInline` legacy 本地展开）、session_turn_items handler + 测试）**
+- [x] `docs/protocol/unified-bridge-protocol.md`：`session_turn_items` wire contract
       （ack-only、backend 归属、状态机/syncRev 完成条件、`turnStateOps`、delivery mode、资源门
       ——先冻结后实现）；如 T2.0 契约复核需要，同步修订 `bridge-v1.md`（R2/R3/R4/R10）
-- [ ] iOS 统一入口 + detailLoadState 状态机（`turnStateOps` 解码/顺序）+ appliedRev≥syncRev 完成
+      **（已冻结：§11.7 lazy_v1 2026-08-30 冻结、§11.8 chunks_v1 终案 owner 终审冻结；
+      `bridge-v1.md` 增补 `detailInline` 语义，2026-09-01）**
+- [x] iOS 统一入口 + detailLoadState 状态机（`turnStateOps` 解码/顺序）+ appliedRev≥syncRev 完成
       条件渲染 + 现有窗口链 load-older 验证（不重造）+ 防重复拉取
-- [ ] 两仓测试全绿、真机矩阵（§4，含 #8/#9/#10）全绿、文档同步
+      **（已落地：`ChatViewModel+TurnDetail.swift` v1/v2 分流 + inline 本地展开；
+      `TurnDetailLazyPhase3Tests`）**
+- [x] 两仓测试全绿、真机矩阵（§4，含 #8/#9/#10）全绿、文档同步
+      **（2026-09-02 收口：定向 + 全量套件复跑全绿（go-bridge + agent/codex-remote，exit 0）；
+      真机矩阵 §4 十行 + fix1/fix2 失效模式专项 owner 验收全过；文档与 CHANGELOG 同步，
+      G4 完成报告见文首链接）**
 
 ## 9. 评审采纳记录（四轮评审 + 合规核验 + 最终定向评审，含不采纳项理由）
 

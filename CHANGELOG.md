@@ -7,6 +7,8 @@
 版本号对齐 MacBridge Release 构建的 `MARKETING_VERSION`（见 `MacBridge/project.yml`）。日期为协调世界时（UTC）。
 
 ## [Unreleased]
+- **改进：Codex Desktop 会话打开与历史明细改为官方懒加载路径**：打开会话不再一次拉取全量回合与全部 items，首屏走官方 `thread/turns/list` Summary 视图，点「加载详细过程」再按 `thread/items/list` 分页拉取该回合明细（`turn_detail_chunks_v1`：明细按页渐进加载，超长输出按 128KB chunk 二级懒加载，断线后按 chunk 续载）；滚动到顶加载更早历史复用既有窗口链，上游分页游标不暴露给客户端。长会话首屏可交互时间明显缩短（owner 真机矩阵确认），单个超大回合不再整段占用传输与内存。
+- **修复：旧版 Codex Desktop 会话的「用时」详情行不再整段消失**：旧会话（legacy historyMode）点「用时xx分xx秒」此前会触发必然失败的 `session_turn_items` 分页请求，iOS 按不支持处理并把整个会话的详情入口全部移除、列表锚点上跳。现 legacy 全量读到的完成回合直接标记为本地已加载（投影 v13 `detailInline`），点击只做本地展开/收起、零分页请求；legacy 会话恢复后新完成的回合同样适用。旧会话展开内容按官方 legacy 视图如实显示（官方对 legacy 线程不下发思考/工具明细，属官方面有意限制，不做补造）。
 - **修复：Codex Desktop 历史详情不再把过程叙述当最终正文**：详情分页保留官方 `commentary` / `final_answer` phase；旧运行时生成的错误详情缓存由 mapper 版本栅栏按回合自动失效并从官方分页重建，避免升级后继续复用错误分类。
 
 - **继续降低 Codex Desktop runtime 热路径 CPU**：Grok 会话标题优先按目录直接定位，避免每次目录刷新递归扫描整个 sessions 树；失效的直连 socket 不再继续作为广播目标，离线期间的重绑定尝试按会话节流；Codex Web 已接入官方目录生命周期信号并保留低频安全扫描；投影诊断改为 Debug 才计算，大回合已发布的 turn shell 后续只发送工具增量。
