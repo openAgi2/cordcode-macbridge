@@ -48,7 +48,10 @@ import (
 // (CommitTurnStateOpsV2) and the generation-bump baseline reset. v11 checkpoints
 // predate that bookkeeping — restoring them would crown zero-manifest turns as
 // authoritative under v2 semantics — so they rebuild from the canonical source.
-const projectionCheckpointSchemaVersion = 12
+// v13: legacy full-read Codex turns carry detailInline + loaded provenance.
+// Rebuild v12 checkpoints so old sessions never probe paginated detail and
+// remove every disclosure row after unsupported_capability.
+const projectionCheckpointSchemaVersion = 13
 
 var (
 	ErrProjectionCheckpointInvalid  = errors.New("projection checkpoint invalid")
@@ -362,6 +365,10 @@ func validateTurnDetailCheckpointFields(turns []TurnProjection) error {
 			}
 		} else if turn.DetailReasonCode != "" {
 			return fmt.Errorf("%w: turn %s state %q carries reasonCode",
+				ErrProjectionCheckpointInvalid, turn.TurnID, turn.DetailLoadState)
+		}
+		if turn.DetailInline && turn.DetailLoadState != DetailStateLoaded {
+			return fmt.Errorf("%w: turn %s inline detail state %q",
 				ErrProjectionCheckpointInvalid, turn.TurnID, turn.DetailLoadState)
 		}
 		if turn.DetailManifestRev < 0 || turn.DetailItemCount < 0 || turn.DetailTotalBytes < 0 {

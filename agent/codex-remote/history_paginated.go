@@ -866,8 +866,14 @@ func (a *Agent) ReadColdHistory(ctx context.Context, threadID string) (*core.Col
 		if err != nil {
 			return nil, err
 		}
+		mapped := mapRemoteHistoryTurns(turns, 0)
+		for i := range mapped {
+			if mapped[i].Status == remoteTurnStatusCompleted {
+				mapped[i].DetailPreloaded = true
+			}
+		}
 		return &core.ColdHistoryResult{HistoryMode: "legacy", Page: &core.UpstreamHistoryPage{
-			Turns: mapRemoteHistoryTurns(turns, 0), NextCursor: "",
+			Turns: mapped, NextCursor: "",
 		}}, nil
 	default:
 		return nil, ErrUnknownHistoryMode

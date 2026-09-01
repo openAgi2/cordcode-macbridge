@@ -116,7 +116,11 @@ type TurnProjection struct {
 	// state. Absent decodes as DetailStateNotRequested (old snapshots stay valid).
 	DetailLoadState  string `json:"detailLoadState,omitempty"`  // "" (notRequested) | loading | loaded | failed
 	DetailReasonCode string `json:"detailReasonCode,omitempty"` // non-empty iff failed
-	TurnGeneration   int    `json:"generation,omitempty"`       // per-turn fence counter; bumps on post-completion content mutation
+	// True only for codex-remote legacy full-read turns. Their complete process
+	// body is inline in Assistant.Parts, so expansion is local and never needs
+	// the paginated session_turn_items transport.
+	DetailInline   bool `json:"detailInline,omitempty"`
+	TurnGeneration int  `json:"generation,omitempty"` // per-turn fence counter; bumps on post-completion content mutation
 	// turn_detail_chunks_v1 (§11.8, owner final ruling 2026-08-30): manifest
 	// SUMMARY only — detail content never enters the projection. Additive;
 	// absent decodes as zero (v1 snapshots stay valid).

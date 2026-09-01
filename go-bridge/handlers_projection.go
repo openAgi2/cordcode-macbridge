@@ -1429,6 +1429,9 @@ func turnScopedHistoryTurnToProjectionEvents(turns []core.TurnScopedHistoryTurn)
 			if t.DurationMs > 0 {
 				completedData["durationMs"] = t.DurationMs
 			}
+			if t.DetailPreloaded {
+				completedData["detailPreloaded"] = true
+			}
 			out = append(out, projectionHydrateEvent{
 				Event:    "turn_completed",
 				Data:     completedData,

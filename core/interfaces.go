@@ -340,6 +340,11 @@ type TurnScopedHistoryTurn struct {
 	// (0 = unknown). Carried through the kernel TurnProjection so clients render the
 	// official "用时" value instead of recomputing from timestamps.
 	DurationMs int64
+	// DetailPreloaded is authoritative provenance from a legacy full-read cold
+	// baseline: every item for this turn is already carried in Parts, so clients
+	// must expand it locally and must not call the paginated session_turn_items
+	// method. False is the paginated summary/lazy-detail default.
+	DetailPreloaded bool
 
 	UserItemID string
 	UserText   string

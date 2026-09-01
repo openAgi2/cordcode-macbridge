@@ -135,6 +135,36 @@ func TestHandleGetSessionProjectionReturnsReducerState(t *testing.T) {
 	}
 }
 
+func TestLegacyCodexRemoteLiveCompletionIsInlineLoaded(t *testing.T) {
+	handlers := NewHandlers()
+	t.Cleanup(func() { handlers.Shutdown(context.Background()) })
+	const backendID = "codex-remote"
+	const sessionID = "legacy-resumed"
+	handlers.hydrateProducerSeeds.Store(
+		projectionDeliveryKey(backendID, sessionID),
+		&CodexProducerState{HistoryMode: "legacy"},
+	)
+
+	handlers.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": "T-live"})
+	handlers.sendSessionEvent(sessionID, backendID, "reasoning_delta", map[string]interface{}{
+		"turnId": "T-live", "itemId": "reason-live", "delta": "checked locally",
+	})
+	payload := map[string]interface{}{"turnId": "T-live"}
+	handlers.sendSessionEvent(sessionID, backendID, "turn_completed", payload)
+
+	projection, ok := handlers.eventPublisher.ProjectionReducer().Snapshot(backendID, sessionID)
+	if !ok || len(projection.Turns) != 1 {
+		t.Fatalf("projection = %+v, ok=%v", projection, ok)
+	}
+	turn := projection.Turns[0]
+	if turn.DetailLoadState != "loaded" || !turn.DetailInline {
+		t.Fatalf("legacy live completion detail = %q inline=%v, want loaded/true", turn.DetailLoadState, turn.DetailInline)
+	}
+	if _, mutated := payload["detailPreloaded"]; mutated {
+		t.Fatal("legacy completion decoration mutated the caller-owned payload")
+	}
+}
+
 // TestHandleGetSessionProjectionEmptyWhenNoState: without a source inspection, absence of reducer
 // state is not proof of a real empty session and must never become Ready(empty).
 func TestHandleGetSessionProjectionEmptyWhenNoState(t *testing.T) {

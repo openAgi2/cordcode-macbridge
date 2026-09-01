@@ -873,6 +873,9 @@ func TestResumeInitialTurnsPageLegacyPreSelectsBaseline(t *testing.T) {
 	if cold.HistoryMode != "legacy" || len(cold.Page.Turns) != 1 || cold.Page.Turns[0].TurnID != "L1" {
 		t.Fatalf("legacy cold = %+v", cold.Page)
 	}
+	if !cold.Page.Turns[0].DetailPreloaded {
+		t.Fatal("legacy full-read turn must carry inline-detail provenance")
+	}
 	if got := assertRPCs(t, calls, "thread/turns/list"); len(got) != 0 {
 		t.Fatalf("legacy cold open must not hit paginated turns/list: %+v", got)
 	}

@@ -1711,6 +1711,7 @@ Open semantics discovered later are BLOCKERS to be re-frozen here first.
 ```ts
 detailLoadState?: "notRequested" | "loading" | "loaded" | "failed"  // absent => notRequested
 detailReasonCode?: string   // present iff detailLoadState === "failed"; non-empty when present
+detailInline?: boolean      // true => complete detail is already in assistant.parts; expand locally
 generation?: number   // per-turn monotonic counter; absent => 0
 ```
 
@@ -1720,6 +1721,11 @@ turn-error code; the PATCH-OP-level field keeps the plan-frozen name `reasonCode
 - `detailLoadState` is a TURN-level field (not part-level, not session-level). Snapshots,
   window responses, and `upsertTurns` carry it on the turn. Absence decodes as `notRequested`,
   so old-bridge snapshots and pre-feature turns stay valid (restore is backward compatible).
+- `detailInline=true` is authoritative provenance for `codex-remote` legacy full-read turns.
+  Such a turn MUST also be `detailLoadState=loaded`; clients keep its disclosure row and only
+  toggle the already projected assistant parts. They MUST NOT call `session_turn_items`, whose
+  per-session gate intentionally rejects `historyMode=legacy`. The marker also applies to turns
+  completed live after a legacy thread is resumed. Absent/false keeps the paginated lazy path.
 - `generation` bumps on EVERY post-completion mutation of that turn (detail replace, upstream
   correction) and persists with the Kernel snapshot. It is the turn-scoped component of the
   `replace_parts` admission token `(backendId, sessionId, turnId, turnGeneration)`. The fence

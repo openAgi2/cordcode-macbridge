@@ -349,13 +349,18 @@ func TestSessionTurnItemsLegacyModeGate(t *testing.T) {
 	h, conn, sessionID, agent := turnDetailHarness(t, detailTurnFixture())
 	agent.cold = &core.ColdHistoryResult{HistoryMode: "legacy", Page: &core.UpstreamHistoryPage{
 		Turns: []core.TurnScopedHistoryTurn{
-			{TurnID: "T1", Status: "completed", UserText: "q1", Parts: []map[string]any{{"type": "text", "content": "a1"}}},
+			{TurnID: "T1", Status: "completed", UserText: "q1", DetailPreloaded: true, Parts: []map[string]any{{"type": "text", "content": "a1"}}},
 		},
 	}}
 	olderWalkDispatch(h, conn, map[string]any{
 		"direction": "window_0", "backendId": "codex-remote", "sessionId": sessionID, "limit": 10,
 	})
 	quiesceProjectionWrites(t, h)
+	projection, ok := h.projectionKernel.Snapshot("codex-remote", sessionID)
+	if !ok || len(projection.Turns) != 1 || projection.Turns[0].DetailLoadState != DetailStateLoaded ||
+		!projection.Turns[0].DetailInline {
+		t.Fatalf("legacy cold turn must be locally expandable: %+v", projection.Turns)
+	}
 	if wireErr, _ := turnItemsDispatch(t, h, conn, sessionID, "T1"); wireErr == nil || wireErr.Code != "unsupported_capability" {
 		t.Fatalf("legacy session must not expose session_turn_items: %+v", wireErr)
 	}

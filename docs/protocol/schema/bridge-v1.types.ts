@@ -656,6 +656,12 @@ export interface BridgeTurnProjection {
   detailLoadState?: "notRequested" | "loading" | "loaded" | "failed";
   /** Present iff detailLoadState === "failed"; non-empty. Frozen closed set in bridge-v1.md. */
   detailReasonCode?: string;
+  /**
+   * True only when the canonical assistant parts already contain the complete
+   * turn detail (codex-remote historyMode=legacy). Expansion is local and MUST
+   * NOT call session_turn_items. Absent/false keeps the paginated lazy path.
+   */
+  detailInline?: boolean;
   /** Per-turn monotonic generation; bumps on every post-completion mutation. Absent => 0. */
   generation?: number;
 }

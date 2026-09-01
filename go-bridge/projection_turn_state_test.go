@@ -209,10 +209,10 @@ func TestTurnStateOpsPatchRoundTrip(t *testing.T) {
 	}
 }
 
-// Schema v12 checkpoint round-trip: turn state + manifest summary fields and
-// the codex producer checkpoint persist through save/load; a v11 checkpoint
+// Schema v13 checkpoint round-trip: turn state + manifest/inline fields and
+// the codex producer checkpoint persist through save/load; an older checkpoint
 // is rejected and rebuilt from the canonical source instead of being restored.
-func TestCheckpointV12RoundTripTurnStateAndProducerState(t *testing.T) {
+func TestCheckpointV13RoundTripTurnStateAndProducerState(t *testing.T) {
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "source.jsonl")
 	if err := os.WriteFile(sourcePath, []byte("{\"a\":1}\n{\"a\":2}\n"), 0o644); err != nil {
@@ -227,6 +227,7 @@ func TestCheckpointV12RoundTripTurnStateAndProducerState(t *testing.T) {
 	}
 	projection := turnStateTestProjection()
 	projection.Turns[0].DetailLoadState = DetailStateLoaded
+	projection.Turns[0].DetailInline = true
 	projection.Turns[0].DetailManifestRev = 7
 	projection.Turns[0].DetailItemCount = 50
 	projection.Turns[0].DetailTotalBytes = 900000
@@ -256,12 +257,15 @@ func TestCheckpointV12RoundTripTurnStateAndProducerState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.SchemaVersion != 12 {
+	if loaded.SchemaVersion != 13 {
 		t.Fatalf("schema = %d", loaded.SchemaVersion)
 	}
 	turns := loaded.Projection.Turns
 	if turns[0].DetailLoadState != DetailStateLoaded || turns[0].EffectiveDetailLoadState() != "loaded" {
 		t.Fatalf("turn state lost: %+v", turns[0])
+	}
+	if !turns[0].DetailInline {
+		t.Fatalf("inline detail provenance lost: %+v", turns[0])
 	}
 	if turns[0].DetailManifestRev != 7 || turns[0].DetailItemCount != 50 || turns[0].DetailTotalBytes != 900000 {
 		t.Fatalf("turn manifest summary lost: %+v", turns[0])
@@ -346,6 +350,10 @@ func TestCheckpointTurnDetailFieldValidation(t *testing.T) {
 		build func() ProjectionCheckpoint
 	}{
 		{"unknown state", valid(func(t *TurnProjection) { t.DetailLoadState = "paused" })},
+		{"inline without loaded", valid(func(t *TurnProjection) {
+			t.DetailInline = true
+			t.DetailLoadState = DetailStatePartial
+		})},
 		{"reasonCode without failed", valid(func(t *TurnProjection) { t.DetailReasonCode = "timeout" })},
 		{"failed without reasonCode", valid(func(t *TurnProjection) { t.DetailLoadState = DetailStateFailed })},
 		{"negative manifestRev", valid(func(t *TurnProjection) { t.DetailManifestRev = -1 })},

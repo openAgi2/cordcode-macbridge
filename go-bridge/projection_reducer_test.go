@@ -852,7 +852,6 @@ func TestTurnStartedRepeatedNoExtraCommit(t *testing.T) {
 	}
 }
 
-
 // 官方 Turn.durationMs（app-server-protocol v2："Duration between turn start and
 // completion in milliseconds, if known"）接线锁定：live turn/completed 与冷 hydrate
 // 两条路都把官方值送进 TurnProjection.DurationMs（零值不覆盖）；客户端渲染官方
@@ -916,6 +915,31 @@ func TestTurnScopedHydrateCarriesDurationMs(t *testing.T) {
 	}
 	if _, present := byTurn["t-hist-old"]["durationMs"]; present {
 		t.Fatal("absent DurationMs must not appear in the hydrate event")
+	}
+}
+
+func TestTurnScopedLegacyDetailPreloadedBecomesInlineLoaded(t *testing.T) {
+	events := turnScopedHistoryTurnToProjectionEvents([]core.TurnScopedHistoryTurn{{
+		TurnID: "legacy-turn", Status: "completed", DetailPreloaded: true,
+		Parts: []map[string]any{
+			{"type": "reasoning", "itemId": "reason-1", "content": "already inline"},
+			{"type": "text", "itemId": "answer-1", "content": "answer", "presentation": "final"},
+		},
+	}})
+	r := newTestReducer()
+	for index, event := range events {
+		r.Apply(ev(index+1, "codex-remote", "legacy-session", event.Event, event.Data))
+	}
+	projection, ok := r.Snapshot("codex-remote", "legacy-session")
+	if !ok || len(projection.Turns) != 1 {
+		t.Fatalf("projection = %+v", projection)
+	}
+	turn := projection.Turns[0]
+	if turn.DetailLoadState != DetailStateLoaded || !turn.DetailInline {
+		t.Fatalf("legacy inline detail state = %+v", turn)
+	}
+	if turn.Assistant == nil || len(turn.Assistant.Parts) != 2 {
+		t.Fatalf("legacy inline parts = %+v", turn.Assistant)
 	}
 }
 

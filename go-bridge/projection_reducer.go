@@ -1308,6 +1308,11 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		}
 		ps.upsertTurn(completed)
 		if turn := ps.turnByID(turnID); turn != nil {
+			if dataBool(data, "detailPreloaded") {
+				turn.DetailLoadState = DetailStateLoaded
+				turn.DetailReasonCode = ""
+				turn.DetailInline = true
+			}
 			classifyProjectionTextPresentation(turn.Assistant, true)
 			ps.upsertTurns[turnID] = *turn
 		}

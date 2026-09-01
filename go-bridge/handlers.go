@@ -420,10 +420,38 @@ func (h *Handlers) publishEvent(logical LogicalEvent) EventMessage {
 	if h.eventPublisher == nil {
 		panic("event publisher is not configured")
 	}
+	logical = h.decorateLegacyInlineTurnCompletion(logical)
 	if len(logical.Targets) > 0 && len(logical.WaitTargets) == 0 {
 		logical.WaitTargets = logical.Targets
 	}
 	return h.eventPublisher.PublishLogical(logical)
+}
+
+// decorateLegacyInlineTurnCompletion carries the cold-open history-mode truth into
+// later live completions. A legacy codex-remote thread has no turn-items endpoint;
+// its file/live projection already contains the full process body, so every completed
+// turn in that session is locally expandable, including turns created after resume.
+// Clone the payload before decorating it because mapper-owned maps may be reused by
+// notification or raw-frame delivery after this call.
+func (h *Handlers) decorateLegacyInlineTurnCompletion(logical LogicalEvent) LogicalEvent {
+	if logical.BackendID != "codex-remote" || logical.Event != "turn_completed" {
+		return logical
+	}
+	state := h.loadProducerState(logical.BackendID, logical.SessionID)
+	if state == nil || state.HistoryMode != "legacy" {
+		return logical
+	}
+	data, ok := logical.Data.(map[string]interface{})
+	if !ok {
+		return logical
+	}
+	decorated := make(map[string]interface{}, len(data)+1)
+	for key, value := range data {
+		decorated[key] = value
+	}
+	decorated["detailPreloaded"] = true
+	logical.Data = decorated
+	return logical
 }
 
 func (h *Handlers) registerConnection(conn Connection) {
