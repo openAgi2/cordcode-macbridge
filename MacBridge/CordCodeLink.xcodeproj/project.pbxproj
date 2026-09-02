@@ -44,10 +44,12 @@
 		95E15CA13AA174B0BE61FAA5 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = D524FA3A3584520B5645C83C /* Localization.swift */; };
 		97A80C6E8F2C1E1E5E3B861B /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0981650921FA2296D640F294 /* SettingsViewModel.swift */; };
 		994A46DC8D86071D4388F8CA /* OpenCodeManagedServerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44FFCCB621A45144903369DD /* OpenCodeManagedServerTests.swift */; };
+		9A499E635034A17D677D4C30 /* TOML in Frameworks */ = {isa = PBXBuildFile; productRef = 854DF6CA183E090703F05554 /* TOML */; };
 		9DAF2027CAA9BC1167BF1E35 /* RuntimeProcessController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A183F62A649B623AA5D1FBA /* RuntimeProcessController.swift */; };
 		9DCAB02C23C6F97F756A87AC /* OpenCodeLaunchAgentCredentials.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2D28621DF47FFFEA3F80696 /* OpenCodeLaunchAgentCredentials.swift */; };
 		A1813AFBDA386D0DE9E1B84C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53BCC29BA17D8F56035A8068 /* ContentView.swift */; };
 		A70F8A382D3EAEC8305B0C15 /* AgentStatusRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59ACDDE8C5E5047CD28C7B85 /* AgentStatusRow.swift */; };
+		AC945C234156C14E25E92A47 /* TOML in Frameworks */ = {isa = PBXBuildFile; productRef = 2D15A4CC7C3D0B8F9B9CD787 /* TOML */; };
 		AFEC8A31F38FA1DBCF600898 /* DeviceStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 974E6D4F31954BBCE23287AF /* DeviceStoreTests.swift */; };
 		B1A14832A89E0CFE69246452 /* LayoutConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 816D0925391B834EE9F44199 /* LayoutConstants.swift */; };
 		C156B2FA00015BBD640265B4 /* BridgeStatusViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F2414D249C8A25F8F5F81D5 /* BridgeStatusViewModel.swift */; };
@@ -141,6 +143,25 @@
 		F2D28621DF47FFFEA3F80696 /* OpenCodeLaunchAgentCredentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeLaunchAgentCredentials.swift; sourceTree = "<group>"; };
 		F75F0357623C9DE9A3951300 /* WebPushMaintenanceViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPushMaintenanceViewModelTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		8EB1A742B6E2260A68945EED /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9A499E635034A17D677D4C30 /* TOML in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B75E7E14E05A9BDF28068ABD /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AC945C234156C14E25E92A47 /* TOML in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		04CBB18CDD956E196EFF8CA3 /* ViewModels */ = {
@@ -291,6 +312,7 @@
 				CA19C8841D51273D5D9393D6 /* Build go-bridge runtime */,
 				B3D16682D9157C12779396C4 /* Sources */,
 				8E38F585F9F5A371E9C685DC /* Resources */,
+				8EB1A742B6E2260A68945EED /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -298,6 +320,7 @@
 			);
 			name = CordCodeLink;
 			packageProductDependencies = (
+				854DF6CA183E090703F05554 /* TOML */,
 			);
 			productName = CordCodeLink;
 			productReference = AD99321F01E1E7EF31F4B0C9 /* CordCodeLink.app */;
@@ -308,6 +331,7 @@
 			buildConfigurationList = 2C260E83748CEB2716A2D917 /* Build configuration list for PBXNativeTarget "CordCodeLinkTests" */;
 			buildPhases = (
 				6B3CDEC042CEF2D5099A4955 /* Sources */,
+				B75E7E14E05A9BDF28068ABD /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -316,6 +340,7 @@
 			);
 			name = CordCodeLinkTests;
 			packageProductDependencies = (
+				2D15A4CC7C3D0B8F9B9CD787 /* TOML */,
 			);
 			productName = CordCodeLinkTests;
 			productReference = 684E9C0C288ED1ED58423396 /* CordCodeLinkTests.xctest */;
@@ -345,6 +370,9 @@
 			);
 			mainGroup = 2B4B5E1AA44FC806DB0CFD4C;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				D0D40CE311899A9ADEFBA2A8 /* XCRemoteSwiftPackageReference "swift-toml" */,
+			);
 			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
@@ -711,6 +739,30 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		D0D40CE311899A9ADEFBA2A8 /* XCRemoteSwiftPackageReference "swift-toml" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mattt/swift-toml";
+			requirement = {
+				kind = exactVersion;
+				version = 2.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		2D15A4CC7C3D0B8F9B9CD787 /* TOML */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D0D40CE311899A9ADEFBA2A8 /* XCRemoteSwiftPackageReference "swift-toml" */;
+			productName = TOML;
+		};
+		854DF6CA183E090703F05554 /* TOML */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D0D40CE311899A9ADEFBA2A8 /* XCRemoteSwiftPackageReference "swift-toml" */;
+			productName = TOML;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = D2B18756D8E980B849C0FA49 /* Project object */;
 }

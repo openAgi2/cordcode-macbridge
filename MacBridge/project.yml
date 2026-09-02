@@ -8,6 +8,10 @@ settings:
     SWIFT_VERSION: "5.9"
     MARKETING_VERSION: 0.1.0
     CURRENT_PROJECT_VERSION: 1
+packages:
+  TOML:
+    url: https://github.com/mattt/swift-toml
+    exactVersion: 2.0.0
 targets:
   CordCodeLink:
     type: application
@@ -16,6 +20,8 @@ targets:
       macOS: "14.0"
     sources:
       - path: MacBridge
+    dependencies:
+      - package: TOML
     info:
       path: Info.plist
       properties:
@@ -63,6 +69,7 @@ targets:
       - path: MacBridge/App/OpenCodeCredentialsGenerator.swift
     dependencies:
       - target: CordCodeLink
+      - package: TOML
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.openagi.cordcode.link.tests
