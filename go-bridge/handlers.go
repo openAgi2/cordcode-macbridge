@@ -1289,6 +1289,16 @@ func (h *Handlers) handleSetObservationScope(conn Connection, msg WireMessage) {
 		}
 		sessions = append(sessions, row)
 	}
+	// 切走的 session 必须退订：订阅语义是「当前打开」，不是「曾经打开」。否则 App
+	// 保持连接期间 HasSessionSubscriber 恒真，no-subscriber 下线路径（grok leader
+	// D-G2、claude/codex file relay 退出）永不触发。
+	keep := make(map[string]struct{}, len(observedSessions))
+	for _, sid := range observedSessions {
+		if sid != "" {
+			keep[sid] = struct{}{}
+		}
+	}
+	h.broadcaster.ReconcileObservationSubscriptions(conn, req.BackendID, keep)
 	// INFO so flapping/delivery-gap forensics can see mode without Debug log level.
 	// hasSubscriber after Subscribe is the forensic for candidateTargets=0 regressions.
 	hasSub := false

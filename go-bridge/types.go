@@ -695,6 +695,34 @@ func (b *Broadcaster) UnsubscribeAll(conn Connection) {
 	delete(b.allConns, conn)
 }
 
+// ReconcileObservationSubscriptions 退订该连接名下 backend 匹配且 Directory 为空、
+// SessionID 不在 keep 集中的订阅键。set_observation_scope 切换会话时调用：订阅语义
+// 是「客户端当前打开该 session」，不是「曾经打开过」——不退订的话，App 保持连接期间
+// HasSessionSubscriber 恒真，grok leader D-G2（no-subscriber 下线）与 claude/codex
+// file relay 的无订阅者退出永不触发（2026-09-02 owner 验收实测）。
+// 只处理观察键（Directory==""）：send_message/resume 带目录的自有会话键与其他
+// backend 的键不受影响。
+func (b *Broadcaster) ReconcileObservationSubscriptions(conn Connection, backendID string, keep map[string]struct{}) {
+	if conn == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for key := range b.connSubs[conn] {
+		if key.BackendID != backendID || key.Directory != "" {
+			continue
+		}
+		if _, ok := keep[key.SessionID]; ok {
+			continue
+		}
+		delete(b.subscribers[key], conn)
+		if len(b.subscribers[key]) == 0 {
+			delete(b.subscribers, key)
+		}
+		delete(b.connSubs[conn], key)
+	}
+}
+
 // TransferSubscriptions moves every session subscription from old → new under one lock.
 // Used when a Relay device re-handshakes: the new Connection must inherit the old
 // session interest immediately so live text/reasoning deltas keep a target.
