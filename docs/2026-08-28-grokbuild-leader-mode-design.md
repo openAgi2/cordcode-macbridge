@@ -534,6 +534,27 @@ binding、协议翻译、capability 组织——在本设计中**不是待实施
     pager-bin flag→env 转换 `:2007-2009` → 实际 `:2039-2041`，文件路径根
     `crates/codegen/xai-grok-pager-bin/src/main.rs`。
 
+11. **【2026-09-02 owner 验收矩阵实测回写】三个真实缺口 + 修复**：
+    (a) **D-G2 永不触发（行 12 事故，两轮修复）**：设计假设订阅键随 scope 切换退订，
+    实际 `handleSetObservationScope` 只加不减——App 连接期间 `HasSessionSubscriber`
+    恒真（98ae793 补 `ReconcileObservationSubscriptions`）；修后仍不触发，第二根因是
+    iOS `get_session` 携带 `currentSessionDirectory` 使读路径产生**带目录键**，幸存
+    reconcile（05152aa 读路径统一记**空目录观察键**）。由此固化订阅键三分语义：空目录
+    键=观察键（随 scope 切换退订）；带目录键=自有会话键（send_message/resume，切换后
+    继续收流）；`Targets` 的 noDir 匹配保证空目录键是带目录事件的合法投递目标。
+    实测取消延迟精确 60s（elapsed=1m0s），无虚假中断，重开恢复。
+    (b) **iPhone 自有 turn 的 user echo 缺身份（行 6 事故）**：`user_message_chunk`
+    按上游设计不带 promptId（§0.2 上游锚点已核），98f0e57 只在观察 loop
+    （`grokLeaderSessionRelayLoop` pendingUserText）做了身份重建，自有 turn 的
+    `relayEvents` 路径无补齐 → SSV2 reducer 跳过 identityless user_message →
+    乐观占位释放后发送的消息从投影消失（39e29a8 在 `grokSession.emitTurnScoped`
+    层补齐，覆盖两个消费路径）。
+    (c) **F-7 / D-G1 实测值**：armed turn + leader kill -9 → turn_aborted
+    (leader_disconnect) + idle 合成实测 17ms 内；D-G1 干净序列实测：退出 TUI →
+    杀 leader（TUI 存活时 ~12s 内自动重生 leader 并重建 socket，无法保持 stale）
+    → iPhone 重开会话触发全新订阅 → `leader subscribe failed, falling back to
+    updates.jsonl tailer` → TUI 发消息按轮询节奏（~1s 批）恢复，终态干净。
+
 ---
 
 ## 3. 架构

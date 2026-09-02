@@ -5,12 +5,69 @@
 
 | 后续案 | 是什么 / 入口 | 前置依赖 | 状态（更新于） |
 | --- | --- | --- | --- |
-| Grok follower 交互升级 | iOS 无缝接力 Mac 端 grok 任务的根治路径（iOS 作为 leader 客户端，消息进同一 full-capability agent，per-client 能力路由 + mid-turn interjection）。入口 `docs/2026-08-28-grokbuild-leader-mode-design.md` §9/§15 D-3 | leader 模式设计（B 路线）实施完；动工前须按 source-first 冻结 leader 协议 request 方向真实样本（interjection/cancel/permission response 的 follower 可用性）+ writer 仲裁 | 未开工；B 路线 Phase 1–4 产品代码已全部落地并安装（2026-09-02，提交 69f3b31…0f4e5e8，owner §7.3 验收矩阵 pending），动工前置中的「实施完」已满足 |
-| Grok roster 通知消费 | `x.ai/sessions/changed` machine-wide 广播 → 会话列表实时刷新（官方 leader 已广播、官方 Pager 已消费；MacBridge 当前丢弃该通知）。入口同上 §9/§4.1 | leader 模式生效；改 `leader_subscriber.go` 方法过滤器 | 未开工（2026-09-02）；B 路线产品代码已落地（2026-09-02），leader 生效待 owner 验收 |
+| Grok follower 交互升级 | iOS 无缝接力 Mac 端 grok 任务的根治路径（iOS 作为 leader 客户端，消息进同一 full-capability agent，per-client 能力路由 + mid-turn interjection）。入口 `docs/2026-08-28-grokbuild-leader-mode-design.md` §9/§15 D-3 | leader 模式设计（B 路线）实施完；动工前须按 source-first 冻结 leader 协议 request 方向真实样本（interjection/cancel/permission response 的 follower 可用性）+ writer 仲裁 | 未开工；B 路线 owner 验收收官（2026-09-02，矩阵 11/12 过 + 诊断卡，提交链 69f3b31…39e29a8），「实施完」前置已满足 |
+| Grok roster 通知消费 | `x.ai/sessions/changed` machine-wide 广播 → 会话列表实时刷新（官方 leader 已广播、官方 Pager 已消费；MacBridge 当前丢弃该通知）。入口同上 §9/§4.1 | leader 模式生效；改 `leader_subscriber.go` 方法过滤器 | 未开工（2026-09-02）；owner 验收收官，leader 生效已验证，前置已满足 |
 | Grok model/provider/effort 缺口 | SetModel 只改内存、spawn 参数不传、AvailableModels 空目录。入口同上 §4.7 | 无硬前置，MacBridge 侧独立改进 | 未开工（2026-09-02） |
 | remote-web 集中测试轮 | 12 门浏览器端验收矩阵 + 4 web-push 取证门（owner 2026-09-02 裁决：先 iOS 任务 → 整体迁移 remote-web → 集中测试）。入口 iOS 仓 `.exec-plan/state/plan-4fe9645c3a36.json` 注记 | iOS App 端任务完成 + remote-web 整体迁移完成 | pending 非阻断；功能路径已真机验证过，16 门属迁移后回归确认（2026-09-02） |
 
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
+
+## 2026-09-02 Grok Leader 验收期两复盘：订阅键三分语义 + user echo 身份补齐覆盖缺口
+
+### D-G2「无人观看 60s 自动下线」两轮修复：订阅键语义混用
+
+owner 真机验收行 12 发现 D-G2 永不触发。两轮根因（`98ae793` + `05152aa`）都出在
+订阅键语义，不是计时器：
+
+1. `handleSetObservationScope` 只往订阅集合加键、从不退订——iPhone 切走会话后旧观察
+   键残留，App 连接期间 `HasSessionSubscriber` 恒真，守望永不超时。
+2. 修完仍不触发：iOS `get_session` 携带 `currentSessionDirectory`，读路径订阅记的是
+   **带目录键**；而守望判据查的是**空目录观察键**。带目录键不等于观察键，幸存了第一轮
+   的 reconcile。
+
+由此固化订阅键三分语义（后续改 `handlers_relay.go` 订阅逻辑必须遵守）：
+
+- **空目录键 = 观察键**：纯旁观，随 scope 切换退订，是 D-G2 守望的判据对象；
+- **带目录键 = 自有会话键**：send_message / resume 产生，切走会话后**继续**收流，
+  不参与守望取消；
+- `Targets` 的 noDir 匹配保证空目录键是带目录事件的合法投递目标（官方 leader 按
+  session+cwd 广播，订阅键去目录后能命中）。
+
+教训：**「订阅键」不是单一概念**。设计守望/退订/取消类逻辑前，先枚举该键的全部生产
+者与消费者，确认它们指的是同一语义；否则单测各自都绿、真机永不触发（两轮修复期间
+13 个 D-G2 单测全程绿，靠的就是它们只测空目录键路径）。
+
+### row 6「iPhone 自己发的消息消失」：身份重建只覆盖了一条消费路径
+
+owner 验收行 6 发现：iPhone 自有 turn 流式正常但 prompt 不显示。根因链（预存缺口，
+2026-08-05 codec 重写时引入，非本分支）：
+
+- 上游 grok-build `meta.rs user_message_chunk_meta` 按设计只 stamp
+  `promptIndex`/`hideFromScrollback`，**无 promptId**（source-first @ bc7f02ed 已核）；
+- `convertSessionUpdate` 产出无 TurnID 的 `EventUserMessage`（正确——身份由消费方补）；
+- 但补齐逻辑（98f0e57）只加在观察路径 `grokLeaderSessionRelayLoop` 的
+  pendingUserText，自有 turn 的 `relayEvents` 路径从未有过；
+- wire `user_message` 无 turnId/itemId → SSV2 reducer（projection_reducer.go:668）
+  跳过 → iOS localSend 乐观占位在权威投影推进后被替换 → 发送的消息消失。
+
+修复（`39e29a8`）：身份补齐下沉到 `grokSession.emitTurnScoped`（session 层，
+handleNotification 统一入口），缓冲 echo、同 turn 首个带身份事件（含 turn_completed
+终态的 prompt_id）到达时以其身份补发；`Send` 开新 turn 时清残留。
+
+教训：**同一 codec 输出有多条消费路径时，任何「补身份/补状态」横切逻辑必须在汇聚层
+做，或在每条路径分别做**。98f0e57 在 loop 层做补齐只覆盖了它看到的那条路径——写这类
+补齐时先列全 codec 事件的全部消费者（grep 产出的 Event 类型流向），再选层；否则验收
+期必然再撞一次。测试也要按消费路径分（观察路径 pendingUserText / 自有路径
+emitTurnScoped 各有钉子）。
+
+### 附带实测事实（后续排障直接引用）
+
+- TUI 存活时 `kill -9` leader → **~12 秒内 TUI 自动重生 leader**（connect_or_spawn，
+  socket 重绑）；要做稳定 stale socket 实验，必须先完全退出 TUI（leader 带
+  `--no-exit-on-disconnect` 存活）再杀。
+- D-G1 回退三要素（订阅结束 + 未转发事件 + ctx 未取消）实测成立；已转发 ≥1 事件后
+  断开不回退（F-7 收口语义）。
+- D-G2 取消延迟实测精确 60s（elapsed=1m0s），无虚假中断。
 
 ## 2026-08-28 Codex Remote Phase 0 冻结（2026-09-02 已解除）
 

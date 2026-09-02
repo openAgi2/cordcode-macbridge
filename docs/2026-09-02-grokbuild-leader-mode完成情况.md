@@ -5,28 +5,30 @@
 - Project Root: `/Users/jacklee/Projects/cordcode-macbridge-grokbuild-leader`（单仓任务，iOS / protocol pack / SSV2 零修改）
 - Plan: `docs/2026-08-28-grokbuild-leader-mode-design.md`（v10 owner APPROVE）
 - Canonical State File: `.exec-plan/state/plan-60f196abb855.json`
-- Completion Report Verdict: **`code-complete / owner-acceptance-pending`**（产品代码、单测、Release 安装全部收口；§7.3 owner 真机矩阵 12 行未执行——这是本报告与 proved-complete 的唯一差距）
-- Queue Summary: 26/33 todos done；pending 的 7 项中 6 项为 owner 矩阵类 regression（p2-dg1/p2-dg2/p3-ui/p4-diagnostics/p4-release/p4-doc-sync-regression，全部 blocked by owner 验收），1 项 p4-doc-sync-regression 为 D0 无运行面（na 见队列）
-- Related Commits: `69f3b31`（TOML 依赖）`1676df5`（开关管理器 T1–T33）`9baa1e5`（D-G1）`3089a95`（D-G2）`4cfddfd`（Phase 3 UI）`0f4e5e8`（Phase 4 诊断行）`f92cec6`（doc-sync + D-3 帮助文案）；另有 Phase 0 基线修复 `6dc9353`（D-G0b 终态通知白名单）与 cwd 缺口修复（见执行日志）
-- Generated At: `2026-09-02T18:20:00+08:00`
+- Completion Report Verdict: **`proved-complete (owner-verified 2026-09-02)`**（产品代码、单测、Release 安装、§7.3 owner 真机矩阵全部收口；12 行中 11 行 owner 实测通过 + 诊断卡确认，行 3「未安装态」为可选行未测，已在 exec-plan regression 证据中注明）
+- Queue Summary: **33/33 todos done**（owner 矩阵类 regression p2-dg1/p2-dg2/p3-ui/p4-diagnostics/p4-release 全部回填；p4-doc-sync-regression 为 D0 无运行面，na 见队列；验收期新增 rfx-row6-user-echo 三元组闭环）
+- Related Commits: `69f3b31`（TOML 依赖）`1676df5`（开关管理器 T1–T33）`9baa1e5`（D-G1）`3089a95`（D-G2）`4cfddfd`（Phase 3 UI）`0f4e5e8`（Phase 4 诊断行）`f92cec6`（doc-sync + D-3 帮助文案）`98ae793`（验收修复 ①：scope 切换退订旧观察键）`05152aa`（验收修复 ②：读路径订阅键改观察语义）`39e29a8`（验收修复 ③：iPhone 自有 turn 的 user echo 补 turn 身份）；另有 Phase 0 基线修复 `6dc9353`（D-G0b 终态通知白名单）与 cwd 缺口修复（见执行日志）
+- Generated At: `2026-09-02T21:04:00+08:00`（owner 验收收官后最终更新）
 
 ## 1. Overall Verdict (总体结论)
 
-B 路线 Leader 模式的产品代码全部落地并已安装到 `/Applications`（两次覆盖安装，最终
-runtime commit `f92cec622e3c`，运行态身份门全过）。产品语义红线全程保持：**只读共存**
-（不 spawn leader、不抢 flock、observer 永不回答 agent→client 请求）、**关 = 删键保留
-节头**、**config.toml 外科文本编辑零重排**（CRLF/注释/其他键逐字节保留）、**fail-visible
-禁止 fallback**（F1/F2 禁用+提示；版本漂移症状可见不加伪装）。
+B 路线 Leader 模式的产品代码全部落地并已安装到 `/Applications`（最终 runtime commit
+`39e29a879f2f`，运行态身份门全过），§7.3 owner 真机矩阵 2026-09-02 验收收官。产品语义
+红线全程保持：**只读共存**（不 spawn leader、不抢 flock、observer 永不回答 agent→client
+请求）、**关 = 删键保留节头**、**config.toml 外科文本编辑零重排**（CRLF/注释/其他键
+逐字节保留）、**fail-visible 禁止 fallback**（F1/F2 禁用+提示；版本漂移症状可见不加伪装）。
 
 验证分级声明（CLAUDE.md 部署后运行态验证第 4 条）：
 
-- **组件级已验证**：Go 单测（go-bridge 包级回归 + D-G2 13 用例 + G4 互锁）、Swift
-  单测（GrokLeaderModeTests 49/49：T1–T33 + rowState 5 例 + 诊断 5 例）、增量 Debug
-  编译、Release 构建。
-- **生产路径级已验证**：Release 覆盖安装 + 进程代际 + 8777 监听者 + runtime.json /
-  management runtimeIdentity 一致 + relay 重连 + grokbuild 目录种子。
-- **待 owner 验收**：§7.3 十二行真机矩阵（见 §6 清单）；Phase 0 已在生产环境实测过
-  拓扑（6a/6b/7/8/9 十步全过），矩阵是 D-G1/D-G2/UI 落地后的回归确认。
+- **组件级已验证**：Go 单测（go-bridge 包级回归 + D-G2 13 用例 + G4 互锁 + user echo
+  5 用例）、Swift 单测（GrokLeaderModeTests 49/49：T1–T33 + rowState 5 例 + 诊断 5 例）、
+  增量 Debug 编译、Release 构建。
+- **生产路径级已验证**：Release 覆盖安装（3 次，最终 `39e29a879f2f`）+ 进程代际 + 8777
+  监听者 + runtime.json / management runtimeIdentity 一致 + relay 重连 + grokbuild
+  目录种子；§7.3 十二行真机矩阵中 11 行 owner 实测通过 + 诊断卡确认（行 3 可选未测）。
+- **验收期暴露并修复的真实缺口**（三个，均非新分支引入的回归，已带测试与文档回写）：
+  D-G2 两轮订阅键语义（`98ae793` + `05152aa`）、iPhone 自有 turn 的 user echo 缺身份
+  （`39e29a8`，预存缺口，2026-08-05 起）。详见设计 §0.2-11。
 
 ## 2. Gate Completion Matrix (门完成矩阵)
 
@@ -41,8 +43,10 @@ runtime commit `f92cec622e3c`，运行态身份门全过）。产品语义红线
 | P4a 诊断行 | DiagnosticsSheet grok 组：配置三分 + socket 路径与存在性 + 安装版本 | `proven-done (re-verified)` | commit `0f4e5e8`；诊断 5 例（三分映射语言中立断言、F1/F2 fail-visible、三段结构、版本探测优先级/回退/nil）49/49 |
 | P4b 帮助文案 | D-3 interaction 提示 + 四因 + D-G2 副作用 + chat 互斥（ON 态 hover） | `proven-done` | commit `f92cec6`；`grok_leader_mode_notes` 双语 |
 | P4c Release | 构建 + 覆盖安装 + 运行态身份门 | `proven-done (re-verified)` | 本文 §4；两次安装（`0f4e5e8`→`f92cec6`）均过四门 |
-| P4d doc-sync | CHANGELOG / think.md / 设计实测回写 / 本报告 | `proven-done` | commit `f92cec6` + 本文件 |
-| §7.3 owner 矩阵 | 12 行真机验收 | **`pending`** | 本文 §6 清单；完成后回填本表并升级 verdict |
+| P4d doc-sync | CHANGELOG / think.md / 设计实测回写 / 本报告 | `proven-done` | commit `f92cec6` + 验收期收口提交 + 本文件 |
+| §7.3 owner 矩阵 | 12 行真机验收 | **`owner-verified (2026-09-02)`** | 本文 §6 清单（11 行过 + 诊断卡确认；行 3 可选未测）；日志佐证：D-G2 取消 elapsed=1m0s、D-G1 回退行 20:59:03、SYNTHESIZE 21:00:47 → 干净终态 21:00:53 |
+| 验收修复 ①② | D-G2 订阅键语义两轮修复 | `proven-done (re-verified)` | commits `98ae793`（scope 切换退订旧观察键）+ `05152aa`（读路径记空目录观察键）；owner 复测行 12 过 |
+| 验收修复 ③ | iPhone 自有 turn user echo 补 turn 身份 | `proven-done (re-verified)` | commit `39e29a8`；`session_user_echo_test.go` 5 用例 + go-bridge/grokbuild 全量绿；owner 复测行 6 过（「发送的消息保持在对话里」） |
 
 ### 2.1 Upstream Anchors (上游锚点)
 
@@ -64,6 +68,8 @@ runtime commit `f92cec622e3c`，运行态身份门全过）。产品语义红线
 - `agent/grokbuild/grokbuild.go`：D-G1 建立失败回退 tailer（§3.5.1）。
 - `go-bridge/handlers_relay.go` + `go-bridge/types.go`：D-G2 订阅者守望（`grokLeaderSessionRelayLoop`、F-7 分流、sessionStateUnknown 第四状态、claim generation CAS、`isKnownActive` 守卫 idleTimer/claude TTL/codex 硬上限三路）。
 - `agent/grokbuild/leader_subscriber.go`：D-G0b 终态通知白名单 wire 形态修复（Phase 0 基线，`6dc9353`）。
+- `go-bridge/handlers_relay.go`（验收修复 ①②）：`set_observation_scope` 切换时 `ReconcileObservationSubscriptions` 退订旧观察键（`98ae793`）；读路径（iOS `get_session` 触发的观察订阅）统一记**空目录观察键**而非带 `currentSessionDirectory` 的键，幸存 reconcile 语义（`05152aa`）。
+- `agent/grokbuild/session.go`（验收修复 ③）：新增 `emitTurnScoped` —— `user_message_chunk` 回显（上游 meta.rs 按设计不 stamp promptId）缓冲为 `pendingUserEcho`，同 turn 首个带身份事件（含 `turn_completed` 终态）到达时以其 TurnID/ItemID 补发，`Send` 开新 turn 时清残留；session/update 循环全部走该方法，观察与自有 turn 两条消费路径统一覆盖（`39e29a8`）。
 
 ## 4. Verification Evidence (验证证据，标注 attestation)
 
@@ -76,55 +82,65 @@ runtime commit `f92cec622e3c`，运行态身份门全过）。产品语义红线
 | 5 | Release 构建 | `./scripts/build-unsigned-release.sh` ×2 | `Runtime … commit: f92cec622e3c, built: 2026-09-02T10:15:19Z`；`dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip` | re-verified |
 | 6 | 部署运行态四门（最终安装） | killall+pkill 双进程名 → cp -R → open；`lsof -t 8777`=50571；`ps lstart`=18:16:22（晚于构建 18:15:19）；runtime.json pid=50571；management `runtimeIdentity.pid`=50571；pgrep 无 /Applications 之外残留 | 全过 | re-verified（生产路径级） |
 | 7 | 重启后健康 | go-bridge.log 18:09/18:16 起滚动；relay `connected`；grokbuild `session discovery snapshot seeded sessionCount=19` | 正常 | re-verified（生产路径级） |
-| 8 | UI 观感（Toggle 副文案/诊断行渲染/alert） | — | **组件级**（单测覆盖状态机与文案；真机观感归 §6 矩阵 #1–#3、#7） | self-attested |
+| 8 | UI 观感（Toggle 副文案/诊断行渲染/alert） | — | **owner 真机确认**（§6 矩阵 #1–#3、#7 过 + 诊断卡过） | owner-verified |
 | 9 | secret scan | 提交链只含源码/测试/文档；config.toml GLM api_key 未入库（`git log --all --oneline -- '**/config.toml'` 无生产配置） | 通过 | self-attested |
+| 10 | 验收期回归（Go） | `go test ./agent/grokbuild/ -count=1` + `go test ./go-bridge/... -count=1`（含 `session_user_echo_test.go` 5 用例） | grokbuild 16.7s / go-bridge 74.1s 全绿 | re-verified（39e29a8 后执行） |
+| 11 | 部署运行态四门（最终安装 ③，`39e29a8`） | killall+pkill 双进程名 → cp -R → open；runtime stamp `39e29a879f2f`；pid/lstart/runtime.json 一致；无 /Applications 之外残留 | 全过（owner 行 6 复测即在该 runtime 上通过） | re-verified（生产路径级） |
 
 ## 5. P0 来源门记录（三个门点）
 
 ```
 仓库路径=/Users/jacklee/Projects/cordcode-macbridge-grokbuild-leader
 分支=codex/grokbuild-leader-mode
-提交=读源码/修改门: 0f4e5e8a02f3…；构建/安装门: f92cec622e3c…（doc-sync 提交后重建）
+提交=读源码/修改门: 39e29a879f2f…（验收修复 ③ 提交后）
+       构建/安装门: 39e29a879f2f…（构建 stamp 与提交一致；最终安装即该产物）
+       doc-sync 门: 验收收官后 D0 提交（本文件/CHANGELOG/think.md/设计 §0.2-11）
 未提交状态=仅 untracked docs/2026-09-02-same-name-ios-device-eviction-fix-design.md
           （另一任务设计文档，明确排除在全部提交与产物之外）
 任务预期分支=codex/grokbuild-leader-mode（一致 ✓）
-配套仓库=无（单仓任务，iOS 零修改 ✓）
+配套仓库=无（单仓任务，iOS 零修改 ✓；owner 真机矩阵使用 iPhone 客户端属验收动作非源码依赖）
 预期产品特性=agentRow grokbuild Leader Toggle、九态副文案、DiagnosticsSheet grok 组
-            状态行、D-G1 回退、D-G2 守望（全部在产物源码中核对 ✓）
+            状态行、D-G1 回退、D-G2 守望（含两轮订阅键修复）、user echo 身份补齐
+            （全部在产物源码中核对 ✓）
 ```
 
-## 6. Owner 验收清单（§7.3 十二行，产品语言）
+## 6. Owner 验收清单（§7.3 十二行，产品语言）—— 已收官 2026-09-02
 
 前提：Mac 上 CordCode Link 已是本轮构建（帮助与诊断里 grok 版本行可查）；iPhone 正常
-连接。逐行做完后回报每行「过 / 不过 + 现象」即可。
+连接。结果：**11 行 owner 实测通过 + 诊断卡确认；行 3 为可选行未测**。验收期暴露的
+三个缺口已修复（见 §2 矩阵验收修复行），修复后相关行由 owner 复测通过。
 
-1. **开**：AI 工具列表 Grok Build 行打开「Leader 模式」→ 行内出现橙色「已开启，重启
+1. **开** ✅：AI 工具列表 Grok Build 行打开「Leader 模式」→ 行内出现橙色「已开启，重启
    grok 后生效」；`~/.grok/config.toml` 出现 `use_leader = true`，其他内容原样。
-2. **关**：再关闭 → 键被删除（不是 false；空 `[cli]` 节头保留）；`~/Library/Application
+2. **关** ✅：再关闭 → 键被删除（不是 false；空 `[cli]` 节头保留）；`~/Library/Application
    Support/CordCode Link/` 下备份目录存在（≤3 份，0700/0600）。
-3. **未安装态**（可选，PATH 移除 grok 时）：开关置灰，悬浮提示「未检测到 grok CLI」。
-4. **生效链**：开关开着 → 启动 grok TUI 发一条消息 → iPhone 打开同一会话：内容实时
+3. **未安装态**（可选，PATH 移除 grok 时）未测：开关置灰，悬浮提示「未检测到 grok CLI」。
+4. **生效链** ✅：开关开着 → 启动 grok TUI 发一条消息 → iPhone 打开同一会话：内容实时
    可见（推送节奏，非 1 秒一次的轮询节奏）。
-5. **长消息流式**：TUI 发长消息 → iPhone 实时流式显示，turn 有唯一终态。
-6. **iPhone 自己发起**：iPhone 对自己发起的 grok 会话发消息正常（自有 `--no-leader`
-   stdio 路径不受影响）。
-7. **未重启提示**：开关开着但 grok 没重启 → 提示保持橙色「重启后生效」，不显示
+5. **长消息流式** ✅：TUI 发长消息 → iPhone 实时流式显示，turn 有唯一终态。
+6. **iPhone 自己发起** ✅（修复后复测）：iPhone 对自己发起的 grok 会话发消息正常，且
+   发送的 prompt 保持在对话里（owner 原话「测试符合预期✅，发送的消息保持在对话里」；
+   修复 `39e29a8`，预存缺口非本分支引入）。
+7. **未重启提示** ✅：开关开着但 grok 没重启 → 提示保持橙色「重启后生效」，不显示
    「检测到 socket」。
-8. **关 TUI 不断流**：开关开着、TUI 里一个没在等权限/提问的任务进行中、iPhone 会话
+8. **关 TUI 不断流** ✅：开关开着、TUI 里一个没在等权限/提问的任务进行中、iPhone 会话
    保持打开 → 关闭 TUI：任务继续完成，iPhone 看到完整收尾。
-9. **OFF 基线**：开关关闭、grok 正常运行 → TUI 发消息、iPhone 打开同一会话：观察照旧
+9. **OFF 基线** ✅：开关关闭、grok 正常运行 → TUI 发消息、iPhone 打开同一会话：观察照旧
    （日志有 `falling back to updates.jsonl file tailer` 行）。
-10. **leader 崩溃**：开关开着、TUI 里任务进行中、iPhone 会话打开 → `kill -9` leader
-    进程：iPhone 收到明确「已中断」并回到空闲，不残留「执行中」。
-11. **stale socket 回退**：`kill -9` leader 留下 socket 文件 → iPhone 重开会话：观察
-    经回退继续工作（事件按轮询节奏恢复），日志出现回退 INFO 行。
-12. **无人观看自动下线**：某会话 observer 在场（最好有任务进行中）→ iPhone 关闭该
-    会话并等 >70 秒：日志可见 observer 取消、relay 退出；**不得出现虚假「已中断」**；
-    侧栏该会话不再显示「运行中」；重开会话后观察恢复（socket 在则推送、否则回退 +
-    冷拉补齐）。
+10. **leader 崩溃** ✅：开关开着、TUI 里任务进行中、iPhone 会话打开 → `kill -9` leader
+    进程：iPhone 收到明确「已中断」并回到空闲，不残留「执行中」（agent 辅助执行，
+    F-7 分流实测 17ms 内合成）。
+11. **stale socket 回退** ✅：`kill -9` leader 留下 socket 文件 → iPhone 重开会话：观察
+    经回退继续工作（事件按轮询节奏恢复），日志出现回退 INFO 行（agent 辅助三步执行：
+    退 TUI → 杀 leader → iPhone 重开；日志 20:59:03 `leader subscribe failed, falling
+    back to updates.jsonl tailer` → 21:00:47 恢复 → 21:00:53 干净终态）。
+12. **无人观看自动下线** ✅（修复后复测）：某会话 observer 在场 → iPhone 关闭该会话
+    并等 >70 秒：日志可见 observer 取消（elapsed=1m0s）、relay 退出；**无虚假「已中断」**；
+    侧栏不再显示「运行中」；重开会话后观察恢复（修复 `98ae793`+`05152aa`，两轮订阅键
+    语义修复）。
 
-帮助与诊断（打开 App 左侧「帮助与诊断」）：应看到「Grok Leader 状态」卡——配置（未设
-置/已显式关闭/已开启）、Socket 路径与存在性、grok 版本（如 `grok 1.0.12 (…)`）。
+帮助与诊断 ✅：App 左侧「帮助与诊断」→「Grok Leader 状态」卡正常（配置三值、Socket
+路径与存在性、grok 版本 `grok 1.0.12 (…)`）。
 
 ## 7. 后续另案（不在本验收内）
 
