@@ -5,6 +5,7 @@
 
 | 后续案 | 是什么 / 入口 | 前置依赖 | 状态（更新于） |
 | --- | --- | --- | --- |
+| iOS 发送 Grok 模型应用条目 id | iOS send_message 的 model 回发 transcript 底层 id（glm-5.3），目录外触发 unknown model id；Mac 端 a0b0f11 已软化兜底（消息可发出），根治需 iOS 改发 list_models 条目 id | 无（可与其它 iOS 任务合并） | Mac 兜底已部署（2026-09-02）；iOS 侧未开工 |
 | Grok follower 交互升级 | iOS 无缝接力 Mac 端 grok 任务的根治路径（iOS 作为 leader 客户端，消息进同一 full-capability agent，per-client 能力路由 + mid-turn interjection）。入口 `docs/2026-08-28-grokbuild-leader-mode-design.md` §9/§15 D-3 | leader 模式设计（B 路线）实施完；动工前须按 source-first 冻结 leader 协议 request 方向真实样本（interjection/cancel/permission response 的 follower 可用性）+ writer 仲裁 | 未开工；B 路线 owner 验收收官（2026-09-02，矩阵 11/12 过 + 诊断卡，提交链 69f3b31…39e29a8），「实施完」前置已满足 |
 | remote-web 集中测试轮 | 12 门浏览器端验收矩阵 + 4 web-push 取证门（owner 2026-09-02 裁决：先 iOS 任务 → 整体迁移 remote-web → 集中测试）。入口 iOS 仓 `.exec-plan/state/plan-4fe9645c3a36.json` 注记 | iOS App 端任务完成 + remote-web 整体迁移完成 | pending 非阻断；功能路径已真机验证过，16 门属迁移后回归确认（2026-09-02） |
 
@@ -45,7 +46,29 @@ registry 里没有 agent-client-protocol crate 源码，这条路反而逼出了
 `session.go`（newSession `_meta` / load 后软失败 set_model / Send 前漂移硬失败）、
 `session_model_switch_test.go`（11 测试，fixture=真实样本形状）。
 
+### 二轮真机再翻车：官方双模型 id 形态 × iOS 回显值当选择发回（a0b0f11 修复）
+
+effort 门修完后 owner 主动选 glm+高仍 -32602。探针排除法收网：官方 set_model
+**只校验 modelId/sessionId**（effort 传 bogus/xhigh 都成功），-32602 必是
+modelId 无效。真相：**官方目录/set_model 请求用条目 id（"grok-4.5"），持久化
+与应答用底层 id（"glm-5.3"）**——owner config `[model."grok-4.5"] model="glm-5.3"`
+的两种身份。summary.json 落 `current_model_id=glm-5.3`，iOS transcript 真值读出
+显示「glm 5.3」，选择后把这个**显示值当 model id 回发** → 目录外 → unknown
+model id。旁证闭环：无 effort 修剪 log（iOS 这次没发 effort 字段）；第一次不选
+模型发送成功（不发 model 就无漂移）。
+
+修复分两层：Mac 端 `unknown model id` 软化（WARN + 保持会话当前模型继续
+turn——此时会话本就在用户所选模型上，杀 turn 只会阻断发消息；其余错误硬失败）
++ callRPC 错误带官方 data + set_model 参数日志；**iOS 侧根治另案**（发送
+list_models 条目 id 而非 transcript 显示值）。
+
+教训：**官方「同一实体多种 id 形态」是 wire 契约的一部分**（请求 id ≠ 持久化
+id ≠ 显示 id），翻译时三种形态都要取证——只抓请求面样本会漏掉回显面。另：
+探针「错误指纹矩阵」（故意发坏参数看 data）比成功路径探针信息量更大，这次
+直接把「-32602 必是 modelId 无效」钉死。
+
 ### 首轮真机即翻车：iOS 状态残留 × 缺客户端侧 effort 门（da17648 修复）
+
 
 owner 矩阵行 3 复现：iOS 先选 grok-4.6+high（行 2 测试），切 GLM 后 effort 残留
 high，MacBridge 把 `set_model{glm, effort:high}` 原样上抛 → 官方 -32602 → Send

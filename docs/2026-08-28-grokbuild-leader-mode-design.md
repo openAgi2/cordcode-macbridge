@@ -606,6 +606,21 @@ binding、协议翻译、capability 组织——在本设计中**不是待实施
     （sessionNewMeta 构造、applyModelSelection 漂移判定）。iOS 侧切模型不清
     effort 状态属 UX 打磨另案，Mac 端修剪已兜住。
 
+15. **【2026-09-02 后续实施】条目 14 修复后二轮真机：官方双模型 id 形态
+    （commit `a0b0f11`）**：owner 主动选 glm+高仍 -32602。错误指纹矩阵探针
+    （故意发坏参数）证明官方 set_model **只校验 modelId/sessionId**（effort
+    传 bogus/xhigh-on-glm 均成功），-32602 必为 modelId 无效。根因：官方目录
+    与 set_model 请求用**条目 id**（"grok-4.5"），持久化（summary.json
+    `current_model_id`）与 set_model 应答用**底层 id**（"glm-5.3"，来自 owner
+    config `[model."grok-4.5"] model=`）；iOS 从 transcript 读出底层 id 显示
+    「glm 5.3」，选择后把它当 model id 回发 → 目录外 → unknown model id。
+    旁证：无 effort 修剪 log（iOS 该次未发 effort 字段）、首次不选模型发送
+    成功（无 model 即无漂移）。修复：`unknown model id` 时软化（WARN + 保持
+    会话当前模型继续 turn——会话本就在用户所选模型上；其余错误硬失败）；
+    callRPC 错误串附带官方 data；applyModelSelection 加参数日志。**iOS 侧
+    根治另案**：send_message 的 model 应发 list_models 条目 id，transcript
+    底层 id 仅用于显示。
+
 ---
 
 ## 3. 架构
