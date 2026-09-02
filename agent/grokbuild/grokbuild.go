@@ -10,8 +10,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -186,15 +188,67 @@ func (a *Agent) SubscribeSessionEvents(ctx context.Context, sessionID, cwd strin
 		return ch, nil
 	}
 
+	// grok 的 leader 校验 session/load 的 cwd 必须是 session 所属项目目录；不符即拒
+	// （session/load: Path not found.）。调用方传入的 cwd 不可信：v2 projection 开启
+	// 路径不携带 directory（iOS ProjectionStore 硬编码 nil），handlers 回落
+	// GetWorkDir() 会得到与 session 无关的 runtime 工作目录。sessions 树是 grok 自己
+	// 写的权威位置——按 sessionID 反查并以其为准；查不到时保持调用方值（维持现状，
+	// 由 leader 的错误路径暴露）。
+	if resolved := resolveSessionCwd(a.grokHome, sessionID); resolved != "" && resolved != cwd {
+		slog.Info("grokbuild: leader subscriber cwd resolved from session store",
+			"session", sessionID, "cwd", resolved, "requested", cwd)
+		cwd = resolved
+	}
+
 	sub := NewLeaderSubscriber(socketPath, sessionID, cwd)
 	go func() {
 		defer close(ch)
 		slog.Info("grokbuild: leader subscriber starting", "session", sessionID, "socket", socketPath)
 		if err := sub.Run(ctx, forward); err != nil {
-			slog.Debug("grokbuild: leader subscriber ended", "session", sessionID, "error", err)
+			if ctx.Err() != nil {
+				// 调用方取消（正常关闭）——保持 Debug 静默。
+				slog.Debug("grokbuild: leader subscriber ended (ctx cancelled)", "session", sessionID, "error", err)
+			} else {
+				// 握手/连接失败在生产必须可见（生产日志级别为 INFO，Debug 会被吞）。
+				slog.Warn("grokbuild: leader subscriber ended", "session", sessionID, "socket", socketPath, "error", err)
+			}
 		}
 	}()
 	return ch, nil
+}
+
+// resolveSessionCwd locates the session's project directory from grok's own
+// session store layout ($GROK_HOME/sessions/<url-encoded-cwd>/<sessionID>/) and
+// decodes it. Returns "" when the session cannot be located unambiguously.
+func resolveSessionCwd(grokHome, sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+	sessionsDir := filepath.Join(resolveGrokHome(grokHome), "sessions")
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		return ""
+	}
+	resolved := ""
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		st, err := os.Stat(filepath.Join(sessionsDir, e.Name(), sessionID))
+		if err != nil || !st.IsDir() {
+			continue
+		}
+		decoded, derr := url.PathUnescape(e.Name())
+		if derr != nil || decoded == "" {
+			continue
+		}
+		if resolved != "" && resolved != decoded {
+			// 多个项目目录声称持有同一 session —— 无法唯一判定，交回调用方值。
+			return ""
+		}
+		resolved = decoded
+	}
+	return resolved
 }
 
 // --- WorkDirSwitcher ---
