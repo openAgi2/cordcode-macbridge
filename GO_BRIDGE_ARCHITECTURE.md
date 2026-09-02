@@ -302,7 +302,11 @@ Grok Build 由 `agent/grokbuild` ACP driver 提供，产品 runtime 默认注册
   （仅显式时携带）；load 恢复/中途切换走 `session/set_model`（**snake-case**，
   camelCase 返回 -32601；`modelId` 服务端必填，effort-only 漂移须重发当前模型，
   真值来自 session/new|load 响应顶层 `models`）。Send 前漂移检查失败=硬失败（turn
-  不发出）；loadSession 后失败=软（会话健康优先）。无效值 fail-closed。
+  不发出）；loadSession 后失败=软（会话健康优先）。无效值 fail-closed。effort 在
+  发送前还过一道官方客户端同款门（`effectiveEffortForModel` 镜像上游
+  `resolve_effort_for_model`）：目录证明该模型不支持 effort 或值不在其菜单 →
+  丢弃 effort 只发模型（log 可观测；iOS 切模型后 effort 状态残留由此兜住），
+  模型无效仍照发由官方报错，无目录真值时透传。
 - 能力仍由 `core` 可选接口和 `WireDescriptor` 推导，客户端不得只按名称猜。
 
 ### DeepSeek（`deepseek` → `agent/dsh`，产品入口已退役）

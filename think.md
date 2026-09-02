@@ -45,6 +45,23 @@ registry 里没有 agent-client-protocol crate 源码，这条路反而逼出了
 `session.go`（newSession `_meta` / load 后软失败 set_model / Send 前漂移硬失败）、
 `session_model_switch_test.go`（11 测试，fixture=真实样本形状）。
 
+### 首轮真机即翻车：iOS 状态残留 × 缺客户端侧 effort 门（da17648 修复）
+
+owner 矩阵行 3 复现：iOS 先选 grok-4.6+high（行 2 测试），切 GLM 后 effort 残留
+high，MacBridge 把 `set_model{glm, effort:high}` 原样上抛 → 官方 -32602 → Send
+硬失败、turn 被杀。第一轮实现只做了「发送选择」，没做「验证选择」。
+
+上游 `model_state.rs` 的 `resolve_effort_for_model` 本来就是官方客户端的本地门：
+目录外模型或无 supports 标志 → Unsupported；token 不在该模型菜单 → UnknownToken；
+注释明言 "so the TUI fails instead of sending a blocked effort to the API"——官方
+TUI 从不把无效组合发给 API。教训：**翻译官方 wire 契约时，客户端侧的校验门也是
+契约的一部分**；只镜像了 server 接受面、没镜像 client 拒绝面，等于把官方客户端
+不会产生的请求发给了 server。修复 `effectiveEffortForModel`（目录证明无效 →
+丢弃 effort + log；model 无效仍照发让官方诚实报错；无目录真值透传）。
+
+iOS 侧的根因（切模型不清 effort 状态）不修也能工作——Mac 端修剪后 GLM turn 正常
+发出；将来 iOS 主动清状态属于 UX 打磨另案。
+
 ## 2026-09-02 Grok Leader 验收期两复盘：订阅键三分语义 + user echo 身份补齐覆盖缺口
 
 ### D-G2「无人观看 60s 自动下线」两轮修复：订阅键语义混用

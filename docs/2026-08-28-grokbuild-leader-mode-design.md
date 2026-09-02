@@ -595,6 +595,17 @@ binding、协议翻译、capability 组织——在本设计中**不是待实施
     常量 + ReasoningEffortOption）、`xai-grok-shell/src/agent/config.rs:5444`
     （to_acp_model_info meta 键全表）。
 
+14. **【2026-09-02 后续实施】条目 13 首轮真机修复：effort 客户端侧门（commit
+    `da17648`）**：owner 矩阵行 3 复现 iOS 切 GLM 后 effort 残留 high，
+    `set_model{glm,high}` 被官方 -32602 拒绝、turn 被杀。上游
+    `model_state.rs` `resolve_effort_for_model` 本就是官方客户端的本地拒绝门
+    （"so the TUI fails instead of sending a blocked effort to the API"），
+    官方 TUI 从不把无效组合发给 API——第一轮只镜像了 server 接受面。修复
+    `effectiveEffortForModel`：目录外模型 / 无 supports 标志 / 菜单外值 →
+    丢弃 effort（log），model 照发；无目录真值透传官方裁决。接线两处
+    （sessionNewMeta 构造、applyModelSelection 漂移判定）。iOS 侧切模型不清
+    effort 状态属 UX 打磨另案，Mac 端修剪已兜住。
+
 ---
 
 ## 3. 架构
