@@ -515,3 +515,129 @@ func TestSendSetModelFailureFailsTurn(t *testing.T) {
 		t.Fatalf("error = %v, want apply model selection failure", err)
 	}
 }
+
+// Upstream mirror of resolve_effort_for_model: values the model does not
+// offer are dropped before the wire (owner observed GLM + leftover "high"
+// → set_model -32602 → turn killed, 2026-09-02).
+func TestEffectiveEffortForModel(t *testing.T) {
+	a := &Agent{}
+	// No adopted catalog: no truth to gate on — effort passes through.
+	if got := a.effectiveEffortForModel("grok-4.6", "high"); got != "high" {
+		t.Fatalf("no catalog: got %q, want pass-through", got)
+	}
+
+	raw, _ := json.Marshal(testModelStatePayload()["_meta"])
+	var m initializeMeta
+	_ = json.Unmarshal(raw, &m)
+	a.adoptModelCatalog(m.ModelState)
+
+	cases := []struct {
+		model, effort, want string
+	}{
+		{"grok-4.6", "high", "high"},          // in menu
+		{"grok-4.6", "HIGH", "HIGH"},          // menu id, case-insensitive
+		{"grok-4.5", "high", ""},              // GLM entry: no meta → unsupported
+		{"grok-4.6", "ultra", ""},             // outside menu
+		{"nope", "high", ""},                  // unknown to known catalog → unsupported
+		{"grok-4.6", "", ""},                  // empty stays empty
+	}
+	for _, tc := range cases {
+		if got := a.effectiveEffortForModel(tc.model, tc.effort); got != tc.want {
+			t.Fatalf("effectiveEffortForModel(%q,%q) = %q, want %q", tc.model, tc.effort, got, tc.want)
+		}
+	}
+
+	// Supported flag set but menu absent/unusable: canonical value stays
+	// (upstream falls back to a built-in menu of canonical levels).
+	supported := &Agent{}
+	raw2, _ := json.Marshal(map[string]any{
+		"modelState": map[string]any{
+			"currentModelId": "m",
+			"availableModels": []map[string]any{
+				{"modelId": "m", "_meta": map[string]any{"supportsReasoningEffort": true}},
+			},
+		},
+	})
+	var m2 initializeMeta
+	_ = json.Unmarshal(raw2, &m2)
+	supported.adoptModelCatalog(m2.ModelState)
+	if got := supported.effectiveEffortForModel("m", "high"); got != "high" {
+		t.Fatalf("supported without menu: got %q, want pass-through", got)
+	}
+}
+
+// Owner repro (2026-09-02): iOS selected GLM + leftover effort "high" — the
+// official catalog proves GLM has no effort surface, so neither session/new
+// nor set_model may carry the effort, and the turn must go out.
+func TestEffortLeftoverOnEffortlessModelDroppedBeforeWire(t *testing.T) {
+	newResult := map[string]any{
+		"sessionId": "new-sess-1",
+		"models": map[string]any{
+			"currentModelId": "grok-4.5",
+			"availableModels": []map[string]any{
+				{"modelId": "grok-4.5", "name": "glm"},
+			},
+		},
+	}
+	s, reqs, mu, stop := startModelProbeAgent(t, testModelStatePayload(), newResult, nil)
+	defer stop()
+	if err := s.initialize(); err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	s.agent.SetModel("grok-4.5")
+	s.agent.SetReasoningEffort("high")
+
+	if err := s.newSession(); err != nil {
+		t.Fatalf("newSession: %v", err)
+	}
+	req := findRequest(reqs, mu, "session/new")
+	if req == nil {
+		t.Fatal("session/new not sent")
+	}
+	meta, _ := req.Params["_meta"].(map[string]any)
+	if got, _ := meta["modelId"].(string); got != "grok-4.5" {
+		t.Fatalf("_meta.modelId = %v", req.Params["_meta"])
+	}
+	if _, present := meta["reasoningEffort"]; present {
+		t.Fatalf("session/new must not carry reasoningEffort for effort-less model: %v", meta)
+	}
+
+	// Send must not hit set_model (no drift once the leftover is dropped).
+	if err := s.Send("hi", nil, nil); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if n := requestCount(reqs, mu, "session/set_model"); n != 0 {
+		t.Fatalf("session/set_model sent %d times, want 0", n)
+	}
+	if findRequest(reqs, mu, "session/prompt") == nil {
+		t.Fatal("session/prompt not sent")
+	}
+}
+
+// Switching a live grok-4.6 session to GLM with the effort leftover sends a
+// model-only set_model (valid — modelId required, effort optional).
+func TestModelSwitchToEffortlessModelSendsWithModelOnly(t *testing.T) {
+	s, reqs, mu, stop := startModelProbeAgent(t, testModelStatePayload(), nil, nil)
+	defer stop()
+	if err := s.initialize(); err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	s.appliedModel = "grok-4.6"
+	s.appliedEffort = "high"
+	s.agent.SetModel("grok-4.5") // GLM; effort stays "high" as leftover
+	s.agent.SetReasoningEffort("high")
+
+	if err := s.Send("hi", nil, nil); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	req := findRequest(reqs, mu, "session/set_model")
+	if req == nil {
+		t.Fatal("session/set_model not sent for model switch")
+	}
+	if got, _ := req.Params["modelId"].(string); got != "grok-4.5" {
+		t.Fatalf("set_model modelId = %v", req.Params["modelId"])
+	}
+	if _, present := req.Params["_meta"]; present {
+		t.Fatalf("set_model must not carry _meta effort for effort-less model: %v", req.Params["_meta"])
+	}
+}

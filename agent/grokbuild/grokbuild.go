@@ -403,10 +403,69 @@ func (a *Agent) explicitModelSelection() (model, effort string) {
 // selection exists; nil when neither is set (agent default applies untouched).
 func (a *Agent) sessionNewMeta() *sessionNewMeta {
 	model, effort := a.explicitModelSelection()
+	target := model
+	if target == "" {
+		// Effort-only selection gates against the model the session would
+		// start with (explicit first, else the catalog's current).
+		target = a.currentModelIDForEfforts()
+	}
+	effort = a.effectiveEffortForModel(target, effort)
 	if model == "" && effort == "" {
 		return nil
 	}
 	return &sessionNewMeta{ModelID: model, ReasoningEffort: effort}
+}
+
+// effectiveEffortForModel mirrors upstream resolve_effort_for_model
+// (xai-grok-pager model_state.rs): a model unknown to the adopted catalog, or
+// one whose entry lacks the effort support flag, gets no effort; a supported
+// model only accepts tokens present in its menu (option id or canonical
+// value). Official clients reject these locally before the wire — "so the TUI
+// fails instead of sending a blocked effort to the API" — and an iOS-side
+// effort leftover after a model switch must not reach session/set_model
+// (grok 1.0.13 answers -32602 there; observed 2026-09-02 with GLM + high).
+// With no adopted catalog there is no truth to gate on: the effort passes
+// through unchanged and the official adjudicates.
+func (a *Agent) effectiveEffortForModel(model, effort string) string {
+	if effort == "" {
+		return ""
+	}
+	entry := a.effortCatalogEntry(model)
+	if entry == nil {
+		if a.effortCatalogKnown() {
+			slog.Info("grokbuild: dropping reasoning effort for model unknown to catalog",
+				"model", model, "effort", effort)
+			return ""
+		}
+		return effort
+	}
+	if entry.Meta == nil || !entry.Meta.SupportsReasoningEffort {
+		slog.Info("grokbuild: dropping reasoning effort for model without effort support",
+			"model", model, "effort", effort)
+		return ""
+	}
+	if len(entry.Meta.ReasoningEfforts) == 0 {
+		// Supported flag set but no usable menu: upstream falls back to a
+		// built-in menu of canonical levels, so a canonical-looking value
+		// stays and the official adjudicates.
+		return effort
+	}
+	for _, opt := range entry.Meta.ReasoningEfforts {
+		if strings.EqualFold(opt.ID, effort) || opt.Value == effort {
+			return effort
+		}
+	}
+	slog.Info("grokbuild: dropping reasoning effort outside model menu",
+		"model", model, "effort", effort)
+	return ""
+}
+
+// effortCatalogKnown reports whether an official catalog has been adopted
+// (nil entry in a known catalog means "unsupported", not "unknown").
+func (a *Agent) effortCatalogKnown() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.modelCatalog != nil
 }
 
 func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {

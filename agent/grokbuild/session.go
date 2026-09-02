@@ -450,6 +450,11 @@ func (s *grokSession) applyModelSelection() error {
 			return nil
 		}
 	}
+	// Gate the effort against the official catalog before the wire: an
+	// iOS-side leftover effort (e.g. high lingering after switching to a
+	// model without effort support) must be dropped here, not sent as an
+	// invalid set_model (grok 1.0.13 answers -32602 and kills the turn).
+	effort = s.agent.effectiveEffortForModel(targetModel, effort)
 	if targetModel == appliedModel && (effort == "" || effort == appliedEffort) {
 		return nil
 	}
