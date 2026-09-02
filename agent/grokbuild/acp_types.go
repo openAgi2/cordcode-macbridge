@@ -104,6 +104,54 @@ type initializeResult struct {
 	AgentCapabilities *agentCapabilities `json:"agentCapabilities,omitempty"`
 	AgentInfo         *clientInfo        `json:"agentInfo,omitempty"`
 	AuthMethods       []authMethod       `json:"authMethods,omitempty"`
+	// Extension meta on Grok 1.0.13 is carried under the underscore-prefixed
+	// `_meta` key (real sample 2026-09-02, grok 1.0.13 / 5e9a585). modelState is
+	// the official model catalog truth (upstream acp::SessionModelState).
+	Meta *initializeMeta `json:"_meta,omitempty"`
+}
+
+type initializeMeta struct {
+	ModelState *sessionModelState `json:"modelState,omitempty"`
+}
+
+// sessionModelState mirrors acp::SessionModelState (camelCase serde): the
+// agent's model catalog. Real sample (grok 1.0.13):
+//
+//	{"currentModelId":"grok-4.5","availableModels":[
+//	  {"modelId":"grok-4.6","name":"Grok 4.6","description":"...",
+//	   "_meta":{"totalContextTokens":500000,"agentType":"grok-build-plan",
+//	            "supportsReasoningEffort":true,"reasoningEffort":"high",
+//	            "reasoningEfforts":[{"id":"xhigh","value":"xhigh","label":"...",
+//	                                 "description":"...","default":false},...]}}]}
+type sessionModelState struct {
+	CurrentModelID  string         `json:"currentModelId,omitempty"`
+	AvailableModels []acpModelInfo `json:"availableModels"`
+}
+
+type acpModelInfo struct {
+	ModelID     string        `json:"modelId"`
+	Name        string        `json:"name,omitempty"`
+	Description string        `json:"description,omitempty"`
+	Meta        *acpModelMeta `json:"_meta,omitempty"`
+}
+
+type acpModelMeta struct {
+	TotalContextTokens     int64             `json:"totalContextTokens,omitempty"`
+	AgentType              string            `json:"agentType,omitempty"`
+	SupportsReasoningEffort bool             `json:"supportsReasoningEffort,omitempty"`
+	// ReasoningEffort is the model's CURRENT/default effort (single value);
+	// ReasoningEfforts is the selectable menu. Meta keys are upstream
+	// constants (xai-grok-sampling-types REASONING_EFFORT_META_KEY etc.).
+	ReasoningEffort  string             `json:"reasoningEffort,omitempty"`
+	ReasoningEfforts []acpEffortOption  `json:"reasoningEfforts,omitempty"`
+}
+
+type acpEffortOption struct {
+	ID          string `json:"id"`
+	Value       string `json:"value"`
+	Label       string `json:"label,omitempty"`
+	Description string `json:"description,omitempty"`
+	Default     bool   `json:"default,omitempty"`
 }
 
 type agentCapabilities struct {
@@ -139,10 +187,40 @@ type sessionNewParams struct {
 	CWD                   string   `json:"cwd"`
 	McpServers            []any    `json:"mcpServers"`
 	AdditionalDirectories []string `json:"additionalDirectories,omitempty"`
+	// _meta carries the explicit initial model/effort selection (grok 1.0.13
+	// consumes both: sessionConfig options flip selected:true; result models
+	// reflects currentModelId/reasoningEffort — real sample 2026-09-02).
+	Meta *sessionNewMeta `json:"_meta,omitempty"`
+}
+
+type sessionNewMeta struct {
+	ModelID         string `json:"modelId,omitempty"`
+	ReasoningEffort string `json:"reasoningEffort,omitempty"`
 }
 
 type sessionNewResult struct {
 	SessionID string `json:"sessionId"`
+	// Per-session model state (grok 1.0.13: present on both session/new and
+	// session/load results; load restores the persisted model/effort).
+	Models *sessionModelState `json:"models,omitempty"`
+}
+
+// --- session/set_model ---
+
+// Wire method is SNAKE-CASE `session/set_model` on the target binary
+// (grok 1.0.13: camelCase `session/setModel` returns -32601 Method not found;
+// snake-case returns -32602 on bad params — probed 2026-09-02). modelId is
+// REQUIRED server-side (effort-only request without it fails with
+// "missing field `modelId`"); an effort-only switch must resend the session's
+// current model. Invalid values fail closed (-32602 unknown model/session id).
+type sessionSetModelParams struct {
+	SessionID string        `json:"sessionId"`
+	ModelID   string        `json:"modelId"`
+	Meta      *setModelMeta `json:"_meta,omitempty"`
+}
+
+type setModelMeta struct {
+	ReasoningEffort string `json:"reasoningEffort,omitempty"`
 }
 
 // --- session/load ---

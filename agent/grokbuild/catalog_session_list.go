@@ -69,6 +69,10 @@ type catalogClientConfig struct {
 	cliExtraArgs []string
 	workDir      string
 	registrar    CatalogSubprocessRegistrar
+	// onModelState (optional) receives the initialize response `_meta.modelState`
+	// so the Agent can adopt the official model catalog without owning the
+	// singleton process. Called once per successful initialize.
+	onModelState func(*sessionModelState)
 }
 
 // grokCatalogClient 是一个进程级单例 ACP catalog 子进程连接。生命周期独立于 per-turn
@@ -236,6 +240,11 @@ func (c *grokCatalogClient) initializeContext(ctx context.Context) error {
 		if err := c.authenticateContext(ctx, initResp.AuthMethods[0].ID); err != nil {
 			return fmt.Errorf("authenticate: %w", err)
 		}
+	}
+
+	// Adopt the official model catalog (grok 1.0.13 initialize `_meta.modelState`).
+	if c.cfg.onModelState != nil && initResp.Meta != nil {
+		c.cfg.onModelState(initResp.Meta.ModelState)
 	}
 	return nil
 }
@@ -629,6 +638,7 @@ func (a *Agent) catalogClientInstance(ctx context.Context) (*grokCatalogClient, 
 		cliExtraArgs: a.cliExtraArgs,
 		workDir:      a.workDir,
 		registrar:    a.catalogRegistrar,
+		onModelState: a.adoptModelCatalog,
 	}
 	// The caller bounds construction and handshake, but must not own the singleton process after
 	// FetchSessionList returns. Each later operation still carries its own request context.

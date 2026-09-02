@@ -27,6 +27,7 @@ var _ core.DiagnosticsProvider = (*Agent)(nil)
 var _ core.WorkDirSwitcher = (*Agent)(nil)
 var _ core.ModeSwitcher = (*Agent)(nil)
 var _ core.ModelSwitcher = (*Agent)(nil)
+var _ core.ModelEffortCatalog = (*Agent)(nil)
 var _ core.ProviderSwitcher = (*Agent)(nil)
 var _ core.ReasoningEffortSwitcher = (*Agent)(nil)
 var _ core.ToolAuthorizer = (*Agent)(nil)
@@ -69,6 +70,13 @@ type Agent struct {
 	// + non-blocking send = N concurrent relay connections each delivering the
 	// broadcast collapse into one pending rescan. Write-once at New.
 	catalogRefresh chan struct{}
+
+	// modelCatalog is the official model catalog adopted from the agent's
+	// initialize response `_meta.modelState` (session subprocesses and the
+	// catalog singleton both feed it — last writer wins, shape is stable per
+	// binary). nil/empty = catalog not observed yet → AvailableModels falls
+	// back to iOS-injected provider models. Guarded by mu.
+	modelCatalog *sessionModelState
 }
 
 func init() {
@@ -101,7 +109,7 @@ func New(opts map[string]any) (core.Agent, error) {
 	if v, ok := opts["model"].(string); ok {
 		a.model = v
 	}
-	if v, ok := opts["reasoning_effort"].(string); ok {
+	if v, ok := opts["reasoning_effort"].(string); ok && v != "" {
 		a.reasoningEffort = normalizeReasoningEffort(v)
 	}
 	if v, ok := opts["mode"].(string); ok {
@@ -368,18 +376,65 @@ func (a *Agent) configuredModels() []core.ModelOption {
 	return core.GetProviderModels(a.providers, a.activeIdx)
 }
 
+// adoptModelCatalog replaces the official model catalog observed in an
+// agent-subprocess or catalog-subprocess initialize response. A nil or empty
+// state is ignored (older grok without modelState keeps the previous view).
+func (a *Agent) adoptModelCatalog(ms *sessionModelState) {
+	if ms == nil || len(ms.AvailableModels) == 0 {
+		return
+	}
+	a.mu.Lock()
+	a.modelCatalog = ms
+	a.mu.Unlock()
+	slog.Info("grokbuild: adopted official model catalog",
+		"models", len(ms.AvailableModels),
+		"current", ms.CurrentModelID)
+}
+
+// explicitModelSelection returns the iOS/bridge-set model and effort (""
+// = no explicit choice; the agent-side default applies).
+func (a *Agent) explicitModelSelection() (model, effort string) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.model, a.reasoningEffort
+}
+
+// sessionNewMeta builds the session/new `_meta` when an explicit model/effort
+// selection exists; nil when neither is set (agent default applies untouched).
+func (a *Agent) sessionNewMeta() *sessionNewMeta {
+	model, effort := a.explicitModelSelection()
+	if model == "" && effort == "" {
+		return nil
+	}
+	return &sessionNewMeta{ModelID: model, ReasoningEffort: effort}
+}
+
 func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
 	_ = ctx
-	// Grok CLI 走 ACP agent stdio（grok agent stdio），无 `grok models` 子命令（ACP v1 无标准
-	// listModels），故不照搬 opencode 的 exec models 探测。custom provider 模型经
-	// configuredModels 可见；无 provider 时返回空——ACP 没有模型目录真值，旧的
-	// grok-4.5/grok-4 硬编码回落会把过时模型冒充真实目录（路线图 §5.6 第 4 条），
-	// 诚实状态是空 catalog + iOS 显示「后端未提供当前模型」。会话实际模型经
-	// SessionModelSelectionReader（transcript 证据）下发。详见 t3code-adoption-plan §5.1。
+	// Official catalog truth first: the agent's initialize `_meta.modelState`
+	// (grok 1.0.13 real sample; covers both official and owner-configured
+	// [models] entries — the GLM provider shows up as a regular entry). Falls
+	// back to iOS-injected provider models when no catalog has been observed
+	// yet; empty catalog + no provider stays the honest "backend did not
+	// provide models" state. Session-level actual model still flows through
+	// SessionModelSelectionReader (transcript evidence).
+	a.mu.RLock()
+	catalog := a.modelCatalog
+	a.mu.RUnlock()
+	if catalog != nil {
+		models := make([]core.ModelOption, 0, len(catalog.AvailableModels))
+		for _, m := range catalog.AvailableModels {
+			models = append(models, core.ModelOption{
+				Name: m.ModelID,
+				Desc: m.Name,
+			})
+		}
+		return models
+	}
 	return a.configuredModels()
 }
 
-// --- ReasoningEffortSwitcher ---
+// --- ReasoningEffortSwitcher / ModelEffortCatalog ---
 
 func (a *Agent) SetReasoningEffort(effort string) {
 	a.mu.Lock()
@@ -393,14 +448,83 @@ func (a *Agent) GetReasoningEffort() string {
 	return a.reasoningEffort
 }
 
-// AvailableReasoningEfforts returns NO effort list: the Grok ACP surface has
-// no reasoning-effort parameter (acp_types.go carries no effort field and
-// SetReasoningEffort never reaches the wire), so the honest state is
-// "unknown" — iOS hides the effort control and handleListModels leaves the
-// catalog unsmeared. The old hardcoded [low,medium,high] was a local guess,
-// not runtime truth (roadmap §5.7 / audit N1).
-func (a *Agent) AvailableReasoningEfforts() []string {
+// effortCatalogEntry returns the catalog entry for one model id from the
+// adopted official catalog (nil when unknown or no catalog).
+func (a *Agent) effortCatalogEntry(modelID string) *acpModelInfo {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.modelCatalog == nil {
+		return nil
+	}
+	for i := range a.modelCatalog.AvailableModels {
+		if a.modelCatalog.AvailableModels[i].ModelID == modelID {
+			return &a.modelCatalog.AvailableModels[i]
+		}
+	}
 	return nil
+}
+
+// currentModelIDForEfforts resolves which model the effort list describes: the
+// explicit selection first, else the catalog's current model.
+func (a *Agent) currentModelIDForEfforts() string {
+	model, _ := a.explicitModelSelection()
+	if model != "" {
+		return model
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.modelCatalog != nil {
+		return a.modelCatalog.CurrentModelID
+	}
+	return ""
+}
+
+// EffortsForModel implements core.ModelEffortCatalog: per-model effort ids and
+// the model's default effort from the official catalog's
+// `_meta.reasoningEfforts` menu. ok=false leaves the wire fields empty rather
+// than smearing an agent-level list across the catalog (handleListModels
+// contract, roadmap §5.2 / audit N3).
+func (a *Agent) EffortsForModel(ctx context.Context, model string) ([]string, string, bool) {
+	_ = ctx
+	entry := a.effortCatalogEntry(model)
+	if entry == nil || entry.Meta == nil || len(entry.Meta.ReasoningEfforts) == 0 {
+		return nil, "", false
+	}
+	efforts := make([]string, 0, len(entry.Meta.ReasoningEfforts))
+	def := ""
+	for _, opt := range entry.Meta.ReasoningEfforts {
+		id := opt.ID
+		if id == "" {
+			id = opt.Value
+		}
+		if id == "" {
+			continue
+		}
+		efforts = append(efforts, id)
+		if opt.Default {
+			def = id
+		}
+	}
+	if len(efforts) == 0 {
+		return nil, "", false
+	}
+	return efforts, def, true
+}
+
+// AvailableReasoningEfforts describes the CURRENT model's selectable efforts
+// from the official catalog (per-model `_meta.reasoningEfforts`, gated on
+// supportsReasoningEffort). nil = unknown or unsupported — iOS hides the
+// effort control and nothing is smeared across other models.
+func (a *Agent) AvailableReasoningEfforts() []string {
+	entry := a.effortCatalogEntry(a.currentModelIDForEfforts())
+	if entry == nil || entry.Meta == nil || !entry.Meta.SupportsReasoningEffort {
+		return nil
+	}
+	efforts, _, ok := a.EffortsForModel(context.Background(), entry.ModelID)
+	if !ok {
+		return nil
+	}
+	return efforts
 }
 
 // --- ProviderSwitcher ---

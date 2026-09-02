@@ -76,6 +76,13 @@ type grokSession struct {
 	// ACP capabilities learned from initialize
 	supportsLoadSession bool
 	supportsListSession bool
+
+	// appliedModel/appliedEffort track what model selection the session is
+	// actually running (seeded from session/new|load result `models` truth,
+	// updated by applyModelSelection). Guarded by pendingPermsMu (Send-time
+	// drift check runs on the turn path; readLoop does not touch these).
+	appliedModel  string
+	appliedEffort string
 }
 
 func newGrokSession(ctx context.Context, agent *Agent, sessionID string) (*grokSession, error) {
@@ -288,6 +295,12 @@ func (s *grokSession) initialize() error {
 		}
 	}
 
+	// Adopt the official model catalog (grok 1.0.13 `_meta.modelState`) so
+	// AvailableModels/EffortsForModel stop guessing.
+	if s.agent != nil && initResp.Meta != nil {
+		s.agent.adoptModelCatalog(initResp.Meta.ModelState)
+	}
+
 	return nil
 }
 
@@ -303,6 +316,10 @@ func (s *grokSession) newSession() error {
 		CWD:        s.agent.workDir,
 		McpServers: []any{}, // empty array — no MCP servers
 	}
+	// Explicit model/effort selection rides session/new `_meta` (official
+	// headless semantics; grok warns and falls back to its default for an
+	// unknown model id rather than failing the session).
+	params.Meta = s.agent.sessionNewMeta()
 	result, err := s.callRPC(id, "session/new", params, 15*time.Second)
 	if err != nil {
 		return err
@@ -316,6 +333,7 @@ func (s *grokSession) newSession() error {
 		return fmt.Errorf("grokbuild: session/new returned empty sessionId")
 	}
 	s.sessionID.Store(sid)
+	s.recordAppliedModelState(resp.Models)
 	// Log only a short prefix — never the full agent payload.
 	slog.Info("grokbuild: session created", "id_prefix", shortID(sid))
 	return nil
@@ -346,13 +364,18 @@ func (s *grokSession) loadSession(sessionID string) error {
 	slog.Info("grokbuild: loadSession calling callRPC",
 		"session_id_prefix", shortID(sessionID),
 		"cwd_base", filepath.Base(cwd))
-	_, err := s.callRPC(id, "session/load", sessionLoadParams{
+	loadResultRaw, err := s.callRPC(id, "session/load", sessionLoadParams{
 		SessionID:  sessionID,
 		CWD:        cwd,
 		McpServers: []any{}, // required empty array (same as session/new)
 	}, 15*time.Second)
 	if err != nil {
 		return err
+	}
+	var loadResp sessionNewResult
+	if err := json.Unmarshal(loadResultRaw, &loadResp); err != nil {
+		// Non-fatal: load succeeded; the per-session models view is optional.
+		slog.Debug("grokbuild: session/load result models unparseable", "error", err.Error())
 	}
 	// Align process workDir with the loaded session workspace.
 	if s.agent != nil {
@@ -362,7 +385,92 @@ func (s *grokSession) loadSession(sessionID string) error {
 		s.cmd.Dir = cwd
 	}
 	s.sessionID.Store(sessionID)
+	s.recordAppliedModelState(loadResp.Models)
+	// session/load accepts no model params (session_lifecycle.rs consumes
+	// none) — apply an explicit selection via session/set_model after load,
+	// exactly like official headless apply_headless_model_and_effort. Soft
+	// failure: the session itself is healthy; the transcript reports the
+	// actual model via SessionModelSelectionReader.
+	if err := s.applyModelSelection(); err != nil {
+		slog.Warn("grokbuild: post-load model selection not applied",
+			"session_id_prefix", shortID(sessionID),
+			"error_class", rpcErrorClass(err))
+	}
 	slog.Info("grokbuild: session loaded", "id_prefix", shortID(sessionID), "cwd_base", filepath.Base(cwd))
+	return nil
+}
+
+// recordAppliedModelState seeds appliedModel/appliedEffort from the
+// session/new|load result `models` truth (grok 1.0.13 returns the per-session
+// model state on both; load restores the persisted model/effort).
+func (s *grokSession) recordAppliedModelState(ms *sessionModelState) {
+	if ms == nil {
+		return
+	}
+	s.pendingPermsMu.Lock()
+	if ms.CurrentModelID != "" {
+		s.appliedModel = ms.CurrentModelID
+	}
+	if ms.CurrentModelID != "" || s.appliedModel != "" {
+		// Per-model current effort lives in the entry's meta (reasoningEffort
+		// mirrors the session-level choice after session/new _meta / set_model).
+		for i := range ms.AvailableModels {
+			if ms.AvailableModels[i].ModelID == ms.CurrentModelID && ms.AvailableModels[i].Meta != nil {
+				s.appliedEffort = ms.AvailableModels[i].Meta.ReasoningEffort
+				break
+			}
+		}
+	}
+	s.pendingPermsMu.Unlock()
+}
+
+// applyModelSelection pushes the agent's explicit model/effort selection onto
+// this live session via session/set_model (snake-case method on grok 1.0.13;
+// modelId is server-required — an effort-only switch resends the session's
+// current model). No-op when nothing explicit is set or nothing drifted.
+func (s *grokSession) applyModelSelection() error {
+	if s.agent == nil {
+		return nil
+	}
+	model, effort := s.agent.explicitModelSelection()
+	s.pendingPermsMu.Lock()
+	appliedModel, appliedEffort := s.appliedModel, s.appliedEffort
+	s.pendingPermsMu.Unlock()
+
+	targetModel := model
+	if targetModel == "" {
+		// Effort-only switch: modelId is required on the wire; resend the
+		// session's current model. Without a known current model there is no
+		// honest value to send — skip (nothing explicit about the model).
+		if effort == "" || effort == appliedEffort {
+			return nil
+		}
+		targetModel = appliedModel
+		if targetModel == "" {
+			return nil
+		}
+	}
+	if targetModel == appliedModel && (effort == "" || effort == appliedEffort) {
+		return nil
+	}
+
+	params := sessionSetModelParams{SessionID: s.CurrentSessionID(), ModelID: targetModel}
+	if effort != "" {
+		params.Meta = &setModelMeta{ReasoningEffort: effort}
+	}
+	id := s.idCounter.next()
+	if _, err := s.callRPC(id, "session/set_model", params, 15*time.Second); err != nil {
+		return err
+	}
+	s.pendingPermsMu.Lock()
+	s.appliedModel = targetModel
+	if effort != "" {
+		s.appliedEffort = effort
+	}
+	s.pendingPermsMu.Unlock()
+	slog.Info("grokbuild: model selection applied",
+		"session_id_prefix", shortID(s.CurrentSessionID()),
+		"model", targetModel, "effort", effort)
 	return nil
 }
 
@@ -371,6 +479,15 @@ func (s *grokSession) loadSession(sessionID string) error {
 func (s *grokSession) Send(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
 	if !s.alive.Load() {
 		return fmt.Errorf("grokbuild: session not alive")
+	}
+
+	// Mid-session model/effort switch (iOS changed the selection after this
+	// session was spawned): push it via session/set_model before the turn.
+	// Unlike the post-load path this is a hard failure — the user just chose
+	// this model for the turn they are sending, so a silent fallback would
+	// send the turn under a different model than requested.
+	if err := s.applyModelSelection(); err != nil {
+		return fmt.Errorf("grokbuild: apply model selection: %w", err)
 	}
 
 	// Save file attachments to disk and reference paths in the prompt.
