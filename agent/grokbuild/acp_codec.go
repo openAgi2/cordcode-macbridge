@@ -227,10 +227,11 @@ func convertSessionUpdate(params json.RawMessage, sessionID string) []core.Event
 		}}
 
 	case "user_message_chunk":
-		// 外部 turn 的用户 prompt 回显 (真实 updates.jsonl: 只带 promptIndex, 不带
-		// promptId)。必须转成 EventUserMessage 交给 relay loop 缓冲, 否则 iOS 只能
-		// 看到回复看不到 prompt。turn 身份 (promptId) 由同 turn 首个内容事件到达时
-		// 补齐 (见 grokLeaderSessionRelayLoop), 这里不合成任何身份。
+		// 用户 prompt 回显 (真实 updates.jsonl: 只带 promptIndex, 不带 promptId —— 上游
+		// meta.rs user_message_chunk_meta 只 stamp promptIndex/hideFromScrollback)。必须转成
+		// EventUserMessage 交给消费方缓冲, 否则 iOS 只能看到回复看不到 prompt。turn 身份
+		// (promptId) 由同 turn 首个内容事件到达时补齐: 观察路径见 grokLeaderSessionRelayLoop
+		// 的 pendingUserText, 自有 turn 路径见 grokSession.emitTurnScoped。这里不合成任何身份。
 		if !p.hasContent() {
 			return nil
 		}

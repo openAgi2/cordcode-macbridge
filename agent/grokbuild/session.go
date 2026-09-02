@@ -60,7 +60,12 @@ type grokSession struct {
 	idCounter requestIDCounter
 
 	// pending permission requests: requestID -> options (for allow/deny lookup)
-	pendingPermsMu  sync.Mutex
+	pendingPermsMu sync.Mutex
+	// pendingUserEcho buffers the identityless user prompt echo (codec
+	// user_message_chunk carries no promptId by upstream design — grok-build
+	// meta.rs user_message_chunk_meta stamps only promptIndex). Guarded by
+	// pendingPermsMu: written by readLoop (emitTurnScoped), cleared by Send.
+	pendingUserEcho string
 	pendingPerms    map[string][]permissionOption
 	pendingPromptID int // session/prompt request ID for turn-end detection
 
@@ -390,8 +395,10 @@ func (s *grokSession) Send(prompt string, images []core.ImageAttachment, files [
 
 	id := s.idCounter.next()
 	// Register turn-end ID before write so a fast response cannot be lost (P0-2).
+	// A stale un-stamped echo from a previous turn must not leak into this one.
 	s.pendingPermsMu.Lock()
 	s.pendingPromptID = id
+	s.pendingUserEcho = ""
 	s.pendingPermsMu.Unlock()
 	// Reset terminal flag for the new turn.
 	s.terminalDone.Store(false)
@@ -665,7 +672,7 @@ func (s *grokSession) handleNotification(notif *agentNotification) {
 			if ev.Done {
 				refreshSignals = true
 			}
-			s.emit(ev)
+			s.emitTurnScoped(ev)
 		}
 		if !alreadyUsage && refreshSignals {
 			if usage := loadGrokSignalsUsage(s.agent.grokHome, s.CurrentSessionID()); usage != nil {
@@ -681,6 +688,45 @@ func (s *grokSession) handleNotification(notif *agentNotification) {
 	default:
 		slog.Debug("grokbuild: unhandled notification", "method", notif.Method)
 	}
+}
+
+// emitTurnScoped forwards session/update events, stamping turn identity onto the
+// identityless user prompt echo. The upstream user_message_chunk carries no
+// promptId (meta.rs user_message_chunk_meta: promptIndex/hideFromScrollback
+// only), so the echo cannot be attributed when it arrives; the SSV2 reducer
+// skips identityless user_message (projection_reducer.go "user_message" empty
+// turnId return) and the sender's own prompt vanishes from the projection once
+// iOS releases its optimistic local-send paint (owner 2026-09-02: iPhone 发送
+// 的消息不显示，流式输出直接接在上个回复后面). The promptId lands with the
+// first promptId-carrying event of the same turn (text/thought/tool/result),
+// so the echo is buffered until then — the same reconstruction the leader
+// observation loop (grokLeaderSessionRelayLoop pendingUserText) applies to
+// external turns, here at the session layer for own turns. readLoop is the
+// single writer of this path; Send clears the buffer for the next turn.
+func (s *grokSession) emitTurnScoped(ev core.Event) {
+	if ev.Type == core.EventUserMessage && ev.TurnID == "" {
+		if text := strings.TrimSpace(ev.Content); text != "" {
+			s.pendingPermsMu.Lock()
+			s.pendingUserEcho = text
+			s.pendingPermsMu.Unlock()
+		}
+		return
+	}
+	s.pendingPermsMu.Lock()
+	echo := s.pendingUserEcho
+	s.pendingPermsMu.Unlock()
+	if echo != "" && ev.TurnID != "" {
+		s.pendingPermsMu.Lock()
+		s.pendingUserEcho = ""
+		s.pendingPermsMu.Unlock()
+		s.emit(core.Event{
+			Type:    core.EventUserMessage,
+			Content: echo,
+			TurnID:  ev.TurnID,
+			ItemID:  ev.TurnID,
+		})
+	}
+	s.emit(ev)
 }
 
 func (s *grokSession) handlePermissionRequest(req *agentRequest) {
