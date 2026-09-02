@@ -189,13 +189,38 @@ Toggle、文案、诊断做完，把"配置写入是否真的让官方 TUI 变 l
    记录**；D-G1 实施后由 §7.3 第 11 行复验回退行为）；turn 进行中 crash leader，验证
    iPhone 收到 `turn_aborted(leader_disconnect)` + idle（F-7 兜底的真实触发场景）；随后
    人工清除 socket 文件，验证下一次订阅恢复；
+   > **2026-09-02 实测修正**：本步前半的「第二次 session-open 仍失败 + 需人工清
+   > socket」基线**不成立**。kill -9 后 owner TUI 在 0.1s 内触发重连、新 leader spawn
+   > 并成功 bind（flock 随进程死亡释放，connect 级 ECONNREFUSED 驱动
+   > connect_or_spawn，新 bind 替换 stale socket；TUI 无限重连 1s/30s backoff，
+   > `leader/mod.rs` connect_or_spawn + `leader.ipc.reconnected`）。剩余有效语义：
+   > **observer-only 场景（无任何 grok 客户端在场）leader 死亡后不自愈**——macbridge
+   > 永不 spawn leader 的自然后果；iPhone 视角 = relay 断开后事件流停，直到任何 grok
+   > 客户端把 leader 拉起且 iPhone 重开会话。D-G1 的「检测到 socket ≠ 已订阅生效」
+   > 红线不变；「人工清 socket」步骤从验证计划中移除。F-7 部分不变。
 9. **回退验证（D-G2 实施前基线：先退出 CordCode Link）**：退出 CordCode Link（**仅关闭
    iOS 会话不够——现状 observer 不随订阅者数量取消**，见 §2.1-3）→ 确认 leader 进程随后
    退出 → 删除 user 层键 → 重启 grok 确认回到 inline + tailer 路径（日志出现
    `falling back to updates.jsonl file tailer`）。D-G2 实施后由 §7.3 第 12 行复验"关闭
    会话 >grace 即取消"，无需退出 Link；
+   > **2026-09-02 实测修正**：「确认 leader 进程随后退出」被证伪——**leader 生命周期
+   > 完全由 grok 客户端侧维持，与 CordCode Link 无关**：退 Link 后 owner TUI 立即
+   > respawn leader；TUI 全关后 leader（`--no-exit-on-disconnect`，PPID=1 孤儿）仍存活；
+   > SIGTERM 退出后 socket 文件残留（与 kill -9 一致，进程死亡路径均不触发
+   > cleanup_socket，需手动 rm 才能让 macbridge 的 os.Stat 走 tailer 分支）。
+   > 实际执行序列：删键 → 退 Link → 新 TUI 验证 inline（GROK_LOG_FILE 193KB 零
+   > leader 痕迹）→ Link 重启 → SIGTERM leader + rm socket → iPhone 重开会话 →
+   > 15:09:44.231 fallback 行 + .241 tailer starting 行。回退闭环结论不变：开关
+   > 回退只依赖 socket 存在性（os.Stat 判据），不依赖 Link 侧状态；D-G2 后
+   > 「退 Link 不再把 leader 续命」的表述应理解为「取消 observer 订阅」，而非
+   > 「导致 leader 退出」。
 10. **场景边界声明**：sandbox/confinement veto（§2.1-1）、chat 模式互斥（§2.1-5）、
     custom socket（§6-8）三场景在本设计中为 **excluded**：不做验收承诺，帮助文案说明。
+    2026-09-02 三锚点在 bc7f02ed 复核成立：`resolve_leader_mode` docstring
+    （confinement 链后 veto、不回收共享 leader）、`chat_mode_conflicts_with_leader`
+    （`app/mod.rs:692` + 官方单测 `:2188-2192`）、`--leader-socket` flag 进程内转 env
+    （`xai-grok-pager-bin/src/main.rs:2039-2041`；设计原引 `:2007-2009` 行号漂移，
+    实为 `crates/codegen/xai-grok-pager-bin/`）。
 
 任一步失败 = 官方实际行为与 §2 源码推导存在分歧：停止产品代码，保留失败现场，回写本文
 §2 后重新裁决。UI 状态呈现、诊断行、文案打磨全部属于"拓扑已证明后"的产品面；单元测试
@@ -445,6 +470,69 @@ binding、协议翻译、capability 组织——在本设计中**不是待实施
    把 `grokbuild.go:194`（及同类 `handlers_relay.go:246`）的 Debug 错误行提升为 Warn，
    消除生产诊断黑洞。证据：`.exec-plan/artifacts/grokbuild-leader-p0/execution-log.md`
    步骤 4 停线裁决节。
+8. **【2026-09-02 Phase 0 步骤 6 实测回写】leader live rail 的 turn 终态通知被订阅者
+   method 门丢弃（基线被证伪 #2）**：内容流（`session/update` 直发 agent_message_chunk/
+   user_message_chunk 等）正常到达 relay（owner 已确认 iPhone 流式同步），但 turn 终态
+   **从不**作为 `session/update` 广播——live rail 的终态走 gateway ext 通知
+   `x.ai/session_notification`（wire 上 `_` 前缀包裹形态 `_x.ai/session_notification`，
+   `update.sessionUpdate="turn_completed"` + `prompt_id` + `stop_reason`），另有孪生
+   fire-and-forget `x.ai/session/prompt_complete`（上游
+   `session/turn_completion.rs:1-9`：TurnCompleted journal 行是 replay 用孪生）。
+   `leader_subscriber.go` 的 `isSessionUpdateMethod` 白名单为
+   `{"session/update", "_x.ai/session/update", "x.ai/session_notification"}`——第三个
+   条目**缺 `_` 前缀**（真实 wire 恒为带前缀形态，见 grok-build `leader/server.rs`
+   `method_of` 文档），终态帧在 method 门即被静默丢弃。该错误形态源自文件创建提交
+   `0008f1d`（从未生效过）。**后果链**：relay `turnArmed` 一旦置位永不复位（无终态）→
+   `markIdle`/`turn terminal` 永不触发 → iPhone live 视角 turn 永远「运行中」（冷拉
+   才能看到完成态）；后续 turn 内容被并入上一个 stale armed turnId。实测证据：
+   当日 3 个正常完成 turn（含 owner 确认的 12:36 轮）0 条 "turn terminal" 日志；
+   原始帧转储探针（复刻 register→initialize→session/load 握手，转储全部下行帧）
+   在一轮正常 turn 中收到 7 帧 `_x.ai/session_notification`（含
+   `turn_completed stop=end_turn`）+ 289 帧直发 `session/update`。官方拓扑与 §2 推导
+   一致（终态确实广播、形状与 codec 既有 `turn_completed` case 匹配），失败仍在
+   macbridge 基线（与条目 7 同类）。证据：
+   `.exec-plan/artifacts/grokbuild-leader-p0/execution-log.md` 步骤 6 停线裁决节 +
+   `logs/step6-rawdump.*` 原始帧转储。
+   **裁决与修复（2026-09-02）**：owner 选方案 A——白名单补
+   `_x.ai/session_notification`（无前缀形态从白名单移除，wire 恒为包裹形态），实施
+   为 D-G0b 独立提交 `6dc9353`（`leader_subscriber.go` + 回归测试：fake leader 发
+   live 终态通知断言 `EventResult{Done,TurnID}` 转发 + replay 孪生仍丢弃 + wire
+   形态表驱动断言）。
+
+9. **【2026-09-02 Phase 0 步骤 7/8 实测回写】stale socket 自愈 + driver 与广播解耦**：
+   (a) stale socket 基线被证伪 #3——kill -9 leader 后 owner TUI 0.1s 内触发重连，
+   新 leader spawn 并成功 bind（socket inode 更新；flock 随进程死亡释放，
+   connect 级 ECONNREFUSED 驱动 connect_or_spawn 路径，新 bind 替换 stale socket；
+   TUI 无限重连 1s/30s backoff）。推论：observer-only 场景（无任何 grok 客户端）
+   leader 死亡后不自愈——**macbridge 永不 spawn leader 红线的自然后果**，产品语义
+   可接受（§0.2-8 的修正注记同步）。
+   (b) driver transfer 的 debug 行（"Transferred session driver after disconnect"）
+   在 unified.jsonl **不可见**（全天 0 次；上游按 target 的级别过滤，文案在 1.0.13
+   二进制 strings 中确认存在、源码 server.rs:1728-1736 逻辑未变）。改用行为证据：
+   TUI-A（driver 候选）SIGKILL 后 observer 连接不断；新客户端 TUI-B attach 发起
+   turn，observer 收到完整 live 生命周期（user_message_chunk → agent_message_chunk
+   → `_x.ai/session_notification turn_completed stop=end_turn` → prompt_complete，
+   全 replay=false）——**广播与 driver 身份完全解耦，driver 变更对 observer 无感**，
+   §2 的「transfer 只影响 driver-only 路由」假设成立。步骤 7 的日志证据预期从
+   「unified.jsonl Transferred 行」修正为「行为级：driver 死亡前后 observer 事件流
+   连续性」。证据：execution-log 步骤 7 节 + `logs/step7-rawdump.log`。
+   (c) 步骤 6b 补记：pending interaction（ask_user_question）跨 TUI 死亡存活
+   （56s 零可答客户端挂起、不超时不报错）+ replay-on-attach（新客户端 load 后
+   立即收到 pending 弹窗）+ first-answer-wins 实证；observer 视角确认 §6-6 风险
+   （REQUEST 帧在 method 门被弃，iPhone 看不到问题、turn 转圈至 terminal）。
+10. **【2026-09-02 Phase 0 步骤 9/10 实测回写】回退闭环 + excluded 锚点**：
+    (a) 关=回退完整闭环：删 `use_leader` 键 → 新 grok TUI inline（GROK_LOG_FILE
+    193KB 零 leader 痕迹：leader_connect/connect_target/leader.client.registered
+    均为 0）→ leader 下线 + socket 消失后 iPhone 重开会话，`go-bridge.log` 出现
+    `grokbuild: leader socket absent, falling back to updates.jsonl file tailer`
+    （`grokbuild.go` os.Stat 判据）+ `updates file tailer starting` 双行证据。
+    (b) leader 生命周期修正：见 §0.2-9 实测注记（归 grok 客户端维持；SIGTERM
+    亦不清理 socket 文件）。对 D-G2 语义的影响：「退 Link 不再把 leader 续命」
+    的准确含义是取消 observer 订阅，不是 leader 退出——§3.5.2 相关表述在
+    实现期按此口径复核。
+    (c) excluded 三锚点 bc7f02ed 复核成立（见 §0.2-10）；唯一行号漂移：
+    pager-bin flag→env 转换 `:2007-2009` → 实际 `:2039-2041`，文件路径根
+    `crates/codegen/xai-grok-pager-bin/src/main.rs`。
 
 ---
 
