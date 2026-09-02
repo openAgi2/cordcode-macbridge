@@ -293,6 +293,16 @@ Grok Build 由 `agent/grokbuild` ACP driver 提供，产品 runtime 默认注册
   失效信号语义：不本地应用 roster 增量，指纹 diff 拥有 fence/seen/publish 真值；
   5s grok fast poll 与 60s safety scan 保留（无订阅连接时 roster 不可达，如纯
   侧栏浏览无打开会话）。
+- 模型/effort（grok 1.0.13 实证，2026-09-02）：initialize 响应 `_meta.modelState`
+  是官方目录真值（`availableModels[]` 含 `_meta.{supportsReasoningEffort,
+  reasoningEfforts[]}`；用户自定义 provider 以普通条目出现）。`Agent` 采纳后
+  `AvailableModels` 目录优先、实现 `core.ModelEffortCatalog`（per-model 档位，
+  handleListModels 下发 `supportedReasoningEfforts`/`defaultReasoningEffort`，
+  iOS 零改动）。显式选择经 `session/new` params `_meta.{modelId,reasoningEffort}`
+  （仅显式时携带）；load 恢复/中途切换走 `session/set_model`（**snake-case**，
+  camelCase 返回 -32601；`modelId` 服务端必填，effort-only 漂移须重发当前模型，
+  真值来自 session/new|load 响应顶层 `models`）。Send 前漂移检查失败=硬失败（turn
+  不发出）；loadSession 后失败=软（会话健康优先）。无效值 fail-closed。
 - 能力仍由 `core` 可选接口和 `WireDescriptor` 推导，客户端不得只按名称猜。
 
 ### DeepSeek（`deepseek` → `agent/dsh`，产品入口已退役）

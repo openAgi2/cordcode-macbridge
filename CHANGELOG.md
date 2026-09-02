@@ -7,6 +7,7 @@
 版本号对齐 MacBridge Release 构建的 `MARKETING_VERSION`（见 `MacBridge/project.yml`）。日期为协调世界时（UTC）。
 
 ## [Unreleased]
+- **新功能：Grok Build 模型与思考力度（effort）选择全链路接通**：Grok 会话此前不支持选模型（模型目录为空、切换只改内存不生效）。现在 initialize 时采纳官方 `_meta.modelState` 目录——iPhone 的模型选择器直接显示 grok 实际可用的模型（含用户在 grok 配置里自定义的 provider 条目，如 glm）；支持思考力度的模型（如 Grok 4.6）会显示官方档位菜单（xhigh/high/medium/low，默认值同官方），不支持的不显示、不猜测。新建会话携带显式选择的模型/力度；恢复已有会话或发送消息前发现选择与会话当前状态漂移时，经官方 `session/set_model` 切换（无效模型/力度按官方语义报错，不静默降级）；无显式选择时不发送任何切换请求，完全尊重会话现状。模型/力度由官方持久化（重启 grok 后仍生效）。iOS 零改动——目录与档位经既有模型接口下发。
 - **改进：Grok 会话列表实时刷新（leader roster 广播消费）**：Grok Leader 模式开启时，官方 leader 每次会话集合变化都会向所有已连接客户端广播 roster 通知，此前 MacBridge 直接丢弃、iPhone 侧栏只能等最多 5 秒的轮询。现在该广播会立即触发一次权威目录重扫并推送 `sessions_changed`——Mac 端新建/结束/删除 grok 会话，iPhone 列表近实时同步。广播只作失效信号：不本地套用增量，目录指纹 diff 仍是唯一真值；轮询兜底保留，无观察会话时行为不变。
 - **新功能：Grok Build 行新增「Leader 模式」开关**：开启时外科手术式写入 `~/.grok/config.toml` 的 `[cli].use_leader = true`（关闭则删除该键、保留节头），其余键、注释与换行风格逐字节保留；写入前自动备份（滚动保留最多 3 份）、原子落盘、写后校验失败自动受限回滚。MacBridge 保持只读共存——不 spawn leader 进程、不抢官方锁。开关下方副文案按九态状态机提示（已开启待重启 grok / 检测到 Leader socket / socket 运行痕迹 / 已显式关闭 / 自定义 socket 路径 / 读取失败等），配置异常时开关禁用并说明原因，切换失败弹窗提示且原配置不受影响。帮助与诊断新增 Grok Leader 状态行：user 层配置值区分「未设置 / 已显式关闭 / 已开启」、socket 路径与存在性、安装版 grok 版本（含发行身份）——grok 上游改名或移除该键时症状可见（开关打开但 socket 提示不转变），不加 fallback 伪装生效。
 - **改进：Grok Leader 订阅更稳健、无人观看时主动下线**：leader socket 订阅建立失败（未转发任何事件即断开）时自动回退 `updates.jsonl` tailer 并记录日志，外部 turn 观察不中断；iOS 断开后持续无订阅者超过 60 秒的会话会主动取消 observer、下线 relay，避免无人观看的长会话持续占用资源；订阅者短暂闪断不清除 relay，重开 App/会话时目录游标失效即整页重建，不残留不可证实的「未知」执行态。

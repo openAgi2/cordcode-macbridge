@@ -6,10 +6,44 @@
 | 后续案 | 是什么 / 入口 | 前置依赖 | 状态（更新于） |
 | --- | --- | --- | --- |
 | Grok follower 交互升级 | iOS 无缝接力 Mac 端 grok 任务的根治路径（iOS 作为 leader 客户端，消息进同一 full-capability agent，per-client 能力路由 + mid-turn interjection）。入口 `docs/2026-08-28-grokbuild-leader-mode-design.md` §9/§15 D-3 | leader 模式设计（B 路线）实施完；动工前须按 source-first 冻结 leader 协议 request 方向真实样本（interjection/cancel/permission response 的 follower 可用性）+ writer 仲裁 | 未开工；B 路线 owner 验收收官（2026-09-02，矩阵 11/12 过 + 诊断卡，提交链 69f3b31…39e29a8），「实施完」前置已满足 |
-| Grok model/provider/effort 缺口 | SetModel 只改内存、spawn 参数不传、AvailableModels 空目录。入口同上 §4.7 | 无硬前置，MacBridge 侧独立改进 | 未开工（2026-09-02） |
 | remote-web 集中测试轮 | 12 门浏览器端验收矩阵 + 4 web-push 取证门（owner 2026-09-02 裁决：先 iOS 任务 → 整体迁移 remote-web → 集中测试）。入口 iOS 仓 `.exec-plan/state/plan-4fe9645c3a36.json` 注记 | iOS App 端任务完成 + remote-web 整体迁移完成 | pending 非阻断；功能路径已真机验证过，16 门属迁移后回归确认（2026-09-02） |
 
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
+
+## 2026-09-02 Grok model/effort 实测取证：checkout ≠ 目标二进制，snake/camel 已分叉
+
+grok 上游 source-first 核验时最关键的发现：**本机 checkout
+（`/Users/jacklee/Projects/grok-build` @ bc7f02ed）不是目标二进制的版本**。本机安装
+grok 1.0.13（自报 commit 5e9a58528b76，`git log` 证实不在 checkout 历史中），两者
+wire 已分叉：
+
+- `session/set_model`（snake_case）在 1.0.13 上是唯一可用方法名；camelCase
+  `session/setModel` 返回 -32601 Method not found（checkout 的测试 fixture
+  `test_leader_stdio_integration.rs:1292` 恰是 camelCase——新版行为，照抄会直接发错）。
+- extension meta 在 1.0.13 走 **`_meta`**（下划线前缀）；checkout 源码是无前缀
+  `meta`。
+- `session/set_model` 的 `modelId` **服务端必填**：effort-only 切换缺省会报
+  "missing field `modelId`"——必须从 session/new|load 响应顶层 `models` 真值取
+  当前模型重发。
+- `session/new` params `_meta.{modelId,reasoningEffort}` 均被消费；`session/load`
+  不接受模型参数，显式选择须 load 后经 set_model 补投。
+- 持久化铁证：`~/.grok/sessions/**/summary.json` 的 `current_model_id` /
+  `reasoning_effort` 直接验证切换落盘。
+
+取证方法（零 API 消耗）：`grok agent stdio` 起 fake 客户端只发
+initialize/authenticate/session-new/set_model/close，不 prompt。比读源码更强，
+符合「目标二进制与 checkout 不同版本时以目标版本真实样本为准」纪律。Cargo
+registry 里没有 agent-client-protocol crate 源码，这条路反而逼出了更直接的实证。
+
+教训：上游 checkout 只能当**语义参考**（ModelState 结构、meta 键常量、effort
+门控语义与 1.0.13 完全一致）；wire 细节（方法名大小写、meta 前缀）必须用目标
+版本探针实证。若当时照 checkout 实现 camelCase，测试全绿但真机发一个
+-32601，又要多一轮 owner 复测。
+
+实现锚点（commit c1dfa81）：`agent/grokbuild/acp_types.go`（wire 类型+注释存证）、
+`grokbuild.go`（adoptModelCatalog / EffortsForModel / AvailableModels 目录优先）、
+`session.go`（newSession `_meta` / load 后软失败 set_model / Send 前漂移硬失败）、
+`session_model_switch_test.go`（11 测试，fixture=真实样本形状）。
 
 ## 2026-09-02 Grok Leader 验收期两复盘：订阅键三分语义 + user echo 身份补齐覆盖缺口
 

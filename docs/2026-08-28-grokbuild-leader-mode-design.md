@@ -568,6 +568,33 @@ binding、协议翻译、capability 组织——在本设计中**不是待实施
     D-G2 已回收 relay）时 fast poll 仍是快速路径。go-bridge 零改动（类型断言
     自动接线），iOS 零改动（sessions_changed 既有事件）。
 
+13. **【2026-09-02 后续实施】§4.7 model/provider/effort 缺口补齐（commit
+    `c1dfa81`）**：SetModel 此前只改内存、session/new 不传、AvailableModels 空目录。
+    实施前按 source-first 对目标二进制实证（**版本偏移声明**：本机 grok 1.0.13 /
+    5e9a58528b76，不在本机 checkout bc7f02ed 历史中——checkout 只作语义参考，
+    wire 细节以 1.0.13 真实协议探针为准，探针零 prompt、零 API 消耗、close 清理）：
+    (a) initialize `_meta.modelState`（`_` 前缀；checkout 无前缀）= 官方目录，
+    per-model `_meta.reasoningEfforts[]` 是档位菜单真值（grok-4.6 四档默认 high；
+    owner 的 GLM provider 条目无 meta、诚实不显示档位）；(b) `session/set_model`
+    是 **snake-case**（camelCase → -32601，checkout fixture 恰为 camelCase——
+    照抄会发错），`modelId` 服务端必填，无效值 -32602 fail-closed；成功持久化到
+    summary.json（current_model_id/reasoning_effort）；(c) `session/new` params
+    `_meta.{modelId,reasoningEffort}` 均被消费（sessionConfig options flip
+    selected:true，result 顶层 `models` 回显）；`session/load` 不接受模型参数。
+    实现：`Agent.adoptModelCatalog`（catalog 单例 initialize / 会话 initialize 双
+   入口）→ `AvailableModels` 目录优先 + `core.ModelEffortCatalog`
+    （`EffortsForModel` per-model 档位，handleListModels 既有 wire 字段下发，iOS
+    零改动）；newSession 仅显式选择携带 `_meta`；`grokSession.appliedModel/
+    appliedEffort` 从 session/new|load 响应 `models` 真值播种，Send 前漂移检查
+    （漂移→set_model；失败=硬失败 turn 不发出；loadSession 后失败=软 Warn 会话
+    健康优先）；`New()` effort 空值短路（`normalizeReasoningEffort("")` 会折叠为
+    medium，防空 config 值静默变显式选择）。测试
+    `session_model_switch_test.go` 11 个，fixture 全部来自 1.0.13 真实样本形状。
+    上游语义参考锚点：`xai-grok-pager/src/acp/model_state.rs`（ModelState 客户端
+    视图/effort 门控）、`xai-grok-sampling-types/src/types.rs:856-893`（meta 键
+    常量 + ReasoningEffortOption）、`xai-grok-shell/src/agent/config.rs:5444`
+    （to_acp_model_info meta 键全表）。
+
 ---
 
 ## 3. 架构
