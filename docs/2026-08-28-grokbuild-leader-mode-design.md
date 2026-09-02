@@ -555,6 +555,19 @@ binding、协议翻译、capability 组织——在本设计中**不是待实施
     → iPhone 重开会话触发全新订阅 → `leader subscribe failed, falling back to
     updates.jsonl tailer` → TUI 发消息按轮询节奏（~1s 批）恢复，终态干净。
 
+12. **【2026-09-02 后续实施】§4.1 roster 通知消费落地（§9 未来改进首项）**：
+    `Agent` 实现 `core.CatalogRefreshSignaler`（commit `c77bb80`）。`LeaderSubscriber`
+    识别 machine-wide `x.ai/sessions/changed`（wire `_` 前缀 + 裸形态，官方
+    server_tests.rs:4419/4523 两形态均有样本；上游 roster.rs `RosterChanged`
+    payload camelCase）→ roster 回调 → buffered-1 通道合并多订阅连接重复广播 →
+    discovery watcher `catalog-signal` 立即权威指纹重扫 → `sessions_changed`。
+    **失效信号语义而非增量应用**：不本地折叠 roster upserted/removed（那是上游
+    FleetView 的视图逻辑，复制易与 catalog 权威扫描漂移），指纹 diff 拥有
+    fence/seen/publish 真值。5s grok fast poll 与 60s safety scan 保留——roster
+    仅在「leader 存活且至少一条订阅连接」时可达，纯侧栏浏览（无打开会话、
+    D-G2 已回收 relay）时 fast poll 仍是快速路径。go-bridge 零改动（类型断言
+    自动接线），iOS 零改动（sessions_changed 既有事件）。
+
 ---
 
 ## 3. 架构

@@ -6,7 +6,6 @@
 | 后续案 | 是什么 / 入口 | 前置依赖 | 状态（更新于） |
 | --- | --- | --- | --- |
 | Grok follower 交互升级 | iOS 无缝接力 Mac 端 grok 任务的根治路径（iOS 作为 leader 客户端，消息进同一 full-capability agent，per-client 能力路由 + mid-turn interjection）。入口 `docs/2026-08-28-grokbuild-leader-mode-design.md` §9/§15 D-3 | leader 模式设计（B 路线）实施完；动工前须按 source-first 冻结 leader 协议 request 方向真实样本（interjection/cancel/permission response 的 follower 可用性）+ writer 仲裁 | 未开工；B 路线 owner 验收收官（2026-09-02，矩阵 11/12 过 + 诊断卡，提交链 69f3b31…39e29a8），「实施完」前置已满足 |
-| Grok roster 通知消费 | `x.ai/sessions/changed` machine-wide 广播 → 会话列表实时刷新（官方 leader 已广播、官方 Pager 已消费；MacBridge 当前丢弃该通知）。入口同上 §9/§4.1 | leader 模式生效；改 `leader_subscriber.go` 方法过滤器 | 未开工（2026-09-02）；owner 验收收官，leader 生效已验证，前置已满足 |
 | Grok model/provider/effort 缺口 | SetModel 只改内存、spawn 参数不传、AvailableModels 空目录。入口同上 §4.7 | 无硬前置，MacBridge 侧独立改进 | 未开工（2026-09-02） |
 | remote-web 集中测试轮 | 12 门浏览器端验收矩阵 + 4 web-push 取证门（owner 2026-09-02 裁决：先 iOS 任务 → 整体迁移 remote-web → 集中测试）。入口 iOS 仓 `.exec-plan/state/plan-4fe9645c3a36.json` 注记 | iOS App 端任务完成 + remote-web 整体迁移完成 | pending 非阻断；功能路径已真机验证过，16 门属迁移后回归确认（2026-09-02） |
 

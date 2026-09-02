@@ -286,6 +286,13 @@ Grok Build 由 `agent/grokbuild` ACP driver 提供，产品 runtime 默认注册
   directory 范围由 go-bridge `filterWireSessionsByDirectory` 过滤。
 - descriptor：`requiresPollingForExternalTurns=true`（外部 turn 仍要 polling /
   `updates.jsonl` tailer 兜底；leader-socket 订阅尚未取代这一声明）。
+- 会话列表加速：`Agent` 实现 `core.CatalogRefreshSignaler`——存活的 leader 订阅
+  连接收到 machine-wide `x.ai/sessions/changed` roster 广播（上游 roster.rs
+  `RosterChanged`，wire `_` 前缀与裸形态均识别）即触发 discovery watcher 立即
+  权威指纹重扫 → `sessions_changed`；buffered-1 通道合并多订阅连接的重复广播。
+  失效信号语义：不本地应用 roster 增量，指纹 diff 拥有 fence/seen/publish 真值；
+  5s grok fast poll 与 60s safety scan 保留（无订阅连接时 roster 不可达，如纯
+  侧栏浏览无打开会话）。
 - 能力仍由 `core` 可选接口和 `WireDescriptor` 推导，客户端不得只按名称猜。
 
 ### DeepSeek（`deepseek` → `agent/dsh`，产品入口已退役）
