@@ -136,14 +136,14 @@ type acpModelInfo struct {
 }
 
 type acpModelMeta struct {
-	TotalContextTokens     int64             `json:"totalContextTokens,omitempty"`
-	AgentType              string            `json:"agentType,omitempty"`
-	SupportsReasoningEffort bool             `json:"supportsReasoningEffort,omitempty"`
+	TotalContextTokens      int64  `json:"totalContextTokens,omitempty"`
+	AgentType               string `json:"agentType,omitempty"`
+	SupportsReasoningEffort bool   `json:"supportsReasoningEffort,omitempty"`
 	// ReasoningEffort is the model's CURRENT/default effort (single value);
 	// ReasoningEfforts is the selectable menu. Meta keys are upstream
 	// constants (xai-grok-sampling-types REASONING_EFFORT_META_KEY etc.).
-	ReasoningEffort  string             `json:"reasoningEffort,omitempty"`
-	ReasoningEfforts []acpEffortOption  `json:"reasoningEfforts,omitempty"`
+	ReasoningEffort  string            `json:"reasoningEffort,omitempty"`
+	ReasoningEfforts []acpEffortOption `json:"reasoningEfforts,omitempty"`
 }
 
 type acpEffortOption struct {
@@ -275,19 +275,19 @@ type sessionUpdatePayload struct {
 	// 记录的 content 是数组 (实测 929 条 tool_call_update 里约一半是数组形状,
 	// 见 contentText())。用 *contentBlock 会让整个 outer unmarshal 失败 → EventError →
 	// relay loop 误判终态 → idle/running 振荡。raw + contentText() 同时兼容两种形状。
-	Content    json.RawMessage    `json:"content,omitempty"`
-	ToolCallID string             `json:"toolCallId,omitempty"`
-	Title      string             `json:"title,omitempty"`
-	Kind       string             `json:"kind,omitempty"`
-	Status     string             `json:"status,omitempty"`
-	Locations  []toolCallLocation `json:"locations,omitempty"`
-	Entries    []planEntry        `json:"entries,omitempty"`
-	Used       *int               `json:"used,omitempty"`
-	Size       *int               `json:"size,omitempty"`
-	TokensUsed     *int `json:"tokens_used,omitempty"`
-	ContextWindow  *int `json:"context_window,omitempty"`
-	TokensBefore   *int `json:"tokens_before,omitempty"`
-	TokensAfter    *int `json:"tokens_after,omitempty"`
+	Content       json.RawMessage    `json:"content,omitempty"`
+	ToolCallID    string             `json:"toolCallId,omitempty"`
+	Title         string             `json:"title,omitempty"`
+	Kind          string             `json:"kind,omitempty"`
+	Status        string             `json:"status,omitempty"`
+	Locations     []toolCallLocation `json:"locations,omitempty"`
+	Entries       []planEntry        `json:"entries,omitempty"`
+	Used          *int               `json:"used,omitempty"`
+	Size          *int               `json:"size,omitempty"`
+	TokensUsed    *int               `json:"tokens_used,omitempty"`
+	ContextWindow *int               `json:"context_window,omitempty"`
+	TokensBefore  *int               `json:"tokens_before,omitempty"`
+	TokensAfter   *int               `json:"tokens_after,omitempty"`
 	// turn_completed 终态字段。上游在不同版本里对 prompt_id 的 JSON key 不一致
 	// (真实 updates.jsonl: "prompt_id" 440 次, "promptId" 289 次), 两个字段都接收,
 	// 取非空者作 durable turn 关联键。stop_reason 区分正常结束 / 取消 / 限流 / 错误。
@@ -413,6 +413,31 @@ type requestPermissionResult struct {
 type outcomePayload struct {
 	Outcome  string `json:"outcome"` // "selected" or "cancelled"
 	OptionID string `json:"optionId,omitempty"`
+}
+
+// --- x.ai/ask_user_question (shared interaction reverse-request) ---
+// Wire shapes frozen from the installed grok 1.0.13 live capture
+// (docs/2026-09-02-grokbuild-follower-interaction-research.md §2.4.1/§3.1):
+// the leader broadcasts the request to EVERY subscriber with the original
+// numeric JSON-RPC id and the params inlined directly under the (possibly
+// "_"-prefixed) top-level method; the envelope carries no timeout field.
+
+type askUserQuestionParams struct {
+	SessionID  string                `json:"sessionId"`
+	ToolCallID string                `json:"toolCallId"`
+	Questions  []askUserQuestionItem `json:"questions"`
+	Mode       string                `json:"mode"`
+}
+
+type askUserQuestionItem struct {
+	Question    string                  `json:"question"`
+	Options     []askUserQuestionOption `json:"options"`
+	MultiSelect *bool                   `json:"multiSelect"` // observed as explicit null (single-select)
+}
+
+type askUserQuestionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
 }
 
 // --- session/list ---

@@ -34,6 +34,7 @@ var _ core.ToolAuthorizer = (*Agent)(nil)
 var _ core.HistoryProvider = (*Agent)(nil)
 var _ core.RichHistoryProvider = (*Agent)(nil)
 var _ core.SessionEventSubscriber = (*Agent)(nil)
+var _ core.SessionQuestionResponder = (*Agent)(nil)
 var _ core.SessionModelSelectionReader = (*Agent)(nil)
 
 // Agent implements core.Agent for the Grok Build CLI.
@@ -77,6 +78,14 @@ type Agent struct {
 	// binary). nil/empty = catalog not observed yet → AvailableModels falls
 	// back to iOS-injected provider models. Guarded by mu.
 	modelCatalog *sessionModelState
+
+	// liveSubs tracks per-session leader subscribers created by
+	// SubscribeSessionEvents so question replies arriving over the bridge RPC
+	// surface (core.SessionQuestionResponder) can reach the connection that
+	// registered the pending interaction. Keyed by sessionID; the subscriber
+	// unregisters itself when Run returns.
+	liveSubs   map[string]*LeaderSubscriber
+	liveSubsMu sync.Mutex
 }
 
 func init() {
@@ -90,6 +99,7 @@ func New(opts map[string]any) (core.Agent, error) {
 		mode:           "default",
 		activeIdx:      -1,
 		catalogRefresh: make(chan struct{}, 1),
+		liveSubs:       make(map[string]*LeaderSubscriber),
 	}
 
 	if v, ok := opts["work_dir"].(string); ok && v != "" {
@@ -254,6 +264,19 @@ func (a *Agent) SubscribeSessionEvents(ctx context.Context, sessionID, cwd strin
 	}
 	go func() {
 		defer close(ch)
+		a.liveSubsMu.Lock()
+		if a.liveSubs == nil {
+			a.liveSubs = make(map[string]*LeaderSubscriber)
+		}
+		a.liveSubs[sessionID] = sub
+		a.liveSubsMu.Unlock()
+		defer func() {
+			a.liveSubsMu.Lock()
+			if a.liveSubs[sessionID] == sub {
+				delete(a.liveSubs, sessionID)
+			}
+			a.liveSubsMu.Unlock()
+		}()
 		slog.Info("grokbuild: leader subscriber starting", "session", sessionID, "socket", socketPath)
 		err := sub.Run(ctx, trackedForward)
 		// 回退三要素：订阅结束（error/nil 一致）+ 未转发任何事件 + ctx 未取消。
@@ -279,6 +302,35 @@ func (a *Agent) SubscribeSessionEvents(ctx context.Context, sessionID, cwd strin
 		}
 	}()
 	return ch, nil
+}
+
+// RespondSessionQuestion implements core.SessionQuestionResponder: routes an
+// iOS question reply to the live leader subscriber that surfaced the question
+// (external-turn observation — no AgentSession exists, so the bridge falls
+// through to the agent-level responder).
+func (a *Agent) RespondSessionQuestion(ctx context.Context, sessionID, questionID string, optionIDs []string) error {
+	_ = ctx
+	sub := a.liveSubscriber(sessionID)
+	if sub == nil {
+		return fmt.Errorf("grokbuild: no live leader subscriber for session %s", shortID(sessionID))
+	}
+	return sub.AnswerQuestion(questionID, optionIDs)
+}
+
+// RejectSessionQuestion implements core.SessionQuestionResponder (dismiss).
+func (a *Agent) RejectSessionQuestion(ctx context.Context, sessionID, questionID string) error {
+	_ = ctx
+	sub := a.liveSubscriber(sessionID)
+	if sub == nil {
+		return fmt.Errorf("grokbuild: no live leader subscriber for session %s", shortID(sessionID))
+	}
+	return sub.CancelQuestion(questionID)
+}
+
+func (a *Agent) liveSubscriber(sessionID string) *LeaderSubscriber {
+	a.liveSubsMu.Lock()
+	defer a.liveSubsMu.Unlock()
+	return a.liveSubs[sessionID]
 }
 
 // resolveSessionCwd locates the session's project directory from grok's own

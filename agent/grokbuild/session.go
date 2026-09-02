@@ -69,6 +69,14 @@ type grokSession struct {
 	pendingPerms    map[string][]permissionOption
 	pendingPromptID int // session/prompt request ID for turn-end detection
 
+	// pendingQuestions registers agent-initiated x.ai/ask_user_question
+	// reverse-requests on OUR OWN driven turns (the driver is the sole ACP
+	// client, so the question arrives as a direct REQUEST, not a leader
+	// broadcast). Keyed by tool_call_id — same identity the leader rail uses
+	// (questionIDFor). Guarded by pendingPermsMu; cleared by Send (stale
+	// questions from a finished turn must not survive into the next one).
+	pendingQuestions map[string]*pendingAskUserQuestion
+
 	// pending response matching: maps request ID → channel for synchronous waits
 	respMu       sync.Mutex
 	respChannels map[int]chan *jsonrpcResponse
@@ -124,17 +132,18 @@ func newGrokSession(ctx context.Context, agent *Agent, sessionID string) (*grokS
 	}
 
 	s := &grokSession{
-		agent:        agent,
-		cmd:          cmd,
-		stdin:        stdin,
-		stdout:       stdout,
-		stderr:       stderr,
-		events:       make(chan core.Event, 64),
-		ctx:          sessionCtx,
-		cancel:       cancel,
-		done:         make(chan struct{}),
-		pendingPerms: make(map[string][]permissionOption),
-		respChannels: make(map[int]chan *jsonrpcResponse),
+		agent:            agent,
+		cmd:              cmd,
+		stdin:            stdin,
+		stdout:           stdout,
+		stderr:           stderr,
+		events:           make(chan core.Event, 64),
+		ctx:              sessionCtx,
+		cancel:           cancel,
+		done:             make(chan struct{}),
+		pendingPerms:     make(map[string][]permissionOption),
+		pendingQuestions: make(map[string]*pendingAskUserQuestion),
+		respChannels:     make(map[int]chan *jsonrpcResponse),
 	}
 	// Store requested ID early; loadSession keeps it, newSession replaces it.
 	s.sessionID.Store(sessionID)
@@ -539,7 +548,17 @@ func (s *grokSession) Send(prompt string, images []core.ImageAttachment, files [
 	s.pendingPermsMu.Lock()
 	s.pendingPromptID = id
 	s.pendingUserEcho = ""
+	// Stale questions from a finished turn must not leak into the new one
+	// (their wire ids are already dead — upstream drops late responses).
+	staleQuestions := make([]string, 0, len(s.pendingQuestions))
+	for toolCallID := range s.pendingQuestions {
+		staleQuestions = append(staleQuestions, toolCallID)
+	}
+	s.pendingQuestions = make(map[string]*pendingAskUserQuestion)
 	s.pendingPermsMu.Unlock()
+	for _, toolCallID := range staleQuestions {
+		markQuestionConsumed(toolCallID)
+	}
 	// Reset terminal flag for the new turn.
 	s.terminalDone.Store(false)
 
@@ -639,14 +658,170 @@ func (s *grokSession) CurrentSessionID() string {
 
 func (s *grokSession) Alive() bool { return s.alive.Load() }
 
-// RespondQuestion — ACP has no question protocol. Always returns ErrNotSupported.
-func (s *grokSession) RespondQuestion(questionID string, optionIDs []string) error {
-	return core.ErrNotSupported
+// pendingAskUserQuestion is one agent-initiated question interaction on the
+// driver rail. Question identity mirrors the leader rail (questionIDFor) so
+// iOS sees the same id shape regardless of which rail surfaced the question.
+type pendingAskUserQuestion struct {
+	rawID   json.RawMessage       // original request id to respond with
+	params  askUserQuestionParams // parsed request (questions, mode)
+	answers map[int][]string      // accumulated per-question selections
 }
 
-// RejectQuestion — ACP has no question protocol. Always returns ErrNotSupported.
+// consumedQuestions tombstones driver-rail interactions that were answered,
+// cancelled, or cleared by a new turn, so a late iOS reply returns nil
+// silently instead of erroring (red line 3 / research §3.5).
+var (
+	consumedQuestionsMu sync.Mutex
+	consumedQuestions   = map[string]bool{}
+)
+
+func markQuestionConsumed(toolCallID string) {
+	consumedQuestionsMu.Lock()
+	defer consumedQuestionsMu.Unlock()
+	if len(consumedQuestions) >= 256 {
+		consumedQuestions = map[string]bool{}
+	}
+	consumedQuestions[toolCallID] = true
+}
+
+func questionWasConsumed(toolCallID string) bool {
+	consumedQuestionsMu.Lock()
+	defer consumedQuestionsMu.Unlock()
+	return consumedQuestions[toolCallID]
+}
+
+func (s *grokSession) handleAskUserQuestionRequest(req *agentRequest) {
+	var p askUserQuestionParams
+	if err := json.Unmarshal(interactionInnerParams(req.Params), &p); err != nil || p.ToolCallID == "" || len(p.Questions) == 0 {
+		slog.Warn("grokbuild: ask_user_question request unparseable", "toolCallId", p.ToolCallID)
+		return
+	}
+	pending := &pendingAskUserQuestion{
+		rawID:   append(json.RawMessage(nil), req.ID...),
+		params:  p,
+		answers: map[int][]string{},
+	}
+	s.pendingPermsMu.Lock()
+	s.pendingQuestions[p.ToolCallID] = pending
+	s.pendingPermsMu.Unlock()
+	consumedQuestionsMu.Lock()
+	delete(consumedQuestions, p.ToolCallID)
+	consumedQuestionsMu.Unlock()
+
+	for i, q := range p.Questions {
+		opts := make([]core.QuestionOption, 0, len(q.Options))
+		for _, o := range q.Options {
+			opts = append(opts, core.QuestionOption{ID: o.Label, Label: o.Label, Description: o.Description})
+		}
+		s.emit(core.Event{
+			Type:         core.EventQuestionAsked,
+			SessionID:    s.CurrentSessionID(),
+			QuestionID:   questionIDFor(p.ToolCallID, i),
+			QuestionText: q.Question,
+			QuestionOpts: opts,
+		})
+	}
+	slog.Info("grokbuild: ask_user_question pending", "toolCallId", p.ToolCallID, "questions", len(p.Questions))
+}
+
+// flushQuestionResponse removes the pending entry (if still present) and
+// writes the JSON-RPC response to the agent's stdin.
+func (s *grokSession) flushQuestionResponse(questionID string, result askUserQuestionExtResponse) error {
+	toolCallID, _, err := parseQuestionID(questionID)
+	if err != nil {
+		return err
+	}
+	s.pendingPermsMu.Lock()
+	pending, ok := s.pendingQuestions[toolCallID]
+	delete(s.pendingQuestions, toolCallID)
+	s.pendingPermsMu.Unlock()
+	if !ok {
+		if questionWasConsumed(toolCallID) {
+			return nil // late reply to an already-consumed interaction — silent
+		}
+		return fmt.Errorf("grokbuild: no pending question %s", questionID)
+	}
+	markQuestionConsumed(toolCallID)
+	if !s.alive.Load() {
+		return fmt.Errorf("grokbuild: session not alive")
+	}
+	resp, err := encodeResponse(pending.rawID, result)
+	if err != nil {
+		return err
+	}
+	s.stdinMu.Lock()
+	_, err = s.stdin.Write(resp)
+	s.stdinMu.Unlock()
+	if err != nil {
+		return err
+	}
+	// Driver rail has no leader broadcast to close the card — the flush itself
+	// is the authoritative outcome. accepted → answered, cancelled → rejected
+	// (reducer maps question_resolved by Content).
+	for i := range pending.params.Questions {
+		s.emit(core.Event{
+			Type:       core.EventQuestionResolved,
+			SessionID:  s.CurrentSessionID(),
+			QuestionID: questionIDFor(toolCallID, i),
+			Content:    result.Outcome,
+		})
+	}
+	return nil
+}
+
+// RespondQuestion answers an agent question with the selected option ids
+// (grok labels). Multi-question interactions accumulate replies and flush the
+// single wire response once every question is answered (upstream expects all
+// answers in one response object).
+func (s *grokSession) RespondQuestion(questionID string, optionIDs []string) error {
+	toolCallID, index, err := parseQuestionID(questionID)
+	if err != nil {
+		return err
+	}
+	s.pendingPermsMu.Lock()
+	pending, ok := s.pendingQuestions[toolCallID]
+	s.pendingPermsMu.Unlock()
+	if !ok {
+		if questionWasConsumed(toolCallID) {
+			return nil // late reply to an already-answered interaction — silent
+		}
+		return fmt.Errorf("grokbuild: no pending question %s", questionID)
+	}
+	if index >= len(pending.params.Questions) {
+		return fmt.Errorf("grokbuild: question index %d out of range for %s", index, questionID)
+	}
+	if len(optionIDs) == 0 {
+		return fmt.Errorf("grokbuild: question reply carries no option")
+	}
+	valid := map[string]bool{}
+	for _, o := range pending.params.Questions[index].Options {
+		valid[o.Label] = true
+	}
+	for _, id := range optionIDs {
+		if !valid[id] {
+			return fmt.Errorf("grokbuild: option %q is not one of the offered choices", id)
+		}
+	}
+	s.pendingPermsMu.Lock()
+	pending.answers[index] = optionIDs
+	complete := len(pending.answers) >= len(pending.params.Questions)
+	s.pendingPermsMu.Unlock()
+	if !complete {
+		return nil
+	}
+	answers := make(map[string][]string, len(pending.params.Questions))
+	for i, q := range pending.params.Questions {
+		if sel, ok := pending.answers[i]; ok && len(sel) > 0 {
+			answers[q.Question] = sel
+		}
+	}
+	return s.flushQuestionResponse(questionID, askUserQuestionExtResponse{Outcome: "accepted", Answers: answers})
+}
+
+// RejectQuestion dismisses a pending question (upstream Path D: Cancelled is
+// a user action, not an error — the turn completes normally).
 func (s *grokSession) RejectQuestion(questionID string) error {
-	return core.ErrNotSupported
+	return s.flushQuestionResponse(questionID, askUserQuestionExtResponse{Outcome: "cancelled"})
 }
 
 func (s *grokSession) Close() error {
@@ -791,9 +966,14 @@ func (s *grokSession) handleResponse(resp *jsonrpcResponse) {
 }
 
 func (s *grokSession) handleRequest(req *agentRequest) {
-	switch req.Method {
+	// Direct stdio rail: the agent addresses ext interaction methods to its
+	// sole client (us). The leader rail's half-wrapped "_x." prefix may also
+	// appear here; normalizeLeaderMethod tolerates both forms.
+	switch normalizeLeaderMethod(req.Method, req.Params) {
 	case "session/request_permission":
 		s.handlePermissionRequest(req)
+	case "x.ai/ask_user_question":
+		s.handleAskUserQuestionRequest(req)
 	default:
 		slog.Debug("grokbuild: unhandled agent request", "method", req.Method)
 	}

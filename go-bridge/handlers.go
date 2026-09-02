@@ -4509,21 +4509,32 @@ func (h *Handlers) handleQuestionReply(conn Connection, msg WireMessage) {
 	sess, ok := h.getSession(params.SessionID)
 	h.mu.Unlock()
 
+	// Dual-rail dispatch: an active local session owns its own-turn questions
+	// (driver rail); external-turn questions (leader rail) are not in that
+	// pending table, so a session error falls through to the agent-level
+	// responder before the RPC fails.
 	var err error
+	handled := false
 	if ok && sess != nil {
 		err = sess.RespondQuestion(params.QuestionID, params.OptionIDs)
-	} else if agent, aok := h.getAgent(msg.BackendID); aok {
-		if responder, rok := agent.(core.SessionQuestionResponder); rok {
-			err = responder.RespondSessionQuestion(h.ctx, params.SessionID, params.QuestionID, params.OptionIDs)
-		} else {
+		handled = err == nil
+	}
+	if !handled {
+		if agent, aok := h.getAgent(msg.BackendID); aok {
+			if responder, rok := agent.(core.SessionQuestionResponder); rok {
+				rerr := responder.RespondSessionQuestion(h.ctx, params.SessionID, params.QuestionID, params.OptionIDs)
+				handled = rerr == nil
+				if rerr != nil {
+					err = rerr
+				}
+			}
+		}
+	}
+	if !handled {
+		if err == nil {
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: "no active session for question reply"})
 			return
 		}
-	} else {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: "no active session for question reply"})
-		return
-	}
-	if err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "question_reply_failed", Message: err.Error()})
 		return
 	}
@@ -4549,21 +4560,30 @@ func (h *Handlers) handleQuestionReject(conn Connection, msg WireMessage) {
 	sess, ok := h.getSession(params.SessionID)
 	h.mu.Unlock()
 
+	// Dual-rail dispatch, mirroring handleQuestionReply: session-owned questions
+	// first, external-turn (leader rail) questions via the agent-level responder.
 	var err error
+	handled := false
 	if ok && sess != nil {
 		err = sess.RejectQuestion(params.QuestionID)
-	} else if agent, aok := h.getAgent(msg.BackendID); aok {
-		if responder, rok := agent.(core.SessionQuestionResponder); rok {
-			err = responder.RejectSessionQuestion(h.ctx, params.SessionID, params.QuestionID)
-		} else {
+		handled = err == nil
+	}
+	if !handled {
+		if agent, aok := h.getAgent(msg.BackendID); aok {
+			if responder, rok := agent.(core.SessionQuestionResponder); rok {
+				rerr := responder.RejectSessionQuestion(h.ctx, params.SessionID, params.QuestionID)
+				handled = rerr == nil
+				if rerr != nil {
+					err = rerr
+				}
+			}
+		}
+	}
+	if !handled {
+		if err == nil {
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: "no active session for question reject"})
 			return
 		}
-	} else {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: "no active session for question reject"})
-		return
-	}
-	if err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "question_reject_failed", Message: err.Error()})
 		return
 	}

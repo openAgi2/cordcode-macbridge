@@ -26,6 +26,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -81,10 +82,23 @@ func resolveLeaderSocket(grokHome string) string {
 
 // LeaderSubscriber attaches to a running grok leader as a read-only subscriber
 // for one session and forwards live session/update notifications as core.Events.
+// Shared interaction reverse-requests (ask_user_question) are registered and
+// surfaced as core.EventQuestionAsked; per owner ruling B (research doc §6.1)
+// request_permission / exit_plan_mode / mcp/elicit remain observe-only.
 type LeaderSubscriber struct {
 	socketPath string
 	sessionID  string
 	cwd        string
+	// conn is the live leader connection (set by Run), shared by the ping
+	// goroutine and the answer write path. All writes go through writeMu.
+	conn    net.Conn
+	writeMu sync.Mutex
+	// interactions registers live ask_user_question reverse-requests awaiting
+	// a follower answer (research §2/§3). Keyed by tool_call_id — the same
+	// identity the official interaction_resolved broadcast carries — so
+	// resolution clears it deterministically. Upstream first-answer-wins is
+	// the only arbiter; CordCode never adjudicates locally.
+	interactions *leaderInteractionRegistry
 	// onRosterChanged fires when the leader broadcasts the machine-wide
 	// x.ai/sessions/changed roster notification (grok-build roster.rs
 	// RosterChanged; leader server.rs broadcasts it to EVERY connected client,
@@ -98,7 +112,105 @@ type LeaderSubscriber struct {
 // NewLeaderSubscriber builds a subscriber for the given session. socketPath is
 // normally resolveLeaderSocket(grokHome).
 func NewLeaderSubscriber(socketPath, sessionID, cwd string) *LeaderSubscriber {
-	return &LeaderSubscriber{socketPath: socketPath, sessionID: sessionID, cwd: cwd}
+	return &LeaderSubscriber{socketPath: socketPath, sessionID: sessionID, cwd: cwd,
+		interactions: newLeaderInteractionRegistry()}
+}
+
+// leaderInteraction is one registered ask_user_question reverse-request.
+type leaderInteraction struct {
+	wireID     int                   // original numeric JSON-RPC id to answer with
+	toolCallID string                // identity shared with interaction_resolved
+	params     askUserQuestionParams // parsed inner params (questions, mode)
+	// answers accumulates iOS replies per question index; the wire response
+	// carries ALL questions at once, so it flushes only when complete
+	// (single-question interactions — the only observed live shape — flush
+	// immediately).
+	answers map[int][]string
+}
+
+type leaderInteractionRegistry struct {
+	mu     sync.Mutex
+	byTool map[string]leaderInteraction
+	// tombstones records recently-consumed tool_call_ids (resolved broadcast
+	// or our own flush). A late answer for a tombstoned id returns success
+	// without writing — upstream silently drops it (research §3.5, red line 3:
+	// no local error for consumed ids). A replayed REQUEST for the same
+	// tool_call_id revives it (removes the tombstone).
+	tombstones map[string]bool
+}
+
+func newLeaderInteractionRegistry() *leaderInteractionRegistry {
+	return &leaderInteractionRegistry{
+		byTool:     map[string]leaderInteraction{},
+		tombstones: map[string]bool{},
+	}
+}
+
+func (r *leaderInteractionRegistry) put(i leaderInteraction) {
+	i.answers = map[int][]string{}
+	r.mu.Lock()
+	r.byTool[i.toolCallID] = i
+	delete(r.tombstones, i.toolCallID)
+	r.mu.Unlock()
+}
+
+// take removes and returns the entry for toolCallID (resolved eviction) and
+// tombstones the id so late answers read as silently-consumed.
+func (r *leaderInteractionRegistry) take(toolCallID string) (leaderInteraction, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	i, ok := r.byTool[toolCallID]
+	if ok {
+		delete(r.byTool, toolCallID)
+		r.markTombstoneLocked(toolCallID)
+	}
+	return i, ok
+}
+
+// get returns a read-only copy without evicting.
+func (r *leaderInteractionRegistry) get(toolCallID string) (leaderInteraction, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	i, ok := r.byTool[toolCallID]
+	return i, ok
+}
+
+// consumed reports whether toolCallID was registered before and has since
+// been consumed (resolved / answered / cleared).
+func (r *leaderInteractionRegistry) consumed(toolCallID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.tombstones[toolCallID]
+}
+
+func (r *leaderInteractionRegistry) markTombstoneLocked(toolCallID string) {
+	if len(r.tombstones) >= 256 {
+		r.tombstones = map[string]bool{}
+	}
+	r.tombstones[toolCallID] = true
+}
+
+// setAnswer records the selected labels for one question index and reports
+// whether every question of the interaction is now answered.
+func (r *leaderInteractionRegistry) setAnswer(toolCallID string, index int, labels []string) (complete bool, ok bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	i, exists := r.byTool[toolCallID]
+	if !exists || index < 0 || index >= len(i.params.Questions) {
+		return false, false
+	}
+	if i.answers == nil {
+		i.answers = map[int][]string{}
+	}
+	i.answers[index] = labels
+	r.byTool[toolCallID] = i
+	return len(i.answers) >= len(i.params.Questions), true
+}
+
+func (r *leaderInteractionRegistry) len() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.byTool)
 }
 
 // leaderPending maps in-flight ACP request id → response channel.
@@ -152,6 +264,14 @@ func (s *LeaderSubscriber) Run(ctx context.Context, onEvent func(core.Event)) er
 		return fmt.Errorf("grokbuild: dial leader socket %s: %w", s.socketPath, err)
 	}
 	defer conn.Close()
+	s.writeMu.Lock()
+	s.conn = conn
+	s.writeMu.Unlock()
+	defer func() {
+		s.writeMu.Lock()
+		s.conn = nil
+		s.writeMu.Unlock()
+	}()
 	slog.Info("grokbuild: leader subscriber connected", "session", s.sessionID, "socket", s.socketPath)
 
 	registerCh := make(chan leaderServerMsg, 4)
@@ -324,7 +444,15 @@ func (s *LeaderSubscriber) handleACP(payload string, pending *leaderPending, ses
 		}
 		return
 	}
-	// Notification (method, no id). Read-only subscriber never answers requests.
+	// Reverse-request (id + method): the leader broadcasts shared interaction
+	// requests to every subscriber so any client can answer (first-answer-wins
+	// upstream). Only ask_user_question is consumed (ruling B); others stay
+	// observe-only.
+	if probe.ID != nil {
+		s.handleInteractionRequest(*probe.ID, *probe.Method, extractParams([]byte(payload)), sessionID, onEvent)
+		return
+	}
+	// Notification (method, no id).
 	if probe.Method == nil {
 		return
 	}
@@ -343,11 +471,312 @@ func (s *LeaderSubscriber) handleACP(payload string, pending *leaderPending, ses
 	if isReplayUpdate(params) {
 		return // iOS already loaded authoritative history; don't re-emit the transcript.
 	}
+	// Official interaction lifecycle broadcasts ride the durable
+	// session_notification rail; resolved evicts the registry and closes the
+	// question on iOS (pending_interaction is a visibility signal only — the
+	// REQUEST frame already carried the full question).
+	if update, toolCallID := peekInteractionLifecycle(params); update != "" {
+		s.handleInteractionLifecycle(update, toolCallID, sessionID, onEvent)
+		return
+	}
 	for _, ev := range convertSessionUpdate(params, sessionID) {
 		if onEvent != nil {
 			onEvent(ev)
 		}
 	}
+}
+
+// handleInteractionRequest registers an ask_user_question broadcast and emits
+// core.EventQuestionAsked per question. Wire id stays the ORIGINAL numeric id
+// (research §3.1) — the answer path echoes it verbatim (§3.3).
+func (s *LeaderSubscriber) handleInteractionRequest(rawID json.RawMessage, topMethod string, params json.RawMessage, sessionID string, onEvent func(core.Event)) {
+	var wireID int
+	if err := json.Unmarshal(rawID, &wireID); err != nil {
+		slog.Debug("grokbuild: leader interaction request with non-numeric id dropped", "method", topMethod)
+		return
+	}
+	method := normalizeLeaderMethod(topMethod, params)
+	if method != "x.ai/ask_user_question" {
+		return // request_permission / exit_plan_mode / mcp/elicit: observe-only (ruling B)
+	}
+	var p askUserQuestionParams
+	if err := json.Unmarshal(interactionInnerParams(params), &p); err != nil || p.ToolCallID == "" || len(p.Questions) == 0 {
+		slog.Warn("grokbuild: leader ask_user_question unparseable", "session", sessionID, "toolCallId", p.ToolCallID, "error", err)
+		return
+	}
+	if s.interactions != nil {
+		s.interactions.put(leaderInteraction{wireID: wireID, toolCallID: p.ToolCallID, params: p})
+	}
+	for i, q := range p.Questions {
+		qid := questionIDFor(p.ToolCallID, i)
+		opts := make([]core.QuestionOption, 0, len(q.Options))
+		for _, o := range q.Options {
+			// grok answers key by option LABEL (research §2.4.3), so the wire
+			// option id IS the label.
+			opts = append(opts, core.QuestionOption{ID: o.Label, Label: o.Label, Description: o.Description})
+		}
+		if q.MultiSelect != nil && *q.MultiSelect {
+			slog.Info("grokbuild: leader ask_user_question multiSelect question surfaced as single-select (bridge wire has no multiSelect field)", "toolCallId", p.ToolCallID, "index", i)
+		}
+		if onEvent != nil {
+			onEvent(core.Event{
+				Type:         core.EventQuestionAsked,
+				SessionID:    sessionID,
+				QuestionID:   qid,
+				QuestionText: q.Question,
+				QuestionOpts: opts,
+			})
+		}
+	}
+	slog.Info("grokbuild: leader ask_user_question registered",
+		"session", sessionID, "toolCallId", p.ToolCallID, "questions", len(p.Questions), "wireId", wireID, "mode", p.Mode)
+}
+
+// handleInteractionLifecycle maps the official pending_interaction /
+// interaction_resolved broadcasts. Resolved is the authoritative close signal:
+// it evicts the registry entry and emits question_resolved for every surfaced
+// question id. Entries we never registered (permission requests, resolutions
+// that raced ahead of our attach) produce no event — iOS only ever saw
+// questions we surfaced.
+func (s *LeaderSubscriber) handleInteractionLifecycle(update, toolCallID, sessionID string, onEvent func(core.Event)) {
+	switch update {
+	case "interaction_resolved":
+		if s.interactions == nil {
+			return
+		}
+		entry, ok := s.interactions.take(toolCallID)
+		if !ok {
+			slog.Debug("grokbuild: leader interaction_resolved for unregistered tool call", "toolCallId", toolCallID)
+			return
+		}
+		for i := range entry.params.Questions {
+			if onEvent != nil {
+				onEvent(core.Event{
+					Type:       core.EventQuestionResolved,
+					SessionID:  sessionID,
+					QuestionID: questionIDFor(entry.toolCallID, i),
+					Content:    "resolved",
+				})
+			}
+		}
+		slog.Info("grokbuild: leader interaction_resolved closed question", "toolCallId", toolCallID)
+	case "pending_interaction":
+		// REQUEST frame already surfaced questions; permission pendings are
+		// observe-only visibility (ruling B) — log, no wire event.
+		slog.Debug("grokbuild: leader pending_interaction", "toolCallId", toolCallID)
+	}
+}
+
+// questionIDFor derives the bridge question identity from the interaction's
+// tool_call_id. Single-question requests (the only observed live shape,
+// research §3.1) use the bare id; later indices append #i to stay unique.
+func questionIDFor(toolCallID string, index int) string {
+	if index == 0 {
+		return toolCallID
+	}
+	return fmt.Sprintf("%s#%d", toolCallID, index)
+}
+
+// parseQuestionID is the inverse of questionIDFor.
+func parseQuestionID(questionID string) (toolCallID string, index int, err error) {
+	if i := strings.LastIndex(questionID, "#"); i > 0 {
+		n, perr := strconv.Atoi(questionID[i+1:])
+		if perr != nil || n < 0 {
+			return "", 0, fmt.Errorf("grokbuild: malformed question id %q", questionID)
+		}
+		return questionID[:i], n, nil
+	}
+	return questionID, 0, nil
+}
+
+// askUserQuestionExtResponse mirrors upstream AskUserQuestionExtResponse
+// (ask_user_question/types.rs): internally tagged on "outcome"; Accepted
+// carries answers keyed by QUESTION TEXT with one label per selected option;
+// Cancelled is a bare tag (not an error upstream).
+type askUserQuestionExtResponse struct {
+	Outcome string              `json:"outcome"` // "accepted" | "cancelled"
+	Answers map[string][]string `json:"answers,omitempty"`
+}
+
+// AnswerQuestion records an iOS reply for one question of a pending
+// interaction and, once every question is answered, sends the wire response
+// with the ORIGINAL numeric id (research §3.3). The response is a plain
+// fire-and-forget frame: upstream first-answer-wins consumes it silently, and
+// a late/duplicate answer is dropped by the leader without any error frame
+// (§3.5) — so success here means "submitted", not "adjudicated". An answer
+// for an already-consumed interaction (TUI grabbed it, resolved broadcast
+// arrived first) returns nil silently per red line 3.
+func (s *LeaderSubscriber) AnswerQuestion(questionID string, optionIDs []string) error {
+	toolCallID, index, err := parseQuestionID(questionID)
+	if err != nil {
+		return err
+	}
+	if s.interactions == nil {
+		return fmt.Errorf("grokbuild: no pending question %s", questionID)
+	}
+	if _, ok := s.interactions.get(toolCallID); !ok {
+		if s.interactions.consumed(toolCallID) {
+			return nil // late answer to an adjudicated interaction — silent (§3.5)
+		}
+		return fmt.Errorf("grokbuild: no pending question %s", questionID)
+	}
+	labels, err := s.validateQuestionSelection(toolCallID, index, optionIDs)
+	if err != nil {
+		return err
+	}
+	complete, ok := s.interactions.setAnswer(toolCallID, index, labels)
+	if !ok {
+		return fmt.Errorf("grokbuild: no pending question %s", questionID)
+	}
+	if !complete {
+		// Multi-question interaction still missing replies; flush happens on
+		// the last one.
+		return nil
+	}
+	entry, _ := s.interactions.take(toolCallID)
+	return s.sendInteractionResponse(entry, askUserQuestionExtResponse{
+		Outcome: "accepted",
+		Answers: answersByQuestionText(entry, entry.answers),
+	})
+}
+
+// CancelQuestion dismisses a pending interaction (upstream Path D: not an
+// error; the tool completes the turn as Cancelled). A cancel for an
+// already-consumed interaction is silent, mirroring AnswerQuestion.
+func (s *LeaderSubscriber) CancelQuestion(questionID string) error {
+	toolCallID, _, err := parseQuestionID(questionID)
+	if err != nil {
+		return err
+	}
+	if s.interactions == nil {
+		return fmt.Errorf("grokbuild: no pending question %s", questionID)
+	}
+	entry, ok := s.interactions.take(toolCallID)
+	if !ok {
+		if s.interactions.consumed(toolCallID) {
+			return nil
+		}
+		return fmt.Errorf("grokbuild: no pending question %s", questionID)
+	}
+	return s.sendInteractionResponse(entry, askUserQuestionExtResponse{Outcome: "cancelled"})
+}
+
+// validateQuestionSelection checks the reply against the registered question:
+// the option ids on the bridge wire are grok option LABELS, so every id must
+// be one of the question's labels. Read-only (peek) — accumulated answers for
+// sibling questions must survive.
+func (s *LeaderSubscriber) validateQuestionSelection(toolCallID string, index int, optionIDs []string) ([]string, error) {
+	entry, ok := s.interactions.get(toolCallID)
+	if !ok {
+		return nil, fmt.Errorf("grokbuild: no pending question for tool call %s", toolCallID)
+	}
+	if index >= len(entry.params.Questions) {
+		return nil, fmt.Errorf("grokbuild: question index %d out of range for tool call %s", index, toolCallID)
+	}
+	valid := map[string]bool{}
+	for _, o := range entry.params.Questions[index].Options {
+		valid[o.Label] = true
+	}
+	if len(optionIDs) == 0 {
+		return nil, fmt.Errorf("grokbuild: question reply carries no option")
+	}
+	for _, id := range optionIDs {
+		if !valid[id] {
+			return nil, fmt.Errorf("grokbuild: option %q is not one of the offered choices", id)
+		}
+	}
+	return optionIDs, nil
+}
+
+// sendInteractionResponse encodes the JSON-RPC response with the ORIGINAL
+// numeric wire id and writes it through the live leader connection.
+func (s *LeaderSubscriber) sendInteractionResponse(entry leaderInteraction, result askUserQuestionExtResponse) error {
+	rawID, err := json.Marshal(entry.wireID)
+	if err != nil {
+		return err
+	}
+	resp, err := encodeResponse(rawID, result)
+	if err != nil {
+		return err
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if s.conn == nil {
+		return fmt.Errorf("grokbuild: leader connection closed")
+	}
+	return writeLeaderMsg(s.conn, leaderClientMsg{Type: "acp", Payload: string(resp)})
+}
+
+// answersByQuestionText maps per-index selections onto the wire answers map,
+// which upstream keys by the question TEXT (research §2.4.3 / §3.3).
+func answersByQuestionText(entry leaderInteraction, answers map[int][]string) map[string][]string {
+	out := make(map[string][]string, len(entry.params.Questions))
+	for i, q := range entry.params.Questions {
+		if sel, ok := answers[i]; ok && len(sel) > 0 {
+			out[q.Question] = sel
+		}
+	}
+	return out
+}
+
+// peekInteractionLifecycle reports the interaction lifecycle sessionUpdate
+// (pending_interaction / interaction_resolved) and its tool_call_id carried
+// inside a session_notification frame (research §3.2: pending also carries
+// kind, resolved carries only tool_call_id).
+func peekInteractionLifecycle(params json.RawMessage) (update, toolCallID string) {
+	var p struct {
+		Update struct {
+			SessionUpdate string `json:"sessionUpdate"`
+			ToolCallID    string `json:"tool_call_id"`
+		} `json:"update"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return "", ""
+	}
+	switch p.Update.SessionUpdate {
+	case "pending_interaction", "interaction_resolved":
+		return p.Update.SessionUpdate, p.Update.ToolCallID
+	}
+	return "", ""
+}
+
+// normalizeLeaderMethod mirrors grok-build server.rs method_of: gateway ext
+// methods may arrive "_"-prefixed, and a fully wrapped payload repeats the
+// real method under params.method (which then wins over the stripped prefix).
+// Direct: {"method":"x.ai/foo"} → x.ai/foo; wrapped/half-wrapped top-level
+// "_x.ai/foo" → x.ai/foo (params.method override when present).
+func normalizeLeaderMethod(topMethod string, params json.RawMessage) string {
+	if !strings.HasPrefix(topMethod, "_") {
+		return topMethod
+	}
+	stripped := strings.TrimPrefix(topMethod, "_")
+	if len(params) > 0 {
+		var probe struct {
+			Method *string `json:"method"`
+		}
+		if json.Unmarshal(params, &probe) == nil && probe.Method != nil && *probe.Method != "" {
+			return *probe.Method
+		}
+	}
+	return stripped
+}
+
+// interactionInnerParams mirrors server.rs interaction_inner_params: for a
+// fully wrapped ext payload (params carries its own method+params) the real
+// params live at params.params; otherwise params is already the real payload
+// (the half-wrapped form observed on the 1.0.13 wire, research §3.1).
+func interactionInnerParams(params json.RawMessage) json.RawMessage {
+	if len(params) == 0 {
+		return params
+	}
+	var probe struct {
+		Method *json.RawMessage `json:"method"`
+		Params *json.RawMessage `json:"params"`
+	}
+	if json.Unmarshal(params, &probe) == nil && probe.Method != nil && probe.Params != nil {
+		return *probe.Params
+	}
+	return params
 }
 
 // isSessionUpdateMethod reports whether a notification method carries a session/update.
