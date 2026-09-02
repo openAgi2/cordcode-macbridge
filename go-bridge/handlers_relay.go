@@ -29,6 +29,28 @@ var (
 )
 
 var (
+	// grokLeaderSubscriberPollInterval（D-G2，§3.5.2）：grok leader relay 的
+	// 订阅者守望采样间隔。每 tick 查一次 HasSessionSubscriber。
+	grokLeaderSubscriberPollInterval = 10 * time.Second
+	// grokLeaderNoSubscriberCancel（D-G2，§3.5.2）：持续无订阅者的取消阈值。
+	// 锚点（首个负样本）+ 本阈值 + 采样粒度 → 实际取消区间 [60s,70s)。
+	grokLeaderNoSubscriberCancel = 60 * time.Second
+)
+
+// grokSubscriberAnchor（D-G2，§3.5.2）：无订阅者判定的锚点纯函数——无时钟、
+// 无 IO，直接单测取消区间。负样本且当前锚点为零才记 now（连续负样本不移动
+// 锚点）；正样本清零；锚点存在且 now-锚点 ≥ 阈值时返回 cancel=true。
+func grokSubscriberAnchor(anchor, now time.Time, hasSubscriber bool) (next time.Time, cancel bool) {
+	if hasSubscriber {
+		return time.Time{}, false
+	}
+	if anchor.IsZero() {
+		return now, false
+	}
+	return anchor, now.Sub(anchor) >= grokLeaderNoSubscriberCancel
+}
+
+var (
 	// codexFileRelayPollInterval 是 Codex transcript 文件 watch 的轮询间隔。
 	codexFileRelayPollInterval = 1 * time.Second
 	// codexFileRelayNoGrowthTTL 是 transcript 无增长时考虑退出的软 TTL。
@@ -190,6 +212,12 @@ func (h *Handlers) startGrokLeaderSessionRelay(sessionID, backendID string, agen
 // local turns (mapAgentEvent + sendSessionEvent). Exits when the leader disconnects
 // (channel close); the next session-open restarts it.
 //
+// D-G2（§3.5.2）订阅者守望：iOS 断开后持续无订阅者 ≥60s（实际取消区间
+// [60s,70s)）→ 主动取消订阅并下线 relay（不再常驻空转）。主动下线不合成
+// turn_aborted(leader_disconnect)——那是真 source 断开的 F-7 语义；此时订阅者
+// 已离开、turn 结果未观测，registry 经 releasePassiveClaim 转 unknown（真实行）
+// 或删除（synthetic 行），真值靠重开 session 冷拉 + 新 relay 重建。
+//
 // Turn 生命周期合成 (Mac 发起的外部 turn 没有 iOS 发起路径里的 EventTurnStarted):
 //   - turn_started: 上游 grok-build 不发任何 turn-start sessionUpdate (真实数据
 //     response_started=0), 所以在首个内容事件前合成 turn_started + running, 激活
@@ -222,15 +250,29 @@ func (h *Handlers) grokLeaderSessionRelayLoop(sessionID, backendID string, sub c
 	// pendingUserText 缓冲外部 turn 的用户 prompt (attach 补扫或 live user_message_chunk),
 	// 等 turn 身份确定后一次性以 user_message 送入投影。
 	var pendingUserText string
+	// claimGen（D-G2，§3.5.2）：claimRunning 返回的 registry 所有权代号。
+	// terminal 收口 / 真断开后清零；主动下线时经 releasePassiveClaim 释放。
+	var claimGen uint64
+	// selfCancelled（D-G2，§3.5.2）：订阅者守望主动取消的分流标志——主动下线
+	// 走 releasePassiveClaim（unknown/删除），不走 defer 的 F-7 合成。
+	var selfCancelled bool
+	// ctx（D-G2，§3.5.2）：可主动取消的订阅 ctx——取消即终止 leader 订阅或
+	// D-G1 回退 tailer，下游 channel 随之关闭。
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	defer func() {
 		// leader 异常断开且未收 turn_completed：turn 结果未知（可能仍在跑，也可能已死）。
 		// F-7（2026-08-15 登记簿）：不再把「结果未知」静默猜成「已完成」——先合成
 		// turn_aborted(leader_disconnect) 明确中断语义（对齐 codex 死进程先例 :423-432，
 		// 协议 bridge-v1.md「turn_error/turn_aborted settle a turn as failed/aborted」），
 		// 再补 idle 让客户端收口、防 isGenerating 残留（2026-08-04 修复保留）。
-		if turnArmed {
+		// D-G2 互锁：selfCancelled 时跳过——主动下线已由 releasePassiveClaim 释放
+		// claim（unknown/删除），此处不得再猜终态。
+		if turnArmed && !selfCancelled {
 			slog.Info("go-bridge: grokLeaderSessionRelay leader disconnect with armed turn, emitting turn_aborted(leader_disconnect) + idle", "sessionID", sessionID)
 			h.sessions.markIdle(sessionID)
+			h.grokCatalogWireCache().FenceBackend(backendID)
+			claimGen = 0
 			h.sendSessionEvent(sessionID, backendID, "turn_aborted", map[string]interface{}{
 				"turnId": armedTurnID, "reason": "leader_disconnect",
 			})
@@ -239,76 +281,113 @@ func (h *Handlers) grokLeaderSessionRelayLoop(sessionID, backendID string, sub c
 		h.mu.Lock()
 		delete(h.relayRunning, relayKey)
 		h.mu.Unlock()
-		slog.Info("go-bridge: grokLeaderSessionRelay exited", "sessionID", sessionID)
+		slog.Info("go-bridge: grokLeaderSessionRelay exited", "sessionID", sessionID, "selfCancelled", selfCancelled)
 	}()
-	events, err := sub.SubscribeSessionEvents(context.Background(), sessionID, cwd)
+	events, err := sub.SubscribeSessionEvents(ctx, sessionID, cwd)
 	if err != nil {
 		slog.Debug("go-bridge: grok leader subscribe unavailable", "sessionID", sessionID, "error", err)
 		return
 	}
 	slog.Info("go-bridge: grokLeaderSessionRelay started", "sessionID", sessionID)
-	for ev := range events {
-		eventName, data, _ := mapAgentEvent(ev)
-		if eventName == "" {
-			continue
-		}
-		if eventName == "user_message" && ev.TurnID == "" {
-			// 身份延迟的 user prompt (codec 的 user_message_chunk): 挂起, 等首个
-			// 内容事件用同 turn 的 promptId 补齐后再发, 不在此处猜身份。
-			if text := strings.TrimSpace(ev.Content); text != "" {
-				pendingUserText = text
+	ticker := time.NewTicker(grokLeaderSubscriberPollInterval)
+	defer ticker.Stop()
+	var firstNegativeAt time.Time
+relayLoop:
+	for {
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				// source 真断开（channel close）→ defer F-7 收口（若 armed）。
+				break relayLoop
 			}
-			continue
-		}
-		// 首个内容事件前合成 turn_started + running (Mac 外部 turn 无上游 start 信号)。
-		// turnId 取自首个内容事件的 ev.TurnID (= convertSessionUpdate 透传的 _meta.promptId),
-		// 让 reducer arm ActiveTurnID 后续 tool/text 才有 turn 可挂。
-		if isContentEvent(eventName) && !turnArmed {
-			turnArmed = true
-			armedTurnID = ev.TurnID
-			h.sessions.markRunning(sessionID)
-			slog.Info("go-bridge: grokLeaderSessionRelay SYNTHESIZE turn_started+running", "sessionID", sessionID, "firstContent", eventName, "turnId", ev.TurnID)
-			h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": ev.TurnID})
-			if pendingUserText != "" {
+			eventName, data, _ := mapAgentEvent(ev)
+			if eventName == "" {
+				continue
+			}
+			if eventName == "user_message" && ev.TurnID == "" {
+				// 身份延迟的 user prompt (codec 的 user_message_chunk): 挂起, 等首个
+				// 内容事件用同 turn 的 promptId 补齐后再发, 不在此处猜身份。
+				if text := strings.TrimSpace(ev.Content); text != "" {
+					pendingUserText = text
+				}
+				continue
+			}
+			// 首个内容事件前合成 turn_started + running (Mac 外部 turn 无上游 start 信号)。
+			// turnId 取自首个内容事件的 ev.TurnID (= convertSessionUpdate 透传的 _meta.promptId),
+			// 让 reducer arm ActiveTurnID 后续 tool/text 才有 turn 可挂。
+			if isContentEvent(eventName) && !turnArmed {
+				turnArmed = true
+				armedTurnID = ev.TurnID
+				claimGen = h.sessions.claimRunning(sessionID)
+				h.grokCatalogWireCache().FenceBackend(backendID)
+				slog.Info("go-bridge: grokLeaderSessionRelay SYNTHESIZE turn_started+running", "sessionID", sessionID, "firstContent", eventName, "turnId", ev.TurnID)
+				h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": ev.TurnID})
+				if pendingUserText != "" {
+					h.sendSessionEvent(sessionID, backendID, "user_message", map[string]interface{}{
+						"itemId": ev.TurnID,
+						"turnId": ev.TurnID,
+						"text":   pendingUserText,
+					})
+					pendingUserText = ""
+				}
+				h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
+			} else if eventName == "user_message" && turnArmed && armedTurnID != "" {
+				// 内容事件先到、prompt 后到 (异常顺序): 用已 arm 的 turn 身份补发。
 				h.sendSessionEvent(sessionID, backendID, "user_message", map[string]interface{}{
-					"itemId": ev.TurnID,
-					"turnId": ev.TurnID,
-					"text":   pendingUserText,
+					"itemId": armedTurnID,
+					"turnId": armedTurnID,
+					"text":   ev.Content,
 				})
+				continue
+			}
+			if eventName == "turn_completed" || eventName == "error" {
+				// 从未收到内容事件的 turn (空回复): 终态自带 promptId, 此时补发挂起的
+				// prompt, 让 iOS 至少看到用户问题 + 完成收口, 而不是只看到空回复。
+				if pendingUserText != "" && ev.TurnID != "" {
+					h.sendSessionEvent(sessionID, backendID, "user_message", map[string]interface{}{
+						"itemId": ev.TurnID,
+						"turnId": ev.TurnID,
+						"text":   pendingUserText,
+					})
+				}
 				pendingUserText = ""
+				armedTurnID = ""
+				// 上游 durable 终态信号到达 (convertSessionUpdate 映射) → 主收口。
+				h.sessions.markIdle(sessionID)
+				h.grokCatalogWireCache().FenceBackend(backendID)
+				turnArmed = false
+				claimGen = 0
+				slog.Info("go-bridge: grokLeaderSessionRelay turn terminal", "sessionID", sessionID, "event", eventName)
+			} else if eventName == "turn_started" {
+				claimGen = h.sessions.claimRunning(sessionID)
+				h.grokCatalogWireCache().FenceBackend(backendID)
 			}
-			h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
-		} else if eventName == "user_message" && turnArmed && armedTurnID != "" {
-			// 内容事件先到、prompt 后到 (异常顺序): 用已 arm 的 turn 身份补发。
-			h.sendSessionEvent(sessionID, backendID, "user_message", map[string]interface{}{
-				"itemId": armedTurnID,
-				"turnId": armedTurnID,
-				"text":   ev.Content,
-			})
-			continue
-		}
-		if eventName == "turn_completed" || eventName == "error" {
-			// 从未收到内容事件的 turn (空回复): 终态自带 promptId, 此时补发挂起的
-			// prompt, 让 iOS 至少看到用户问题 + 完成收口, 而不是只看到空回复。
-			if pendingUserText != "" && ev.TurnID != "" {
-				h.sendSessionEvent(sessionID, backendID, "user_message", map[string]interface{}{
-					"itemId": ev.TurnID,
-					"turnId": ev.TurnID,
-					"text":   pendingUserText,
-				})
+			// web push §8.1 producer 位点 3：该 leader relay 是 ingest owner；非终态事件
+			// pushIntentForRelayTerminal 恒为 nil（fail closed），不影响普通事件。
+			h.sendSessionEventWithPushIntent(sessionID, backendID, eventName, data)
+		case now := <-ticker.C:
+			// D-G2 订阅者守望：iOS 仍打开该 session 时保持订阅（正样本清零锚点）；
+			// 持续无订阅者达到阈值才主动下线。
+			hasSubscriber := h.broadcaster != nil && h.broadcaster.HasSessionSubscriber(backendID, sessionID)
+			var cancelNow bool
+			firstNegativeAt, cancelNow = grokSubscriberAnchor(firstNegativeAt, now, hasSubscriber)
+			if !cancelNow {
+				continue
 			}
-			pendingUserText = ""
-			armedTurnID = ""
-			// 上游 durable 终态信号到达 (convertSessionUpdate 映射) → 主收口。
-			h.sessions.markIdle(sessionID)
-			turnArmed = false
-			slog.Info("go-bridge: grokLeaderSessionRelay turn terminal", "sessionID", sessionID, "event", eventName)
-		} else if eventName == "turn_started" {
-			h.sessions.markRunning(sessionID)
+			selfCancelled = true
+			outcome := h.sessions.releasePassiveClaim(sessionID, claimGen)
+			h.grokCatalogWireCache().FenceBackend(backendID)
+			slog.Info("go-bridge: grokLeaderSessionRelay no subscribers, cancelling subscription",
+				"backendID", backendID,
+				"sessionID", sessionID,
+				"reason", "no_subscribers",
+				"firstNegativeAt", firstNegativeAt.Format(time.RFC3339),
+				"elapsed", now.Sub(firstNegativeAt).Round(time.Millisecond).String(),
+				"claimReleased", claimGen != 0,
+				"registryOutcome", string(outcome))
+			cancel()
+			return
 		}
-		// web push §8.1 producer 位点 3：该 leader relay 是 ingest owner；非终态事件
-		// pushIntentForRelayTerminal 恒为 nil（fail closed），不影响普通事件。
-		h.sendSessionEventWithPushIntent(sessionID, backendID, eventName, data)
 	}
 }
 
@@ -317,11 +396,14 @@ func (h *Handlers) sessionLiveProcess(ctx context.Context, sessionID, backendID 
 	// The explicit lifecycle signal is the sessionRegistry state maintained by the passive
 	// app-server subscriber (running/idle from turn_started / session_state_changed /
 	// turn_completed) and by the codex file relay (task_started/task_complete/turn_aborted).
-	// isIdle defaults to true for unknown sessions, so this is strictly "registered AND
-	// running" — a session the bridge has never seen is not treated as live. Short-circuit
-	// before the agent-lister loop so codex never falls through to the claudecode stub lookup.
+	// Registry state defaults to not-live for unseen sessions, so this is strictly
+	// "registered AND running" — a session the bridge has never seen is not treated as
+	// live. Short-circuit before the agent-lister loop so codex never falls through to
+	// the claudecode stub lookup.
+	// D-G2：unknown（被动 relay 下线后的真实 session 行）不计 known-active——
+	// 状态未观测，不得冒充 Executing。
 	if backendID == "codex" {
-		if !h.sessions.isIdle(sessionID) {
+		if h.sessions.isKnownActive(sessionID) {
 			// Registry "not idle" == a turn is in flight — Live carries that meaning
 			// for codex (no process stubs), so Executing mirrors it.
 			return core.LiveSessionProcess{SessionID: sessionID, Live: true, Executing: true}, nil, nil
@@ -446,7 +528,7 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 			// 永久 running turn。该判定不因有订阅者而跳过：死进程不会再写文件，下一轮真实 turn
 			// 由 codex relay watcher / 下次打开补启 relay。
 			if codexFileRelayNoGrowthHardCap > 0 && since >= codexFileRelayNoGrowthHardCap {
-				if currentTurnID != "" && !h.sessions.isIdle(sessionID) &&
+				if currentTurnID != "" && h.sessions.isKnownActive(sessionID) &&
 					h.detectCodexTranscriptTaskState(sessPath) == "running" {
 					h.sendSessionEvent(sessionID, backendID, "turn_aborted", map[string]interface{}{
 						"turnId": currentTurnID, "reason": "process_death",
@@ -454,7 +536,7 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 					slog.Info("go-bridge: codexSessionFileRelay synthesized turn_aborted for dead process",
 						"sessionID", sessionID, "backendID", backendID, "turnId", currentTurnID)
 				}
-				if !h.sessions.isIdle(sessionID) {
+				if h.sessions.isKnownActive(sessionID) {
 					h.broadcastIdleState(sessionID, backendID)
 				}
 				slog.Info("go-bridge: codexSessionFileRelay no-growth hardCap elapsed, exiting", "sessionID", sessionID, "idleFor", since.String(), "subscribed", h.codexSessionHasSubscriber(sessionID, backendID))
@@ -902,7 +984,7 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 			if !runningObserved && !processStillLive &&
 				!h.broadcaster.HasSessionSubscriber(backendID, sessionID) &&
 				claudeFileRelayLiveIdleTTL > 0 && time.Since(lastMeaningfulGrowth) >= claudeFileRelayLiveIdleTTL {
-				if !h.sessions.isIdle(sessionID) {
+				if h.sessions.isKnownActive(sessionID) {
 					h.broadcastIdleState(sessionID, backendID)
 				}
 				slog.Info("go-bridge: claudeSessionFileRelay live-idle TTL elapsed, exiting", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
@@ -2725,7 +2807,7 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 					// running（9cf9287 (b) 的同一规则）。
 					return
 				}
-				if !h.sessions.isIdle(sessionID) {
+				if h.sessions.isKnownActive(sessionID) {
 					h.mu.Lock()
 					dir := h.sessions.directoryForSession(sessionID)
 					h.mu.Unlock()
@@ -2861,7 +2943,7 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 				continue
 			}
 			slog.Warn("go-bridge: relayEvents idle timeout, auto-completing", "backendID", backendID, "sessionID", sessionID, "eventsSeen", eventCount)
-			if !h.sessions.isIdle(sessionID) {
+			if h.sessions.isKnownActive(sessionID) {
 				h.mu.Lock()
 				dir := h.sessions.directoryForSession(sessionID)
 				h.mu.Unlock()

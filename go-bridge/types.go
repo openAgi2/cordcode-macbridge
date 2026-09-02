@@ -227,6 +227,11 @@ const (
 	sessionStateIdle    sessionState = "idle"
 	sessionStateRunning sessionState = "running"
 	sessionStateClosing sessionState = "closing"
+	// sessionStateUnknown（D-G2，§3.5.2）：只读 leader relay 主动下线后真实
+	// session 的「状态未知」——订阅者已离开、turn 结果未观测，真值靠重开冷拉 +
+	// 新 relay 重建。unknown 不是 idle（不冒充空闲），也不计 known-active
+	// （isKnownActive），因此不触发 running-only 自动终态。
+	sessionStateUnknown sessionState = "unknown"
 )
 
 type trackedSession struct {
@@ -238,11 +243,17 @@ type trackedSession struct {
 	lastUsedAt  time.Time
 	lastEventAt time.Time
 	pendingID   string // 非 空 时表示原始 pending ID，等待 rebind
+	// gen（D-G2，§3.5.2）：本条目最近一次状态变更的全局单调代号。每次
+	// put/putRaw/claimRunning/markIdle/markUnknown 都盖新 gen，使旧的被动
+	// claim（releasePassiveClaim 携带的 gen）在任意后续变更后自动失效。
+	gen uint64
 }
 
 type sessionRegistry struct {
 	mu       sync.Mutex
 	sessions map[string]*trackedSession
+	// genCounter（D-G2，§3.5.2）：全局单调 generation 计数器，锁内自增。
+	genCounter uint64
 	// onStateChange, if set, is invoked after a session transitions to running or
 	// idle. It fires outside the registry mutex. Handlers uses it to invalidate
 	// the cached Claude running map so the next list_sessions reflects owned-turn
@@ -289,6 +300,7 @@ func sameBackendIdentity(lhs, rhs string) bool {
 func (r *sessionRegistry) put(sessionID, backendID, directory string, sess core.AgentSession) *trackedSession {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.genCounter++
 	t := &trackedSession{
 		session:     sess,
 		backendID:   backendID,
@@ -297,6 +309,7 @@ func (r *sessionRegistry) put(sessionID, backendID, directory string, sess core.
 		state:       sessionStateIdle,
 		lastUsedAt:  time.Now(),
 		lastEventAt: time.Now(),
+		gen:         r.genCounter,
 	}
 	r.sessions[sessionID] = t
 	return t
@@ -305,8 +318,10 @@ func (r *sessionRegistry) put(sessionID, backendID, directory string, sess core.
 func (r *sessionRegistry) putRaw(sessionID string, sess core.AgentSession) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.genCounter++
 	if t, ok := r.sessions[sessionID]; ok {
 		t.session = sess
+		t.gen = r.genCounter
 	} else {
 		r.sessions[sessionID] = &trackedSession{
 			session:     sess,
@@ -314,16 +329,23 @@ func (r *sessionRegistry) putRaw(sessionID string, sess core.AgentSession) {
 			state:       sessionStateIdle,
 			lastUsedAt:  time.Now(),
 			lastEventAt: time.Now(),
+			gen:         r.genCounter,
 		}
 	}
 }
 
-func (r *sessionRegistry) markRunning(sessionID string) {
+// claimRunning（D-G2，§3.5.2）：markRunning 的带所有权变体。除置 running 外
+// 返回本次变更的 generation，供被动订阅方（grok leader relay）在主动下线时经
+// releasePassiveClaim 做 CAS 语义的释放。
+func (r *sessionRegistry) claimRunning(sessionID string) uint64 {
 	r.mu.Lock()
 	var backendID string
+	r.genCounter++
+	gen := r.genCounter
 	if t, ok := r.sessions[sessionID]; ok {
 		t.state = sessionStateRunning
 		t.lastUsedAt = time.Now()
+		t.gen = gen
 		backendID = t.backendID
 	} else {
 		r.sessions[sessionID] = &trackedSession{
@@ -331,6 +353,7 @@ func (r *sessionRegistry) markRunning(sessionID string) {
 			state:       sessionStateRunning,
 			lastUsedAt:  time.Now(),
 			lastEventAt: time.Now(),
+			gen:         gen,
 		}
 	}
 	cb := r.onStateChange
@@ -338,6 +361,11 @@ func (r *sessionRegistry) markRunning(sessionID string) {
 	if cb != nil {
 		cb(backendID, sessionID, string(sessionStateRunning))
 	}
+	return gen
+}
+
+func (r *sessionRegistry) markRunning(sessionID string) {
+	r.claimRunning(sessionID)
 }
 
 func (r *sessionRegistry) touch(sessionID string) {
@@ -351,9 +379,11 @@ func (r *sessionRegistry) touch(sessionID string) {
 func (r *sessionRegistry) markIdle(sessionID string) {
 	r.mu.Lock()
 	var backendID string
+	r.genCounter++
 	if t, ok := r.sessions[sessionID]; ok {
 		t.state = sessionStateIdle
 		t.lastEventAt = time.Now()
+		t.gen = r.genCounter
 		backendID = t.backendID
 	} else {
 		r.sessions[sessionID] = &trackedSession{
@@ -361,6 +391,7 @@ func (r *sessionRegistry) markIdle(sessionID string) {
 			state:       sessionStateIdle,
 			lastUsedAt:  time.Now(),
 			lastEventAt: time.Now(),
+			gen:         r.genCounter,
 		}
 	}
 	cb := r.onStateChange
@@ -370,11 +401,76 @@ func (r *sessionRegistry) markIdle(sessionID string) {
 	}
 }
 
-func (r *sessionRegistry) isIdle(sessionID string) bool {
+// markUnknown（D-G2，§3.5.2）：真实 session 行转入 unknown——被动 relay 主动
+// 下线后状态未观测，保留句柄等冷拉重建。对不存在的条目是 no-op（synthetic 行
+// 的下线走 releasePassiveClaim 的 CAS 删除，不留 unknown 孤儿）。
+func (r *sessionRegistry) markUnknown(sessionID string) {
+	r.mu.Lock()
+	var backendID string
+	r.genCounter++
+	if t, ok := r.sessions[sessionID]; ok {
+		t.state = sessionStateUnknown
+		t.lastEventAt = time.Now()
+		t.gen = r.genCounter
+		backendID = t.backendID
+	}
+	cb := r.onStateChange
+	r.mu.Unlock()
+	if cb != nil {
+		cb(backendID, sessionID, string(sessionStateUnknown))
+	}
+}
+
+// isKnownActive（D-G2，§3.5.2）：known-active = 已登记且 running/closing。
+// 取代旧 `!isIdle`（在旧三态上逐点等价）；新增的 unknown 不计 active，因此
+// running-only 自动终态（relay 断开收口、idleTimer 等）不会被 unknown 触发。
+func (r *sessionRegistry) isKnownActive(sessionID string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	t, ok := r.sessions[sessionID]
-	return !ok || t.state == sessionStateIdle
+	return ok && t != nil && (t.state == sessionStateRunning || t.state == sessionStateClosing)
+}
+
+// passiveClaimReleaseOutcome（D-G2，§3.5.2）：被动 claim 下线的三种结局。
+type passiveClaimReleaseOutcome string
+
+const (
+	// passiveClaimNoop：条目不存在 / 已不是 running / generation 失配——
+	// claim 已被 terminal 收口或其它变更接管，本次释放无需动作。
+	passiveClaimNoop passiveClaimReleaseOutcome = "noop"
+	// passiveClaimDeleted：synthetic 行（session==nil）命中 → CAS 删除，不留句柄。
+	passiveClaimDeleted passiveClaimReleaseOutcome = "deleted"
+	// passiveClaimUnknown：真实行（session!=nil）命中 → 转 unknown 保留句柄。
+	passiveClaimUnknown passiveClaimReleaseOutcome = "unknown"
+)
+
+// releasePassiveClaim（D-G2，§3.5.2）：被动订阅方（grok leader relay）主动
+// 下线时释放 claimRunning 拿到的所有权。判定与变更在同一锁内完成，无 TOCTOU：
+// gen 失配一律 no-op；命中时 synthetic 行删除、真实行转 unknown。
+func (r *sessionRegistry) releasePassiveClaim(sessionID string, gen uint64) passiveClaimReleaseOutcome {
+	r.mu.Lock()
+	t, ok := r.sessions[sessionID]
+	if !ok || t == nil || t.state != sessionStateRunning || t.gen != gen || gen == 0 {
+		r.mu.Unlock()
+		return passiveClaimNoop
+	}
+	if t.session == nil {
+		if t.sessionID != "" && t.sessionID != sessionID {
+			delete(r.sessions, t.sessionID)
+		}
+		if t.pendingID != "" {
+			delete(r.sessions, t.pendingID)
+		}
+		delete(r.sessions, sessionID)
+		r.mu.Unlock()
+		return passiveClaimDeleted
+	}
+	t.state = sessionStateUnknown
+	t.lastEventAt = time.Now()
+	r.genCounter++
+	t.gen = r.genCounter
+	r.mu.Unlock()
+	return passiveClaimUnknown
 }
 
 // deleteIfSame CAS-deletes the registry entry for sessionID only when it
