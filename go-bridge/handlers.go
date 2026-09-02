@@ -3331,7 +3331,11 @@ func (h *Handlers) handleCheckPendingNotifications(conn Connection, msg WireMess
 	}, nil)
 }
 
-func (h *Handlers) subscribeConnToSession(conn Connection, msg WireMessage, resolvedSessionID string) {
+// subscribeConnToSession 建立该连接对 session 的订阅。directory 为空 = 观察键
+// （get_session/get_session_messages：读取即观察，随 set_observation_scope 切换
+// 退订，no-subscriber 下线路径才能看到「切走」）；非空 = 自有会话键
+// （send_message/resume_session：用户自己发起的 turn，切换视图后继续收流）。
+func (h *Handlers) subscribeConnToSession(conn Connection, msg WireMessage, resolvedSessionID string, directory string) {
 	sessionID := resolvedSessionID
 	if sessionID == "" {
 		var params struct {
@@ -3345,11 +3349,10 @@ func (h *Handlers) subscribeConnToSession(conn Connection, msg WireMessage, reso
 	if sessionID == "" {
 		return
 	}
-	dir := extractDir(msg)
 	h.broadcaster.Subscribe(conn, SubscriptionKey{
 		BackendID: msg.BackendID,
 		SessionID: sessionID,
-		Directory: dir,
+		Directory: directory,
 	})
 }
 
@@ -3366,7 +3369,7 @@ func (h *Handlers) handleGetSession(conn Connection, msg WireMessage, agent core
 	}
 
 	resolvedSID := h.resolveSessionIDForActiveSession(params.SessionID)
-	h.subscribeConnToSession(conn, msg, resolvedSID)
+	h.subscribeConnToSession(conn, msg, resolvedSID, "")
 
 	dir := extractDir(msg)
 	if agent.Name() == "claudecode" {
@@ -4010,7 +4013,7 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 
 	slog.Info("go-bridge: get_session_messages", "backendID", msg.BackendID, "sessionID", params.SessionID, "directory", params.Directory)
 
-	h.subscribeConnToSession(conn, msg, params.SessionID)
+	h.subscribeConnToSession(conn, msg, params.SessionID, "")
 
 	// 如果已经有活跃 session 对象（先前 send_message 创建），启动事件转发。
 	// 纯读取历史时不能同步 resume thread，否则 app-server/CLI 握手会把只读路径变成执行路径。
@@ -4301,7 +4304,7 @@ func (h *Handlers) handleResumeSession(conn Connection, msg WireMessage, agent c
 
 	slog.Info("go-bridge: handleResumeSession", "sessionID", params.SessionID, "directory", params.Directory)
 
-	h.subscribeConnToSession(conn, msg, h.resolveSessionIDForActiveSession(params.SessionID))
+	h.subscribeConnToSession(conn, msg, h.resolveSessionIDForActiveSession(params.SessionID), extractDir(msg))
 
 	// 对于 claudecode session：如果没有活跃 AgentSession（外部 Desktop 创建），
 	// 启动基于 transcript 文件监视的事件转发，使 iOS 能收到 turn_started/turn_completed 等事件。

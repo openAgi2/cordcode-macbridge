@@ -49,6 +49,12 @@ func TestObservationScopeSwitchDropsStaleSessionSubscriber(t *testing.T) {
 	h := newTestHandlers(t)
 	conn := &relayBroadcastCaptureConn{device: &TrustedDeviceRecord{DeviceID: "dev_row12"}}
 
+	// 事故链第一步（2026-09-02 实测）：iOS 打开 grok 会话走 get_session 且带
+	// directory（iOS CCCodeBridgeClient.getSession 传 currentSessionDirectory）。
+	// 读路径必须记为观察键（空目录），否则 dir-ful 键幸存 reconcile，D-G2 永不触发。
+	getSessionParams := json.RawMessage(`{"sessionId":"sessA","directory":"/Users/jacklee/w","backendId":"grokbuild"}`)
+	h.subscribeConnToSession(conn, WireMessage{RequestID: "req-gs", BackendID: "grokbuild", Params: getSessionParams}, "sessA", "")
+
 	scopeA := json.RawMessage(`{"backendId":"grokbuild","sessionIds":["sessA"],"deliveryMode":"full_stream","includeRunningSessionSignals":true,"leaseSeconds":90}`)
 	h.handleSetObservationScope(conn, WireMessage{RequestID: "req-a", BackendID: "grokbuild", Params: scopeA})
 	if !h.broadcaster.HasSessionSubscriber("grokbuild", "sessA") {
@@ -69,6 +75,20 @@ func TestObservationScopeSwitchDropsStaleSessionSubscriber(t *testing.T) {
 	}
 	if !h.broadcaster.HasSessionSubscriber("grokbuild", "sessOwn") {
 		t.Fatal("own-session dir key must survive scope switch")
+	}
+
+	// 观察键退订后仍能收到带目录事件的目标集语义由 Targets 的 noDir 匹配保证
+	// （types.go:843），此处钉住：空目录观察键是 dir-ful 事件的合法投递目标。
+	h.broadcaster.Subscribe(conn, SubscriptionKey{BackendID: "grokbuild", SessionID: "sessB"})
+	targets := h.broadcaster.Targets("grokbuild", "sessB", "/Users/jacklee/w")
+	found := false
+	for _, c := range targets {
+		if c == Connection(conn) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("empty-dir observation key must receive dir-ful events (Targets noDir match)")
 	}
 
 	// 其他 backend 的观察不受本次切换影响。

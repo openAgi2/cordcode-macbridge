@@ -94,7 +94,7 @@ func (h *Handlers) handleGetSessionProjectionWindow(conn Connection, msg WireMes
 	// projection_patch frames flow, and attach the live producer relay that feeds the
 	// reducer for projection-only clients (no get_session_messages call would otherwise
 	// watch file/API growth). Claude starts its relay through the beforeHydrate hook.
-	h.subscribeConnToSession(conn, msg, params.SessionID)
+	h.subscribeConnToSession(conn, msg, params.SessionID, "")
 	if msg.BackendID != "claude" && msg.BackendID != "claudecode" {
 		h.startProjectionLiveRelay(params.SessionID, conn, msg.BackendID, agent, params.Directory)
 	}

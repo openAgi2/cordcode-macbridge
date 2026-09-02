@@ -88,7 +88,7 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	logProjectionRPCTrace("mac_receive", msg, params.SessionID, params.SinceRev, -1, "", nil)
 
 	// Subscribe so the conn receives subsequent projection_patch push frames (WP5 emission).
-	h.subscribeConnToSession(conn, msg, params.SessionID)
+	h.subscribeConnToSession(conn, msg, params.SessionID, "")
 	// Projection-only clients never call get_session_messages, so subscribing alone is not
 	// enough for file-backed external sessions: nothing would be watching Claude/Codex JSONL
 	// growth and the reducer would never receive live events. Start the same read-only relay

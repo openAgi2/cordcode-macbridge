@@ -437,7 +437,7 @@ func (h *Handlers) ocHandleGetSessionMessages(conn Connection, msg WireMessage, 
 	}
 
 	// 订阅连接到该 session，以便 relayEvents 转发实时事件
-	h.subscribeConnToSession(conn, msg, sessionID)
+	h.subscribeConnToSession(conn, msg, sessionID, "")
 
 	msgs, err := h.ocProxy.getSessionMessages(sessionID, dir)
 	if err != nil {
