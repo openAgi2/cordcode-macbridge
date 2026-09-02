@@ -887,4 +887,104 @@ extension GrokLeaderModeTests {
         XCTAssertFalse(GrokLeaderModeManager(environment: ["GROK_LEADER_SOCKET": "   "]).hasCustomSocketPath)
         XCTAssertTrue(GrokLeaderModeManager(environment: ["GROK_LEADER_SOCKET": "/custom/leader.sock"]).hasCustomSocketPath)
     }
+
+    // MARK: - Phase 4：DiagnosticsSheet grok 组状态行（§3.2 必做）
+
+    /// 配置三分（absent / explicit false / true）逐值映射到对应文案键——
+    /// 语言中立断言：与 L10n 键值本身比对，验证映射而非字面量。
+    @MainActor
+    func testDiagnosticsSummaryConfigThreeWay() {
+        let absent = GrokLeaderModeManager.diagnosticsSummary(
+            status: makeRowStatus(value: .absent), version: nil)
+        XCTAssertTrue(absent.configText.contains(L10n.grokLeaderDiagConfigAbsent),
+                      "absent 应映射到未设置键，实际：\(absent.configText)")
+
+        let off = GrokLeaderModeManager.diagnosticsSummary(
+            status: makeRowStatus(value: .explicitFalse), version: nil)
+        XCTAssertTrue(off.configText.contains(L10n.grokLeaderDiagConfigFalse),
+                      "explicit false 应映射到已显式关闭键，实际：\(off.configText)")
+        XCTAssertFalse(off.configText.contains(L10n.grokLeaderDiagConfigAbsent),
+                       "explicit false 不得再显示未设置")
+
+        let on = GrokLeaderModeManager.diagnosticsSummary(
+            status: makeRowStatus(value: .explicitTrue), version: nil)
+        XCTAssertTrue(on.configText.contains(L10n.grokLeaderDiagConfigTrue),
+                      "true 应映射到已开启键，实际：\(on.configText)")
+    }
+
+    /// 读失败 F1/F2 在诊断行 fail-visible：失败原因原文可见，不静默降级为配置三态。
+    @MainActor
+    func testDiagnosticsSummaryFailureVisible() {
+        let f1 = GrokLeaderModeManager.diagnosticsSummary(
+            status: makeRowStatus(value: nil, readError: .f1(reason: "boom-原因")), version: nil)
+        XCTAssertTrue(f1.configText.contains("boom-原因"), "F1 原因应出现在诊断行：\(f1.configText)")
+        XCTAssertFalse(f1.configText.contains(L10n.grokLeaderDiagConfigAbsent))
+
+        let f2 = GrokLeaderModeManager.diagnosticsSummary(
+            status: makeRowStatus(value: nil, readError: .f2), version: nil)
+        XCTAssertTrue(f2.configText.contains(L10n.grokLeaderDiagUnsafeForm),
+                      "F2 应映射到等价形态键，实际：\(f2.configText)")
+    }
+
+    /// socket 段含路径与存在性；版本段：nil → 未检测到，有值 → 原样呈现。
+    @MainActor
+    func testDiagnosticsSummarySocketAndVersionSegments() {
+        let present = GrokLeaderModeManager.diagnosticsSummary(
+            status: makeRowStatus(value: .explicitTrue, socketPresent: true, socketPath: "/tmp/sock-a"),
+            version: "grok 9.9.9-test (deadbeef)")
+        XCTAssertTrue(present.socketText.contains("/tmp/sock-a"))
+        XCTAssertTrue(present.socketText.contains(L10n.grokLeaderDiagSocketPresent))
+        XCTAssertTrue(present.versionText.contains("grok 9.9.9-test (deadbeef)"))
+        XCTAssertEqual(present.joined.components(separatedBy: " · ").count, 3, "诊断行应为三段")
+
+        let missing = GrokLeaderModeManager.diagnosticsSummary(
+            status: makeRowStatus(value: .absent, socketPresent: false), version: nil)
+        XCTAssertTrue(missing.socketText.contains(L10n.grokLeaderDiagSocketMissing))
+        XCTAssertTrue(missing.versionText.contains(L10n.grokLeaderDiagVersionMissing))
+    }
+
+    // MARK: - Phase 4：安装版 grok 版本探测
+
+    private func makeFakeGrokScript(in dir: String, output: String) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let script = "#!/bin/sh\nprintf '%s\\n' \"\(output)\"\n"
+        try script.write(toFile: dir + "/grok", atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir + "/grok")
+    }
+
+    /// 临时目录放可执行 grok 脚本 → 探测返回 stdout 首个非空行（含发行身份原文）；
+    /// searchDirs 优先于继承 PATH。
+    func testVersionProbeFindsScriptAndPrecedence() throws {
+        let base = NSTemporaryDirectory() + "grok-ver-probe-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        let dirA = base + "/a", dirB = base + "/b"
+        try makeFakeGrokScript(in: dirA, output: "grok 9.9.9-test (deadbeef)")
+        try makeFakeGrokScript(in: dirB, output: "grok B-BUILD")
+
+        // searchDirs 优先：A 在前 + PATH 指向 B → 取 A。
+        let viaSearch = GrokLeaderVersionProbe.installedVersion(
+            environment: ["PATH": dirB], searchDirs: [dirA])
+        XCTAssertEqual(viaSearch, "grok 9.9.9-test (deadbeef)")
+
+        // searchDirs 为空目录列表时回退继承 PATH。
+        let viaPath = GrokLeaderVersionProbe.installedVersion(
+            environment: ["PATH": dirB], searchDirs: [])
+        XCTAssertEqual(viaPath, "grok B-BUILD")
+    }
+
+    /// 目录不存在 / 输出为空 → nil（UI 显示未检测到，不猜测）。
+    func testVersionProbeMissingOrEmptyReturnsNil() throws {
+        let base = NSTemporaryDirectory() + "grok-ver-probe-nil-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        let dir = base + "/empty-out"
+        try makeFakeGrokScript(in: dir, output: "   ")
+
+        XCTAssertNil(GrokLeaderVersionProbe.installedVersion(
+            environment: [:], searchDirs: [base + "/nope"]),
+                     "不存在目录应返回 nil")
+        XCTAssertNil(GrokLeaderVersionProbe.installedVersion(
+            environment: [:], searchDirs: [dir]),
+                     "空输出应返回 nil")
+    }
 }

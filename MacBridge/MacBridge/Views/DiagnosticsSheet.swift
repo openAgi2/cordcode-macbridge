@@ -13,6 +13,9 @@ struct DiagnosticsSheet: View {
     @State private var showRawLogs = true
     @State private var selectedLevelFilter: LogLevelFilter = .all
     @Environment(\.dismiss) private var dismiss
+    // 只读实例：诊断行仅 refresh()/probeGrokVersion()（config 读 + socket stat + CLI
+    // 版本探测），与 WorkspaceView 写路径的 manager 无竞态（写走原子 rename）。
+    @StateObject private var grokLeader = GrokLeaderModeManager()
 
     var body: some View {
         PageContainer(scrolls: false) {
@@ -30,6 +33,8 @@ struct DiagnosticsSheet: View {
                     
                     HStack(spacing: 12) {
                         Button {
+                            grokLeader.refresh()
+                            grokLeader.probeGrokVersion()
                             Task { await diagnosticsViewModel.loadLogs() }
                         } label: {
                             HStack(spacing: 6) {
@@ -66,6 +71,9 @@ struct DiagnosticsSheet: View {
                 // 健康摘要三卡片并排
                 healthSummarySection
 
+                // Grok Leader 状态行（§3.2 Phase 4 必做：版本漂移 fail-visible 通道）
+                grokLeaderSection
+
                 Divider()
                     .padding(.vertical, 4)
 
@@ -88,7 +96,70 @@ struct DiagnosticsSheet: View {
         .frame(width: LayoutConstants.unifiedSheetWidth, height: LayoutConstants.unifiedSheetHeight)
         .task {
             await diagnosticsViewModel.loadLogs()
+            grokLeader.refresh()
+            grokLeader.probeGrokVersion()
         }
+    }
+
+    // MARK: - Grok Leader 状态行（§3.2/§4.10）
+
+    /// 状态点颜色复用 agentRow 的 rowState 真值（§3.4 优先级），不自建第二张状态表：
+    /// ON+socket 绿 / ON 待重启橙 / 读失败橙 / 其余（OFF/观察态）次级色。
+    private var grokLeaderDotColor: Color {
+        switch GrokLeaderModeManager.rowState(
+            status: grokLeader.status,
+            customSocketPath: grokLeader.hasCustomSocketPath
+        ) {
+        case .coreOnSocketDetected: return .green
+        case .coreOnPendingRestart, .failedRead, .failedUnsafeForm: return .orange
+        case .coreOff, .observeSocketTrace, .observeExplicitOff, .observeCustomSocket: return .secondary
+        }
+    }
+
+    private var grokLeaderSection: some View {
+        let summary = GrokLeaderModeManager.diagnosticsSummary(
+            status: grokLeader.status,
+            version: grokLeader.installedGrokVersion
+        )
+        return HStack(spacing: 12) {
+            ZStack {
+                grokLeaderDotColor.opacity(0.15)
+                Image(systemName: "bolt.horizontal.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(grokLeaderDotColor)
+            }
+            .frame(width: 32, height: 32)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L10n.grokLeaderDiagTitle)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
+                HStack(spacing: 4) {
+                    Text("●")
+                        .font(.system(size: 8))
+                        .foregroundStyle(grokLeaderDotColor)
+                    Text(summary.joined)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+
+            Spacer()
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        }
+        .help(summary.joined)
     }
 
     // MARK: - 健康摘要（结论优先）

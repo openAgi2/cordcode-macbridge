@@ -112,6 +112,18 @@ enum L10n {
     static var grokLeaderNotInstalled: String { tr("grok_leader_not_installed") }
     static var grokLeaderToggleFailedTitle: String { tr("grok_leader_toggle_failed_title") }
     static var grokLeaderToggleFailedBody: String { tr("grok_leader_toggle_failed_body") }
+    static var grokLeaderDiagTitle: String { tr("grok_leader_diag_title") }
+    static var grokLeaderDiagConfigFmt: String { tr("grok_leader_diag_config_fmt") }
+    static var grokLeaderDiagConfigAbsent: String { tr("grok_leader_diag_config_absent") }
+    static var grokLeaderDiagConfigFalse: String { tr("grok_leader_diag_config_false") }
+    static var grokLeaderDiagConfigTrue: String { tr("grok_leader_diag_config_true") }
+    static var grokLeaderDiagReadFailedFmt: String { tr("grok_leader_diag_read_failed_fmt") }
+    static var grokLeaderDiagUnsafeForm: String { tr("grok_leader_diag_unsafe_form") }
+    static var grokLeaderDiagSocketFmt: String { tr("grok_leader_diag_socket_fmt") }
+    static var grokLeaderDiagSocketPresent: String { tr("grok_leader_diag_socket_present") }
+    static var grokLeaderDiagSocketMissing: String { tr("grok_leader_diag_socket_missing") }
+    static var grokLeaderDiagVersionFmt: String { tr("grok_leader_diag_version_fmt") }
+    static var grokLeaderDiagVersionMissing: String { tr("grok_leader_diag_version_missing") }
     static var workspaceNoToolsTitle: String { tr("workspace_no_tools_title") }
     static var workspaceNoToolsSubtitle: String { tr("workspace_no_tools_subtitle") }
     static var topologyTitle: String { tr("topology_title") }
@@ -536,6 +548,18 @@ enum L10n {
             "grok_leader_not_installed": "grok CLI not detected",
             "grok_leader_toggle_failed_title": "Leader mode toggle failed",
             "grok_leader_toggle_failed_body": "Reason: %@\nThe previous config is untouched. Backups: %@",
+            "grok_leader_diag_title": "Grok Leader Status",
+            "grok_leader_diag_config_fmt": "Config: %@",
+            "grok_leader_diag_config_absent": "unset",
+            "grok_leader_diag_config_false": "explicit false",
+            "grok_leader_diag_config_true": "true",
+            "grok_leader_diag_read_failed_fmt": "read failed: %@",
+            "grok_leader_diag_unsafe_form": "unsafe equivalent form (handle manually)",
+            "grok_leader_diag_socket_fmt": "Socket: %@ (%@)",
+            "grok_leader_diag_socket_present": "present",
+            "grok_leader_diag_socket_missing": "missing",
+            "grok_leader_diag_version_fmt": "grok version: %@",
+            "grok_leader_diag_version_missing": "not found",
             "codex_config_changed_hint_full": "Detected a Codex config change (e.g. provider switch); restart the shared Codex service to apply it.",
             "codex_restart_success": "Shared Codex service restarted. If the Codex desktop app did not recover automatically, quit and reopen it.",
             "codex_restart_rejected_active_turns": "A task is still running. Wait for it to finish before restarting the shared Codex service.",
@@ -913,6 +937,18 @@ enum L10n {
             "grok_leader_explicit_off": "已显式关闭（会屏蔽服务器推荐开启）",
             "grok_leader_custom_socket": "Leader socket 路径：%@",
             "grok_leader_read_failed": "无法安全读取 grok 配置（%@）",
+            "grok_leader_diag_title": "Grok Leader 状态",
+            "grok_leader_diag_config_fmt": "配置：%@",
+            "grok_leader_diag_config_absent": "未设置",
+            "grok_leader_diag_config_false": "已显式关闭（false）",
+            "grok_leader_diag_config_true": "已开启（true）",
+            "grok_leader_diag_read_failed_fmt": "读取失败：%@",
+            "grok_leader_diag_unsafe_form": "等价形态（请手工处理）",
+            "grok_leader_diag_socket_fmt": "Socket：%@（%@）",
+            "grok_leader_diag_socket_present": "存在",
+            "grok_leader_diag_socket_missing": "不存在",
+            "grok_leader_diag_version_fmt": "grok 版本：%@",
+            "grok_leader_diag_version_missing": "未检测到",
             "grok_leader_unsafe_form": "配置含 CordCode 无法安全管理的 use_leader 写法，请手工处理",
             "grok_leader_not_installed": "未检测到 grok CLI",
             "grok_leader_toggle_failed_title": "Leader 模式切换失败",

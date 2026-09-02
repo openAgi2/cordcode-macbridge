@@ -1333,4 +1333,133 @@ final class GrokLeaderModeManager: ObservableObject {
         refresh()
         return true
     }
+
+    // MARK: - 安装版 grok 版本（§3.2 DiagnosticsSheet grok 组；§4.10 版本漂移 fail-visible）
+
+    /// `grok --version` 首行原文（含发行身份，如 "grok 1.0.12 (ece2b556c271)"）。
+    /// 未探测/失败 = nil，UI 显示「未检测到」——不猜测、不 fallback。
+    @Published private(set) var installedGrokVersion: String?
+
+    /// 非阻塞探测：在 detached task 上执行（Process + 5s 上限），完成后回 MainActor。
+    func probeGrokVersion() {
+        let env = environment
+        Task { [weak self] in
+            let version = await Task.detached(priority: .utility) {
+                GrokLeaderVersionProbe.installedVersion(environment: env)
+            }.value
+            self?.installedGrokVersion = version
+        }
+    }
+
+    // MARK: - DiagnosticsSheet grok 组状态行（§3.2 必做：配置三分 + socket + 版本）
+
+    struct GrokLeaderDiagnosticsSummary: Equatable {
+        let configText: String
+        let socketText: String
+        let versionText: String
+
+        var joined: String { [configText, socketText, versionText].joined(separator: " · ") }
+    }
+
+    /// 诊断行文案（纯函数可单测）：user 层配置值区分 absent / explicit false / true
+    /// （读失败 F1/F2 优先呈现，fail-visible）、socket 路径与存在性、安装版本。
+    static func diagnosticsSummary(
+        status: GrokLeaderModeStatus,
+        version: String?
+    ) -> GrokLeaderDiagnosticsSummary {
+        let config: String
+        if let err = status.readError {
+            switch err {
+            case .f1(let reason): config = String(format: L10n.grokLeaderDiagReadFailedFmt, reason)
+            case .f2: config = L10n.grokLeaderDiagUnsafeForm
+            }
+        } else {
+            switch status.value {
+            case .explicitTrue: config = L10n.grokLeaderDiagConfigTrue
+            case .explicitFalse: config = L10n.grokLeaderDiagConfigFalse
+            case .absent, .none: config = L10n.grokLeaderDiagConfigAbsent
+            }
+        }
+        let socketState = status.socketPresent
+            ? L10n.grokLeaderDiagSocketPresent
+            : L10n.grokLeaderDiagSocketMissing
+        return GrokLeaderDiagnosticsSummary(
+            configText: String(format: L10n.grokLeaderDiagConfigFmt, config),
+            socketText: String(
+                format: L10n.grokLeaderDiagSocketFmt,
+                status.paths.socketPath,
+                socketState
+            ),
+            versionText: String(
+                format: L10n.grokLeaderDiagVersionFmt,
+                version ?? L10n.grokLeaderDiagVersionMissing
+            )
+        )
+    }
+}
+
+/// 安装版 grok 的 `--version` 探测。搜索链镜像 RuntimeManager.defaultCLISearchPath
+/// （GUI 进程不继承用户 shell PATH），再追加继承 PATH 中的目录；逐目录找可执行的
+/// `grok`，取 stdout 首个非空行。找不到 / 启动失败 / 超时 / 空输出 → nil。
+enum GrokLeaderVersionProbe {
+    static let defaultSearchDirs: [String] = [
+        "~/.bun/bin",
+        "~/.local/bin",
+        "~/.cargo/bin",
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+        "/usr/local/sbin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+        "~/Library/pnpm",
+        "~/.volta/bin",
+        "~/.npm-global/bin",
+    ]
+
+    /// `searchDirs` 仅供测试注入；生产走 defaultSearchDirs + 继承 PATH。
+    static func installedVersion(
+        environment: [String: String],
+        searchDirs: [String]? = nil
+    ) -> String? {
+        var dirs = (searchDirs ?? defaultSearchDirs).map { NSString(string: $0).expandingTildeInPath }
+        if let path = environment["PATH"], !path.isEmpty {
+            dirs.append(contentsOf: path.split(separator: ":").map(String.init))
+        }
+        for dir in dirs where !dir.isEmpty {
+            let bin = (dir as NSString).appendingPathComponent("grok")
+            guard FileManager.default.isExecutableFile(atPath: bin) else { continue }
+            if let line = firstVersionLine(of: bin) { return line }
+        }
+        return nil
+    }
+
+    private static func firstVersionLine(of bin: String) -> String? {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: bin)
+        process.arguments = ["--version"]
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        let done = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in done.signal() }
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        guard done.wait(timeout: .now() + 5) == .success else {
+            process.terminate()
+            return nil
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let text = String(data: data, encoding: .utf8) ?? ""
+        return text
+            .split(separator: "\n")
+            .lazy
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty }
+    }
 }
