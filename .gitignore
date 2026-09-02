@@ -56,6 +56,7 @@ handoffs/handoff-20260824-2257.md
 # grokbuild-leader P0 evidence logs contain grok session dumps incl. MCP env
 # secrets (Z_AI_API_KEY); keep on disk, never commit.
 .exec-plan/artifacts/grokbuild-leader-p0/
+.exec-plan/artifacts/grokbuild-leader-p1/
 
 # Local task/evidence artifacts (kept on disk, never product inputs).
 .zcode/
