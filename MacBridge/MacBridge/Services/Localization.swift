@@ -100,6 +100,18 @@ enum L10n {
     static var codexRestartSuccess: String { tr("codex_restart_success") }
     static var codexRestartRejectedActiveTurns: String { tr("codex_restart_rejected_active_turns") }
     static var codexRestartFailed: String { tr("codex_restart_failed") }
+    static var grokLeaderMode: String { tr("grok_leader_mode") }
+    static var grokLeaderPendingRestart: String { tr("grok_leader_pending_restart") }
+    static var grokLeaderPendingRestartFull: String { tr("grok_leader_pending_restart_full") }
+    static var grokLeaderSocketDetected: String { tr("grok_leader_socket_detected") }
+    static var grokLeaderSocketTrace: String { tr("grok_leader_socket_trace") }
+    static var grokLeaderExplicitOff: String { tr("grok_leader_explicit_off") }
+    static var grokLeaderCustomSocket: String { tr("grok_leader_custom_socket") }
+    static var grokLeaderReadFailed: String { tr("grok_leader_read_failed") }
+    static var grokLeaderUnsafeForm: String { tr("grok_leader_unsafe_form") }
+    static var grokLeaderNotInstalled: String { tr("grok_leader_not_installed") }
+    static var grokLeaderToggleFailedTitle: String { tr("grok_leader_toggle_failed_title") }
+    static var grokLeaderToggleFailedBody: String { tr("grok_leader_toggle_failed_body") }
     static var workspaceNoToolsTitle: String { tr("workspace_no_tools_title") }
     static var workspaceNoToolsSubtitle: String { tr("workspace_no_tools_subtitle") }
     static var topologyTitle: String { tr("topology_title") }
@@ -512,6 +524,18 @@ enum L10n {
             "topology_updated_prefix": "Checked",
             "codex_restart_shared_service": "Restart Shared Codex Service",
             "codex_config_changed_hint": "Config changed; restart the shared Codex service to apply.",
+            "grok_leader_mode": "Leader mode",
+            "grok_leader_pending_restart": "Enabled; restart grok to take effect",
+            "grok_leader_pending_restart_full": "If grok is running, quit and restart it; if not, just start it. Only affects grok processes started after this change.",
+            "grok_leader_socket_detected": "Leader socket detected; live push is confirmed by the runtime log",
+            "grok_leader_socket_trace": "Leader socket trace detected (cause unknown: manual --leader / server recommendation / old leader still running after a config change)",
+            "grok_leader_explicit_off": "Explicitly disabled (this also suppresses server-recommended enabling)",
+            "grok_leader_custom_socket": "Leader socket path: %@",
+            "grok_leader_read_failed": "Cannot safely read grok config (%@)",
+            "grok_leader_unsafe_form": "The config contains a use_leader form CordCode cannot safely manage; please handle it manually",
+            "grok_leader_not_installed": "grok CLI not detected",
+            "grok_leader_toggle_failed_title": "Leader mode toggle failed",
+            "grok_leader_toggle_failed_body": "Reason: %@\nThe previous config is untouched. Backups: %@",
             "codex_config_changed_hint_full": "Detected a Codex config change (e.g. provider switch); restart the shared Codex service to apply it.",
             "codex_restart_success": "Shared Codex service restarted. If the Codex desktop app did not recover automatically, quit and reopen it.",
             "codex_restart_rejected_active_turns": "A task is still running. Wait for it to finish before restarting the shared Codex service.",
@@ -881,6 +905,18 @@ enum L10n {
             "topology_updated_prefix": "检测于",
             "codex_restart_shared_service": "重启共享 Codex 服务",
             "codex_config_changed_hint": "配置已变更，重启共享 Codex 服务后生效",
+            "grok_leader_mode": "Leader 模式",
+            "grok_leader_pending_restart": "已开启，重启 grok 后生效",
+            "grok_leader_pending_restart_full": "若 grok 正在运行请关闭并重新启动；尚未运行则直接启动。仅对此后启动的 grok 生效。",
+            "grok_leader_socket_detected": "检测到 Leader socket，实时推送以运行日志为准",
+            "grok_leader_socket_trace": "检测到 Leader socket 运行痕迹（原因无法判定：手动 --leader / 服务器推荐 / 配置变更后旧 leader 仍在运行）",
+            "grok_leader_explicit_off": "已显式关闭（会屏蔽服务器推荐开启）",
+            "grok_leader_custom_socket": "Leader socket 路径：%@",
+            "grok_leader_read_failed": "无法安全读取 grok 配置（%@）",
+            "grok_leader_unsafe_form": "配置含 CordCode 无法安全管理的 use_leader 写法，请手工处理",
+            "grok_leader_not_installed": "未检测到 grok CLI",
+            "grok_leader_toggle_failed_title": "Leader 模式切换失败",
+            "grok_leader_toggle_failed_body": "原因：%@\n原配置未受影响。备份目录：%@",
             "codex_config_changed_hint_full": "检测到 Codex 配置变更（如 provider 切换），重启共享 Codex 服务后才会生效。",
             "codex_restart_success": "已重启共享 Codex 服务。如果 Codex 桌面应用没有自动恢复，请完全退出并重新打开它。",
             "codex_restart_rejected_active_turns": "当前仍有任务在执行，请等任务结束后再重启共享 Codex 服务。",

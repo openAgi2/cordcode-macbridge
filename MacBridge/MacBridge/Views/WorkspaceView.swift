@@ -31,6 +31,13 @@ struct WorkspaceView: View {
     @State private var isRestartingCodexDaemon = false
     @State private var codexRestartMessage: String? = nil
     @State private var showCodexDesktopPairing = false
+    @StateObject private var grokLeaderManager = GrokLeaderModeManager()
+    @State private var grokLeaderFailureAlert: GrokLeaderToggleFailure?
+
+    struct GrokLeaderToggleFailure: Identifiable {
+        let id = UUID()
+        let reason: String
+    }
 
     /// 活跃 turn / pending 交互（每 3s 轮询更新）；>0 时重启共享 daemon 会打断任务。
     private var hasActiveCodexTurns: Bool {
@@ -457,6 +464,25 @@ struct WorkspaceView: View {
                         }
                     }
                     .padding(.bottom, 12) // OpenCode 底部增加 12px 留白
+                    .onAppear { grokLeaderManager.refresh() }
+                    .onChange(of: backendViewModel.agents) { _, _ in
+                        grokLeaderManager.refresh()
+                    }
+                    .alert(
+                        L10n.grokLeaderToggleFailedTitle,
+                        isPresented: Binding(
+                            get: { grokLeaderFailureAlert != nil },
+                            set: { if !$0 { grokLeaderFailureAlert = nil } }
+                        )
+                    ) {
+                        Button("OK", role: .cancel) {}
+                    } message: {
+                        Text(String(
+                            format: L10n.grokLeaderToggleFailedBody,
+                            grokLeaderFailureAlert?.reason ?? "",
+                            grokLeaderManager.backupDirectoryPath
+                        ))
+                    }
                 }
             }
 
@@ -519,6 +545,9 @@ struct WorkspaceView: View {
                         .truncationMode(.tail)
                         .help(L10n.codexConfigChangedHintFull)
                 }
+                if agent.kind.lowercased() == "grokbuild" {
+                    grokLeaderHint(for: agent)
+                }
             }
 
             HStack(spacing: 12) {
@@ -561,6 +590,11 @@ struct WorkspaceView: View {
                 .frame(width: 172, height: 32)
             }
 
+            if agent.kind.lowercased() == "grokbuild" {
+                grokLeaderToggle(for: agent)
+                    .frame(width: 172, height: 32)
+            }
+
             if !agent.isAvailable {
                 Button(L10n.workspaceRecheck) {
                     Task { await backendViewModel.testAgent(id: agent.id) }
@@ -596,6 +630,98 @@ struct WorkspaceView: View {
             case let .failed(detail):
                 codexRestartMessage = String(format: L10n.codexRestartFailed, detail)
             }
+        }
+    }
+
+    // MARK: - Grok Leader 模式（§3.4 状态机：核心三态 / 观察态 / 失败态）
+
+    private var grokLeaderRowState: GrokLeaderRowState {
+        GrokLeaderModeManager.rowState(
+            status: grokLeaderManager.status,
+            customSocketPath: grokLeaderManager.hasCustomSocketPath
+        )
+    }
+
+    /// 行内 Toggle（槽位与 codex-web 行内按钮对齐；F1/F2/F3 禁用）。
+    private func grokLeaderToggle(for agent: BackendAgentStatus) -> some View {
+        Toggle(L10n.grokLeaderMode, isOn: Binding(
+            get: { grokLeaderManager.status.isON },
+            set: { setGrokLeaderMode($0) }
+        ))
+        .toggleStyle(.switch)
+        .controlSize(.small)
+        .disabled(grokLeaderRowState.disablesToggle || !agent.isAvailable)
+        .help(grokLeaderToggleHelp(for: agent))
+    }
+
+    private func grokLeaderToggleHelp(for agent: BackendAgentStatus) -> String {
+        if !agent.isAvailable {
+            return L10n.grokLeaderNotInstalled
+        }
+        switch grokLeaderRowState {
+        case .coreOnPendingRestart:
+            return L10n.grokLeaderPendingRestartFull
+        case .failedRead(let reason):
+            return String(format: L10n.grokLeaderReadFailed, reason)
+        case .failedUnsafeForm:
+            return L10n.grokLeaderUnsafeForm
+        default:
+            return L10n.grokLeaderMode
+        }
+    }
+
+    /// 名字下方副文案（§3.4 表；#2 橙色，其余次级色；hover 提供全文）。
+    @ViewBuilder
+    private func grokLeaderHint(for agent: BackendAgentStatus) -> some View {
+        // F3：grok 不可用时开关已由槽位禁用 + .help 提示；副文案只承载配置/socket 维度。
+        switch grokLeaderRowState {
+        case .coreOff:
+            EmptyView()
+        case .coreOnPendingRestart:
+            hintText(L10n.grokLeaderPendingRestart, full: L10n.grokLeaderPendingRestartFull, color: .orange)
+        case .coreOnSocketDetected:
+            hintText(L10n.grokLeaderSocketDetected, full: L10n.grokLeaderSocketDetected, color: .secondary)
+        case .observeSocketTrace:
+            hintText(L10n.grokLeaderSocketTrace, full: L10n.grokLeaderSocketTrace, color: .secondary)
+        case .observeExplicitOff:
+            hintText(L10n.grokLeaderExplicitOff, full: L10n.grokLeaderExplicitOff, color: .secondary)
+        case .observeCustomSocket(let path):
+            hintText(String(format: L10n.grokLeaderCustomSocket, path), full: path, color: .secondary)
+        case .failedRead(let reason):
+            hintText(String(format: L10n.grokLeaderReadFailed, reason), full: reason, color: .orange)
+        case .failedUnsafeForm:
+            hintText(L10n.grokLeaderUnsafeForm, full: L10n.grokLeaderUnsafeForm, color: .orange)
+        }
+    }
+
+    private func hintText(_ text: String, full: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .help(full)
+    }
+
+    /// 开关动作：失败回弹 alert（含原因与备份目录）；成功后 refresh 已由 Manager 完成。
+    private func setGrokLeaderMode(_ enabled: Bool) {
+        do {
+            _ = try grokLeaderManager.setLeaderMode(enabled)
+        } catch let error as GrokLeaderModeManager.SetModeError {
+            switch error {
+            case .f1(let reason):
+                grokLeaderFailureAlert = GrokLeaderToggleFailure(reason: reason)
+            case .f2:
+                grokLeaderFailureAlert = GrokLeaderToggleFailure(reason: L10n.grokLeaderUnsafeForm)
+            case .concurrentModification(let reason):
+                grokLeaderFailureAlert = GrokLeaderToggleFailure(reason: reason)
+            case .ioFailure(let reason):
+                grokLeaderFailureAlert = GrokLeaderToggleFailure(reason: reason)
+            case .postVerifyFailed(_, let reason):
+                grokLeaderFailureAlert = GrokLeaderToggleFailure(reason: reason)
+            }
+        } catch {
+            grokLeaderFailureAlert = GrokLeaderToggleFailure(reason: error.localizedDescription)
         }
     }
 

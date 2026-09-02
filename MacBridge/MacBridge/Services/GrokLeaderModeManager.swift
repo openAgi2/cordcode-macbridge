@@ -51,6 +51,34 @@ struct GrokLeaderModeStatus: Equatable {
     var isDisabled: Bool { readError != nil }
 }
 
+/// agentRow 行内副文案状态机（§3.4：核心三态 / 扩展观察态 / 失败态）。
+/// 纯数据——渲染（颜色/hover/alert）在 WorkspaceView，推导在 Manager.rowState。
+enum GrokLeaderRowState: Equatable {
+    /// #1：OFF（absent），无副文案
+    case coreOff
+    /// #2：ON + 未检测到 socket——橙色「已开启，重启 grok 后生效」
+    case coreOnPendingRestart
+    /// #3：ON + 检测到 socket——次级色「检测到 Leader socket，实时推送以运行日志为准」
+    case coreOnSocketDetected
+    /// #4：无键/false + 检测到 socket——次级色运行痕迹提示
+    case observeSocketTrace
+    /// #5：explicit false——次级色「已显式关闭（会屏蔽服务器推荐开启）」
+    case observeExplicitOff
+    /// #6：Link 继承的 env 解析出非默认 socket 路径——中性提示
+    case observeCustomSocket(path: String)
+    /// F1：config 读取/解析/symlink 失败——开关禁用 + 错误提示
+    case failedRead(reason: String)
+    /// F2：交叉裁决矩阵判等价形态——开关禁用 + 提示手工处理
+    case failedUnsafeForm
+
+    var disablesToggle: Bool {
+        switch self {
+        case .failedRead, .failedUnsafeForm: return true
+        default: return false
+        }
+    }
+}
+
 // MARK: - 语义 parser（§3.3-3：整文档合法性 + cli.use_leader 语义 oracle）
 
 enum GrokLeaderSemanticParser {
@@ -1140,6 +1168,18 @@ final class GrokLeaderModeManager: ObservableObject {
     private let environment: [String: String]
     private let appSupportDirectory: URL
 
+    /// Link 进程实际继承的 env 是否解析出非默认 socket 路径（§3.4 #6：只反映
+    /// Link 继承的 env，不能发现任意 TUI 的 --leader-socket）。
+    var hasCustomSocketPath: Bool {
+        !(environment["GROK_LEADER_SOCKET"] ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// 失败回弹 alert 的备份路径段（§3.3 备份目录；固定目录而非单次文件名——
+    /// Writer 错误链不携带 backupPath，目录足以让 owner 定位受限回滚材料）。
+    var backupDirectoryPath: String {
+        GrokConfigBackupStore.defaultDirectory(appSupport: appSupportDirectory).path
+    }
+
     init(environment: [String: String] = ProcessInfo.processInfo.environment,
          appSupport: URL? = nil) {
         self.environment = environment
@@ -1153,6 +1193,28 @@ final class GrokLeaderModeManager: ObservableObject {
             socketPresent: false,
             paths: paths
         )
+    }
+
+    /// agentRow 行内副文案状态机（§3.4）。纯函数（可单测）：
+    /// 失败态 F1/F2 > 核心三态 #2/#3 > 观察态 #4 > #5 > #6（#6 仅在其余态无文案时
+    /// 显示——核心态与 socket 观察态信息优先，完整路径信息由 Phase 4 DiagnosticsSheet
+    /// 呈现）。#4 优先于 #5：explicit false + socket 痕迹时运行痕迹更值得注意。
+    static func rowState(status: GrokLeaderModeStatus, customSocketPath: Bool) -> GrokLeaderRowState {
+        if let err = status.readError {
+            switch err {
+            case .f1(let reason): return .failedRead(reason: reason)
+            case .f2: return .failedUnsafeForm
+            }
+        }
+        switch status.value {
+        case .explicitTrue:
+            return status.socketPresent ? .coreOnSocketDetected : .coreOnPendingRestart
+        case .explicitFalse, .absent, .none:
+            if status.socketPresent { return .observeSocketTrace }
+            if status.value == .explicitFalse { return .observeExplicitOff }
+            if customSocketPath { return .observeCustomSocket(path: status.paths.socketPath) }
+            return .coreOff
+        }
     }
 
     /// 状态刷新（§3.4：视图 appear / agents 刷新回调 / 开关操作完成后）。

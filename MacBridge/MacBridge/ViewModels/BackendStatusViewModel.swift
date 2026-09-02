@@ -2,7 +2,7 @@ import Combine
 import Foundation
 
 /// 单个后端的状态信息，用于 UI 展示
-struct BackendAgentStatus: Identifiable {
+struct BackendAgentStatus: Identifiable, Equatable {
     let id: String
     let displayName: String
     let kind: String

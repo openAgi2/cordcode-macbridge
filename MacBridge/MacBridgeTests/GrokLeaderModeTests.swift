@@ -801,3 +801,90 @@ private extension GrokLeaderReadError {
         return false
     }
 }
+
+// MARK: - 行内状态机（§3.4，Phase 3：核心三态 / 观察态 / 失败态推导）
+
+extension GrokLeaderModeTests {
+
+    private func makeRowStatus(
+        value: GrokLeaderConfigValue?,
+        readError: GrokLeaderReadError? = nil,
+        socketPresent: Bool = false,
+        socketPath: String = "/tmp/grok-leader-test.sock"
+    ) -> GrokLeaderModeStatus {
+        GrokLeaderModeStatus(
+            value: value,
+            readError: readError,
+            socketPresent: socketPresent,
+            paths: GrokLeaderPaths(
+                grokHome: "/tmp/grok-leader-test-home",
+                configPath: "/tmp/grok-leader-test-home/config.toml",
+                socketPath: socketPath
+            )
+        )
+    }
+
+    /// 核心三态：#1 无文案；#2 ON+无 socket（橙色重启指引）；#3 ON+socket（次级色，
+    /// 不得表述为「已生效」——由文案冻结保证，此处只冻结状态归类）。
+    @MainActor
+    func testRowStateCoreThreeStates() {
+        XCTAssertEqual(GrokLeaderModeManager.rowState(status: makeRowStatus(value: .absent), customSocketPath: false), .coreOff)
+        XCTAssertEqual(GrokLeaderModeManager.rowState(status: makeRowStatus(value: nil), customSocketPath: false), .coreOff)
+        XCTAssertEqual(GrokLeaderModeManager.rowState(status: makeRowStatus(value: .explicitTrue, socketPresent: false), customSocketPath: false), .coreOnPendingRestart)
+        XCTAssertEqual(GrokLeaderModeManager.rowState(status: makeRowStatus(value: .explicitTrue, socketPresent: true), customSocketPath: false), .coreOnSocketDetected)
+    }
+
+    /// 观察态：#4 socket 痕迹（absent/false + socket）；#5 explicit false（无 socket）；
+    /// #4 优先于 #5（explicit false + socket 显示运行痕迹）。
+    @MainActor
+    func testRowStateObservationStates() {
+        XCTAssertEqual(GrokLeaderModeManager.rowState(status: makeRowStatus(value: .absent, socketPresent: true), customSocketPath: false), .observeSocketTrace)
+        XCTAssertEqual(GrokLeaderModeManager.rowState(status: makeRowStatus(value: .explicitFalse, socketPresent: true), customSocketPath: false), .observeSocketTrace)
+        XCTAssertEqual(GrokLeaderModeManager.rowState(status: makeRowStatus(value: .explicitFalse, socketPresent: false), customSocketPath: false), .observeExplicitOff)
+    }
+
+    /// 失败态：F1/F2 禁用开关；优先于配置 × socket 一切组合。
+    @MainActor
+    func testRowStateFailureStatesTakePrecedence() {
+        let f1 = GrokLeaderModeManager.rowState(status: makeRowStatus(value: .explicitTrue, readError: .f1(reason: "权限"), socketPresent: true), customSocketPath: false)
+        XCTAssertEqual(f1, .failedRead(reason: "权限"))
+        XCTAssertTrue(f1.disablesToggle)
+
+        let f2 = GrokLeaderModeManager.rowState(status: makeRowStatus(value: nil, readError: .f2), customSocketPath: false)
+        XCTAssertEqual(f2, .failedUnsafeForm)
+        XCTAssertTrue(f2.disablesToggle)
+
+        // 核心态/观察态不禁用
+        XCTAssertFalse(GrokLeaderModeManager.rowState(status: makeRowStatus(value: .explicitTrue), customSocketPath: false).disablesToggle)
+        XCTAssertFalse(GrokLeaderModeManager.rowState(status: makeRowStatus(value: .absent, socketPresent: true), customSocketPath: false).disablesToggle)
+    }
+
+    /// #6 自定义 socket 路径：仅覆盖无文案位（#1），不压过 #2/#3/#4/#5。
+    @MainActor
+    func testRowStateCustomSocketLowestPriority() {
+        XCTAssertEqual(
+            GrokLeaderModeManager.rowState(status: makeRowStatus(value: .absent, socketPath: "/custom/leader.sock"), customSocketPath: true),
+            .observeCustomSocket(path: "/custom/leader.sock")
+        )
+        XCTAssertEqual(
+            GrokLeaderModeManager.rowState(status: makeRowStatus(value: .explicitTrue, socketPresent: false, socketPath: "/custom/leader.sock"), customSocketPath: true),
+            .coreOnPendingRestart
+        )
+        XCTAssertEqual(
+            GrokLeaderModeManager.rowState(status: makeRowStatus(value: .explicitTrue, socketPresent: true, socketPath: "/custom/leader.sock"), customSocketPath: true),
+            .coreOnSocketDetected
+        )
+        XCTAssertEqual(
+            GrokLeaderModeManager.rowState(status: makeRowStatus(value: .explicitFalse, socketPath: "/custom/leader.sock"), customSocketPath: true),
+            .observeExplicitOff
+        )
+    }
+
+    /// Manager 派生：hasCustomSocketPath 只看 Link 继承的 env（§6-8：不能发现任意 TUI 的 --leader-socket）。
+    @MainActor
+    func testManagerHasCustomSocketPathFromEnvOnly() {
+        XCTAssertFalse(GrokLeaderModeManager(environment: [:]).hasCustomSocketPath)
+        XCTAssertFalse(GrokLeaderModeManager(environment: ["GROK_LEADER_SOCKET": "   "]).hasCustomSocketPath)
+        XCTAssertTrue(GrokLeaderModeManager(environment: ["GROK_LEADER_SOCKET": "/custom/leader.sock"]).hasCustomSocketPath)
+    }
+}
