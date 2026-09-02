@@ -93,6 +93,15 @@ func startModelProbeAgent(t *testing.T, initPayload map[string]any, newResult ma
 					result = map[string]any{}
 				}
 			case "session/set_model":
+				if mid, _ := params["modelId"].(string); mid == "reject-unknown" {
+					errResp, _ := json.Marshal(map[string]any{
+						"jsonrpc": "2.0",
+						"id":      json.RawMessage(req.ID),
+						"error":   map[string]any{"code": -32602, "message": "Invalid params", "data": "unknown model id"},
+					})
+					_, _ = outW.Write(append(errResp, '\n'))
+					continue
+				}
 				result = map[string]any{"_meta": map[string]any{"model": map[string]any{"Ok": "grok-4.6"}}}
 			case "session/prompt":
 				result = map[string]any{"stopReason": "end_turn"}
@@ -496,6 +505,23 @@ func TestInitializeAdoptsModelStateIntoAgent(t *testing.T) {
 	}
 	if ms := s.agent.AvailableModels(context.Background()); len(ms) != 2 || ms[0].Name != "grok-4.6" {
 		t.Fatalf("AvailableModels after adopt = %+v", ms)
+	}
+}
+
+// The official catalog persists UNDERLYING ids ("glm-5.3") while set_model
+// only accepts entry ids — iOS echoing the transcript id must not kill the
+// turn: the session is already on the model the user picked.
+func TestSendUnknownModelIdSoftensToCurrentModel(t *testing.T) {
+	s, reqs, mu, stop := startModelProbeAgent(t, nil, nil, nil)
+	defer stop()
+	s.appliedModel = "grok-4.5"
+	s.agent.SetModel("reject-unknown") // fake answers -32602 "unknown model id"
+
+	if err := s.Send("hi", nil, nil); err != nil {
+		t.Fatalf("Send must continue past unknown model id: %v", err)
+	}
+	if findRequest(reqs, mu, "session/prompt") == nil {
+		t.Fatal("session/prompt not sent after softened set_model")
 	}
 }
 

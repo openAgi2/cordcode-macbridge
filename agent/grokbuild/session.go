@@ -463,8 +463,26 @@ func (s *grokSession) applyModelSelection() error {
 	if effort != "" {
 		params.Meta = &setModelMeta{ReasoningEffort: effort}
 	}
+	slog.Info("grokbuild: applying model selection via set_model",
+		"session_id_prefix", shortID(s.CurrentSessionID()),
+		"model", targetModel, "effort", effort,
+		"applied_model", appliedModel, "applied_effort", appliedEffort)
 	id := s.idCounter.next()
 	if _, err := s.callRPC(id, "session/set_model", params, 15*time.Second); err != nil {
+		// The official catalog accepts entry ids (e.g. "grok-4.5") but
+		// persists the UNDERLYING model id ("glm-5.3") into summary.json,
+		// which iOS echoes back as the selected model. That id is not a
+		// catalog entry, so set_model answers -32602 "unknown model id".
+		// The session is already on the model the user picked in that case —
+		// kill the turn would block messaging entirely, so keep the session's
+		// current model and let the turn go out (transcript truth keeps the
+		// visible model honest). Any other failure stays hard.
+		if strings.Contains(err.Error(), "unknown model id") {
+			slog.Warn("grokbuild: set_model rejected with unknown model id; keeping session's current model and continuing turn",
+				"session_id_prefix", shortID(s.CurrentSessionID()),
+				"requested_model", targetModel, "error", err.Error())
+			return nil
+		}
 		return err
 	}
 	s.pendingPermsMu.Lock()
@@ -926,6 +944,9 @@ func (s *grokSession) callRPC(id int, method string, params any, timeout time.Du
 			"write_elapsed_ms", writeElapsed.Milliseconds(),
 			"wait_elapsed_ms", time.Since(writeStart).Milliseconds())
 		if resp.Error != nil {
+			if len(resp.Error.Data) > 0 {
+				return nil, fmt.Errorf("rpc error %d: %s (%s)", resp.Error.Code, resp.Error.Message, string(resp.Error.Data))
+			}
 			return nil, fmt.Errorf("rpc error %d: %s", resp.Error.Code, resp.Error.Message)
 		}
 		return resp.Result, nil
