@@ -1032,12 +1032,15 @@ test target 增量编译通过；④ unsigned Release package 构建通过（`sc
     <70s）→ observer 取消、relay 退出并清理（**主动取消不合成 turn_aborted、registry
     收口为 unknown**，见 §3.5.2 分流）；重开会话时
     现有路径重启 relay 并重新选路（stat socket）。iOS 快速切页（<60s）不产生重建抖动；
-  - **TUI 关闭后 turn 的命运是待证假设**：无 pending interaction 的 turn 可能在 leader 上
-    继续执行至完成——前提是 iPhone 会话保持打开（observer 在场）；interaction
-    （permission / question / plan approval）是**共享广播、first-answer-wins**
-    （`server.rs:491-500`），observer 收到但永不回答——若其他客户端均已关闭且 iPhone
-    会话也关闭（超过 §3.5.2 上界），observer 取消 → leader 若无其他客户端则退出，turn 命运交还
-    grok 自身（Phase 0 第 6a/6b 步实测定型，§6-6）；
+  - **TUI 关闭后 turn 的命运（Phase 0 第 6a 步已实测证实，2026-09-02）**：无 pending
+    interaction 的 turn 在 leader 上继续执行至完成——driver（TUI）mid-turn SIGKILL 后
+    leader 无头跑完 turn（实测 kill 后约 108s `turn_completed`（end_turn）落盘
+    updates.jsonl，与上游 `session_driver.entry().or_insert` 首个 session/load 者为
+    driver、订阅者死亡仅清理的语义一致）；前提是 iPhone 会话保持打开（observer 在场）。
+    interaction（permission / question / plan approval）是**共享广播、
+    first-answer-wins**（`server.rs:491-500`），observer 收到但永不回答——若其他客户端
+    均已关闭且 iPhone 会话也关闭（超过 §3.5.2 上界），observer 取消 → leader 若无其他
+    客户端则退出，turn 命运交还 grok 自身（Phase 0 第 6a/6b 步实测定型，§6-6）；
   - **leader 真死（崩溃 / 被 kill）→ channel 关闭 → relay 退出**：已转发过事件的订阅，
     turn 未收口时按 F-7 合成 `turn_aborted(leader_disconnect)` + idle
     （`handlers_relay.go:225-243`）；**尚未转发任何事件的订阅按 D-G1 回退 tailer**
@@ -1102,7 +1105,11 @@ socket 路径与存在性 / 安装版本），它是 §2.1-6 版本漂移 fail-v
    真值、后续事件重建 running/idle 徽标。**副作用（帮助文案披露）**：iPhone 长期不看
    的会话，其外部 turn 的实时流也会停——重开会话即恢复（tailer/leader 重选 + 冷拉
    补齐）；取消后至重开前，侧栏该会话无运行徽标（unknown，F-8"不知道就不亮灯"）。
-   数值以实现测试冻结（G5 边界 tick 断言）。
+   数值以实现测试冻结（G5 边界 tick 断言）。**实施回写（2026-09-02）**：D-G2 已落地
+   （`grok_leader_relay_dg2_test.go` 13 用例：G5 锚点状态机/59.9s 不取消/[60s,70s)
+   取消区间/正样本清零、G6 闪断保持、G7 synthetic CAS-deleted 与真实行 unknown、
+   G8 claim/终态/idleTimer/codex 硬上限/claude TTL 五路 unknown 不冒充），生产路径级
+   观感归 §7.3 owner 矩阵。
 5. **effective config 的真实不生效原因（四因，r3-M4 补全）**：① 显式 `--no-leader`
    （最高优先级，启动参数可观察）；② requirements/MDM 层覆盖；③ confinement veto（链后
    最终 veto）；④ 版本漂移。managed 层被 user 覆盖、不是原因；项目级 config 不影响该键。
@@ -1111,10 +1118,19 @@ socket 路径与存在性 / 安装版本），它是 §2.1-6 版本漂移 fail-v
 6. **interaction 无人应答风险（v5 窗口更新）**：interaction 请求是共享广播、
    first-answer-wins（§2.1-4）；TUI 关闭后若有 pending permission/question/plan approval，
    observer 收到但不答，turn 可能长期等待——**等待窗口 = iPhone 会话保持打开期间**
-   （D-G2 后，iPhone 关闭会话超过上界即取消 observer，leader 可能随之退出）。Phase 0
-   第 6b 步实测定型；帮助文案（Owner 已批 D-3）："权限/提问等待期间不要关闭唯一可
-   应答的客户端（grok TUI）"。follower 应答能力仍另案。"TUI 关闭后 turn 继续完成"仅对
-   无 interaction 的 turn 成立且仍待 Phase 0 第 6a 步证实，**不得作为无条件收益表述**。
+   （D-G2 后，iPhone 关闭会话超过上界即取消 observer，leader 可能随之退出）。帮助文案
+   （Owner 已批 D-3）："权限/提问等待期间不要关闭唯一可应答的客户端（grok TUI）"。
+   follower 应答能力仍另案。"TUI 关闭后 turn 继续完成"仅对无 interaction 的 turn 成立
+   （**Phase 0 第 6a 步已证实**，见 §4.9），**不得作为无条件收益表述**。
+   **第 6b 步实测结论回写（2026-09-02，session 01a06048）**：① pending interaction
+   跨 TUI 死亡存活——发问 TUI 死于提问前 1s，问题广播后在零可答客户端状态挂起 56s
+   （上游默认 30 分钟超时，`[toolset.ask_user_question] timeout_enabled/timeout_secs`
+   可配；56s 为实测窗口，机制上无差别——无客户端→无回答→挂到超时）；②
+   **replay-on-attach**——新客户端 `session/load` 后立即收到 pending interaction
+   （attach→回答注册 2.5s）；③ first-answer-wins、回车确认默认高亮项 options[0]；
+   ④ observer（iPhone）视角确认 §6-6 风险——`ask_user_question` REQUEST 帧在
+   macbridge method 门被弃（iPhone 看不到问题内容），turn 全程运行态、回答后 terminal
+   正常到达，iPhone 观感即「转圈直到突然结束」。
 7. **stale socket（D-G1 已批，语义更新）**：leader 异常崩溃残留 socket 文件后，每次
    session-open 的建立失败都会**回退 tailer**（§3.5.1）——观察以 1s 轮询节奏继续、INFO
    日志可查，不再持续阻断；socket 文件本身仍不被清除，该路径被新 leader 接管后自动回到
@@ -1223,7 +1239,7 @@ runtime 日志 `~/Library/Application Support/CordCode Link/logs/go-bridge.log`�
 | 5 | 第 4 行之后 | TUI 内发长消息 | iPhone 实时流式显示（push 延迟，非 1s 轮询节奏）；turn 唯一终态 |
 | 6 | 第 4 行之后 | iPhone 对自己发起的会话发消息 | 正常（macbridge 自有 `--no-leader` stdio 路径不受影响） |
 | 7 | 开关开启、grok 未重启 | — | 提示保持橙色"重启后生效"，不得显示检测到 socket |
-| 8 | 开关已开、TUI 内无 interaction 的 turn 进行中、**iPhone 会话保持打开** | 关闭 TUI | 按 Phase 0 第 6a 步实测定型（预期：turn 在 leader 上继续完成，iPhone 看到完整终态；observer 因 iPhone 订阅在场而保留） |
+| 8 | 开关已开、TUI 内无 interaction 的 turn 进行中、**iPhone 会话保持打开** | 关闭 TUI | Phase 0 第 6a 步已实测拓扑（TUI mid-turn SIGKILL 后 leader 无头跑完 turn）；本行作为 D-G2 后回归复验：turn 在 leader 上继续完成，iPhone 看到完整终态；observer 因 iPhone 订阅在场而保留 |
 | 9 | 开关关闭（或删键后）、grok 正常 inline 运行 | TUI 发消息，iPhone 打开同一会话 | 观察照旧走 tailer 路径（日志出现 `falling back to updates.jsonl file tailer`），流式正常——证明开关未破坏 OFF 基线 |
 | 10 | 开关已开、TUI 内 turn 进行中、iPhone 会话打开 | `kill -9` leader 进程（模拟崩溃） | 已转发事件的 turn：iPhone 收到明确"已中断"终态（`turn_aborted(leader_disconnect)`）并回 idle，不残留执行中（F-7 生产验证） |
 | 11（D-G1） | D-G1 已实现、stale socket 存在 | `kill -9` leader 留 stale socket，iPhone 重开会话 | 观察经回退**继续工作**（事件以轮询节奏恢复流动）；`go-bridge.log` 出现建立失败回退 INFO 行（文案以 G1 冻结为准）；不再持续阻断 |

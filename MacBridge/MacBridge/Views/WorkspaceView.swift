@@ -660,7 +660,11 @@ struct WorkspaceView: View {
         }
         switch grokLeaderRowState {
         case .coreOnPendingRestart:
-            return L10n.grokLeaderPendingRestartFull
+            // §6-6/§6-4 如实披露（D-3 owner 已批）：重启指引 + 四因 + interaction 等待
+            // + D-G2 副作用 + chat 互斥，只在 ON 态展示完整注意事项。
+            return L10n.grokLeaderPendingRestartFull + "\n\n" + L10n.grokLeaderModeNotes
+        case .coreOnSocketDetected:
+            return L10n.grokLeaderModeNotes
         case .failedRead(let reason):
             return String(format: L10n.grokLeaderReadFailed, reason)
         case .failedUnsafeForm:

@@ -110,6 +110,7 @@ enum L10n {
     static var grokLeaderReadFailed: String { tr("grok_leader_read_failed") }
     static var grokLeaderUnsafeForm: String { tr("grok_leader_unsafe_form") }
     static var grokLeaderNotInstalled: String { tr("grok_leader_not_installed") }
+    static var grokLeaderModeNotes: String { tr("grok_leader_mode_notes") }
     static var grokLeaderToggleFailedTitle: String { tr("grok_leader_toggle_failed_title") }
     static var grokLeaderToggleFailedBody: String { tr("grok_leader_toggle_failed_body") }
     static var grokLeaderDiagTitle: String { tr("grok_leader_diag_title") }
@@ -546,6 +547,7 @@ enum L10n {
             "grok_leader_read_failed": "Cannot safely read grok config (%@)",
             "grok_leader_unsafe_form": "The config contains a use_leader form CordCode cannot safely manage; please handle it manually",
             "grok_leader_not_installed": "grok CLI not detected",
+            "grok_leader_mode_notes": "If it stays \"restart to take effect\" after restarting grok, check: ① the launch command includes --no-leader; ② a requirements/MDM layer overrides it; ③ the environment is restricted (confinement veto); ④ grok version drift (see Help & Diagnostics for the installed version).\nWhile a permission/question is pending, do not close the only client that can answer it (the grok TUI) — the turn may then wait until the upstream timeout.\nSessions you stop watching on iPhone pause their live push; reopening the session resumes it (the sidebar shows no running badge until then).\n--chat mode is mutually exclusive with leader mode; grok itself reports the error.",
             "grok_leader_toggle_failed_title": "Leader mode toggle failed",
             "grok_leader_toggle_failed_body": "Reason: %@\nThe previous config is untouched. Backups: %@",
             "grok_leader_diag_title": "Grok Leader Status",
@@ -951,6 +953,7 @@ enum L10n {
             "grok_leader_diag_version_missing": "未检测到",
             "grok_leader_unsafe_form": "配置含 CordCode 无法安全管理的 use_leader 写法，请手工处理",
             "grok_leader_not_installed": "未检测到 grok CLI",
+            "grok_leader_mode_notes": "重启 grok 后仍提示「重启后生效」时依次检查：① 启动命令是否带 --no-leader；② 是否被 requirements/MDM 层覆盖；③ 环境受限（confinement veto）；④ grok 版本漂移（安装版本见帮助与诊断）。\n权限/提问等待期间不要关闭唯一可应答的客户端（grok TUI），否则 turn 可能一直等到上游超时。\n在 iPhone 上不再查看的会话会暂停实时推送，重新打开会话即恢复（此间侧栏不显示运行徽标）。\n--chat 模式与 leader 互斥，由 grok 自身报错引导。",
             "grok_leader_toggle_failed_title": "Leader 模式切换失败",
             "grok_leader_toggle_failed_body": "原因：%@\n原配置未受影响。备份目录：%@",
             "codex_config_changed_hint_full": "检测到 Codex 配置变更（如 provider 切换），重启共享 Codex 服务后才会生效。",
