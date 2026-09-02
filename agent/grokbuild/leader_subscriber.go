@@ -339,9 +339,12 @@ func (s *LeaderSubscriber) handleACP(payload string, pending *leaderPending, ses
 }
 
 // isSessionUpdateMethod reports whether a notification method carries a session/update.
+// The gateway ext rail wraps methods with an "_" prefix on the wire: the durable turn
+// terminal arrives as _x.ai/session_notification (params.update carries the
+// sessionUpdate payload directly), never as the unwrapped x.ai/session_notification.
 func isSessionUpdateMethod(method string) bool {
 	switch method {
-	case "session/update", "_x.ai/session/update", "x.ai/session_notification":
+	case "session/update", "_x.ai/session/update", "_x.ai/session_notification":
 		return true
 	}
 	return false

@@ -214,3 +214,130 @@ func TestLeaderSubscriberReturnsErrorWhenSocketMissing(t *testing.T) {
 		t.Fatal("want error dialing missing socket, got nil")
 	}
 }
+
+// TestLeaderSubscriberReceivesTerminalSessionNotification: the live-rail turn terminal
+// arrives as the gateway-ext wrapped notification _x.ai/session_notification (params.update
+// carries the sessionUpdate payload directly; observed on the wire via raw frame dump,
+// 2026-09-02). The journal twin travels as _x.ai/session/update with _meta.isReplay=true
+// and must stay dropped. Regression: the whitelist previously matched only the unwrapped
+// "x.ai/session_notification", so every terminal frame was silently discarded and the
+// relay never reached markIdle.
+func TestLeaderSubscriberReceivesTerminalSessionNotification(t *testing.T) {
+	sock := filepath.Join("/tmp", fmt.Sprintf("cc-grok-leader-%d.sock", time.Now().UnixNano()))
+	defer os.Remove(sock)
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	var got []core.Event
+	var mu sync.Mutex
+	onEvent := func(ev core.Event) {
+		mu.Lock()
+		got = append(got, ev)
+		mu.Unlock()
+	}
+
+	serverErr := make(chan error, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			serverErr <- err
+			return
+		}
+		defer c.Close()
+
+		reg, err := readClientMsg(c)
+		if err != nil {
+			serverErr <- err
+			return
+		}
+		if reg.Type != "register" || reg.ClientType != leaderClientType {
+			serverErr <- fmt.Errorf("want register/%s, got %s/%s", leaderClientType, reg.Type, reg.ClientType)
+			return
+		}
+		rr, _ := json.Marshal(leaderServerMsg{Type: "registered", Ready: true})
+		if err := writeTestFrame(c, rr); err != nil {
+			serverErr <- err
+			return
+		}
+
+		init, err := readClientMsg(c)
+		if err != nil {
+			serverErr <- err
+			return
+		}
+		if err := writeACPResponse(c, acpPayloadID(init.Payload), map[string]any{"protocolVersion": "1"}); err != nil {
+			serverErr <- err
+			return
+		}
+
+		load, err := readClientMsg(c)
+		if err != nil {
+			serverErr <- err
+			return
+		}
+		// Journal twin of the terminal, replay-marked — must be dropped.
+		if err := writeACPNotification(c, "_x.ai/session/update", map[string]any{
+			"sessionId": "sess-1",
+			"update":    map[string]any{"sessionUpdate": "turn_completed", "prompt_id": "replay-twin", "stop_reason": "end_turn"},
+			"_meta":     map[string]any{"isReplay": true},
+		}); err != nil {
+			serverErr <- err
+			return
+		}
+		if err := writeACPResponse(c, acpPayloadID(load.Payload), map[string]any{}); err != nil {
+			serverErr <- err
+			return
+		}
+
+		// Live terminal — real wire shape captured 2026-09-02 (rawdump step6).
+		if err := writeACPNotification(c, "_x.ai/session_notification", map[string]any{
+			"sessionId": "sess-1",
+			"update":    map[string]any{"sessionUpdate": "turn_completed", "prompt_id": "d1e8de4b", "stop_reason": "end_turn"},
+		}); err != nil {
+			serverErr <- err
+			return
+		}
+		time.Sleep(150 * time.Millisecond)
+		serverErr <- nil
+	}()
+
+	sub := NewLeaderSubscriber(sock, "sess-1", "/tmp")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = sub.Run(ctx, onEvent)
+
+	if err := <-serverErr; err != nil {
+		t.Fatalf("mock leader server: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 {
+		t.Fatalf("got %d events, want 1 (replay twin dropped, live terminal forwarded): %+v", len(got), got)
+	}
+	if got[0].Type != core.EventResult || !got[0].Done || got[0].TurnID != "d1e8de4b" {
+		t.Fatalf("got[0] = %+v, want EventResult{Done:true, TurnID:d1e8de4b}", got[0])
+	}
+}
+
+func TestIsSessionUpdateMethodWireForms(t *testing.T) {
+	for _, tc := range []struct {
+		method string
+		want   bool
+	}{
+		{"session/update", true},
+		{"_x.ai/session/update", true},
+		{"_x.ai/session_notification", true},
+		{"_x.ai/session/prompt_complete", false},
+		{"_x.ai/queue/changed", false},
+		{"x.ai/session_notification", false}, // wire never uses the unwrapped form
+		{"", false},
+	} {
+		if got := isSessionUpdateMethod(tc.method); got != tc.want {
+			t.Errorf("isSessionUpdateMethod(%q) = %v, want %v", tc.method, got, tc.want)
+		}
+	}
+}
