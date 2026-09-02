@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -172,18 +173,21 @@ func (a *Agent) SubscribeSessionEvents(ctx context.Context, sessionID, cwd strin
 		case <-ctx.Done():
 		}
 	}
+	runUpdatesTail := func() {
+		tail := newUpdatesFileTailSubscriber(a.grokHome, sessionID)
+		if err := tail.Run(ctx, forward); err != nil {
+			slog.Debug("grokbuild: updates file tailer ended", "session", sessionID, "error", err)
+		}
+	}
 
 	socketPath := resolveLeaderSocket(a.grokHome)
 	if _, err := os.Stat(socketPath); err != nil {
 		// Leader socket absent (默认 inline 模式) —— fallback 到 updates.jsonl file tailer。
 		slog.Info("grokbuild: leader socket absent, falling back to updates.jsonl file tailer",
 			"session", sessionID, "socket", socketPath)
-		tail := newUpdatesFileTailSubscriber(a.grokHome, sessionID)
 		go func() {
 			defer close(ch)
-			if err := tail.Run(ctx, forward); err != nil {
-				slog.Debug("grokbuild: updates file tailer ended", "session", sessionID, "error", err)
-			}
+			runUpdatesTail()
 		}()
 		return ch, nil
 	}
@@ -201,10 +205,30 @@ func (a *Agent) SubscribeSessionEvents(ctx context.Context, sessionID, cwd strin
 	}
 
 	sub := NewLeaderSubscriber(socketPath, sessionID, cwd)
+	// D-G1（§3.5.1，r4-B1 首事件规则）：建立/live 分界 = 是否已向下游转发任何
+	// leader event。先置位再转发，保证判据不落后于下游可见性。
+	var forwardedEvents atomic.Bool
+	trackedForward := func(ev core.Event) {
+		forwardedEvents.Store(true)
+		forward(ev)
+	}
 	go func() {
 		defer close(ch)
 		slog.Info("grokbuild: leader subscriber starting", "session", sessionID, "socket", socketPath)
-		if err := sub.Run(ctx, forward); err != nil {
+		err := sub.Run(ctx, trackedForward)
+		// 回退三要素：订阅结束（error/nil 一致）+ 未转发任何事件 + ctx 未取消。
+		// D-G2 互锁：主动取消时 relay 已退出，不得再拉起无人消费的 tailer；
+		// 已转发 ≥1 事件后的断开不回退（relay 层 F-7 收口）。
+		if ctx.Err() == nil && !forwardedEvents.Load() {
+			args := []any{"session", sessionID, "socket", socketPath}
+			if err != nil {
+				args = append(args, "error", err)
+			}
+			slog.Info("grokbuild: leader subscribe failed, falling back to updates.jsonl tailer", args...)
+			runUpdatesTail()
+			return
+		}
+		if err != nil {
 			if ctx.Err() != nil {
 				// 调用方取消（正常关闭）——保持 Debug 静默。
 				slog.Debug("grokbuild: leader subscriber ended (ctx cancelled)", "session", sessionID, "error", err)
