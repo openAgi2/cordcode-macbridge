@@ -6,9 +6,9 @@
 - Plan: `docs/2026-08-28-grokbuild-leader-mode-design.md`（v10 owner APPROVE）
 - Canonical State File: `.exec-plan/state/plan-60f196abb855.json`
 - Completion Report Verdict: **`proved-complete (owner-verified 2026-09-02)`**（产品代码、单测、Release 安装、§7.3 owner 真机矩阵全部收口；12 行中 11 行 owner 实测通过 + 诊断卡确认，行 3「未安装态」为可选行未测，已在 exec-plan regression 证据中注明）
-- Queue Summary: **33/33 todos done**（owner 矩阵类 regression p2-dg1/p2-dg2/p3-ui/p4-diagnostics/p4-release 全部回填；p4-doc-sync-regression 为 D0 无运行面，na 见队列；验收期新增 rfx-row6-user-echo 三元组闭环）
-- Related Commits: `69f3b31`（TOML 依赖）`1676df5`（开关管理器 T1–T33）`9baa1e5`（D-G1）`3089a95`（D-G2）`4cfddfd`（Phase 3 UI）`0f4e5e8`（Phase 4 诊断行）`f92cec6`（doc-sync + D-3 帮助文案）`98ae793`（验收修复 ①：scope 切换退订旧观察键）`05152aa`（验收修复 ②：读路径订阅键改观察语义）`39e29a8`（验收修复 ③：iPhone 自有 turn 的 user echo 补 turn 身份）；另有 Phase 0 基线修复 `6dc9353`（D-G0b 终态通知白名单）与 cwd 缺口修复（见执行日志）
-- Generated At: `2026-09-02T21:04:00+08:00`（owner 验收收官后最终更新）
+- Queue Summary: **45/45 todos done**（B 路线原 33 项收官后，2026-09-02 晚间 owner 授权追加后续批次 12 项：`followup-roster-consume`、`followup-model-effort`、`rfx-effort-gate`、`rfx-model-id-softening` 四个三元组，全部 done 带 proof；owner 矩阵类 regression p2-dg1/p2-dg2/p3-ui/p4-diagnostics/p4-release 全部回填；p4-doc-sync-regression 为 D0 无运行面，na 见队列；验收期新增 rfx-row6-user-echo 三元组闭环）
+- Related Commits: `69f3b31`（TOML 依赖）`1676df5`（开关管理器 T1–T33）`9baa1e5`（D-G1）`3089a95`（D-G2）`4cfddfd`（Phase 3 UI）`0f4e5e8`（Phase 4 诊断行）`f92cec6`（doc-sync + D-3 帮助文案）`98ae793`（验收修复 ①：scope 切换退订旧观察键）`05152aa`（验收修复 ②：读路径订阅键改观察语义）`39e29a8`（验收修复 ③：iPhone 自有 turn 的 user echo 补 turn 身份）`c77bb80`（后续批次：消费 leader roster 广播）`c1dfa81`（后续批次：model/effort 全链路）`da17648`（后续修复 ④：镜像官方 effort 门）`a0b0f11`（后续修复 ⑤：set_model unknown model id 软化）；另有 Phase 0 基线修复 `6dc9353`（D-G0b 终态通知白名单）与 cwd 缺口修复（见执行日志）
+- Generated At: `2026-09-02T21:04:00+08:00`（owner 验收收官后更新）；`2026-09-02T22:21:00+08:00`（后续批次 12 todos 入账后更新，见 §1.1 与 §2 追加行）
 
 ## 1. Overall Verdict (总体结论)
 
@@ -30,6 +30,28 @@ B 路线 Leader 模式的产品代码全部落地并已安装到 `/Applications`
   D-G2 两轮订阅键语义（`98ae793` + `05152aa`）、iPhone 自有 turn 的 user echo 缺身份
   （`39e29a8`，预存缺口，2026-08-05 起）。详见设计 §0.2-11。
 
+### 1.1 后续改进批次（2026-09-02 晚间，owner 授权「先把条件成熟的做了」）
+
+B 路线收官后同日追加四个三元组（12 todos，见队列 followup-/rfx- 前缀）：
+
+1. **roster 广播消费**（`c77bb80`）：leader 进程的 roster 广播 → sessions_changed，
+   iPhone 会话列表实时刷新；`leader_subscriber_roster_test.go` 192 行。
+2. **model/effort 全链路**（`c1dfa81`）：initialize `_meta.modelState` 模型目录 →
+   `list_models` capability → session/new `_meta.{modelId,reasoningEffort}` 初始选择 →
+   `session/set_model` 切换；`session_model_switch_test.go` +517 行。owner 首轮真机验收
+   1✅2✅4✅（目录显示/默认会话/grok-4.5 切换）。
+3. **官方 effort 门镜像**（`da17648`，首轮真机 GLM+high 残留 → -32602 的修复）：
+   `effectiveEffortForModel` 镜像上游 `resolve_effort_for_model`，目录证明无效的
+   (model, effort) 组合不上 wire。
+4. **双模型 id 形态软化**（`a0b0f11`，二轮真机修复）：官方目录/请求用条目 id、持久化/
+   应答用底层 id，iOS 把 transcript 底层 id 回发 → 目录外 → -32602。修复为 unknown
+   model id 软化（WARN + 会话保持当前模型继续 turn，此时会话本就在用户所选模型上）+
+   RPC 错误携带 data + set_model 参数日志。owner 终验「测试结果符合预期✅」。
+
+组件级：`go test ./agent/grokbuild/ -count=1` 全绿（每轮跑）；生产路径级：Release 覆盖
+安装（最终 `a0b0f110f76e`）四门核对 + management API grokbuild available；owner 三轮
+真机反馈全部收口。根因复盘与 iOS 条目 id 另案见 `think.md` 2026-09-02 复盘节。
+
 ## 2. Gate Completion Matrix (门完成矩阵)
 
 | Gate | 内容 | Verdict | 证据 |
@@ -47,6 +69,10 @@ B 路线 Leader 模式的产品代码全部落地并已安装到 `/Applications`
 | §7.3 owner 矩阵 | 12 行真机验收 | **`owner-verified (2026-09-02)`** | 本文 §6 清单（11 行过 + 诊断卡确认；行 3 可选未测）；日志佐证：D-G2 取消 elapsed=1m0s、D-G1 回退行 20:59:03、SYNTHESIZE 21:00:47 → 干净终态 21:00:53 |
 | 验收修复 ①② | D-G2 订阅键语义两轮修复 | `proven-done (re-verified)` | commits `98ae793`（scope 切换退订旧观察键）+ `05152aa`（读路径记空目录观察键）；owner 复测行 12 过 |
 | 验收修复 ③ | iPhone 自有 turn user echo 补 turn 身份 | `proven-done (re-verified)` | commit `39e29a8`；`session_user_echo_test.go` 5 用例 + go-bridge/grokbuild 全量绿；owner 复测行 6 过（「发送的消息保持在对话里」） |
+| 后续批次 · roster 消费 | leader roster 广播 → sessions_changed 实时刷新 | `owner-verified (2026-09-02)` | commit `c77bb80`；`leader_subscriber_roster_test.go` 192 行；owner 首轮真机验收 |
+| 后续批次 · model/effort | 模型目录 / 初始 `_meta` / `set_model` 切换全链路 | `owner-verified (2026-09-02)` | commit `c1dfa81`；`session_model_switch_test.go` +517 行；owner 首轮 1✅2✅4✅ |
+| 后续修复 ④ | 官方 effort 门镜像（无效组合不上 wire） | `proven-done (re-verified)` | commit `da17648`；`TestEffectiveEffortForModel` 7 断言 + 2 场景测试；上游锚点 `model_state.rs` |
+| 后续修复 ⑤ | 双模型 id 形态：unknown model id 软化 + RPC data | `owner-verified (2026-09-02)` | commit `a0b0f11`；`TestSendUnknownModelIdSoftensToCurrentModel`；owner 终验「测试结果符合预期✅」；Release `a0b0f110f76e` 四门核对 |
 
 ### 2.1 Upstream Anchors (上游锚点)
 
@@ -57,6 +83,7 @@ B 路线 Leader 模式的产品代码全部落地并已安装到 `/Applications`
 | live rail 终态通知 | `_x.ai/session_notification`（gateway ext 包裹形态） | D-G0b 白名单修复（`6dc9353`）；codec 零改动承接 |
 | disconnect 语义 / flock / stale socket | `leader/mod.rs` connect_or_spawn + flock 随进程死亡释放 | 只读共存：stat 判据 + D-G1 回退；Phase 0 第 8 步实测自愈语义回写设计 |
 | interaction 共享广播 | `server.rs:491-500` first-answer-wins + `[toolset.ask_user_question]` timeout | 不答、帮助文案披露（D-3）；6b 实测 56s 挂起 + replay-on-attach 回写 §6-6 |
+| model/effort 契约与门 | `xai-grok-pager/src/acp/model_state.rs`：`resolve_effort_for_model`（gate on supports 标志，目录外 `unwrap_or(false)`）+ `_meta.modelState` 形态 | `effectiveEffortForModel` 逐项镜像；目录/初始 `_meta`/set_model 按 1.0.13 wire 契约实测样本实现（探针 fixture） |
 
 ## 3. Key File Changes (关键文件变更)
 
@@ -144,5 +171,9 @@ B 路线 Leader 模式的产品代码全部落地并已安装到 `/Applications`
 
 ## 7. 后续另案（不在本验收内）
 
-follower 交互升级（D-3 已批另案，前置的 source-first 冻结条件见 think.md 总账）、
-roster 通知消费、model/provider/effort 缺口——均已登记 think.md 顶部总账。
+- follower 交互升级（D-3 已批另案，前置的 source-first 冻结条件见 think.md 总账）。
+- iOS 发送 Grok 模型改用 list_models 条目 id（transcript 底层 id 仅用于显示）——
+  2026-09-02 登记；Mac 侧已部署 unknown model id 软化兜底（`a0b0f11`），iOS 根治另案。
+
+（原列于此的 roster 通知消费、model/provider/effort 缺口已于 2026-09-02 晚间完成并
+入账本报告 §1.1，think.md 总账对应行已删除。）
