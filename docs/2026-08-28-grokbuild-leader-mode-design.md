@@ -424,6 +424,27 @@ binding、协议翻译、capability 组织——在本设计中**不是待实施
    控件与副文案槽位——codex-web 的"重启共享服务"按钮（`:528-545`）与
    `codexConfigChangedHint` 提示（`:506-513`）。grok build 行照此模式扩展。
 6. **本地化**：L10n 定义于 `MacBridge/MacBridge/Services/Localization.swift`。
+7. **【2026-09-02 Phase 0 步骤 4 实测回写】v2 projection 开启路径的 cwd 缺口（基线被证伪）**：
+   三行链在生产止于 connected（37ms 退出，无 live）。根因链（全部独立取证）：
+   iOS v2 客户端的 projection 开启走 `get_session_projection`，而 iOS
+   `ProjectionStore.swift:688/:834` 两处 fetch **硬编码 `directory: nil`**——该路径从不
+   携带 directory；Mac `handlers_projection.go:99` → `startProjectionLiveRelay(directory="")`
+   → `startGrokLeaderSessionRelay(cwd="")` 回落 `GetWorkDir()` = runtime
+   `-work-dir`（如 `/Users/jacklee`）；grok leader 对 `session/load` 校验 cwd 必须匹配
+   session 所属项目目录，不符即拒（`session/load: Path not found.`——探针复现）。
+   `sub.Run` 错误在 `grokbuild.go:194` slog.Debug 且生产日志硬编码 INFO（`main.go:125`），
+   失败被静默吞掉。**含义**：只要 iPhone 以 v2 projection 开启 grok 会话（当前唯一
+   开启路径），leader 订阅结构性无法达到 live；本节上文「核心链路零 runtime 改动」的
+   前提（调用方总带正确 directory）不成立。legacy `get_session_messages`/`resume_session`
+   路径 iOS 会带 directory（`CCCodeBridgeClient.swift` 参数链完整），不受影响。
+   官方 grok 拓扑本身无分歧（正确 cwd 下 register/initialize/session/load/live/replay
+   全通）。修复路径待 owner 重新裁决：A. `grokbuild.go` 内 sessionID→cwd 解析
+   （`~/.grok/sessions/*/<sessionID>` 父目录解码，机制与 updates tailer 同源，落在
+   D-G1 文件面，全调用路径修复）；B. iOS 补 directory（违背单仓任务边界，需真机重装）；
+   C. `handlers_relay.go` catalog 反查（D-G2 文件面，仅修 relay 调用点）。附带建议：
+   把 `grokbuild.go:194`（及同类 `handlers_relay.go:246`）的 Debug 错误行提升为 Warn，
+   消除生产诊断黑洞。证据：`.exec-plan/artifacts/grokbuild-leader-p0/execution-log.md`
+   步骤 4 停线裁决节。
 
 ---
 
