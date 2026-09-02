@@ -281,6 +281,27 @@ round 4：id=3 请求 pending 时，原 TUI 已被 kill、两个观察者均已�
 5. **协议面影响**：question 通道复用 bridge-v1 既有 question wire（无协议包变更）还是引入 grokbuild 专属事件字段（需升 protocol pack + iOS mirror）？——倾向前者，但 iOS question UI 对 grokbuild 场景的字段适配（multiSelect/mode/description）需要一次 iOS 侧确认。
 6. **exit_plan_mode / mcp/elicit**：本次仅源码冻结（§2.1.1），未实测、iOS 无对应 UI——纳入本期还是显式移出 capability？
 
+### 6.1 裁决记录（2026-09-02，owner 授权 agent 代定）
+
+owner 当日裁决方式：「你自己看着办吧，我其实看不懂这些细节」——六点全部由 agent
+按保守/子集优先原则代定，实施时按此执行；如 owner 后续推翻任何一条，从对应条目重做：
+
+1. **范围 = 候选 B（question only 起步）**。理由：ask_user_question 是全链路实测方向，
+   permission 方向无实测样本（§3.7）；候选 A 是 B 的严格超集，后补 permission 无返工。
+2. **permission 样本补证 = 本期不做受控采集**。不改 owner 生产 `~/.grok/config.toml`
+   （含 api_key，属外部环境操作红线）；question-only 实施不需要该样本。将来做候选 A
+   时再议（届时优先在非 always-approve 环境自然采集，其次才考虑受控采集并单独请示）。
+3. **超时 UX = 无期限等待提示，不做倒计时**。wire 无超时字段且 `timeout_secs` 可被
+   用户配置/env 覆盖（§2.4.4），本地倒计时必然可能给出错误承诺；显示中性「等待回答中」，
+   到期由 turn 正常收口自愈（§2.4.5，取消非错误）。
+4. **抢答冲突 = 静默收口**。本地应答后显示「已提交」；`interaction_resolved` 广播到达即
+   清 pending 收口 UI，不追加「已被其他客户端应答」提示——最常见的抢答者是 Mac TUI
+   （用户自己刚答过），再弹提示是噪音。
+5. **协议面 = 复用 bridge-v1 既有 question wire**。不升 protocol pack、不动 iOS mirror
+   协议；multiSelect / options.description / mode 的适配放 iOS 渲染层。
+6. **exit_plan_mode / mcp/elicit = 显式移出本期 capability**。源码语义已冻结（§2.1.1），
+   将来有产品需求再评估；不在 capability 中广告未实现面。
+
 ---
 
 ## 7. 后续实施前置条件清单（只列不改）
