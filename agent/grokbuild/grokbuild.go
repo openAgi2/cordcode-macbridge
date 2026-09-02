@@ -61,6 +61,14 @@ type Agent struct {
 	catalogClient    *grokCatalogClient
 	catalogClientMu  sync.Mutex
 	catalogRegistrar CatalogSubprocessRegistrar
+
+	// catalogRefresh coalesces machine-wide x.ai/sessions/changed roster
+	// broadcasts (arriving on any live leader subscriber connection) into
+	// core.CatalogRefreshSignals — the discovery watcher reacts with an
+	// immediate authoritative fingerprint rescan → sessions_changed. Buffered 1
+	// + non-blocking send = N concurrent relay connections each delivering the
+	// broadcast collapse into one pending rescan. Write-once at New.
+	catalogRefresh chan struct{}
 }
 
 func init() {
@@ -70,9 +78,10 @@ func init() {
 // New creates a Grok Build agent from the given options map.
 func New(opts map[string]any) (core.Agent, error) {
 	a := &Agent{
-		workDir:   ".",
-		mode:      "default",
-		activeIdx: -1,
+		workDir:        ".",
+		mode:           "default",
+		activeIdx:      -1,
+		catalogRefresh: make(chan struct{}, 1),
 	}
 
 	if v, ok := opts["work_dir"].(string); ok && v != "" {
@@ -142,6 +151,25 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 
 func (a *Agent) Stop() error { return nil }
 
+var _ core.CatalogRefreshSignaler = (*Agent)(nil)
+
+// CatalogRefreshSignals implements core.CatalogRefreshSignaler: each leader
+// roster broadcast (x.ai/sessions/changed, machine-wide) asks the bridge for an
+// immediate fingerprint rescan. Latency win only — the 5s grok fast poll and
+// the 60s safety scan stay as the fallback when no leader subscriber connection
+// is alive to carry the broadcast (e.g. no session under observation).
+func (a *Agent) CatalogRefreshSignals() <-chan struct{} { return a.catalogRefresh }
+
+// signalCatalogRefresh is the roster callback wired into every leader
+// subscriber. Non-blocking send against the buffered-1 channel coalesces
+// repeated broadcasts while a rescan is still in flight.
+func (a *Agent) signalCatalogRefresh() {
+	select {
+	case a.catalogRefresh <- struct{}{}:
+	default:
+	}
+}
+
 // SubscribeSessionEvents streams a session's live session/update notifications as
 // core.Events (via convertSessionUpdate). It prefers the leader-socket subscriber
 // (push, low-latency) when ~/.grok/leader.sock exists; otherwise it falls back to
@@ -205,6 +233,10 @@ func (a *Agent) SubscribeSessionEvents(ctx context.Context, sessionID, cwd strin
 	}
 
 	sub := NewLeaderSubscriber(socketPath, sessionID, cwd)
+	// The roster broadcast is machine-wide: every live subscriber connection
+	// delivers it, and signalCatalogRefresh coalesces the duplicates into one
+	// pending catalog rescan.
+	sub.onRosterChanged = a.signalCatalogRefresh
 	// D-G1（§3.5.1，r4-B1 首事件规则）：建立/live 分界 = 是否已向下游转发任何
 	// leader event。先置位再转发，保证判据不落后于下游可见性。
 	var forwardedEvents atomic.Bool

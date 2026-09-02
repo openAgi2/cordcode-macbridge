@@ -85,6 +85,14 @@ type LeaderSubscriber struct {
 	socketPath string
 	sessionID  string
 	cwd        string
+	// onRosterChanged fires when the leader broadcasts the machine-wide
+	// x.ai/sessions/changed roster notification (grok-build roster.rs
+	// RosterChanged; leader server.rs broadcasts it to EVERY connected client,
+	// not just session subscribers). It is a catalog-invalidation signal only —
+	// the upserted/removed deltas are NOT applied locally; the authoritative
+	// fingerprint rescan owns fence/seen/publish. Set once by the constructor's
+	// caller before Run; read-only afterwards.
+	onRosterChanged func()
 }
 
 // NewLeaderSubscriber builds a subscriber for the given session. socketPath is
@@ -321,6 +329,10 @@ func (s *LeaderSubscriber) handleACP(payload string, pending *leaderPending, ses
 		return
 	}
 	method := *probe.Method
+	if isRosterChangedMethod(method) {
+		s.handleRosterChanged(extractParams([]byte(payload)))
+		return
+	}
 	if !isSessionUpdateMethod(method) {
 		return
 	}
@@ -348,6 +360,43 @@ func isSessionUpdateMethod(method string) bool {
 		return true
 	}
 	return false
+}
+
+// isRosterChangedMethod reports whether a notification method is the machine-wide
+// roster broadcast x.ai/sessions/changed (grok-build roster.rs
+// SESSIONS_CHANGED_METHOD; leader server.rs routes it to every connected client).
+// Both the gateway-ext "_"-prefixed form and the bare form are accepted — the
+// official leader tests exercise both wire shapes (server_tests.rs).
+func isRosterChangedMethod(method string) bool {
+	switch method {
+	case "x.ai/sessions/changed", "_x.ai/sessions/changed":
+		return true
+	}
+	return false
+}
+
+// rosterChangedPayload mirrors the upstream RosterChanged wire shape
+// (roster.rs, camelCase). Only the counts are inspected — for logging — because
+// consumption is invalidation-only; the authoritative catalog rescan owns truth.
+type rosterChangedPayload struct {
+	Upserted []json.RawMessage `json:"upserted"`
+	Removed  []string          `json:"removed"`
+}
+
+// handleRosterChanged fires the roster callback. The frame itself is the signal:
+// even an unparseable or empty payload still means "the roster may have changed",
+// and the downstream fingerprint diff is idempotent, so the callback always fires.
+func (s *LeaderSubscriber) handleRosterChanged(params json.RawMessage) {
+	if s.onRosterChanged == nil {
+		return
+	}
+	var p rosterChangedPayload
+	if err := json.Unmarshal(params, &p); err != nil {
+		slog.Debug("grokbuild: leader roster changed (unparseable payload)", "bytes", len(params))
+	} else {
+		slog.Debug("grokbuild: leader roster changed", "upserted", len(p.Upserted), "removed", len(p.Removed))
+	}
+	s.onRosterChanged()
 }
 
 // isReplayUpdate reports whether the session/update params carry _meta.isReplay==true.
