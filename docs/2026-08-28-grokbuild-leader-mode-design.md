@@ -1218,6 +1218,10 @@ socket 路径与存在性 / 安装版本），它是 §2.1-6 版本漂移 fail-v
    ④ observer（iPhone）视角确认 §6-6 风险——`ask_user_question` REQUEST 帧在
    macbridge method 门被弃（iPhone 看不到问题内容），turn 全程运行态、回答后 terminal
    正常到达，iPhone 观感即「转圈直到突然结束」。
+   **（2026-09-03 已修复：follower question-only 起步交付后 method 门按 request kind
+   分发，iPhone 可直接作答；本条 ④ 保留为修复前实测基线，进度见 think.md 总账
+   「Grok follower 交互升级」行与
+   `docs/2026-09-02-grokbuild-follower-question-implementation-plan完成情况.md`。）**
 7. **stale socket（D-G1 已批，语义更新）**：leader 异常崩溃残留 socket 文件后，每次
    session-open 的建立失败都会**回退 tailer**（§3.5.1）——观察以 1s 轮询节奏继续、INFO
    日志可查，不再持续阻断；socket 文件本身仍不被清除，该路径被新 leader 接管后自动回到
