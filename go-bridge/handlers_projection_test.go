@@ -2150,3 +2150,51 @@ func TestHandleGetSessionProjectionRunningCodexSessionTranscriptFallback(t *test
 		t.Fatalf("in-flight turn status=%q, want \"running\"", got)
 	}
 }
+
+// TestGrokBuildProjectionHydratePendingQuestionGate (D-G4 断线恢复): a cold
+// baseline whose final turn carries a pending user_input part (the rehydrated
+// unanswered ask_user_question) deliberately has NO terminal event, so the
+// commit gate needs a live signal. handleGetSessionProjection itself
+// subscribes the pulling conn (WP5 patch push) — and hydrate only ever runs
+// because someone pulled — so the grokbuild §3.1 branch (subscriber ⇒ live)
+// admits the honest requires_action partial on the real path. The narrow
+// gate lives in the agent: a pending part is only produced while the leader
+// socket accepts (GetRichSessionHistory), so a dead leader falls back to the
+// all-terminal tool-step baseline that commits without any live signal.
+func TestGrokBuildProjectionHydratePendingQuestionGate(t *testing.T) {
+	pendingParts := []map[string]any{{
+		"type": "user_input", "itemId": "call_open", "interactionId": "call_open",
+		"status": "pending", "canRespond": true, "canReject": true,
+		"questions": []map[string]any{{
+			"id": "call_open", "prompt": "选一个？", "answerMode": "single",
+			"options":       []map[string]any{{"id": "A", "label": "A", "description": "da"}},
+			"allowsCustomAnswer": true, "required": true,
+		}},
+	}}
+	rich := func() []core.RichHistoryEntry {
+		return []core.RichHistoryEntry{
+			{ID: "u1", Role: "user", Content: "问个问题"},
+			{ID: "a1", Role: "assistant", Parts: pendingParts},
+		}
+	}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "ses-ask-gate", "sinceRev": 0})
+
+	// The real path: pull (⇒ subscribe) → live signal → the pending-question
+	// partial commits with execution requires_action and the card in place.
+	h := NewHandlers()
+	h.mu.Lock()
+	h.agents = map[string]core.Agent{"grokbuild": &fakeAgent{name: "grokbuild", richHistory: rich()}}
+	h.mu.Unlock()
+	conn := &readFileCaptureConn{}
+	h.handleGetSessionProjection(conn, WireMessage{RequestID: "r-sub", BackendID: "grokbuild", Method: "get_session_projection", Params: params}, nil)
+	if conn.err != nil {
+		t.Fatalf("pull error: %v", conn.err)
+	}
+	raw, _ := json.Marshal(conn.data)
+	if !strings.Contains(string(raw), "call_open") {
+		t.Fatalf("snapshot missing the pending question card: %s", string(raw))
+	}
+	if !strings.Contains(string(raw), "requires_action") {
+		t.Fatalf("pending question must keep execution in requires_action: %s", string(raw))
+	}
+}
