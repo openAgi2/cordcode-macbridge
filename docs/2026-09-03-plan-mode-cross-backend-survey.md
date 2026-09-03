@@ -8,7 +8,8 @@
 ## 修订记录
 
 - **v1.0（2026-09-03 调研 / 09-04 凌晨成文）**：初版。
-- **v1.1（2026-09-04）**：按独立评审报告 [2026-09-04-plan-mode-cross-backend-survey-review.md](2026-09-04-plan-mode-cross-backend-survey-review.md)（结论：有条件通过）修订。评审项逐条处置：
+- **v1.1（2026-09-04）**：按独立评审报告修订（逐项处置见下表）。
+- **v1.2（2026-09-04）**：owner 质询后撤回「恢复 codex-web」并列前置选项（v1.1 采自评审 C1 建议原文）：恢复不解决 codex 审批层缺口（无 wire 审批在两个载体上同样成立），只省 plan 展示接线量，不足以推翻当天退役裁决；§4/§8 改为 codex-remote 单一载体基线，回滚机制仅留备注，并补列「codex-remote 经 Remote Control 链路的 plan 事件可达性」为待核实项。
 
 | 评审项 | 处置 | 说明 |
 | --- | --- | --- |
@@ -220,7 +221,7 @@ iOS 仓=本次修订零读零写（main 已推进至 61f67bf，与调研时点 a
 
 ## 4. Codex（Codex Web 与 Codex Desktop 共用 app-server 协议族）
 
-> **载体时效（v1.1）**：codex-web 已于 2026-09-04 从产品 lineup 退役（源码保留、回滚=加回 drivers；Codex 产品面由 `codex-remote` 独立承接）。本节协议事实对 codex-remote 同构适用（同一 app-server 协议族）；涉及产品载体的表述已按退役时点标注，完整档的 Codex 载体基线 = codex-remote（或先裁决「恢复 codex-web」，见 §8.3-7）。
+> **载体时效（v1.1）**：codex-web 已于 2026-09-04 从产品 lineup 退役（源码保留、回滚=加回 drivers；Codex 产品面由 `codex-remote` 独立承接）。本节协议事实对 codex-remote 同构适用（同一 app-server 协议族）；涉及产品载体的表述已按退役时点标注，完整档的 Codex 载体基线 = **codex-remote**（v1.2 撤回「恢复 codex-web」并列选项，理由见 §8.3-7 备注）。
 
 ### 4.1 官方 plan mode 语义
 
@@ -236,7 +237,7 @@ iOS 仓=本次修订零读零写（main 已推进至 61f67bf，与调研时点 a
   - 核心协议：`EventMsg::PlanUpdate(UpdatePlanArgs)`（`protocol.rs:1523`）与 `EventMsg::PlanDelta(PlanDeltaEvent{thread_id,turn_id,item_id,delta})`（`protocol.rs:1545,1962-1968`）；完成项 `TurnItem::Plan(PlanItem{id, text})`（`protocol/src/items.rs:50,184-188`，本次亲验——**text 是无界 String**）。
   - app-server v2：`ThreadItem::Plan {type:"plan", id, text}`（`protocol/v2/item.rs:270-277`，serde camelCase，注释标 EXPERIMENTAL、完成项 authoritative、deltas 拼接不保证一致）+ 通知 `PlanDeltaNotification{threadId,turnId,itemId,delta}`（`protocol/v2/item.rs:1433-1438`；映射 `protocol/event_mapping.rs:372-377`）。
   - 官方测试：`app-server/tests/suite/v2/plan_item.rs`（mock SSE `<proposed_plan>...` → 断言 PlanItem 与 PlanDelta 拼接）。
-- 桥现状：退役前的 codex-web adapter 已消费 plan 流（我仓 `think.md:482-491` 已有结论：`turn/plan/updated` 是 todo 的唯一结构化真相源、plan 展示缓存——非审批）；现产品载体 codex-remote 同协议族、事件面同构可达，但需自行接线（其 approval 基建现状见 4.4）。
+- 桥现状：退役前的 codex-web adapter 已消费 plan 流（我仓 `think.md:482-491` 已有结论：`turn/plan/updated` 是 todo 的唯一结构化真相源、plan 展示缓存——非审批）；现产品载体 codex-remote 同协议族、事件面同构可达（**协议族推断，Remote Control 链路对 plan 事件的实际透传未核实**），需自行接线（其 approval 基建现状见 4.4）。
 - 体积：无截断（全仓无截断常量命中）。
 
 ### 4.3 动作全集（审批门形态：TUI 纯客户端编排，无 wire 审批请求）
@@ -502,7 +503,7 @@ Mac 侧按 backend 翻译：claude `request_changes→deny+message`、`quit→de
   2. **claude**——can_use_tool 管道已可代答，plan 全文已在 ToolInputRaw；升级=ExitPlanMode 专门化 + deny.message 反馈通道 + iOS 计划卡。
   3. **dsh**——question 管道 + custom 参数原生支持带反馈打回；先闭合一项「转发面可见性」小核实即可定档。
 - **第二批（展示先行 / 依赖前置）**：
-  4. **codex**——载体基线 = **codex-remote**（v1.1：codex-web 已于 2026-09-04 退役；「恢复 codex-web」属前置决策，与 §8.3-7 一并裁决）。先做 plan 展示（PlanItem/PlanDelta 同协议族同构可达，退役前 codex-web 已验证消费路径，codex-remote 需自行接线）；「审批动作」因非官方 wire 审批语义，等 owner 裁决后再定。codex-remote 连既有三类审批都是 `ErrNotSupported`，若要覆盖须先补 approval 面（独立工作量）。
+  4. **codex**——载体基线 = **codex-remote**（v1.1：codex-web 已于 2026-09-04 退役；v1.2：恢复路径不成立，单一载体）。先做 plan 展示（PlanItem/PlanDelta 同协议族同构，退役前 codex-web 已验证消费路径；codex-remote 需自行接线，**且 Remote Control 链路对 plan 事件的实际透传未核实——实施前先验证**）；「审批动作」因非官方 wire 审批语义，等 owner 裁决后再定。codex-remote 连既有三类审批都是 `ErrNotSupported`，若要覆盖须先补 approval 面（独立工作量）。
   5. **opencode**——先按目标 stable 版本核对 wire（版本漂移警示），plan_exit question 桥已能答 Yes/No；requestChanges 无原生反馈是产品语义缺口。
 
 ### 8.2 官方无此功能的 backend
@@ -517,7 +518,7 @@ Mac 侧按 backend 翻译：claude `request_changes→deny+message`、`quit→de
 4. claude 批准的模式二选（auto mode vs 手动逐批）：透传（updatedPermissions setMode，需真机验证）还是固定单一行为？
 5. codex「approve」是否产品化为合成 "Implement the plan." + 切模式？（非官方 wire 审批语义是唯一硬理由；协议类型标 EXPERIMENTAL、目标部署须按部署验证——feature gate 论据已按 v1.1 修订移除）
 6. 行内评论（仅 grok 真实语义）第一批做不做？（建议不做）
-7. codex-remote 的 approval 面补齐（现 ErrNotSupported）是否纳入本项或另案？（v1.1：codex-web 退役后 Codex 计划层的产品载体即 codex-remote；另一路径是把「恢复 codex-web」作为前置决策——退役回滚=drivers 列表加回 id）
+7. codex-remote 的 approval 面补齐（现 ErrNotSupported）是否纳入本项或另案？（codex-web 退役后 Codex 计划层的产品载体即 codex-remote。v1.2 备注：退役设计留有回滚开关（drivers 加回 id），但本调研**不把「恢复 codex-web」作为选项**——它不解决审批层缺口（codex 无 wire 审批在两个载体上同样成立），只省 plan 展示的接线工作量，不足以推翻退役裁决；真正该补的核实项是 codex-remote 经 Remote Control 链路的 plan 事件可达性）
 8. 计划全文大小上限与 iOS 截断策略（含 relay mailbox 帧预算确认）。
 9. dsh quit 的目标语义（dismiss vs /plan off）。
 10. opencode stable 版本核对的时机（并入完整档立项或先行小任务）。
@@ -526,7 +527,7 @@ Mac 侧按 backend 翻译：claude `request_changes→deny+message`、`quit→de
 
 - 已核实：grok 全链（含本次补齐的评论上行 + 两处 §25 修正）、codex 源码级全量、opencode dev 分支源码级全量、dsh 源码级全量（亲验关键路径）、claude 文档级 + 本机真实 transcript 样本 + 我方 adapter 源码。
 - 未取得样本：claude plan 专属拒绝文案（仅文档）、bare -p 的 control_request 行为（仅类型注释指向）、交互式 UI 截图（全部 backend，需真机 UI 操作）。
-- 未核实（已在各节列出）：dsh 转发面可见性、opencode stable 版本 wire 一致性、codex 目标部署协作模式能力（协议类型标 EXPERIMENTAL，按部署验证）、claude setMode 批准语义。
+- 未核实（已在各节列出）：dsh 转发面可见性、opencode stable 版本 wire 一致性、codex 目标部署协作模式能力（协议类型标 EXPERIMENTAL，按部署验证）、codex-remote 经 Remote Control 链路的 plan 事件可达性、claude setMode 批准语义。
 
 ---
 
