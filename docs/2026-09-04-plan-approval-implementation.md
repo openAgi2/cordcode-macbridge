@@ -109,16 +109,16 @@ requestChanges 反馈文本手写行号引用）；codex / opencode（第二批�
 
 调研档 §3.4 要求补的 fixture 属代码改动，作为 Phase 1 任务执行（§6 列明 fixture 来源）。
 
-## 3. Owner 决策点（呈报裁决，本文档不自行定稿）
+## 3. Owner 决策点（**2026-09-04 已裁决，全部按推荐**）
 
-| # | 决策点 | 选项 | **推荐** | 理由 |
+| # | 决策点 | 选项 | **裁决** | 理由 |
 | --- | --- | --- | --- | --- |
 | D1 | iOS 计划卡形态（§8.3-1） | a) 独立计划卡 b) 扩展现有权限卡 | **a 独立计划卡**（`permissionKind=plan_review` 分支新视图） | 计划全文渲染（markdown 查看器 + 折叠/展开）与两键权限卡交互差异大；§25 已证明复用权限卡可行但展示差；新视图不动旧卡回滚面（旧卡零改动，分支不命中即回滚） |
 | D2 | requestChanges / quit 进不进第一批（§8.3-2） | a) 三动作全进 b) 仅 approve（维持现状二值） | **a 全进** | 三 backend 官方语义都有落点（调研档 §7.2 词汇表：grok cancelled+feedback / abandoned，claude deny+message，dsh Keep-planning+custom）；不拆则「拒绝」语义偏差（quit≠打回）继续存在；通道全部现成，增量在 iOS 反馈输入框与 Mac 翻译表 |
 | D3 | dsh quit 目标语义（§8.3-9） | a) dismiss（reject 整批 ≈ ASK_CANCELLED） b) `/plan off` | **a dismiss** | 官方 `ASK_CANCELLED` 语义「用户接管、agent 停下等消息」（调研档 §6.3）与统一 quit「用户拿回回合」一致；`/plan off` 是关闭 plan mode 的另一命令通道（commands.execute），语义是「退出规划状态」而非「不回答当前审批」，混用会让 agent 状态突变；且 dismiss 有现成 `RejectQuestion` 管道零新增 |
 | D4 | 反馈必填性（§8.3-3） | a) requestChanges 反馈必填 b) 可选 | **b 可选** | 三 backend 官方均允许空反馈（grok feedback 仅在有文字时上 wire；dsh custom 可空；claude deny.message 需非空——Mac 端空时填固定文案）；必填只增加 iOS 输入阻力。文案区分：空反馈 requestChanges =「打回重做（未说明原因）」，quit =「放弃本次计划」 |
 | D5 | claude 批准的模式二选（§8.3-4） | a) 固定单一行为（不透传 updatedPermissions） b) 透传 setMode 二选 | **a 固定不透传** | 透传属「基于类型的推断，需真机验证」（调研档 §3.3 未核实项）；第一批先用纯 allow（现有 RespondPermission allow 路径已在生产，形状零新增），行为 = 批准计划、后续写操作仍逐个走 iOS 权限卡（与 CordCode 远程审批面定位一致）；二选项等真机验证后第二批补（届时按开工指令另行申请授权） |
-| D6 | 统一字段命名（§7.1） | 以调研档为基线：`permissionKind="plan_review"`、`plan{content,contentFormat,title,planFilePath}`、`permissionActions`、`planAction`、`feedback` | **按基线，另统一 camelCase**：`planAction` 取值 `approve\|requestChanges\|quit`（与 `permissionActions` 一致，弃调研档示例的 `request_changes` snake_case 写法） | 与既有 wire 词汇（`approveAlways` 等 camelCase）一致；**标注「待立项评审确认」**——本方案即立项评审载体，owner 认可 D6 即视为定稿 |
+| D6 | 统一字段命名（§7.1） | 以调研档为基线：`permissionKind="plan_review"`、`plan{content,contentFormat,title,planFilePath}`、`permissionActions`、`planAction`、`feedback` | **按基线 + camelCase 定稿**：`planAction` 取值 `approve\|requestChanges\|quit`（与 `permissionActions` 一致，弃调研档示例的 `request_changes` snake_case 写法） | 与既有 wire 词汇（`approveAlways` 等 camelCase）一致；本方案即立项评审载体，owner 已认可，§4 命名视为定稿 |
 
 附带呈报（非阻断，owner 可在裁决时一并推翻）：
 
