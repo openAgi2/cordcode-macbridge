@@ -312,11 +312,11 @@ func TestReadRichSessionHistory_StableIDsAcrossReads(t *testing.T) {
 		{"type": "assistant", "content": "goodbye"},
 	})
 
-	first, err := readRichSessionHistory(home, sid, 0)
+	first, err := readRichSessionHistory(home, sid, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := readRichSessionHistory(home, sid, 0)
+	second, err := readRichSessionHistory(home, sid, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,8 +358,8 @@ func TestReadRichSessionHistory_IDsImmuneToLimitTruncation(t *testing.T) {
 		"info": map[string]any{"id": sid, "cwd": "/tmp/lim"}, "updated_at": "2026-07-12T00:00:00Z",
 	}, hist)
 
-	full, _ := readRichSessionHistory(home, sid, 0)
-	limited, _ := readRichSessionHistory(home, sid, 2) // last 2 of 6 entries
+	full, _ := readRichSessionHistory(home, sid, 0, false)
+	limited, _ := readRichSessionHistory(home, sid, 2, false) // last 2 of 6 entries
 
 	if len(limited) != 2 {
 		t.Fatalf("limited len=%d, want 2", len(limited))
@@ -417,7 +417,7 @@ func TestReadRichSessionHistory_FillsPartsAndSteps(t *testing.T) {
 		{"type": "assistant", "content": "Done."},
 	})
 
-	entries, err := readRichSessionHistory(home, sid, 0)
+	entries, err := readRichSessionHistory(home, sid, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -517,7 +517,7 @@ func TestReadRichSessionHistory_StatusUnknownWhenNoStatusField(t *testing.T) {
 		{"type": "tool_result", "tool_call_id": "call-a", "content": "hi"},
 	})
 
-	entries, err := readRichSessionHistory(home, sid, 0)
+	entries, err := readRichSessionHistory(home, sid, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -551,7 +551,7 @@ func TestReadRichSessionHistory_NoOutputWithoutProvenCorrelation(t *testing.T) {
 		{"type": "tool_result", "tool_call_id": "call-y", "content": "unrelated output"},
 	})
 
-	entries, err := readRichSessionHistory(home, sid, 0)
+	entries, err := readRichSessionHistory(home, sid, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -583,7 +583,7 @@ func TestReadRichSessionHistory_MultiCallOutOfOrderResults(t *testing.T) {
 		{"type": "tool_result", "tool_call_id": "call-1", "content": "first-out"},
 	})
 
-	entries, err := readRichSessionHistory(home, sid, 0)
+	entries, err := readRichSessionHistory(home, sid, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -619,7 +619,7 @@ func TestReadRichSessionHistory_EmptyContentToolCallNotSkipped(t *testing.T) {
 		{"type": "tool_result", "tool_call_id": "call-1", "content": "/tmp"},
 	})
 
-	entries, err := readRichSessionHistory(home, sid, 0)
+	entries, err := readRichSessionHistory(home, sid, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -659,7 +659,7 @@ func TestReadRichSessionHistory_RealTextAndToolCallPreserved(t *testing.T) {
 		{"type": "tool_result", "tool_call_id": "call-1", "content": "hi"},
 	})
 
-	entries, err := readRichSessionHistory(home, sid, 0)
+	entries, err := readRichSessionHistory(home, sid, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -689,7 +689,7 @@ func TestReadRichSessionHistory_LongOutputDropped(t *testing.T) {
 		{"type": "tool_result", "tool_call_id": "call-1", "content": longResult},
 	})
 
-	entries, err := readRichSessionHistory(home, sid, 0)
+	entries, err := readRichSessionHistory(home, sid, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -724,8 +724,8 @@ func TestReadRichSessionHistory_StepIDsStableAcrossReads(t *testing.T) {
 		{"type": "tool_result", "tool_call_id": "call-2", "content": "b"},
 	})
 
-	first, _ := readRichSessionHistory(home, sid, 0)
-	second, _ := readRichSessionHistory(home, sid, 0)
+	first, _ := readRichSessionHistory(home, sid, 0, false)
+	second, _ := readRichSessionHistory(home, sid, 0, false)
 	if len(first) != len(second) {
 		t.Fatalf("entry count drift: %d vs %d", len(first), len(second))
 	}
@@ -763,8 +763,8 @@ func TestReadRichSessionHistory_LimitPreservesStepsInTail(t *testing.T) {
 		"info": map[string]any{"id": sid, "cwd": "/tmp/ls"}, "updated_at": "2026-07-12T00:00:00Z",
 	}, hist)
 
-	full, _ := readRichSessionHistory(home, sid, 0)
-	limited, _ := readRichSessionHistory(home, sid, 2) // last 2 entries
+	full, _ := readRichSessionHistory(home, sid, 0, false)
+	limited, _ := readRichSessionHistory(home, sid, 2, false) // last 2 entries
 
 	if len(limited) != 2 {
 		t.Fatalf("limited len=%d want 2", len(limited))
@@ -794,7 +794,7 @@ func TestReadRichSessionHistory_NameOnlyCallNoGuessing(t *testing.T) {
 		}},
 	})
 
-	entries, err := readRichSessionHistory(home, sid, 0)
+	entries, err := readRichSessionHistory(home, sid, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -831,7 +831,7 @@ func TestReadRichSessionHistory_MalformedJSONLineSkipped(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "chat_history.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644)
 	os.WriteFile(filepath.Join(dir, "summary.json"), []byte(`{"info":{"id":"`+sid+`","cwd":"/tmp/mf"},"updated_at":"2026-07-12T00:00:00Z"}`), 0o644)
 
-	entries, err := readRichSessionHistory(home, sid, 0)
+	entries, err := readRichSessionHistory(home, sid, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -858,7 +858,7 @@ func TestReadRichSessionHistory_ReasoningProducesThinkingEntry(t *testing.T) {
 		{"type": "assistant", "content": "answer"},
 	})
 
-	entries, err := readRichSessionHistory(home, sid, 0)
+	entries, err := readRichSessionHistory(home, sid, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -899,7 +899,7 @@ func TestReadRichSessionHistory_PreservesInterleavedReasoningAndTools(t *testing
 		{"type": "assistant", "content": "Done."},
 	})
 
-	entries, err := readRichSessionHistory(home, sid, 0)
+	entries, err := readRichSessionHistory(home, sid, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -935,7 +935,7 @@ func TestReadRichSessionHistory_ReasoningFromSummaryField(t *testing.T) {
 		{"type": "assistant", "content": "Done."},
 	})
 
-	entries, err := readRichSessionHistory(home, sid, 0)
+	entries, err := readRichSessionHistory(home, sid, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -967,7 +967,7 @@ func TestReadRichSessionHistory_DuplicateCallIDs(t *testing.T) {
 		{"type": "tool_result", "tool_call_id": "call-dup", "content": "single-result"},
 	})
 
-	entries, err := readRichSessionHistory(home, sid, 0)
+	entries, err := readRichSessionHistory(home, sid, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -983,5 +983,144 @@ func TestReadRichSessionHistory_DuplicateCallIDs(t *testing.T) {
 		if out != "single-result" {
 			t.Errorf("step %d output = %v, want 'single-result'", i, out)
 		}
+	}
+}
+
+// findPart returns the first part of the given type in the entry's Parts.
+func findPart(t *testing.T, e core.RichHistoryEntry, ptype string) map[string]any {
+	t.Helper()
+	for _, p := range e.Parts {
+		if fmt.Sprint(p["type"]) == ptype {
+			return p
+		}
+	}
+	return nil
+}
+
+// TestReadRichSessionHistory_PendingAskUserQuestionRehydrates (D-G4 断线恢复):
+// an unanswered ask_user_question in chat_history.jsonl rehydrates as the
+// canonical user_input part only while pendingQuestionsLive (leader socket
+// accepting). Leader off ⇒ read-only tool-step face (baseline row 4); an
+// answered question always stays a tool step.
+func TestReadRichSessionHistory_PendingAskUserQuestionRehydrates(t *testing.T) {
+	askArgs := `{"questions":[{"question":"选一个？","multi_select":false,"options":[{"label":"A","description":"da"},{"label":"B","description":"db"}]}]}`
+	multiArgs := `{"questions":[{"question":"第一题？","multi_select":true,"options":[{"label":"X","description":"dx"}]},{"question":"第二题？","multiSelect":false,"options":[{"label":"Y","description":"dy"}]}]}`
+
+	home := t.TempDir()
+	sid := "rich-ask-pending"
+	writeSessionFixture(t, home, "/tmp/ask", sid, map[string]any{
+		"info": map[string]any{"id": sid, "cwd": "/tmp/ask"}, "updated_at": "2026-09-03T00:00:00Z",
+	}, []map[string]any{
+		{"type": "user", "content": []map[string]any{{"type": "text", "text": "<user_query>\nq\n</user_query>"}}},
+		{"type": "assistant", "content": "", "tool_calls": []map[string]any{
+			{"id": "call_pending", "name": "ask_user_question", "arguments": askArgs},
+		}},
+		{"type": "tool_result", "tool_call_id": "call_pending", "content": []map[string]any{{"type": "text", "text": "answered later"}}},
+		{"type": "user", "content": []map[string]any{{"type": "text", "text": "<user_query>\nq2\n</user_query>"}}},
+		{"type": "assistant", "content": "", "tool_calls": []map[string]any{
+			{"id": "call_open", "name": "ask_user_question", "arguments": askArgs},
+		}},
+	})
+
+	// Leader live: the unanswered call rehydrates as a user_input part.
+	entries, err := readRichSessionHistory(home, sid, 0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var openEntry *core.RichHistoryEntry
+	for i := range entries {
+		if entries[i].Role == "assistant" {
+			openEntry = &entries[i]
+		}
+	}
+	if openEntry == nil {
+		t.Fatal("no assistant entry")
+	}
+	ui := findPart(t, *openEntry, "user_input")
+	if ui == nil {
+		t.Fatalf("pending ask_user_question did not rehydrate as user_input part; parts=%v", openEntry.Parts)
+	}
+	if got := ui["interactionId"]; got != "call_open" {
+		t.Fatalf("interactionId = %v, want call_open", got)
+	}
+	if got := ui["status"]; got != "pending" {
+		t.Fatalf("status = %v, want pending", got)
+	}
+	if got := ui["canRespond"]; got != true {
+		t.Fatalf("canRespond = %v, want true", got)
+	}
+	qs, ok := ui["questions"].([]map[string]any)
+	if !ok || len(qs) != 1 {
+		t.Fatalf("questions = %#v, want 1 element", ui["questions"])
+	}
+	q := qs[0]
+	if q["id"] != "call_open" || q["prompt"] != "选一个？" || q["answerMode"] != "single" {
+		t.Fatalf("question shape = %#v", q)
+	}
+	if q["allowsCustomAnswer"] != true || q["required"] != true {
+		t.Fatalf("freeform/required flags = %#v", q)
+	}
+	opts, ok := q["options"].([]map[string]any)
+	if !ok || len(opts) != 2 || opts[0]["id"] != "A" || opts[0]["label"] != "A" || opts[0]["description"] != "da" {
+		t.Fatalf("options = %#v", q["options"])
+	}
+	if findPart(t, *openEntry, "tool") != nil {
+		t.Fatal("pending question must not ALSO project a tool step (double face)")
+	}
+
+	// Leader off: read-only tool-step face — no card (baseline row 4).
+	entries, err = readRichSessionHistory(home, sid, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range entries {
+		if entries[i].Role == "assistant" && findPart(t, entries[i], "user_input") != nil {
+			t.Fatal("user_input part must NOT appear when questions are not live")
+		}
+	}
+
+	// The answered call in the earlier turn stays a tool step even when live.
+	entries, err = readRichSessionHistory(home, sid, 0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var answeredEntry *core.RichHistoryEntry
+	for i := range entries {
+		if entries[i].Role == "assistant" && entries[i].ID != openEntry.ID {
+			answeredEntry = &entries[i]
+		}
+	}
+	if answeredEntry == nil {
+		t.Fatal("no earlier assistant entry")
+	}
+	if findPart(t, *answeredEntry, "user_input") != nil {
+		t.Fatal("answered ask_user_question must stay a tool step, not a user_input card")
+	}
+	if findPart(t, *answeredEntry, "tool") == nil {
+		t.Fatal("answered ask_user_question lost its tool step")
+	}
+	_ = multiArgs
+
+	// Multi-question args: #i suffixed interaction ids, snake and camel
+	// multi_select both honored.
+	parts := pendingUserInputParts("call_multi", multiArgs)
+	if len(parts) != 2 {
+		t.Fatalf("multi-question parts = %d, want 2", len(parts))
+	}
+	if parts[0]["interactionId"] != "call_multi" || parts[1]["interactionId"] != "call_multi#1" {
+		t.Fatalf("multi interaction ids = %v / %v", parts[0]["interactionId"], parts[1]["interactionId"])
+	}
+	q0 := parts[0]["questions"].([]map[string]any)[0]
+	q1 := parts[1]["questions"].([]map[string]any)[0]
+	if q0["answerMode"] != "multiple" {
+		t.Fatalf("snake multi_select not honored: %#v", q0)
+	}
+	if q1["answerMode"] != "single" {
+		t.Fatalf("camel multiSelect not honored: %#v", q1)
+	}
+
+	// Unparseable arguments fail closed to the tool-step face.
+	if pendingUserInputParts("call_bad", "{not json") != nil {
+		t.Fatal("unparseable arguments must return nil (fail closed)")
 	}
 }

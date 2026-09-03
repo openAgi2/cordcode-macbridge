@@ -14,6 +14,10 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
+// askUserQuestionToolName is the tool name in grok's chat_history.jsonl
+// tool_calls (the ACP ext_method face is "x.ai/ask_user_question").
+const askUserQuestionToolName = "ask_user_question"
+
 // emitQuestionAsked surfaces one pending question on both faces:
 //   - canonical EventUserInputRequested (v2 clients, projected user_input part);
 //   - legacy EventQuestionAsked (v1 clients).

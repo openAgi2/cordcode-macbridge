@@ -187,7 +187,15 @@ func (a *Agent) GetRichSessionHistory(ctx context.Context, sessionID string, lim
 	if home == "" {
 		return nil, fmt.Errorf("grokbuild: cannot resolve GROK_HOME")
 	}
-	return readRichSessionHistory(home, sessionID, limit)
+	// D-G4（2026-09-03 矩阵行 3 断线恢复）: an unanswered ask_user_question
+	// survives in chat_history.jsonl as a tool_call without a tool_result.
+	// Rehydrate it as a canonical user_input part (→ user_input_requested
+	// hydrate event → pending card) ONLY while a leader is accepting
+	// connections — the answer rail (ResolveUserInput → leader subscriber)
+	// requires one. Leader mode off ⇒ no socket ⇒ read-only tool-step face
+	// (baseline row 4).
+	questionsLive := leaderSocketDialable(resolveLeaderSocket(home))
+	return readRichSessionHistory(home, sessionID, limit, questionsLive)
 }
 
 func listLocalSessions(ctx context.Context, grokHome string) ([]core.AgentSessionInfo, error) {
@@ -585,7 +593,11 @@ func readSessionHistory(grokHome, sessionID string, limit int) ([]core.HistoryEn
 // Two-pass design: pass 1 collects tool_result content by tool_call_id; pass 2
 // builds entries with correlated output. tool_result rows are consumed in pass
 // 1 and contribute to their calling tool's step output in pass 2.
-func readRichSessionHistory(grokHome, sessionID string, limit int) ([]core.RichHistoryEntry, error) {
+//
+// pendingQuestionsLive rehydrates an unanswered ask_user_question as a
+// canonical user_input part instead of a tool step (D-G4; see
+// GetRichSessionHistory for the leader-socket gate).
+func readRichSessionHistory(grokHome, sessionID string, limit int, pendingQuestionsLive bool) ([]core.RichHistoryEntry, error) {
 	dir := findSessionDir(grokHome, sessionID)
 	if dir == "" {
 		return nil, fmt.Errorf("grokbuild: session not found: %s", sessionID)
@@ -655,7 +667,7 @@ func readRichSessionHistory(grokHome, sessionID string, limit int) ([]core.RichH
 		}
 
 		// Accumulate reasoning / assistant / tool_result into the current turn.
-		turn.add(row, sessionID, lineNum, rawLine, resultByCallID)
+		turn.add(row, sessionID, lineNum, rawLine, resultByCallID, pendingQuestionsLive)
 	}
 	flushTurn()
 
@@ -686,7 +698,7 @@ type turnAccumulator struct {
 // Consecutive reasoning rows are coalesced, but are flushed before each visible
 // tool or text part. This preserves the actual reasoning → tool → reasoning
 // timeline instead of moving all thinking to the front of a completed turn.
-func (t *turnAccumulator) add(row grokHistoryLine, sessionID string, lineNum int, rawLine []byte, resultByCallID map[string]string) {
+func (t *turnAccumulator) add(row grokHistoryLine, sessionID string, lineNum int, rawLine []byte, resultByCallID map[string]string, pendingQuestionsLive bool) {
 	if !t.started {
 		t.firstID = deriveStableMessageID(sessionID, lineNum, rawLine)
 		t.started = true
@@ -722,6 +734,15 @@ func (t *turnAccumulator) add(row grokHistoryLine, sessionID string, lineNum int
 			name := strings.TrimSpace(tc.Name)
 			if name == "" {
 				continue
+			}
+			// An unanswered ask_user_question rehydrates as the canonical
+			// user_input face (matching the live projection, which carries no
+			// tool step for it). Answered ones keep the tool-step face.
+			if pendingQuestionsLive && name == askUserQuestionToolName && !answeredCall(resultByCallID, tc.ID) {
+				if parts := pendingUserInputParts(tc.ID, tc.Arguments); parts != nil {
+					t.parts = append(t.parts, parts...)
+					continue
+				}
 			}
 			stepID := deriveStableStepID(lineNum, i, tc)
 			title := deriveToolTitle(name, tc.Arguments)
@@ -805,6 +826,95 @@ func (t *turnAccumulator) build(_ string) *core.RichHistoryEntry {
 		e.ModelID = t.modelID
 	}
 	return e
+}
+
+// chatHistoryAskArgs mirrors the model-facing ask_user_question arguments as
+// recorded in chat_history.jsonl tool_calls[].arguments. Upstream serializes
+// the ACP face camelCase (multiSelect) while the model schema is snake_case
+// (multi_select) and the file carries the model-authored input — accept both.
+type chatHistoryAskArgs struct {
+	Questions []chatHistoryAskQuestion `json:"questions"`
+}
+
+type chatHistoryAskQuestion struct {
+	Question         string                `json:"question"`
+	Options          []chatHistoryAskOption `json:"options"`
+	MultiSelectSnake *bool                 `json:"multi_select"`
+	MultiSelectCamel *bool                 `json:"multiSelect"`
+}
+
+type chatHistoryAskOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+func (q chatHistoryAskQuestion) multiSelect() bool {
+	if q.MultiSelectSnake != nil {
+		return *q.MultiSelectSnake
+	}
+	return q.MultiSelectCamel != nil && *q.MultiSelectCamel
+}
+
+// answeredCall reports whether the tool call already has a tool_result row
+// (pass-1 map) — i.e. the question was answered and must stay a tool step.
+func answeredCall(resultByCallID map[string]string, toolCallID string) bool {
+	cid := strings.TrimSpace(toolCallID)
+	if cid == "" {
+		return false
+	}
+	_, ok := resultByCallID[cid]
+	return ok
+}
+
+// pendingUserInputParts rebuilds the canonical user_input part face for an
+// unanswered ask_user_question (D-G4). It must match the live shape from
+// emitQuestionAsked exactly — interaction ids via questionIDFor so an iOS
+// answer on the rehydrated card routes to the same leader-rail entry, option
+// ids ARE labels (grok answers key by label), freeform always allowed.
+// Returns nil when the arguments do not parse; the caller then keeps the
+// plain tool-step face (fail closed — no phantom card).
+func pendingUserInputParts(toolCallID, arguments string) []map[string]any {
+	cid := strings.TrimSpace(toolCallID)
+	if cid == "" {
+		return nil
+	}
+	var args chatHistoryAskArgs
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil || len(args.Questions) == 0 {
+		return nil
+	}
+	parts := make([]map[string]any, 0, len(args.Questions))
+	for i, q := range args.Questions {
+		qid := questionIDFor(cid, i)
+		mode := string(core.UserInputAnswerModeSingle)
+		if q.multiSelect() {
+			mode = string(core.UserInputAnswerModeMultiple)
+		}
+		opts := make([]map[string]any, 0, len(q.Options))
+		for _, o := range q.Options {
+			opts = append(opts, map[string]any{
+				"id":          o.Label,
+				"label":       o.Label,
+				"description": o.Description,
+			})
+		}
+		parts = append(parts, map[string]any{
+			"type":          "user_input",
+			"interactionId": qid,
+			"itemId":        qid,
+			"status":        "pending",
+			"canRespond":    true,
+			"canReject":     true,
+			"questions": []map[string]any{{
+				"id":                 qid,
+				"prompt":             q.Question,
+				"answerMode":         mode,
+				"options":            opts,
+				"allowsCustomAnswer": true,
+				"required":           true,
+			}},
+		})
+	}
+	return parts
 }
 
 // collectToolResults scans chat_history.jsonl once and returns a map of
