@@ -77,6 +77,24 @@ owner 验收 rename 功能：列表标题已改、消息页 header 停留旧名�
   /tmp/cccode-rename-investigate/probe_getsession.py，shape 见
   pairing_handler.go / auth_gate.go）。
 
+## 2026-09-03 同名 iOS 设备配对互踢：UIDevice.name 泛称 × 名字清理启发式无格式校验（已修复）
+
+2026-09-02 13:35 事故（iPhone 11 批准后 iPhone 16 被踢回扫码页）的根因与修复教训：
+
+- **iOS 16 起 `UIDevice.current.name` == `model`，永远返回泛称 "iPhone"**，与设置里
+  的本名无关。所有现代 iOS 原生客户端上报的 (platform, displayName) 必然相同
+  （`("ios","iPhone")`），撞名是系统性必然，改名规避不了。
+- **deviceID 格式即身份代际**：iOS 稳定 ID = `"dev_" + UUID hex`（下划线，Keychain
+  持久）；`pairing_handler` 兜底 = `dev-%x`（短横线，每配对随机）；web/旧记录 = 裸
+  32-hex。`ReplaceDevice` 的名字清理启发式本意是清升级前随机 ID 残留，却没校验旧
+  记录是否真是 legacy 格式 → 稳定 ID 记录按名字互相顶掉，同 bridge 原生 iOS 客户端
+  最多共存一台。修复 = 名字清理只对无 `dev_` 前缀记录生效 + identityPublicKey 等价
+  替换加固（双方非空才比较，空 key 不算同身份）。
+- **写探针先核对 ID 格式语义**：首轮 wire 探针用了 `dev-probe-xxx`（短横线），按
+  修复语义恰属 legacy、被名字清理是正确行为——探针失败反而实证了 legacy 分支仍
+  生效。生产探针设备 ID 必须用 `dev_` 下划线格式才模拟现代 iOS 客户端。
+- 方案与实施记录：`docs/2026-09-02-same-name-ios-device-eviction-fix-design.md`。
+
 ## 2026-09-03 iOS automation open-session 冷启动竞态：桩 client 本地抛错 = 无 wire RPC（已修复）
 
 §23.8 排查中顺带暴露、随后修复的 E2E 自动化路径坑（iOS 主树工作区，随 iOS 侧提交）：

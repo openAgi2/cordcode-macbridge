@@ -6,9 +6,14 @@ import (
 	"fmt"
 	"github.com/openAgi2/cordcode-macbridge/core"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
+
+// stableDeviceIDPrefix 是新客户端生成的稳定 deviceID 前缀（iOS："dev_" + UUID hex，
+// Keychain 持久）。pairing_handler 的 dev-%x 兜底是短横线、每配对随机，属 legacy。
+const stableDeviceIDPrefix = "dev_"
 
 // TrustedDeviceRecord 存储一台已信任设备的完整信息。
 type TrustedDeviceRecord struct {
@@ -53,7 +58,12 @@ type TrustedDeviceStore interface {
 }
 
 // ReplaceDevice 保存最新配对凭据，并删除同一设备的旧记录。
-// 新版客户端使用稳定 deviceID；DisplayName + Platform 用于清理升级前的随机 ID 记录。
+// 替换条件（任一满足）：同 deviceID；同安装身份（双方非空且 IdentityPublicKey 相等，
+// 覆盖 Keychain 异常丢失后 deviceID 轮换）；legacy 随机 ID 记录（无 dev_ 前缀）与
+// 新记录 platform+displayName 相同（清理升级前的随机 ID 残留）。
+// 稳定 dev_ ID 记录永不因撞名被顶：所有现代 iOS 设备上报的 displayName 都是泛称
+// "iPhone"（iOS 16 起 UIDevice.name 等于机型名），按名字清理会把批准的第二台
+// 设备变成踢掉第一台（2026-09-02 13:35 同名互踢事故）。
 func (s *MemoryDeviceStore) ReplaceDevice(record TrustedDeviceRecord) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -61,9 +71,12 @@ func (s *MemoryDeviceStore) ReplaceDevice(record TrustedDeviceRecord) ([]string,
 	replaced := make([]string, 0)
 	for deviceID, existing := range s.byID {
 		sameDeviceID := deviceID == record.DeviceID
-		sameLegacyIdentity := existing.Platform == record.Platform &&
+		sameInstallIdentity := existing.IdentityPublicKey != "" &&
+			existing.IdentityPublicKey == record.IdentityPublicKey
+		sameLegacyIdentity := !strings.HasPrefix(deviceID, stableDeviceIDPrefix) &&
+			existing.Platform == record.Platform &&
 			existing.DisplayName == record.DisplayName
-		if !sameDeviceID && !sameLegacyIdentity {
+		if !sameDeviceID && !sameInstallIdentity && !sameLegacyIdentity {
 			continue
 		}
 		delete(s.byID, deviceID)

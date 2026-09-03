@@ -94,6 +94,88 @@ func TestMemoryStore_ReplaceDeviceRemovesLegacyRandomID(t *testing.T) {
 	}
 }
 
+// 2026-09-02 13:35 事故回归：两台不同 iPhone 上报的 (platform, displayName) 都是
+// ("ios", "iPhone")（iOS 16 起 UIDevice.name 等于机型名），批准第二台不得顶掉第一台。
+func TestMemoryStore_ReplaceDeviceKeepsSameNameStableIDs(t *testing.T) {
+	store := newTestStore()
+	first := makeTestRecord("dev_aaa")
+	first.DisplayName = "iPhone"
+	_ = store.AddDevice(first)
+	second := makeTestRecord("dev_bbb")
+	second.DisplayName = "iPhone"
+
+	replaced, err := store.ReplaceDevice(second)
+	if err != nil {
+		t.Fatalf("ReplaceDevice 失败: %v", err)
+	}
+	if len(replaced) != 0 {
+		t.Fatalf("同名稳定 ID 不应被顶掉: replaced = %v", replaced)
+	}
+	for _, id := range []string{"dev_aaa", "dev_bbb"} {
+		if got, _ := store.LookupByDeviceID(id); got == nil {
+			t.Fatalf("设备 %s 应保留", id)
+		}
+	}
+	if got, _ := store.LookupByTokenHash(first.TokenHash); got == nil {
+		t.Fatal("第一台的 token 应保持有效")
+	}
+}
+
+func TestMemoryStore_ReplaceDeviceSameInstallIdentityKey(t *testing.T) {
+	store := newTestStore()
+	old := makeTestRecord("dev_old")
+	old.IdentityPublicKey = "identity-shared"
+	_ = store.AddDevice(old)
+	// 不同 deviceID（Keychain 异常丢失后轮换），但同安装身份。
+	rotated := makeTestRecord("dev_new")
+	rotated.IdentityPublicKey = "identity-shared"
+
+	replaced, err := store.ReplaceDevice(rotated)
+	if err != nil {
+		t.Fatalf("ReplaceDevice 失败: %v", err)
+	}
+	if len(replaced) != 1 || replaced[0] != old.DeviceID {
+		t.Fatalf("replaced = %v, want [%s]", replaced, old.DeviceID)
+	}
+	if got, _ := store.LookupByDeviceID(old.DeviceID); got != nil {
+		t.Fatal("旧 deviceID 记录应被清理")
+	}
+}
+
+// 空 identity key 不得视为同安装身份（否则所有配对期记录都会互相顶掉）。
+func TestMemoryStore_ReplaceDeviceEmptyIdentityKeyDoesNotReplace(t *testing.T) {
+	store := newTestStore()
+	first := makeTestRecord("dev_aaa")
+	_ = store.AddDevice(first)
+	second := makeTestRecord("dev_bbb")
+
+	replaced, err := store.ReplaceDevice(second)
+	if err != nil {
+		t.Fatalf("ReplaceDevice 失败: %v", err)
+	}
+	if len(replaced) != 0 {
+		t.Fatalf("空 identity key 不应触发替换: replaced = %v", replaced)
+	}
+}
+
+// pairing_handler 的 dev-%x 兜底格式（短横线、每配对随机）仍按 legacy 名字清理。
+func TestMemoryStore_ReplaceDeviceCleansDashFallbackID(t *testing.T) {
+	store := newTestStore()
+	old := makeTestRecord("dev-ab12cd34")
+	old.DisplayName = "iPhone"
+	_ = store.AddDevice(old)
+	latest := makeTestRecord("dev_stable")
+	latest.DisplayName = "iPhone"
+
+	replaced, err := store.ReplaceDevice(latest)
+	if err != nil {
+		t.Fatalf("ReplaceDevice 失败: %v", err)
+	}
+	if len(replaced) != 1 || replaced[0] != old.DeviceID {
+		t.Fatalf("replaced = %v, want [%s]", replaced, old.DeviceID)
+	}
+}
+
 func TestMemoryStore_LookupByID_NotFound(t *testing.T) {
 	store := newTestStore()
 	got, err := store.LookupByDeviceID("nonexistent")
