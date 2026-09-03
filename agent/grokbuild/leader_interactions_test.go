@@ -299,10 +299,10 @@ func TestLeaderSubscriberAskUserQuestionReplay(t *testing.T) {
 	}
 }
 
-// TestLeaderSubscriberIgnoresOtherRequestForms: request_permission is now a
-// surfaced interaction (§24 — emits permission_request, registers by wire id);
-// exit_plan_mode / mcp elicit remain observe-only (ruling B), and non-numeric
-// ids are dropped — neither may register or emit.
+// TestLeaderSubscriberIgnoresOtherRequestForms: request_permission and
+// exit_plan_mode are surfaced interactions (§24 / §25 — emit permission_request,
+// register on the wire axis); mcp elicit remains observe-only (ruling B), and
+// non-numeric ids are dropped — neither may register or emit.
 func TestLeaderSubscriberIgnoresOtherRequestForms(t *testing.T) {
 	got, sub := runLeaderSubscriber(t, func(c net.Conn) error {
 		// session/request_permission REQUEST (numeric id) — surfaced (§24).
@@ -310,8 +310,8 @@ func TestLeaderSubscriberIgnoresOtherRequestForms(t *testing.T) {
 			return err
 		}
 		time.Sleep(100 * time.Millisecond)
-		// exit_plan_mode ext request — observe-only.
-		if err := writeACPRequestRaw(c, `{"jsonrpc":"2.0","id":6,"method":"_x.ai/exit_plan_mode","params":{"sessionId":"sess-1"}}`); err != nil {
+		// exit_plan_mode ext request — surfaced as a plan-approval card (§25).
+		if err := writeACPRequestRaw(c, `{"jsonrpc":"2.0","id":6,"method":"_x.ai/exit_plan_mode","params":{"sessionId":"sess-1","toolCallId":"call_plan_6","planContent":"# 计划 A"}}`); err != nil {
 			return err
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -319,20 +319,26 @@ func TestLeaderSubscriberIgnoresOtherRequestForms(t *testing.T) {
 		return writeACPRequestRaw(c, `{"jsonrpc":"2.0","id":"string-id","method":"_x.ai/ask_user_question","params":{"sessionId":"sess-1","toolCallId":"call_str","questions":[{"question":"q","options":[{"label":"x","description":""}],"multiSelect":null}],"mode":"default"}}`)
 	})
 	perms := filterEvents(got, core.EventPermissionRequest)
-	if len(perms) != 1 {
-		t.Fatalf("permission_request events = %d, want 1: %+v", len(perms), got)
+	if len(perms) != 2 {
+		t.Fatalf("permission_request events = %d, want 2: %+v", len(perms), got)
 	}
 	if perms[0].RequestID != "5" || perms[0].ToolName != "rm" {
 		t.Fatalf("permission event = %+v, want RequestID 5 / ToolName rm", perms[0])
 	}
-	if len(got) != 1 {
-		t.Fatalf("got %+v, want only the permission event (exit_plan_mode observe-only, string id dropped)", got)
+	if perms[1].RequestID != "6" || perms[1].ToolName != "计划审批: 计划 A" {
+		t.Fatalf("plan event = %+v, want RequestID 6 / plan title", perms[1])
 	}
-	if sub.interactions.len() != 1 {
-		t.Fatalf("registry len = %d, want 1 (permission registered)", sub.interactions.len())
+	if len(got) != 2 {
+		t.Fatalf("got %+v, want only the two permission events (string id dropped)", got)
+	}
+	if sub.interactions.len() != 2 {
+		t.Fatalf("registry len = %d, want 2 (permission + plan registered)", sub.interactions.len())
 	}
 	if entry, ok := sub.interactions.getByWire(5); !ok || entry.perm == nil || entry.perm.ToolCall.ToolCallID != "call_perm" {
 		t.Fatalf("byWire(5) = %+v ok=%v, want registered permission call_perm", entry, ok)
+	}
+	if entry, ok := sub.interactions.getByWire(6); !ok || entry.kind != leaderKindPlan || entry.plan == nil {
+		t.Fatalf("byWire(6) = %+v ok=%v, want registered plan entry", entry, ok)
 	}
 }
 

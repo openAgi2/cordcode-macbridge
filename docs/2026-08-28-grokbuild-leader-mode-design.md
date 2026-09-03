@@ -2304,3 +2304,127 @@ iOS 仓库=零改动（§24.1 论证：permission wire 面 iOS 侧已存在）
 - permission 特征输出（`leader request_permission registered` 日志行）需真实
   权限广播触发，无法无副作用预验证——由 owner 真机矩阵第一步覆盖。
 - 待办：owner 真机矩阵（§24.5）验收后本节状态行去 pending、think.md 总账行收口。
+
+## 25. exit_plan_mode 开放 + 权限选项透传（2026-09-03 owner 裁决「剩下都做了」）
+
+状态：Mac 侧代码+测试完成，待 owner 真机验收（步骤见 §25.5）。
+
+### 25.1 裁决与范围
+
+owner 于 §24 真机矩阵四步全过后裁决（2026-09-03）：「可以把剩下需要做的都做了吧，
+那个 plan mode……先把能开发的代码都开发了」。两项据此立项：
+
+1. **exit_plan_mode 开放（§25 第一块）**：修订 §24 裁决 B——exit_plan_mode 从
+   observe-only 名单移出，升级为 wire 可答交互。理由：plan 审批与 permission 同构
+   （允许/拒绝二值、first-answer-wins、interaction_resolved 收口），§24 管道零成本
+   复用；iOS 零改动（permission 卡直接渲染）。mcp/elicit 仍 observe-only（复杂
+   elicit 表单无既有 iOS 面，维持裁决 B 原判）。
+2. **权限选项透传（§25 第二块）**：owner 真机观察「iOS 端权限选项比 Mac TUI 少」
+   （21:53/21:54 双端截图对比：TUI 5 键 vs iOS 允许/拒绝）。根因是 CordCode 侧
+   `EventPermissionRequest` 一直未填既有 `PermissionActions`/`PermissionKind` wire
+   字段，iOS 落到缺省通用卡。本块把 grok 实收 options 如实透传，让 iOS 卡显示
+   grok 真实提供的选项（含「总是允许」）。
+
+### 25.2 上游证据（`/Users/jacklee/Projects/grok-build` @ `72a61251`；grok 1.0.13 安装版）
+
+**exit_plan_mode wire**（`crates/codegen/xai-grok-workspace/src/exit_plan_mode/types.rs`，
+官方 round-trip 测试同文件）：
+
+- 请求（leader 广播，半包 `_x.ai/exit_plan_mode`）：`{sessionId, toolCallId,
+  planContent?}`，camelCase；plan 全文在 `planContent`。
+- 应答：`{outcome: "approved"|"cancelled"|"abandoned", feedback?}`；`feedback` 仅
+  cancelled 且用户输入文字时（TUI 的 s 键改稿路径）。CordCode 卡无输入框，允许→
+  `approved`、拒绝→`cancelled`（无 feedback），`abandoned` 仅内部用不回。
+- TUI 按键映射（`plan_approval_view.rs`）：a→approved、s→cancelled+feedback、
+  q→cancelled。
+
+**options 档位机制**（`permission/prompter.rs`）：
+
+- prompter 按创建 session 客户端的 `client_type` 构造选项集；`request()` 把
+  `build_options(access)` 的结果原样经 gateway 广播给**所有订阅者**——options 不按
+  订阅者定制。owner 场景（TUI 建 session）CordCode 收到 TUI 档。
+- TUI 档 per AccessKind：Edit = allow_always+allow_once+reject_once；AgentMessage =
+  allow_once+reject_once；Bash = 动态 always-allow-command[allow_always] + 基础集
+  + 动态 reject-always-command[reject_always]；WebFetch/MCPTool 同构四键；未知 =
+  fallback 三键。Generic/Web 档为固定四键集（generic_bash_options）。
+- kind wire 值 = agent_client_protocol 0.10.4 `PermissionOptionKind` snake_case：
+  `allow_once`/`allow_always`/`reject_once`/`reject_always`（§24 真机已验证）。
+- **推论**：CordCode 不能按 AccessKind 硬编码选项集（档位随 session 创建者、动态
+  插入项而变），必须从实收 options 动态映射。
+
+### 25.3 实施方案（MacBridge 单仓，iOS 零改动）
+
+**第一块 exit_plan_mode**（复用 §24 permission 管道）：
+
+- `acp_types.go`：`exitPlanModeParams`（sessionId/toolCallId/planContent）+
+  `exitPlanModeExtResponse`（outcome/feedback，feedback 恒空）。
+- `leader_subscriber.go`：registry kind 三元（question/permission/plan），
+  `wireAnswerable()` 统一 permission+plan 的 wire 轴索引/tombstone；`handlePlanBroadcast`
+  解析→注册→emit `EventPermissionRequest`（RequestID=wire id，ToolName=
+  `planApprovalTitle(planContent)`＝首个非空行去 `#` 前缀、80 rune 截断、「计划审批: 」
+  前缀）；`AnswerPermission` kind 分流——plan 允许/always→`{outcome:"approved"}`、
+  拒绝→`{outcome:"cancelled"}`；lifecycle `interaction_resolved` 对 wireAnswerable
+  双 kind 统一 emit `EventPermissionResolved` 收口。
+- iOS 权限卡零改动直接渲染（plan 卡 ToolName 前缀区分工具权限）。
+
+**第二块选项透传**：
+
+- `acp_codec.go` 新 helper：
+  - `permissionOptionActions(options)`：实收 options kind 动态映射 wire
+    permissionActions，规范序 approve→approveAlways→reject；**reject_always 不映射**
+    （wire 无 denyAlways，iOS 端 rejectAlways 应答与 reject 同发 "deny" 无法区分，
+    诚实起见不显示）；非 permission kind（followup/cancelled/error）跳过。
+  - `grokPermissionKind(toolCall.Kind)`：execute→"bash"、read/fetch/edit 透传、
+    空/未知→"grok" 占位（非空 kind 启用 iOS official 卡样式与 always 应答；未知
+    catalog 键仅省略类别行，安全）。
+- emit 三路同步：leader `handlePermissionBroadcast`、`handlePlanBroadcast`（固定
+  `["approve","reject"]`、kind 留空——plan 无工具类别且无持久化概念）、OFF 模式
+  `session.go handlePermissionRequest`（与 leader 轨同词汇）。
+- `permissionOutcome` kind 精确化：always→优先 allow_always、无则降级任意 allow_*
+  （§24 兼容）；allow→优先 allow_once；deny→优先 reject_once 次选 reject_always
+  （持久化 deny 是超出用户意图的副作用）、全无→cancelled（§24 兼容）。
+- iOS 消费面（main 工作树 @de264a2c 只读核实）：raw 路径 wireActions 优先渲染；
+  approveAlways 仅在 `permissionSupportsAlways`（permissionKind 非空）时发
+  "always"；投影路径 projection_reducer.go 已提取 permissionActions。故
+  allow_always 在场 + kind 非空 ⇒ iOS 显示「总是允许」且回 always ⇒ Mac 精确回
+  allow_always 选项 id。
+
+### 25.4 测试（`agent/grokbuild/`，D3 定向）
+
+- `leader_plan_test.go` 5 例：exit_plan_mode 表面化（heading 标题+registry plan
+  条目）、allow→approved 回帧（无 feedback）、reject→cancelled / always→approved
+  降级、interaction_resolved 收口+迟到应答静默、`planApprovalTitle` 四分支。
+- `leader_permission_options_test.go` 6 例：`permissionOptionActions` 各档位/
+  reject_always 排除/规范序/非 permission kind 跳过、`grokPermissionKind` 全映射、
+  `permissionOutcome` kind 精确化（TUI 档 always/allow/deny 各选对、agent-message
+  档 always 降级、reject_always-only 仍 selected、§24 cancelled 兼容）、leader
+  permission 广播透传断言、plan 卡二键断言。
+- 既有测试更新：`TestLeaderSubscriberIgnoresOtherRequestForms`——exit_plan_mode
+  升级为第 2 个 permission_request；§24 全部行为测试零改动通过。
+- `go test ./agent/grokbuild/ -count=1` 全绿（ok 24.7s）；`go build ./...` +
+  relay-server 过。
+
+### 25.5 owner 真机验收步骤
+
+1. TUI 起一个 plan 模式任务（模型产出计划后触发 exit plan mode 审批）→ iPhone
+   出现「计划审批: …」卡，仅允许/拒绝两键。
+2. iPhone 允许 → TUI 计划批准、任务继续；iPhone 拒绝 → TUI 计划取消。
+3. 普通权限（bash 命令）：iPhone 卡出现「总是允许」三键（TUI 档 allow_always
+   在场时）；点「总是允许」→ grok 侧选中 always-allow-command 选项（TUI 后续同类
+   命令不再询问 = events.jsonl permission_resolved decision 佐证）。
+4. Mac TUI 先答 → iPhone 卡消失（§24 第三步同款收口）。
+
+### 25.6 来源清单（P0 门，编写时）
+
+```text
+仓库路径=/Users/jacklee/Projects/cordcode-macbridge-grokbuild-leader
+分支=codex/grokbuild-leader-mode
+提交=0699945（本节改动基于此未提交工作树）
+未提交状态=acp_codec.go/acp_types.go/leader_subscriber.go/session.go/leader_plan_test.go(新)/leader_interactions_test.go/leader_permission_options_test.go(新)
+任务预期分支=codex/grokbuild-leader-mode（owner §24/§25 连续指令）
+上游仓库路径=/Users/jacklee/Projects/grok-build @ 72a61251（只读）
+上游锚点=exit_plan_mode/types.rs；permission/prompter.rs build_options_inner/new/request；plan_approval_view.rs
+iOS 只读核实=/Users/jacklee/Projects/cordcode-ios main 工作树 @de264a2c（CCCodeBridgeBackendClient.swift wireActions/permissionSupportsAlways；TaskDockView 官方卡样式；Message.swift OfficialPermissionCatalog 未知键 nil）
+安装版目标二进制=grok 1.0.13（5e9a58528b76）
+iOS 仓库=零改动（两块均复用既有 wire 面）
+```

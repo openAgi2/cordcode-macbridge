@@ -8,7 +8,7 @@
 - Completion Report Verdict: **`proved-complete (owner-verified 2026-09-02)`**（产品代码、单测、Release 安装、§7.3 owner 真机矩阵全部收口；12 行中 11 行 owner 实测通过 + 诊断卡确认，行 3「未安装态」为可选行未测，已在 exec-plan regression 证据中注明）
 - Queue Summary: **54/54 todos done**（B 路线原 33 项收官后，2026-09-02 晚间 owner 授权追加后续批次 12 项：`followup-roster-consume`、`followup-model-effort`、`rfx-effort-gate`、`rfx-model-id-softening` 四个三元组，全部 done 带 proof；owner 矩阵类 regression p2-dg1/p2-dg2/p3-ui/p4-diagnostics/p4-release 全部回填；p4-doc-sync-regression 为 D0 无运行面，na 见队列；验收期新增 rfx-row6-user-echo 三元组闭环；2026-09-03 追加 §23 会话 rename/delete（`followup-session-admin` 三元组，owner 矩阵 rename/delete ✅、archive 接受现状）与 §23.8 rename 标题瑕疵修复（`rfx-rename-title` 三元组，owner 复测 ✅）；2026-09-03 追加 §24 follower permission 应答（`perm-follower` 三元组，owner 真机矩阵四步全过，见 §9））
 - Related Commits: `69f3b31`（TOML 依赖）`1676df5`（开关管理器 T1–T33）`9baa1e5`（D-G1）`3089a95`（D-G2）`4cfddfd`（Phase 3 UI）`0f4e5e8`（Phase 4 诊断行）`f92cec6`（doc-sync + D-3 帮助文案）`98ae793`（验收修复 ①：scope 切换退订旧观察键）`05152aa`（验收修复 ②：读路径订阅键改观察语义）`39e29a8`（验收修复 ③：iPhone 自有 turn 的 user echo 补 turn 身份）`c77bb80`（后续批次：消费 leader roster 广播）`c1dfa81`（后续批次：model/effort 全链路）`da17648`（后续修复 ④：镜像官方 effort 门）`a0b0f11`（后续修复 ⑤：set_model unknown model id 软化）；另有 Phase 0 基线修复 `6dc9353`（D-G0b 终态通知白名单）与 cwd 缺口修复（见执行日志）；2026-09-03 批次：`441706c`/`dc30edc`（§23 方案与修复指针）`5f37692`（§23 rename/delete 实现）`eaf5703`（§23.8 display_title 标题修复）`5f24679`（§23.8 文档三件套）
-- Generated At: `2026-09-02T21:04:00+08:00`（owner 验收收官后更新）；`2026-09-02T22:21:00+08:00`（后续批次 12 todos 入账后更新，见 §1.1 与 §2 追加行）；`2026-09-03T18:52:00+08:00`（§23 session-admin + §23.8 标题修复 6 todos 入账后更新，见 §8）；`2026-09-03T22:05:00+08:00`（§24 follower permission 三元组收官、owner 矩阵四步全过后更新，见 §9）
+- Generated At: `2026-09-02T21:04:00+08:00`（owner 验收收官后更新）；`2026-09-02T22:21:00+08:00`（后续批次 12 todos 入账后更新，见 §1.1 与 §2 追加行）；`2026-09-03T18:52:00+08:00`（§23 session-admin + §23.8 标题修复 6 todos 入账后更新，见 §8）；`2026-09-03T22:05:00+08:00`（§24 follower permission 三元组收官、owner 矩阵四步全过后更新，见 §9）；`2026-09-03T22:50:00+08:00`（§25 exit_plan_mode + 选项透传批次入账，Mac 侧交付完成待 owner 验收，见 §10）
 
 ## 1. Overall Verdict (总体结论)
 
@@ -240,3 +240,35 @@ Always allow / Never allow / 拒绝附反馈文字）vs iOS 允许/拒绝两键�
 23 次权限请求全部毫秒级 allow）——Ctrl+O 为 yolo 全放行开关（TUI actions.rs:424）、
 `[ui] permission_mode` 持久化且停在 `always-approve`；两者任一处于放行态即不询问。
 测试前须确认 `permission_mode = "ask"` 且 yolo 关闭。
+
+## 10. 2026-09-03 追加批次：§25 exit_plan_mode 开放 + 权限选项透传
+
+owner 裁决「可以把剩下需要做的都做了吧，那个 plan mode……先把能开发的代码都开发了」
+——本批次推翻 §9「范围裁决」中的两点搁置（exit_plan_mode observe-only、选项透传
+另案），按设计文档 §25 实施。MCP elicit 仍 observe-only（维持 ruling B 原判）。
+本批次为 owner 直指令快车道，未开 exec-plan 三元组；验收证据形态与 §9 同构。
+
+**交付内容**（Mac 单仓，iOS 零改动）：
+
+1. exit_plan_mode（plan 审批）：registry kind 三元（question/permission/plan）+
+   `wireAnswerable` 统一 wire 轴；`handlePlanBroadcast` 表面化为「计划审批: 」权限卡
+   （标题取计划首个标题行，80 rune 截断）；iPhone 允许→`{outcome:"approved"}`、
+   拒绝→`{outcome:"cancelled"}`；interaction_resolved 双 kind 收口。
+2. 权限选项透传：`permissionOptionActions`（实收 options kind 动态映射，规范序
+   approve→approveAlways→reject；reject_always 有意不透传——iOS 应答无法区分持久
+   拒绝与单次拒绝）；`grokPermissionKind`（execute→bash 等，空/未知→"grok" 占位）；
+   leader/OFF 两轨 + plan 卡三路 emit 同步；`permissionOutcome` kind 精确化
+   （always→allow_always 优先、deny→reject_once 优先、§24 降级路径全兼容）。
+3. 上游锚点：grok-build @72a61251 prompter.rs（options 按 session 创建者档位广播，
+   不按订阅者定制——故必须动态映射）+ exit_plan_mode/types.rs。
+
+**验证**（self-attested，命令可复跑）：`leader_plan_test.go` 5 例 +
+`leader_permission_options_test.go` 6 例 + §24 既有测试零改动通过；
+`go test ./agent/grokbuild/ -count=1` ok 24.7s；`go build ./...` + relay-server 过；
+Release 0699945+§25 构建产物 strings 含两个特征日志文案；覆盖安装四门核对过
+（runtime PID 17642 lstart 22:44:12 晚于构建 22:42:51、8777 监听者
+/Applications 内嵌 runtime、无违规残留、日志新代际）。
+
+**待 owner 真机验收**（设计文档 §25.5）：① TUI plan 模式任务→iPhone 出「计划审批」
+两键卡；② iPhone 允许/拒绝→TUI 计划批准/取消；③ bash 权限卡出现「总是允许」三键、
+点后 grok 侧持久放行（后续同类不再询问）；④ Mac TUI 先答→iPhone 卡收口。

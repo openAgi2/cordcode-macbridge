@@ -1139,6 +1139,10 @@ func (s *grokSession) handlePermissionRequest(req *agentRequest) {
 		Type:      core.EventPermissionRequest,
 		RequestID: reqIDStr,
 		ToolName:  params.ToolCall.Title,
+		// Same options pass-through as the leader follower rail — both rails
+		// must render the same card vocabulary for the same grok request.
+		PermissionActions: permissionOptionActions(params.Options),
+		PermissionKind:    grokPermissionKind(params.ToolCall.Kind),
 	})
 }
 

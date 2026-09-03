@@ -385,18 +385,43 @@ func selectPermissionOption(options []permissionOption, behavior string) (string
 	return "", false
 }
 
+// selectPermissionOptionKind picks the optionId of the first option whose
+// kind matches exactly (e.g. "allow_always").
+func selectPermissionOptionKind(options []permissionOption, kind string) (string, bool) {
+	for _, opt := range options {
+		if opt.Kind == kind {
+			return opt.OptionID, true
+		}
+	}
+	return "", false
+}
+
 // permissionOutcome maps a bridge permission behavior onto the grok ACP
 // outcome for a registered permission request's options. Shared by the
 // driver rail (grokSession.RespondPermission) and the leader follower rail
-// (LeaderSubscriber.AnswerPermission). "always" (opencode-web official
-// reply) has no grok option and degrades to allow; a deny with no reject
-// option degrades to cancelled (upstream Path: not an error).
+// (LeaderSubscriber.AnswerPermission). Kind-precise with graceful degrade:
+// "always" selects allow_always when the request offers it, else degrades to
+// any allow_* option (grok requests without a persistent variant must still
+// answer); "allow" prefers allow_once but takes any allow_*; deny prefers
+// reject_once over reject_always (reject_always persists a deny rule — a
+// stronger side effect than the user asked for), and a deny with no reject
+// option at all degrades to cancelled (upstream Path: not an error).
 func permissionOutcome(options []permissionOption, behavior string) (outcomePayload, error) {
 	if behavior == "allow" || behavior == "always" {
+		wantKind := "allow_once"
+		if behavior == "always" {
+			wantKind = "allow_always"
+		}
+		if optionID, ok := selectPermissionOptionKind(options, wantKind); ok {
+			return outcomePayload{Outcome: "selected", OptionID: optionID}, nil
+		}
 		optionID, found := selectPermissionOption(options, "allow")
 		if !found {
 			return outcomePayload{}, fmt.Errorf("grokbuild: no allow option in permission request")
 		}
+		return outcomePayload{Outcome: "selected", OptionID: optionID}, nil
+	}
+	if optionID, ok := selectPermissionOptionKind(options, "reject_once"); ok {
 		return outcomePayload{Outcome: "selected", OptionID: optionID}, nil
 	}
 	optionID, found := selectPermissionOption(options, "deny")
@@ -404,4 +429,56 @@ func permissionOutcome(options []permissionOption, behavior string) (outcomePayl
 		return outcomePayload{Outcome: "cancelled"}, nil
 	}
 	return outcomePayload{Outcome: "selected", OptionID: optionID}, nil
+}
+
+// permissionOptionActions translates the grok option kinds a pending
+// request actually offers into the bridge permissionActions vocabulary
+// (core/message.go: approve | approveAlways | reject | rejectAlways).
+// Built from the received options — never hardcoded per access kind — so
+// every upstream tier (TUI full set, generic web set, dynamic always-command
+// insertions; prompter.rs build_options) passes through as-is. Output uses
+// the canonical order approve → approveAlways → reject regardless of arrival
+// order (the client treats it as a set). reject_always maps to nothing: the
+// wire vocabulary has no denyAlways the client can distinguish from reject
+// (both reply "deny"), and the iOS card must not offer a persistent-deny
+// button that answers identically to a one-shot reject. Non-permission
+// kinds (followup/cancelled/error — exit_plan_mode vocabulary) are skipped.
+func permissionOptionActions(options []permissionOption) []string {
+	has := map[string]bool{}
+	for _, opt := range options {
+		switch opt.Kind {
+		case "allow_once":
+			has["approve"] = true
+		case "allow_always":
+			has["approveAlways"] = true
+		case "reject_once":
+			has["reject"] = true
+		}
+	}
+	var actions []string
+	for _, a := range []string{"approve", "approveAlways", "reject"} {
+		if has[a] {
+			actions = append(actions, a)
+		}
+	}
+	return actions
+}
+
+// grokPermissionKind maps the ACP toolCall kind (execute/read/fetch/edit;
+// agentclientprotocol 0.10.4 ToolCallKind) onto the official permissionKind
+// vocabulary the iOS catalog knows (bash/read/fetch/edit). Unknown or empty
+// kinds fall back to "grok": a non-empty kind switches the iOS card to the
+// official style (enabling approveAlways replies), and an unknown catalog
+// key merely omits the category line — safe by construction.
+func grokPermissionKind(toolCallKind string) string {
+	switch toolCallKind {
+	case "execute":
+		return "bash"
+	case "read", "fetch", "edit":
+		return toolCallKind
+	case "":
+		return "grok"
+	default:
+		return "grok"
+	}
 }

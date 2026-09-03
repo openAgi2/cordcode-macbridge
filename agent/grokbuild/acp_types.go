@@ -415,6 +415,26 @@ type outcomePayload struct {
 	OptionID string `json:"optionId,omitempty"`
 }
 
+// --- x.ai/exit_plan_mode (shared interaction reverse-request) ---
+// Wire shapes from grok-build exit_plan_mode/types.rs @72a61251 (official
+// round-trip tests in the same file): request is camelCase {sessionId,
+// toolCallId, planContent?}; response is {outcome: "approved"|"cancelled"|
+// "abandoned", feedback?} with feedback present only on cancelled-with-typed-
+// feedback (the TUI's "s request changes" path).
+
+type exitPlanModeParams struct {
+	SessionID   string `json:"sessionId"`
+	ToolCallID  string `json:"toolCallId"`
+	PlanContent string `json:"planContent,omitempty"`
+}
+
+type exitPlanModeExtResponse struct {
+	Outcome string `json:"outcome"` // "approved" or "cancelled"
+	// Feedback mirrors the upstream field but is always empty from iOS — the
+	// bridge permission card has no text input (the TUI-only freeform path).
+	Feedback string `json:"feedback,omitempty"`
+}
+
 // --- x.ai/ask_user_question (shared interaction reverse-request) ---
 // Wire shapes frozen from the installed grok 1.0.13 live capture
 // (docs/2026-09-02-grokbuild-follower-interaction-research.md §2.4.1/§3.1):

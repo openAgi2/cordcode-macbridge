@@ -82,9 +82,10 @@ func resolveLeaderSocket(grokHome string) string {
 
 // LeaderSubscriber attaches to a running grok leader as a read-only subscriber
 // for one session and forwards live session/update notifications as core.Events.
-// Shared interaction reverse-requests (ask_user_question) are registered and
-// surfaced as core.EventQuestionAsked; per owner ruling B (research doc §6.1)
-// request_permission / exit_plan_mode / mcp/elicit remain observe-only.
+// Shared interaction reverse-requests (ask_user_question, request_permission,
+// exit_plan_mode) are registered and surfaced as their matching core events;
+// per ruling B only mcp/elicit remains observe-only (exit_plan_mode was opened
+// by owner ruling 2026-09-03 — design §25).
 type LeaderSubscriber struct {
 	socketPath string
 	sessionID  string
@@ -146,6 +147,9 @@ type leaderInteraction struct {
 	// same key OFF-mode pendingPerms uses — served by the registry wireID
 	// index, not by toolCallID.
 	perm *requestPermissionParams
+	// plan carries the exit_plan_mode-kind payload (planContent for the card
+	// title). Answered on the wire-id axis exactly like perm.
+	plan *exitPlanModeParams
 	// answers accumulates iOS replies per question index; the wire response
 	// carries ALL questions at once, so it flushes only when complete
 	// (single-question interactions — the only observed live shape — flush
@@ -161,13 +165,22 @@ type leaderInteractionKind int
 const (
 	leaderKindQuestion leaderInteractionKind = iota
 	leaderKindPermission
+	leaderKindPlan
 )
+
+// wireAnswerable reports whether the kind's iOS answer path addresses entries
+// by the numeric wire id (RequestID on the bridge wire) — both permission and
+// exit_plan_mode reuse the resolve_permission rail.
+func (k leaderInteractionKind) wireAnswerable() bool {
+	return k == leaderKindPermission || k == leaderKindPlan
+}
 
 type leaderInteractionRegistry struct {
 	mu     sync.Mutex
 	byTool map[string]leaderInteraction
-	// byWire indexes permission-kind entries: their answer path carries the
-	// numeric wire id (RequestID on the bridge wire), not the tool_call_id.
+	// byWire indexes wire-answerable entries (permission / exit_plan_mode):
+	// their answer path carries the numeric wire id (RequestID on the bridge
+	// wire), not the tool_call_id.
 	byWire map[int]string
 	// tombstones records recently-consumed tool_call_ids (resolved broadcast
 	// or our own flush). A late answer for a tombstoned id returns success
@@ -194,7 +207,7 @@ func (r *leaderInteractionRegistry) put(i leaderInteraction) {
 	r.mu.Lock()
 	r.byTool[i.toolCallID] = i
 	delete(r.tombstones, i.toolCallID)
-	if i.kind == leaderKindPermission {
+	if i.kind.wireAnswerable() {
 		r.byWire[i.wireID] = i.toolCallID
 		delete(r.wireTombstones, i.wireID)
 	}
@@ -210,7 +223,7 @@ func (r *leaderInteractionRegistry) take(toolCallID string) (leaderInteraction, 
 	if ok {
 		delete(r.byTool, toolCallID)
 		r.markTombstoneLocked(toolCallID)
-		if i.kind == leaderKindPermission {
+		if i.kind.wireAnswerable() {
 			delete(r.byWire, i.wireID)
 			r.markWireTombstoneLocked(i.wireID)
 		}
@@ -226,8 +239,8 @@ func (r *leaderInteractionRegistry) get(toolCallID string) (leaderInteraction, b
 	return i, ok
 }
 
-// getByWire returns a read-only copy of the permission-kind entry addressed
-// by its numeric wire id without evicting.
+// getByWire returns a read-only copy of the wire-answerable (permission /
+// exit_plan_mode) entry addressed by its numeric wire id without evicting.
 func (r *leaderInteractionRegistry) getByWire(wireID int) (leaderInteraction, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -591,8 +604,12 @@ func (s *LeaderSubscriber) handleInteractionRequest(rawID json.RawMessage, topMe
 		s.handlePermissionBroadcast(wireID, params, sessionID, onEvent)
 		return
 	}
+	if method == "x.ai/exit_plan_mode" {
+		s.handlePlanBroadcast(wireID, params, sessionID, onEvent)
+		return
+	}
 	if method != "x.ai/ask_user_question" {
-		return // exit_plan_mode / mcp/elicit: observe-only (ruling B)
+		return // mcp/elicit: observe-only (ruling B)
 	}
 	var p askUserQuestionParams
 	if err := json.Unmarshal(interactionInnerParams(params), &p); err != nil || p.ToolCallID == "" || len(p.Questions) == 0 {
@@ -641,10 +658,66 @@ func (s *LeaderSubscriber) handlePermissionBroadcast(wireID int, params json.Raw
 			Type:      core.EventPermissionRequest,
 			RequestID: strconv.Itoa(wireID),
 			ToolName:  p.ToolCall.Title,
+			// Options pass-through: the card shows what grok actually offers
+			// (allow_always present → iOS "always" reply → allow_always answer),
+			// and a non-empty kind switches the card to the official style.
+			PermissionActions: permissionOptionActions(p.Options),
+			PermissionKind:    grokPermissionKind(p.ToolCall.Kind),
 		})
 	}
 	slog.Info("grokbuild: leader request_permission registered",
 		"session", sessionID, "toolCallId", p.ToolCall.ToolCallID, "wireId", wireID, "title", p.ToolCall.Title, "options", len(p.Options))
+}
+
+// handlePlanBroadcast registers an x.ai/exit_plan_mode broadcast (plan
+// approval — the shared interaction set member that fires when the agent
+// finishes its plan and asks to exit plan mode) and emits
+// core.EventPermissionRequest so the existing iOS permission card surfaces it
+// with zero iOS changes: iPhone 允许 maps to outcome "approved", 拒绝 to
+// "cancelled" (no feedback — the card has no text input; the TUI-only
+// freeform path stays TUI-local). planContent rides in the request itself
+// (exit_plan_mode/types.rs); the card title carries its first non-empty line
+// so the user can tell WHICH plan is awaiting approval.
+func (s *LeaderSubscriber) handlePlanBroadcast(wireID int, params json.RawMessage, sessionID string, onEvent func(core.Event)) {
+	var p exitPlanModeParams
+	if err := json.Unmarshal(interactionInnerParams(params), &p); err != nil || p.ToolCallID == "" {
+		slog.Warn("grokbuild: leader exit_plan_mode unparseable", "session", sessionID, "toolCallId", p.ToolCallID, "error", err)
+		return
+	}
+	if s.interactions != nil {
+		s.interactions.put(leaderInteraction{wireID: wireID, toolCallID: p.ToolCallID, kind: leaderKindPlan, plan: &p})
+	}
+	if onEvent != nil {
+		onEvent(core.Event{
+			Type:      core.EventPermissionRequest,
+			RequestID: strconv.Itoa(wireID),
+			ToolName:  planApprovalTitle(p.PlanContent),
+			// Plan approval is a binary allow/deny — no persistent variant, no
+			// tool kind. Leave PermissionKind empty (generic card style) and
+			// advertise only approve/reject so the card renders exactly two
+			// buttons.
+			PermissionActions: []string{"approve", "reject"},
+		})
+	}
+	slog.Info("grokbuild: leader exit_plan_mode registered",
+		"session", sessionID, "toolCallId", p.ToolCallID, "wireId", wireID, "planBytes", len(p.PlanContent))
+}
+
+// planApprovalTitle derives the iOS card title from the plan markdown: the
+// first non-empty line with its heading marker stripped, truncated, prefixed
+// so the card reads as a plan approval rather than a tool permission.
+func planApprovalTitle(planContent string) string {
+	for _, line := range strings.Split(planContent, "\n") {
+		t := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#"))
+		if t == "" {
+			continue
+		}
+		if len([]rune(t)) > 80 {
+			t = string([]rune(t)[:80])
+		}
+		return "计划审批: " + t
+	}
+	return "计划审批 (Exit plan mode)"
 }
 
 // handleInteractionLifecycle maps the official pending_interaction /
@@ -664,20 +737,22 @@ func (s *LeaderSubscriber) handleInteractionLifecycle(update, toolCallID, sessio
 			slog.Debug("grokbuild: leader interaction_resolved for unregistered tool call", "toolCallId", toolCallID)
 			return
 		}
-		if entry.kind == leaderKindPermission {
+		if entry.kind.wireAnswerable() {
 			// Leader-side resolution (TUI answered first, or the answer raced
 			// our attach): close the iOS permission card. The broadcast
 			// carries no outcome detail, only that the interaction completed.
 			// The follower-answer path does NOT emit here — the bridge-level
 			// optimistic close (handleResolvePermission) already broadcast
 			// permission_resolved for every subscriber, so this fires only
-			// for leader-side resolutions.
+			// for leader-side resolutions. Covers exit_plan_mode too: the
+			// TUI approving/rejecting its plan modal resolves the same way.
 			s.emitSessionEvent(core.Event{
 				Type:      core.EventPermissionResolved,
 				RequestID: strconv.Itoa(entry.wireID),
 				Content:   "resolved",
 			})
-			slog.Info("grokbuild: leader interaction_resolved closed permission", "toolCallId", toolCallID)
+			slog.Info("grokbuild: leader interaction_resolved closed wire interaction",
+				"toolCallId", toolCallID, "kind", entry.kind)
 			return
 		}
 		for i := range entry.params.Questions {
@@ -689,8 +764,8 @@ func (s *LeaderSubscriber) handleInteractionLifecycle(update, toolCallID, sessio
 		}
 		slog.Info("grokbuild: leader interaction_resolved closed question", "toolCallId", toolCallID)
 	case "pending_interaction":
-		// REQUEST frame already surfaced questions; permission pendings are
-		// observe-only visibility (ruling B) — log, no wire event.
+		// REQUEST frame already surfaced questions/permissions/plans;
+		// pendings are visibility only — log, no wire event.
 		slog.Debug("grokbuild: leader pending_interaction", "toolCallId", toolCallID)
 	}
 }
@@ -829,15 +904,15 @@ func (s *LeaderSubscriber) CancelQuestion(questionID string) (bool, error) {
 }
 
 // AnswerPermission records an iOS permission reply for a registered
-// session/request_permission broadcast and sends the ACP
-// requestPermissionResult with the ORIGINAL numeric id — upstream
+// session/request_permission or x.ai/exit_plan_mode broadcast and sends the
+// matching ACP response with the ORIGINAL numeric id — upstream
 // first-answer-wins consumes it, a TUI-first answer has already consumed it
 // (wire tombstone) and reads as silently-resolved here, mirroring
 // AnswerQuestion. requestID is the wire id string (the RequestID the emit
-// carried). resolved is always true on success: permission interactions
-// answer atomically (no multi-question accumulation). No
-// permission_resolved emit on this path — the bridge-level optimistic close
-// (handleResolvePermission) broadcasts it for every subscriber already.
+// carried). resolved is always true on success: both interactions answer
+// atomically (no multi-question accumulation). No permission_resolved emit on
+// this path — the bridge-level optimistic close (handleResolvePermission)
+// broadcasts it for every subscriber already.
 func (s *LeaderSubscriber) AnswerPermission(requestID string, result core.PermissionResult) (bool, error) {
 	wireID, err := strconv.Atoi(strings.TrimSpace(requestID))
 	if err != nil {
@@ -849,27 +924,39 @@ func (s *LeaderSubscriber) AnswerPermission(requestID string, result core.Permis
 	entry, ok := s.interactions.getByWire(wireID)
 	if !ok {
 		if s.interactions.consumedByWire(wireID) {
-			return true, nil // late answer to an adjudicated permission — silent
+			return true, nil // late answer to an adjudicated interaction — silent
 		}
 		return false, fmt.Errorf("grokbuild: no pending permission %s", requestID)
 	}
-	if entry.perm == nil {
-		return false, fmt.Errorf("grokbuild: pending interaction %s is not a permission", requestID)
-	}
-	outcome, err := permissionOutcome(entry.perm.Options, result.Behavior)
-	if err != nil {
-		return false, err // entry stays pending — the reply was invalid, not the interaction
+	var response any
+	switch {
+	case entry.kind == leaderKindPlan:
+		// exit_plan_mode outcomes (official types.rs): allow → approved,
+		// anything else → cancelled without feedback (the card has no text
+		// input; the TUI's typed-feedback path stays TUI-local).
+		outcome := "cancelled"
+		if result.Behavior == "allow" || result.Behavior == "always" {
+			outcome = "approved"
+		}
+		response = exitPlanModeExtResponse{Outcome: outcome}
+	case entry.perm != nil:
+		outcome, err := permissionOutcome(entry.perm.Options, result.Behavior)
+		if err != nil {
+			return false, err // entry stays pending — the reply was invalid, not the interaction
+		}
+		response = requestPermissionResult{Outcome: outcome}
+	default:
+		return false, fmt.Errorf("grokbuild: pending interaction %s is not answerable", requestID)
 	}
 	if _, ok := s.interactions.take(entry.toolCallID); !ok {
 		// resolved raced ahead between get and take — silent
 		return true, nil
 	}
-	if err := s.sendInteractionResponse(entry, requestPermissionResult{Outcome: outcome}); err != nil {
+	if err := s.sendInteractionResponse(entry, response); err != nil {
 		return false, err
 	}
 	slog.Info("grokbuild: leader permission answered",
-		"toolCallId", entry.toolCallID, "wireId", wireID, "behavior", result.Behavior,
-		"outcome", outcome.Outcome, "optionId", outcome.OptionID)
+		"toolCallId", entry.toolCallID, "wireId", wireID, "kind", entry.kind, "behavior", result.Behavior)
 	return true, nil
 }
 
@@ -906,9 +993,9 @@ func (s *LeaderSubscriber) validateQuestionSelection(toolCallID string, index in
 	return optionIDs, nil
 }
 
-// sendInteractionResponse encodes the JSON-RPC response (askUserQuestionExtResponse
-// or requestPermissionResult) with the ORIGINAL numeric wire id and writes it
-// through the live leader connection.
+// sendInteractionResponse encodes the JSON-RPC response (askUserQuestionExtResponse,
+// requestPermissionResult, or exitPlanModeExtResponse) with the ORIGINAL
+// numeric wire id and writes it through the live leader connection.
 func (s *LeaderSubscriber) sendInteractionResponse(entry leaderInteraction, result any) error {
 	rawID, err := json.Marshal(entry.wireID)
 	if err != nil {
