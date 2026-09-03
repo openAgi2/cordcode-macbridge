@@ -2307,7 +2307,7 @@ iOS 仓库=零改动（§24.1 论证：permission wire 面 iOS 侧已存在）
 
 ## 25. exit_plan_mode 开放 + 权限选项透传（2026-09-03 owner 裁决「剩下都做了」）
 
-状态：Mac 侧代码+测试完成，待 owner 真机验收（步骤见 §25.5）。
+状态：**已交付，owner 真机验收通过（2026-09-03 23:06，程度可接受）**。iPhone 卡出现、plan 审批可答；owner 同步裁决：iOS 当前两键卡（标题行+允许/拒绝）为本轮终点——完整体验（计划文档全文展示 + Mac TUI 全按钮集）属专门计划方案、须跨 backend 通用，本轮不编码，由跨 backend 调研文档先行（owner 已安排写文档 agent）。MCP elicit 仍 observe-only。
 
 ### 25.1 裁决与范围
 
