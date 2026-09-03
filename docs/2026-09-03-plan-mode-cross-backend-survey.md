@@ -12,6 +12,7 @@
 - **v1.2（2026-09-04）**：owner 质询后撤回「恢复 codex-web」并列前置选项（v1.1 采自评审 C1 建议原文）：恢复不解决 codex 审批层缺口（无 wire 审批在两个载体上同样成立），只省 plan 展示接线量，不足以推翻当天退役裁决；§4/§8 改为 codex-remote 单一载体基线，回滚机制仅留备注，并补列「codex-remote 经 Remote Control 链路的 plan 事件可达性」为待核实项。
 - **v1.3（2026-09-04）**：按第二轮评审（结论：v1.1 通过、修订质量优秀；B1/B2 争议均为文档方正确，一轮 B1 项由评审方撤回）修正 3 项 + B1 行加注。**A5** §6.3 三处 dsh 行号修正（keep-planning 块 `:336-341`、approve 返回 `:345-346`、dismiss catch 块 `:317-328`——修订时逐行亲验，原 `:331-336`/`:338-341`/`:312-316` 偏 5-8 行；系一轮评审交付遗漏项，非 v1.1 引入）；**A6** §4 路径统一 codex-rs/ 相对基准（§4.6 加路径基准注记，§4.1 两处 `codex-rs/` 前缀统一去除）；**A7** §4.6 清单去重 `:382`；修订记录 B1 行加注二轮撤回、防反向引用。**本轮全部采纳，无不予采纳项**。
 - **v1.4（2026-09-04）**：第三轮评审（结论：锚点层三轮干净、文档可移交开发者 agent；A5 修正比二轮建议更精确获确认——抛错块以 v1.3 的 `:338-340` 为准）唯一残留建议**采纳**：§4.6「未核实项」清单同步补列 v1.2 提出的「codex-remote 经 Remote Control 链路 plan 事件可达性」（此前仅在 §8.1-4/§8.3-7 正文出现），恢复「清单=正文」一致。三轮其余内容（移交就绪度判定、前置 A=owner 裁决项、前置 B=开发者技术核实项、推荐推进形态）**不写入正文**——理由：属流程/移交建议而非本调研事实，评审报告已完整记录，正文 §8.3/§8.4 已含对应决策项与未核实项，双写会产生两个真值源。
+- **v1.5（2026-09-04）**：owner 指令补注「退役目录警示」（文首表格）+ §4.6 codex-web 锚点标注 deprecated.md：`agent/{codex,codex-web,dsh,opencode}` 四目录已退役、**一律不要修改**，仅作只读历史参考；四个 deprecated.md 修订时逐一核验，日期与承接关系与 owner 指令一致。属 owner 直接指令，非评审项，无采纳/不采纳判定。
 
 | 评审项 | 处置 | 说明 |
 | --- | --- | --- |
@@ -62,6 +63,17 @@ iOS 仓=本次修订零读零写（main 已推进至 61f67bf，与调研时点 a
 ```
 
 调研局限（如实声明）：嵌套 `claude -p` 实测因本 shell 无凭据（宿主持有 `ANTHROPIC_AUTH_TOKEN`，Keychain 无 `Claude Code-credentials` 条目）返回 "Not logged in"，无法现场触发 ExitPlanMode 权限请求；Claude 真实样本改取自本机 `~/.claude/projects/**/*.jsonl` 会话 transcript（claude CLI 自写、与桥消费的 stream-json 同源格式）+ 官方文档/SDK 类型，样本来源已在节内逐条标注。
+
+> **退役目录警示（owner 2026-09-04 指令，v1.5 补注）**：以下四个 agent 目录**已退役，一律不要修改**，仅可作只读历史参考（本档引用 `agent/codex-web/interactions.go` 即属此类）；新功能禁止落在退役目录：
+>
+> | 目录 | 退役裁决 | deprecated.md 要点 |
+> | --- | --- | --- |
+> | `agent/codex/` | 2026-08-25 | exec/app_server 双模式退役；回滚=drivers 加回 `"codex"` |
+> | `agent/codex-web/` | 2026-09-04 | 指向 [退役完成报告](2026-09-04-codex-web-backend-retirement-完成情况.md)；回滚=drivers 加回 `"codex-web"` |
+> | `agent/dsh/` | 2026-08-17 | legacy `deepseek`（SDK stdio 路线）；现役 DeepSeek 面由 `dsh-web` 承接 |
+> | `agent/opencode/` | 2026-08-19 | 现役 OpenCode 面由 `opencode-web` 承接 |
+>
+> 现役承接关系：Codex→`codex-remote`、DeepSeek→`dsh-web`、OpenCode→`opencode-web`（与 CLAUDE.md「Backend runtime model」legacy 清单一致）。
 
 ---
 
@@ -285,7 +297,8 @@ iOS 仓=本次修订零读零写（main 已推进至 61f67bf，与调研时点 a
     测试=app-server/tests/suite/v2/plan_item.rs；core/tests/suite/items.rs:444-505；
     protocol/v2/tests.rs:682,715（requestApproval 反序列化）、:5107（requestUserInput/ToolRequestUserInputParams 测试，非 approval——v1.1 修正引用错位）；
     protocol/common.rs:2807-2867（内联 #[test]，:2813 起 v1 ExecCommandApprovalParams fixture）
-本仓锚点=agent/codex-web/interactions.go:244-306,385-415（codex-web 2026-09-04 退役，源码保留）；agent/codex-remote/session.go:121-123；
+本仓锚点=agent/codex-web/interactions.go:244-306,385-415（codex-web 2026-09-04 退役，源码保留、**只读勿改**——见
+    agent/codex-web/deprecated.md 与文首退役目录警示）；agent/codex-remote/session.go:121-123；
     think.md:482-491
 未核实项=安装版 Codex daemon 与 checkout 同版本性（未比对目标二进制版本）；协作模式主线恒启用（gate 已 Removed），
     但 app-server 协议类型仍标 EXPERIMENTAL——目标部署（ChatGPT Desktop / 远端 controller）是否提供协作模式能力须按部署验证；
