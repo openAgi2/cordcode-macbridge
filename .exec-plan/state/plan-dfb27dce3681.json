@@ -292,7 +292,7 @@
       "id": "phase2c-dsh-plan-impl",
       "title": "Phase 2c dsh plan-review 识别与应答",
       "description": "agent/dsh-web/approvals.go question 解析结构(:326-338) 补 intent/detail 字段（wire 锚点：dsh-v0.1.1-rc.2 packages/host/apiproxy/src/api/events.schema.ts:22-29,51）；intent.kind==\"plan-review\" 的 question 改 emit EventPermissionRequest（permissionKind=plan_review + Plan{Content=detail}，三动作）替代 user_input 卡，同批非 plan question 不受影响；应答适配：approve→选 intent.approve 指名 label（不硬编码 \"Approve\"）；requestChanges→Keep-planning label + respondQuestion custom=feedback（approvals.go:519+ 第 5 参）；quit→RejectQuestion（=dismiss/ASK_CANCELLED，D3）。core.UserInputQuestion 不加 Detail。",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase2",
       "kind": "impl",
       "depends_on": [
@@ -302,20 +302,22 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "status": "present",
+        "method": "impl",
+        "attestation": "re-verified",
+        "summary": "question/requested 补 intent 解析；plan-review question 改 emit permission_request（plan_review+三动作+PlanReview{content=detail}）；derivePlanReviewMeta fail-closed（approve label 必须在 options 且恰余一个 keep-planning label，否则退化通用卡）；respondPermissionRouted 按 planReviews 注册表路由到 question 机器（approve/requestChanges+custom/quit→rejectQuestion，legacy allow→approve label）；question/resolved 对 plan 卡发 permission_resolved+清理注册表；dshSession.RespondPermission 同路由",
+        "artifacts": [
+          "agent/dsh-web/approvals.go",
+          "agent/dsh-web/session.go"
+        ],
+        "checked_at": "2026-09-04"
       }
     },
     {
       "id": "phase2c-dsh-plan-tests",
       "title": "Phase 2c dsh plan-review 测试",
       "description": "fakedsh 测试补 plan-review intent 用例；断言：intent 识别、detail→plan.content、Keep-planning+custom 应答、quit→reject 整批。fixture 来源：官方 packages/host/apiproxy/tests/api-proxy-question.spec.ts + apps/web/tests/plan-control-row.e2e.ts + events.schema.ts 校验规则（均 @ dsh-v0.1.1-rc.2）。go test ./agent/dsh-web/... -count=1。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "tests",
       "depends_on": [
@@ -325,20 +327,21 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "automated",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "status": "present",
+        "method": "tests",
+        "attestation": "re-verified",
+        "summary": "go test ./agent/dsh-web/... -count=1 → ok（13.5s 全套含既有回归；首跑 2 处断言时序错——plain 先发/degrade 带 legacy question_asked——修正后过）；4 新测试：混合 batch 卡面分流、三动作翻译（label/custom/错误分支断言到 /api/respond 原文）、resolved 关卡+注册表清理、bad intent 退化；fixture 锚定 dsh-v0.1.1-rc.2 官方 events.schema.ts+user-questions.spec.ts+plan-mode index.ts",
+        "artifacts": [
+          "agent/dsh-web/plan_review_test.go"
+        ],
+        "checked_at": "2026-09-04"
       }
     },
     {
       "id": "phase2c-dsh-plan-regression",
       "title": "Phase 2c dsh 回归（N/A 说明）",
       "description": "backend 接线单元，e2e 面集中在 Phase 4。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "regression",
       "depends_on": [
@@ -348,20 +351,20 @@
       "notes": "",
       "verification": {
         "required": false,
-        "status": "missing",
-        "method": "manual",
+        "status": "present",
+        "method": "regression",
         "attestation": "self-attested",
-        "na_reason": "backend 接线单元；e2e 面由 phase4-mac-runtime-verification 与 phase4-owner-acceptance-matrix 集中覆盖（方案 §5 Phase 4）；fakedsh 级验证已在 phase2c-dsh-plan-tests。",
-        "summary": "",
+        "na_reason": "纯 backend 翻译层；同批 plain question 不受影响已由混合 batch 测试覆盖；fakedsh 级验证即达本层验收（方案 Phase 4：dsh 走单测与 fakedsh 级验证，运行态日志归 Phase 4）",
+        "summary": "na：fakedsh 级即本层验收面，运行态归 Phase 4",
         "artifacts": [],
-        "checked_at": null
+        "checked_at": "2026-09-04"
       }
     },
     {
       "id": "phase3-ios-wire-impl",
       "title": "Phase 3 iOS wire 解析与应答客户端 + protocol mirror",
       "description": "工作树 /Users/jacklee/Projects/cordcode-ios-plan-approval @ plan/approval-layer-ios。BackendModels / SessionProjection / SessionProjectionMapping：解析 permissionKind=plan_review + plan 载荷（沿现有 optional 解析模式；SessionProjectionMapping.swift:466 permissionOptions(from wireActions:) wireActions 优先机制）；CCCodeBridgeBackendClient.swift(:837-864) resolvePermission 扩展携带 planAction/feedback（behavior 兼容映射：approve→allow，其余→deny）；iOS docs/protocol/ mirror 同步 + 即时 commit。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "impl",
       "depends_on": [
@@ -370,21 +373,26 @@
       "source": "方案 §5 Phase 3 + §4.4",
       "notes": "",
       "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "implementation",
+        "status": "present",
         "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "iOS wire 解析与应答客户端 + protocol mirror 完成：mirror commit 269f652f（README/bridge-v1.md/types.ts 计划审批 hunks）；Message.swift ToolPermissionAction+requestChanges/quit、PlanReviewPayload、ToolStep.planReview；SessionProjectionPart.permissionPlan + mergedTool 全字段非空合并（含修复既有 kind/patterns 丢失缺口，镜像 Mac mergeToolPart）；SessionProjectionMapping.mapPlanReview + permissionOptions 词表；CCCodeBridgeBackendClient mapWirePlanReview（修 BridgeAnyCodable 形参）+ requestPlanChanges/quitPlanReview；CCCodeBridgeClient.resolvePermissionPlan（requirement + 兼容默认 + 实现带 planAction/可选 feedback 省略空值）；BackendClient 协议 + 抛错默认；ChatViewModel respondToPendingPermission 增 feedback 形参与两动作分发 + 本地状态文案。",
+        "artifacts": [
+          "OpenCodeiOS/OpenCodeiOS/Models/Message.swift",
+          "OpenCodeiOS/OpenCodeiOS/Models/SessionProjection.swift",
+          "OpenCodeiOS/OpenCodeiOS/Models/SessionProjectionMapping.swift",
+          "OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeBackendClient.swift",
+          "OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeClient.swift",
+          "OpenCodeiOS/OpenCodeiOS/Services/Backend/BackendClient.swift",
+          "OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+Generation.swift",
+          "OpenCodeiOS/docs/protocol/ (commit 269f652f)"
+        ]
       }
     },
     {
       "id": "phase3-ios-wire-tests",
       "title": "Phase 3 iOS 解析/动作映射定向单测",
       "description": "定向单测：projection 映射（plan 载荷解码/合并）、动作映射（三键→planAction/behavior）；scripts/run.sh test -only-testing:CCCodeTests/<相关类> 通过。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "tests",
       "depends_on": [
@@ -393,21 +401,23 @@
       "source": "方案 §5 Phase 3 验收",
       "notes": "",
       "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "automated",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "status": "present",
+        "attestation": "re-verified",
+        "summary": "PlanApprovalWireTests 10/10 通过（2026-09-04 04:33 模拟器 iPhone 17 Pro Max）：resolve wire 映射（requestChanges/quit→planAction+deny、approve 纯 allow D5）、pump plan 载荷解码、投影映射 + 薄 patch 防擦除合并、render spec 计划标题/副标题/payload。相邻回归 SessionProjectionMappingTests 23/23、TaskDockStateDerivationTests 26/26、BridgePermissionWireBehaviorTests 11/11、MessageWebEventRoutingTests 全过。",
+        "artifacts": [
+          "/tmp/plan-approval-test5.log",
+          "/tmp/pa-test-map.log",
+          "/tmp/pa-test-dock.log",
+          "/tmp/pa-test-wire.log",
+          "/tmp/pa-test-route.log"
+        ]
       }
     },
     {
       "id": "phase3-ios-wire-regression",
       "title": "Phase 3 iOS wire 层回归（N/A 说明）",
       "description": "解析/客户端层，无独立 UI 面。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "regression",
       "depends_on": [
@@ -416,21 +426,19 @@
       "source": "方案 §5 Phase 3",
       "notes": "",
       "verification": {
-        "required": false,
-        "status": "missing",
-        "method": "manual",
+        "status": "present",
         "attestation": "self-attested",
-        "na_reason": "解析/客户端层无独立 UI 面；由 phase3-ios-wire-tests（定向单测）与 phase3-ios-plancard-regression（真机安装核验）覆盖。",
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "required": false,
+        "na_reason": "解析/应答客户端层无独立 UI 面；风险已由 phase3-ios-wire-tests 的定向单测（re-verified 10/10）与相邻回归类覆盖。",
+        "summary": "N/A（见 na_reason）",
+        "artifacts": []
       }
     },
     {
       "id": "phase3-ios-plancard-impl",
       "title": "Phase 3 iOS 独立计划卡 UI（D1）",
       "description": "TaskDockView.swift(:168-173 permissionKind 分支区) + AssistantTimelineRenderSpec.swift(:672)：permissionKind==\"plan_review\" 分支→独立计划卡（D1 裁决）：卡面=标题+折叠预览（前 N 行）；点击进入全文 markdown 视图（10KB 级，默认折叠高度+展开；无传输截断，方案 §2.2）；三键动作栏（approve/requestChanges/quit，沿用 permissionOptions wireActions 优先）；requestChanges 弹多行反馈输入（D4 可选）；ChatViewModel+TaskDock.swift(:147-149) 接线。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "impl",
       "depends_on": [
@@ -439,21 +447,27 @@
       "source": "方案 §5 Phase 3 + D1/D2/D4",
       "notes": "",
       "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "implementation",
+        "status": "present",
         "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "独立计划卡 UI（D1/D2）完成：TaskDockView 计划卡分支（先于官方卡判断）三键 放弃/打回修改/批准 + 点卡开全文 sheet + 打回开反馈 sheet（D4 空反馈合法，sheet 层 trim 后空→nil）；PlanReviewSheets.swift（全文 MarkdownMessageView + 底部三动作；反馈 TextEditor + 提交/取消）；ChatUIKitContainerView 接线 onPlanReviewTapped/onPlanRequestChanges + pageSheet 呈现 + handleTaskDockPermissionAction 增 feedback 透传；AssistantTimelineRenderSpec 计划标题/副标题/payload 正文接入；PermissionDockModel.planReview 透传；UITestIdentifiers 四个新标识符；ToolPermissionAction 穷举 switch 补齐（UITestIdentifiers/DetailSheets×2/ChatViewModel×2）。",
+        "artifacts": [
+          "OpenCodeiOS/OpenCodeiOS/App/TaskDockView.swift",
+          "OpenCodeiOS/OpenCodeiOS/Views/Chat/PlanReviewSheets.swift",
+          "OpenCodeiOS/OpenCodeiOS/App/ChatUIKitContainerView.swift",
+          "OpenCodeiOS/OpenCodeiOS/App/AssistantTimelineRenderSpec.swift",
+          "OpenCodeiOS/OpenCodeiOS/Models/TaskDockState.swift",
+          "OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+TaskDock.swift",
+          "OpenCodeiOS/OpenCodeiOS/Utilities/UITestIdentifiers.swift",
+          "OpenCodeiOS/OpenCodeiOS/Views/Chat/DetailSheets.swift",
+          "OpenCodeiOS/OpenCodeiOSTests/PlanApprovalWireTests.swift"
+        ]
       }
     },
     {
       "id": "phase3-ios-plancard-tests",
       "title": "Phase 3 iOS 计划卡定向测试",
       "description": "定向单测（render spec 映射等可测面）；不加 snapshot/UI test（未授权）；scripts/run.sh test -only-testing:CCCodeTests/<相关类> 通过。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "tests",
       "depends_on": [
@@ -462,36 +476,36 @@
       "source": "方案 §5 Phase 3 验收 + §6 iOS 行",
       "notes": "",
       "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "automated",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "status": "present",
+        "attestation": "re-verified",
+        "summary": "计划卡可测面（render spec 标题/副标题/payload/preview，PlanApprovalWireTests §D 两用例）通过；按方案 §276 不加 snapshot/UI test（未授权）。同一轮 10/10 + 相邻类回归全绿。",
+        "artifacts": [
+          "/tmp/plan-approval-test5.log"
+        ]
       }
     },
     {
       "id": "phase3-ios-plancard-regression",
       "title": "Phase 3 iOS 真机安装核验",
       "description": "交付前一次 scripts/run.sh device（有连接真机时，探测以 devicectl 为准）；安装启动成功 + 日志级核验。UI 视觉验收归 phase4-owner-acceptance-matrix（owner 授权后）。",
-      "status": "pending",
+      "status": "blocked",
       "phase": "phase3",
       "kind": "regression",
       "depends_on": [
         "phase3-ios-plancard-tests"
       ],
       "source": "方案 §5 Phase 3 验收",
-      "notes": "",
+      "notes": "\n[2026-09-04] 真机探测：devicectl list devices 显示 chuck?iPhone11 与 iPhone 16 Pro 均 unavailable；iOS 侧 wire/plancard 测试已全绿，仅真机安装级 regression 被环境阻断。",
       "verification": {
         "required": true,
         "status": "missing",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
+        "summary": "blocked：2026-09-04 devicectl 探测两台实体 iPhone（chuck?iPhone11、iPhone 16 Pro）均 unavailable，无连接真机，无法执行 scripts/run.sh device 安装与日志级真机核验。需 owner 连接任一真机后解除。",
+        "artifacts": [
+          "devicectl list devices 输出：2 台均 unavailable（2026-09-04）"
+        ],
         "checked_at": null
       }
     },
@@ -499,7 +513,7 @@
       "id": "phase4-mac-runtime-verification",
       "title": "Phase 4 Mac Release 安装 + 运行态核验",
       "description": "Release 构建→覆盖安装 /Applications→killall CordCodeLink + pkill -f cordcode-bridge-runtime→open 重启→运行态核验（缺一不可）：进程代际 ps lstart 晚于本次构建；新版本特征输出（plan_review 相关日志行）；8777 监听者为 /Applications 内嵌 runtime；pgrep 核对无临时产物残留。Mac 行为级自验：claude ExitPlanMode 用真实会话触发（可行时）+ dsh/grok fakedsh/单测级证据引用。禁止临时构建产物。构建前按 P0 门在实际构建工作目录重新生成来源清单。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase4",
       "kind": "regression",
       "depends_on": [
@@ -509,13 +523,14 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "mixed",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "status": "present",
+        "attestation": "re-verified",
+        "summary": "生产路径级运行态核验全过（2026-09-04，正式 /Applications runtime，非临时产物）：①进程代际：runtime PID 76371 lstart 04:39:29 晚于构建完成 04:38:56，8777 由该新 PID 监听，两进程均来自 /Applications/CordCodeLink.app，无临时产物残留；②产物身份：安装内嵌 runtime 与构建产物字节一致（cmp），strings 含 92f7d68cd808；③行为级特征输出（本提交独有）：真实 claude 会话（--permission-mode plan）触发 ExitPlanMode → runtime 日志 \"claudeSession: permission request tool=ExitPlanMode\"，wire 层 permissionKind=plan_review、permissionActions=[approve requestChanges quit]、plan.content 1172 字节 markdown 全文经观察连接送达；resolve_permission behavior=allow 应答 ok，claude 收到批准退出 plan 模式并继续执行（后续 Write 权限请求出现证明）。④复位：测试探针设备已 revoke，claude 权限模式已恢复 default，测试 child 已终止。E2E 驱动脚本 /tmp/plan-approval-e2e/main.go（不进仓）。",
+        "artifacts": [
+          "/tmp/plan-approval-e2e-run4.log（E2E 驱动全输出：PAIRING/HELLO/OBSERVE/PLAN_EVENT/RESOLVE PASS）",
+          "/tmp/plan-approval-mac-release.log（Release 构建 BUILD SUCCEEDED + runtime commit 92f7d68cd808）",
+          "go-bridge.log 2026-09-04 04:59:48 ExitPlanMode 权限请求 + 05:03:48 模式恢复 default"
+        ]
       }
     },
     {
@@ -545,7 +560,7 @@
       "id": "phase4-changelog-secretscan",
       "title": "Phase 4 CHANGELOG 双仓 + secret scan",
       "description": "CHANGELOG.md [Unreleased] 双仓各按现有格式追加一节（日期—主题：改了什么/有何提升）；secret scan（gitleaks pinned）。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase4",
       "kind": "impl",
       "depends_on": [
@@ -555,13 +570,14 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "status": "present",
+        "attestation": "re-verified",
+        "summary": "双仓 CHANGELOG [Unreleased] 各追加一节：iOS dbf0c048（计划审批呈现与应答层）；Mac 已写入待提交（新功能：计划审批层第一批 grok/claude/dsh）。gitleaks v8.21.2（CI 同 pin）双仓 git+dir 四项扫描全部 no leaks found：Mac 1064 commits/121MB、iOS 736MB。",
+        "artifacts": [
+          "Mac CHANGELOG.md [Unreleased] 首条（计划审批层）",
+          "iOS commit dbf0c048 CHANGELOG",
+          "gitleaks 输出：Mac git/dir + iOS git/dir = 4× no leaks found"
+        ]
       }
     }
   ]
