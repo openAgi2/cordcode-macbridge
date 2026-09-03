@@ -7,16 +7,22 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // nextRequestID generates sequential JSON-RPC request IDs starting from 1.
+// Mutex-guarded: the catalog singleton serves both the discovery poll loop and
+// user-triggered admin RPCs, which can allocate IDs concurrently.
 type requestIDCounter struct {
-	n int
+	mu sync.Mutex
+	n  int
 }
 
 func (c *requestIDCounter) next() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.n++
 	return c.n
 }

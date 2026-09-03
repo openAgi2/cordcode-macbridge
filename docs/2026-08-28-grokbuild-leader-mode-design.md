@@ -1854,12 +1854,18 @@ session，**常驻 leader 进程与 `--no-leader stdio` 子进程（MvpAgent）�
   serde lowercase `"build"`）；`resetToAuto` 缺省 false。官方测试
   `agent/mvp_agent/tests/session_rename_tests.rs:31-42` 直接以
   `{"sessionId", "title", "cwd"}` JSON 调 `ExtRequest::new("x.ai/session/rename", …)`。
-- **wire 帧**：`acp::ExtRequest` = JSON-RPC 裸方法名请求（method 字段即
-  `"x.ai/session/rename"`，params 内联，数字 id）——与 CordCode catalog rail 现有
-  `callRPCWithCtx`（`catalog_session_list.go` 发 `initialize`/`session/list`）完全同构，
-  不需要新帧格式。官方客户端侧证据：`xai-grok-pager/src/app/effects/mod.rs:4734-4765`
-  `session_rename_rpc`（`acp::ExtRequest::new` → `acp_send` → 响应取 `error` 字段）；
-  `actions.rs:2096-2134` `RenameSessionRequest`（`resetToAuto` false 时 skip 序列化）。
+- **wire 帧（2026-09-03 探针实测修正）**：ext 方法在 stdio JSON-RPC 上**必须带 `_`
+  前缀**——wire method 字段为 `"_x.ai/session/rename"`（agent-client-protocol crate 的
+  wire 约定，与 leader socket 半包装形态一致；`_` 剥离发生在 acp crate wire 层，grok
+  源码内无对应逻辑）。**裸 `"x.ai/session/rename"` 在 grok 1.0.13 上返回 -32601
+  Method not found**——本节初稿据 checkout 源码写的「裸方法名」结论已被探针推翻。
+  帧的其余部分（params 内联 camelCase、数字 id、单行 JSON-RPC 2.0）与 catalog rail
+  现有 `callRPCWithCtx` 同构。官方客户端侧证据：`xai-grok-pager/src/app/effects/
+  mod.rs:4734-4765` `session_rename_rpc`（`acp::ExtRequest::new` → `acp_send` → 响应取
+  `error` 字段）；`actions.rs:2096-2134` `RenameSessionRequest`（`resetToAuto` false 时
+  skip 序列化）。**错误形状**：官方错误（`session not found: {id}`、title 校验文案）
+  在 JSON-RPC error 的 **data 字段**（message 是泛化 "Invalid request"）——透传必须带
+  data。
 - **校验链**（官方已在边界做，CordCode 无需复刻）：
   1. `title.len() > MAX_TITLE_BYTES`（=464 字节，`session/persistence.rs:59`）→ 报错；
   2. `sanitize_rename_title`：剥 C0/C1 控制字符 + bidi/format overrides（U+200E/200F/
@@ -1929,10 +1935,12 @@ func (a *Agent) RenameSession(ctx, sessionID, title) (*core.AgentSessionInfo, er
 1. 预检：trim sessionId/title 非空（与 `handlers.go:2302-2308` 的 missing_param 门
    互补，agent 层不重复官方校验——464 字节/100 字符/控制字符清洗由官方边界做，错误
    原文透传给 iOS）；
-2. `catalogClientInstance(ctx)` → `callRPCWithCtx(ctx, id, "x.ai/session/rename",
-   {"sessionId": …, "title": …}, 60s)`——**不发 cwd**（`list_summaries(None)` 跨目录
-   匹配，实现最简且行为正确；带 cwd 列为可选优化）、不发 kind（缺省 Build 即目标语义）、
-   不发 resetToAuto（bridge-v1 rename 协议只有 title，iOS 无 unpin UI）；
+2. `catalogClientInstance(ctx)` → `sessionAdminCall(ctx, "_x.ai/session/rename",
+   {"sessionId": …, "title": …})`（60s 超时；独立于 `callRPCWithCtx` 的 raw-call helper，
+   因为通用路径的错误格式化会丢 `error.data`——官方细节文案全在 data）——**不发
+   cwd**（`list_summaries(None)` 跨目录匹配，实现最简且行为正确；带 cwd 列为可选
+   优化）、不发 kind（缺省 Build 即目标语义）、不发 resetToAuto（bridge-v1 rename
+   协议只有 title，iOS 无 unpin UI）；
 3. 响应 `{"success": true}` → 构造 `AgentSessionInfo{ID, Summary: title, ModifiedAt:
    time.Now()}`（**dsh-web 模式**：官方响应不含完整 Session.Info，本地构造返回值，
    参考 `agent/dsh-web/sessions.go:290-305`）；
@@ -1956,9 +1964,8 @@ func (a *Agent) DeleteSession(ctx, sessionID) error
 4. 成功后 `a.signalCatalogRefresh()`（磁盘目录已删 → fingerprint 少一行 →
    `sessions_changed`）。iOS 正在查看被删 session 的窗口由列表刷新自然收口（与
    Claude/OpenCode 删除路径同语义，无特判）。
-5. 可选收敛校验（实施期决定，非必须）：delete 成功后重拉一次列表确认 absence——
-   官方 pager 自身也未做此校验（信任 `{"success":true}`），CordCode 对齐官方信任
-   边界即可，不做额外远端往返。
+5. 不做额外收敛校验：官方 pager 自身信任 `{"success":true}`；且探针实测 delete 对
+   不存在 id **幂等成功**（§23.5）——陈旧列表上的重复删除不报错，无需 absence 校验。
 
 #### 23.4.3 capability 变化（零手写，接口断言自动推导）
 
@@ -1982,18 +1989,26 @@ func (a *Agent) DeleteSession(ctx, sessionID) error
 - **不为 grok TUI 端做额外同步**：官方 rename/delete 内部已通知 leader gateway
   （`x.ai/session_notification`），Mac 端 grok TUI 自己收口。
 
-### 23.5 版本偏移与 Phase 0 探针（实施前置）
+### 23.5 版本偏移与 Phase 0 探针（已执行，2026-09-03）
 
 - 本机目标二进制 **grok 1.0.13**（`5e9a58528b76`）与 checkout `72a61251` 存在版本
   偏移（§2 既有口径）；rename/delete 的 wire 形态在 1.0.13 上**必须先探针实证**，
   不得只凭 checkout 结论编码。
-- **零成本探针**（沿用 follower-question 调研方法论：零 prompt、零 API 消耗、用完即删）：
-  catalog 子进程握手后发 `x.ai/session/rename`，params `{"sessionId":
-  "probe-nonexistent-0000", "title": "probe"}`——期待 JSON-RPC error `session not
-  found: probe-nonexistent-0000` 而非 method not found：证明 1.0.13 已有该 ext 分派且
-  无任何副作用；delete 同一分派表（`acp_agent.rs:2320-2324` 同一 match 臂），rename
-  探针通过即双方法分派存在（delete 可再发一次不存在 id 确认错误形状）。探针脚本与
-  输出归档到本节附注后再进入实施。
+- **零成本探针**（沿用 follower-question 调研方法论：零 prompt、零 API 消耗、用完即删；
+  临时测试文件 `probe_rename_delete_ext_test.go`，已删）：catalog 子进程握手后对同一个
+  不存在 sessionId 试了五种 wire 形态。**实测结果**：
+
+  | wire method | 结果 |
+  | --- | --- |
+  | `_x.ai/session/rename` | `-32600 Invalid request`，**data: `"session not found: cordcode-probe-nonexistent-0000"`** —— 分派存在，穿透到 rename handler 的 session 匹配 |
+  | `_x.ai/session/delete` | **`{"success":true}`** —— 分派存在；不存在 id **幂等成功**（与官方 `delete_session_history` 语义一致） |
+  | `_x.ai/session/archive` | `-32601`，data `"unknown ACP extension method: x.ai/session/archive"` —— 1.0.13 同样无 archive |
+  | 裸 `x.ai/session/rename` / `x.ai/session/delete` | `-32601 Method not found` —— 裸名不可用 |
+  | `ext_method` 包装 / `session/request` 包装 | `-32601 Method not found` |
+
+  三个实施级结论：① wire 方法名必须 `_` 前缀（§23.2.2 已修正）；② 错误细节在
+  `error.data`；③ delete 幂等——重复删除陈旧列表里的 session 不报错，CordCode 无需
+  额外收敛校验。
 
 ### 23.6 测试与验收
 

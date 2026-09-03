@@ -540,8 +540,8 @@ agent session 等价。
 | `diagnostics` | `DiagnosticsProvider` |
 | `usage_reporting` | `TokenUsageReporter` |
 | `permission_mode` | `ModeSwitcher`（含 dsh-web 官方 `/permission` 预设） |
-| `session_mutation` | rename + archive |
-| `session_delete` | `SessionDeleter` |
+| `session_mutation` | rename + archive（grokbuild 只有 rename 无 archive，故不宣告——官方无 `x.ai/session/archive` 方法，见 leader 设计 §23） |
+| `session_delete` | `SessionDeleter`（grokbuild 走官方 `_x.ai/session/delete` ext 方法，catalog rail） |
 | `session_pin` | `SessionPinner`（独立于 mutation；Codex/OpenCode/dsh-web 可只有 pin） |
 | `content_chunking` | Claude `StaticCapabilities`，配合 `fetch_content_chunk` |
 | `permission_resolve` | `ToolAuthorizer`；dsh-web（`/api/respond`）、opencode-web（SSE `permission.asked` + folding）宣告；OpenCode/Codex 不宣告 |
