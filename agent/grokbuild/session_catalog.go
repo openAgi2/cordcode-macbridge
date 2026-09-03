@@ -353,6 +353,7 @@ type grokSummaryFile struct {
 		CWD string `json:"cwd"`
 	} `json:"info"`
 	SessionSummary  string `json:"session_summary"`
+	GeneratedTitle  string `json:"generated_title"`
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
 	LastActiveAt    string `json:"last_active_at"`
@@ -401,9 +402,18 @@ func parseSummaryFile(path string) (core.AgentSessionInfo, bool) {
 	if msgCount == 0 {
 		msgCount = s.NumMessages
 	}
+	// Official display_title (persistence.rs:1108 @72a61251): a non-blank
+	// generated_title wins over session_summary, regardless of title_is_manual.
+	// The official /rename only writes generated_title and leaves session_summary
+	// stale, so reading session_summary alone reports pre-rename titles on the
+	// get_session detail path (the list path already resolves via session/list).
+	title := strings.TrimSpace(s.GeneratedTitle)
+	if title == "" {
+		title = strings.TrimSpace(s.SessionSummary)
+	}
 	return core.AgentSessionInfo{
 		ID:           id,
-		Summary:      strings.TrimSpace(s.SessionSummary),
+		Summary:      title,
 		Directory:    cwd,
 		MessageCount: msgCount,
 		ModifiedAt:   mod,

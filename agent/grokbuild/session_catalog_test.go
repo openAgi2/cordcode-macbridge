@@ -125,6 +125,54 @@ func TestListLocalSessions_EmptyHome(t *testing.T) {
 	}
 }
 
+// TestListLocalSessions_DisplayTitleMirrorsOfficialRename pins the official
+// display_title() priority against the real post-rename summary.json shape
+// (observed on disk 2026-09-03): /rename writes generated_title +
+// title_is_manual and leaves session_summary at the old auto title. The
+// get_session fallback reads this list, so session_summary alone would
+// overwrite the fresh rename title with the stale one.
+func TestListLocalSessions_DisplayTitleMirrorsOfficialRename(t *testing.T) {
+	home := t.TempDir()
+	writeSessionFixture(t, home, "/tmp/project-a", "sid-manual", map[string]any{
+		"info":            map[string]any{"id": "sid-manual", "cwd": "/tmp/project-a"},
+		"session_summary": "讲个漫威电影宇宙故事 200 字左右",
+		"generated_title": "哈哈讲个漫威电影宇宙故事 200 字左右",
+		"title_is_manual": true,
+		"updated_at":      "2026-09-03T10:10:40Z",
+	}, nil)
+	// Auto-generated titles also live in generated_title (no manual flag);
+	// display_title does not gate on title_is_manual.
+	writeSessionFixture(t, home, "/tmp/project-b", "sid-auto", map[string]any{
+		"info":            map[string]any{"id": "sid-auto", "cwd": "/tmp/project-b"},
+		"session_summary": "old auto summary",
+		"generated_title": "auto generated title",
+	}, nil)
+	// Blank generated_title falls back to session_summary (official
+	// display_title_falls_back_on_empty_generated_title).
+	writeSessionFixture(t, home, "/tmp/project-c", "sid-blank", map[string]any{
+		"info":            map[string]any{"id": "sid-blank", "cwd": "/tmp/project-c"},
+		"session_summary": "fallback summary",
+		"generated_title": "   ",
+	}, nil)
+
+	list, err := listLocalSessions(context.Background(), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, s := range list {
+		got[s.ID] = s.Summary
+	}
+	want := map[string]string{
+		"sid-manual": "哈哈讲个漫威电影宇宙故事 200 字左右",
+		"sid-auto":   "auto generated title",
+		"sid-blank":  "fallback summary",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("titles = %v, want %v", got, want)
+	}
+}
+
 func TestQuerySessionsFromSQLite_ParsesFields(t *testing.T) {
 	// Unit-test the parser path without requiring a real sqlite file by
 	// exercising parseSQLiteUpdatedAt + merge of sqlite-only rows in listLocalSessions
