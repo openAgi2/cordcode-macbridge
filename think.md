@@ -77,6 +77,25 @@ owner 验收 rename 功能：列表标题已改、消息页 header 停留旧名�
   /tmp/cccode-rename-investigate/probe_getsession.py，shape 见
   pairing_handler.go / auth_gate.go）。
 
+## 2026-09-03 iOS automation open-session 冷启动竞态：桩 client 本地抛错 = 无 wire RPC（已修复）
+
+§23.8 排查中顺带暴露、随后修复的 E2E 自动化路径坑（iOS 主树工作区，随 iOS 侧提交）：
+
+- **`BridgeUnavailableBackendClient` 桩是「本地抛错」而非「慢」**。冷启动 hello_ack
+  未到达时 `resolveBackendClient` 返回桩，桩的全部方法（含 getSession）立即 throw
+  unavailableError()——不产生 wire RPC、被 `try?` 静默吞掉、无重试。症状：占位
+  Session（「新会话」）永久停留，Mac 日志**完全没有** get_session（不是失败，是
+  没发出）。排障时「Mac 侧无日志」先查 iOS 是否拿的是桩。
+- **修复 = 有界等待真实 client**（ContentView.swift `openSession` Task 内 10s/200ms
+  轮询 `client is BridgeUnavailableBackendClient`）+ 等待窗口内用户切走
+  （`selectedSession?.id != sessionID`）则不回写。同函数还承接通知点开
+  （notification-pending/live）路径，一并受益；用户手动打开本就不受影响。
+- **devicectl env 注入要点**：host 侧 `DEVICECTL_CHILD_<KEY>=value` 经
+  `devicectl device process launch --terminate-existing` 转发给 app（app 读
+  `OPENCODE_OPEN_SESSION_ID` 等，AppLaunchAutomation.swift）；不加
+  `--terminate-existing` 只前台化已运行进程，env 不被消费。验证配方：注入重启 →
+  grep go-bridge.log 出现新 get_session → 截图 header 显示真实标题。
+
 ## 2026-09-02 Grok model/effort 实测取证：checkout ≠ 目标二进制，snake/camel 已分叉
 
 grok 上游 source-first 核验时最关键的发现：**本机 checkout

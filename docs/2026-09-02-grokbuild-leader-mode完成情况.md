@@ -178,7 +178,13 @@ B 路线收官后同日追加四个三元组（12 todos，见队列 followup-/rf
 - iOS 发送 Grok 模型改用 list_models 条目 id（transcript 底层 id 仅用于显示）——
   2026-09-02 登记；Mac 侧已部署 unknown model id 软化兜底（`a0b0f11`），iOS 根治另案。
 - iOS automation open-session 冷启动 get_session 竞态（2026-09-03 §23.8 排查中发现；
-  仅影响 E2E/UITest 自动化路径，不影响用户手动打开；设计文档 §23.8 末尾有记录）。
+  设计文档 §23.8 末尾有记录）——**已修复（2026-09-03，iOS 主树工作区）**：根因是冷启动
+  hello_ack 未到达时 `resolveBackendClient` 返回 `BridgeUnavailableBackendClient` 桩，
+  getSession 本地即抛被 `try?` 吞掉、无 wire RPC；修复 = ContentView.swift `openSession`
+  的 Task 内有界等待（10s/200ms 轮询）真实 client 建立后再解析，等待窗口内用户切走则
+  不回写。同路径的通知点开（notification-pending/live replay）一并受益。真机验证：
+  env 注入重启后 Mac 日志出现 get_session（19:00:47 req_2）且 header 显示真实标题。
+  （iOS 仓有他轮未提交改动，本修复暂留在工作区随 iOS 侧一并提交。）
 
 （原列于此的 roster 通知消费、model/provider/effort 缺口已于 2026-09-02 晚间完成并
 入账本报告 §1.1，think.md 总账对应行已删除。）
