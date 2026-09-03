@@ -1793,3 +1793,247 @@ T1–T33 与 unknown 第四状态术语及源码行号、连续负样本不重�
 
 本节及头部状态更新仅记录复核结论，不改变 §0–§11 规范正文；规范正文的变更（若实施期
 发现必要）须按 §0.3 纪律回写本文并重新评审受影响条目。
+
+---
+
+## 23. Session rename / delete / archive 实施方案（2026-09-03 追补；owner 指令：只补方案，不写代码）
+
+> 背景：owner 在 iOS Grok Build 模式某 session 的「更多设置」菜单依次试了重命名 / 归档 /
+> 删除，三项全部报错。owner 裁定先读 grok-build 官方源码、把实施方案补进本文档，
+> **本轮不写任何产品代码**。本节按 §0.3 追补纪律新增，不改动 §0–§22 的既有结论。
+
+### 23.1 问题定位：既没设计也没实现
+
+owner 看到的三条报错全部来自 **go-bridge 通用 fallback**，不是 grokbuild 自己的错误路径：
+
+| iOS 文案 | 来源 | 触发条件 |
+| --- | --- | --- |
+| 重命名失败：session rename not yet supported | `go-bridge/handlers.go:2309`（`handleRenameSession`） | agent 未实现 `core.SessionRenamer` |
+| 归档失败：session archive not yet supported | `go-bridge/handlers.go:2344`（`handleArchiveSession`） | 未实现 `core.SessionArchiver` |
+| 删除失败：backend does not support session deletion | `go-bridge/handlers.go:4283`（delete handler） | 未实现 `core.SessionDeleter` |
+
+- `agent/grokbuild/` 对三接口 `grep` 零命中——**三项能力全部未实现**。
+- 本文档 §4 功能面映射未覆盖 session 增删改三项——**也未设计**（leader 模式九轮评审
+  的范围是观察/应答面，不含 session 管理）。
+- capability 推导（`go-bridge/backend_capabilities.go:47-51/56-58`）：`session_mutation`
+  需 **Renamer + Archiver 双实现**才宣告（AND 语义）；`session_delete` 由 Deleter 独立
+  宣告。grokbuild 目前两者都不宣告。
+- iOS 入口结构（iOS 仓 `ContentView.swift:873-879` + `ChatUIKitContainerView.swift:892-921`）：
+  「更多设置」header 菜单的**重命名/归档/删除三个回调恒提供、无 capability 门**（只有
+  「分享」gate 在 `supportsSessionSharing`），点击后靠后端 RPC 报错兜底——这就是 owner
+  在 grokbuild 上仍能看到三个入口、点了才报错的原因。侧边栏（`SidebarView.swift:37`）
+  三项 gate 在同一 `session_mutation`，grokbuild 未宣告故隐藏（现状正确）。
+
+### 23.2 官方源码证据（上游 `/Users/jacklee/Projects/grok-build` @ `72a61251`，clean）
+
+`x.ai/` 命名空间全量枚举（`grep -rhon '"x\.ai/[a-z_/]*"' | sort | uniq -c`）：
+
+- **`x.ai/session/rename` 存在**（5 处引用）；**`x.ai/session/delete` 存在**（3 处引用）；
+- **无 `x.ai/session/archive`**——官方 ACP 面没有 archive 概念，零命中。
+
+#### 23.2.1 分派层：agent-level，无 resident session 门
+
+`crates/codegen/xai-grok-shell/src/agent/mvp_agent/acp_agent.rs:2320-2324`：
+
+```rust
+"x.ai/session/rename" | "x.ai/session/delete"
+| "x.ai/session/update_mcp_servers" | "x.ai/session/fork"
+| "x.ai/plugins/reload" | "x.ai/commands/list" => {
+    crate::extensions::session_admin::handle(self, &args).await
+}
+```
+
+ext 分派在 `ext_method`（`acp_agent.rs:2268`），是 **agent-level**——不要求 resident
+session，**常驻 leader 进程与 `--no-leader stdio` 子进程（MvpAgent）都能响应**。CordCode
+现有的进程级单例 catalog 子进程（`grok agent --no-leader stdio`，§5.4）天然具备响应能力。
+
+#### 23.2.2 rename 语义（`extensions/session_admin.rs:88-221`）
+
+- **wire params**（camelCase，`#[serde(rename_all = "camelCase")]`）：
+  `{sessionId, title, cwd?, kind?, resetToAuto?}`；`kind` 缺省 `Build`（`unified_list/envelope.rs:7-11`，
+  serde lowercase `"build"`）；`resetToAuto` 缺省 false。官方测试
+  `agent/mvp_agent/tests/session_rename_tests.rs:31-42` 直接以
+  `{"sessionId", "title", "cwd"}` JSON 调 `ExtRequest::new("x.ai/session/rename", …)`。
+- **wire 帧**：`acp::ExtRequest` = JSON-RPC 裸方法名请求（method 字段即
+  `"x.ai/session/rename"`，params 内联，数字 id）——与 CordCode catalog rail 现有
+  `callRPCWithCtx`（`catalog_session_list.go` 发 `initialize`/`session/list`）完全同构，
+  不需要新帧格式。官方客户端侧证据：`xai-grok-pager/src/app/effects/mod.rs:4734-4765`
+  `session_rename_rpc`（`acp::ExtRequest::new` → `acp_send` → 响应取 `error` 字段）；
+  `actions.rs:2096-2134` `RenameSessionRequest`（`resetToAuto` false 时 skip 序列化）。
+- **校验链**（官方已在边界做，CordCode 无需复刻）：
+  1. `title.len() > MAX_TITLE_BYTES`（=464 字节，`session/persistence.rs:59`）→ 报错；
+  2. `sanitize_rename_title`：剥 C0/C1 控制字符 + bidi/format overrides（U+200E/200F/
+     202A-202E/2066-2069），trim——单一权威点；
+  3. 空 title → 报错（`title must not be blank`）；
+  4. 标量数 > `MAX_TITLE_SCALARS`（=100 字符，`persistence.rs:54`）→ 报错。
+- **执行链**：`list_summaries(cwd?)` 按 sessionId 精确匹配（找不到 → `session not
+  found: {id}`；`cwd=None` 列全部 cwd，跨目录 session 也能找到）→ `JsonlStorageAdapter
+  .update_session_title` 落盘 → 常驻 session 走 persistence actor 冻结 auto-title /
+  休眠 session 直接落 watermark → 搜索 index 更新 → `SessionSummaryGenerated` 通知
+  （`x.ai/session_notification` ext notification，`_meta.x.ai/titleIsManual`，**不是**
+  `x.ai/sessions/changed` roster）→ writeback（非 ZDR）时同步远端
+  `save_session_data`（ExportedMetadata{title, title_is_manual:true}）→ fire-and-forget
+  registry replica 更新 → 响应 `{"success": true}`。
+- **官方已知限制**（doc comment，session_admin.rs:108-113）：relay-registered sessions 的
+  sidebar title 权威在 x.ai relay REST endpoint，此 ACP 方法不写 `relay_sync`——未达
+  relay 的 rename 会在下次 sidebar refetch 回滚。这是官方自己的 gap，照抄语义、不做补偿。
+
+#### 23.2.3 delete 语义（`extensions/session_admin.rs:441-482`）
+
+- **wire params**：`{sessionId, cwd?, kind?}`（camelCase，kind 缺省 Build）。
+- **执行链**：writeback + 非 ZDR 时 **remote-first**（远端删除失败 → 本地不动、RPC 报错
+  ——fail-closed 语义直接传播给 iOS）→ `teardown_live_session_before_delete`（先排空常驻
+  session 与 coordinator 子进程）→ `delete_session_history`（本地磁盘删除 + FTS 搜索
+  index 驱逐）→ 响应 `{"success": true}`。CLI 路径 `grok sessions delete <id>` 镜像同一
+  逻辑。
+- delete 同样**不发 roster 广播**（官方 pager 靠自身操作成功后本地移除行）。
+- Chat kind（conversations lane，OIDC）走 `soft_delete_conversation`——CordCode
+  grokbuild driver 只管 build session，不触及。
+
+### 23.3 裁决：rename + delete 复用官方 ext 方法；archive 不做
+
+| 能力 | 裁决 | 依据 |
+| --- | --- | --- |
+| rename | **实现**：`SessionRenamer` + catalog rail 发 `x.ai/session/rename` | 官方方法存在、语义完整、与 catalog rail 同构 |
+| delete | **实现**：`SessionDeleter` + 同 rail 发 `x.ai/session/delete` | 同上；remote-first fail-closed 与 CordCode 纪律同向 |
+| archive | **不实现**（维持 `not_supported` fallback） | 官方 ACP 面**无** `x.ai/session/archive`；自建 bridge-owned archive 状态会把 session 在 iOS 隐藏而 Mac 端 grok TUI 仍显示（跨端不一致），违反「不得为凑 capability 自造语义」红线与上游源码优先门第 5 条 |
+
+archive 的行为后果（可接受、诚实）：
+- `session_mutation` 因 AND 语义（Renamer+Archiver 双实现才宣告）**维持不宣告**——
+  与 **dsh-web 先例一致**（dsh-web 只实现 `SessionRenamer`，见 `agent/dsh-web/sessions.go:357`，
+  同样不宣告 `session_mutation`）。
+- iOS「更多设置」header 三项恒显示：rename/delete 变为**真实可用**；archive 点击仍报
+  `session archive not yet supported`（诚实状态，不是假成功）。
+- iOS 侧边栏三项继续隐藏（gate 未满足）——现状不变，iOS 零改动。
+- 后续若想把 header 三个入口按能力分别显隐（拆 `session_mutation` 为 rename/archive
+  独立 capability），属于协议 + iOS 变更，**列为另案**，不在本方案内。
+
+### 23.4 CordCode 实施方案（MacBridge 单仓，iOS / protocol pack 零改动）
+
+#### Rail：复用进程级单例 catalog 子进程
+
+rename/delete 走 `grokCatalogClient`（`catalog_session_list.go`，`grok agent --no-leader
+stdio`）：已握手（initialize → authenticate）、进程级单例、按需重建、`callRPCWithCtx`
+支持任意 JSON-RPC 请求。**不选**另外两条 rail 的理由：
+- per-turn driver 子进程（`session.go`）：rename/delete 是列表级操作，不应依赖/干扰
+  活跃 turn 子进程；
+- leader socket（`leader_subscriber.go`）：CordCode 在该 rail 是订阅者/应答者角色，
+  不发管理请求（§3 架构边界维持）。
+
+#### 23.4.1 `RenameSession`（新文件 `agent/grokbuild/session_admin.go`）
+
+```
+func (a *Agent) RenameSession(ctx, sessionID, title) (*core.AgentSessionInfo, error)
+```
+
+1. 预检：trim sessionId/title 非空（与 `handlers.go:2302-2308` 的 missing_param 门
+   互补，agent 层不重复官方校验——464 字节/100 字符/控制字符清洗由官方边界做，错误
+   原文透传给 iOS）；
+2. `catalogClientInstance(ctx)` → `callRPCWithCtx(ctx, id, "x.ai/session/rename",
+   {"sessionId": …, "title": …}, 60s)`——**不发 cwd**（`list_summaries(None)` 跨目录
+   匹配，实现最简且行为正确；带 cwd 列为可选优化）、不发 kind（缺省 Build 即目标语义）、
+   不发 resetToAuto（bridge-v1 rename 协议只有 title，iOS 无 unpin UI）；
+3. 响应 `{"success": true}` → 构造 `AgentSessionInfo{ID, Summary: title, ModifiedAt:
+   time.Now()}`（**dsh-web 模式**：官方响应不含完整 Session.Info，本地构造返回值，
+   参考 `agent/dsh-web/sessions.go:290-305`）；
+4. 成功后 `a.signalCatalogRefresh()`——复用既有 roster 信号通道（`grokbuild.go:193`）：
+   `session_discovery.go:169-172` 收到信号立即 `authoritativeRefresh` → fingerprint
+   diff（磁盘 summary title 已变）→ `sessions_changed` 广播 → iOS 列表自动换新标题。
+   **无需改 session_discovery / 新增轮询**。
+5. JSON-RPC error（含 `session not found: {id}`、`title must not be blank`、
+   `title too long…`、writeback 远端同步失败）原文包装返回——iOS 已有错误 toast 渲染。
+
+#### 23.4.2 `DeleteSession`
+
+```
+func (a *Agent) DeleteSession(ctx, sessionID) error
+```
+
+1. 预检 trim 非空；
+2. 同 rail 发 `x.ai/session/delete`，params `{"sessionId": …}`（不发 cwd，理由同上）；
+3. 官方 remote-first：writeback 用户远端删除失败时本地不动且 RPC 报错——直接透传，
+   iOS 显示失败、session 仍在（**fail-closed，不造本地假成功**）；
+4. 成功后 `a.signalCatalogRefresh()`（磁盘目录已删 → fingerprint 少一行 →
+   `sessions_changed`）。iOS 正在查看被删 session 的窗口由列表刷新自然收口（与
+   Claude/OpenCode 删除路径同语义，无特判）。
+5. 可选收敛校验（实施期决定，非必须）：delete 成功后重拉一次列表确认 absence——
+   官方 pager 自身也未做此校验（信任 `{"success":true}`），CordCode 对齐官方信任
+   边界即可，不做额外远端往返。
+
+#### 23.4.3 capability 变化（零手写，接口断言自动推导）
+
+| capability | 变化 | iOS 影响 |
+| --- | --- | --- |
+| `session_delete` | **新增宣告**（Deleter 实现即自动，`backend_capabilities.go:56-58`） | 无（iOS 全仓 grep `session_delete` 零消费，纯真值诚实） |
+| `session_mutation` | **维持不宣告**（缺 Archiver，AND 语义） | 侧边栏三项继续隐藏（现状）；header 恒显示不受 capability 影响 |
+
+不新增任何手写能力真值表；`hello_ack.backends[]` 由推导自动携带。
+
+#### 23.4.4 边界与不做清单
+
+- **不动 iOS、不动 protocol pack、不动 SSV2**：bridge-v1 `rename_session` /
+  `delete_session` RPC 形状已存在且 iOS 已在用（对 Claude/OpenCode），grokbuild 只是
+  从 fallback 变为真实实现。
+- **不做 resetToAuto / unpin**：bridge-v1 rename 协议无此概念。
+- **不触碰 leader 订阅 / follower 应答链路**（§3 架构边界）：rename/delete 全部走
+  catalog rail，与 leader_subscriber.go 零交集。
+- **不做 Chat conversation rename/delete**（conversations lane，OIDC）：grokbuild
+  driver 只管 build session；`kind` 缺省 Build 即官方语义。
+- **不为 grok TUI 端做额外同步**：官方 rename/delete 内部已通知 leader gateway
+  （`x.ai/session_notification`），Mac 端 grok TUI 自己收口。
+
+### 23.5 版本偏移与 Phase 0 探针（实施前置）
+
+- 本机目标二进制 **grok 1.0.13**（`5e9a58528b76`）与 checkout `72a61251` 存在版本
+  偏移（§2 既有口径）；rename/delete 的 wire 形态在 1.0.13 上**必须先探针实证**，
+  不得只凭 checkout 结论编码。
+- **零成本探针**（沿用 follower-question 调研方法论：零 prompt、零 API 消耗、用完即删）：
+  catalog 子进程握手后发 `x.ai/session/rename`，params `{"sessionId":
+  "probe-nonexistent-0000", "title": "probe"}`——期待 JSON-RPC error `session not
+  found: probe-nonexistent-0000` 而非 method not found：证明 1.0.13 已有该 ext 分派且
+  无任何副作用；delete 同一分派表（`acp_agent.rs:2320-2324` 同一 match 臂），rename
+  探针通过即双方法分派存在（delete 可再发一次不存在 id 确认错误形状）。探针脚本与
+  输出归档到本节附注后再进入实施。
+
+### 23.6 测试与验收
+
+- **单测**（`agent/grokbuild/session_admin_test.go`）：
+  - rename 成功：fake catalog 子进程返回 `{"success":true}` → 返回 info（ID/title/
+    ModifiedAt 非零）+ `signalCatalogRefresh` 被触发；
+  - rename 失败透传：`session not found` / `title must not be blank` → 错误原文包装；
+  - delete 成功 / remote-first 失败透传（fake error）；
+  - 空 sessionId/title 预检报错。
+- **验收矩阵**（owner 真机）：
+  1. iOS header 重命名 → grok TUI 同 session 标题同步变化 + iOS 列表刷新出新标题；
+  2. iOS header 删除 → session 从 iOS 列表消失 + `~/.grok/sessions/…/<id>/` 磁盘目录
+     消失（Mac 侧只读核对）；
+  3. archive 点击仍报 `session archive not yet supported`（诚实不支持）；
+  4. 重命名超长/空白标题 → iOS 显示官方错误文案。
+- 验证级别按 D3（状态/协议类）：相关测试类 + 一次增量 build，不跑全仓。
+
+### 23.7 来源清单（P0 门）
+
+```text
+仓库路径=/Users/jacklee/Projects/cordcode-macbridge-grokbuild-leader
+分支=codex/grokbuild-leader-mode
+提交=dc30edc（HEAD，本节写入前）
+未提交状态=docs/2026-09-02-same-name-ios-device-eviction-fix-design.md（untracked，另案，未触碰）
+任务预期分支=codex/grokbuild-leader-mode（本工作树即任务工作树）
+
+配套仓库（上游，只读）=/Users/jacklee/Projects/grok-build
+分支/提交=72a61251（detached 快照，clean）
+引用符号=session_admin.rs handle_session_rename/handle_session_delete、
+  acp_agent.rs:2320-2324 ext 分派、persistence.rs MAX_TITLE_*/sanitize_rename_title、
+  unified_list/envelope.rs SessionKind、effects/mod.rs:4734 session_rename_rpc、
+  actions.rs:2096 RenameSessionRequest、tests/session_rename_tests.rs（官方测试锚点）
+
+配套仓库（iOS，只读参考）=/Users/jacklee/Projects/cordcode-ios
+分支=main，提交=de264a2c
+引用符号=ContentView.swift:234/873-879、ChatUIKitContainerView.swift:892-921（header
+  菜单恒显示证据）、SidebarView.swift:33-39（侧边栏 session_mutation gate）、
+  CCCodeBridgeBackendClient.swift:183（capability 消费）；OpenCodeiOS 全仓 grep
+  "session_delete" 零消费（2026-09-03 核对）
+
+版本偏移=目标二进制 grok 1.0.13（5e9a58528b76）≠ checkout 72a61251；
+  rename/delete wire 实施前需 §23.5 探针实证
+```
