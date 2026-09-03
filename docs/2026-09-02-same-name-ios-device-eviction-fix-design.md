@@ -170,8 +170,8 @@ displayName 自定，如 "iPhone/iPad web"/"web"，未撞）。改名设置里�
   两台探针设备均以 `("ios","iPhone")` claim、先后经 Management API 批准 → **两条记录
   共存**、首台 token 经主 WS hello 仍认证通过。首轮误用 `dev-` 短横线 ID 的失败跑
   恰好实证了 legacy 清理分支仍生效（与单测一致）。
-- 遗留：owner 双真机（iPhone 11 + 16 Pro）正向复测可选；已发生的错误删除（16 的
-  dev_c5ad42a3 记录）重配即恢复。
+- 遗留：owner 双真机（iPhone 11 + 16 Pro）正向复测**已于 2026-09-03 通过**
+  （「测试结果符合预期✅」）；已发生的错误删除（16 的 dev_c5ad42a3 记录）重配恢复。
 
 ## 9. 相关文档
 
