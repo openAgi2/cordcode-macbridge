@@ -155,11 +155,12 @@ separate repo (`../cordcode-ios/`).
 It exposes AI coding agent backends to iPhone/iPad clients over a direct LAN
 WebSocket or an end-to-end-encrypted public Relay. Product lineup
 ([RuntimeManager.swift](MacBridge/MacBridge/Services/RuntimeManager.swift)):
-Claude Code CLI, Codex Web (official shared daemon), Codex Desktop
+Claude Code CLI, Codex Desktop
 (`codex-remote`, ChatGPT Remote Control), Grok Build (ACP driver), DeepSeek
 Harness (`dsh-web`, official `dsh web`), and OpenCode Web (official
-`opencode serve`). Legacy `codex` (exec/app_server), `opencode`, and
-`deepseek` drivers remain in-tree but are off the product lineup.
+`opencode serve`). Legacy `codex` (exec/app_server), `codex-web`, `opencode`,
+and `deepseek` drivers remain in-tree but are off the product lineup
+(`codex-web` retired 2026-09-04).
 
 **Two distinct deployment units share this repo:**
 
@@ -520,12 +521,11 @@ capability，不能用“实现期再确认”放行编码。
 
 iOS 只连接 Bridge `8777` / `8778` 或 Relay，不直连下面的 backend 端口/服务。
 
-产品 lineup（`RuntimeManager.swift` 默认 `drivers`，2026-09-02 校正）：
+产品 lineup（`RuntimeManager.swift` 默认 `drivers`，2026-09-04 校正）：
 
 | Backend | 运行模型 | 本地依赖 | 外部 turn 如何到 iOS |
 | --- | --- | --- | --- |
 | Claude Code | 每个活跃 session 一个独立 `claude` CLI 子进程，stdin/stdout stream-json | `claude` 在 runtime PATH 且已登录 | 其他 Terminal 中的 Claude 进程没有共享事件总线；iOS 必须用历史变化 polling 旁观 |
-| Codex Web（`codex-web`） | 官方 Codex Web 共享 daemon 的 JSON-RPC 客户端；产品默认空 URL = 复用官方 daemon（managed start），失败可见 | 官方 daemon 可连接 | 订阅连接直播官方 thread 的 turn/item 事件；Mac 官方客户端的外部 turn 实时旁观，无需 polling |
 | Codex Desktop（`codex-remote`） | ChatGPT Desktop 私有 app-server → OpenAI Remote Control relay → 独立 enrollment 的 controller → app-server JSON-RPC 流 | ChatGPT「电脑」页完成设备配对（device key + JWT，可独立撤销） | turn/item 事件直播 + 官方分页远程历史；turn detail 懒加载（`turn_detail_lazy/chunks_v1`）；无需 polling |
 | Grok Build（`grokbuild`） | 每 turn 独立 `grok agent` stdio 子进程（ACP）+ 进程级单例 catalog 子进程（`grok agent --no-leader stdio`） | `grok` 可启动 | 外部 turn 靠 polling / `updates.jsonl` tailer 兜底（leader-socket 订阅尚未取代该声明） |
 | DeepSeek Harness（`dsh-web`） | 官方 `dsh web` 的请求转发器 + 常驻 mux/host WebSocket（座位 `127.0.0.1:3080`，端口即身份） | `dsh` CLI（座位实例冷启动/补拉用） | mux 是 agent 级广播，Mac web 端发起的外部 turn 直播；无需 polling |
@@ -536,6 +536,11 @@ GO_BRIDGE_ARCHITECTURE.md 对应节）：
 
 - `codex`（exec / app_server 双模式）——2026-08-25 owner 裁决退役：codex-web 通过
   owner 矩阵验收，app_server 驱动不再启动。
+- `codex-web`（官方 Codex Web 共享 daemon 客户端）——2026-09-04 owner 裁决退役：
+  从产品 lineup 移除，Mac/iOS 不再出现、runtime 不再挂载；共享 daemon seat
+  （`configureCodexDesktopSharedRuntime`）以 drivers 列表为门自动 skip，
+  codex-remote 走独立 Remote Control 链路不受影响。Codex 产品面由 `codex-remote`
+  承接。iOS 侧枚举与解码路径保留（已保存的 Codex Web 服务器标记不可用）。
 - `opencode`（managed_local / external_http / legacy_64667 server source 模型）——
   2026-08-19 owner 裁决退役：与 opencode-web 双订阅同一 serve，事件/投影双流互相
   覆盖，干扰 opencode-web。
@@ -543,9 +548,10 @@ GO_BRIDGE_ARCHITECTURE.md 对应节）：
 
 ### Codex app-server（legacy `codex` backend，产品 lineup 已退役）
 
-> 2026-08-25 owner 裁决：codex-web 通过 owner 矩阵验收后，app_server 驱动不再启动；
+> 2026-08-25 owner 裁决：codex-web 通过 owner 矩阵验收后，app_server 驱动不再启动
+> （codex-web 本身亦已于 2026-09-04 退役，见上）；
 > 本节适用于显式把 `codex` 加回 drivers 的场景（回滚 = 加回该 id）。产品 Codex 面由
-> `codex-web`（共享 daemon）与 `codex-remote`（Codex Desktop / Remote Control）承接，
+> `codex-remote`（Codex Desktop / Remote Control）承接，
 > 后者复用同一套 app-server JSON-RPC 语义但走 Remote Control 链路。
 
 挂载该 backend 时 `RuntimeConfig` 默认传：

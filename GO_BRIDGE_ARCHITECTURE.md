@@ -37,15 +37,21 @@ cordcode-bridge-runtime
 只是 app-server JSON-RPC 客户端库（无 `RegisterAgent`），不是 backend；
 `agent/providerseedtest/` 是测试辅助包。
 
-**默认 drivers 是双真值（2026-09-02 校正）：**
+**默认 drivers 是双真值（2026-09-04 校正）：**
 
 - **产品 lineup**（`MacBridge/MacBridge/Services/RuntimeManager.swift` 默认传给
-  runtime 的 `-drivers`）：`claude,codex-web,codex-remote,grokbuild,dsh-web,opencode-web`。
+  runtime 的 `-drivers`）：`claude,codex-remote,grokbuild,dsh-web,opencode-web`。
 - **go-bridge fallback**（`go-bridge/main.go` `defaultDrivers`，无 Swift 传参时）：
   `claude,codex,codex-web,grokbuild,dsh-web,opencode-web`。
 
-两者差异：产品 lineup 不含旧 `codex`（exec/app_server）与 `opencode`、`deepseek`；
-runtime fallback 仍含旧 `codex` 但不含 `codex-remote`。以产品实际传入为准排查。
+两者差异：产品 lineup 不含旧 `codex`（exec/app_server）、`codex-web`（已退役，
+见下）与 `opencode`、`deepseek`；runtime fallback 仍含旧 `codex` 与 `codex-web`
+但不含 `codex-remote`。以产品实际传入为准排查。
+
+`codex-web` 已于 2026-09-04 按 owner 指令从产品 lineup 退役（Mac/iOS 不再出现、
+runtime 不再挂载）；`agent/codex-web` 源码保留、仍可显式挂载，回滚 = 把
+`codex-web` 加回 RuntimeManager drivers 列表。Codex 产品面由 `codex-remote`
+（Codex Desktop / Remote Control）承接。
 
 flag 里的 id 与 Go 包名/注册名不完全相同：`claude` → 注册名 `claudecode`，
 `deepseek` → 注册名 `dsh`（别名表在 `go-bridge/main.go`），其余同名注册；
@@ -192,10 +198,9 @@ turn 完成时，在线订阅设备收到事件；未在线设备的通知写入
 
 ### Codex（`codex`，产品 lineup 已退役；runtime fallback 仍默认注册）
 
-> 2026-09-02 定位注记：产品 lineup 已不含 `codex`——iPhone 产品面由
-> `codex-web`（官方 Codex Web daemon）与 `codex-remote`（Codex Desktop /
-> Remote Control）承接。本节描述的 exec/app_server 双模式仅在显式挂载或
-> runtime fallback 下生效，是排查旧部署时的参考路径。
+> 2026-09-04 更新：产品 lineup 已不含 `codex` 与 `codex-web`——iPhone 产品面由
+> `codex-remote`（Codex Desktop / Remote Control）承接。本节描述的 exec/app_server
+> 双模式仅在显式挂载或 runtime fallback 下生效，是排查旧部署时的参考路径。
 
 支持两种模式：
 
@@ -231,7 +236,11 @@ MacBridge Restart 只重启 Bridge runtime，不负责重启外部共享 Codex a
 共享服务的启动归属和本机常驻约束见
 [BUILD_INSTALL_AND_RUNTIME.md](BUILD_INSTALL_AND_RUNTIME.md#codex-app-server-的启动归属)。
 
-### Codex Web（`codex-web` → `agent/codex-web`，产品 lineup 默认）
+### Codex Web（`codex-web` → `agent/codex-web`，产品 lineup 已退役 2026-09-04）
+
+> 2026-09-04 owner 裁决：`codex-web` 从产品 lineup 退役（MacBridge drivers 列表
+> 移除、iOS 新建入口移除并标记 deprecated），runtime 不再挂载。源码与注册保留，
+> 显式挂载或 runtime fallback 仍可用；本节语义仅在排查旧部署/显式挂载时适用。
 
 官方 Codex Web 共享 daemon 的 JSON-RPC 客户端 backend。独立身份、独立注册
 （不覆盖、不别名到旧 `codex`——2026-08-24 事故红线：iOS 映射器把两个类型当未知
@@ -615,9 +624,10 @@ running-session polling、session switch 之间的互斥与优先级。MacBridge
   external-turn polling。iOS 必须把它放进 SSV2 投影族；空 kernel 时先用官方
   history 播种，不得把 live 会话收成空基线。审批等待期无 text_delta，relay 不得
   因空闲超时封口。
-- **Codex Web / OpenCode Web / Codex Desktop**：同属官方服务端广播 backend
+- **OpenCode Web / Codex Desktop**：同属官方服务端广播 backend
   （`LiveEventBroadcast` + `requiresPollingForExternalTurns=false`），外部 turn
-  直播，不需要 external-turn polling；冷基线见 SSV2 家族表。
+  直播，不需要 external-turn polling；冷基线见 SSV2 家族表。（codex-web 同属
+  该家族，但已于 2026-09-04 从产品 lineup 退役，仅显式挂载时适用。）
 
 ownership 的读写与 history apply 前复核均在 iOS `@MainActor` 边界内完成，并有定向
 交错测试覆盖（`RemoteRunningSessionTests.testClaudeCodeInterleave_*`）。MacBridge 的

@@ -7,6 +7,7 @@
 版本号对齐 MacBridge Release 构建的 `MARKETING_VERSION`（见 `MacBridge/project.yml`）。日期为协调世界时（UTC）。
 
 ## [Unreleased]
+- **移除：Codex Web backend（`codex-web`）从产品 lineup 退役（owner 2026-09-04）**：Mac 端 backend 列表与 iPhone 新建服务器入口不再出现 Codex Web，runtime 不再随启动挂载该 backend（官方共享 daemon 也不再由 CordCode 代为配置/重启）。`agent/codex-web` 源码保留、仍可显式挂载（回滚 = 把 id 加回 drivers 列表）；Codex 产品面由 Codex Desktop（`codex-remote`）承接，不受影响。iPhone 上已保存的 Codex Web 服务器仍显示、标记为不可用，既有会话数据不受影响。
 - **新功能：Grok Build 计划审批（plan mode）可在 iPhone 上直接批准/拒绝**：Mac 端 grok 在 plan 模式下产出计划后弹出的「exit plan mode」审批（批准后计划生效、任务继续），此前 iPhone 完全看不到。现在它以「计划审批: …」卡出现在 iPhone 上（标题取计划首个标题行），点「允许」即批准计划、点「拒绝」即取消，与 Mac 端 TUI 先到先得：Mac 端先按键时 iPhone 卡自动收口，iPhone 先答时 Mac 端审批框同步消失。iOS 与协议零改动（复用权限卡面）。
 - **改进：Grok 权限卡选项与 Mac 端 grok 实际提供的一致（选项透传）**：此前 iPhone 权限卡固定只显示允许/拒绝两键，即使 grok 实际提供「总是允许」选项（如 bash 命令的 always-allow）。现在权限卡如实反映 grok 本次请求的选项集——有「总是允许」时显示第三键，点它即按官方语义持久放行同类命令（后续同类命令 Mac/iPhone 都不再询问）；权限类别行（运行 shell 命令/读取文件等）同步显示。「总是拒绝」类持久化拒绝选项有意不透传（iOS 应答无法与单次拒绝区分，避免用户误触持久禁用）。Leader 模式与普通模式两轨行为一致。
 - **新功能：Grok Build 权限卡可在 iPhone 上直接批准/拒绝（follower 权限应答）**：Mac 端 grok 弹出的工具权限请求（如执行命令）此前在 Leader 模式下 iPhone 完全看不到，turn 卡住直到回 Mac 应答。现在 iPhone 会弹出与 Mac 端一致的权限卡（显示工具标题），点「允许/始终允许/拒绝」直接生效：官方 leader 服务器按先到先得仲裁 iPhone 与 Mac 端的并发应答，Mac 端先答时 iPhone 卡片自动收口，iPhone 先答时 Mac 端权限提示同步消失。断线重连后挂起中的权限请求会重新出现在 iPhone 上。权限类交互中的 MCP 表单按裁决维持只读旁观（plan 审批已开放，见上条）。iOS 与协议零改动。

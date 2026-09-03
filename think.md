@@ -11,6 +11,28 @@
 
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
 
+## 2026-09-04 codex-web 已退役：三个防误判点
+
+Owner 2026-09-04 裁决：codex-web 从产品 lineup 退役（Mac/iOS 不再出现、runtime
+不挂载），`agent/codex-web` 源码保留，Codex 面由 codex-remote 承接。完整决策/
+改动/回滚见 `docs/2026-09-04-codex-web-backend-retirement-完成情况.md`。排障时
+别把以下预期行为当 bug 查：
+
+1. **启动 WARN「codex-web agent not present; topology bridge dimension stays
+   unresolved」**：topology monitor（go-bridge/main.go）的既有优雅降级，每次
+   启动一条，正常。
+2. **Mac/iOS 源码里大量 codex-web 引用仍在**：WorkspaceView 行内按钮/横幅、
+   ManagementV1Codec activity 计数、daemon 重启逻辑、iOS codexWeb 枚举与
+   MessageWeb 分支——都以 `agent.kind == "codex-web"` / `drivers.contains` 为键，
+   不挂载即不渲染，是退役模式「代码保留」的一部分，不是漏删；iOS codexWeb 与
+   codexRemote 共享流式机制，深删会伤 Codex Desktop。
+3. **日志 catalog 行偶现 "codex-web" 字样**：是旧工作树目录名（如
+   `cordcode-ios-codex-web-backend`）出现在 workspace filter dropped_basenames，
+   与 backend 无关。
+
+回滚 = RuntimeManager drivers 加回 `"codex-web"`（daemon seat 自动恢复）+ iOS
+serverCreationCases/isDeprecated 还原 + 双侧测试断言翻转。
+
 ## 2026-09-03 Grok follower 问题断线恢复四层剥洋葱：同症状两层根因 + 揭盖式连环雷
 
 owner 矩阵行 3「iPhone 杀 App 重开 → 挂起的问题卡应恢复且可答」连续三轮失败，

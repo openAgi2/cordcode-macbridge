@@ -28,9 +28,10 @@ LaunchAgent，也不要让仓库里的开发二进制长期占用 `8777`。
 | Codex app-server | `4141` | Codex app/CLI | 否 |
 | Relay runtime | `8780` loopback | VPS 上的 `relay-server` | 否，外部由 nginx `8443` 终止 TLS |
 
-当前正式 runtime 默认注册 `claude,codex-web,codex-remote,grokbuild,dsh-web,opencode-web`。
-`codex-web` 是独立于旧 `codex` 的官方长驻 app-server backend；`codex-remote` 是 ChatGPT Desktop
-Remote Control 的独立入口（产品显示名 Codex Desktop）。旧 `codex` driver 已退役。`grokbuild`
+当前正式 runtime 默认注册 `claude,codex-remote,grokbuild,dsh-web,opencode-web`。
+`codex-remote` 是 ChatGPT Desktop Remote Control 的独立入口（产品显示名 Codex
+Desktop）。旧 `codex` driver 与 `codex-web` 均已退役（后者 2026-09-04：源码保留、
+runtime 不再挂载，共享 daemon seat 随 drivers 列表自动 skip）。`grokbuild`
 对应产品显示名 Grok Build。Copilot 仍存在于部分通用类型与旧 UI 兼容代码中，但不属于当前
 MacBridge runtime 的已迁移 backend。
 
@@ -44,7 +45,7 @@ MacBridge runtime 的已迁移 backend。
 | Flag | 默认/产品值 | 作用 |
 | --- | --- | --- |
 | `-port` | `8777` | LAN Bridge WebSocket |
-| `-drivers` | `claude,codex-web,codex-remote,grokbuild,dsh-web,opencode-web` | 注册的 backend |
+| `-drivers` | `claude,codex-remote,grokbuild,dsh-web,opencode-web` | 注册的 backend |
 | `-work-dir` | 当前目录 | agent 默认工作目录 |
 | `-codex-backend` | CLI 默认 `exec`；Mac app 产品态 `app_server` | Codex 模式 |
 | `-codex-app-server-url` | 空；显式配置时如 `ws://127.0.0.1:4141` | 可选共享 Codex service |
