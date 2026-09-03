@@ -219,7 +219,7 @@
       "id": "phase2b-claude-plan-impl",
       "title": "Phase 2b claude ExitPlanMode 专门化",
       "description": "agent/claudecode/session.go handleControlRequest(:827-889)：tool_name==\"ExitPlanMode\" 分支——从 ToolInputRaw.input 抽 plan/planFilePath，emit permissionKind=plan_review + Plan 载荷（permissionActions 三动作）；claudecode.go summarizeInput(:2225) 加分支（卡面摘要不塞全文）；RespondPermission(:979→respondPermissionContext) 按 planAction 翻译（D5 裁决=纯 allow 不带 updatedPermissions；requestChanges→deny+message=feedback，空时 Mac 填固定文案；quit→deny+固定 message）。上游锚点：SDK 0.3.259 PermissionResult deny.message 必填（sdk.d.ts:2324-2334）。",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase2",
       "kind": "impl",
       "depends_on": [
@@ -229,20 +229,22 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "status": "present",
+        "method": "impl",
+        "attestation": "re-verified",
+        "summary": "handleControlRequest ExitPlanMode 分支（plan_review kind + 三动作 + PlanReview{plan,planFilePath}）；summarizeInput ExitPlanMode 分支（planFilePath 摘要）；respondPermissionContext deny 按 PlanAction 三文案（requestChanges 空反馈/quit/legacy 默认），approve 纯 allow 无 updatedPermissions（D5）",
+        "artifacts": [
+          "agent/claudecode/session.go",
+          "agent/claudecode/claudecode.go"
+        ],
+        "checked_at": "2026-09-04"
       }
     },
     {
       "id": "phase2b-claude-plan-tests",
       "title": "Phase 2b claude ExitPlanMode fixture 测试",
       "description": "session_test.go 新增 ExitPlanMode control_request fixture 用例（本机 ~/.claude/projects/**/*.jsonl 真实 transcript 脱敏入仓，调研档 §3.2 两例 7557/7883 字节）；断言：plan 抽取、plan_review 下发、deny+message 应答形状（requestChanges 反馈与 quit 固定文案）。go test ./agent/claudecode/... -count=1。补调研档 §3.4 缺口。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "tests",
       "depends_on": [
@@ -252,20 +254,22 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "automated",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "status": "present",
+        "method": "tests",
+        "attestation": "re-verified",
+        "summary": "go test ./agent/claudecode/... -count=1 → ok（0.99s，含既有全套 + 新增 3 测试）；fixture=本机真实 transcript 脱敏（testdata/exit_plan_mode_control_request.json，7.5KB 级 plan 全文，家目录/哈希占位替换）；断言 kind/三动作/全文/planFilePath/摘要分支/D5 无 updatedPermissions/deny 三文案/legacy 不变",
+        "artifacts": [
+          "agent/claudecode/exit_plan_mode_test.go",
+          "agent/claudecode/testdata/exit_plan_mode_control_request.json"
+        ],
+        "checked_at": "2026-09-04"
       }
     },
     {
       "id": "phase2b-claude-plan-regression",
       "title": "Phase 2b claude 回归（N/A 说明）",
       "description": "backend 接线单元，e2e 面集中在 Phase 4。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "regression",
       "depends_on": [
@@ -275,20 +279,20 @@
       "notes": "",
       "verification": {
         "required": false,
-        "status": "missing",
-        "method": "manual",
+        "status": "present",
+        "method": "regression",
         "attestation": "self-attested",
-        "na_reason": "backend 接线单元；e2e 面由 phase4-mac-runtime-verification（真实会话触发 ExitPlanMode + 运行态日志）与 phase4-owner-acceptance-matrix 集中覆盖（方案 §5 Phase 4）。",
-        "summary": "",
+        "na_reason": "纯 backend 翻译层，无独立 UI/perf 面；legacy deny 文案不变已由 -tests 断言；真实 claude 会话触发 ExitPlanMode 的运行态自验归 Phase 4 统一验收（本机 claude 已登录场景）",
+        "summary": "na：legacy 回归由 -tests 覆盖，运行态归 Phase 4",
         "artifacts": [],
-        "checked_at": null
+        "checked_at": "2026-09-04"
       }
     },
     {
       "id": "phase2c-dsh-plan-impl",
       "title": "Phase 2c dsh plan-review 识别与应答",
       "description": "agent/dsh-web/approvals.go question 解析结构(:326-338) 补 intent/detail 字段（wire 锚点：dsh-v0.1.1-rc.2 packages/host/apiproxy/src/api/events.schema.ts:22-29,51）；intent.kind==\"plan-review\" 的 question 改 emit EventPermissionRequest（permissionKind=plan_review + Plan{Content=detail}，三动作）替代 user_input 卡，同批非 plan question 不受影响；应答适配：approve→选 intent.approve 指名 label（不硬编码 \"Approve\"）；requestChanges→Keep-planning label + respondQuestion custom=feedback（approvals.go:519+ 第 5 参）；quit→RejectQuestion（=dismiss/ASK_CANCELLED，D3）。core.UserInputQuestion 不加 Detail。",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "phase2",
       "kind": "impl",
       "depends_on": [

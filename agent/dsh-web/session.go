@@ -195,10 +195,11 @@ func (s *dshSession) emit(ev core.Event) {
 	}
 }
 
-// RespondPermission answers an approval request (§8-4 wires the pending
-// registry; until then the request id is unknown and the error is honest).
+// RespondPermission answers an approval request or a plan-review question
+// (plan approval layer: plan_review cards answer through the question
+// machinery — routing in respondPermissionRouted).
 func (s *dshSession) RespondPermission(requestID string, result core.PermissionResult) error {
-	return s.agent.respondApproval(s.ctx, s.CurrentSessionID(), requestID, result)
+	return s.agent.respondPermissionRouted(s.ctx, s.CurrentSessionID(), requestID, result)
 }
 
 // RespondQuestion answers one question of an ask batch (§8-4: per-question

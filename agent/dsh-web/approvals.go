@@ -60,6 +60,19 @@ type approvalsState struct {
 	batches map[string]*pendingQuestionBatch
 	// questionOwner: question id → batch rpcId (answer routing).
 	questionOwner map[string]string
+	// planReviews: question id → derived plan-review answer labels (plan approval
+	// layer, 2026-09-04). Present only for questions surfaced as the plan_review
+	// permission card; cleaned up with questionOwner on question/resolved.
+	planReviews map[string]planReviewMeta
+}
+
+// planReviewMeta mirrors what the official intent needs for answering
+// (plan-mode/src/index.ts @49a606bc): intent.approve NAMES the approve label —
+// never hardcode "Approve" — and the keep-planning label is the question's
+// single other option.
+type planReviewMeta struct {
+	approveLabel      string
+	keepPlanningLabel string
 }
 
 type pendingApproval struct {
@@ -94,6 +107,7 @@ func (a *Agent) approvalsInit() {
 			approvals:     map[string]*pendingApproval{},
 			batches:       map[string]*pendingQuestionBatch{},
 			questionOwner: map[string]string{},
+			planReviews:   map[string]planReviewMeta{},
 		}
 	}
 }
@@ -158,7 +172,44 @@ func (a *Agent) emitPermissionEvent(sessionID string, sess *dshSession, ev core.
 // RespondSessionPermission implements core.SessionPermissionResponder so
 // resolve_permission works without a go-bridge registry session (observe-only).
 func (a *Agent) RespondSessionPermission(ctx context.Context, sessionID, requestID string, result core.PermissionResult) error {
+	return a.respondPermissionRouted(ctx, sessionID, requestID, result)
+}
+
+// respondPermissionRouted dispatches a resolve_permission to the plan-review
+// question machinery when the request id belongs to a surfaced plan card, else
+// to the approval responder (plan approval layer, 2026-09-04).
+func (a *Agent) respondPermissionRouted(ctx context.Context, sessionID, requestID string, result core.PermissionResult) error {
+	a.approvalsInit()
+	a.approvals.mu.Lock()
+	meta, isPlan := a.approvals.planReviews[requestID]
+	a.approvals.mu.Unlock()
+	if isPlan {
+		return a.respondPlanReview(ctx, sessionID, requestID, meta, result)
+	}
 	return a.respondApproval(ctx, sessionID, requestID, result)
+}
+
+// respondPlanReview maps the plan-card vocabulary onto the official question
+// answer (方案 §4.3 翻译表；plan-mode/src/index.ts answer reading @49a606bc):
+// approve → select the intent-named approve label; requestChanges → select the
+// keep-planning label with custom=feedback (empty feedback omits custom);
+// quit → reject the batch (respond error branch = ASK_CANCELLED, "the user
+// dismissed the plan review" — D3). Legacy two-button replies (no planAction)
+// map allow→approve label, anything else→keep-planning label.
+func (a *Agent) respondPlanReview(ctx context.Context, sessionID, questionID string, meta planReviewMeta, result core.PermissionResult) error {
+	switch result.PlanAction {
+	case "approve":
+		return a.respondQuestion(ctx, sessionID, questionID, []string{meta.approveLabel}, "")
+	case "requestChanges":
+		return a.respondQuestion(ctx, sessionID, questionID, []string{meta.keepPlanningLabel}, result.Message)
+	case "quit":
+		return a.rejectQuestion(ctx, sessionID, questionID)
+	default:
+		if result.Behavior == "allow" || result.Behavior == "always" {
+			return a.respondQuestion(ctx, sessionID, questionID, []string{meta.approveLabel}, "")
+		}
+		return a.respondQuestion(ctx, sessionID, questionID, []string{meta.keepPlanningLabel}, "")
+	}
 }
 
 func (a *Agent) StructuredUserInputReady() bool { return true }
@@ -318,6 +369,32 @@ func (a *Agent) handleApprovalFrame(ctx context.Context, rpcID, method string, p
 	}
 }
 
+// derivePlanReviewMeta validates the official intent against the offered
+// options: the approve label must be named by intent.approve and present among
+// the options, and exactly one other option must remain (the keep-planning
+// label). Anything else is not answerable as a plan review.
+func derivePlanReviewMeta(approve string, labels []string) (planReviewMeta, bool) {
+	if approve == "" {
+		return planReviewMeta{}, false
+	}
+	var keep string
+	found := false
+	for _, l := range labels {
+		if l == approve {
+			found = true
+			continue
+		}
+		if keep != "" {
+			return planReviewMeta{}, false // more than one non-approve option
+		}
+		keep = l
+	}
+	if !found || keep == "" {
+		return planReviewMeta{}, false
+	}
+	return planReviewMeta{approveLabel: approve, keepPlanningLabel: keep}, true
+}
+
 // handleQuestionFrame dispatches question/requested|resolved.
 func (a *Agent) handleQuestionFrame(ctx context.Context, rpcID, method string, payload json.RawMessage) {
 	a.approvalsInit()
@@ -335,6 +412,14 @@ func (a *Agent) handleQuestionFrame(ctx context.Context, rpcID, method string, p
 					Description string `json:"description"`
 				} `json:"options"`
 				MultiSelect bool `json:"multiSelect"`
+				// intent is presentation-only metadata on the official question
+				// (plan-mode/src/index.ts:313): {kind:"plan-review", approve:<label>}
+				// names the approve label; a capable UI renders the plan (detail)
+				// as a review decision instead of a generic question.
+				Intent *struct {
+					Kind    string `json:"kind"`
+					Approve string `json:"approve,omitempty"`
+				} `json:"intent"`
 			} `json:"questions"`
 		}
 		if err := json.Unmarshal(payload, &f); err != nil || len(f.Questions) == 0 {
@@ -367,6 +452,37 @@ func (a *Agent) handleQuestionFrame(ctx context.Context, rpcID, method string, p
 		// will not ingest it, so emitting it alone leaves iPhone with no card
 		// (owner 2026-08-16: Mac 多选框出现，iPhone 没有).
 		for _, q := range f.Questions {
+			// plan approval layer (2026-09-04): a plan-review question (official
+			// intent.kind=="plan-review", plan full text in detail) surfaces as the
+			// plan_review permission card INSTEAD of the user_input card — the
+			// answer rides resolve_permission.planAction. Non-plan questions in
+			// the same batch are unaffected. Meta not derivable (intent.approve
+			// not among the offered labels / option shape unexpected) fails
+			// closed to the generic card, never to a broken plan card.
+			if q.Intent != nil && q.Intent.Kind == "plan-review" {
+				labels := make([]string, 0, len(q.Options))
+				for _, o := range q.Options {
+					labels = append(labels, o.Label)
+				}
+				if meta, ok := derivePlanReviewMeta(q.Intent.Approve, labels); ok {
+					a.approvals.mu.Lock()
+					a.approvals.planReviews[q.ID] = meta
+					a.approvals.mu.Unlock()
+					a.emitPermissionEvent(f.SessionID, sess, core.Event{
+						Type:              core.EventPermissionRequest,
+						SessionID:         f.SessionID,
+						TurnID:            a.sessionTurnID(f.SessionID),
+						RequestID:         q.ID,
+						ToolName:          q.Header,
+						PermissionKind:    "plan_review",
+						PermissionActions: []string{"approve", "requestChanges", "quit"},
+						PlanReview:        &core.PlanPayload{Content: q.Detail},
+					})
+					continue
+				}
+				slog.Warn("dsh-web: plan-review question without derivable labels, degrading to generic card",
+					"sessionPrefix", shortLog(f.SessionID), "questionPrefix", shortLog(q.ID), "approve", q.Intent.Approve, "options", len(q.Options))
+			}
 			opts := make([]core.QuestionOption, 0, len(q.Options))
 			uiOpts := make([]core.UserInputOption, 0, len(q.Options))
 			for _, o := range q.Options {
@@ -435,6 +551,18 @@ func (a *Agent) handleQuestionFrame(ctx context.Context, rpcID, method string, p
 				delete(a.approvals.questionOwner, qid)
 			}
 		}
+		// Plan-surfaced question ids leave the plan registry too; snapshot which
+		// ones were plan cards so the per-id close below emits permission_resolved
+		// (the card face iOS actually has) instead of the user_input resolution.
+		planQIDs := make([]string, 0, len(batch.questionIDs))
+		if batch != nil {
+			for _, qid := range batch.questionIDs {
+				if _, isPlan := a.approvals.planReviews[qid]; isPlan {
+					delete(a.approvals.planReviews, qid)
+					planQIDs = append(planQIDs, qid)
+				}
+			}
+		}
 		a.approvals.mu.Unlock()
 		if batch == nil {
 			return // resolved for a batch never surfaced here
@@ -447,7 +575,24 @@ func (a *Agent) handleQuestionFrame(ctx context.Context, rpcID, method string, p
 			status = core.UserInputStatusRejected
 		}
 		turnID := a.sessionTurnID(f.SessionID)
+		planSet := map[string]bool{}
+		for _, qid := range planQIDs {
+			planSet[qid] = true
+			// Web-answered-first plan card: close the permission face. The frame
+			// carries no per-question content, so the outcome is echoed verbatim
+			// (answered|cancelled) — no synthetic approve/deny claim.
+			a.emitPermissionEvent(f.SessionID, sess, core.Event{
+				Type:      core.EventPermissionResolved,
+				SessionID: f.SessionID,
+				TurnID:    turnID,
+				RequestID: qid,
+				Content:   f.Outcome,
+			})
+		}
 		for _, qid := range batch.questionIDs {
+			if planSet[qid] {
+				continue // plan-surfaced: no user_input face was ever emitted
+			}
 			a.emitPermissionEvent(f.SessionID, sess, core.Event{
 				Type:      core.EventUserInputResolved,
 				SessionID: f.SessionID,
