@@ -133,11 +133,19 @@ func NewLeaderSubscriber(socketPath, sessionID, cwd string) *LeaderSubscriber {
 		interactions: newLeaderInteractionRegistry()}
 }
 
-// leaderInteraction is one registered ask_user_question reverse-request.
+// leaderInteraction is one registered interaction reverse-request. kind
+// distinguishes the two surfaced shapes; both share the tool_call_id identity
+// the official interaction_resolved broadcast evicts on.
 type leaderInteraction struct {
 	wireID     int                   // original numeric JSON-RPC id to answer with
 	toolCallID string                // identity shared with interaction_resolved
-	params     askUserQuestionParams // parsed inner params (questions, mode)
+	kind       leaderInteractionKind
+	params     askUserQuestionParams // question-kind payload (questions, mode)
+	// perm carries the permission-kind payload (options, title). The iOS
+	// answer path addresses the entry by the numeric wire id string — the
+	// same key OFF-mode pendingPerms uses — served by the registry wireID
+	// index, not by toolCallID.
+	perm *requestPermissionParams
 	// answers accumulates iOS replies per question index; the wire response
 	// carries ALL questions at once, so it flushes only when complete
 	// (single-question interactions — the only observed live shape — flush
@@ -148,21 +156,36 @@ type leaderInteraction struct {
 	notes map[int]string
 }
 
+type leaderInteractionKind int
+
+const (
+	leaderKindQuestion leaderInteractionKind = iota
+	leaderKindPermission
+)
+
 type leaderInteractionRegistry struct {
 	mu     sync.Mutex
 	byTool map[string]leaderInteraction
+	// byWire indexes permission-kind entries: their answer path carries the
+	// numeric wire id (RequestID on the bridge wire), not the tool_call_id.
+	byWire map[int]string
 	// tombstones records recently-consumed tool_call_ids (resolved broadcast
 	// or our own flush). A late answer for a tombstoned id returns success
 	// without writing — upstream silently drops it (research §3.5, red line 3:
 	// no local error for consumed ids). A replayed REQUEST for the same
 	// tool_call_id revives it (removes the tombstone).
 	tombstones map[string]bool
+	// wireTombstones mirrors tombstones on the wire-id axis so late
+	// permission answers (addressed by wire id) read as silently-consumed.
+	wireTombstones map[int]bool
 }
 
 func newLeaderInteractionRegistry() *leaderInteractionRegistry {
 	return &leaderInteractionRegistry{
-		byTool:     map[string]leaderInteraction{},
-		tombstones: map[string]bool{},
+		byTool:         map[string]leaderInteraction{},
+		byWire:         map[int]string{},
+		tombstones:     map[string]bool{},
+		wireTombstones: map[int]bool{},
 	}
 }
 
@@ -171,6 +194,10 @@ func (r *leaderInteractionRegistry) put(i leaderInteraction) {
 	r.mu.Lock()
 	r.byTool[i.toolCallID] = i
 	delete(r.tombstones, i.toolCallID)
+	if i.kind == leaderKindPermission {
+		r.byWire[i.wireID] = i.toolCallID
+		delete(r.wireTombstones, i.wireID)
+	}
 	r.mu.Unlock()
 }
 
@@ -183,6 +210,10 @@ func (r *leaderInteractionRegistry) take(toolCallID string) (leaderInteraction, 
 	if ok {
 		delete(r.byTool, toolCallID)
 		r.markTombstoneLocked(toolCallID)
+		if i.kind == leaderKindPermission {
+			delete(r.byWire, i.wireID)
+			r.markWireTombstoneLocked(i.wireID)
+		}
 	}
 	return i, ok
 }
@@ -195,6 +226,19 @@ func (r *leaderInteractionRegistry) get(toolCallID string) (leaderInteraction, b
 	return i, ok
 }
 
+// getByWire returns a read-only copy of the permission-kind entry addressed
+// by its numeric wire id without evicting.
+func (r *leaderInteractionRegistry) getByWire(wireID int) (leaderInteraction, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	toolCallID, ok := r.byWire[wireID]
+	if !ok {
+		return leaderInteraction{}, false
+	}
+	i, ok := r.byTool[toolCallID]
+	return i, ok
+}
+
 // consumed reports whether toolCallID was registered before and has since
 // been consumed (resolved / answered / cleared).
 func (r *leaderInteractionRegistry) consumed(toolCallID string) bool {
@@ -203,11 +247,26 @@ func (r *leaderInteractionRegistry) consumed(toolCallID string) bool {
 	return r.tombstones[toolCallID]
 }
 
+// consumedByWire reports whether a permission wire id was registered before
+// and has since been consumed (TUI answered first, or resolved raced ahead).
+func (r *leaderInteractionRegistry) consumedByWire(wireID int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.wireTombstones[wireID]
+}
+
 func (r *leaderInteractionRegistry) markTombstoneLocked(toolCallID string) {
 	if len(r.tombstones) >= 256 {
 		r.tombstones = map[string]bool{}
 	}
 	r.tombstones[toolCallID] = true
+}
+
+func (r *leaderInteractionRegistry) markWireTombstoneLocked(wireID int) {
+	if len(r.wireTombstones) >= 256 {
+		r.wireTombstones = map[int]bool{}
+	}
+	r.wireTombstones[wireID] = true
 }
 
 // setAnswer records the selected labels (and optional freeform notes) for one
@@ -516,9 +575,11 @@ func (s *LeaderSubscriber) handleACP(payload string, pending *leaderPending, ses
 	}
 }
 
-// handleInteractionRequest registers an ask_user_question broadcast and emits
-// core.EventQuestionAsked per question. Wire id stays the ORIGINAL numeric id
-// (research §3.1) — the answer path echoes it verbatim (§3.3).
+// handleInteractionRequest registers an ask_user_question or
+// session/request_permission broadcast (the official shared interaction set,
+// server.rs is_interaction_request) and emits the matching core event.
+// Question wire id stays the ORIGINAL numeric id (research §3.1) — the answer
+// path echoes it verbatim (§3.3).
 func (s *LeaderSubscriber) handleInteractionRequest(rawID json.RawMessage, topMethod string, params json.RawMessage, sessionID string, onEvent func(core.Event)) {
 	var wireID int
 	if err := json.Unmarshal(rawID, &wireID); err != nil {
@@ -526,8 +587,12 @@ func (s *LeaderSubscriber) handleInteractionRequest(rawID json.RawMessage, topMe
 		return
 	}
 	method := normalizeLeaderMethod(topMethod, params)
+	if method == "session/request_permission" {
+		s.handlePermissionBroadcast(wireID, params, sessionID, onEvent)
+		return
+	}
 	if method != "x.ai/ask_user_question" {
-		return // request_permission / exit_plan_mode / mcp/elicit: observe-only (ruling B)
+		return // exit_plan_mode / mcp/elicit: observe-only (ruling B)
 	}
 	var p askUserQuestionParams
 	if err := json.Unmarshal(interactionInnerParams(params), &p); err != nil || p.ToolCallID == "" || len(p.Questions) == 0 {
@@ -535,7 +600,7 @@ func (s *LeaderSubscriber) handleInteractionRequest(rawID json.RawMessage, topMe
 		return
 	}
 	if s.interactions != nil {
-		s.interactions.put(leaderInteraction{wireID: wireID, toolCallID: p.ToolCallID, params: p})
+		s.interactions.put(leaderInteraction{wireID: wireID, toolCallID: p.ToolCallID, kind: leaderKindQuestion, params: p})
 	}
 	for i, q := range p.Questions {
 		qid := questionIDFor(p.ToolCallID, i)
@@ -555,6 +620,33 @@ func (s *LeaderSubscriber) handleInteractionRequest(rawID json.RawMessage, topMe
 		"session", sessionID, "toolCallId", p.ToolCallID, "questions", len(p.Questions), "wireId", wireID, "mode", p.Mode)
 }
 
+// handlePermissionBroadcast registers a session/request_permission broadcast
+// (upstream nests the shared tool_call_id under toolCall; server.rs
+// extract_interaction_tool_call_id) and emits core.EventPermissionRequest —
+// the exact event shape the OFF-mode driver rail emits (session.go
+// handlePermissionRequest), so the relay shared mapper lands it on the
+// existing iOS permission card with zero iOS changes. RequestID is the wire
+// id string (the key the resolve_permission reply carries back).
+func (s *LeaderSubscriber) handlePermissionBroadcast(wireID int, params json.RawMessage, sessionID string, onEvent func(core.Event)) {
+	var p requestPermissionParams
+	if err := json.Unmarshal(interactionInnerParams(params), &p); err != nil || p.ToolCall.ToolCallID == "" {
+		slog.Warn("grokbuild: leader request_permission unparseable", "session", sessionID, "toolCallId", p.ToolCall.ToolCallID, "error", err)
+		return
+	}
+	if s.interactions != nil {
+		s.interactions.put(leaderInteraction{wireID: wireID, toolCallID: p.ToolCall.ToolCallID, kind: leaderKindPermission, perm: &p})
+	}
+	if onEvent != nil {
+		onEvent(core.Event{
+			Type:      core.EventPermissionRequest,
+			RequestID: strconv.Itoa(wireID),
+			ToolName:  p.ToolCall.Title,
+		})
+	}
+	slog.Info("grokbuild: leader request_permission registered",
+		"session", sessionID, "toolCallId", p.ToolCall.ToolCallID, "wireId", wireID, "title", p.ToolCall.Title, "options", len(p.Options))
+}
+
 // handleInteractionLifecycle maps the official pending_interaction /
 // interaction_resolved broadcasts. Resolved is the authoritative close signal:
 // it evicts the registry entry and emits question_resolved for every surfaced
@@ -570,6 +662,22 @@ func (s *LeaderSubscriber) handleInteractionLifecycle(update, toolCallID, sessio
 		entry, ok := s.interactions.take(toolCallID)
 		if !ok {
 			slog.Debug("grokbuild: leader interaction_resolved for unregistered tool call", "toolCallId", toolCallID)
+			return
+		}
+		if entry.kind == leaderKindPermission {
+			// Leader-side resolution (TUI answered first, or the answer raced
+			// our attach): close the iOS permission card. The broadcast
+			// carries no outcome detail, only that the interaction completed.
+			// The follower-answer path does NOT emit here — the bridge-level
+			// optimistic close (handleResolvePermission) already broadcast
+			// permission_resolved for every subscriber, so this fires only
+			// for leader-side resolutions.
+			s.emitSessionEvent(core.Event{
+				Type:      core.EventPermissionResolved,
+				RequestID: strconv.Itoa(entry.wireID),
+				Content:   "resolved",
+			})
+			slog.Info("grokbuild: leader interaction_resolved closed permission", "toolCallId", toolCallID)
 			return
 		}
 		for i := range entry.params.Questions {
@@ -720,6 +828,51 @@ func (s *LeaderSubscriber) CancelQuestion(questionID string) (bool, error) {
 	return true, nil
 }
 
+// AnswerPermission records an iOS permission reply for a registered
+// session/request_permission broadcast and sends the ACP
+// requestPermissionResult with the ORIGINAL numeric id — upstream
+// first-answer-wins consumes it, a TUI-first answer has already consumed it
+// (wire tombstone) and reads as silently-resolved here, mirroring
+// AnswerQuestion. requestID is the wire id string (the RequestID the emit
+// carried). resolved is always true on success: permission interactions
+// answer atomically (no multi-question accumulation). No
+// permission_resolved emit on this path — the bridge-level optimistic close
+// (handleResolvePermission) broadcasts it for every subscriber already.
+func (s *LeaderSubscriber) AnswerPermission(requestID string, result core.PermissionResult) (bool, error) {
+	wireID, err := strconv.Atoi(strings.TrimSpace(requestID))
+	if err != nil {
+		return false, fmt.Errorf("grokbuild: invalid permission request id %q", requestID)
+	}
+	if s.interactions == nil {
+		return false, fmt.Errorf("grokbuild: no pending permission %s", requestID)
+	}
+	entry, ok := s.interactions.getByWire(wireID)
+	if !ok {
+		if s.interactions.consumedByWire(wireID) {
+			return true, nil // late answer to an adjudicated permission — silent
+		}
+		return false, fmt.Errorf("grokbuild: no pending permission %s", requestID)
+	}
+	if entry.perm == nil {
+		return false, fmt.Errorf("grokbuild: pending interaction %s is not a permission", requestID)
+	}
+	outcome, err := permissionOutcome(entry.perm.Options, result.Behavior)
+	if err != nil {
+		return false, err // entry stays pending — the reply was invalid, not the interaction
+	}
+	if _, ok := s.interactions.take(entry.toolCallID); !ok {
+		// resolved raced ahead between get and take — silent
+		return true, nil
+	}
+	if err := s.sendInteractionResponse(entry, requestPermissionResult{Outcome: outcome}); err != nil {
+		return false, err
+	}
+	slog.Info("grokbuild: leader permission answered",
+		"toolCallId", entry.toolCallID, "wireId", wireID, "behavior", result.Behavior,
+		"outcome", outcome.Outcome, "optionId", outcome.OptionID)
+	return true, nil
+}
+
 // validateQuestionSelection checks the reply against the registered question:
 // the option ids on the bridge wire are grok option LABELS, so every id must
 // be one of the question's labels — except the freeform label "Other", which
@@ -753,9 +906,10 @@ func (s *LeaderSubscriber) validateQuestionSelection(toolCallID string, index in
 	return optionIDs, nil
 }
 
-// sendInteractionResponse encodes the JSON-RPC response with the ORIGINAL
-// numeric wire id and writes it through the live leader connection.
-func (s *LeaderSubscriber) sendInteractionResponse(entry leaderInteraction, result askUserQuestionExtResponse) error {
+// sendInteractionResponse encodes the JSON-RPC response (askUserQuestionExtResponse
+// or requestPermissionResult) with the ORIGINAL numeric wire id and writes it
+// through the live leader connection.
+func (s *LeaderSubscriber) sendInteractionResponse(entry leaderInteraction, result any) error {
 	rawID, err := json.Marshal(entry.wireID)
 	if err != nil {
 		return err

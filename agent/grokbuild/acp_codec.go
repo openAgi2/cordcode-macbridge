@@ -384,3 +384,24 @@ func selectPermissionOption(options []permissionOption, behavior string) (string
 	}
 	return "", false
 }
+
+// permissionOutcome maps a bridge permission behavior onto the grok ACP
+// outcome for a registered permission request's options. Shared by the
+// driver rail (grokSession.RespondPermission) and the leader follower rail
+// (LeaderSubscriber.AnswerPermission). "always" (opencode-web official
+// reply) has no grok option and degrades to allow; a deny with no reject
+// option degrades to cancelled (upstream Path: not an error).
+func permissionOutcome(options []permissionOption, behavior string) (outcomePayload, error) {
+	if behavior == "allow" || behavior == "always" {
+		optionID, found := selectPermissionOption(options, "allow")
+		if !found {
+			return outcomePayload{}, fmt.Errorf("grokbuild: no allow option in permission request")
+		}
+		return outcomePayload{Outcome: "selected", OptionID: optionID}, nil
+	}
+	optionID, found := selectPermissionOption(options, "deny")
+	if !found {
+		return outcomePayload{Outcome: "cancelled"}, nil
+	}
+	return outcomePayload{Outcome: "selected", OptionID: optionID}, nil
+}

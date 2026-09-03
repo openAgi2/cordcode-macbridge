@@ -299,12 +299,13 @@ func TestLeaderSubscriberAskUserQuestionReplay(t *testing.T) {
 	}
 }
 
-// TestLeaderSubscriberIgnoresOtherRequestForms: reverse-requests outside the
-// question scope stay observe-only (ruling B), and non-numeric ids are
-// dropped — neither may register or emit.
+// TestLeaderSubscriberIgnoresOtherRequestForms: request_permission is now a
+// surfaced interaction (§24 — emits permission_request, registers by wire id);
+// exit_plan_mode / mcp elicit remain observe-only (ruling B), and non-numeric
+// ids are dropped — neither may register or emit.
 func TestLeaderSubscriberIgnoresOtherRequestForms(t *testing.T) {
 	got, sub := runLeaderSubscriber(t, func(c net.Conn) error {
-		// session/request_permission REQUEST (numeric id) — observe-only.
+		// session/request_permission REQUEST (numeric id) — surfaced (§24).
 		if err := writeACPRequestRaw(c, `{"jsonrpc":"2.0","id":5,"method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"call_perm","title":"rm","kind":"execute","status":"pending"},"options":[{"optionId":"allow_once","name":"Allow","kind":"allow_once"}]}}`); err != nil {
 			return err
 		}
@@ -317,11 +318,21 @@ func TestLeaderSubscriberIgnoresOtherRequestForms(t *testing.T) {
 		// Non-numeric id — dropped without panic.
 		return writeACPRequestRaw(c, `{"jsonrpc":"2.0","id":"string-id","method":"_x.ai/ask_user_question","params":{"sessionId":"sess-1","toolCallId":"call_str","questions":[{"question":"q","options":[{"label":"x","description":""}],"multiSelect":null}],"mode":"default"}}`)
 	})
-	if len(got) != 0 {
-		t.Fatalf("got %+v, want no events for observe-only requests", got)
+	perms := filterEvents(got, core.EventPermissionRequest)
+	if len(perms) != 1 {
+		t.Fatalf("permission_request events = %d, want 1: %+v", len(perms), got)
 	}
-	if sub.interactions.len() != 0 {
-		t.Fatalf("registry len = %d, want 0", sub.interactions.len())
+	if perms[0].RequestID != "5" || perms[0].ToolName != "rm" {
+		t.Fatalf("permission event = %+v, want RequestID 5 / ToolName rm", perms[0])
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %+v, want only the permission event (exit_plan_mode observe-only, string id dropped)", got)
+	}
+	if sub.interactions.len() != 1 {
+		t.Fatalf("registry len = %d, want 1 (permission registered)", sub.interactions.len())
+	}
+	if entry, ok := sub.interactions.getByWire(5); !ok || entry.perm == nil || entry.perm.ToolCall.ToolCallID != "call_perm" {
+		t.Fatalf("byWire(5) = %+v ok=%v, want registered permission call_perm", entry, ok)
 	}
 }
 

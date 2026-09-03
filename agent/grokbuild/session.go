@@ -616,21 +616,9 @@ func (s *grokSession) RespondPermission(requestID string, result core.Permission
 		return fmt.Errorf("grokbuild: no pending permission for request %s", requestID)
 	}
 
-	var outcome outcomePayload
-	// "always" (opencode-web official reply) has no grok option; degrade to allow.
-	if result.Behavior == "allow" || result.Behavior == "always" {
-		optionID, found := selectPermissionOption(options, "allow")
-		if !found {
-			return fmt.Errorf("grokbuild: no allow option in permission request %s", requestID)
-		}
-		outcome = outcomePayload{Outcome: "selected", OptionID: optionID}
-	} else {
-		optionID, found := selectPermissionOption(options, "deny")
-		if !found {
-			outcome = outcomePayload{Outcome: "cancelled"}
-		} else {
-			outcome = outcomePayload{Outcome: "selected", OptionID: optionID}
-		}
+	outcome, err := permissionOutcome(options, result.Behavior)
+	if err != nil {
+		return err
 	}
 
 	// Parse the request ID as a JSON-RPC id (it was the numeric id from the agent's request).

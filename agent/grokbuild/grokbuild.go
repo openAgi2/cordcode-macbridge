@@ -407,6 +407,24 @@ func (a *Agent) RejectSessionQuestion(ctx context.Context, sessionID, questionID
 	return err
 }
 
+// RespondSessionPermission implements core.SessionPermissionResponder: routes
+// an iOS permission reply (allow/always/reject) to the live leader subscriber
+// that surfaced the request (external-turn observation — no AgentSession
+// exists, so the bridge falls through to the agent-level responder). The
+// deny/reject distinction is carried by PermissionResult.Behavior, not a
+// separate method; upstream has no reject-specific wire shape.
+func (a *Agent) RespondSessionPermission(ctx context.Context, sessionID, requestID string, result core.PermissionResult) error {
+	_ = ctx
+	sub := a.liveSubscriber(sessionID)
+	if sub == nil {
+		return fmt.Errorf("grokbuild: no live leader subscriber for session %s", shortID(sessionID))
+	}
+	_, err := sub.AnswerPermission(requestID, result)
+	return err
+}
+
+var _ core.SessionPermissionResponder = (*Agent)(nil)
+
 var _ core.UserInputResponder = (*Agent)(nil)
 var _ core.StructuredUserInputProvider = (*Agent)(nil)
 
