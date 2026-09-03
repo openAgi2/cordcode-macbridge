@@ -145,7 +145,7 @@
       "id": "phase2a-grok-plan-impl",
       "title": "Phase 2a grok plan 审批接线（三动作 + abandoned 修正）",
       "description": "agent/grokbuild/leader_subscriber.go handlePlanBroadcast(:681-699)：EventPermissionRequest 补 PermissionKind:\"plan_review\" + Plan{Content=planContent, Title=planApprovalTitle}，PermissionActions 改 [approve,requestChanges,quit]；应答侧(:934-939)按方案 §4.3 翻译表拆三路：approve→{outcome:\"approved\"}；requestChanges→{outcome:\"cancelled\",feedback}（空反馈无 feedback 字段）；quit→{outcome:\"abandoned\"}（修正调研档 §2.3 语义偏差，cancelled 仅 stale 兜底）。上游锚点：grok-build@72a61251 exit_plan_mode/types.rs。",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase2",
       "kind": "impl",
       "depends_on": [
@@ -156,20 +156,22 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "status": "present",
+        "method": "impl",
+        "attestation": "re-verified",
+        "summary": "handlePlanBroadcast 补 PermissionKind=plan_review + PlanReview{Content=planContent, Title=planApprovalTitle} + 三动作；AnswerPermission plan 分支按 PlanAction 三路翻译（approve→approved / requestChanges→cancelled+feedback 空反馈 omitempty / quit→abandoned），legacy 无 planAction 保持旧二值映射；acp_types.go 注释同步上游三 outcome",
+        "artifacts": [
+          "agent/grokbuild/leader_subscriber.go",
+          "agent/grokbuild/acp_types.go"
+        ],
+        "checked_at": "2026-09-04"
       }
     },
     {
       "id": "phase2a-grok-plan-tests",
       "title": "Phase 2a grok plan 测试",
       "description": "go test ./agent/grokbuild/... -count=1；grok_leader_relay 既有测试扩展：plan 全文下发断言 + 三 outcome（approved/cancelled+feedback/abandoned）翻译断言。fixture 来源：生产日志形状（planBytes=1635/1376）+ 上游 exit_plan_mode/types.rs @72a61251 round-trip 测试。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "tests",
       "depends_on": [
@@ -179,20 +181,22 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "automated",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "status": "present",
+        "method": "tests",
+        "attestation": "re-verified",
+        "summary": "go test ./agent/grokbuild/... -count=1 → ok (24.5s)（重跑过两次，首跑暴露 PlanActionsBinary 旧断言后更新）；surfaced 扩展 plan 全文/标题/kind/三动作断言；新增 AnswerPlanVocabulary（abandoned 修正 + cancelled+feedback + 空反馈无字段）；leader_interactions 其余测试不涉动作断言无需改",
+        "artifacts": [
+          "agent/grokbuild/leader_plan_test.go",
+          "agent/grokbuild/leader_permission_options_test.go"
+        ],
+        "checked_at": "2026-09-04"
       }
     },
     {
       "id": "phase2a-grok-plan-regression",
       "title": "Phase 2a grok 回归（N/A 说明）",
       "description": "backend 接线单元，e2e 面集中在 Phase 4。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "regression",
       "depends_on": [
@@ -202,20 +206,20 @@
       "notes": "",
       "verification": {
         "required": false,
-        "status": "missing",
-        "method": "manual",
+        "status": "present",
+        "method": "regression",
         "attestation": "self-attested",
-        "na_reason": "backend 接线单元；e2e 面由 phase4-mac-runtime-verification 与 phase4-owner-acceptance-matrix 集中覆盖（方案 §5 Phase 4），风险已由 phase2a-grok-plan-tests 锚定翻译表。",
-        "summary": "",
+        "na_reason": "纯 backend 翻译层，无独立 UI/perf 面；wire 兼容已由 Phase 1 字节级锚点测试 + 本期 legacy fallback 断言（AnswerPlanApproved/Cancelled 保持原行为）覆盖；运行态 e2e 归 Phase 4 统一验收",
+        "summary": "na：legacy 二值回归由 -tests 覆盖",
         "artifacts": [],
-        "checked_at": null
+        "checked_at": "2026-09-04"
       }
     },
     {
       "id": "phase2b-claude-plan-impl",
       "title": "Phase 2b claude ExitPlanMode 专门化",
       "description": "agent/claudecode/session.go handleControlRequest(:827-889)：tool_name==\"ExitPlanMode\" 分支——从 ToolInputRaw.input 抽 plan/planFilePath，emit permissionKind=plan_review + Plan 载荷（permissionActions 三动作）；claudecode.go summarizeInput(:2225) 加分支（卡面摘要不塞全文）；RespondPermission(:979→respondPermissionContext) 按 planAction 翻译（D5 裁决=纯 allow 不带 updatedPermissions；requestChanges→deny+message=feedback，空时 Mac 填固定文案；quit→deny+固定 message）。上游锚点：SDK 0.3.259 PermissionResult deny.message 必填（sdk.d.ts:2324-2334）。",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "phase2",
       "kind": "impl",
       "depends_on": [

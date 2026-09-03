@@ -2233,6 +2233,13 @@ func summarizeInput(tool string, input any) string {
 		if fp, ok := m["file_path"].(string); ok {
 			return fp
 		}
+	case "ExitPlanMode":
+		// 计划全文走 plan_review 载荷；卡面摘要保持短（planFilePath 是全文的
+		// 本地第二来源），不再序列化整个 input 把 7.5KB 级 plan 挤进 toolInput。
+		if fp, ok := m["planFilePath"].(string); ok && fp != "" {
+			return fp
+		}
+		return "plan approval"
 	case "Bash":
 		if cmd, ok := m["command"].(string); ok {
 			return cmd

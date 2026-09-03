@@ -880,6 +880,18 @@ func (cs *claudeSession) handleControlRequest(raw map[string]any) {
 		ToolInput:    summarizeInput(toolName, input),
 		ToolInputRaw: input,
 	}
+	// ExitPlanMode（plan approval layer, 2026-09-04）：plan mode 的审批门。计划全文在
+	// input.plan（实测 7.5KB 级 markdown），planFilePath 是本地第二来源；
+	// allowedPrompts 已废弃、忽略（调研档 §3.2）。升级为 plan_review 专用卡，
+	// 不再把全文塞进通用权限卡的 toolInput。
+	if toolName == "ExitPlanMode" {
+		evt.PermissionKind = "plan_review"
+		evt.PermissionActions = []string{"approve", "requestChanges", "quit"}
+		evt.PlanReview = &core.PlanPayload{
+			Content:      strVal(input, "plan"),
+			PlanFilePath: strVal(input, "planFilePath"),
+		}
+	}
 
 	select {
 	case cs.events <- cs.scopeEvent(evt):
@@ -1000,7 +1012,17 @@ func (cs *claudeSession) respondPermissionContext(ctx context.Context, requestID
 	} else {
 		msg := result.Message
 		if msg == "" {
-			msg = "The user denied this tool use. Stop and wait for the user's instructions."
+			// Plan-review deny copy（方案 §4.3）：deny.message 是官方指定的反馈回
+			// 模型通道且必填——requestChanges 空反馈与 quit 各用固定文案区分语义
+			//（claude wire 上两动作同为 deny，差异只在文案，调研档 §3.5）。
+			switch result.PlanAction {
+			case "requestChanges":
+				msg = "The user rejected the plan and asked to keep planning. No specific feedback was provided."
+			case "quit":
+				msg = "The user dismissed the plan review."
+			default:
+				msg = "The user denied this tool use. Stop and wait for the user's instructions."
+			}
 		}
 		permResponse = map[string]any{
 			"behavior": "deny",
