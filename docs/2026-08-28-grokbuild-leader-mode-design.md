@@ -2086,3 +2086,188 @@ wire 探针（临时配对设备直连生产 8777 发真实 `get_session`）返�
 （`openAutomationOpenSession`）的 get_session 在桥接连接就绪前发出且无重试，
 冷启动经 env-var 注入打开 session 时 header 停留占位「新会话」。仅影响
 automation/UITest 路径，不影响用户手动打开（日志证明手动打开必发 get_session）。
+
+## 24. Follower permission 应答升级（2026-09-03 计划；owner 指令：先方案入档、
+扩展现有 plan JSON、继续 exec-plan 执行）
+
+> 状态：**计划已入档（2026-09-03），待实施**。前置调查已入账（commit 750cb87 +
+> think.md 总账行）：permission 与 interjection 两类 follower 应答在官方 leader
+> 协议下均可行。本节只覆盖 **permission 应答**（§24.3）；interjection 为 Phase B
+> 后置（§24.6）。分级 D3（跨进程协议/状态语义）。
+
+### 24.1 问题定位与目标
+
+现状（question-only 已交付）：leader 模式下外部 turn（Mac TUI 发起）触发
+`session/request_permission` 交互时，follower 广播 REQUEST 到达
+`handleInteractionRequest`（`agent/grokbuild/leader_subscriber.go:522`）后被 :529
+方法门直接丢弃（ruling B observe-only）——**iPhone 上什么都不出现**，turn 卡在
+权限等待直到 Mac TUI 用户应答。iOS 若手动发 `resolve_permission` 也到不了
+agent：无 AgentSession（外部 turn）时 `handleResolvePermission`
+（`go-bridge/handlers.go:4440`）的 agent 级回退要求 backend 实现
+`core.SessionPermissionResponder`（`core/interfaces.go:66`），grokbuild 目前未实现
+→ 返回 `session_not_found`。
+
+目标：follower（iOS）在 leader 模式外部 turn 下能看到权限卡（allow / always /
+reject）并应答；与 Mac TUI 的并发应答由官方 server first-answer-wins 仲裁，
+CordCode 侧迟到应答静默（与 question 轨道同款 tombstone 语义）。
+
+**iOS / protocol pack 零改动**：`permission_request`（`go-bridge/events.go:203`，
+reducer `projection_reducer.go:970`）、`permission_resolved`（`events.go:205`）、
+iOS 权限卡（`CCCodeBridgeBackendClient.swift:1596`）与 `resolve_permission` wire
+应答全部已存在——本节是纯 Mac 侧管道接通。
+
+### 24.2 官方源码证据（上游 `/Users/jacklee/Projects/grok-build` @ `72a61251`；
+安装版 grok 1.0.13 = `5e9a58528b76`，偏移口径同 §23.5）
+
+前置调查（750cb87）结论，逐项锚点：
+
+1. **共享交互集**：`server.rs:496-506 is_interaction_request` = `session/request_permission`
+   + `x.ai/ask_user_question` + `x.ai/exit_plan_mode` + `x.ai/mcp/elicit`——全部走
+   同一条广播管道：广播**所有**订阅者（`server_tests.rs:3472
+   interaction_request_broadcasts_to_all_subscribers`）+ pending 缓存重放给晚加入者
+   （`pending_interaction_replayed_to_late_joiner`）。
+2. **上行无方法门**：`ClientMessage::Acp` 载荷无条件转发 agent
+   （`server.rs:1825-1943`）；`rewrite_request_id`（`server.rs:326`）只改写带 method
+   的**请求**，客户端**应答**（JSON-RPC response，无 method）原样回 agent——即
+   follower 用原始 numeric id 回 `requestPermissionResult` 即达 agent。
+3. **first-answer-wins**：官方 server 消费第一个应答，后续静默丢弃（question 轨道
+   §3.5 已实证同款行为，permission 同一仲裁点）。
+4. **ACP 形状**：`RequestPermissionRequest/Response` 是标准 ACP
+   （`xai-acp-lib/src/message.rs`）；CordCode `agent/grokbuild/acp_types.go:388-423`
+   已有同款类型且在 OFF 模式 stdio 路径上验证过（`handlePermissionRequest`
+   session.go:1137 / `RespondPermission` session.go:603）。
+5. **envelope 形态**：permission REQUEST 与 ask_user_question 同走
+   `is_interaction_request` 广播，half-wrapped / wrapped 差异由既有
+   `normalizeLeaderMethod`（leader_subscriber.go:829）+ `interactionInnerParams`
+   （:849）处理——两者已有单测锁定（ask_user_question 从 1.0.13 活体 frozen）。
+   permission 无需新 envelope 探针：params 形状 stdio 已验证、envelope helpers
+   已覆盖；活体到达形状由 owner 真机矩阵第一步（REQUEST 到达 → iOS 卡出现）兜底。
+
+### 24.3 CordCode 实施方案（MacBridge 单仓）
+
+#### 24.3.1 leader_subscriber.go：门加宽 + 注册 + emit
+
+- `handleInteractionRequest`（:522）在 `x.ai/ask_user_question` 分支旁新增
+  `session/request_permission` 分支：`interactionInnerParams` 解包 →
+  `requestPermissionParams` 解析（`ToolCallID`/`ToolCall.Title`/`Options`）→
+  注册进 interactions registry → emit
+  `core.EventPermissionRequest{RequestID: string(wireID), ToolName: ToolCall.Title}`
+  （与 OFF 模式 emit 完全同款；relay 共享 mapper 自动转 wire `permission_request`
+  → iOS 权限卡）。
+- `x.ai/exit_plan_mode` / `x.ai/mcp/elicit` 维持 observe-only（本节范围外，与
+  前置调查裁决一致）。
+- **registry 复用**：`leaderInteractionRegistry` 增加条目 kind（question /
+  permission）与 **wireID 索引**。permission 与 question 的注册键同为
+  `toolCallID`（lifecycle 广播按 toolCallID 清理，两条 kind 共用 take/tombstone
+  语义）；iOS 应答回流的 RequestID 是 numeric wire id 字符串（OFF 模式同款键），
+  与 question 的 `toolCallID[#idx]` 命名空间天然不冲突，wireID 索引只服务
+  permission 查找。
+
+#### 24.3.2 AnswerPermission + 共享映射 helper
+
+- 新增 `(s *LeaderSubscriber) AnswerPermission(requestID string, result
+  core.PermissionResult) (bool, error)`：镜像 `AnswerQuestion`（:653）——wireID
+  索引查条目 → behavior 映射 → `sendInteractionResponse` 发
+  `requestPermissionResult{Outcome}`（原始 numeric id，`writeMu`/`conn` 同款）→
+  take + 返回 resolved=true；tombstone（TUI 先答）静默 resolved=true。
+- **共享映射 helper**：从 `grokSession.RespondPermission`（session.go:603）提取
+  `permissionOutcome(options []permissionOption, behavior string)
+  (outcomePayload, error)`（allow/always→`selectPermissionOption("allow")`、deny→
+  deny 选项或 `cancelled`、无匹配 deny 选项降级 cancelled）为包级函数，OFF 模式
+  与 leader 模式共用，行为零变化。
+- `sendInteractionResponse`（:758）的 result 参数放宽为 `any`（两种 result 类型
+  都走 `encodeResponse`，无行为分支）。
+- **resolved 收口分工**（关键决策，不重复广播）：
+  - **iOS 应答路径**：`handleResolvePermission` 对非 official source responder 的
+    本地乐观收口（handlers.go:4463 `publishEvent permission_resolved`，无 Targets
+    广播全部订阅连接）**已经覆盖所有设备**（包括未应答的 iPad 等）——leader
+    subscriber 在 `AnswerPermission` 成功后**不再 emit**
+    `EventPermissionResolved`，避免双发。
+  - **TUI 先答路径**：官方 `interaction_resolved` 广播到达 →
+    `handleInteractionLifecycle`（:564）的 resolved 分支扩展：条目为 permission
+    kind 时 take + emit `core.EventPermissionResolved{RequestID: string(wireID),
+    Content: "resolved"}`（广播不带 outcome，behavior 用 `"resolved"`；执行时核对
+    iOS `permission_resolved` reducer 对未知 behavior 的收口分支是否纯关卡——
+    OFF 模式乐观收口的 behavior 值域是 allow/deny/always/reject，reducer 若对值
+    敏感需在实现时确认 `"resolved"` 不产生副作用，必要时换 neutral 值）。
+
+#### 24.3.3 grokbuild.go：agent 级路由（wire 侧零改动）
+
+- `Agent` 实现 `core.SessionPermissionResponder.RespondSessionPermission`
+  （接口已在 `core/interfaces.go:66`，无需新增）：镜像
+  `RespondSessionQuestion`（grokbuild.go:386）——`liveSubscriber(sessionID)` →
+  `sub.AnswerPermission(requestID, result)`；无 live subscriber 报错（与 question
+  同款文案风格）。`RejectSessionPermission` 不需要：`handleResolvePermission`
+  只走 `RespondSessionPermission`（deny/reject 由 behavior 映射 cancelled/deny
+  option，无独立 reject 方法）。
+- wire 链路现状即通：iOS `resolve_permission` → `handleResolvePermission`
+  （handlers.go:4447 优先 `sess.RespondPermission`，无 AgentSession 时回退 type
+  assertion `SessionPermissionResponder` → `RespondSessionPermission`）。
+- capability：`handleResolvePermission` 不查 capability 直接 type assertion，
+  `hello_ack.backends[]` 无需变化；执行时确认无其他 call site 需要 capability
+  广告（如 iOS 端按键 gating 已按 backend 静态处理）。
+
+#### 24.3.4 pending 重放与断线
+
+晚加入 follower 收到官方 pending REQUEST 重放 → 走同一条
+`handleInteractionRequest` 路径 → 自动注册 + emit（iOS 卡出现）；
+`pending_interaction` lifecycle 信号维持 visibility-only 日志（REQUEST 帧已携带
+完整权限信息）。断线重连后 registry 重建靠重放，CordCode 不自建快照。
+
+### 24.4 测试计划（`agent/grokbuild/`，D3 定向）
+
+| 用例（leader_subscriber permission 域） | 预期 |
+| --- | --- |
+| permission REQUEST 注册 + emit | `EventPermissionRequest`，RequestID = wire id 字符串、ToolName = title |
+| AnswerPermission allow / always | outcome selected + allow 选项（always 无 grok 对应选项时降级 allow） |
+| AnswerPermission deny（有/无 deny 选项） | selected deny / cancelled |
+| 迟到应答（已 tombstone） | 静默 resolved=true，无 wire 写入 |
+| `interaction_resolved` 广播（permission kind） | 条目清理 + `EventPermissionResolved`（Content="resolved"） |
+| TUI 先答后 iOS 迟到应答 | 同 tombstone 静默 |
+| exit_plan_mode / mcp/elicit 仍被门挡 | 无注册无 emit（锁定 observe-only） |
+| OFF 模式 `RespondPermission` 重构后 | 既有测试全过（行为零变化） |
+| registry wireID 索引 | put/take/consumed 与 toolCallID 键一致性（kind 混合注册互不干扰） |
+
+定向：`go test ./agent/grokbuild/ -count=1`（包全量，~25s 预算内）+ `go vet` +
+`go build ./go-bridge`。不跑全仓。
+
+### 24.5 交付与验收
+
+1. 实现按三元组 `perm-follower-{impl,tests,regression}` 走 exec-plan
+   （plan-60f196abb855.json 追加，链式 depends_on
+   `rfx-rename-title-regression`）。
+2. Release 构建覆盖安装 + 四门核对（新 PID / lstart / 8777 监听者 / 无违规残留
+   + 新行为特征输出：permission 注册日志行）。
+3. **owner 真机矩阵**（leader 模式 + 外部 turn）：
+   1. Mac TUI 发起触发权限的 turn → **iPhone 权限卡出现**（标题与 TUI 一致）；
+   2. iPhone 点 Allow → Mac TUI 权限提示消失、agent 继续执行（first-answer-wins：
+      CordCode 应答被官方消费）；
+   3. 反向：Mac TUI 先答 → iPhone 卡自动收口（`interaction_resolved` →
+      permission_resolved）；
+   4. 并发竞态（可选）：两端同时应答 → 先达者生效，后达者静默无报错。
+4. 回灌：本节状态行改已实施 + `think.md` 总账行收口 + `CHANGELOG.md`。
+
+### 24.6 Phase B：interjection（本轮不做，另案立项理由）
+
+官方语义（前置调查 750cb87）：插话 = server-authoritative 共享队列 +
+`x.ai/queue/interject` ext 方法（`expected_version` 乐观锁，owner 仅归属）+
+`x.ai/queue/changed` 全客户端广播（`ext_parsers.rs:46` →
+`SessionCommand::InterjectQueuedPrompt`）。**不做进本轮的原因**：①iOS 侧需要
+输入框行为改动（turn 进行中发送 → 转 interject + 队列状态展示），是产品 UI
+决策而非纯管道复用；②Mac 侧队列版本跟踪（`expected_version` 维护与
+`queue/changed` 广播消费）是新状态面，与 permission 的「复用既有 OFF 模式
+管道」成本结构不同。权限应答落地且验收后，interjection 按 §24.6 另行立项
+（届时 iOS 改动需跨仓双改）。
+
+### 24.7 来源清单（P0 门，本节计划编写时）
+
+```text
+MacBridge 仓库路径=/Users/jacklee/Projects/cordcode-macbridge-grokbuild-leader（功能工作树）
+MacBridge 分支=codex/grokbuild-leader-mode
+MacBridge 提交=750cb87（docs: follower permission/interjection 前置调查结论入账）
+MacBridge 未提交状态=干净（本节为唯一新增修改）
+上游 grok-build=/Users/jacklee/Projects/grok-build @ 72a61251（只读调查，§24.2 锚点）
+安装版目标二进制=grok 1.0.13（5e9a58528b76），偏移口径同 §23.5
+iOS 仓库=零改动（§24.1 论证：permission wire 面 iOS 侧已存在）
+被测生产 runtime=/Applications/CordCodeLink.app 内嵌 runtime（03e5527 构建，含同名互踢修复）
+```
