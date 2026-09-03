@@ -1,13 +1,15 @@
 package grokbuild
 
 // Follower exit_plan_mode (plan approval) tests for the leader subscriber
-// (design §25 — owner ruling 2026-09-03 opened the observe-only gate).
+// (design §24 / §25 — owner ruling 2026-09-03 opened the observe-only gate;
+// plan approval layer 2026-09-04 added the plan_review card + 3-action
+// vocabulary).
 //
 // Wire shapes frozen from grok-build exit_plan_mode/types.rs @72a61251 and its
 // official round-trip tests: request camelCase {sessionId, toolCallId,
 // planContent?} on the half-wrapped _x.ai/ method; response {outcome:
-// "approved"|"cancelled", feedback?} with feedback only on typed-cancel (the
-// TUI freeform path, which the bridge card does not have).
+// "approved"|"cancelled"|"abandoned", feedback?} with feedback only on
+// cancelled-with-typed-feedback.
 
 import (
 	"fmt"
@@ -38,6 +40,20 @@ func TestLeaderSubscriberExitPlanModeSurfaced(t *testing.T) {
 	}
 	if perms[0].RequestID != "9" || perms[0].ToolName != "计划审批: 重构方案" {
 		t.Fatalf("plan card = %+v, want RequestID 9 / heading-derived title", perms[0])
+	}
+	// plan_review 卡面（方案 §4.1）：kind 命中、三动作全集、plan 全文与标题。
+	if perms[0].PermissionKind != "plan_review" {
+		t.Fatalf("PermissionKind = %q, want plan_review", perms[0].PermissionKind)
+	}
+	actions := perms[0].PermissionActions
+	if len(actions) != 3 || actions[0] != "approve" || actions[1] != "requestChanges" || actions[2] != "quit" {
+		t.Fatalf("PermissionActions = %+v, want [approve requestChanges quit]", actions)
+	}
+	if perms[0].PlanReview == nil || perms[0].PlanReview.Content != "# 重构方案\n\n## 步骤\n1. 先做 A\n2. 再做 B" {
+		t.Fatalf("PlanReview = %+v, want full planContent", perms[0].PlanReview)
+	}
+	if perms[0].PlanReview.Title != "计划审批: 重构方案" {
+		t.Fatalf("PlanReview.Title = %q, want heading-derived title", perms[0].PlanReview.Title)
 	}
 	if sub.interactions.len() != 1 {
 		t.Fatalf("registry len = %d, want 1", sub.interactions.len())
@@ -116,6 +132,58 @@ func TestLeaderSubscriberAnswerPlanCancelled(t *testing.T) {
 		}
 		if resolved, err := sub.AnswerPermission("10", core.PermissionResult{Behavior: "always"}); err != nil || !resolved {
 			t.Errorf("always degrade = (%v, %v), want (true, nil)", resolved, err)
+		}
+	})
+}
+
+// TestLeaderSubscriberAnswerPlanVocabulary: the plan-card 3-action vocabulary
+// (方案 §4.3 翻译表，锚点 types.rs @72a61251 round-trip tests)——quit →
+// {outcome:"abandoned"}（修正旧把一切非 allow 都归 cancelled 的语义偏差）；
+// requestChanges → {outcome:"cancelled", feedback}，空反馈时无 feedback 字段。
+func TestLeaderSubscriberAnswerPlanVocabulary(t *testing.T) {
+	_, _ = runLeaderSubscriberAnswer(t, func(c net.Conn, answered <-chan struct{}) error {
+		for i, plan := range []string{"# 计划甲", "# 计划乙", "# 计划丙"} {
+			if err := writeACPRequestRaw(c, fmt.Sprintf(`{"jsonrpc":"2.0","id":2%d,"method":"_x.ai/exit_plan_mode","params":{"sessionId":"sess-1","toolCallId":"call_plan_2%d","planContent":%q}}`, i, i, plan)); err != nil {
+				return err
+			}
+		}
+		<-answered
+		frames := []map[string]any{readClientACPFrame(t, c), readClientACPFrame(t, c), readClientACPFrame(t, c)}
+		byID := map[string]map[string]any{}
+		for _, f := range frames {
+			byID[fmt.Sprint(f["id"])] = f
+		}
+		// quit → abandoned（abandoned 无 feedback，官方类型）。
+		r, _ := byID["20"]["result"].(map[string]any)
+		if r["outcome"] != "abandoned" {
+			t.Errorf("quit result = %+v, want outcome abandoned", r)
+		}
+		if _, has := r["feedback"]; has {
+			t.Errorf("quit result = %+v, abandoned must omit feedback", r)
+		}
+		// requestChanges + 反馈 → cancelled + feedback。
+		r, _ = byID["21"]["result"].(map[string]any)
+		if r["outcome"] != "cancelled" || r["feedback"] != "第二步改成并行" {
+			t.Errorf("requestChanges result = %+v, want cancelled + feedback", r)
+		}
+		// requestChanges 空反馈 → cancelled，无 feedback 字段（omitempty 语义）。
+		r, _ = byID["22"]["result"].(map[string]any)
+		if r["outcome"] != "cancelled" {
+			t.Errorf("requestChanges(empty) result = %+v, want outcome cancelled", r)
+		}
+		if _, has := r["feedback"]; has {
+			t.Errorf("requestChanges(empty) result = %+v, empty feedback must omit the field", r)
+		}
+		return nil
+	}, func(sub *LeaderSubscriber) {
+		if resolved, err := sub.AnswerPermission("20", core.PermissionResult{Behavior: "deny", PlanAction: "quit"}); err != nil || !resolved {
+			t.Errorf("quit = (%v, %v), want (true, nil)", resolved, err)
+		}
+		if resolved, err := sub.AnswerPermission("21", core.PermissionResult{Behavior: "deny", PlanAction: "requestChanges", Message: "第二步改成并行"}); err != nil || !resolved {
+			t.Errorf("requestChanges = (%v, %v), want (true, nil)", resolved, err)
+		}
+		if resolved, err := sub.AnswerPermission("22", core.PermissionResult{Behavior: "deny", PlanAction: "requestChanges"}); err != nil || !resolved {
+			t.Errorf("requestChanges(empty) = (%v, %v), want (true, nil)", resolved, err)
 		}
 	})
 }

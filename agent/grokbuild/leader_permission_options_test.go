@@ -160,19 +160,20 @@ func TestLeaderSubscriberPermissionOptionsPassedThrough(t *testing.T) {
 	}
 }
 
-// TestLeaderSubscriberPlanActionsBinary: the plan card advertises exactly
-// approve/reject with no official kind (generic style; a plan has no tool
-// category).
-func TestLeaderSubscriberPlanActionsBinary(t *testing.T) {
+// TestLeaderSubscriberPlanActionsVocabulary: the plan card (plan approval
+// layer, 2026-09-04) advertises the full approve/requestChanges/quit
+// vocabulary with permissionKind "plan_review" (a plan has no tool category;
+// kind switches the iOS card style to the dedicated plan card).
+func TestLeaderSubscriberPlanActionsVocabulary(t *testing.T) {
 	got, _ := runLeaderSubscriber(t, funcScript(fixtureExitPlanMode))
 	perms := filterEvents(got, core.EventPermissionRequest)
 	if len(perms) != 1 {
 		t.Fatalf("permission_request count = %d, want 1", len(perms))
 	}
-	if !actionsEqual(perms[0].PermissionActions, "approve", "reject") {
-		t.Errorf("plan actions = %v, want [approve reject]", perms[0].PermissionActions)
+	if !actionsEqual(perms[0].PermissionActions, "approve", "requestChanges", "quit") {
+		t.Errorf("plan actions = %v, want [approve requestChanges quit]", perms[0].PermissionActions)
 	}
-	if perms[0].PermissionKind != "" {
-		t.Errorf("plan kind = %q, want empty", perms[0].PermissionKind)
+	if perms[0].PermissionKind != "plan_review" {
+		t.Errorf("plan kind = %q, want plan_review", perms[0].PermissionKind)
 	}
 }

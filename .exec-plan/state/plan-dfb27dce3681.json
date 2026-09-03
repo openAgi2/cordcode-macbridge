@@ -119,7 +119,7 @@
       "id": "phase1-protocol-pack-sync",
       "title": "Phase 1 Mac docs/protocol/ canonical 更新 + commit",
       "description": "Mac docs/protocol/ 更新 permission_request.plan / resolve_permission.planAction/feedback 字段说明与兼容性注记；hello.protocol.version 不动（非破坏性可选字段）；单独 commit。",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase1",
       "kind": "impl",
       "depends_on": [
@@ -129,20 +129,23 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "implementation",
+        "status": "present",
+        "method": "impl",
         "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "protocol pack 三件套同步：bridge-v1.md 新增 Plan review payload 文档节（permissionKind=plan_review / permissionActions 三动作 / plan 对象 / permissionPlan 投影 SoT / resolve_permission.planAction+feedback 行为兼容映射与 fail-closed）+ 投影面字段表扩展；schema/bridge-v1.types.ts 新增 BridgePlanReviewPayload、BridgePermissionRequestExtras 补 permissionActions/plan、投影 part permissionActions union 扩 requestChanges|quit + permissionPlan 字段；README.md schema revision bump 2026-07-05→2026-09-04",
+        "artifacts": [
+          "docs/protocol/bridge-v1.md",
+          "docs/protocol/schema/bridge-v1.types.ts",
+          "docs/protocol/README.md"
+        ],
+        "checked_at": "2026-09-04"
       }
     },
     {
       "id": "phase2a-grok-plan-impl",
       "title": "Phase 2a grok plan 审批接线（三动作 + abandoned 修正）",
       "description": "agent/grokbuild/leader_subscriber.go handlePlanBroadcast(:681-699)：EventPermissionRequest 补 PermissionKind:\"plan_review\" + Plan{Content=planContent, Title=planApprovalTitle}，PermissionActions 改 [approve,requestChanges,quit]；应答侧(:934-939)按方案 §4.3 翻译表拆三路：approve→{outcome:\"approved\"}；requestChanges→{outcome:\"cancelled\",feedback}（空反馈无 feedback 字段）；quit→{outcome:\"abandoned\"}（修正调研档 §2.3 语义偏差，cancelled 仅 stale 兜底）。上游锚点：grok-build@72a61251 exit_plan_mode/types.rs。",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "phase2",
       "kind": "impl",
       "depends_on": [

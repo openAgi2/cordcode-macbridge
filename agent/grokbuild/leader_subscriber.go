@@ -672,12 +672,11 @@ func (s *LeaderSubscriber) handlePermissionBroadcast(wireID int, params json.Raw
 // handlePlanBroadcast registers an x.ai/exit_plan_mode broadcast (plan
 // approval — the shared interaction set member that fires when the agent
 // finishes its plan and asks to exit plan mode) and emits
-// core.EventPermissionRequest so the existing iOS permission card surfaces it
-// with zero iOS changes: iPhone 允许 maps to outcome "approved", 拒绝 to
-// "cancelled" (no feedback — the card has no text input; the TUI-only
-// freeform path stays TUI-local). planContent rides in the request itself
-// (exit_plan_mode/types.rs); the card title carries its first non-empty line
-// so the user can tell WHICH plan is awaiting approval.
+// core.EventPermissionRequest with permissionKind "plan_review" and the full
+// plan payload (plan approval layer, 2026-09-04): iPhone sees a dedicated plan
+// card with approve / requestChanges / quit. planContent rides in the request
+// itself (exit_plan_mode/types.rs); the card title carries its first
+// non-empty line so the user can tell WHICH plan is awaiting approval.
 func (s *LeaderSubscriber) handlePlanBroadcast(wireID int, params json.RawMessage, sessionID string, onEvent func(core.Event)) {
 	var p exitPlanModeParams
 	if err := json.Unmarshal(interactionInnerParams(params), &p); err != nil || p.ToolCallID == "" {
@@ -692,11 +691,13 @@ func (s *LeaderSubscriber) handlePlanBroadcast(wireID int, params json.RawMessag
 			Type:      core.EventPermissionRequest,
 			RequestID: strconv.Itoa(wireID),
 			ToolName:  planApprovalTitle(p.PlanContent),
-			// Plan approval is a binary allow/deny — no persistent variant, no
-			// tool kind. Leave PermissionKind empty (generic card style) and
-			// advertise only approve/reject so the card renders exactly two
-			// buttons.
-			PermissionActions: []string{"approve", "reject"},
+			// Plan review — no persistent variant, no tool kind. Full action
+			// vocabulary per the official outcome space (approved / cancelled
+			// +feedback / abandoned); old clients degrade to the generic
+			// approve/reject two-button card via permissionActions absence.
+			PermissionKind:    "plan_review",
+			PermissionActions: []string{"approve", "requestChanges", "quit"},
+			PlanReview:        &core.PlanPayload{Content: p.PlanContent, Title: planApprovalTitle(p.PlanContent)},
 		})
 	}
 	slog.Info("grokbuild: leader exit_plan_mode registered",
@@ -931,14 +932,25 @@ func (s *LeaderSubscriber) AnswerPermission(requestID string, result core.Permis
 	var response any
 	switch {
 	case entry.kind == leaderKindPlan:
-		// exit_plan_mode outcomes (official types.rs): allow → approved,
-		// anything else → cancelled without feedback (the card has no text
-		// input; the TUI's typed-feedback path stays TUI-local).
-		outcome := "cancelled"
-		if result.Behavior == "allow" || result.Behavior == "always" {
-			outcome = "approved"
+		// exit_plan_mode outcomes (official types.rs @72a61251): the plan-card
+		// vocabulary maps approve→approved, requestChanges→cancelled with
+		// typed feedback (empty feedback omits the field), quit→abandoned.
+		// Legacy two-button replies (no planAction) keep the pre-plan-layer
+		// binary mapping: allow/always→approved, else cancelled.
+		switch result.PlanAction {
+		case "approve":
+			response = exitPlanModeExtResponse{Outcome: "approved"}
+		case "requestChanges":
+			response = exitPlanModeExtResponse{Outcome: "cancelled", Feedback: result.Message}
+		case "quit":
+			response = exitPlanModeExtResponse{Outcome: "abandoned"}
+		default:
+			outcome := "cancelled"
+			if result.Behavior == "allow" || result.Behavior == "always" {
+				outcome = "approved"
+			}
+			response = exitPlanModeExtResponse{Outcome: outcome}
 		}
-		response = exitPlanModeExtResponse{Outcome: outcome}
 	case entry.perm != nil:
 		outcome, err := permissionOutcome(entry.perm.Options, result.Behavior)
 		if err != nil {

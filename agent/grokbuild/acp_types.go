@@ -429,9 +429,9 @@ type exitPlanModeParams struct {
 }
 
 type exitPlanModeExtResponse struct {
-	Outcome string `json:"outcome"` // "approved" or "cancelled"
-	// Feedback mirrors the upstream field but is always empty from iOS — the
-	// bridge permission card has no text input (the TUI-only freeform path).
+	Outcome string `json:"outcome"` // "approved" | "cancelled" | "abandoned"
+	// Feedback mirrors the upstream field: present only on "cancelled" with
+	// typed feedback (iOS requestChanges path; empty omits the field).
 	Feedback string `json:"feedback,omitempty"`
 }
 
