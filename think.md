@@ -6,10 +6,50 @@
 | 后续案 | 是什么 / 入口 | 前置依赖 | 状态（更新于） |
 | --- | --- | --- | --- |
 | iOS 发送 Grok 模型应用条目 id | iOS send_message 的 model 回发 transcript 底层 id（glm-5.3），目录外触发 unknown model id；Mac 端 a0b0f11 已软化兜底（消息可发出），根治需 iOS 改发 list_models 条目 id | 无（可与其它 iOS 任务合并） | Mac 兜底已部署（2026-09-02）；iOS 侧未开工 |
-| Grok follower 交互升级 | iOS 无缝接力 Mac 端 grok 任务的根治路径（iOS 作为 leader 客户端，消息进同一 full-capability agent，per-client 能力路由 + mid-turn interjection）。入口 `docs/2026-08-28-grokbuild-leader-mode-design.md` §9/§15 D-3 | leader 模式设计（B 路线）实施完；动工前须按 source-first 冻结 leader 协议 request 方向真实样本（interjection/cancel/permission response 的 follower 可用性）+ writer 仲裁 | 调研取证完成（2026-09-02，docs/2026-09-02-grokbuild-follower-interaction-research.md，评审通过）：request 方向真实 wire 样本 + writer 仲裁（oneshot+guard first-answer-wins）已冻结，现状根因=leader_subscriber 方法门静默丢弃 REQUEST 帧；实施未开工；§6 六点已由 agent 代定（2026-09-02 owner 授权「你自己看着办」）：question-only 起步、permission 不采样本、无倒计时、抢答静默收口、复用既有 question wire、elicit/plan 移出本期（裁决记录见调研文档 §6.1） |
+| Grok follower 交互升级 | iOS 无缝接力 Mac 端 grok 任务的根治路径（iOS 作为 leader 客户端，消息进同一 full-capability agent，per-client 能力路由 + mid-turn interjection）。入口 `docs/2026-08-28-grokbuild-leader-mode-design.md` §9/§15 D-3 | leader 模式设计（B 路线）实施完；动工前须按 source-first 冻结 leader 协议 request 方向真实样本（interjection/cancel/permission response 的 follower 可用性）+ writer 仲裁 | **question-only 起步已交付**（2026-09-03 owner 矩阵四行全过：iPhone 可答/静默收口/断线恢复/关开关回退；四轮修复 1fc6f1f/fdb7d97/ceffc9c/8c1ac9b，复盘见下方 2026-09-03 条目）；permission/interjection 升级未开工 |
 | remote-web 集中测试轮 | 12 门浏览器端验收矩阵 + 4 web-push 取证门（owner 2026-09-02 裁决：先 iOS 任务 → 整体迁移 remote-web → 集中测试）。入口 iOS 仓 `.exec-plan/state/plan-4fe9645c3a36.json` 注记 | iOS App 端任务完成 + remote-web 整体迁移完成 | pending 非阻断；功能路径已真机验证过，16 门属迁移后回归确认（2026-09-02） |
 
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
+
+## 2026-09-03 Grok follower 问题断线恢复四层剥洋葱：同症状两层根因 + 揭盖式连环雷
+
+owner 矩阵行 3「iPhone 杀 App 重开 → 挂起的问题卡应恢复且可答」连续三轮失败，
+每轮修复都让下一层露出来。完整链：
+
+1. **D-G3（leader 死亡场景）**：leader 进程死 → 订阅 ECONNREFUSED → 永久回退
+   tailer。修复 = 订阅统一循环 + 10s dial 探测 reclaim（1fc6f1f）。
+2. **D-G4（订阅活着场景）**：owner 场景 leader 活着、订阅未断，D-G3 不触发。
+   真缺口 = iPhone 重开时全冷 hydrate（`checkpointHit=false`）从 chat_history
+   重建——而 chat_history 转换器根本不产 question 帧。修复 =
+   `GetRichSessionHistory` 以 `leaderSocketDialable` 为 `questionsLive` 门，
+   未答 `ask_user_question` tool_call 产出 pending user_input part（fdb7d97）。
+3. **gate 卡死**：D-G4 部署后「一直正在展开会话」。pending user_input turn
+   **故意**无终态（阻塞边界，转换器不 seal turn_completed），而
+   `WaitHydrateCommitReady` 要求非终态 turn 数为 0 且 grokbuild 无 §3.1
+   冷源活跃信号 → gate 永不 ready → iOS 15s 超时重试死循环（ceffc9c）。
+4. **panic 重启循环**：gate 放行后仍「一直正在展开会话」。hydrate 首次走到
+   commit → `Restore` 安装基线——Restore 构造 projectionSession 漏建
+   `userInputs` map（其余 4 个 map 都建了），leader subscriber 重发挂起 ask 的
+   live 事件写 nil map → `panic: assignment to entry in nil map` → runtime
+   崩溃 → supervisor 重启 → iOS 重连重拉 → 再 panic。生产日志铁证：
+   `hydrate_commit headRev=254` snapshot 已发出，10ms 后 panic 栈（8c1ac9b）。
+
+**教训：**
+
+- **「修复生效后立刻出现新故障」往往是揭盖，不是回归。** gate 放行让 hydrate
+  commit 这条从未走过的路径首次被执行，Restore 的 latent nil map 就在路径上。
+  排障时先问「这次修复让哪条新路径首次可达」，再评估风险面。
+- **同症状不同层**：两轮「正在展开会话」分别是 gate 死循环（行为层）和 panic
+  重启循环（运行层）。SSV2 护栏第 9 条再次应验：先证运行层（panic 栈、进程
+  代际、runtime_ready 次数）再谈行为层。第二轮 10 分钟定位全靠先 grep panic。
+- **拿 HasSessionSubscriber 当 live 信号前先查 RPC 自身的订阅副作用**：
+  `handleGetSessionProjection` 拉取即订阅（WP5 patch push），「无订阅 hydrate」
+  在生产不可达——测试构造该场景会失败且失败方向误导。grokbuild 的窄门在
+  agent 层（`questionsLive` 才产 pending part），宽门（拉取即订阅）+ 窄门组合
+  才是正确语义。
+- **hydrate 基线安装（Restore）必须重建派生索引**：快照装进 reducer 后，后续
+  live 事件的跨源归属（interactionId → owning turn）依赖 `userInputs` 索引；
+  只装快照不建索引，轻则 live 重发落错 turn，重则 nil map 崩进程。
 
 ## 2026-09-02 Grok model/effort 实测取证：checkout ≠ 目标二进制，snake/camel 已分叉
 

@@ -307,6 +307,36 @@ Grok Build 由 `agent/grokbuild` ACP driver 提供，产品 runtime 默认注册
   `resolve_effort_for_model`）：目录证明该模型不支持 effort 或值不在其菜单 →
   丢弃 effort 只发模型（log 可观测；iOS 切模型后 effort 状态残留由此兜住），
   模型无效仍照发由官方报错，无目录真值时透传。
+- **follower 问题应答（question only，2026-09-03 owner 矩阵四行验收）**：
+  Mac 端 grok 弹出的 `ask_user_question` 多选/单选卡可从 iPhone 直接作答。范围
+  裁决：仅 question——permission 类交互不开放；无期限等待（卡片不设超时）；
+  抢答 first-writer-wins（Mac 先答则 iPhone 卡片静默收口）；Leader 模式关闭时
+  回退只读基线。事件双轨发射（`question_events.go`）：canonical
+  `user_input_requested`/`user_input_resolved`（SSV2 投影 user_input part，
+  v2 客户端唯一权威面）+ derived-legacy `question_asked`/`question_resolved`
+  （EventPublisher 不 ingest，仅 v1）。应答经 `resolve_user_input` 双轨路由
+  （`grokbuild.go` RespondSessionQuestion/ResolveUserInput）：leader rail
+  （leader socket 活——转发到 `x.ai/ask_user_question` 应答帧）或 driver rail
+  （每 turn ACP 子进程）。上游 serde 细节：`multi_select`/`multiSelect` 官方
+  双收（模型 chat_history 原文是 snake_case）；option 无 id 字段，CordCode 用
+  label 当 id；freeform 恒开（官方 TUI modal 从不带 no-freeform 门），上行
+  label `"Other"` + annotations notes。多题一次提问时 interactionId =
+  `questionIDFor(toolCallID, i)`（单题裸 id、多题 `#i` 后缀），live 与 hydrate
+  跨源对齐到同一 rail entry。
+- **断线恢复（hydrate 重进 pending question）**：iPhone 杀 App 重开后，挂起中
+  的问题卡随会话水合回来。`GetRichSessionHistory` 的 `questionsLive` =
+  `leaderSocketDialable`：leader 可 dial 时，chat_history 中未答的
+  `ask_user_question` tool_call（`answeredCall` 判定已收口的除外）产出
+  pending `user_input` part（`session_catalog.go`）；leader 死亡则回落
+  tool step 全终态基线（fail closed，不显示可答卡片）。pending part 使
+  hydrate turn 故意无终态（阻塞边界，转换器不 seal turn_completed），因此
+  提交门需要 §3.1 冷源活跃信号：grokbuild 的信号 = 该 session 的活跃事件订阅
+  （`HasSessionSubscriber`）——拉取即订阅（`handleGetSessionProjection` 的
+  subscribe 先于 hydrate），窄门在 agent 层（只有 leader 活才产 pending
+  part）。投影 reducer `Restore`（hydrate 基线安装）从基线 pending part
+  重建 `userInputs` 索引：leader live 重发沿用 hydrate 已建立的 owning turn
+  （跨源身份），upsert 原地替换不复制卡片。leader 订阅断开（ECONNREFUSED，
+  如 Mac grok 重启）走统一循环 10s dial 探测自动 reclaim。
 - 能力仍由 `core` 可选接口和 `WireDescriptor` 推导，客户端不得只按名称猜。
 
 ### DeepSeek（`deepseek` → `agent/dsh`，产品入口已退役）
@@ -517,8 +547,8 @@ agent session 等价。
 | `permission_resolve` | `ToolAuthorizer`；dsh-web（`/api/respond`）、opencode-web（SSE `permission.asked` + folding）宣告；OpenCode/Codex 不宣告 |
 | `todos` | `TodoProvider` |
 | `compression` | Codex `app_server` |
-| `question_reply` | Codex `app_server` 在 derive 里加；Claude / dsh-web 走 `StaticCapabilities`；opencode-web **故意不宣告**（结构化问答只走 `resolve_user_input`） |
-| `structured_user_input_v1` | Codex `app_server`，或 `StructuredUserInputProvider`（codex-web / opencode-web）；dsh-web 也在 StaticCapabilities |
+| `question_reply` | Codex `app_server` 在 derive 里加；Claude / dsh-web 走 `StaticCapabilities`；opencode-web / grokbuild **故意不宣告**（结构化问答只走 `resolve_user_input`） |
+| `structured_user_input_v1` | Codex `app_server`，或 `StructuredUserInputProvider`（codex-web / opencode-web / grokbuild）；dsh-web 也在 StaticCapabilities |
 | `external_turn_streaming` | 各 driver `StaticCapabilities`（dsh-web mux / codex-web 共享 daemon 订阅 / opencode-web SSE 广播） |
 | `turn_detail_lazy_v1` / `turn_detail_chunks_v1` | 仅 codex-remote `StaticCapabilities`；门控 `session_turn_items` / `turn_output_chunk`（unified-bridge-protocol §11.7/§11.8），见 SSV2 一节 |
 | `supports_checkpoint` / `supports_commit_message` / `supports_pull_requests` | 对应 opt-in 接口；未实现则不宣告 |
