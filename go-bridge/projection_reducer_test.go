@@ -1006,3 +1006,71 @@ func TestLiveTurnCompletedPayloadCarriesDurationMs(t *testing.T) {
 		t.Fatalf("payload durationMs = %d, want 86000", got)
 	}
 }
+
+// TestReducerRestoreRebuildsUserInputIndex proves the crash behind the 2026-09-03
+// "正在展开会话" infinite loop: a hydrate commit installs its baseline via Restore,
+// and the first live user_input_requested (grokbuild leader re-emitting the still
+// pending ask) then wrote ps.userInputs — a map Restore never made — panicking the
+// runtime and restarting the whole reconnect cycle. Restore must both build the
+// map and index the baseline's pending parts so the live ask keeps the owning
+// turn the hydrate established (cross-source identity).
+func TestReducerRestoreRebuildsUserInputIndex(t *testing.T) {
+	r := newTestReducer()
+	const backend, sid, turn, interaction = "grokbuild", "s-restore-ui", "turn-hydrate", "call_pending_ask"
+	r.Restore(backend, sid, SessionProjection{
+		SessionID: sid,
+		SyncRev:   250,
+		Execution: ExecutionView{Phase: "requires_action", ActiveTurnID: turn},
+		Turns: []TurnProjection{{
+			TurnID:     turn,
+			Status:     "running",
+			Assistant: &MessageProjection{ID: turn, Role: "assistant", Parts: []ProjectionPart{{
+				Type:                   "user_input",
+				UserInputInteractionID: interaction,
+				UserInputStatus:        "pending",
+				UserInputCanRespond:    true,
+				UserInputQuestions: []interface{}{map[string]interface{}{
+					"id": interaction, "prompt": "选一个？", "answerMode": "single",
+					"options": []interface{}{map[string]interface{}{"id": "A", "label": "A"}},
+				}},
+			}}},
+		}},
+	})
+
+	// The leader subscriber re-emits the still-pending ask as a live event with
+	// no turnId (mid external tool call). Before the fix this write panicked.
+	r.Apply(ev(1, backend, sid, "user_input_requested", map[string]interface{}{
+		"interactionId": interaction,
+		"canRespond":    true,
+		"canReject":     true,
+		"questions": []interface{}{map[string]interface{}{
+			"id": interaction, "prompt": "选一个？", "answerMode": "single",
+			"options": []interface{}{map[string]interface{}{"id": "A", "label": "A"}},
+		}},
+	}))
+
+	proj, ok := r.Snapshot(backend, sid)
+	if !ok {
+		t.Fatal("missing projection after live ask")
+	}
+	var cards []ProjectionPart
+	for _, tu := range proj.Turns {
+		if tu.Assistant == nil {
+			continue
+		}
+		for _, p := range tu.Assistant.Parts {
+			if p.Type == "user_input" {
+				cards = append(cards, p)
+			}
+		}
+	}
+	if len(cards) != 1 {
+		t.Fatalf("live ask must upsert the baseline card, got %d user_input parts: %+v", len(cards), cards)
+	}
+	if cards[0].UserInputInteractionID != interaction {
+		t.Fatalf("card interactionId = %q, want %q", cards[0].UserInputInteractionID, interaction)
+	}
+	if proj.Execution.Phase != "requires_action" {
+		t.Fatalf("execution phase = %q, want requires_action", proj.Execution.Phase)
+	}
+}

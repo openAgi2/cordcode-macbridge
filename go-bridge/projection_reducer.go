@@ -1453,6 +1453,22 @@ func (r *ProjectionReducer) Restore(backendID, sessionID string, projection Sess
 	healProjectionTurnConsistency(&projection)
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// Rebuild the userInputs index from the baseline so a live
+	// user_input_requested for the same interaction keeps the owning turn the
+	// hydrate established (cross-source identity, see user_input_requested).
+	// Every other construction path makes this map; Restore without it panicked
+	// on the first live ask after a hydrate commit (nil map assignment).
+	userInputs := make(map[string]userInputPending)
+	for _, turn := range projection.Turns {
+		if turn.Assistant == nil {
+			continue
+		}
+		for _, part := range turn.Assistant.Parts {
+			if part.Type == "user_input" && part.UserInputInteractionID != "" {
+				userInputs[part.UserInputInteractionID] = userInputPending{turnID: turn.TurnID, part: part}
+			}
+		}
+	}
 	r.sessions[projectionSessionKey(backendID, sessionID)] = &projectionSession{
 		projection:     projection,
 		lastAppliedRev: 0,
@@ -1470,6 +1486,7 @@ func (r *ProjectionReducer) Restore(backendID, sessionID string, projection Sess
 		thinking:    make(map[string]string),
 		tools:       make(map[string]ProjectionPart),
 		upsertTurns: make(map[string]TurnProjection),
+		userInputs:  userInputs,
 	}
 }
 
