@@ -51,6 +51,32 @@ owner 矩阵行 3「iPhone 杀 App 重开 → 挂起的问题卡应恢复且可�
   live 事件的跨源归属（interactionId → owning turn）依赖 `userInputs` 索引；
   只装快照不建索引，轻则 live 重发落错 turn，重则 nil map 崩进程。
 
+## 2026-09-03 Grok rename 后消息页标题不更新：同一磁盘字段的两条解析链分裂
+
+owner 验收 rename 功能：列表标题已改、消息页 header 停留旧名。排查教训：
+
+- **纸面链路全对 ≠ 没问题，先找「同一数据的第二条消费链」**。iOS 静态链
+  （rename 响应 → selectedSession → header）逐环无条件正确，问题在 Mac 侧
+  get_session 回退链返回旧标题把新值覆盖回去。rename 后 50ms 的 get_session
+  （日志 req_19→req_20）就是覆盖者。
+- **官方 rename 只写 `generated_title` + `title_is_manual`，不回写
+  `session_summary`**（上游 persistence.rs `display_title()` 的字段分工）。
+  CordCode 列表链走 catalog `session/list`（官方解析，新名）、详情链
+  （`Agent.ListSessions` → `parseSummaryFile`）直读磁盘 `session_summary`
+  （旧 auto-title）——两条链对同一 summary.json 给出不同标题。修复 =
+  `parseSummaryFile` 镜像 `display_title()` 优先级（非空 `generated_title`
+  优先，**不看 `title_is_manual`**：自动生成标题同字段，官方测试明确锁定）。
+- **复现路径与用户路径不同时，复现产物只可用于取证不可用于结论**。env-var
+  automation open-session 复现出的「新会话」占位是 iOS 冷启动竞态
+  （get_session 在连接就绪前发出且 `try?` 吞掉、无重试），与 owner 症状无关；
+  真正的锚点是生产日志里 owner 时间线的 RPC 序列。
+- **生产路径验证可用临时配对 wire 探针**：pairing create（Management API）→
+  `/pairing` claim → approve → `pairing_complete` 拿 device token → 带查询参数
+  `?token=&deviceId=` 连主 WS → hello → get_session，最后 revoke 探针设备。
+  免 UI、免真机，读生产 runtime 同一 handler（脚本
+  /tmp/cccode-rename-investigate/probe_getsession.py，shape 见
+  pairing_handler.go / auth_gate.go）。
+
 ## 2026-09-02 Grok model/effort 实测取证：checkout ≠ 目标二进制，snake/camel 已分叉
 
 grok 上游 source-first 核验时最关键的发现：**本机 checkout

@@ -2052,3 +2052,37 @@ func (a *Agent) DeleteSession(ctx, sessionID) error
 版本偏移=目标二进制 grok 1.0.13（5e9a58528b76）≠ checkout 72a61251；
   rename/delete wire 实施前需 §23.5 探针实证
 ```
+
+### 23.8 验收瑕疵修复：rename 后消息页标题不立即更新（2026-09-03）
+
+owner 矩阵验收：rename/delete ✅；archive 报「session archive not yet supported」
+（owner 裁决接受现状，不修）；瑕疵——rename 后 session 列表标题已更新，但消息页
+header 标题停留在旧名。
+
+根因（日志 + 磁盘 + 上游源码三层实证）：官方 `/rename` 只写 `generated_title` +
+`title_is_manual`，`session_summary` 保持旧 auto-title（上游
+`persistence.rs:1108 display_title()` 的设计分工）。CordCode 两条 title 链路语义分裂：
+
+- 列表链（`grokHandleListSessions` → catalog `session/list`）经官方 `display_title()`
+  解析 → 新名（owner 看到的列表已改）；
+- 详情链（`handleGetSession` 无 `SessionInfoFetcher` 回退 → `Agent.ListSessions` →
+  `listLocalSessions` → `parseSummaryFile`）只读 `session_summary` → 旧名。
+
+日志时序（2026-09-03 18:06:52）：`rename_session` req_19 → iOS 收到响应后 50ms 的
+`get_session` req_20（刷新链路发出）→ 返回旧 `session_summary` → 覆盖 rename
+响应写入 `selectedSession` 的新标题 → 消息页 header 停留旧名。iOS 侧
+`renameSelectedSession`（先 await rename 再赋值）本身无错，无需改 iOS。
+
+修复（Mac 单仓，eaf5703）：`parseSummaryFile` 镜像官方 `display_title()` 优先级——
+非空 trimmed `generated_title` 优先（不看 `title_is_manual`：自动生成标题同字段），
+否则 `session_summary`。定向单测 fixture 复刻磁盘实测的 rename 后 summary.json
+分裂形状（manual/auto/blank 三例，`TestListLocalSessions_DisplayTitleMirrorsOfficialRename`）。
+
+验证：grokbuild 包全量测试过（23.4s）；Release 构建安装四门核对过；生产路径
+wire 探针（临时配对设备直连生产 8777 发真实 `get_session`）返回新标题
+「哈哈讲个漫威电影宇宙故事 200 字左右」，探针设备已 revoke。
+
+另案记录（不在本次范围）：iOS automation open-session 路径
+（`openAutomationOpenSession`）的 get_session 在桥接连接就绪前发出且无重试，
+冷启动经 env-var 注入打开 session 时 header 停留占位「新会话」。仅影响
+automation/UITest 路径，不影响用户手动打开（日志证明手动打开必发 get_session）。
