@@ -2090,10 +2090,14 @@ automation/UITest 路径，不影响用户手动打开（日志证明手动打�
 ## 24. Follower permission 应答升级（2026-09-03 计划；owner 指令：先方案入档、
 扩展现有 plan JSON、继续 exec-plan 执行）
 
-> 状态：**计划已入档（2026-09-03），待实施**。前置调查已入账（commit 750cb87 +
-> think.md 总账行）：permission 与 interjection 两类 follower 应答在官方 leader
-> 协议下均可行。本节只覆盖 **permission 应答**（§24.3）；interjection 为 Phase B
-> 后置（§24.6）。分级 D3（跨进程协议/状态语义）。
+> 状态：**已实施（2026-09-03，commit 1661e91，Mac 单仓）；owner 真机矩阵验收
+> pending**。前置调查已入账（commit 750cb87 + think.md 总账行）：permission 与
+> interjection 两类 follower 应答在官方 leader 协议下均可行。本节只覆盖
+> **permission 应答**（§24.3）；interjection 为 Phase B 后置（§24.6）。分级 D3
+> （跨进程协议/状态语义）。实施与 §24.3 计划逐项一致，差异仅一处：§24.3.2 计划的
+> 「Take by toolCallID 后 sendInteractionResponse」在实现中改为 getByWire 预检 →
+> permissionOutcome 校验（失败条目保持 pending）→ take → send，消除无效应答
+> 消费条目的窗口。
 
 ### 24.1 问题定位与目标
 
@@ -2271,3 +2275,29 @@ MacBridge 未提交状态=干净（本节为唯一新增修改）
 iOS 仓库=零改动（§24.1 论证：permission wire 面 iOS 侧已存在）
 被测生产 runtime=/Applications/CordCodeLink.app 内嵌 runtime（03e5527 构建，含同名互踢修复）
 ```
+
+### 24.8 实施记录（2026-09-03，commit 1661e91）
+
+- 实现（§24.3 逐项落地）：`acp_codec.go permissionOutcome` 共享 helper（OFF 模式
+  `RespondPermission` 改调用，行为零变化）；`leader_subscriber.go` registry 加
+  `kind`（零值=question，既有测试字面量零改动兼容）+ `byWire` 索引 +
+  `wireTombstones`（getByWire/consumedByWire，put/take 同步维护，256 上限同款）；
+  `handlePermissionBroadcast`（emit
+  `EventPermissionRequest{RequestID: strconv.Itoa(wireID), ToolName: Title}`）；
+  `AnswerPermission`（getByWire 预检 → permissionOutcome 校验 → take → send；
+  tombstone/resolved 竞态静默）；lifecycle resolved 按 kind 分流（permission →
+  `EventPermissionResolved{Content:"resolved"}`）；`sendInteractionResponse`
+  result 放宽 any；`grokbuild.go RespondSessionPermission` +
+  `var _ core.SessionPermissionResponder` 断言。
+- 测试：`leader_permission_test.go` 5 例（allow 回帧/always-reject-cancelled 映射/
+  resolved 广播收口+迟到应答静默/未知 id 报错且不消费条目/wire 索引一致性含
+  replay 复活）；`TestLeaderSubscriberIgnoresOtherRequestForms` 更新为新门
+  （permission emit、exit_plan_mode 与 string-id 仍 observe-only）。
+  `go test ./agent/grokbuild/ -count=1` 包全量 ok 23.853s；`go vet` +
+  `go build ./go-bridge` 过。
+- 部署：Release `1661e91` 四门核对过（runtime PID 18150 lstart 20:05:09 晚于
+  构建 20:04:23、8777 监听者为 `/Applications/CordCodeLink.app` 内嵌 runtime、
+  无违规残留进程、stamp 1661e91e051b 与 HEAD 一致）。
+- permission 特征输出（`leader request_permission registered` 日志行）需真实
+  权限广播触发，无法无副作用预验证——由 owner 真机矩阵第一步覆盖。
+- 待办：owner 真机矩阵（§24.5）验收后本节状态行去 pending、think.md 总账行收口。

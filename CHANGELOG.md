@@ -7,6 +7,7 @@
 版本号对齐 MacBridge Release 构建的 `MARKETING_VERSION`（见 `MacBridge/project.yml`）。日期为协调世界时（UTC）。
 
 ## [Unreleased]
+- **新功能：Grok Build 权限卡可在 iPhone 上直接批准/拒绝（follower 权限应答）**：Mac 端 grok 弹出的工具权限请求（如执行命令）此前在 Leader 模式下 iPhone 完全看不到，turn 卡住直到回 Mac 应答。现在 iPhone 会弹出与 Mac 端一致的权限卡（显示工具标题），点「允许/始终允许/拒绝」直接生效：官方 leader 服务器按先到先得仲裁 iPhone 与 Mac 端的并发应答，Mac 端先答时 iPhone 卡片自动收口，iPhone 先答时 Mac 端权限提示同步消失。断线重连后挂起中的权限请求会重新出现在 iPhone 上。权限类交互中的 plan 确认、MCP 表单按裁决维持只读旁观。iOS 与协议零改动。
 - **修复：第二台 iPhone 配对后不再把第一台踢下线（同名设备互踢）**：iPhone 批准配对后，此前已配对且正常使用的另一台 iPhone 会被顶回配对扫码页。根因是 iOS 16 起所有 iPhone 向 Mac 上报的设备名都是同一个泛称「iPhone」（系统不再读用户设置的本名），而设备库的清理规则按「名字+平台相同」判定为同一台旧设备——批准第二台时删掉了第一台的记录。现清理规则只针对升级前的旧随机 ID 记录（现代稳定 ID 记录永不因撞名被顶），另加安装身份（identity key）等价替换加固：多台 iPhone 可同时配对、同时在线互不影响；已配对设备升级 App 后重配也照常合并。被踢掉的设备重新扫码即可恢复。
 - **修复：Grok 会话重命名后消息页标题立即同步（2026-09-03 真机验收瑕疵）**：重命名后 iPhone 会话列表标题已更新，但消息页顶部标题仍停留在旧名。根因是两条标题链路语义分裂：官方重命名只写 `generated_title`（列表链经官方解析显示新名），而会话详情读取的 `session_summary` 仍是旧自动标题——重命名后 iPhone 的详情刷新把新标题覆盖回旧值。现详情读取与官方同规则解析（手动/自动生成的 `generated_title` 优先），重命名后消息页标题即时一致；Mac 端 grok 与 iPhone 三处标题（列表、消息页、详情）同步。
 - **新功能：Grok 会话重命名与删除（iPhone「更多设置」真实可用）**：此前在 iPhone 的 Grok Build 会话「更多设置」里点重命名或删除，只会报「not yet supported」——MacBridge 侧从未实现这两项（归档官方 Grok 就没有该功能，继续如实报不支持）。现在经 Grok 官方会话管理通道（`_x.ai/session/rename` / `_x.ai/session/delete` ext 方法，由常驻 catalog 子进程发出）真实生效：重命名同步落盘 Grok 本地会话存储（Mac 端 grok 里同名会话标题同步变化），标题校验（长度上限、控制字符清洗）由官方边界把关、错误文案原文透传；删除按官方语义先远端后本地（登录用户远端删除失败时本地不动并如实报错），删除后 iPhone 列表立即刷新。iOS 与协议零改动——「更多设置」菜单本就恒显示这两项，从报错变为真实功能。
