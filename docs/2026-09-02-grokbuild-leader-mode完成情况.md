@@ -6,9 +6,9 @@
 - Plan: `docs/2026-08-28-grokbuild-leader-mode-design.md`（v10 owner APPROVE）
 - Canonical State File: `.exec-plan/state/plan-60f196abb855.json`
 - Completion Report Verdict: **`proved-complete (owner-verified 2026-09-02)`**（产品代码、单测、Release 安装、§7.3 owner 真机矩阵全部收口；12 行中 11 行 owner 实测通过 + 诊断卡确认，行 3「未安装态」为可选行未测，已在 exec-plan regression 证据中注明）
-- Queue Summary: **51/51 todos done**（B 路线原 33 项收官后，2026-09-02 晚间 owner 授权追加后续批次 12 项：`followup-roster-consume`、`followup-model-effort`、`rfx-effort-gate`、`rfx-model-id-softening` 四个三元组，全部 done 带 proof；owner 矩阵类 regression p2-dg1/p2-dg2/p3-ui/p4-diagnostics/p4-release 全部回填；p4-doc-sync-regression 为 D0 无运行面，na 见队列；验收期新增 rfx-row6-user-echo 三元组闭环；2026-09-03 追加 §23 会话 rename/delete（`followup-session-admin` 三元组，owner 矩阵 rename/delete ✅、archive 接受现状）与 §23.8 rename 标题瑕疵修复（`rfx-rename-title` 三元组，owner 复测 ✅））
+- Queue Summary: **54/54 todos done**（B 路线原 33 项收官后，2026-09-02 晚间 owner 授权追加后续批次 12 项：`followup-roster-consume`、`followup-model-effort`、`rfx-effort-gate`、`rfx-model-id-softening` 四个三元组，全部 done 带 proof；owner 矩阵类 regression p2-dg1/p2-dg2/p3-ui/p4-diagnostics/p4-release 全部回填；p4-doc-sync-regression 为 D0 无运行面，na 见队列；验收期新增 rfx-row6-user-echo 三元组闭环；2026-09-03 追加 §23 会话 rename/delete（`followup-session-admin` 三元组，owner 矩阵 rename/delete ✅、archive 接受现状）与 §23.8 rename 标题瑕疵修复（`rfx-rename-title` 三元组，owner 复测 ✅）；2026-09-03 追加 §24 follower permission 应答（`perm-follower` 三元组，owner 真机矩阵四步全过，见 §9））
 - Related Commits: `69f3b31`（TOML 依赖）`1676df5`（开关管理器 T1–T33）`9baa1e5`（D-G1）`3089a95`（D-G2）`4cfddfd`（Phase 3 UI）`0f4e5e8`（Phase 4 诊断行）`f92cec6`（doc-sync + D-3 帮助文案）`98ae793`（验收修复 ①：scope 切换退订旧观察键）`05152aa`（验收修复 ②：读路径订阅键改观察语义）`39e29a8`（验收修复 ③：iPhone 自有 turn 的 user echo 补 turn 身份）`c77bb80`（后续批次：消费 leader roster 广播）`c1dfa81`（后续批次：model/effort 全链路）`da17648`（后续修复 ④：镜像官方 effort 门）`a0b0f11`（后续修复 ⑤：set_model unknown model id 软化）；另有 Phase 0 基线修复 `6dc9353`（D-G0b 终态通知白名单）与 cwd 缺口修复（见执行日志）；2026-09-03 批次：`441706c`/`dc30edc`（§23 方案与修复指针）`5f37692`（§23 rename/delete 实现）`eaf5703`（§23.8 display_title 标题修复）`5f24679`（§23.8 文档三件套）
-- Generated At: `2026-09-02T21:04:00+08:00`（owner 验收收官后更新）；`2026-09-02T22:21:00+08:00`（后续批次 12 todos 入账后更新，见 §1.1 与 §2 追加行）；`2026-09-03T18:52:00+08:00`（§23 session-admin + §23.8 标题修复 6 todos 入账后更新，见 §8）
+- Generated At: `2026-09-02T21:04:00+08:00`（owner 验收收官后更新）；`2026-09-02T22:21:00+08:00`（后续批次 12 todos 入账后更新，见 §1.1 与 §2 追加行）；`2026-09-03T18:52:00+08:00`（§23 session-admin + §23.8 标题修复 6 todos 入账后更新，见 §8）；`2026-09-03T22:05:00+08:00`（§24 follower permission 三元组收官、owner 矩阵四步全过后更新，见 §9）
 
 ## 1. Overall Verdict (总体结论)
 
@@ -208,3 +208,35 @@ archive 报「not yet supported」owner 裁决接受现状。
 验证：定向单测（磁盘实测 fixture 三例）+ 包全量全绿；Release 四门核对；生产路径
 wire 探针（临时配对设备直连生产 8777 的真实 get_session）返回新标题，探针设备已
 revoke；owner 真机复测「测试结果符合预期✅」（2026-09-03）。
+
+## 9. 2026-09-03 追加批次：§24 follower permission 应答
+
+owner 指令「先方案入档、扩展现有 plan JSON、继续 exec-plan」。一个 proof-carrying
+三元组（`perm-follower-*`）入账，队列 54/54 done，queue hash `6d25a7906b1c`。
+
+**实现**（`1661e91`，方案 `5511a84`，收口 `12a2abc`）：Mac 单仓、iOS/protocol pack
+零改动——wire `resolve_permission` → 既有 `core.SessionPermissionResponder` 接口
+（core/interfaces.go:66 早已存在）type assertion 即通。leader 订阅门加宽
+（`session/request_permission` → `handlePermissionBroadcast`：registry 按 wireID 索引 +
+emit `permission_request`）；`AnswerPermission`（getByWire 预检 → permissionOutcome
+行为映射 → take → 原始 numeric id 回帧）；TUI 先答经 `interaction_resolved` 广播收口。
+`permissionOutcome` 共享 helper（acp_codec.go）：allow/always→allow 选项（always 无
+grok 对应降级）、deny→deny 选项、无 deny→cancelled。
+
+**验证**：单测 5 例（`leader_permission_test.go`：允许应答/行为映射/TUI 先答广播/
+未知 id/registry 双轴一致性）+ 包全量全绿（re-verified）；Release 四门核对（PID
+18150 lstart 晚于构建、8777 = /Applications 内嵌 runtime、无残留）；owner 真机矩阵
+四步全过（2026-09-03 21:52-21:54，grok 1.0.13 leader 会话，`permission_mode=ask` +
+yolo 关闭）：TUI 发起权限 turn（`rm -rf /tmp/grok-perm-test`）→ iPhone 权限卡同步
+出现；iPhone 允许 → 任务继续 + Mac 弹窗自动收口；iPhone 拒绝路径 ✅；Mac 先答 →
+iPhone 卡自动消失。owner 原话「1✅2✅，测试结果符合预期」。
+
+**范围裁决**（非缺陷）：grok TUI 5 档选项（always-approve 模式切换 / 按命令
+Always allow / Never allow / 拒绝附反馈文字）vs iOS 允许/拒绝两键——iOS 权限卡为
+跨后端通用组件，bridge-v1 权限语义即二元应答；选项集透传属范围扩展（需 wire
+协议 + iOS UI 改造），另案。exit_plan_mode / mcp elicit 维持 ruling B observe-only。
+
+**排障教训入账**：owner 初测「几十次不弹」的根因是 grok 侧自动放行（事件流实证
+23 次权限请求全部毫秒级 allow）——Ctrl+O 为 yolo 全放行开关（TUI actions.rs:424）、
+`[ui] permission_mode` 持久化且停在 `always-approve`；两者任一处于放行态即不询问。
+测试前须确认 `permission_mode = "ask"` 且 yolo 关闭。

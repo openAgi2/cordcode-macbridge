@@ -2090,8 +2090,11 @@ automation/UITest 路径，不影响用户手动打开（日志证明手动打�
 ## 24. Follower permission 应答升级（2026-09-03 计划；owner 指令：先方案入档、
 扩展现有 plan JSON、继续 exec-plan 执行）
 
-> 状态：**已实施（2026-09-03，commit 1661e91，Mac 单仓）；owner 真机矩阵验收
-> pending**。前置调查已入账（commit 750cb87 + think.md 总账行）：permission 与
+> 状态：**已交付（2026-09-03，commit 1661e91，Mac 单仓；owner 真机矩阵验收四步
+> 全过：TUI 发起权限 turn→iPhone 卡出现；iPhone 允许→任务继续+Mac 弹窗收口；
+> iPhone 拒绝路径；Mac 先答→iPhone 卡自动消失。选项差异——grok TUI 5 档 vs iOS
+> 允许/拒绝——确认为跨后端通用权限卡设计现状，范围扩展另案）**。前置调查已入账
+>（commit 750cb87 + think.md 总账行）：permission 与
 > interjection 两类 follower 应答在官方 leader 协议下均可行。本节只覆盖
 > **permission 应答**（§24.3）；interjection 为 Phase B 后置（§24.6）。分级 D3
 > （跨进程协议/状态语义）。实施与 §24.3 计划逐项一致，差异仅一处：§24.3.2 计划的
