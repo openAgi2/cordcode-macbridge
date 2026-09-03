@@ -50,6 +50,12 @@ type ProjectionPart struct {
 	PermissionKind     string   `json:"permissionKind,omitempty"`
 	PermissionPatterns []string `json:"permissionPatterns,omitempty"`
 	PermissionActions  []string `json:"permissionActions,omitempty"`
+	// Plan-review payload (permissionKind == "plan_review"): mirrors the wire
+	// permission_request.plan object ({content, contentFormat, title?,
+	// planFilePath?}). SSV2 clients render the plan card from this projected
+	// field — raw permission_request is sealed for v2 clients. Additive; absent
+	// on other requests. See bridge-v1.md「Plan review」.
+	PermissionPlan interface{} `json:"permissionPlan,omitempty"`
 
 	// file
 	Path     string `json:"path,omitempty"`

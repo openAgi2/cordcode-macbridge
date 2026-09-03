@@ -200,6 +200,12 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		if len(ev.PermissionActions) > 0 {
 			payload["permissionActions"] = ev.PermissionActions
 		}
+		// Plan-review payload (permissionKind == "plan_review"): full plan text
+		// rides the permission_request control-plane event. nil payload keeps the
+		// legacy wire shape byte-identical.
+		if ev.PlanReview != nil {
+			payload["plan"] = planToWire(ev.PlanReview)
+		}
 		return "permission_request", payload, false
 
 	case core.EventPermissionResolved:
@@ -303,6 +309,27 @@ func eventData(ev core.Event, payload map[string]interface{}) map[string]interfa
 		payload["parentStreamId"] = ev.ParentStreamID
 	}
 	return payload
+}
+
+// planToWire serializes the plan-review payload for permission_request events
+// (plan approval layer, canonical §permission_request.plan). contentFormat
+// defaults to markdown so consumers never guess the format.
+func planToWire(p *core.PlanPayload) map[string]interface{} {
+	format := p.ContentFormat
+	if format == "" {
+		format = "markdown"
+	}
+	plan := map[string]interface{}{
+		"content":       p.Content,
+		"contentFormat": format,
+	}
+	if p.Title != "" {
+		plan["title"] = p.Title
+	}
+	if p.PlanFilePath != "" {
+		plan["planFilePath"] = p.PlanFilePath
+	}
+	return plan
 }
 
 func fileChangesToWire(changes []core.FileChange) []map[string]interface{} {

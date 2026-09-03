@@ -441,6 +441,19 @@ type ToolMatches struct {
 	Items []ToolMatchItem `json:"items,omitempty"`
 }
 
+// PlanPayload is the plan document attached to a plan-review permission
+// request (PermissionKind == "plan_review"; grok exit_plan_mode / claude
+// ExitPlanMode / dsh plan-review question). Content is the full plan text
+// (markdown; may be empty when the backend broadcast a plan approval with no
+// plan content). Title and PlanFilePath are source-proven only — never
+// synthesized by the bridge.
+type PlanPayload struct {
+	Content       string `json:"content"`
+	ContentFormat string `json:"contentFormat,omitempty"` // "markdown" (only format today)
+	Title         string `json:"title,omitempty"`
+	PlanFilePath  string `json:"planFilePath,omitempty"`
+}
+
 // Event represents a single piece of agent output streamed back to the engine.
 type Event struct {
 	Type         EventType
@@ -462,8 +475,13 @@ type Event struct {
 	// PermissionActions is the exact UI action vocabulary supported by this
 	// pending request. Empty preserves the legacy client default; Codex Web sets
 	// approve/reject because its official wire has no persistent "always" reply.
-	PermissionActions []string       // approve | approveAlways | reject | rejectAlways
-	TurnID            string         // source-proven turn identity (Codex/Claude/OpenCode turn id; projection lifecycle)
+	PermissionActions []string       // approve | approveAlways | reject | rejectAlways | plan actions (requestChanges | quit)
+	// PlanReview carries the plan document for permission requests whose
+	// PermissionKind == "plan_review" (plan approval layer). nil for every other
+	// permission request. It rides the existing permission_request control-plane
+	// event only — never the messages timeline, never a second projection writer.
+	PlanReview        *PlanPayload
+	TurnID            string // source-proven turn identity (Codex/Claude/OpenCode turn id; projection lifecycle)
 	ItemID            string         // source-proven item identity (assistant text/reasoning/tool part id)
 	// DurationMs mirrors the official Turn.durationMs ("Duration between turn start and
 	// completion in milliseconds, if known" — codex app-server-protocol v2/Turn.ts). 0 =

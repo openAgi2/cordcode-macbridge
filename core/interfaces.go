@@ -113,6 +113,11 @@ type PermissionResult struct {
 	Behavior     string         `json:"behavior"`               // "allow" or "deny"
 	UpdatedInput map[string]any `json:"updatedInput,omitempty"` // echoed back for allow
 	Message      string         `json:"message,omitempty"`      // reason for deny
+	// PlanAction is the plan-review action (approve|requestChanges|quit) when the
+	// resolved request was a plan_review card. Behavior remains the compatibility
+	// truth (approve→allow, requestChanges/quit→deny); backends translate the
+	// action into their official semantics. Empty for non-plan requests.
+	PlanAction string `json:"planAction,omitempty"`
 }
 
 // AttachmentSupporter is an optional interface for agents that can declare

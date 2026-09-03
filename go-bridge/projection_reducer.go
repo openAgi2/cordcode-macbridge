@@ -1032,6 +1032,11 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if actions := dataStringSlice(data, "permissionActions"); len(actions) > 0 {
 			part.PermissionActions = actions
 		}
+		// Plan-review payload rides the projected part (SSV2 clients are sealed
+		// off raw permission_request); assign-only, never synthesized.
+		if plan, ok := data["plan"]; ok && plan != nil {
+			part.PermissionPlan = plan
+		}
 		found := false
 		for i := range t.Assistant.Parts {
 			if t.Assistant.Parts[i].Type == "tool" && t.Assistant.Parts[i].ItemID == callID {
@@ -1416,6 +1421,9 @@ func mergeToolPart(dst *ProjectionPart, src ProjectionPart) {
 	}
 	if len(src.PermissionActions) > 0 {
 		dst.PermissionActions = src.PermissionActions
+	}
+	if src.PermissionPlan != nil {
+		dst.PermissionPlan = src.PermissionPlan
 	}
 	if src.RequiresPermissionConfirmation {
 		dst.RequiresPermissionConfirmation = true
@@ -1946,6 +1954,7 @@ func cloneProjectionPart(part ProjectionPart) ProjectionPart {
 	out.Matches = cloneProjectionJSONValue(part.Matches)
 	out.FileChanges = cloneProjectionJSONValue(part.FileChanges)
 	out.UserInputQuestions = cloneProjectionJSONValue(part.UserInputQuestions)
+	out.PermissionPlan = cloneProjectionJSONValue(part.PermissionPlan)
 	if len(part.PermissionPatterns) > 0 {
 		out.PermissionPatterns = make([]string, len(part.PermissionPatterns))
 		copy(out.PermissionPatterns, part.PermissionPatterns)

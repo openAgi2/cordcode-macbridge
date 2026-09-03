@@ -323,6 +323,33 @@ export interface BridgeToolEventData {
 export interface BridgePermissionRequestExtras {
   permissionKind?: string;
   patterns?: string[];
+  /**
+   * Exact client actions supported by this request. Plan-review requests
+   * (permissionKind == "plan_review") carry ["approve","requestChanges","quit"].
+   */
+  permissionActions?: Array<
+    "approve" | "approveAlways" | "reject" | "rejectAlways" | "requestChanges" | "quit"
+  >;
+  /**
+   * Plan-review payload (plan approval layer, 2026-09-04). Present only when
+   * permissionKind == "plan_review". Resolve via resolve_permission with
+   * planAction (approve|requestChanges|quit) + optional feedback.
+   */
+  plan?: BridgePlanReviewPayload;
+}
+
+// Plan-review payload (plan approval layer, 2026-09-04; permissionKind == "plan_review"):
+// the full plan document riding the permission_request control-plane event. content is
+// source-proven plan text (may be empty — client shows backend placeholder); title /
+// planFilePath are optional, never synthesized. contentFormat is always present
+// ("markdown" is the only format today). 10KB-class payloads fit every relay/frame
+// budget by >=3 orders of magnitude — no transport truncation.
+// Canonical doc: bridge-v1.md「Plan review payload」.
+export interface BridgePlanReviewPayload {
+  content: string;
+  contentFormat: "markdown";
+  title?: string;
+  planFilePath?: string;
 }
 
 export type BridgeEventName =
@@ -545,8 +572,21 @@ export type BridgeProjectionPart =
        */
       permissionKind?: string;
       permissionPatterns?: string[];
-      /** Exact client actions supported by this pending request. */
-      permissionActions?: Array<"approve" | "approveAlways" | "reject" | "rejectAlways">;
+      /**
+       * Exact client actions supported by this pending request. Plan-review parts
+       * (permissionKind == "plan_review") carry ["approve","requestChanges","quit"] —
+       * this projected part is the SSV2 plan card's only data surface (raw
+       * permission_request is sealed for v2 clients).
+       */
+      permissionActions?: Array<
+        "approve" | "approveAlways" | "reject" | "rejectAlways" | "requestChanges" | "quit"
+      >;
+      /**
+       * Plan-review payload (plan approval layer, 2026-09-04): the full plan document
+       * on the projected permission part. Mirrors the wire permission_request `plan`
+       * extras; additive, absent on non-plan requests.
+       */
+      permissionPlan?: BridgePlanReviewPayload;
     }
   | { type: "file"; path?: string; kind?: string; diff?: string; movePath?: string }
   | {

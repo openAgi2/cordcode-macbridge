@@ -1,0 +1,557 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge-plan-approval",
+  "plan_file": "docs/2026-09-04-plan-approval-implementation.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-dfb27dce3681.json",
+    "legacy_path": ".claude/exec-plans/plan-dfb27dce3681.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "todo-write-optional-mirror",
+    "invocation_policy": "slash-or-natural-language-equivalent",
+    "persistence_rule": "persist-on-every-status-transition"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-09-04-plan-approval-implementation完成情况.md",
+    "completion_report_status": "missing",
+    "last_generated_at": null,
+    "based_on_queue_hash": null
+  },
+  "updated_at": "2026-09-03T19:51:28+00:00",
+  "todos": [
+    {
+      "id": "phase1-wire-extension-impl",
+      "title": "Phase 1 Mac wire 协议层扩展（core + go-bridge）",
+      "description": "core/message.go: Event 新增 Plan *PlanPayload 字段 + PlanPayload{Content,ContentFormat,Title,PlanFilePath}（core/message.go:455-466 Event 区域、:394-403 附近）；core/interfaces.go: PermissionResult 新增可选 PlanAction；go-bridge/events.go:181-203 EventPermissionRequest 下发可选 plan 载荷（permissionKind=plan_review 时必填）；go-bridge/types.go:179-183 ResolvePermissionParams 新增可选 planAction/feedback + handlers 解析并透传 backend（behavior 兼容映射：approve→allow，其余→deny；旧客户端无 planAction 行为不变）。",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "方案 §4.1/§4.2 + §5 Phase 1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "PlanReview wire 扩展落地：core.PlanPayload+Event.PlanReview（避开既有 Plan []Todo 字段名）；PermissionResult.PlanAction；events.go permission_request.plan 下发（contentFormat 默认 markdown）；ResolvePermissionParams.planAction/feedback + handleResolvePermission 归一化（approve→allow，requestChanges/quit→deny，未知 planAction fail-closed invalid_params）+ permission_resolved 广播改用归一后 behavior；ProjectionPart.PermissionPlan + reducer 复制 + mergeToolPart 保留 + clone 深拷贝（SSV2 v2 客户端 raw permission_request 被 seal，投影 part 是 iOS 计划卡唯一数据面）。go build ./core/... ./go-bridge/... 通过；既有 Permission|Plan|Projection 定向测试全绿。",
+        "artifacts": [
+          "core/message.go",
+          "core/interfaces.go",
+          "go-bridge/events.go",
+          "go-bridge/types.go",
+          "go-bridge/handlers.go",
+          "go-bridge/projection_types.go",
+          "go-bridge/projection_reducer.go"
+        ],
+        "checked_at": "2026-09-03T19:48:56+00:00"
+      }
+    },
+    {
+      "id": "phase1-wire-extension-tests",
+      "title": "Phase 1 wire 序列化 + 兼容回归 + relay 帧预算单测",
+      "description": "go build ./go-bridge；go test ./go-bridge/... -run 'Permission|Plan' -count=1；新增单测：plan 载荷出现在 permission_request wire；旧形状（无 plan 字段）序列化字节级不变；8KB 级 plan permission_request 过 relay 入站调度的帧预算单测（方案 §6 relay 大载荷行）。fixture 来源：既有 permission_request 事件样本（§25 grok 最小档生产形状），禁手造协议。",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "tests",
+      "depends_on": [
+        "phase1-wire-extension-impl"
+      ],
+      "source": "方案 §5 Phase 1 验收 + §6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "新增 go-bridge/plan_review_wire_test.go 6 用例全过：plan 载荷序列化（contentFormat 默认 markdown、空可选字段省略）；旧形状字节级兼容（硬编码 JSON 锚点，grok §25 两键生产形状无 plan 键）；resolve planAction 归一化四路（approve/requestChanges+feedback/quit/未知 fail-closed invalid_params）+ 旧客户端 behavior-only 不变；SSV2 投影 PermissionPlan 落 part + thin 重复不擦除；8KB plan 过 mapAgentEvent→wire→reducer→投影全链无截断；8KB 帧入站调度零压力。验收命令 go build ./go-bridge + go test ./go-bridge/... -run Permission|Plan|Projection|Relay 全绿（21.9s）。",
+        "artifacts": [
+          "go-bridge/plan_review_wire_test.go"
+        ],
+        "checked_at": "2026-09-03T19:51:28+00:00"
+      }
+    },
+    {
+      "id": "phase1-wire-extension-regression",
+      "title": "Phase 1 wire 扩展回归（N/A 说明）",
+      "description": "纯协议字段扩展，后端未接线前无 e2e 面。",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "regression",
+      "depends_on": [
+        "phase1-wire-extension-tests"
+      ],
+      "source": "方案 §5 Phase 1",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": "纯协议字段扩展，Phase 2 接线前无 e2e 面；字节级兼容由 phase1-wire-extension-tests 覆盖，运行态 e2e 由 phase4-mac-runtime-verification 覆盖。",
+        "summary": "N/A 按既定理由闭环：纯协议字段扩展，字节级兼容由 phase1-wire-extension-tests 硬编码 JSON 锚点覆盖，运行态 e2e 由 phase4-mac-runtime-verification 承接。",
+        "artifacts": [
+          "go-bridge/plan_review_wire_test.go"
+        ],
+        "checked_at": "2026-09-03T19:51:28+00:00"
+      }
+    },
+    {
+      "id": "phase1-protocol-pack-sync",
+      "title": "Phase 1 Mac docs/protocol/ canonical 更新 + commit",
+      "description": "Mac docs/protocol/ 更新 permission_request.plan / resolve_permission.planAction/feedback 字段说明与兼容性注记；hello.protocol.version 不动（非破坏性可选字段）；单独 commit。",
+      "status": "in_progress",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [
+        "phase1-wire-extension-impl"
+      ],
+      "source": "方案 §4.4 + §5 Phase 1 验收",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2a-grok-plan-impl",
+      "title": "Phase 2a grok plan 审批接线（三动作 + abandoned 修正）",
+      "description": "agent/grokbuild/leader_subscriber.go handlePlanBroadcast(:681-699)：EventPermissionRequest 补 PermissionKind:\"plan_review\" + Plan{Content=planContent, Title=planApprovalTitle}，PermissionActions 改 [approve,requestChanges,quit]；应答侧(:934-939)按方案 §4.3 翻译表拆三路：approve→{outcome:\"approved\"}；requestChanges→{outcome:\"cancelled\",feedback}（空反馈无 feedback 字段）；quit→{outcome:\"abandoned\"}（修正调研档 §2.3 语义偏差，cancelled 仅 stale 兜底）。上游锚点：grok-build@72a61251 exit_plan_mode/types.rs。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase1-wire-extension-regression",
+        "phase1-protocol-pack-sync"
+      ],
+      "source": "方案 §5 Phase 2a + §4.3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2a-grok-plan-tests",
+      "title": "Phase 2a grok plan 测试",
+      "description": "go test ./agent/grokbuild/... -count=1；grok_leader_relay 既有测试扩展：plan 全文下发断言 + 三 outcome（approved/cancelled+feedback/abandoned）翻译断言。fixture 来源：生产日志形状（planBytes=1635/1376）+ 上游 exit_plan_mode/types.rs @72a61251 round-trip 测试。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2a-grok-plan-impl"
+      ],
+      "source": "方案 §5 Phase 2a 验收 + §6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2a-grok-plan-regression",
+      "title": "Phase 2a grok 回归（N/A 说明）",
+      "description": "backend 接线单元，e2e 面集中在 Phase 4。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2a-grok-plan-tests"
+      ],
+      "source": "方案 §5 Phase 2a",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "missing",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": "backend 接线单元；e2e 面由 phase4-mac-runtime-verification 与 phase4-owner-acceptance-matrix 集中覆盖（方案 §5 Phase 4），风险已由 phase2a-grok-plan-tests 锚定翻译表。",
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2b-claude-plan-impl",
+      "title": "Phase 2b claude ExitPlanMode 专门化",
+      "description": "agent/claudecode/session.go handleControlRequest(:827-889)：tool_name==\"ExitPlanMode\" 分支——从 ToolInputRaw.input 抽 plan/planFilePath，emit permissionKind=plan_review + Plan 载荷（permissionActions 三动作）；claudecode.go summarizeInput(:2225) 加分支（卡面摘要不塞全文）；RespondPermission(:979→respondPermissionContext) 按 planAction 翻译（D5 裁决=纯 allow 不带 updatedPermissions；requestChanges→deny+message=feedback，空时 Mac 填固定文案；quit→deny+固定 message）。上游锚点：SDK 0.3.259 PermissionResult deny.message 必填（sdk.d.ts:2324-2334）。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase2a-grok-plan-regression"
+      ],
+      "source": "方案 §5 Phase 2b + §4.3 + D5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2b-claude-plan-tests",
+      "title": "Phase 2b claude ExitPlanMode fixture 测试",
+      "description": "session_test.go 新增 ExitPlanMode control_request fixture 用例（本机 ~/.claude/projects/**/*.jsonl 真实 transcript 脱敏入仓，调研档 §3.2 两例 7557/7883 字节）；断言：plan 抽取、plan_review 下发、deny+message 应答形状（requestChanges 反馈与 quit 固定文案）。go test ./agent/claudecode/... -count=1。补调研档 §3.4 缺口。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2b-claude-plan-impl"
+      ],
+      "source": "方案 §5 Phase 2b 验收 + §6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2b-claude-plan-regression",
+      "title": "Phase 2b claude 回归（N/A 说明）",
+      "description": "backend 接线单元，e2e 面集中在 Phase 4。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2b-claude-plan-tests"
+      ],
+      "source": "方案 §5 Phase 2b",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "missing",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": "backend 接线单元；e2e 面由 phase4-mac-runtime-verification（真实会话触发 ExitPlanMode + 运行态日志）与 phase4-owner-acceptance-matrix 集中覆盖（方案 §5 Phase 4）。",
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2c-dsh-plan-impl",
+      "title": "Phase 2c dsh plan-review 识别与应答",
+      "description": "agent/dsh-web/approvals.go question 解析结构(:326-338) 补 intent/detail 字段（wire 锚点：dsh-v0.1.1-rc.2 packages/host/apiproxy/src/api/events.schema.ts:22-29,51）；intent.kind==\"plan-review\" 的 question 改 emit EventPermissionRequest（permissionKind=plan_review + Plan{Content=detail}，三动作）替代 user_input 卡，同批非 plan question 不受影响；应答适配：approve→选 intent.approve 指名 label（不硬编码 \"Approve\"）；requestChanges→Keep-planning label + respondQuestion custom=feedback（approvals.go:519+ 第 5 参）；quit→RejectQuestion（=dismiss/ASK_CANCELLED，D3）。core.UserInputQuestion 不加 Detail。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase2b-claude-plan-regression"
+      ],
+      "source": "方案 §5 Phase 2c + §4.3 + D3 + §2.1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2c-dsh-plan-tests",
+      "title": "Phase 2c dsh plan-review 测试",
+      "description": "fakedsh 测试补 plan-review intent 用例；断言：intent 识别、detail→plan.content、Keep-planning+custom 应答、quit→reject 整批。fixture 来源：官方 packages/host/apiproxy/tests/api-proxy-question.spec.ts + apps/web/tests/plan-control-row.e2e.ts + events.schema.ts 校验规则（均 @ dsh-v0.1.1-rc.2）。go test ./agent/dsh-web/... -count=1。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2c-dsh-plan-impl"
+      ],
+      "source": "方案 §5 Phase 2c 验收 + §6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2c-dsh-plan-regression",
+      "title": "Phase 2c dsh 回归（N/A 说明）",
+      "description": "backend 接线单元，e2e 面集中在 Phase 4。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2c-dsh-plan-tests"
+      ],
+      "source": "方案 §5 Phase 2c",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "missing",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": "backend 接线单元；e2e 面由 phase4-mac-runtime-verification 与 phase4-owner-acceptance-matrix 集中覆盖（方案 §5 Phase 4）；fakedsh 级验证已在 phase2c-dsh-plan-tests。",
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-ios-wire-impl",
+      "title": "Phase 3 iOS wire 解析与应答客户端 + protocol mirror",
+      "description": "工作树 /Users/jacklee/Projects/cordcode-ios-plan-approval @ plan/approval-layer-ios。BackendModels / SessionProjection / SessionProjectionMapping：解析 permissionKind=plan_review + plan 载荷（沿现有 optional 解析模式；SessionProjectionMapping.swift:466 permissionOptions(from wireActions:) wireActions 优先机制）；CCCodeBridgeBackendClient.swift(:837-864) resolvePermission 扩展携带 planAction/feedback（behavior 兼容映射：approve→allow，其余→deny）；iOS docs/protocol/ mirror 同步 + 即时 commit。",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [
+        "phase2c-dsh-plan-regression"
+      ],
+      "source": "方案 §5 Phase 3 + §4.4",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-ios-wire-tests",
+      "title": "Phase 3 iOS 解析/动作映射定向单测",
+      "description": "定向单测：projection 映射（plan 载荷解码/合并）、动作映射（三键→planAction/behavior）；scripts/run.sh test -only-testing:CCCodeTests/<相关类> 通过。",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "tests",
+      "depends_on": [
+        "phase3-ios-wire-impl"
+      ],
+      "source": "方案 §5 Phase 3 验收",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-ios-wire-regression",
+      "title": "Phase 3 iOS wire 层回归（N/A 说明）",
+      "description": "解析/客户端层，无独立 UI 面。",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-ios-wire-tests"
+      ],
+      "source": "方案 §5 Phase 3",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "missing",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": "解析/客户端层无独立 UI 面；由 phase3-ios-wire-tests（定向单测）与 phase3-ios-plancard-regression（真机安装核验）覆盖。",
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-ios-plancard-impl",
+      "title": "Phase 3 iOS 独立计划卡 UI（D1）",
+      "description": "TaskDockView.swift(:168-173 permissionKind 分支区) + AssistantTimelineRenderSpec.swift(:672)：permissionKind==\"plan_review\" 分支→独立计划卡（D1 裁决）：卡面=标题+折叠预览（前 N 行）；点击进入全文 markdown 视图（10KB 级，默认折叠高度+展开；无传输截断，方案 §2.2）；三键动作栏（approve/requestChanges/quit，沿用 permissionOptions wireActions 优先）；requestChanges 弹多行反馈输入（D4 可选）；ChatViewModel+TaskDock.swift(:147-149) 接线。",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [
+        "phase3-ios-wire-regression"
+      ],
+      "source": "方案 §5 Phase 3 + D1/D2/D4",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-ios-plancard-tests",
+      "title": "Phase 3 iOS 计划卡定向测试",
+      "description": "定向单测（render spec 映射等可测面）；不加 snapshot/UI test（未授权）；scripts/run.sh test -only-testing:CCCodeTests/<相关类> 通过。",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "tests",
+      "depends_on": [
+        "phase3-ios-plancard-impl"
+      ],
+      "source": "方案 §5 Phase 3 验收 + §6 iOS 行",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-ios-plancard-regression",
+      "title": "Phase 3 iOS 真机安装核验",
+      "description": "交付前一次 scripts/run.sh device（有连接真机时，探测以 devicectl 为准）；安装启动成功 + 日志级核验。UI 视觉验收归 phase4-owner-acceptance-matrix（owner 授权后）。",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-ios-plancard-tests"
+      ],
+      "source": "方案 §5 Phase 3 验收",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase4-mac-runtime-verification",
+      "title": "Phase 4 Mac Release 安装 + 运行态核验",
+      "description": "Release 构建→覆盖安装 /Applications→killall CordCodeLink + pkill -f cordcode-bridge-runtime→open 重启→运行态核验（缺一不可）：进程代际 ps lstart 晚于本次构建；新版本特征输出（plan_review 相关日志行）；8777 监听者为 /Applications 内嵌 runtime；pgrep 核对无临时产物残留。Mac 行为级自验：claude ExitPlanMode 用真实会话触发（可行时）+ dsh/grok fakedsh/单测级证据引用。禁止临时构建产物。构建前按 P0 门在实际构建工作目录重新生成来源清单。",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-ios-plancard-regression"
+      ],
+      "source": "方案 §5 Phase 4 + CLAUDE.md 部署后运行态验证",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase4-owner-acceptance-matrix",
+      "title": "Phase 4 owner 验收矩阵（产品语言，一次给全）",
+      "description": "生成 owner 验收矩阵（LAN×relay、三 backend 全覆盖，产品语言 checklist）呈 owner；真机 UI 操作/截图须 owner 授权，agent 只做日志级核验。owner 未验收前本项保持 pending（external-blocker，不虚报完成）。",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "regression",
+      "depends_on": [
+        "phase4-mac-runtime-verification"
+      ],
+      "source": "方案 §5 Phase 4",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase4-changelog-secretscan",
+      "title": "Phase 4 CHANGELOG 双仓 + secret scan",
+      "description": "CHANGELOG.md [Unreleased] 双仓各按现有格式追加一节（日期—主题：改了什么/有何提升）；secret scan（gitleaks pinned）。",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "impl",
+      "depends_on": [
+        "phase4-mac-runtime-verification"
+      ],
+      "source": "方案 §5 Phase 4 + CLAUDE.md 惯例",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    }
+  ]
+}

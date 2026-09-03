@@ -4441,6 +4441,23 @@ func (h *Handlers) handleResolvePermission(conn Connection, msg WireMessage) {
 	h.mu.Unlock()
 
 	result := core.PermissionResult{Behavior: params.Behavior}
+	if params.PlanAction != "" {
+		switch params.PlanAction {
+		case "approve":
+			result.Behavior = "allow"
+		case "requestChanges", "quit":
+			result.Behavior = "deny"
+		default:
+			// Fail closed: an unknown plan action must not silently resolve as
+			// allow/deny by coincidence (no fallback guessing).
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: fmt.Sprintf("unknown planAction %q", params.PlanAction)})
+			return
+		}
+		result.PlanAction = params.PlanAction
+	}
+	if params.Feedback != "" {
+		result.Message = params.Feedback
+	}
 	var err error
 	var responder any // 承载应答的 session/agent（乐观收口豁免判定用）
 	if ok && sess != nil {
@@ -4475,7 +4492,7 @@ func (h *Handlers) handleResolvePermission(conn Connection, msg WireMessage) {
 			Event:     "permission_resolved",
 			Data: map[string]interface{}{
 				"requestId": params.RequestID,
-				"behavior":  params.Behavior,
+				"behavior":  result.Behavior,
 			},
 		})
 	}

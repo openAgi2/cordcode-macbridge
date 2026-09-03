@@ -400,6 +400,40 @@ field, type, or wire value was changed.
     permission-card SoT for SSV2 clients, so the kernel copies them from the
     wire event on reduce (non-empty merge: a thin duplicate from a same-serve
     legacy backend must not erase them).
+- **Plan review payload (`permissionKind: "plan_review"`, plan approval layer)** —
+  `permission_request` gains additive, optional fields for plan approval cards
+  (2026-09-04; batch 1 producers: grok `exit_plan_mode`, claude `ExitPlanMode`,
+  dsh plan-review question):
+  - `permissionKind: "plan_review"` selects the plan card presentation.
+  - `permissionActions: ["approve", "requestChanges", "quit"]` — the plan-review
+    action vocabulary (camelCase, consistent with `approveAlways`). Clients
+    render exactly these actions; absence of `permissionKind=plan_review`
+    preserves the existing card verbatim.
+  - `plan?: { content: string, contentFormat: "markdown", title?: string,
+    planFilePath?: string }` — the full plan document riding the
+    `permission_request` control-plane event. `content` is the source-proven
+    plan text (may be empty when the backend broadcast an approval with no plan
+    content; clients show the backend's placeholder); `title` / `planFilePath`
+    are optional and never synthesized by the bridge. `contentFormat` is
+    always present (`"markdown"` is the only format today). 10KB-class
+    payloads are within every relay/frame budget by ≥3 orders of magnitude
+    (no transport truncation; long-text handling is a pure client rendering
+    decision).
+  - The Session Projection part carries the same payload as
+    `permissionPlan` — SSV2 clients are sealed off raw `permission_request`,
+    so the projected part is the plan-card SoT (non-empty merge, like the
+    official permission fields).
+  - `resolve_permission` gains optional `planAction?: "approve" |
+    "requestChanges" | "quit"` and `feedback?: string` (requestChanges text;
+    optional — empty feedback is legal on every batch-1 backend). `behavior`
+    remains the compatibility truth: when `planAction` is set the bridge
+    normalizes `approve` → `"allow"`, `requestChanges`/`quit` → `"deny"`
+    (old clients that only send `behavior` are unchanged). An unknown
+    `planAction` fails closed (`invalid_params`) rather than guessing.
+    Backends translate the action into their official semantics (grok
+    `{outcome:"approved"|"cancelled"+feedback|"abandoned"}`; claude control
+    response allow / deny+message; dsh option label selection / Keep-planning
+    + custom / reject batch).
 - v1 limitations (enforced at MacBridge parse time, never reach iOS):
   - Only single-question, single-select AskUserQuestion prompts are emitted as
     `question_asked`.
@@ -1413,7 +1447,8 @@ in `docs/protocol/schema/bridge-v1.types.ts`.
 | `fileChanges?: { path, kind?, movePath?, diff? }[]` | Structured file mutations for this tool step (Codex Patch / apply_patch). Same shape as UnifiedFileChange. |
 | `requiresPermissionConfirmation?: boolean` | Pending tool must be approved before the turn continues (`permission_request`). Clients map to the existing permission card. Absent/false on older producers. |
 | `permissionKind?: string` / `permissionPatterns?: string[]` | Official permission payload (opencode-web v1.18) carried on the projected permission part: category key + pattern rows so SSV2 clients render the official card (category line + patterns + reject/always/once). Mirrors the `permission_request` extras; additive, absent on other backends. |
-| `permissionActions?: string[]` | Exact actions supported by this request (`approve`, `approveAlways`, `reject`, `rejectAlways`). When present, clients must render only these actions. Codex Web emits `approve`/`reject` because its official approval response has no distinct persistent “always” decision. Absent preserves the legacy client policy. |
+| `permissionActions?: string[]` | Exact actions supported by this request (`approve`, `approveAlways`, `reject`, `rejectAlways`). When present, clients must render only these actions. Codex Web emits `approve`/`reject` because its official approval response has no distinct persistent “always” decision. Absent preserves the legacy client policy. Plan-review requests emit the plan vocabulary `approve`/`requestChanges`/`quit`. |
+| `permissionPlan?: { content, contentFormat, title?, planFilePath? }` | Plan-review payload (`permissionKind == "plan_review"`) carried on the projected permission part: the full plan document so SSV2 clients render the plan card (title + collapsed preview → full-text markdown view). Mirrors the `permission_request.plan` extras; additive, absent on other requests. Non-empty merge — a thin duplicate must not erase it. |
 
 Producers (live `tool_started`/`tool_finished` and cold hydrate) must pass these through the
 Projection Kernel reducer so snapshot/patch parts retain them. Clients map them read-only; when

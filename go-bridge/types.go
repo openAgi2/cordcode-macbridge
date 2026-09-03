@@ -180,6 +180,12 @@ type ResolvePermissionParams struct {
 	SessionID string `json:"sessionId"`
 	RequestID string `json:"requestId"`
 	Behavior  string `json:"behavior"` // "allow" or "deny"
+	// Plan review (plan approval layer): planAction is the semantic action
+	// (approve|requestChanges|quit). Behavior stays the compatibility truth —
+	// the handler normalizes approve→allow, requestChanges/quit→deny when
+	// planAction is set; old clients that only send Behavior are unchanged.
+	PlanAction string `json:"planAction,omitempty"`
+	Feedback   string `json:"feedback,omitempty"` // optional requestChanges feedback text
 }
 
 type ListModelsParams struct {
