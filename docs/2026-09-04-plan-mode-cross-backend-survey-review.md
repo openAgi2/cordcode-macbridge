@@ -106,3 +106,84 @@ owner 2026-09-04 指令：codex-web 从 iOS 端与 MacBridge 端产品面移除�
 - 方法：评审亲验本仓全部锚点与 grok 上游承重锚点（sed/grep/find/git 逐项）；2 个 Explore 子代理逐条核验 codex（26+2）、opencode（17+2）、deepseek-harness（14+2）；SDK 类型直接抓取 unpkg；退役影响面以退役完成文档 + git status 文件范围交叉确认。
 - 全程只读：评审未修改调研档、未修改任何源码；唯一写操作 = 本文档（docs/2026-09-04-plan-mode-cross-backend-survey-review.md）。
 - 时间：2026-09-04。
+
+---
+
+# 第二轮评审（v1.1 修订后复查，2026-09-04）
+
+- 评审对象：`docs/2026-09-03-plan-mode-cross-backend-survey.md` **v1.1**（488 → 537 行，新增「修订记录」节：15 项采纳逐项处置表 + 修订时点 P0 来源清单）
+- 评审结论：**通过（v1.1 修订质量良好，建议仅带 3 项小修正）**。15 项采纳全部真实落地、逐项复验无新错误；两处「不采纳/部分采纳」争议经独立复验**均为文档方正确、第一轮评审有误**——其中 B1 系第一轮评审误判（本报告撤回该项），B2 部分采纳处置正确。新发现问题 3 项（A5 dsh 行号、A6 codex 路径前缀、A7 重复行号），其中 A5 是**第一轮评审报告输出遗漏项**（拟稿存在、交付报告未含），一并补上。
+- 第二轮评审时点：macbridge HEAD=`21e0410`（提交 v1.1 + 评审报告）；上游四仓 HEAD 与第一轮相同；评审独立复验了争议点（grok 上游逐行 grep）、A4/B10 落地行号、dsh 三处行号。
+
+## 1. 争议点裁决（第一轮 vs 修订方，独立复验，本轮最终裁定）
+
+**B1——修订方正确，第一轮评审 B1 项撤回。**
+grep -n 精确复验 `line_viewer.rs`（grok-build @72a61251）五处按钮 `build_shortcut_button` 调用行：
+
+| 按钮 | v1.0/v1.1 原文 | 第一轮评审声称 | 实测（grep） |
+| --- | --- | --- | --- |
+| y copy plan | :1673 | :1675 | **:1673** |
+| a approve | :1685 | :1679-1681 | **:1685** |
+| s send（casual） | :1689 | :1687-1689 | **:1689** |
+| s request changes | :1699 | :1696-1699 | **:1699** |
+| q quit plan | :1708 | :1706-1707 | **:1708** |
+
+第一轮评审的偏差行号系基于**无行号 sed 输出目测计数**（sed -n + 数行）所得，错 2-4 行；修订方用逐行 grep 复验得正确值。**「B1 维持原文、不采纳」的处置正确**。第一轮报告 B1 项即行撤回，以本表为准。修订记录对第一轮谬误的转述（「评审给出的行号指向邻近注释/标签行」）准确——:1706 确是 quit 注释行、:1707 是 `quit_spans` 起始。
+
+**B2——部分采纳处置正确。**
+带行号复验 plan.rs：approve+评论块 `:187-205` 精确（187=`let review_comments = {`，205=Interject 块闭合）——修订方把第一轮建议的「185-207 整体区间」精化为「187-205 承重段」是更优做法；`a` 键 `:407-414` 正确（407=`if !is_commenting` 条件起点、412=`{`、413=`approve_plan()`、414=闭合）——第一轮建议的 :410 起点确在条件式中段，修订维持原文正确。
+
+## 2. 15 项采纳落地核验（逐项）
+
+| 项 | 落地核验 | 判定 |
+| --- | --- | --- |
+| A1 grok `app/` 前缀 | §2.2（3 条）、§2.3（2 条）、§2.4、§2.5 全部改为 `crates/codegen/xai-grok-pager/src/app/agent_view/{plan,viewer}.rs`，§2.5 清单为 crate 全路径 | ✅ |
+| A2 think.md 行号 | §4.2/§4.6 均为 `:482-491`；已逐字复验 :482 命中「官方 `turn/plan/updated` 是 todo 唯一结构化真相」 | ✅ |
+| A3 codex 路径 | §4.1/§4.2/§4.6 改 `app-server-protocol/src/protocol/v2/{turn,thread,item,tests}.rs`；`common.rs`/`event_mapping.rs` 归位 `protocol/` 根（无误导）；**但 `codex-rs/` 前缀仍缺见 A6** | ⚠️→A6 |
+| A4 CollaborationModes | §4.1 改写（`Stage::Removed, default_enabled: true` 恒启用、实验性仅在协议类型层）；§4.5/§7.4/§8.3-5 全部移除「experimental gate」论据；复验 features/src/lib.rs:380-382/:1556-1560 逐字命中 | ✅ |
+| B3 agent.ts | §5.1/§5.6 = `:141-155` build / `:156-181` plan，「亲验 :150-181」表述已撤销 | ✅ |
+| B4 session.ts | §5.2/§5.6：四态 :259-301、completed :277-290、ToolPart :315-322 | ✅ |
+| B5 question.ts | §5.3/§5.6：Request :35-40、事件 :58-60 | ✅ |
+| B6 PlanModeControl | §6.3/§6.6：组件 :19、off() 执行体 :36-50、client/index.ts:60-61 | ✅ |
+| B7 message.removed | §5.2 事件全集补列（:605 标注） | ✅ |
+| B8 tests.rs:5107 | §4.6 标注 :5107=requestUserInput 非 approval，补 :682/:715 | ✅ |
+| B9 todo_write | §6.1 改「提示词级约束」+ tool-todo :240-241 注册；复验 :118 文案与注册均在 | ✅ |
+| B10 base/preset | §6.1 改「独立载体」+ :307-309；复验 base patch id/name 在 :307-308、grep 无 standard 引用 | ✅ |
+| C1 codex-web 退役 | §1 表格行、§4 节首时效框、§4.2/§4.4、§7.1/§7.2、§8.1-4、§8.3-5/7 全部改 codex-remote 载体基线 +「恢复 codex-web」前置选项；无残留「codex-web 在产品面」表述 | ✅ |
+
+## 3. 新发现问题（第二轮，建议 v1.2 修正）
+
+**A5（真实错误，建议必须修正）：§6.3 三处 dsh 行号仍为错误值。**
+第一轮评审报告交付时遗漏了该组偏差（拟稿有 A5 项、最终报告未含——本轮自我纠正承认）。带行号复验 deepseek-harness @49a606bc `packages/plan/plan-mode/src/index.ts`：
+
+| 文档 v1.1 引用 | 实测 |
+| --- | --- |
+| Keep planning + custom 抛错 `（:331-336）` | 条件 :336、feedback :337、抛错 :340-341（块 :336-341） |
+| Approve → `{approved: true}` `（:338-341）` | `pendingIntents.set` :345、`return { approved: true }` :346（:345-346） |
+| dismiss → ASK_CANCELLED `（:312-316）` | 检查 :323、抛错 :324-325（块 :317-328） |
+
+内容描述全部准确（偏 5-8 行），与第一轮 B 级性质相同——建议改为 :336-341 / :345-346 / :317-328。
+
+**A6（路径定位）：§4 全节路径前缀不统一，均缺 `codex-rs/`。**
+codex 仓库所有 crate 在 `codex-rs/` 子目录下，而 §4.1 正文（`protocol/v2/turn.rs`、`protocol/v2/item.rs`、`protocol/event_mapping.rs` 等）与 §4.6 清单（`protocol/src/config_types.rs`、`tui/…`、`core/…`、`features/…`、`app-server-protocol/…` 全部）缺前缀——按「上游仓库路径=/Users/jacklee/Projects/codex」repo 根解释时路径不存在。§4.1 中 `codex-rs/protocol/src/config_types.rs` 与 `codex-rs/collaboration-mode-templates/templates/plan.md` 两处带前缀，同节不一致。第一轮评审遗漏（子代理核验使用了绝对路径，当时仅注意 `protocol/` 层）。建议：统一加 `codex-rs/` 前缀，或在 §4.6 清单顶部注明「锚点路径均相对 codex-rs/ 子目录」。
+
+**A7（文字瑕疵）：§4.6 `features/src/lib.rs:380-382,382,1556-1560` 有重复项 `382`**——应为 `:380-382,1556-1560`。
+
+## 4. 修订记录节质量
+
+- 处置表与第一轮报告 A/B 清单逐项对应（15 采纳 + B1 不采纳 + B2 部分采纳 + C2/C3 无需修订），无遗漏项、无夸大；评级引用（如 B9 正确引用第一轮「表述过强」定性）准确。
+- 修订时点来源清单：**HEAD=`e1daf97` 属实**——git log 验证 `c6df219`（codex-web 退役）、`e1daf97`（deprecated.md 标记）在前、`21e0410`（提交 v1.1+评审报告）在后，时间线自洽；「未提交状态=2 个未跟踪」与提交前状态一致。
+- 「iOS 仓 main 已推进至 61f67bf、未核对其内容、本文档不依赖 iOS 时点敏感锚点」——诚实且必要的声明（iOS 仓从调研时点 aeba911 已前移）。
+- 唯一可改进：处置表引述「评审给出的实际行号」时（B1 行）以第一轮错误值为对象，客观上把错误值记录进了修订记录；随本报告 B1 撤回后，建议在 B1 行末加「（该评审行号经二轮复验为错误，原文维持正确）」字样，防止未来读者从修订记录反向引用错误行号。
+
+## 5. 总体判定（第二轮）
+
+1. **v1.1 修订质量：优秀。** 15 项采纳全部真实落地且未引入新错误；对 B1/B2 两个争议点，修订方坚持了正确的立场并给出了正确的复验证据（第一轮评审在此两点均有误，其中 B1 为评审自身错误——本报告已撤回）。
+2. **新增问题 3 项**：A5（dsh 行号，第一轮遗漏）建议 v1.2 修正；A6（codex-rs/ 前缀，第一轮遗漏）、A7（重复 382）建议顺手修正——均不影响任何结论，且 A5 的描述性内容准确。
+3. 第一轮评审的交付缺陷（B1 误判、dsh 行号遗漏、codex-rs/ 前缀未点名）在本次复查中已全部纠正；两轮合并后，文档剩余偏差仅 A5-A7 三项，均为行号/路径/文字层面。
+
+## 附：第二轮评审执行记录
+
+- 复验方式：grep -n 精确定位（grok line_viewer.rs 五按钮、plan.rs 区间带行号、codex features 行、dsh index.ts 行、base cordis patch 行）；git log 验证修订时点提交链。
+- 全程只读：未修改调研档；唯一写操作 = 在本评审报告追加本轮章节。
+- 时间：2026-09-04。

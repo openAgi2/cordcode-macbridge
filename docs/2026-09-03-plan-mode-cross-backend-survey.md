@@ -10,6 +10,7 @@
 - **v1.0（2026-09-03 调研 / 09-04 凌晨成文）**：初版。
 - **v1.1（2026-09-04）**：按独立评审报告修订（逐项处置见下表）。
 - **v1.2（2026-09-04）**：owner 质询后撤回「恢复 codex-web」并列前置选项（v1.1 采自评审 C1 建议原文）：恢复不解决 codex 审批层缺口（无 wire 审批在两个载体上同样成立），只省 plan 展示接线量，不足以推翻当天退役裁决；§4/§8 改为 codex-remote 单一载体基线，回滚机制仅留备注，并补列「codex-remote 经 Remote Control 链路的 plan 事件可达性」为待核实项。
+- **v1.3（2026-09-04）**：按第二轮评审（结论：v1.1 通过、修订质量优秀；B1/B2 争议均为文档方正确，一轮 B1 项由评审方撤回）修正 3 项 + B1 行加注。**A5** §6.3 三处 dsh 行号修正（keep-planning 块 `:336-341`、approve 返回 `:345-346`、dismiss catch 块 `:317-328`——修订时逐行亲验，原 `:331-336`/`:338-341`/`:312-316` 偏 5-8 行；系一轮评审交付遗漏项，非 v1.1 引入）；**A6** §4 路径统一 codex-rs/ 相对基准（§4.6 加路径基准注记，§4.1 两处 `codex-rs/` 前缀统一去除）；**A7** §4.6 清单去重 `:382`；修订记录 B1 行加注二轮撤回、防反向引用。**本轮全部采纳，无不予采纳项**。
 
 | 评审项 | 处置 | 说明 |
 | --- | --- | --- |
@@ -17,7 +18,7 @@
 | A2 think.md 行号 | **采纳** | `:460-473` → `:482-491`（修订时逐字复验：「官方 `turn/plan/updated` 是 todo 唯一结构化真相」确在 :482） |
 | A3 codex 协议路径 | **采纳** | 修正为 `app-server-protocol/src/protocol/v2/{turn,thread,item,tests}.rs`；`common.rs`/`event_mapping.rs` 在 `protocol/` 根（无 v2 子目录）；全部行号复验一致 |
 | A4 CollaborationModes 定性过时 | **采纳** | 亲验 `features/src/lib.rs:380-382,1556-1560`：`Stage::Removed, default_enabled: true`，注释明言恒启用——主线已非 experimental gate；实验性仅在协议类型层（EXPERIMENTAL 注释/`#[experimental]` 属性）。§4/§7/§8 相应改写，「动作产品化需裁决」保留唯一硬理由：非官方 wire 审批语义 |
-| B1 line_viewer.rs 行号 | **不采纳** | 评审称实际为 :1675/:1679-1681/:1687-1689/:1696-1699/:1706-1707；修订时 @72a61251 逐行复验，`build_shortcut_button('y'/'a'/'s'/'s'/'q')` 调用行实测 = **:1673/:1685/:1689/:1699/:1708**，与 v1.0 原文一致——评审给出的行号指向邻近注释/标签行（如 :1679-1681 是 a 键 label 选择三元组、:1706-1707 是 quit 注释行与 `quit_spans` 起始），非按钮构建调用行。原文行号准确，维持 |
+| B1 line_viewer.rs 行号 | **不采纳** | 评审称实际为 :1675/:1679-1681/:1687-1689/:1696-1699/:1706-1707；修订时 @72a61251 逐行复验，`build_shortcut_button('y'/'a'/'s'/'s'/'q')` 调用行实测 = **:1673/:1685/:1689/:1699/:1708**，与 v1.0 原文一致——评审给出的行号指向邻近注释/标签行（如 :1679-1681 是 a 键 label 选择三元组、:1706-1707 是 quit 注释行与 `quit_spans` 起始），非按钮构建调用行。原文行号准确，维持；**第二轮评审已独立复验并撤回 B1 项（系一轮评审 sed 目测计数错误），该错误行号勿再引用** |
 | B2 plan.rs 区间 | **部分采纳** | approve+评论块精化为 `:187-205`（187 起 `review_comments` 构造、205 Interject 块闭合）；`a` 键直达维持 `:407-414`——复验条件从 :407 `if !is_commenting` 起，评审建议的 :410-414 起点在条件式中段 |
 | B3 agent.ts 区间 | **采纳** | 修正为 build :141-155 / plan :156-181；原「亲验 :150-181」含 build 尾部，撤销该区间表述 |
 | B4 session.ts 区间 | **采纳** | ToolPart :315-322；state 四态联合 :259-301；completed 形状精化 :277-290 |
@@ -225,9 +226,9 @@ iOS 仓=本次修订零读零写（main 已推进至 61f67bf，与调研时点 a
 
 ### 4.1 官方 plan mode 语义
 
-- 存在。Plan 是两种 collaboration mode 之一：`ModeKind {Plan, Default}`（serde snake_case → `"plan"`/`"default"`；`codex-rs/protocol/src/config_types.rs:668-683`）。
+- 存在。Plan 是两种 collaboration mode 之一：`ModeKind {Plan, Default}`（serde snake_case → `"plan"`/`"default"`；`protocol/src/config_types.rs:668-683`，路径基准见 §4.6 注记）。
 - 进入途径：TUI `/plan` 命令（`slash_command.rs:42,130`；分发 `chatwidget/slash_dispatch.rs:84-102`）、Shift+Tab 循环（`keymap.rs:2183-2185` → `chatwidget/settings.rs:633`）、启动配置（`core/src/config/mod.rs:758`）、app-server `turn/start.collaborationMode`（`protocol/v2/turn.rs:249-251`）与 `thread/settings/update.collaborationMode`（`protocol/v2/thread.rs:269-271`）。**实验性标注在协议类型层而非 feature gate**（v1.1 修订）：这两个字段及其注释标 EXPERIMENTAL（`#[experimental]` 属性/注释：`protocol/v2/turn.rs:244,249`、`protocol/v2/thread.rs:265,269`、`protocol/v2/item.rs:272`）；`Feature::CollaborationModes`（`features/src/lib.rs:382`）的 FeatureSpec 为 **`Stage::Removed, default_enabled: true`**（`:1556-1560`），:380-381 注释原文 "Kept for config backward compatibility; behavior is always collaboration-modes-enabled."——**协作模式在主线恒启用**，不再是 experimental 开关。**模型不可自主进出 Plan**：自动触发的 turn 禁止进入或离开（`session/turn_input.rs:57-74`）。
-- 限制是**提示词级 + 两条硬规则**，无沙箱/工具白名单分支（`ModeKind::Plan` 非测试引用仅 6 处，无一在 sandbox/工具注册）：① `update_plan`（TODO 清单工具，与 plan mode 无关的 checklist）在 Plan mode 被拒（`tools/handlers/plan.rs:87-91`）；② `request_user_input` 提问工具默认仅 Plan 可用（`config_types.rs:699-701`）。提示词模板：`codex-rs/collaboration-mode-templates/templates/plan.md`（三阶段会话式规划，最终计划须 decision complete，每 turn 至多一个 `<proposed_plan>` 块，修订块须完整替换旧计划）；注入点 `core/src/context/world_state/collaboration_mode.rs:24-78,163-169`。
+- 限制是**提示词级 + 两条硬规则**，无沙箱/工具白名单分支（`ModeKind::Plan` 非测试引用仅 6 处，无一在 sandbox/工具注册）：① `update_plan`（TODO 清单工具，与 plan mode 无关的 checklist）在 Plan mode 被拒（`tools/handlers/plan.rs:87-91`）；② `request_user_input` 提问工具默认仅 Plan 可用（`config_types.rs:699-701`）。提示词模板：`collaboration-mode-templates/templates/plan.md`（三阶段会话式规划，最终计划须 decision complete，每 turn 至多一个 `<proposed_plan>` 块，修订块须完整替换旧计划）；注入点 `core/src/context/world_state/collaboration_mode.rs:24-78,163-169`。
 
 ### 4.2 计划数据形状
 
@@ -269,8 +270,9 @@ iOS 仓=本次修订零读零写（main 已推进至 61f67bf，与调研时点 a
 
 ```text
 上游仓库路径=/Users/jacklee/Projects/codex  分支=main  提交=50fffd5ed367aa99491d9ec58575626fce4e9dd4  未提交状态=干净
+路径基准=本节（§4 全部）锚点均相对 codex-rs/ 子目录（codex 仓全部 crate 位于其下，仓根无 protocol/ 等目录——v1.3 注记）
 锚点=protocol/src/config_types.rs:668-683,699-701；tui/chatwidget/plan_implementation.rs:9-19（亲验）；
-    tui/chatwidget/slash_dispatch.rs:84-102；tui/keymap.rs:2183-2185；features/src/lib.rs:380-382,382,1556-1560；
+    tui/chatwidget/slash_dispatch.rs:84-102；tui/keymap.rs:2183-2185；features/src/lib.rs:380-382,1556-1560；
     core/src/session/turn_input.rs:57-74；core/src/session/turn.rs:1714；core/src/tools/handlers/plan.rs:87-91；
     utils/stream-parser/src/proposed_plan.rs:7-8（亲验）；protocol/src/protocol.rs:1523,1545,1962-1968,4053-4088；
     protocol/src/items.rs:50,184-188（亲验）；app-server-protocol/src/protocol/v2/turn.rs:244,249-251；
@@ -373,9 +375,9 @@ iOS 仓=本次修订零读零写（main 已推进至 61f67bf，与调研时点 a
 - question：header "Plan review"、问题 "Approve this plan and leave plan mode?"、**`detail` = 计划全文**、两个选项：
   - **Approve** — "Leave plan mode; the plan is carried out from the next step."
   - **Keep planning** — "Stay in plan mode; feedback goes back to the model."
-- **presentation intent 标记**：`intent: {kind: 'plan-review', approve: <label>}`（`packages/interaction/user-questions/src/types.ts:33-48`）——有能力的前端据此渲染专门计划审批面板；**answer 里可以带 `custom` 自由文字**：选 Keep planning 且 `item.custom` 非空时，工具抛错 `"The user chose to keep planning; their feedback: <custom>"` 把反馈带回模型（:331-336）——**原生带反馈打回通道**。
-- **Approve** → 工具返回 `{approved: true}`，plan mode 在下一步静默退出（pendingIntents，:338-341）。
-- **dismiss**（用户不答、拿回回合说话）→ `ASK_CANCELLED` 分支：抛错告知模型 "The user dismissed the plan review to speak instead; stay in plan mode, stop here, and wait for their message."（:312-316）——语义是「用户接管」而非「放弃」。
+- **presentation intent 标记**：`intent: {kind: 'plan-review', approve: <label>}`（`packages/interaction/user-questions/src/types.ts:33-48`）——有能力的前端据此渲染专门计划审批面板；**answer 里可以带 `custom` 自由文字**：选 Keep planning 且 `item.custom` 非空时，工具抛错 `"The user chose to keep planning; their feedback: <custom>"` 把反馈带回模型（块 :336-341：条件 :336、feedback :337、抛错 :338-340——v1.3 修正行号）——**原生带反馈打回通道**。
+- **Approve** → 工具返回 `{approved: true}`，plan mode 在下一步静默退出（`pendingIntents.set` :345、return :346）。
+- **dismiss**（用户不答、拿回回合说话）→ `ASK_CANCELLED` 分支：抛错告知模型 "The user dismissed the plan review to speak instead; stay in plan mode, stop here, and wait for their message."（catch 块 :317-328：判定 :323、抛错 :324-325——v1.3 修正行号）——语义是「用户接管」而非「放弃」。
 - web UI：`PlanReviewPanel`（`packages/client/ui-user-questions/src/client/PlanReviewPanel.tsx`，plan-review intent 专用面板）+ `PlanChip`（`packages/client/ui-plan/src/client/PlanModeControl.tsx:19` 组件、`:36-50` `off()` 执行体；实际退出经 `client/index.ts:60-61` 的 `commands.execute(sessionId, '/plan off', [])`）；e2e `apps/web/tests/plan-control-row.e2e.ts`。
 - 另有独立的 user-approval 体系（`ApprovalOutcome = allowed-once|rejected|cancelled|unavailable`，`packages/interaction/user-approval/src/types.ts:32`，fail-closed）——与 plan 审批分属两个 seam。
 
