@@ -6,9 +6,9 @@
 - Plan: `docs/2026-08-28-grokbuild-leader-mode-design.md`（v10 owner APPROVE）
 - Canonical State File: `.exec-plan/state/plan-60f196abb855.json`
 - Completion Report Verdict: **`proved-complete (owner-verified 2026-09-02)`**（产品代码、单测、Release 安装、§7.3 owner 真机矩阵全部收口；12 行中 11 行 owner 实测通过 + 诊断卡确认，行 3「未安装态」为可选行未测，已在 exec-plan regression 证据中注明）
-- Queue Summary: **45/45 todos done**（B 路线原 33 项收官后，2026-09-02 晚间 owner 授权追加后续批次 12 项：`followup-roster-consume`、`followup-model-effort`、`rfx-effort-gate`、`rfx-model-id-softening` 四个三元组，全部 done 带 proof；owner 矩阵类 regression p2-dg1/p2-dg2/p3-ui/p4-diagnostics/p4-release 全部回填；p4-doc-sync-regression 为 D0 无运行面，na 见队列；验收期新增 rfx-row6-user-echo 三元组闭环）
-- Related Commits: `69f3b31`（TOML 依赖）`1676df5`（开关管理器 T1–T33）`9baa1e5`（D-G1）`3089a95`（D-G2）`4cfddfd`（Phase 3 UI）`0f4e5e8`（Phase 4 诊断行）`f92cec6`（doc-sync + D-3 帮助文案）`98ae793`（验收修复 ①：scope 切换退订旧观察键）`05152aa`（验收修复 ②：读路径订阅键改观察语义）`39e29a8`（验收修复 ③：iPhone 自有 turn 的 user echo 补 turn 身份）`c77bb80`（后续批次：消费 leader roster 广播）`c1dfa81`（后续批次：model/effort 全链路）`da17648`（后续修复 ④：镜像官方 effort 门）`a0b0f11`（后续修复 ⑤：set_model unknown model id 软化）；另有 Phase 0 基线修复 `6dc9353`（D-G0b 终态通知白名单）与 cwd 缺口修复（见执行日志）
-- Generated At: `2026-09-02T21:04:00+08:00`（owner 验收收官后更新）；`2026-09-02T22:21:00+08:00`（后续批次 12 todos 入账后更新，见 §1.1 与 §2 追加行）
+- Queue Summary: **51/51 todos done**（B 路线原 33 项收官后，2026-09-02 晚间 owner 授权追加后续批次 12 项：`followup-roster-consume`、`followup-model-effort`、`rfx-effort-gate`、`rfx-model-id-softening` 四个三元组，全部 done 带 proof；owner 矩阵类 regression p2-dg1/p2-dg2/p3-ui/p4-diagnostics/p4-release 全部回填；p4-doc-sync-regression 为 D0 无运行面，na 见队列；验收期新增 rfx-row6-user-echo 三元组闭环；2026-09-03 追加 §23 会话 rename/delete（`followup-session-admin` 三元组，owner 矩阵 rename/delete ✅、archive 接受现状）与 §23.8 rename 标题瑕疵修复（`rfx-rename-title` 三元组，owner 复测 ✅））
+- Related Commits: `69f3b31`（TOML 依赖）`1676df5`（开关管理器 T1–T33）`9baa1e5`（D-G1）`3089a95`（D-G2）`4cfddfd`（Phase 3 UI）`0f4e5e8`（Phase 4 诊断行）`f92cec6`（doc-sync + D-3 帮助文案）`98ae793`（验收修复 ①：scope 切换退订旧观察键）`05152aa`（验收修复 ②：读路径订阅键改观察语义）`39e29a8`（验收修复 ③：iPhone 自有 turn 的 user echo 补 turn 身份）`c77bb80`（后续批次：消费 leader roster 广播）`c1dfa81`（后续批次：model/effort 全链路）`da17648`（后续修复 ④：镜像官方 effort 门）`a0b0f11`（后续修复 ⑤：set_model unknown model id 软化）；另有 Phase 0 基线修复 `6dc9353`（D-G0b 终态通知白名单）与 cwd 缺口修复（见执行日志）；2026-09-03 批次：`441706c`/`dc30edc`（§23 方案与修复指针）`5f37692`（§23 rename/delete 实现）`eaf5703`（§23.8 display_title 标题修复）`5f24679`（§23.8 文档三件套）
+- Generated At: `2026-09-02T21:04:00+08:00`（owner 验收收官后更新）；`2026-09-02T22:21:00+08:00`（后续批次 12 todos 入账后更新，见 §1.1 与 §2 追加行）；`2026-09-03T18:52:00+08:00`（§23 session-admin + §23.8 标题修复 6 todos 入账后更新，见 §8）
 
 ## 1. Overall Verdict (总体结论)
 
@@ -172,8 +172,33 @@ B 路线收官后同日追加四个三元组（12 todos，见队列 followup-/rf
 ## 7. 后续另案（不在本验收内）
 
 - follower 交互升级（D-3 已批另案，前置的 source-first 冻结条件见 think.md 总账）。
+  question-only 起步已另计划交付（2026-09-03，owner 矩阵四行全过，见
+  `2026-09-02-grokbuild-follower-question-implementation-plan完成情况.md`）；剩余
+  permission/interjection 升级仍未开工。
 - iOS 发送 Grok 模型改用 list_models 条目 id（transcript 底层 id 仅用于显示）——
   2026-09-02 登记；Mac 侧已部署 unknown model id 软化兜底（`a0b0f11`），iOS 根治另案。
+- iOS automation open-session 冷启动 get_session 竞态（2026-09-03 §23.8 排查中发现；
+  仅影响 E2E/UITest 自动化路径，不影响用户手动打开；设计文档 §23.8 末尾有记录）。
 
 （原列于此的 roster 通知消费、model/provider/effort 缺口已于 2026-09-02 晚间完成并
 入账本报告 §1.1，think.md 总账对应行已删除。）
+
+## 8. 2026-09-03 追加批次：§23 会话 rename/delete + §23.8 标题修复
+
+owner 2026-09-03 授权按设计 §23 直接实施会话重命名/删除；验收后修复唯一瑕疵。
+两个 proof-carrying 三元组入账（`followup-session-admin-*`、`rfx-rename-title-*`），
+队列 51/51 done，queue hash `185719b9dbfe`。
+
+**§23 rename/delete**（`5f37692`，方案 `441706c`/`dc30edc`）：经官方 session-admin
+ext 方法（`_x.ai/session/rename` / `_x.ai/session/delete`，catalog rail 半包装形态，
+grok 1.0.13 探针锚定）实现 `core.SessionRenamer`/`SessionDeleter`；官方 error data
+透传；archive 有意不实现（官方无此功能）。owner 真机矩阵：rename ✅、delete ✅、
+archive 报「not yet supported」owner 裁决接受现状。
+
+**§23.8 标题修复**（`eaf5703`，文档 `5f24679`）：rename 后消息页标题停留旧名的
+根因是官方 rename 只写 `generated_title` 不回写 `session_summary`，CordCode 详情链
+只读后者、列表链经官方解析——两条链标题分裂，rename 后 50ms 的 get_session 刷新
+把新标题覆盖回旧值。修复 = `parseSummaryFile` 镜像官方 `display_title()` 优先级。
+验证：定向单测（磁盘实测 fixture 三例）+ 包全量全绿；Release 四门核对；生产路径
+wire 探针（临时配对设备直连生产 8777 的真实 get_session）返回新标题，探针设备已
+revoke；owner 真机复测「测试结果符合预期✅」（2026-09-03）。
