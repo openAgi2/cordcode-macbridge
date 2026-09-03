@@ -141,7 +141,7 @@ func TestGrokSessionRespondQuestion(t *testing.T) {
 		t.Fatalf("questions = %+v", ui.UserInput.Questions)
 	}
 	q := ui.UserInput.Questions[0]
-	if q.ID != "call_drv1" || q.Prompt != "选一个?" || q.AnswerMode != core.UserInputAnswerModeSingle || q.AllowsCustomAnswer {
+	if q.ID != "call_drv1" || q.Prompt != "选一个?" || q.AnswerMode != core.UserInputAnswerModeSingle || !q.AllowsCustomAnswer {
 		t.Fatalf("canonical question = %+v", q)
 	}
 	if len(q.Options) != 2 || q.Options[0].ID != "A" || q.Options[0].Description != "选项A" {
@@ -484,7 +484,7 @@ func TestLeaderSubscriberAnswerQuestion(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 		return nil
 	}, func(sub *LeaderSubscriber) {
-		resolved, err := sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", []string{"深色主题"})
+		resolved, err := sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", []string{"深色主题"}, "")
 		if err != nil || !resolved {
 			t.Errorf("AnswerQuestion = (%v, %v), want (true, nil)", resolved, err)
 		}
@@ -505,6 +505,61 @@ func TestLeaderSubscriberAnswerQuestion(t *testing.T) {
 			t.Fatalf("canonical resolved = %+v, want answered/ios", e)
 		}
 	}
+}
+
+// TestLeaderSubscriberAnswerQuestionFreeform: a typed answer submits the
+// freeform wire shape — label "Other" with the text in annotations notes.
+func TestLeaderSubscriberAnswerQuestionFreeform(t *testing.T) {
+	got, _ := runLeaderSubscriberAnswer(t, func(c net.Conn, answered <-chan struct{}) error {
+		if err := writeACPRequestRaw(c, fixtureAskUserQuestionHalfWrapped); err != nil {
+			return err
+		}
+		<-answered
+		resp := readClientACPFrame(t, c)
+		result, _ := resp["result"].(map[string]any)
+		if result == nil || result["outcome"] != "accepted" {
+			t.Errorf("result = %+v, want outcome accepted", result)
+		}
+		answers, _ := result["answers"].(map[string]any)
+		if v, _ := answers["你偏好哪种配色主题?"].([]any); len(v) != 1 || v[0] != "Other" {
+			t.Errorf("answers = %+v, want {你偏好哪种配色主题?: [Other]}", answers)
+		}
+		anns, _ := result["annotations"].(map[string]any)
+		ann, _ := anns["你偏好哪种配色主题?"].(map[string]any)
+		if ann == nil || ann["notes"] != "我要自定义" {
+			t.Errorf("annotations = %+v, want {你偏好哪种配色主题?: {notes: 我要自定义}}", anns)
+		}
+		return nil
+	}, func(sub *LeaderSubscriber) {
+		resolved, err := sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", []string{"Other"}, "我要自定义")
+		if err != nil || !resolved {
+			t.Errorf("freeform AnswerQuestion = (%v, %v), want (true, nil)", resolved, err)
+		}
+	})
+	counts := countEventTypes(got)
+	if counts[core.EventUserInputResolved] != 1 {
+		t.Fatalf("resolved counts = %v, want flush", counts)
+	}
+}
+
+// "Other" without notes stays invalid (the TUI never submits an empty
+// freeform selection).
+func TestLeaderSubscriberOtherWithoutNotesRejected(t *testing.T) {
+	runLeaderSubscriberAnswer(t, func(c net.Conn, answered <-chan struct{}) error {
+		if err := writeACPRequestRaw(c, fixtureAskUserQuestionHalfWrapped); err != nil {
+			return err
+		}
+		<-answered
+		time.Sleep(100 * time.Millisecond)
+		return nil
+	}, func(sub *LeaderSubscriber) {
+		if _, err := sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", []string{"Other"}, ""); err == nil {
+			t.Error("Other without notes must be rejected")
+		}
+		if sub.interactions.len() != 1 {
+			t.Errorf("rejected freeform must not consume the entry; len = %d", sub.interactions.len())
+		}
+	})
 }
 
 func TestLeaderSubscriberCancelQuestion(t *testing.T) {
@@ -555,24 +610,24 @@ func TestLeaderSubscriberAnswerValidationAndSilent(t *testing.T) {
 		time.Sleep(150 * time.Millisecond)
 		return nil
 	}, func(sub *LeaderSubscriber) {
-		if _, err := sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", []string{"不存在的选项"}); err == nil {
+		if _, err := sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", []string{"不存在的选项"}, ""); err == nil {
 			t.Error("invalid label must error")
 		}
-		if _, err := sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", nil); err == nil {
+		if _, err := sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", nil, ""); err == nil {
 			t.Error("empty selection must error")
 		}
-		if _, err := sub.AnswerQuestion("call_never_seen", []string{"深色主题"}); err == nil {
+		if _, err := sub.AnswerQuestion("call_never_seen", []string{"深色主题"}, ""); err == nil {
 			t.Error("never-registered id must error")
 		}
 		if sub.interactions.len() != 1 {
 			t.Errorf("failed validations must not consume the entry; len = %d", sub.interactions.len())
 		}
-		resolved, err := sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", []string{"浅色主题"})
+		resolved, err := sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", []string{"浅色主题"}, "")
 		if err != nil || !resolved {
 			t.Errorf("valid answer = (%v, %v), want (true, nil)", resolved, err)
 		}
 		// Duplicate (already flushed) — silent per §3.5.
-		resolved, err = sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", []string{"浅色主题"})
+		resolved, err = sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", []string{"浅色主题"}, "")
 		if err != nil || !resolved {
 			t.Errorf("late answer = (%v, %v), want silent (true, nil)", resolved, err)
 		}
@@ -628,14 +683,6 @@ func TestGrokSessionResolveUserInputDriverRail(t *testing.T) {
 	awaitEventOfType(t, sess, core.EventUserInputRequested)
 	awaitEventOfType(t, sess, core.EventQuestionAsked)
 
-	// Custom text is rejected with the stable invalid_answer_shape code.
-	_, err := sess.ResolveUserInput(context.Background(), "call_drv1", "11111111-1111-4111-8111-111111111111", core.UserInputActionAnswer,
-		[]core.UserInputAnswer{{QuestionID: "call_drv1", Values: []core.UserInputValue{{Kind: core.UserInputValueText, Text: "自定义"}}}})
-	var uie *core.UserInputError
-	if !errorsAs(err, &uie) || uie.Code != "invalid_answer_shape" {
-		t.Fatalf("custom text err = %v, want invalid_answer_shape", err)
-	}
-
 	// Valid option answer: accepted/answered, canonical resolved emitted.
 	res, err := sess.ResolveUserInput(context.Background(), "call_drv1", "11111111-1111-4111-8111-111111111111", core.UserInputActionAnswer,
 		[]core.UserInputAnswer{{QuestionID: "call_drv1", Values: []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: "A"}}}})
@@ -661,6 +708,46 @@ func TestGrokSessionResolveUserInputDriverRail(t *testing.T) {
 	res, err = sess.ResolveUserInput(context.Background(), "call_drv1", "33333333-3333-4333-8333-333333333333", core.UserInputActionReject, nil)
 	if err != nil || res.Outcome != core.UserInputOutcomeAlreadyResolved {
 		t.Fatalf("late reject resolution = (%+v, %v), want already_resolved", res, err)
+	}
+}
+
+// TestGrokSessionResolveUserInputFreeformText: a typed answer (iOS "type your
+// answer here" equivalent) maps to grok's freeform wire shape — label "Other"
+// with the text in annotations notes (types.rs AskUserQuestionExtResponse).
+func TestGrokSessionResolveUserInputFreeformText(t *testing.T) {
+	sess, lines, mu, stop := startQuestionProbeAgent(t, driverQuestionFixture)
+	defer stop()
+	awaitEventOfType(t, sess, core.EventUserInputRequested)
+
+	res, err := sess.ResolveUserInput(context.Background(), "call_drv1", "88888888-8888-4888-8888-888888888888", core.UserInputActionAnswer,
+		[]core.UserInputAnswer{{QuestionID: "call_drv1", Values: []core.UserInputValue{{Kind: core.UserInputValueText, Text: " 我要自定义答案 "}}}})
+	if err != nil || res.Outcome != core.UserInputOutcomeAccepted || res.CurrentStatus != core.UserInputStatusAnswered {
+		t.Fatalf("freeform resolution = (%+v, %v), want accepted/answered", res, err)
+	}
+	var resp map[string]any
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if m := lastAgentResponse(t, lines, mu); m != nil && fmt.Sprint(m["id"]) == "5" {
+			resp = m
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if resp == nil {
+		t.Fatal("agent never received the freeform response")
+	}
+	result, _ := resp["result"].(map[string]any)
+	if result == nil || result["outcome"] != "accepted" {
+		t.Fatalf("result = %+v, want outcome accepted", result)
+	}
+	answers, _ := result["answers"].(map[string]any)
+	if v, _ := answers["选一个?"].([]any); len(v) != 1 || v[0] != "Other" {
+		t.Fatalf("answers = %+v, want {选一个?: [Other]}", answers)
+	}
+	anns, _ := result["annotations"].(map[string]any)
+	ann, _ := anns["选一个?"].(map[string]any)
+	if ann == nil || ann["notes"] != "我要自定义答案" {
+		t.Fatalf("annotations = %+v, want {选一个?: {notes: 我要自定义答案}} (text trimmed)", anns)
 	}
 }
 
@@ -755,11 +842,17 @@ func TestAgentResolveUserInputLeaderRouting(t *testing.T) {
 		t.Fatalf("partial resolution = (%+v, %v), want in_progress/pending", res, err)
 	}
 
-	// Custom text on the leader rail is also invalid_answer_shape.
+	// Freeform text on the leader rail is now a legal answer (TUI "type your
+	// answer here" shape): the second question completes the interaction, so
+	// the flush proceeds — this sub has no live connection, so the failure is
+	// the connection error, NOT invalid_answer_shape.
 	_, err = a.ResolveUserInput(context.Background(), "call_route", "77777777-7777-4777-8777-777777777777", core.UserInputActionAnswer,
 		[]core.UserInputAnswer{{QuestionID: "call_route#1", Values: []core.UserInputValue{{Kind: core.UserInputValueText, Text: "自定义"}}}})
-	if !errorsAs(err, &uie) || uie.Code != "invalid_answer_shape" {
-		t.Fatalf("custom text err = %v, want invalid_answer_shape", err)
+	if errorsAs(err, &uie) && uie.Code == "invalid_answer_shape" {
+		t.Fatalf("freeform text err = %v, text answers are legal now", err)
+	}
+	if err == nil {
+		t.Fatal("freeform flush without a live connection must still error")
 	}
 }
 

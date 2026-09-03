@@ -73,69 +73,19 @@ func TestSubscribeSessionEventsResolvesCwdFromSessionStore(t *testing.T) {
 
 	loadCwd := make(chan string, 1)
 	serverErr := make(chan error, 1)
+	// Accept loop like the real leader: the subscribe path's reclaim probe
+	// dials and closes without registering — tolerate those connections.
 	go func() {
-		c, err := ln.Accept()
-		if err != nil {
-			serverErr <- err
-			return
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return // listener closed (teardown)
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				serveCwdCaptureLeader(c, loadCwd, serverErr)
+			}(c)
 		}
-		defer c.Close()
-
-		reg, err := readClientMsg(c)
-		if err != nil {
-			serverErr <- err
-			return
-		}
-		if reg.Type != "register" || reg.ClientType != leaderClientType {
-			serverErr <- fmt.Errorf("want register/%s, got %s/%s", leaderClientType, reg.Type, reg.ClientType)
-			return
-		}
-		rr, _ := json.Marshal(leaderServerMsg{Type: "registered", Ready: true})
-		if err := writeTestFrame(c, rr); err != nil {
-			serverErr <- err
-			return
-		}
-
-		init, err := readClientMsg(c)
-		if err != nil {
-			serverErr <- err
-			return
-		}
-		if init.Type != "acp" {
-			serverErr <- fmt.Errorf("want acp initialize, got %s", init.Type)
-			return
-		}
-		if err := writeACPResponse(c, acpPayloadID(init.Payload), map[string]any{"protocolVersion": "1"}); err != nil {
-			serverErr <- err
-			return
-		}
-
-		load, err := readClientMsg(c)
-		if err != nil {
-			serverErr <- err
-			return
-		}
-		if load.Type != "acp" {
-			serverErr <- fmt.Errorf("want acp session/load, got %s", load.Type)
-			return
-		}
-		var req struct {
-			Params struct {
-				Cwd string `json:"cwd"`
-			} `json:"params"`
-		}
-		if err := json.Unmarshal([]byte(load.Payload), &req); err != nil {
-			serverErr <- fmt.Errorf("parse session/load params: %w", err)
-			return
-		}
-		loadCwd <- req.Params.Cwd
-		if err := writeACPResponse(c, acpPayloadID(load.Payload), map[string]any{}); err != nil {
-			serverErr <- err
-			return
-		}
-		// Hold the connection briefly so Run stays in the live loop, then close.
-		time.Sleep(120 * time.Millisecond)
-		serverErr <- nil
 	}()
 
 	// Mirror production: caller cwd is the runtime work dir (unrelated to the session).
@@ -158,5 +108,71 @@ func TestSubscribeSessionEventsResolvesCwdFromSessionStore(t *testing.T) {
 	}
 	if err := <-serverErr; err != nil {
 		t.Fatalf("mock leader server: %v", err)
+	}
+}
+
+// serveCwdCaptureLeader performs the register → initialize → session/load
+// handshake, capturing the load cwd. A connection that dies before register
+// (the reclaim probe) surfaces as EOF and is tolerated.
+func serveCwdCaptureLeader(c net.Conn, loadCwd chan<- string, serverErr chan<- error) {
+	reg, err := readClientMsg(c)
+	if err != nil {
+		return // probe connection (dial + close, no register) — tolerate
+	}
+	if reg.Type != "register" || reg.ClientType != leaderClientType {
+		serverErr <- fmt.Errorf("want register/%s, got %s/%s", leaderClientType, reg.Type, reg.ClientType)
+		return
+	}
+	rr, _ := json.Marshal(leaderServerMsg{Type: "registered", Ready: true})
+	if err := writeTestFrame(c, rr); err != nil {
+		serverErr <- err
+		return
+	}
+
+	init, err := readClientMsg(c)
+	if err != nil {
+		serverErr <- err
+		return
+	}
+	if init.Type != "acp" {
+		serverErr <- fmt.Errorf("want acp initialize, got %s", init.Type)
+		return
+	}
+	if err := writeACPResponse(c, acpPayloadID(init.Payload), map[string]any{"protocolVersion": "1"}); err != nil {
+		serverErr <- err
+		return
+	}
+
+	load, err := readClientMsg(c)
+	if err != nil {
+		serverErr <- err
+		return
+	}
+	if load.Type != "acp" {
+		serverErr <- fmt.Errorf("want acp session/load, got %s", load.Type)
+		return
+	}
+	var req struct {
+		Params struct {
+			Cwd string `json:"cwd"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal([]byte(load.Payload), &req); err != nil {
+		serverErr <- fmt.Errorf("parse session/load params: %w", err)
+		return
+	}
+	select {
+	case loadCwd <- req.Params.Cwd:
+	default:
+	}
+	if err := writeACPResponse(c, acpPayloadID(load.Payload), map[string]any{}); err != nil {
+		serverErr <- err
+		return
+	}
+	// Hold the connection briefly so Run stays in the live loop, then close.
+	time.Sleep(120 * time.Millisecond)
+	select {
+	case serverErr <- nil:
+	default:
 	}
 }

@@ -2,21 +2,25 @@ package grokbuild
 
 // D-G1（§3.5.1，owner 批准的受控 Go 改动 1/2）：leader 订阅建立失败回退
 // updates.jsonl tailer。分界 = 是否已向下游转发任何 leader event（r4-B1）。
-//   G1 stale socket（stat 成功但拨不通）→ 回退 tailer + INFO + 不删 socket
+//   G1 stale socket（拨不通）→ 回退 tailer + INFO + 不删 socket
 //   G2 握手/live 零事件即断开 → 同回退（updates.jsonl 是真相文件可补齐）
 //   G3 已转发 ≥1 事件后断开 → 不回退，channel 照常关闭（relay 层 F-7 收口）
 //   G4 ctx 取消（模拟 D-G2 主动取消）→ 不回退（relay 已退出，不得拉起
 //      无人消费的 tailer）
+//   G5 leader 回归探测（D-G3）：fallback tailer 期间 leader 重新 listen →
+//      自动重订阅，attach 事件继续送达同一 channel
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -24,7 +28,9 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
-const leaderFallbackFrozenMessage = "leader subscribe failed, falling back to updates.jsonl tailer"
+// leaderFallbackFrozenMessage is the stable log anchor for "the fallback
+// engaged" (grep anchor for think.md / live-log triage).
+const leaderFallbackFrozenMessage = "falling back to updates.jsonl tailer"
 
 // syncLogBuffer collects slog output from concurrent goroutines.
 type syncLogBuffer struct {
@@ -107,8 +113,10 @@ func expectTailerEvent(t *testing.T, logs *syncLogBuffer, events <-chan core.Eve
 
 // runMockLeader runs a mock leader server whose behavior after completing the
 // full handshake (register → registered → acp initialize → response →
-// session/load → response) is delegated to afterLoad. It signals handshakeDone
-// once session/load has been answered.
+// session/load → response) is delegated to afterLoad. Like the real leader
+// (server.rs accept loop), it keeps accepting: probe connections from the
+// reclaim path (dial + immediate close, no register frame) are tolerated
+// silently. It signals serverErr once session/load has been answered.
 func runMockLeader(t *testing.T, sock string, afterLoad func(c net.Conn)) <-chan error {
 	t.Helper()
 	ln, err := net.Listen("unix", sock)
@@ -119,62 +127,75 @@ func runMockLeader(t *testing.T, sock string, afterLoad func(c net.Conn)) <-chan
 
 	serverErr := make(chan error, 1)
 	go func() {
-		c, err := ln.Accept()
-		if err != nil {
-			serverErr <- err
-			return
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return // listener closed (teardown)
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				if err := serveMockLeaderConn(c, afterLoad); err != nil {
+					if err == io.EOF || strings.Contains(err.Error(), "closed") {
+						return // probe connection (dial + close, no register) — tolerate
+					}
+					select {
+					case serverErr <- err:
+					default:
+					}
+					return
+				}
+				select {
+				case serverErr <- nil:
+				default:
+				}
+			}(c)
 		}
-		defer c.Close()
-
-		reg, err := readClientMsg(c)
-		if err != nil {
-			serverErr <- err
-			return
-		}
-		if reg.Type != "register" || reg.ClientType != leaderClientType {
-			serverErr <- fmt.Errorf("want register/%s, got %s/%s", leaderClientType, reg.Type, reg.ClientType)
-			return
-		}
-		rr, _ := json.Marshal(leaderServerMsg{Type: "registered", Ready: true})
-		if err := writeTestFrame(c, rr); err != nil {
-			serverErr <- err
-			return
-		}
-
-		init, err := readClientMsg(c)
-		if err != nil {
-			serverErr <- err
-			return
-		}
-		if init.Type != "acp" {
-			serverErr <- fmt.Errorf("want acp initialize, got %s", init.Type)
-			return
-		}
-		if err := writeACPResponse(c, acpPayloadID(init.Payload), map[string]any{"protocolVersion": "1"}); err != nil {
-			serverErr <- err
-			return
-		}
-
-		load, err := readClientMsg(c)
-		if err != nil {
-			serverErr <- err
-			return
-		}
-		if load.Type != "acp" {
-			serverErr <- fmt.Errorf("want acp session/load, got %s", load.Type)
-			return
-		}
-		if err := writeACPResponse(c, acpPayloadID(load.Payload), map[string]any{}); err != nil {
-			serverErr <- err
-			return
-		}
-
-		if afterLoad != nil {
-			afterLoad(c)
-		}
-		serverErr <- nil
 	}()
 	return serverErr
+}
+
+// serveMockLeaderConn performs the register → initialize → session/load
+// handshake, then hands the connection to afterLoad. A connection that dies
+// before register (the reclaim probe) surfaces as EOF.
+func serveMockLeaderConn(c net.Conn, afterLoad func(c net.Conn)) error {
+	reg, err := readClientMsg(c)
+	if err != nil {
+		return err
+	}
+	if reg.Type != "register" || reg.ClientType != leaderClientType {
+		return fmt.Errorf("want register/%s, got %s/%s", leaderClientType, reg.Type, reg.ClientType)
+	}
+	rr, _ := json.Marshal(leaderServerMsg{Type: "registered", Ready: true})
+	if err := writeTestFrame(c, rr); err != nil {
+		return err
+	}
+
+	init, err := readClientMsg(c)
+	if err != nil {
+		return err
+	}
+	if init.Type != "acp" {
+		return fmt.Errorf("want acp initialize, got %s", init.Type)
+	}
+	if err := writeACPResponse(c, acpPayloadID(init.Payload), map[string]any{"protocolVersion": "1"}); err != nil {
+		return err
+	}
+
+	load, err := readClientMsg(c)
+	if err != nil {
+		return err
+	}
+	if load.Type != "acp" {
+		return fmt.Errorf("want acp session/load, got %s", load.Type)
+	}
+	if err := writeACPResponse(c, acpPayloadID(load.Payload), map[string]any{}); err != nil {
+		return err
+	}
+
+	if afterLoad != nil {
+		afterLoad(c)
+	}
+	return nil
 }
 
 // G1: socket file exists (stat → leader path) but nothing listens → dial fails,
@@ -346,5 +367,69 @@ func TestLeaderFallbackG4CtxCancelNoFallback(t *testing.T) {
 	}
 	if err := <-serverErr; err != nil {
 		t.Fatalf("mock leader server: %v", err)
+	}
+}
+
+// G5 (D-G3 reclaim): with the fallback tailer running (no leader), a leader
+// that starts listening again is probed, the tailer stops, and the subscriber
+// re-attaches — its post-load events keep flowing on the SAME channel. This
+// is the reconnect-recovery path for pending questions: the leader's
+// attach-time interaction replay rides the re-subscription.
+func TestLeaderFallbackG5ReclaimWhenLeaderReturns(t *testing.T) {
+	fastTailKnobs()
+	oldProbe := leaderReclaimProbeInterval
+	leaderReclaimProbeInterval = 20 * time.Millisecond
+	t.Cleanup(func() { leaderReclaimProbeInterval = oldProbe })
+	logs := captureSlog(t)
+	sid := "01fb-g5-reclaim"
+	home, sock, updatesPath := setupFallbackFixture(t, sid)
+
+	a := &Agent{grokHome: home, workDir: "/tmp"}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	events, err := a.SubscribeSessionEvents(ctx, sid, "/tmp")
+	if err != nil {
+		t.Fatalf("SubscribeSessionEvents: %v", err)
+	}
+
+	// Phase 1: no leader — the tailer delivers appended updates.
+	expectTailerEvent(t, logs, events, sid, updatesPath, "tailer-before-reclaim")
+
+	// Phase 2: the leader comes back and pushes a live event after load.
+	serverErr := runMockLeader(t, sock, func(c net.Conn) {
+		if err := writeACPNotification(c, "session/update", map[string]any{
+			"sessionId": sid,
+			"update":    map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "leader-live-after-reclaim"}},
+		}); err != nil {
+			t.Errorf("write live notification: %v", err)
+		}
+		// Hold the connection until teardown.
+		buf := make([]byte, 4096)
+		for {
+			if _, err := c.Read(buf); err != nil {
+				return
+			}
+		}
+	})
+
+	// Phase 3: the reclaim probe re-subscribes; the leader event arrives on
+	// the same channel.
+	select {
+	case ev := <-events:
+		if ev.Type != core.EventText || ev.Content != "leader-live-after-reclaim" {
+			t.Fatalf("post-reclaim event = %+v, want EventText leader-live-after-reclaim", ev)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("leader never re-attached (reclaim probe did not fire?)")
+	}
+	if got := logs.String(); !bytes.Contains([]byte(got), []byte("leader reclaim: socket accepting again, re-subscribing")) {
+		t.Fatalf("missing reclaim INFO in log:\n%s", got)
+	}
+	if err := <-serverErr; err != nil {
+		t.Fatalf("mock leader server: %v", err)
+	}
+
+	cancel()
+	for range events {
 	}
 }

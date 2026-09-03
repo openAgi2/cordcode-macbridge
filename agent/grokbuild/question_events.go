@@ -40,11 +40,18 @@ func emitQuestionAsked(emit func(core.Event), sessionID, questionID, questionTex
 			InteractionID: questionID,
 			Status:        core.UserInputStatusPending,
 			Questions: []core.UserInputQuestion{{
-				ID:                 questionID,
-				Prompt:             questionText,
-				AnswerMode:         mode,
-				Options:            uiOpts,
-				AllowsCustomAnswer: false, // answer path validates option labels only
+				ID:     questionID,
+				Prompt: questionText,
+				AnswerMode: mode,
+				Options:  uiOpts,
+				// grok's TUI modal always carries the freeform "type your answer
+				// here" row for model-issued ask_user_question (pager
+				// acp_handler/interactions.rs opens the view WITHOUT with_no_freeform
+				// — that gate exists only for the SuperGrok upsell modal). A typed
+				// answer rides the wire as label "Other" + annotations notes
+				// (types.rs AskUserQuestionExtResponse::Accepted), which the answer
+				// path mirrors.
+				AllowsCustomAnswer: true,
 				Required:           true,
 			}},
 			CanRespond: true,

@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -198,13 +199,18 @@ func (a *Agent) signalCatalogRefresh() {
 
 // SubscribeSessionEvents streams a session's live session/update notifications as
 // core.Events (via convertSessionUpdate). It prefers the leader-socket subscriber
-// (push, low-latency) when ~/.grok/leader.sock exists; otherwise it falls back to
-// the updates.jsonl file tailer (poll). grok's leader socket only exists under
-// use_leader=true (default inline embedded agent mode never creates it), so the
-// file fallback is the path most users actually hit — and it works without any
-// requirement on how grok was launched, since grok writes updates.jsonl in all
-// modes. Both sources feed the same codec (convertSessionUpdate), so the downstream
-// relay loop's turn-start synthesis / defer-idle logic is shared unchanged.
+// (push, low-latency) when a leader is accepting connections on
+// ~/.grok/leader.sock; otherwise it falls back to the updates.jsonl file tailer
+// (poll) while probing for a leader to come back — D-G3 reclaim: the moment a
+// leader accepts connections again the tailer stops and the subscriber
+// re-attaches, whose attach-time interaction replay re-surfaces pending
+// questions (the transcript tailer can never carry them). grok's leader socket
+// only exists under use_leader=true (default inline embedded agent mode never
+// creates it), so the file fallback is the path most users actually hit — and
+// it works without any requirement on how grok was launched, since grok writes
+// updates.jsonl in all modes. Both sources feed the same codec
+// (convertSessionUpdate), so the downstream relay loop's turn-start synthesis /
+// defer-idle logic is shared unchanged.
 //
 // Neither path spawns a leader, acquires the flock, or drives the session. The
 // channel closes when the source disconnects / tails out or ctx is cancelled.
@@ -227,25 +233,8 @@ func (a *Agent) SubscribeSessionEvents(ctx context.Context, sessionID, cwd strin
 		case <-ctx.Done():
 		}
 	}
-	runUpdatesTail := func() {
-		tail := newUpdatesFileTailSubscriber(a.grokHome, sessionID)
-		if err := tail.Run(ctx, forward); err != nil {
-			slog.Debug("grokbuild: updates file tailer ended", "session", sessionID, "error", err)
-		}
-	}
 
 	socketPath := resolveLeaderSocket(a.grokHome)
-	if _, err := os.Stat(socketPath); err != nil {
-		// Leader socket absent (默认 inline 模式) —— fallback 到 updates.jsonl file tailer。
-		slog.Info("grokbuild: leader socket absent, falling back to updates.jsonl file tailer",
-			"session", sessionID, "socket", socketPath)
-		go func() {
-			defer close(ch)
-			runUpdatesTail()
-		}()
-		return ch, nil
-	}
-
 	// grok 的 leader 校验 session/load 的 cwd 必须是 session 所属项目目录；不符即拒
 	// （session/load: Path not found.）。调用方传入的 cwd 不可信：v2 projection 开启
 	// 路径不携带 directory（iOS ProjectionStore 硬编码 nil），handlers 回落
@@ -258,16 +247,123 @@ func (a *Agent) SubscribeSessionEvents(ctx context.Context, sessionID, cwd strin
 		cwd = resolved
 	}
 
+	go func() {
+		defer close(ch)
+		for ctx.Err() == nil {
+			if leaderSocketDialable(socketPath) {
+				forwarded, err := a.runLeaderSubscription(ctx, sessionID, cwd, socketPath, forward)
+				if ctx.Err() != nil {
+					// 调用方取消（正常关闭）——保持 Debug 静默。
+					slog.Debug("grokbuild: leader subscriber ended (ctx cancelled)", "session", sessionID, "error", err)
+					return
+				}
+				if forwarded {
+					// D-G1/F-7：已转发 ≥1 事件后的断开不回退——channel 关闭，
+					// 由 bridge 的 observation 逻辑重新拉起订阅。
+					slog.Warn("grokbuild: leader subscriber ended", "session", sessionID, "socket", socketPath, "error", err)
+					return
+				}
+				// 回退三要素：订阅结束（error/nil 一致）+ 未转发任何事件 + ctx 未取消。
+				args := []any{"session", sessionID, "socket", socketPath}
+				if err != nil {
+					args = append(args, "error", err)
+				}
+				slog.Info("grokbuild: leader subscribe failed, falling back to updates.jsonl tailer (with leader reclaim probe)", args...)
+			} else {
+				slog.Info("grokbuild: leader socket absent or not accepting, falling back to updates.jsonl tailer (with leader reclaim probe)",
+					"session", sessionID, "socket", socketPath)
+			}
+			// D-G2 互锁：主动取消时 relay 已退出，不得再拉起无人消费的 tailer
+			// （runTailerWithLeaderProbe 在 ctx.Done 时立即返回 false）。
+			if !a.runTailerWithLeaderProbe(ctx, sessionID, socketPath, forward) {
+				return
+			}
+			slog.Info("grokbuild: leader reclaim: socket accepting again, re-subscribing", "session", sessionID, "socket", socketPath)
+		}
+	}()
+	return ch, nil
+}
+
+// leaderReclaimProbeInterval is how often the tailer fallback probes the
+// leader socket for a reclaim (D-G3). Cheap unix dial; 10s covers leader
+// restart windows (TUI relaunch) without hot-looping. Var so tests can
+// shorten it.
+var leaderReclaimProbeInterval = 10 * time.Second
+
+// leaderSocketDialable reports whether something is currently accepting
+// connections on socketPath.
+func leaderSocketDialable(socketPath string) bool {
+	c, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		return false
+	}
+	_ = c.Close()
+	return true
+}
+
+// runTailerWithLeaderProbe runs the updates.jsonl tailer while probing the
+// leader socket. Returns true when a leader accepts connections again (the
+// caller re-subscribes — the attach-time replay re-surfaces pending
+// questions); false when ctx is cancelled or the tailer ended on its own
+// (post-turn grace / hardCap — the channel closes, matching pre-reclaim
+// behavior).
+func (a *Agent) runTailerWithLeaderProbe(ctx context.Context, sessionID, socketPath string, forward func(core.Event)) bool {
+	tailCtx, cancelTail := context.WithCancel(ctx)
+	defer cancelTail()
+	tailDone := make(chan struct{})
+	go func() {
+		defer close(tailDone)
+		tail := newUpdatesFileTailSubscriber(a.grokHome, sessionID)
+		if err := tail.Run(tailCtx, forward); err != nil {
+			slog.Debug("grokbuild: updates file tailer ended", "session", sessionID, "error", err)
+		}
+	}()
+	ticker := time.NewTicker(leaderReclaimProbeInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			cancelTail()
+			<-tailDone
+			return false
+		case <-tailDone:
+			return false
+		case <-ticker.C:
+			if leaderSocketDialable(socketPath) {
+				cancelTail()
+				<-tailDone
+				return true
+			}
+		}
+	}
+}
+
+// runLeaderSubscription runs one leader-subscriber lifecycle: registers it in
+// liveSubs (so answer routing can find it), forwards events with question-owner
+// tracking, and reports whether any event was forwarded (the D-G1
+// live/fallback boundary for this connection).
+func (a *Agent) runLeaderSubscription(ctx context.Context, sessionID, cwd, socketPath string, forward func(core.Event)) (forwardedAny bool, err error) {
 	sub := NewLeaderSubscriber(socketPath, sessionID, cwd)
-	// The roster broadcast is machine-wide: every live subscriber connection
-	// delivers it, and signalCatalogRefresh coalesces the duplicates into one
-	// pending catalog rescan.
 	sub.onRosterChanged = a.signalCatalogRefresh
+	a.liveSubsMu.Lock()
+	if a.liveSubs == nil {
+		a.liveSubs = make(map[string]*LeaderSubscriber)
+	}
+	a.liveSubs[sessionID] = sub
+	a.liveSubsMu.Unlock()
+	defer func() {
+		a.liveSubsMu.Lock()
+		if a.liveSubs[sessionID] == sub {
+			delete(a.liveSubs, sessionID)
+		}
+		a.liveSubsMu.Unlock()
+	}()
+	slog.Info("grokbuild: leader subscriber starting", "session", sessionID, "socket", socketPath)
 	// D-G1（§3.5.1，r4-B1 首事件规则）：建立/live 分界 = 是否已向下游转发任何
 	// leader event。先置位再转发，保证判据不落后于下游可见性。
-	var forwardedEvents atomic.Bool
-	trackedForward := func(ev core.Event) {
-		forwardedEvents.Store(true)
+	var forwarded atomic.Bool
+	err = sub.Run(ctx, func(ev core.Event) {
+		forwarded.Store(true)
 		// Leader-rail question ownership: remember which session surfaced a
 		// pending interaction so the session-less resolve_user_input path can
 		// route back; forget it once resolved.
@@ -282,47 +378,8 @@ func (a *Agent) SubscribeSessionEvents(ctx context.Context, sessionID, cwd strin
 			}
 		}
 		forward(ev)
-	}
-	go func() {
-		defer close(ch)
-		a.liveSubsMu.Lock()
-		if a.liveSubs == nil {
-			a.liveSubs = make(map[string]*LeaderSubscriber)
-		}
-		a.liveSubs[sessionID] = sub
-		a.liveSubsMu.Unlock()
-		defer func() {
-			a.liveSubsMu.Lock()
-			if a.liveSubs[sessionID] == sub {
-				delete(a.liveSubs, sessionID)
-			}
-			a.liveSubsMu.Unlock()
-		}()
-		slog.Info("grokbuild: leader subscriber starting", "session", sessionID, "socket", socketPath)
-		err := sub.Run(ctx, trackedForward)
-		// 回退三要素：订阅结束（error/nil 一致）+ 未转发任何事件 + ctx 未取消。
-		// D-G2 互锁：主动取消时 relay 已退出，不得再拉起无人消费的 tailer；
-		// 已转发 ≥1 事件后的断开不回退（relay 层 F-7 收口）。
-		if ctx.Err() == nil && !forwardedEvents.Load() {
-			args := []any{"session", sessionID, "socket", socketPath}
-			if err != nil {
-				args = append(args, "error", err)
-			}
-			slog.Info("grokbuild: leader subscribe failed, falling back to updates.jsonl tailer", args...)
-			runUpdatesTail()
-			return
-		}
-		if err != nil {
-			if ctx.Err() != nil {
-				// 调用方取消（正常关闭）——保持 Debug 静默。
-				slog.Debug("grokbuild: leader subscriber ended (ctx cancelled)", "session", sessionID, "error", err)
-			} else {
-				// 握手/连接失败在生产必须可见（生产日志级别为 INFO，Debug 会被吞）。
-				slog.Warn("grokbuild: leader subscriber ended", "session", sessionID, "socket", socketPath, "error", err)
-			}
-		}
-	}()
-	return ch, nil
+	})
+	return forwarded.Load(), err
 }
 
 // RespondSessionQuestion implements core.SessionQuestionResponder: routes an
@@ -335,7 +392,7 @@ func (a *Agent) RespondSessionQuestion(ctx context.Context, sessionID, questionI
 	if sub == nil {
 		return fmt.Errorf("grokbuild: no live leader subscriber for session %s", shortID(sessionID))
 	}
-	_, err := sub.AnswerQuestion(questionID, optionIDs)
+	_, err := sub.AnswerQuestion(questionID, optionIDs, "")
 	return err
 }
 
@@ -362,8 +419,8 @@ func (a *Agent) StructuredUserInputReady() bool { return true }
 // questions: interactions surfaced by a session's live leader subscriber
 // (external-turn observation, no active AgentSession). Driver-rail questions
 // are answered by grokSession.ResolveUserInput, which falls through here on a
-// miss. Custom text answers are rejected with invalid_answer_shape — grokbuild
-// questions are surfaced with allowsCustomAnswer=false.
+// miss. Typed text answers map to grok's freeform wire shape: label "Other" +
+// annotations notes (the TUI "type your answer here" path).
 func (a *Agent) ResolveUserInput(_ context.Context, interactionID, _ string, action core.UserInputAction, answers []core.UserInputAnswer) (core.UserInputResolution, error) {
 	sessionID := a.questionSessionOwner(interactionID)
 	if sessionID == "" {
@@ -385,15 +442,22 @@ func (a *Agent) ResolveUserInput(_ context.Context, interactionID, _ string, act
 			qid = interactionID
 		}
 		var selected []string
+		notes := ""
 		for _, v := range ans.Values {
 			if v.Kind == core.UserInputValueText && strings.TrimSpace(v.Text) != "" {
-				return core.UserInputResolution{}, &core.UserInputError{Code: "invalid_answer_shape", Message: "grokbuild questions accept offered options only"}
+				notes = strings.TrimSpace(v.Text)
+				continue
 			}
 			if v.Kind == core.UserInputValueOption && v.OptionID != "" {
 				selected = append(selected, v.OptionID)
 			}
 		}
-		resolved, err := sub.AnswerQuestion(qid, selected)
+		if notes != "" {
+			// Freeform answer: append the wire "Other" label alongside any
+			// picked options; the text rides annotations notes (TUI shape).
+			selected = append(selected, freeformOtherLabel)
+		}
+		resolved, err := sub.AnswerQuestion(qid, selected, notes)
 		if err != nil {
 			return core.UserInputResolution{}, err
 		}

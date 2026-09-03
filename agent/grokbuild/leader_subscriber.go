@@ -143,6 +143,9 @@ type leaderInteraction struct {
 	// (single-question interactions — the only observed live shape — flush
 	// immediately).
 	answers map[int][]string
+	// notes carries the freeform text per question index (typed iOS answers);
+	// it flushes alongside answers as annotations[q].notes.
+	notes map[int]string
 }
 
 type leaderInteractionRegistry struct {
@@ -207,9 +210,10 @@ func (r *leaderInteractionRegistry) markTombstoneLocked(toolCallID string) {
 	r.tombstones[toolCallID] = true
 }
 
-// setAnswer records the selected labels for one question index and reports
-// whether every question of the interaction is now answered.
-func (r *leaderInteractionRegistry) setAnswer(toolCallID string, index int, labels []string) (complete bool, ok bool) {
+// setAnswer records the selected labels (and optional freeform notes) for one
+// question index and reports whether every question of the interaction is now
+// answered.
+func (r *leaderInteractionRegistry) setAnswer(toolCallID string, index int, labels []string, notes string) (complete bool, ok bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	i, exists := r.byTool[toolCallID]
@@ -219,7 +223,13 @@ func (r *leaderInteractionRegistry) setAnswer(toolCallID string, index int, labe
 	if i.answers == nil {
 		i.answers = map[int][]string{}
 	}
+	if i.notes == nil {
+		i.notes = map[int]string{}
+	}
 	i.answers[index] = labels
+	if notes != "" {
+		i.notes[index] = notes
+	}
 	r.byTool[toolCallID] = i
 	return len(i.answers) >= len(i.params.Questions), true
 }
@@ -601,21 +611,38 @@ func parseQuestionID(questionID string) (toolCallID string, index int, err error
 
 // askUserQuestionExtResponse mirrors upstream AskUserQuestionExtResponse
 // (ask_user_question/types.rs): internally tagged on "outcome"; Accepted
-// carries answers keyed by QUESTION TEXT with one label per selected option;
-// Cancelled is a bare tag (not an error upstream).
+// carries answers keyed by QUESTION TEXT with one label per selected option,
+// plus optional per-question annotations where a typed freeform answer rides
+// as notes (freeform-only selects are the single label "Other"); Cancelled is
+// a bare tag (not an error upstream).
 type askUserQuestionExtResponse struct {
-	Outcome string              `json:"outcome"` // "accepted" | "cancelled"
-	Answers map[string][]string `json:"answers,omitempty"`
+	Outcome     string                     `json:"outcome"` // "accepted" | "cancelled"
+	Answers     map[string][]string        `json:"answers,omitempty"`
+	Annotations map[string]askAnnotation   `json:"annotations,omitempty"`
 }
+
+// askAnnotation mirrors upstream QuestionAnnotation{preview, notes} — only
+// notes is produced (CordCode never synthesizes a preview).
+type askAnnotation struct {
+	Notes string `json:"notes,omitempty"`
+}
+
+// freeformOtherLabel is the wire label grok's TUI submits for a freeform-only
+// answer ("type your answer here"); the typed text rides annotations notes
+// (types.rs AskUserQuestionExtResponse::Accepted doc).
+const freeformOtherLabel = "Other"
 
 // AnswerQuestion records an iOS reply for one question of a pending
 // interaction and, once every question is answered, sends the wire response
-// with the ORIGINAL numeric id (research §3.3). The response is a plain
-// fire-and-forget frame: upstream first-answer-wins consumes it silently, and
-// a late/duplicate answer is dropped by the leader without any error frame
-// (§3.5) — so success here means "submitted", not "adjudicated". An answer
-// for an already-consumed interaction (TUI grabbed it, resolved broadcast
-// arrived first) returns resolved=true silently per red line 3.
+// with the ORIGINAL numeric id (research §3.3). notes is the typed freeform
+// answer: non-empty notes make the freeform label "Other" a valid selection
+// and flush as annotations[q].notes (mirroring the TUI's "type your answer
+// here" path). The response is a plain fire-and-forget frame: upstream
+// first-answer-wins consumes it silently, and a late/duplicate answer is
+// dropped by the leader without any error frame (§3.5) — so success here
+// means "submitted", not "adjudicated". An answer for an already-consumed
+// interaction (TUI grabbed it, resolved broadcast arrived first) returns
+// resolved=true silently per red line 3.
 //
 // resolved reports whether the interaction is closed after this call: true on
 // flush and on already-consumed silence, false while a multi-question
@@ -623,7 +650,7 @@ type askUserQuestionExtResponse struct {
 // resolved events emit through the Run callback — the answering client's
 // authoritative close (the later interaction_resolved broadcast finds the
 // registry empty and stays silent).
-func (s *LeaderSubscriber) AnswerQuestion(questionID string, optionIDs []string) (bool, error) {
+func (s *LeaderSubscriber) AnswerQuestion(questionID string, optionIDs []string, notes string) (bool, error) {
 	toolCallID, index, err := parseQuestionID(questionID)
 	if err != nil {
 		return false, err
@@ -637,11 +664,11 @@ func (s *LeaderSubscriber) AnswerQuestion(questionID string, optionIDs []string)
 		}
 		return false, fmt.Errorf("grokbuild: no pending question %s", questionID)
 	}
-	labels, err := s.validateQuestionSelection(toolCallID, index, optionIDs)
+	labels, err := s.validateQuestionSelection(toolCallID, index, optionIDs, notes)
 	if err != nil {
 		return false, err
 	}
-	complete, ok := s.interactions.setAnswer(toolCallID, index, labels)
+	complete, ok := s.interactions.setAnswer(toolCallID, index, labels, notes)
 	if !ok {
 		return false, fmt.Errorf("grokbuild: no pending question %s", questionID)
 	}
@@ -652,8 +679,9 @@ func (s *LeaderSubscriber) AnswerQuestion(questionID string, optionIDs []string)
 	}
 	entry, _ := s.interactions.take(toolCallID)
 	if err := s.sendInteractionResponse(entry, askUserQuestionExtResponse{
-		Outcome: "accepted",
-		Answers: answersByQuestionText(entry, entry.answers),
+		Outcome:     "accepted",
+		Answers:     answersByQuestionText(entry, entry.answers),
+		Annotations: annotationsByQuestionText(entry, entry.notes),
 	}); err != nil {
 		return false, err
 	}
@@ -694,9 +722,11 @@ func (s *LeaderSubscriber) CancelQuestion(questionID string) (bool, error) {
 
 // validateQuestionSelection checks the reply against the registered question:
 // the option ids on the bridge wire are grok option LABELS, so every id must
-// be one of the question's labels. Read-only (peek) — accumulated answers for
-// sibling questions must survive.
-func (s *LeaderSubscriber) validateQuestionSelection(toolCallID string, index int, optionIDs []string) ([]string, error) {
+// be one of the question's labels — except the freeform label "Other", which
+// is only valid when accompanied by typed notes (the TUI's freeform path;
+// "Other" without notes is never submitted upstream). Read-only (peek) —
+// accumulated answers for sibling questions must survive.
+func (s *LeaderSubscriber) validateQuestionSelection(toolCallID string, index int, optionIDs []string, notes string) ([]string, error) {
 	entry, ok := s.interactions.get(toolCallID)
 	if !ok {
 		return nil, fmt.Errorf("grokbuild: no pending question for tool call %s", toolCallID)
@@ -712,9 +742,13 @@ func (s *LeaderSubscriber) validateQuestionSelection(toolCallID string, index in
 		return nil, fmt.Errorf("grokbuild: question reply carries no option")
 	}
 	for _, id := range optionIDs {
-		if !valid[id] {
-			return nil, fmt.Errorf("grokbuild: option %q is not one of the offered choices", id)
+		if valid[id] {
+			continue
 		}
+		if id == freeformOtherLabel && strings.TrimSpace(notes) != "" {
+			continue
+		}
+		return nil, fmt.Errorf("grokbuild: option %q is not one of the offered choices", id)
 	}
 	return optionIDs, nil
 }
@@ -745,6 +779,22 @@ func answersByQuestionText(entry leaderInteraction, answers map[int][]string) ma
 	for i, q := range entry.params.Questions {
 		if sel, ok := answers[i]; ok && len(sel) > 0 {
 			out[q.Question] = sel
+		}
+	}
+	return out
+}
+
+// annotationsByQuestionText maps per-index freeform notes onto the wire
+// annotations map (keyed by question TEXT like answers). Returns nil when no
+// question carries notes — the field is omitempty upstream.
+func annotationsByQuestionText(entry leaderInteraction, notes map[int]string) map[string]askAnnotation {
+	var out map[string]askAnnotation
+	for i, q := range entry.params.Questions {
+		if n, ok := notes[i]; ok && n != "" {
+			if out == nil {
+				out = make(map[string]askAnnotation, len(entry.params.Questions))
+			}
+			out[q.Question] = askAnnotation{Notes: n}
 		}
 	}
 	return out

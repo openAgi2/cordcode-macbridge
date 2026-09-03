@@ -665,6 +665,7 @@ type pendingAskUserQuestion struct {
 	rawID   json.RawMessage       // original request id to respond with
 	params  askUserQuestionParams // parsed request (questions, mode)
 	answers map[int][]string      // accumulated per-question selections
+	notes   map[int]string        // per-question freeform text (annotations notes)
 }
 
 // consumedQuestions tombstones driver-rail interactions that were answered,
@@ -762,8 +763,16 @@ func (s *grokSession) flushQuestionResponse(questionID string, result askUserQue
 // RespondQuestion answers an agent question with the selected option ids
 // (grok labels). Multi-question interactions accumulate replies and flush the
 // single wire response once every question is answered (upstream expects all
-// answers in one response object).
+// answers in one response object). The legacy v1 rail carries no freeform
+// text; typed answers ride respondQuestionWithNotes.
 func (s *grokSession) RespondQuestion(questionID string, optionIDs []string) error {
+	return s.respondQuestionWithNotes(questionID, optionIDs, "")
+}
+
+// respondQuestionWithNotes is RespondQuestion plus the freeform answer path:
+// non-empty notes make the wire label "Other" a valid selection and flush as
+// annotations[q].notes (the TUI "type your answer here" shape).
+func (s *grokSession) respondQuestionWithNotes(questionID string, optionIDs []string, notes string) error {
 	toolCallID, index, err := parseQuestionID(questionID)
 	if err != nil {
 		return err
@@ -788,12 +797,22 @@ func (s *grokSession) RespondQuestion(questionID string, optionIDs []string) err
 		valid[o.Label] = true
 	}
 	for _, id := range optionIDs {
-		if !valid[id] {
-			return fmt.Errorf("grokbuild: option %q is not one of the offered choices", id)
+		if valid[id] {
+			continue
 		}
+		if id == freeformOtherLabel && strings.TrimSpace(notes) != "" {
+			continue
+		}
+		return fmt.Errorf("grokbuild: option %q is not one of the offered choices", id)
 	}
 	s.pendingPermsMu.Lock()
 	pending.answers[index] = optionIDs
+	if notes != "" {
+		if pending.notes == nil {
+			pending.notes = map[int]string{}
+		}
+		pending.notes[index] = notes
+	}
 	complete := len(pending.answers) >= len(pending.params.Questions)
 	s.pendingPermsMu.Unlock()
 	if !complete {
@@ -805,7 +824,16 @@ func (s *grokSession) RespondQuestion(questionID string, optionIDs []string) err
 			answers[q.Question] = sel
 		}
 	}
-	return s.flushQuestionResponse(questionID, askUserQuestionExtResponse{Outcome: "accepted", Answers: answers})
+	var annotations map[string]askAnnotation
+	for i, q := range pending.params.Questions {
+		if n, ok := pending.notes[i]; ok && n != "" {
+			if annotations == nil {
+				annotations = make(map[string]askAnnotation, len(pending.params.Questions))
+			}
+			annotations[q.Question] = askAnnotation{Notes: n}
+		}
+	}
+	return s.flushQuestionResponse(questionID, askUserQuestionExtResponse{Outcome: "accepted", Answers: answers, Annotations: annotations})
 }
 
 // RejectQuestion dismisses a pending question (upstream Path D: Cancelled is
@@ -826,9 +854,8 @@ var _ core.UserInputResponder = (*grokSession)(nil)
 // ResolveUserInput is the session-level v2 responder for driver-rail
 // questions (asked by this session's own stdio agent turn). A miss means the
 // interaction belongs to the leader rail of an external turn — fall through to
-// the agent-level responder, which routes via liveSubs. Custom text answers are
-// rejected with invalid_answer_shape: grokbuild questions are surfaced with
-// allowsCustomAnswer=false and the wire answer path validates option labels.
+// the agent-level responder, which routes via liveSubs. Typed text answers map
+// to grok's freeform wire shape: label "Other" + annotations notes.
 func (s *grokSession) ResolveUserInput(ctx context.Context, interactionID, _ string, action core.UserInputAction, answers []core.UserInputAnswer) (core.UserInputResolution, error) {
 	toolCallID, _, err := parseQuestionID(interactionID)
 	if err != nil {
@@ -855,15 +882,22 @@ func (s *grokSession) ResolveUserInput(ctx context.Context, interactionID, _ str
 			qid = interactionID
 		}
 		var selected []string
+		notes := ""
 		for _, v := range ans.Values {
 			if v.Kind == core.UserInputValueText && strings.TrimSpace(v.Text) != "" {
-				return core.UserInputResolution{}, &core.UserInputError{Code: "invalid_answer_shape", Message: "grokbuild questions accept offered options only"}
+				notes = strings.TrimSpace(v.Text)
+				continue
 			}
 			if v.Kind == core.UserInputValueOption && v.OptionID != "" {
 				selected = append(selected, v.OptionID)
 			}
 		}
-		if err := s.RespondQuestion(qid, selected); err != nil {
+		if notes != "" {
+			// Freeform answer: append the wire "Other" label alongside any
+			// picked options; the text rides annotations notes (TUI shape).
+			selected = append(selected, freeformOtherLabel)
+		}
+		if err := s.respondQuestionWithNotes(qid, selected, notes); err != nil {
 			return core.UserInputResolution{}, err
 		}
 	}
