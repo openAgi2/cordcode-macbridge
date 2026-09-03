@@ -1217,8 +1217,11 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if existing, ok := ps.userInputs[interactionID]; ok && existing.turnID != "" {
 			turnID = existing.turnID
 		}
-		if turnID == "" && msg.BackendID == "dsh-web" {
-			// Mac-initiated dsh-web asks after codec reset may omit turnId.
+		if turnID == "" && (msg.BackendID == "dsh-web" || msg.BackendID == "grokbuild") {
+			// dsh-web Mac-initiated asks after codec reset may omit turnId.
+			// grokbuild follower questions are mid-tool-call inside an external
+			// turn whose turn_started the relay loop synthesizes from the first
+			// content event — the ask always arrives after ActiveTurnID is armed.
 			// Claude/Codex stay fail-closed (identityless frames stay dropped).
 			turnID = ps.projection.Execution.ActiveTurnID
 			if turnID == "" {

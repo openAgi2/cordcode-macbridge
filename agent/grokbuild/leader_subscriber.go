@@ -107,6 +107,23 @@ type LeaderSubscriber struct {
 	// fingerprint rescan owns fence/seen/publish. Set once by the constructor's
 	// caller before Run; read-only afterwards.
 	onRosterChanged func()
+	// emitFn is the session event callback captured from Run. The answer write
+	// path uses it to emit canonical+legacy resolved at flush time — that is
+	// the authoritative close for the answering client, because the leader's
+	// interaction_resolved broadcast already evicted the registry entry by
+	// then (take() makes the broadcast side silent).
+	emitFn func(core.Event)
+	emitMu sync.Mutex
+}
+
+// emitSessionEvent delivers an event through the Run callback if still live.
+func (s *LeaderSubscriber) emitSessionEvent(ev core.Event) {
+	s.emitMu.Lock()
+	fn := s.emitFn
+	s.emitMu.Unlock()
+	if fn != nil {
+		fn(ev)
+	}
 }
 
 // NewLeaderSubscriber builds a subscriber for the given session. socketPath is
@@ -273,6 +290,9 @@ func (s *LeaderSubscriber) Run(ctx context.Context, onEvent func(core.Event)) er
 		s.writeMu.Unlock()
 	}()
 	slog.Info("grokbuild: leader subscriber connected", "session", s.sessionID, "socket", s.socketPath)
+	s.emitMu.Lock()
+	s.emitFn = onEvent
+	s.emitMu.Unlock()
 
 	registerCh := make(chan leaderServerMsg, 4)
 	pending := newLeaderPending()
@@ -515,18 +535,11 @@ func (s *LeaderSubscriber) handleInteractionRequest(rawID json.RawMessage, topMe
 			// option id IS the label.
 			opts = append(opts, core.QuestionOption{ID: o.Label, Label: o.Label, Description: o.Description})
 		}
-		if q.MultiSelect != nil && *q.MultiSelect {
-			slog.Info("grokbuild: leader ask_user_question multiSelect question surfaced as single-select (bridge wire has no multiSelect field)", "toolCallId", p.ToolCallID, "index", i)
+		multi := q.MultiSelect != nil && *q.MultiSelect
+		if multi {
+			slog.Info("grokbuild: leader multiSelect question: canonical user_input face honors multiple; legacy v1 face stays single-select (wire has no multiSelect field)", "toolCallId", p.ToolCallID, "index", i)
 		}
-		if onEvent != nil {
-			onEvent(core.Event{
-				Type:         core.EventQuestionAsked,
-				SessionID:    sessionID,
-				QuestionID:   qid,
-				QuestionText: q.Question,
-				QuestionOpts: opts,
-			})
-		}
+		emitQuestionAsked(onEvent, sessionID, qid, q.Question, opts, multi)
 	}
 	slog.Info("grokbuild: leader ask_user_question registered",
 		"session", sessionID, "toolCallId", p.ToolCallID, "questions", len(p.Questions), "wireId", wireID, "mode", p.Mode)
@@ -550,14 +563,11 @@ func (s *LeaderSubscriber) handleInteractionLifecycle(update, toolCallID, sessio
 			return
 		}
 		for i := range entry.params.Questions {
-			if onEvent != nil {
-				onEvent(core.Event{
-					Type:       core.EventQuestionResolved,
-					SessionID:  sessionID,
-					QuestionID: questionIDFor(entry.toolCallID, i),
-					Content:    "resolved",
-				})
-			}
+			// Leader-side resolution (TUI answered first, or the answer raced
+			// our attach): close on both faces. The broadcast carries no
+			// outcome detail, only that the interaction completed — answered is
+			// the projection close that matters for card state.
+			emitQuestionResolved(onEvent, sessionID, questionIDFor(entry.toolCallID, i), "resolved", "mac")
 		}
 		slog.Info("grokbuild: leader interaction_resolved closed question", "toolCallId", toolCallID)
 	case "pending_interaction":
@@ -605,60 +615,81 @@ type askUserQuestionExtResponse struct {
 // a late/duplicate answer is dropped by the leader without any error frame
 // (§3.5) — so success here means "submitted", not "adjudicated". An answer
 // for an already-consumed interaction (TUI grabbed it, resolved broadcast
-// arrived first) returns nil silently per red line 3.
-func (s *LeaderSubscriber) AnswerQuestion(questionID string, optionIDs []string) error {
+// arrived first) returns resolved=true silently per red line 3.
+//
+// resolved reports whether the interaction is closed after this call: true on
+// flush and on already-consumed silence, false while a multi-question
+// interaction is still accumulating replies. On flush, canonical+legacy
+// resolved events emit through the Run callback — the answering client's
+// authoritative close (the later interaction_resolved broadcast finds the
+// registry empty and stays silent).
+func (s *LeaderSubscriber) AnswerQuestion(questionID string, optionIDs []string) (bool, error) {
 	toolCallID, index, err := parseQuestionID(questionID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if s.interactions == nil {
-		return fmt.Errorf("grokbuild: no pending question %s", questionID)
+		return false, fmt.Errorf("grokbuild: no pending question %s", questionID)
 	}
 	if _, ok := s.interactions.get(toolCallID); !ok {
 		if s.interactions.consumed(toolCallID) {
-			return nil // late answer to an adjudicated interaction — silent (§3.5)
+			return true, nil // late answer to an adjudicated interaction — silent (§3.5)
 		}
-		return fmt.Errorf("grokbuild: no pending question %s", questionID)
+		return false, fmt.Errorf("grokbuild: no pending question %s", questionID)
 	}
 	labels, err := s.validateQuestionSelection(toolCallID, index, optionIDs)
 	if err != nil {
-		return err
+		return false, err
 	}
 	complete, ok := s.interactions.setAnswer(toolCallID, index, labels)
 	if !ok {
-		return fmt.Errorf("grokbuild: no pending question %s", questionID)
+		return false, fmt.Errorf("grokbuild: no pending question %s", questionID)
 	}
 	if !complete {
 		// Multi-question interaction still missing replies; flush happens on
 		// the last one.
-		return nil
+		return false, nil
 	}
 	entry, _ := s.interactions.take(toolCallID)
-	return s.sendInteractionResponse(entry, askUserQuestionExtResponse{
+	if err := s.sendInteractionResponse(entry, askUserQuestionExtResponse{
 		Outcome: "accepted",
 		Answers: answersByQuestionText(entry, entry.answers),
-	})
+	}); err != nil {
+		return false, err
+	}
+	for i := range entry.params.Questions {
+		emitQuestionResolved(s.emitSessionEvent, s.sessionID, questionIDFor(entry.toolCallID, i), "accepted", "ios")
+	}
+	return true, nil
 }
 
 // CancelQuestion dismisses a pending interaction (upstream Path D: not an
 // error; the tool completes the turn as Cancelled). A cancel for an
-// already-consumed interaction is silent, mirroring AnswerQuestion.
-func (s *LeaderSubscriber) CancelQuestion(questionID string) error {
+// already-consumed interaction is silent, mirroring AnswerQuestion. resolved
+// semantics match AnswerQuestion; a live cancel always flushes, so it returns
+// true unless the write itself fails.
+func (s *LeaderSubscriber) CancelQuestion(questionID string) (bool, error) {
 	toolCallID, _, err := parseQuestionID(questionID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if s.interactions == nil {
-		return fmt.Errorf("grokbuild: no pending question %s", questionID)
+		return false, fmt.Errorf("grokbuild: no pending question %s", questionID)
 	}
 	entry, ok := s.interactions.take(toolCallID)
 	if !ok {
 		if s.interactions.consumed(toolCallID) {
-			return nil
+			return true, nil
 		}
-		return fmt.Errorf("grokbuild: no pending question %s", questionID)
+		return false, fmt.Errorf("grokbuild: no pending question %s", questionID)
 	}
-	return s.sendInteractionResponse(entry, askUserQuestionExtResponse{Outcome: "cancelled"})
+	if err := s.sendInteractionResponse(entry, askUserQuestionExtResponse{Outcome: "cancelled"}); err != nil {
+		return false, err
+	}
+	for i := range entry.params.Questions {
+		emitQuestionResolved(s.emitSessionEvent, s.sessionID, questionIDFor(entry.toolCallID, i), "cancelled", "ios")
+	}
+	return true, nil
 }
 
 // validateQuestionSelection checks the reply against the registered question:

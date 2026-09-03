@@ -220,6 +220,90 @@ func TestReducerQuestionAskedWithoutTurnDroppedFailClosed(t *testing.T) {
 	}
 }
 
+// The grokbuild v2 face after the dual-track fix: canonical user_input_requested
+// (no turnId — the ask is a mid-tool-call event inside a relay-loop-synthesized
+// turn) falls back to ActiveTurnID once armed, projects the user_input card, and
+// canonical user_input_resolved closes it as answered. This is the projection
+// path v2 (syncV2) clients see; the legacy question_asked frames alone never
+// entered the Kernel (isDerivedLegacyQuestionEvent), which is why iOS showed no
+// card before the fix.
+func TestReducerGrokCanonicalUserInputInsideSyntheticTurn(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "grokbuild", "s1", "turn_started", map[string]interface{}{"turnId": "prompt-42"}))
+	r.Apply(ev(2, "grokbuild", "s1", "user_input_requested", map[string]interface{}{
+		"interactionId": "call_410dc27a15f64707b7f36ca2",
+		"itemId":        "call_410dc27a15f64707b7f36ca2",
+		"status":        "pending",
+		"canRespond":    true,
+		"canReject":     true,
+		"questions": []interface{}{map[string]interface{}{
+			"id":         "call_410dc27a15f64707b7f36ca2",
+			"prompt":     "你偏好哪种配色主题?",
+			"answerMode": "single",
+			"options": []interface{}{
+				map[string]interface{}{"id": "深色主题", "label": "深色主题"},
+				map[string]interface{}{"id": "浅色主题", "label": "浅色主题"},
+			},
+		}},
+	}))
+	r.Apply(ev(3, "grokbuild", "s1", "user_input_resolved", map[string]interface{}{
+		"interactionId": "call_410dc27a15f64707b7f36ca2",
+		"status":        "answered",
+		"source":        "ios",
+	}))
+
+	proj, ok := r.Snapshot("grokbuild", "s1")
+	if !ok {
+		t.Fatal("no projection")
+	}
+	cards := 0
+	for _, turn := range proj.Turns {
+		if turn.Assistant == nil {
+			continue
+		}
+		for _, p := range turn.Assistant.Parts {
+			if p.Type == "user_input" && p.UserInputInteractionID == "call_410dc27a15f64707b7f36ca2" {
+				cards++
+				if p.UserInputStatus != "answered" {
+					t.Fatalf("status = %q, want answered", p.UserInputStatus)
+				}
+				if p.UserInputResolutionSource != "ios" {
+					t.Fatalf("source = %q, want ios", p.UserInputResolutionSource)
+				}
+			}
+		}
+	}
+	if cards != 1 {
+		t.Fatalf("question cards = %d, want exactly 1", cards)
+	}
+}
+
+// Identityless canonical asks on grokbuild stay fail-closed: with no armed turn
+// the frame must not fabricate one (mirrors the legacy fail-closed policy; the
+// live ask always follows the first content event of the external turn).
+func TestReducerGrokCanonicalUserInputWithoutTurnDropped(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "grokbuild", "s1", "user_input_requested", map[string]interface{}{
+		"interactionId": "call_early",
+		"status":        "pending",
+		"canRespond":    true,
+		"canReject":     true,
+		"questions": []interface{}{map[string]interface{}{
+			"id": "call_early", "prompt": "q?", "answerMode": "single",
+		}},
+	}))
+	if _, ok := r.FlushPatch("grokbuild", "s1"); ok {
+		t.Fatal("identityless canonical ask must not produce a patch")
+	}
+	proj, ok := r.Snapshot("grokbuild", "s1")
+	if !ok {
+		t.Fatal("no projection snapshot")
+	}
+	if len(proj.Turns) != 0 {
+		t.Fatalf("turns = %d, want 0 (no phantom turn)", len(proj.Turns))
+	}
+}
+
 // The grokbuild leader-rail shape: question lands inside the armed synthetic
 // turn (turn_started from the relay loop's first content event), replay of the
 // same question id upserts the same card, resolved closes it as answered.

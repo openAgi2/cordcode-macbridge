@@ -86,6 +86,14 @@ type Agent struct {
 	// unregisters itself when Run returns.
 	liveSubs   map[string]*LeaderSubscriber
 	liveSubsMu sync.Mutex
+
+	// questionSessions maps leader-rail question ids (bridge interaction ids)
+	// to the session whose live subscriber surfaced them, so the session-less
+	// resolve_user_input path can route to the right subscriber (mirrors
+	// dsh-web questionOwner). Entries clear on resolved; bounded as a safety
+	// valve.
+	questionSessions   map[string]string
+	questionSessionsMu sync.Mutex
 }
 
 func init() {
@@ -260,6 +268,19 @@ func (a *Agent) SubscribeSessionEvents(ctx context.Context, sessionID, cwd strin
 	var forwardedEvents atomic.Bool
 	trackedForward := func(ev core.Event) {
 		forwardedEvents.Store(true)
+		// Leader-rail question ownership: remember which session surfaced a
+		// pending interaction so the session-less resolve_user_input path can
+		// route back; forget it once resolved.
+		switch ev.Type {
+		case core.EventUserInputRequested:
+			if id := ev.ItemID; id != "" {
+				a.trackQuestionOwner(id, ev.SessionID)
+			}
+		case core.EventUserInputResolved:
+			if id := ev.ItemID; id != "" {
+				a.untrackQuestionOwner(id)
+			}
+		}
 		forward(ev)
 	}
 	go func() {
@@ -314,7 +335,8 @@ func (a *Agent) RespondSessionQuestion(ctx context.Context, sessionID, questionI
 	if sub == nil {
 		return fmt.Errorf("grokbuild: no live leader subscriber for session %s", shortID(sessionID))
 	}
-	return sub.AnswerQuestion(questionID, optionIDs)
+	_, err := sub.AnswerQuestion(questionID, optionIDs)
+	return err
 }
 
 // RejectSessionQuestion implements core.SessionQuestionResponder (dismiss).
@@ -324,7 +346,90 @@ func (a *Agent) RejectSessionQuestion(ctx context.Context, sessionID, questionID
 	if sub == nil {
 		return fmt.Errorf("grokbuild: no live leader subscriber for session %s", shortID(sessionID))
 	}
-	return sub.CancelQuestion(questionID)
+	_, err := sub.CancelQuestion(questionID)
+	return err
+}
+
+var _ core.UserInputResponder = (*Agent)(nil)
+var _ core.StructuredUserInputProvider = (*Agent)(nil)
+
+// StructuredUserInputReady: the canonical user_input producer (dual-track
+// emitQuestionAsked/emitQuestionResolved), the real responder (this type plus
+// grokSession), and the driver/leader rails are all enabled together.
+func (a *Agent) StructuredUserInputReady() bool { return true }
+
+// ResolveUserInput implements core.UserInputResponder for leader-rail
+// questions: interactions surfaced by a session's live leader subscriber
+// (external-turn observation, no active AgentSession). Driver-rail questions
+// are answered by grokSession.ResolveUserInput, which falls through here on a
+// miss. Custom text answers are rejected with invalid_answer_shape — grokbuild
+// questions are surfaced with allowsCustomAnswer=false.
+func (a *Agent) ResolveUserInput(_ context.Context, interactionID, _ string, action core.UserInputAction, answers []core.UserInputAnswer) (core.UserInputResolution, error) {
+	sessionID := a.questionSessionOwner(interactionID)
+	if sessionID == "" {
+		return core.UserInputResolution{}, &core.UserInputError{Code: "interaction_not_found", Message: "question is not pending"}
+	}
+	sub := a.liveSubscriber(sessionID)
+	if sub == nil {
+		return core.UserInputResolution{}, &core.UserInputError{Code: "interaction_not_found", Message: "no live leader subscriber for this session"}
+	}
+	if action == core.UserInputActionReject {
+		if _, err := sub.CancelQuestion(interactionID); err != nil {
+			return core.UserInputResolution{}, err
+		}
+		return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: core.UserInputStatusRejected}, nil
+	}
+	for _, ans := range answers {
+		qid := ans.QuestionID
+		if qid == "" {
+			qid = interactionID
+		}
+		var selected []string
+		for _, v := range ans.Values {
+			if v.Kind == core.UserInputValueText && strings.TrimSpace(v.Text) != "" {
+				return core.UserInputResolution{}, &core.UserInputError{Code: "invalid_answer_shape", Message: "grokbuild questions accept offered options only"}
+			}
+			if v.Kind == core.UserInputValueOption && v.OptionID != "" {
+				selected = append(selected, v.OptionID)
+			}
+		}
+		resolved, err := sub.AnswerQuestion(qid, selected)
+		if err != nil {
+			return core.UserInputResolution{}, err
+		}
+		if !resolved {
+			// Multi-question interaction partially answered; the wire response
+			// flushes (and resolved events emit) on the last answer.
+			return core.UserInputResolution{Outcome: core.UserInputOutcomeInProgress, CurrentStatus: core.UserInputStatusPending}, nil
+		}
+	}
+	return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: core.UserInputStatusAnswered}, nil
+}
+
+func (a *Agent) trackQuestionOwner(interactionID, sessionID string) {
+	a.questionSessionsMu.Lock()
+	defer a.questionSessionsMu.Unlock()
+	if a.questionSessions == nil {
+		a.questionSessions = make(map[string]string)
+	}
+	if len(a.questionSessions) >= 512 {
+		// Safety valve: drop stale ownership rather than grow unbounded. Live
+		// questions re-register on their next ask event.
+		a.questionSessions = make(map[string]string)
+	}
+	a.questionSessions[interactionID] = sessionID
+}
+
+func (a *Agent) untrackQuestionOwner(interactionID string) {
+	a.questionSessionsMu.Lock()
+	defer a.questionSessionsMu.Unlock()
+	delete(a.questionSessions, interactionID)
+}
+
+func (a *Agent) questionSessionOwner(interactionID string) string {
+	a.questionSessionsMu.Lock()
+	defer a.questionSessionsMu.Unlock()
+	return a.questionSessions[interactionID]
 }
 
 func (a *Agent) liveSubscriber(sessionID string) *LeaderSubscriber {

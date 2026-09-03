@@ -111,9 +111,21 @@ const fixtureAskUserQuestionHalfWrapped = `{"jsonrpc":"2.0","id":0,"method":"_x.
 // (same id, same payload form as the original broadcast).
 const fixtureAskUserQuestionReplay = `{"jsonrpc":"2.0","id":2,"method":"_x.ai/ask_user_question","params":{"sessionId":"01a06290-1a64-70e1-a125-824782ed79ff","toolCallId":"call_d45f229bcd024f67b0ab9984","questions":[{"question":"你偏好哪种饮品?","options":[{"label":"咖啡","description":"含咖啡因的提神饮品"},{"label":"茶","description":"茶类饮品"}],"multiSelect":null}],"mode":"default"}}`
 
+// filterEvents keeps only one face of a dual-track emission.
+func filterEvents(events []core.Event, typ core.EventType) []core.Event {
+	var out []core.Event
+	for _, e := range events {
+		if e.Type == typ {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // TestLeaderSubscriberAskUserQuestionHalfWrapped: the §3.1 REQUEST form must
 // register the interaction (keyed by tool_call_id, wire id preserved) and emit
-// one EventQuestionAsked whose option ids are the grok labels.
+// the question on both faces (canonical user_input_requested + legacy
+// question_asked) whose option ids are the grok labels.
 func TestLeaderSubscriberAskUserQuestionHalfWrapped(t *testing.T) {
 	got, sub := runLeaderSubscriber(t, func(c net.Conn) error {
 		if err := writeACPRequestRaw(c, fixtureAskUserQuestionHalfWrapped); err != nil {
@@ -122,28 +134,36 @@ func TestLeaderSubscriberAskUserQuestionHalfWrapped(t *testing.T) {
 		time.Sleep(150 * time.Millisecond)
 		return nil
 	})
-	if len(got) != 1 {
-		t.Fatalf("got %d events, want 1 question_asked: %+v", len(got), got)
+	if len(got) != 2 {
+		t.Fatalf("got %d events, want canonical + legacy ask: %+v", len(got), got)
 	}
-	ev := got[0]
-	if ev.Type != core.EventQuestionAsked {
-		t.Fatalf("type = %v, want question_asked", ev.Type)
+	ui := filterEvents(got, core.EventUserInputRequested)
+	if len(ui) != 1 || ui[0].ItemID != "call_410dc27a15f64707b7f36ca2" || ui[0].UserInput == nil {
+		t.Fatalf("canonical ask = %+v", ui)
 	}
-	if ev.QuestionID != "call_410dc27a15f64707b7f36ca2" {
-		t.Fatalf("questionID = %q, want the tool_call_id (single-question uses the bare id)", ev.QuestionID)
+	if ui[0].UserInput.InteractionID != "call_410dc27a15f64707b7f36ca2" || ui[0].UserInput.Status != core.UserInputStatusPending {
+		t.Fatalf("canonical interaction = %+v", ui[0].UserInput)
 	}
-	if ev.QuestionText != "你偏好哪种配色主题?" {
-		t.Fatalf("questionText = %q", ev.QuestionText)
+	ev := filterEvents(got, core.EventQuestionAsked)
+	if len(ev) != 1 {
+		t.Fatalf("legacy asks = %d, want 1", len(ev))
 	}
-	if len(ev.QuestionOpts) != 2 {
-		t.Fatalf("opts = %+v, want 2", ev.QuestionOpts)
+	ev = ev[:1]
+	if ev[0].QuestionID != "call_410dc27a15f64707b7f36ca2" {
+		t.Fatalf("questionID = %q, want the tool_call_id (single-question uses the bare id)", ev[0].QuestionID)
+	}
+	if ev[0].QuestionText != "你偏好哪种配色主题?" {
+		t.Fatalf("questionText = %q", ev[0].QuestionText)
+	}
+	if len(ev[0].QuestionOpts) != 2 {
+		t.Fatalf("opts = %+v, want 2", ev[0].QuestionOpts)
 	}
 	for i, want := range []struct{ id, desc string }{
 		{"深色主题", "界面以深色背景为主,适合弱光环境"},
 		{"浅色主题", "界面以浅色背景为主,适合明亮环境"},
 	} {
-		if ev.QuestionOpts[i].ID != want.id || ev.QuestionOpts[i].Label != want.id || ev.QuestionOpts[i].Description != want.desc {
-			t.Fatalf("opt[%d] = %+v, want id/label=%q desc=%q", i, ev.QuestionOpts[i], want.id, want.desc)
+		if ev[0].QuestionOpts[i].ID != want.id || ev[0].QuestionOpts[i].Label != want.id || ev[0].QuestionOpts[i].Description != want.desc {
+			t.Fatalf("opt[%d] = %+v, want id/label=%q desc=%q", i, ev[0].QuestionOpts[i], want.id, want.desc)
 		}
 	}
 	if sub.interactions == nil || sub.interactions.len() != 1 {
@@ -174,11 +194,12 @@ func TestLeaderSubscriberAskUserQuestionFullyWrapped(t *testing.T) {
 		time.Sleep(150 * time.Millisecond)
 		return nil
 	})
-	if len(got) != 1 || got[0].Type != core.EventQuestionAsked {
-		t.Fatalf("got %+v, want 1 question_asked", got)
+	if len(got) != 2 {
+		t.Fatalf("got %d events, want canonical + legacy ask", len(got))
 	}
-	if got[0].QuestionID != "call_full_wrap" || got[0].QuestionText != "哪种形态?" {
-		t.Fatalf("ev = %+v", got[0])
+	ev := filterEvents(got, core.EventQuestionAsked)
+	if len(ev) != 1 || ev[0].QuestionID != "call_full_wrap" || ev[0].QuestionText != "哪种形态?" {
+		t.Fatalf("legacy ask = %+v", ev)
 	}
 	entry, ok := sub.interactions.take("call_full_wrap")
 	if !ok || entry.wireID != 7 {
@@ -226,14 +247,20 @@ func TestLeaderSubscriberInteractionLifecycle(t *testing.T) {
 			"update":    map[string]any{"sessionUpdate": "interaction_resolved", "tool_call_id": "call_permission_only"},
 		})
 	})
-	if len(got) != 2 {
-		t.Fatalf("got %d events, want exactly question_asked + question_resolved: %+v", len(got), got)
+	if len(got) != 4 {
+		t.Fatalf("got %d events, want dual-track ask + dual-track resolved: %+v", len(got), got)
 	}
-	if got[0].Type != core.EventQuestionAsked || got[1].Type != core.EventQuestionResolved {
-		t.Fatalf("event sequence = %v then %v, want question_asked → question_resolved", got[0].Type, got[1].Type)
+	wantSeq := []core.EventType{core.EventUserInputRequested, core.EventQuestionAsked, core.EventUserInputResolved, core.EventQuestionResolved}
+	for i, want := range wantSeq {
+		if got[i].Type != want {
+			t.Fatalf("event[%d] = %v, want %v", i, got[i].Type, want)
+		}
 	}
-	if got[1].QuestionID != "call_410dc27a15f64707b7f36ca2" {
-		t.Fatalf("resolved questionID = %q, want the tool_call_id", got[1].QuestionID)
+	if got[2].ItemID != "call_410dc27a15f64707b7f36ca2" || got[2].UserInput == nil || got[2].UserInput.Status != core.UserInputStatusAnswered || got[2].UserInput.ResolutionSource != "mac" {
+		t.Fatalf("canonical resolved = %+v, want call_410dc27a15f64707b7f36ca2 answered/mac (leader-side close)", got[2])
+	}
+	if got[3].QuestionID != "call_410dc27a15f64707b7f36ca2" {
+		t.Fatalf("resolved questionID = %q, want the tool_call_id", got[3].QuestionID)
 	}
 	if sub.interactions.len() != 0 {
 		t.Fatalf("registry len = %d after resolution, want 0", sub.interactions.len())
@@ -253,13 +280,16 @@ func TestLeaderSubscriberAskUserQuestionReplay(t *testing.T) {
 		// Attach-time replay: same id, same payload verbatim.
 		return writeACPRequestRaw(c, fixtureAskUserQuestionReplay)
 	})
-	if len(got) != 2 {
-		t.Fatalf("got %d events, want question_asked re-emitted on replay: %+v", len(got), got)
+	if len(got) != 4 {
+		t.Fatalf("got %d events, want dual-track ask re-emitted on replay: %+v", len(got), got)
 	}
-	for i := range got {
-		if got[i].Type != core.EventQuestionAsked || got[i].QuestionID != "call_d45f229bcd024f67b0ab9984" || got[i].QuestionText != "你偏好哪种饮品?" {
-			t.Fatalf("event[%d] = %+v, want replayed ask for 饮品", i, got[i])
+	for i, ev := range filterEvents(got, core.EventQuestionAsked) {
+		if ev.QuestionID != "call_d45f229bcd024f67b0ab9984" || ev.QuestionText != "你偏好哪种饮品?" {
+			t.Fatalf("legacy ask[%d] = %+v, want replayed ask for 饮品", i, ev)
 		}
+	}
+	if len(filterEvents(got, core.EventUserInputRequested)) != 2 {
+		t.Fatalf("canonical asks = %d, want 2 (replay re-surfaces both faces)", len(filterEvents(got, core.EventUserInputRequested)))
 	}
 	if sub.interactions.len() != 1 {
 		t.Fatalf("registry len = %d, want 1 (replay overwrites the same tool_call_id key)", sub.interactions.len())

@@ -713,13 +713,8 @@ func (s *grokSession) handleAskUserQuestionRequest(req *agentRequest) {
 		for _, o := range q.Options {
 			opts = append(opts, core.QuestionOption{ID: o.Label, Label: o.Label, Description: o.Description})
 		}
-		s.emit(core.Event{
-			Type:         core.EventQuestionAsked,
-			SessionID:    s.CurrentSessionID(),
-			QuestionID:   questionIDFor(p.ToolCallID, i),
-			QuestionText: q.Question,
-			QuestionOpts: opts,
-		})
+		multi := q.MultiSelect != nil && *q.MultiSelect
+		emitQuestionAsked(s.emit, s.CurrentSessionID(), questionIDFor(p.ToolCallID, i), q.Question, opts, multi)
 	}
 	slog.Info("grokbuild: ask_user_question pending", "toolCallId", p.ToolCallID, "questions", len(p.Questions))
 }
@@ -756,15 +751,10 @@ func (s *grokSession) flushQuestionResponse(questionID string, result askUserQue
 		return err
 	}
 	// Driver rail has no leader broadcast to close the card — the flush itself
-	// is the authoritative outcome. accepted → answered, cancelled → rejected
-	// (reducer maps question_resolved by Content).
+	// is the authoritative outcome. accepted → answered, cancelled → rejected,
+	// on both the canonical (v2 projection) and legacy (v1) faces.
 	for i := range pending.params.Questions {
-		s.emit(core.Event{
-			Type:       core.EventQuestionResolved,
-			SessionID:  s.CurrentSessionID(),
-			QuestionID: questionIDFor(toolCallID, i),
-			Content:    result.Outcome,
-		})
+		emitQuestionResolved(s.emit, s.CurrentSessionID(), questionIDFor(toolCallID, i), result.Outcome, "ios")
 	}
 	return nil
 }
@@ -822,6 +812,67 @@ func (s *grokSession) RespondQuestion(questionID string, optionIDs []string) err
 // a user action, not an error — the turn completes normally).
 func (s *grokSession) RejectQuestion(questionID string) error {
 	return s.flushQuestionResponse(questionID, askUserQuestionExtResponse{Outcome: "cancelled"})
+}
+
+func (s *grokSession) hasPendingQuestion(toolCallID string) bool {
+	s.pendingPermsMu.Lock()
+	defer s.pendingPermsMu.Unlock()
+	_, ok := s.pendingQuestions[toolCallID]
+	return ok
+}
+
+var _ core.UserInputResponder = (*grokSession)(nil)
+
+// ResolveUserInput is the session-level v2 responder for driver-rail
+// questions (asked by this session's own stdio agent turn). A miss means the
+// interaction belongs to the leader rail of an external turn — fall through to
+// the agent-level responder, which routes via liveSubs. Custom text answers are
+// rejected with invalid_answer_shape: grokbuild questions are surfaced with
+// allowsCustomAnswer=false and the wire answer path validates option labels.
+func (s *grokSession) ResolveUserInput(ctx context.Context, interactionID, _ string, action core.UserInputAction, answers []core.UserInputAnswer) (core.UserInputResolution, error) {
+	toolCallID, _, err := parseQuestionID(interactionID)
+	if err != nil {
+		return core.UserInputResolution{}, err
+	}
+	if !s.hasPendingQuestion(toolCallID) {
+		if questionWasConsumed(toolCallID) {
+			return core.UserInputResolution{Outcome: core.UserInputOutcomeAlreadyResolved, CurrentStatus: core.UserInputStatusAnswered}, nil
+		}
+		if s.agent != nil {
+			return s.agent.ResolveUserInput(ctx, interactionID, "", action, answers)
+		}
+		return core.UserInputResolution{}, &core.UserInputError{Code: "interaction_not_found", Message: "question is not pending"}
+	}
+	if action == core.UserInputActionReject {
+		if err := s.RejectQuestion(interactionID); err != nil {
+			return core.UserInputResolution{}, err
+		}
+		return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: core.UserInputStatusRejected}, nil
+	}
+	for _, ans := range answers {
+		qid := ans.QuestionID
+		if qid == "" {
+			qid = interactionID
+		}
+		var selected []string
+		for _, v := range ans.Values {
+			if v.Kind == core.UserInputValueText && strings.TrimSpace(v.Text) != "" {
+				return core.UserInputResolution{}, &core.UserInputError{Code: "invalid_answer_shape", Message: "grokbuild questions accept offered options only"}
+			}
+			if v.Kind == core.UserInputValueOption && v.OptionID != "" {
+				selected = append(selected, v.OptionID)
+			}
+		}
+		if err := s.RespondQuestion(qid, selected); err != nil {
+			return core.UserInputResolution{}, err
+		}
+	}
+	if s.hasPendingQuestion(toolCallID) {
+		// Multi-question interaction partially answered; the wire response
+		// flushes (and resolved events emit) on the last answer.
+		return core.UserInputResolution{Outcome: core.UserInputOutcomeInProgress, CurrentStatus: core.UserInputStatusPending}, nil
+	}
+	return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: core.UserInputStatusAnswered}, nil
 }
 
 func (s *grokSession) Close() error {

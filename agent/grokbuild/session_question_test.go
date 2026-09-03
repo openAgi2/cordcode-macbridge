@@ -91,6 +91,24 @@ func awaitEvent(t *testing.T, sess *grokSession) core.Event {
 	}
 }
 
+// awaitEventOfType skips the sibling face of a dual-track emission (each
+// question ask/resolve emits canonical user_input_* AND legacy question_*).
+func awaitEventOfType(t *testing.T, sess *grokSession, typ core.EventType) core.Event {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case ev := <-sess.events:
+			if ev.Type == typ {
+				return ev
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for %s event", typ)
+			return core.Event{}
+		}
+	}
+}
+
 // lastAgentResponse parses the most recent JSON-RPC response the fake agent
 // received. Returns nil when nothing was written yet.
 func lastAgentResponse(t *testing.T, lines *[]string, mu *sync.Mutex) map[string]any {
@@ -111,9 +129,28 @@ func TestGrokSessionRespondQuestion(t *testing.T) {
 	sess, lines, mu, stop := startQuestionProbeAgent(t, driverQuestionFixture)
 	defer stop()
 
-	ev := awaitEvent(t, sess)
-	if ev.Type != core.EventQuestionAsked || ev.QuestionID != "call_drv1" || ev.QuestionText != "选一个?" {
-		t.Fatalf("event = %+v, want question_asked for call_drv1", ev)
+	// Dual-track ask: canonical user_input_requested first, then legacy.
+	ui := awaitEventOfType(t, sess, core.EventUserInputRequested)
+	if ui.ItemID != "call_drv1" || ui.UserInput == nil || ui.UserInput.InteractionID != "call_drv1" {
+		t.Fatalf("canonical ask = %+v, want interaction call_drv1", ui)
+	}
+	if ui.UserInput.Status != core.UserInputStatusPending || !ui.UserInput.CanRespond || !ui.UserInput.CanReject {
+		t.Fatalf("canonical interaction state = %+v", ui.UserInput)
+	}
+	if len(ui.UserInput.Questions) != 1 {
+		t.Fatalf("questions = %+v", ui.UserInput.Questions)
+	}
+	q := ui.UserInput.Questions[0]
+	if q.ID != "call_drv1" || q.Prompt != "选一个?" || q.AnswerMode != core.UserInputAnswerModeSingle || q.AllowsCustomAnswer {
+		t.Fatalf("canonical question = %+v", q)
+	}
+	if len(q.Options) != 2 || q.Options[0].ID != "A" || q.Options[0].Description != "选项A" {
+		t.Fatalf("canonical options = %+v", q.Options)
+	}
+
+	ev := awaitEventOfType(t, sess, core.EventQuestionAsked)
+	if ev.QuestionID != "call_drv1" || ev.QuestionText != "选一个?" {
+		t.Fatalf("legacy ask = %+v, want question_asked for call_drv1", ev)
 	}
 	if len(ev.QuestionOpts) != 2 || ev.QuestionOpts[0].ID != "A" || ev.QuestionOpts[0].Description != "选项A" {
 		t.Fatalf("opts = %+v", ev.QuestionOpts)
@@ -124,10 +161,14 @@ func TestGrokSessionRespondQuestion(t *testing.T) {
 	}
 
 	// Driver rail has no leader broadcast — the flush itself closes the card
-	// locally via question_resolved (Content = wire outcome).
-	resolved := awaitEvent(t, sess)
-	if resolved.Type != core.EventQuestionResolved || resolved.QuestionID != "call_drv1" || resolved.Content != "accepted" {
-		t.Fatalf("resolved event = %+v, want question_resolved call_drv1 accepted", resolved)
+	// locally on both faces (canonical user_input_resolved + legacy).
+	res := awaitEventOfType(t, sess, core.EventUserInputResolved)
+	if res.ItemID != "call_drv1" || res.UserInput == nil || res.UserInput.Status != core.UserInputStatusAnswered || res.UserInput.ResolutionSource != "ios" {
+		t.Fatalf("canonical resolved = %+v, want call_drv1 answered/ios", res)
+	}
+	resolved := awaitEventOfType(t, sess, core.EventQuestionResolved)
+	if resolved.QuestionID != "call_drv1" || resolved.Content != "accepted" {
+		t.Fatalf("legacy resolved = %+v, want question_resolved call_drv1 accepted", resolved)
 	}
 
 	deadline := time.Now().Add(3 * time.Second)
@@ -161,14 +202,19 @@ func TestGrokSessionRejectQuestion(t *testing.T) {
 	sess, lines, mu, stop := startQuestionProbeAgent(t, driverQuestionFixture)
 	defer stop()
 
-	awaitEvent(t, sess)
+	awaitEventOfType(t, sess, core.EventUserInputRequested)
+	awaitEventOfType(t, sess, core.EventQuestionAsked)
 	if err := sess.RejectQuestion("call_drv1"); err != nil {
 		t.Fatalf("RejectQuestion: %v", err)
 	}
 
-	resolved := awaitEvent(t, sess)
-	if resolved.Type != core.EventQuestionResolved || resolved.QuestionID != "call_drv1" || resolved.Content != "cancelled" {
-		t.Fatalf("resolved event = %+v, want question_resolved call_drv1 cancelled", resolved)
+	res := awaitEventOfType(t, sess, core.EventUserInputResolved)
+	if res.ItemID != "call_drv1" || res.UserInput == nil || res.UserInput.Status != core.UserInputStatusRejected {
+		t.Fatalf("canonical resolved = %+v, want call_drv1 rejected", res)
+	}
+	resolved := awaitEventOfType(t, sess, core.EventQuestionResolved)
+	if resolved.QuestionID != "call_drv1" || resolved.Content != "cancelled" {
+		t.Fatalf("legacy resolved = %+v, want question_resolved call_drv1 cancelled", resolved)
 	}
 
 	deadline := time.Now().Add(3 * time.Second)
@@ -193,7 +239,7 @@ func TestGrokSessionRejectQuestion(t *testing.T) {
 func TestGrokSessionRespondQuestionValidation(t *testing.T) {
 	sess, _, _, stop := startQuestionProbeAgent(t, driverQuestionFixture)
 	defer stop()
-	awaitEvent(t, sess)
+	awaitEventOfType(t, sess, core.EventUserInputRequested)
 
 	if err := sess.RespondQuestion("call_drv1", []string{"不是选项"}); err == nil {
 		t.Fatal("invalid option label must error")
@@ -224,7 +270,7 @@ func s_pendingQuestion(sess *grokSession, toolCallID string) (*pendingAskUserQue
 func TestGrokSessionLateQuestionReplySilent(t *testing.T) {
 	sess, lines, mu, stop := startQuestionProbeAgent(t, driverQuestionFixture)
 	defer stop()
-	awaitEvent(t, sess)
+	awaitEventOfType(t, sess, core.EventUserInputRequested)
 
 	if err := sess.RespondQuestion("call_drv1", []string{"A"}); err != nil {
 		t.Fatalf("first answer: %v", err)
@@ -260,13 +306,23 @@ func TestGrokSessionMultiQuestionAccumulate(t *testing.T) {
 	sess, lines, mu, stop := startQuestionProbeAgent(t, twoQuestions)
 	defer stop()
 
-	ev1 := awaitEvent(t, sess)
-	if ev1.QuestionID != "call_multi" {
-		t.Fatalf("question 0 id = %q, want bare tool_call_id", ev1.QuestionID)
+	// Each question emits canonical + legacy in that order; the canonical face
+	// carries the derived per-question ids.
+	ui1 := awaitEventOfType(t, sess, core.EventUserInputRequested)
+	if ui1.ItemID != "call_multi" {
+		t.Fatalf("canonical question 0 id = %q, want bare tool_call_id", ui1.ItemID)
 	}
-	ev2 := awaitEvent(t, sess)
-	if ev2.QuestionID != "call_multi#1" {
-		t.Fatalf("question 1 id = %q, want call_multi#1", ev2.QuestionID)
+	l1 := awaitEventOfType(t, sess, core.EventQuestionAsked)
+	if l1.QuestionID != "call_multi" {
+		t.Fatalf("legacy question 0 id = %q", l1.QuestionID)
+	}
+	ui2 := awaitEventOfType(t, sess, core.EventUserInputRequested)
+	if ui2.ItemID != "call_multi#1" {
+		t.Fatalf("canonical question 1 id = %q, want call_multi#1", ui2.ItemID)
+	}
+	l2 := awaitEventOfType(t, sess, core.EventQuestionAsked)
+	if l2.QuestionID != "call_multi#1" {
+		t.Fatalf("legacy question 1 id = %q", l2.QuestionID)
 	}
 
 	if err := sess.RespondQuestion("call_multi", []string{"甲"}); err != nil {
@@ -288,15 +344,21 @@ func TestGrokSessionMultiQuestionAccumulate(t *testing.T) {
 			if answers["第一问?"] == nil || answers["第二问?"] == nil {
 				t.Fatalf("answers = %+v, want both questions keyed by text", answers)
 			}
-			// One resolved event per question id, both accepted.
-			r1 := awaitEvent(t, sess)
-			r2 := awaitEvent(t, sess)
-			got := map[string]string{r1.QuestionID: r1.Content, r2.QuestionID: r2.Content}
-			if r1.Type != core.EventQuestionResolved || r2.Type != core.EventQuestionResolved {
-				t.Fatalf("resolved types = %+v / %+v", r1, r2)
+			// One resolved pair per question id, both faces, interleaved
+			// canonical-then-legacy.
+			got := map[string]string{}
+			canon := map[string]string{}
+			for i := 0; i < 2; i++ {
+				cr := awaitEventOfType(t, sess, core.EventUserInputResolved)
+				lr := awaitEventOfType(t, sess, core.EventQuestionResolved)
+				canon[cr.ItemID] = string(cr.UserInput.Status)
+				got[lr.QuestionID] = lr.Content
 			}
 			if got["call_multi"] != "accepted" || got["call_multi#1"] != "accepted" || len(got) != 2 {
-				t.Fatalf("resolved map = %v, want both call_multi and call_multi#1 accepted", got)
+				t.Fatalf("legacy resolved map = %v, want both accepted", got)
+			}
+			if canon["call_multi"] != "answered" || canon["call_multi#1"] != "answered" || len(canon) != 2 {
+				t.Fatalf("canonical resolved map = %v, want both answered", canon)
 			}
 			return
 		}
@@ -391,6 +453,15 @@ func readClientACPFrame(t *testing.T, c net.Conn) map[string]any {
 	return payload
 }
 
+// countEventTypes tallies dual-track emissions by type.
+func countEventTypes(events []core.Event) map[core.EventType]int {
+	m := map[core.EventType]int{}
+	for _, e := range events {
+		m[e.Type]++
+	}
+	return m
+}
+
 func TestLeaderSubscriberAnswerQuestion(t *testing.T) {
 	got, _ := runLeaderSubscriberAnswer(t, func(c net.Conn, answered <-chan struct{}) error {
 		if err := writeACPRequestRaw(c, fixtureAskUserQuestionHalfWrapped); err != nil {
@@ -413,20 +484,31 @@ func TestLeaderSubscriberAnswerQuestion(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 		return nil
 	}, func(sub *LeaderSubscriber) {
-		if err := sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", []string{"深色主题"}); err != nil {
-			t.Errorf("AnswerQuestion: %v", err)
+		resolved, err := sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", []string{"深色主题"})
+		if err != nil || !resolved {
+			t.Errorf("AnswerQuestion = (%v, %v), want (true, nil)", resolved, err)
 		}
 		if sub.interactions.len() != 0 {
 			t.Errorf("registry len = %d after flush, want 0", sub.interactions.len())
 		}
 	})
-	if len(got) != 1 || got[0].Type != core.EventQuestionAsked {
-		t.Fatalf("events = %+v, want 1 question_asked", got)
+	// Dual-track ask (canonical + legacy) and flush-time dual-track resolved.
+	counts := countEventTypes(got)
+	if counts[core.EventUserInputRequested] != 1 || counts[core.EventQuestionAsked] != 1 {
+		t.Fatalf("ask counts = %v, want 1 canonical + 1 legacy", counts)
+	}
+	if counts[core.EventUserInputResolved] != 1 || counts[core.EventQuestionResolved] != 1 {
+		t.Fatalf("resolved counts = %v, want 1 canonical + 1 legacy", counts)
+	}
+	for _, e := range got {
+		if e.Type == core.EventUserInputResolved && (e.UserInput == nil || e.UserInput.Status != core.UserInputStatusAnswered || e.UserInput.ResolutionSource != "ios") {
+			t.Fatalf("canonical resolved = %+v, want answered/ios", e)
+		}
 	}
 }
 
 func TestLeaderSubscriberCancelQuestion(t *testing.T) {
-	_, _ = runLeaderSubscriberAnswer(t, func(c net.Conn, answered <-chan struct{}) error {
+	got, _ := runLeaderSubscriberAnswer(t, func(c net.Conn, answered <-chan struct{}) error {
 		if err := writeACPRequestRaw(c, fixtureAskUserQuestionHalfWrapped); err != nil {
 			return err
 		}
@@ -444,13 +526,23 @@ func TestLeaderSubscriberCancelQuestion(t *testing.T) {
 		}
 		return nil
 	}, func(sub *LeaderSubscriber) {
-		if err := sub.CancelQuestion("call_410dc27a15f64707b7f36ca2"); err != nil {
-			t.Errorf("CancelQuestion: %v", err)
+		resolved, err := sub.CancelQuestion("call_410dc27a15f64707b7f36ca2")
+		if err != nil || !resolved {
+			t.Errorf("CancelQuestion = (%v, %v), want (true, nil)", resolved, err)
 		}
 		if sub.interactions.len() != 0 {
 			t.Errorf("registry len = %d after cancel, want 0", sub.interactions.len())
 		}
 	})
+	counts := countEventTypes(got)
+	if counts[core.EventUserInputResolved] != 1 || counts[core.EventQuestionResolved] != 1 {
+		t.Fatalf("resolved counts = %v, want 1 canonical + 1 legacy", counts)
+	}
+	for _, e := range got {
+		if e.Type == core.EventUserInputResolved && (e.UserInput == nil || e.UserInput.Status != core.UserInputStatusRejected) {
+			t.Fatalf("canonical resolved = %+v, want rejected", e)
+		}
+	}
 }
 
 func TestLeaderSubscriberAnswerValidationAndSilent(t *testing.T) {
@@ -463,28 +555,34 @@ func TestLeaderSubscriberAnswerValidationAndSilent(t *testing.T) {
 		time.Sleep(150 * time.Millisecond)
 		return nil
 	}, func(sub *LeaderSubscriber) {
-		if err := sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", []string{"不存在的选项"}); err == nil {
+		if _, err := sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", []string{"不存在的选项"}); err == nil {
 			t.Error("invalid label must error")
 		}
-		if err := sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", nil); err == nil {
+		if _, err := sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", nil); err == nil {
 			t.Error("empty selection must error")
 		}
-		if err := sub.AnswerQuestion("call_never_seen", []string{"深色主题"}); err == nil {
+		if _, err := sub.AnswerQuestion("call_never_seen", []string{"深色主题"}); err == nil {
 			t.Error("never-registered id must error")
 		}
 		if sub.interactions.len() != 1 {
 			t.Errorf("failed validations must not consume the entry; len = %d", sub.interactions.len())
 		}
-		if err := sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", []string{"浅色主题"}); err != nil {
-			t.Errorf("valid answer: %v", err)
+		resolved, err := sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", []string{"浅色主题"})
+		if err != nil || !resolved {
+			t.Errorf("valid answer = (%v, %v), want (true, nil)", resolved, err)
 		}
 		// Duplicate (already flushed) — silent per §3.5.
-		if err := sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", []string{"浅色主题"}); err != nil {
-			t.Errorf("late answer must be silent, got %v", err)
+		resolved, err = sub.AnswerQuestion("call_410dc27a15f64707b7f36ca2", []string{"浅色主题"})
+		if err != nil || !resolved {
+			t.Errorf("late answer = (%v, %v), want silent (true, nil)", resolved, err)
 		}
 	})
-	if len(got) != 1 {
-		t.Fatalf("events = %+v, want exactly 1 question_asked", got)
+	counts := countEventTypes(got)
+	if counts[core.EventQuestionAsked] != 1 || counts[core.EventUserInputRequested] != 1 {
+		t.Fatalf("ask counts = %v, want exactly 1 each", counts)
+	}
+	if counts[core.EventQuestionResolved] != 1 || counts[core.EventUserInputResolved] != 1 {
+		t.Fatalf("resolved counts = %v, want exactly 1 flush (failed validations silent)", counts)
 	}
 }
 
@@ -520,4 +618,160 @@ func TestAgentRespondSessionQuestionRouting(t *testing.T) {
 	if err := a.RespondSessionQuestion(context.Background(), "sess-x", "call_route", []string{"A"}); err != nil {
 		t.Fatalf("routed late answer must be silent, got %v", err)
 	}
+}
+
+// ── resolve_user_input (v2 structured face) ────────────────────────────────
+
+func TestGrokSessionResolveUserInputDriverRail(t *testing.T) {
+	sess, lines, mu, stop := startQuestionProbeAgent(t, driverQuestionFixture)
+	defer stop()
+	awaitEventOfType(t, sess, core.EventUserInputRequested)
+	awaitEventOfType(t, sess, core.EventQuestionAsked)
+
+	// Custom text is rejected with the stable invalid_answer_shape code.
+	_, err := sess.ResolveUserInput(context.Background(), "call_drv1", "11111111-1111-4111-8111-111111111111", core.UserInputActionAnswer,
+		[]core.UserInputAnswer{{QuestionID: "call_drv1", Values: []core.UserInputValue{{Kind: core.UserInputValueText, Text: "自定义"}}}})
+	var uie *core.UserInputError
+	if !errorsAs(err, &uie) || uie.Code != "invalid_answer_shape" {
+		t.Fatalf("custom text err = %v, want invalid_answer_shape", err)
+	}
+
+	// Valid option answer: accepted/answered, canonical resolved emitted.
+	res, err := sess.ResolveUserInput(context.Background(), "call_drv1", "11111111-1111-4111-8111-111111111111", core.UserInputActionAnswer,
+		[]core.UserInputAnswer{{QuestionID: "call_drv1", Values: []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: "A"}}}})
+	if err != nil || res.Outcome != core.UserInputOutcomeAccepted || res.CurrentStatus != core.UserInputStatusAnswered {
+		t.Fatalf("answer resolution = (%+v, %v), want accepted/answered", res, err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if m := lastAgentResponse(t, lines, mu); m != nil && fmt.Sprint(m["id"]) == "5" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Repeat submission: consumed → already_resolved, no extra agent frames.
+	res, err = sess.ResolveUserInput(context.Background(), "call_drv1", "22222222-2222-4222-8222-222222222222", core.UserInputActionAnswer,
+		[]core.UserInputAnswer{{QuestionID: "call_drv1", Values: []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: "B"}}}})
+	if err != nil || res.Outcome != core.UserInputOutcomeAlreadyResolved {
+		t.Fatalf("repeat resolution = (%+v, %v), want already_resolved", res, err)
+	}
+
+	// Reject on the same interaction stays already_resolved (consumed).
+	res, err = sess.ResolveUserInput(context.Background(), "call_drv1", "33333333-3333-4333-8333-333333333333", core.UserInputActionReject, nil)
+	if err != nil || res.Outcome != core.UserInputOutcomeAlreadyResolved {
+		t.Fatalf("late reject resolution = (%+v, %v), want already_resolved", res, err)
+	}
+}
+
+func TestGrokSessionResolveUserInputReject(t *testing.T) {
+	sess, lines, mu, stop := startQuestionProbeAgent(t, driverQuestionFixture)
+	defer stop()
+	awaitEventOfType(t, sess, core.EventUserInputRequested)
+
+	res, err := sess.ResolveUserInput(context.Background(), "call_drv1", "44444444-4444-4444-8444-444444444444", core.UserInputActionReject, nil)
+	if err != nil || res.Outcome != core.UserInputOutcomeAccepted || res.CurrentStatus != core.UserInputStatusRejected {
+		t.Fatalf("reject resolution = (%+v, %v), want accepted/rejected", res, err)
+	}
+	resEv := awaitEventOfType(t, sess, core.EventUserInputResolved)
+	if resEv.UserInput == nil || resEv.UserInput.Status != core.UserInputStatusRejected {
+		t.Fatalf("canonical resolved = %+v, want rejected", resEv)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if m := lastAgentResponse(t, lines, mu); m != nil && fmt.Sprint(m["id"]) == "5" {
+			result, _ := m["result"].(map[string]any)
+			if result == nil || result["outcome"] != "cancelled" {
+				t.Fatalf("result = %+v, want cancelled", result)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("agent never received the cancel response")
+}
+
+func TestGrokSessionResolveUserInputMissFallsBackToAgent(t *testing.T) {
+	sess, _, _, stop := startQuestionProbeAgent(t, driverQuestionFixture)
+	defer stop()
+	awaitEventOfType(t, sess, core.EventUserInputRequested)
+
+	// Unknown interaction: driver rail misses → agent-level fallback → no
+	// registered owner → interaction_not_found (stable code).
+	_, err := sess.ResolveUserInput(context.Background(), "call_unknown", "55555555-5555-4555-8555-555555555555", core.UserInputActionAnswer,
+		[]core.UserInputAnswer{{QuestionID: "call_unknown", Values: []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: "A"}}}})
+	var uie *core.UserInputError
+	if !errorsAs(err, &uie) || uie.Code != "interaction_not_found" {
+		t.Fatalf("miss err = %v, want interaction_not_found", err)
+	}
+}
+
+func TestAgentResolveUserInputLeaderRouting(t *testing.T) {
+	a := &Agent{liveSubs: make(map[string]*LeaderSubscriber)}
+
+	// No registered owner → interaction_not_found.
+	_, err := a.ResolveUserInput(context.Background(), "call_route", "66666666-6666-4666-8666-666666666666", core.UserInputActionAnswer,
+		[]core.UserInputAnswer{{QuestionID: "call_route", Values: []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: "A"}}}})
+	var uie *core.UserInputError
+	if !errorsAs(err, &uie) || uie.Code != "interaction_not_found" {
+		t.Fatalf("no-owner err = %v, want interaction_not_found", err)
+	}
+
+	// Owner registered (leader rail surfaced it) but subscriber gone → same
+	// stable code.
+	a.trackQuestionOwner("call_route", "sess-x")
+	_, err = a.ResolveUserInput(context.Background(), "call_route", "66666666-6666-4666-8666-666666666666", core.UserInputActionAnswer,
+		[]core.UserInputAnswer{{QuestionID: "call_route", Values: []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: "A"}}}})
+	if !errorsAs(err, &uie) || uie.Code != "interaction_not_found" {
+		t.Fatalf("no-subscriber err = %v, want interaction_not_found", err)
+	}
+
+	// Live subscriber with a two-question interaction: one answer →
+	// in_progress (wire response not flushed yet).
+	sub := NewLeaderSubscriber("", "sess-x", "/tmp")
+	sub.interactions.put(leaderInteraction{
+		wireID:     3,
+		toolCallID: "call_route",
+		params: askUserQuestionParams{
+			SessionID:  "sess-x",
+			ToolCallID: "call_route",
+			Questions: []askUserQuestionItem{{
+				Question: "第一问?",
+				Options:  []askUserQuestionOption{{Label: "A"}},
+			}, {
+				Question: "第二问?",
+				Options:  []askUserQuestionOption{{Label: "B"}},
+			}},
+			Mode: "default",
+		},
+	})
+	a.liveSubsMu.Lock()
+	a.liveSubs["sess-x"] = sub
+	a.liveSubsMu.Unlock()
+
+	res, err := a.ResolveUserInput(context.Background(), "call_route", "66666666-6666-4666-8666-666666666666", core.UserInputActionAnswer,
+		[]core.UserInputAnswer{{QuestionID: "call_route", Values: []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: "A"}}}})
+	if err != nil || res.Outcome != core.UserInputOutcomeInProgress || res.CurrentStatus != core.UserInputStatusPending {
+		t.Fatalf("partial resolution = (%+v, %v), want in_progress/pending", res, err)
+	}
+
+	// Custom text on the leader rail is also invalid_answer_shape.
+	_, err = a.ResolveUserInput(context.Background(), "call_route", "77777777-7777-4777-8777-777777777777", core.UserInputActionAnswer,
+		[]core.UserInputAnswer{{QuestionID: "call_route#1", Values: []core.UserInputValue{{Kind: core.UserInputValueText, Text: "自定义"}}}})
+	if !errorsAs(err, &uie) || uie.Code != "invalid_answer_shape" {
+		t.Fatalf("custom text err = %v, want invalid_answer_shape", err)
+	}
+}
+
+// errorsAs is errors.As with the pointer-to-pointer pattern kept local so the
+// test file reads cleanly.
+func errorsAs(err error, target **core.UserInputError) bool {
+	if err == nil {
+		return false
+	}
+	if e, ok := err.(*core.UserInputError); ok {
+		*target = e
+		return true
+	}
+	return false
 }
