@@ -1,0 +1,45 @@
+{
+  "scenario": "main",
+  "verdicts": {
+    "initialize": {
+      "request_id": "req_1",
+      "verdict": "success",
+      "response_subtype": "success"
+    },
+    "list_models": {
+      "request_id": "req_2",
+      "verdict": "success",
+      "response_subtype": "success"
+    },
+    "set_model": {
+      "request_id": "req_3",
+      "verdict": "success",
+      "response_subtype": "success"
+    },
+    "set_model_reset_default": {
+      "request_id": "req_4",
+      "verdict": "success",
+      "response_subtype": "success"
+    },
+    "set_permission_mode_acceptEdits": {
+      "request_id": "req_5",
+      "verdict": "success",
+      "response_subtype": "success"
+    },
+    "set_permission_mode_default": {
+      "request_id": "req_6",
+      "verdict": "success",
+      "response_subtype": "success"
+    },
+    "interrupt_cancel_queued": {
+      "request_id": "req_7",
+      "verdict": "success",
+      "response_subtype": "success"
+    },
+    "rename_session": {
+      "request_id": "req_8",
+      "verdict": "success",
+      "response_subtype": "success"
+    }
+  }
+}

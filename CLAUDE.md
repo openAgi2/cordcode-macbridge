@@ -629,6 +629,13 @@ Claude 没有共享 server 端口。Bridge 启动/恢复自己的 CLI session，
 的 stdout 事件；用户在另一个 Terminal 发起的 Claude turn 只能通过共享 JSONL 历史被发现。
 因此不能照搬 Codex/OpenCode 的“收到广播后停止 polling”策略。
 
+**模型选取优先级（2026-09-04 探针实测，CLI 2.1.234）**：`--model` flag > 进程 env
+`ANTHROPIC_MODEL`（仅 canonical id 生效；未知 id 如 `glm-5.3` 被忽略、空串=unset）>
+user settings.`model` > settings 层 env；`ANTHROPIC_DEFAULT_*` 别名不作用于主线程。
+执行侧改写发生在网关（本机 bigmodel：opus/sonnet→glm-5.3、haiku→glm-5.3-flash），
+请求侧恒为 canonical——真实执行模型只能靠 assistant `message.model` 观测。
+证据：`scripts/claudecode-phase0/`（Phase 0 证据包）。
+
 Backend capability 由 `core/interfaces.go` 的可选接口推导，并在 `hello_ack.backends[]`
 下发；不要维护脱离源码的手写能力真值表。完整细节见
 [GO_BRIDGE_ARCHITECTURE.md](GO_BRIDGE_ARCHITECTURE.md)。

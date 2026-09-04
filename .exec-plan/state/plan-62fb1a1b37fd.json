@@ -1,0 +1,787 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge-claudecode-official",
+  "plan_file": "docs/2026-09-04-claudecode-official-capability-upgrade-design.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-62fb1a1b37fd.json",
+    "legacy_path": ".claude/exec-plans/plan-62fb1a1b37fd.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "todo-write-optional-mirror",
+    "invocation_policy": "slash-or-natural-language-equivalent",
+    "persistence_rule": "persist-on-every-status-transition"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-09-04-claudecode-official-capability-upgrade-design完成情况.md",
+    "completion_report_status": "missing",
+    "last_generated_at": null,
+    "based_on_queue_hash": null
+  },
+  "updated_at": "2026-09-04T12:56:26Z",
+  "todos": [
+    {
+      "id": "p0-1-control-plane-probe",
+      "title": "Phase 0.1 控制面探针（硬门）",
+      "description": "spawn 通道逐字复用 baseClaudeInnerArgs（agent/claudecode/session.go:108：--output-format stream-json --input-format stream-json --permission-prompt-tool stdio --include-partial-messages --verbose，无 -p），stdin 保持打开；env 镜像活体 runtime（ANTHROPIC_* allowlist + CLAUDE_CODE_ENTRYPOINT=claude-desktop-3p），key 脱敏后归档。按序发送 initialize → list_models → set_model → set_permission_mode → interrupt(cancel_queued:true) → rename_session，信封 {\"type\":\"control_request\",\"request_id\":…,\"request\":{…}}，归档每个 control_response 原文。bypassPermissions 档单独一轮记录（SDK 注明需 allowDangerouslySkipPermissions）。三种合法结论分开记录：success / unknown subtype / 无响应。探针脚本入仓 scripts/claudecode-phase0/。",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "设计 §6 Phase 0.1；kickoff 指令 3",
+      "notes": "证据收集单元：deliverable=dump 归档+脚本入仓，无独立 tests/regression 面（skill 反虚假 triplet 规则）；§7.1 红线：未 dump 前禁止写解析器。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "六个控制 subtype（initialize/list_models/set_model/set_permission_mode×3档/interrupt/rename_session）全部在 CLI 2.1.234 streaming spawn 上实发 success 并归档原文；信封双向按 §3.1（载荷嵌套第二层 response）；裸 -p 未用作判据；bypassPermissions 成功带本机用户设置语境（skipDangerousModePermissionPrompt）已标注不外推；探针脚本+README 入仓 scripts/claudecode-phase0/。",
+        "artifacts": [
+          "scripts/claudecode-phase0/control_plane_probe.py",
+          "scripts/claudecode-phase0/capture_runtime_env.sh",
+          "scripts/claudecode-phase0/README.md",
+          "scripts/claudecode-phase0/dumps/main-summary.json",
+          "scripts/claudecode-phase0/dumps/bare-list-summary.json",
+          "scripts/claudecode-phase0/dumps/bypass-summary.json",
+          "scripts/claudecode-phase0/dumps/main.jsonl",
+          "scripts/claudecode-phase0/dumps/bare-list.jsonl",
+          "scripts/claudecode-phase0/dumps/bypass.jsonl"
+        ],
+        "checked_at": "2026-09-04T12:47:36Z"
+      }
+    },
+    {
+      "id": "p0-2-generation-matrix",
+      "title": "Phase 0.2 代际矩阵结论",
+      "description": "按 §3.2 矩阵两行分别出结论：PATH CLI 2.1.234（CordCode spawn 真值，结论来自 p0-1 dump）× Desktop 2.1.258（外部会话真值，来自 ~/.claude/sessions/48261.json 与文档门记录）。PostModelSwitch 在 2.1.234 记『文档级不存在』（需 ≥2.1.251），不消耗探针预算冒充 unknown。不得合并成单一真值。",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "p0-1-control-plane-probe"
+      ],
+      "source": "设计 §6 Phase 0.2、§3.2",
+      "notes": "证据分析单元，产物=证据包内矩阵表。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "两行矩阵落盘 README：PATH CLI 2.1.234（version+system/init 双锚，六 subtype success，无 modelCatalog 但 list_models 可用，PostModelSwitch 文档级不存在）；Desktop 2.1.258（sessions/25813.json 实测锚，外部会话不可控）。未合并单一真值。",
+        "artifacts": [
+          "scripts/claudecode-phase0/README.md",
+          "scripts/claudecode-phase0/dumps/turn.jsonl"
+        ],
+        "checked_at": "2026-09-04T12:48:10Z"
+      }
+    },
+    {
+      "id": "p0-3-catalog-dual-dump",
+      "title": "Phase 0.3 目录双 dump（initialize.models × list_models 并排）",
+      "description": "initialize 成功体与 list_models 成功体并排 dump：是否必须先 initialize 才认 list_models（裸 list_models 对照）；两者 models 是否同构；resolvedModel 在 cc-switch 别名场景下解析成什么。记录 initialize 副作用（hooks_applied、first-attached-client-wins、perTaskStopAffordance）。对照项（非硬门）：确认省略 initialize.hooks 的裸 initialize 不影响 --settings HTTP hook 触发（与 p0-5 协同）。dump 之前禁止写任何解析器。",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "p0-1-control-plane-probe"
+      ],
+      "source": "设计 §6 Phase 0.3（M1/R2-S7）",
+      "notes": "dump 归档单元。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "initialize.models 与 list_models.models 逐字节同构（程序化比对 True）；裸 list_models 无需先 initialize（before==after）；resolvedModel=canonical（claude-sonnet-5 等），cc-switch env 别名不改目录映射，请求侧 claude-opus-5[1m] vs 执行侧 glm-5.3 分离实证；initialize 裸请求 hooks_applied 缺席（与 SDK 契约一致）；ModelInfo 可选字段（haiku 无 effort 族）确认。",
+        "artifacts": [
+          "scripts/claudecode-phase0/dumps/main.jsonl",
+          "scripts/claudecode-phase0/dumps/bare-list.jsonl",
+          "scripts/claudecode-phase0/dumps/turn.jsonl",
+          "scripts/claudecode-phase0/README.md"
+        ],
+        "checked_at": "2026-09-04T12:48:10Z"
+      }
+    },
+    {
+      "id": "p0-4-cap-detection",
+      "title": "Phase 0.4 cap 探测（capabilities[] 搜 modelCatalog）",
+      "description": "dump init capabilities[] 全量内容，搜字符串 modelCatalog；以 list_models/initialize 实发结果为最终判据。『无 cap 字符串』≠『无 list_models』，禁止等价化。",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "p0-3-catalog-dual-dump"
+      ],
+      "source": "设计 §6 Phase 0.4（M2）",
+      "notes": "结论并入证据包。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "system/init capabilities=[interrupt_receipt_v1,interrupt_cancel_queued_v1,msg_lifecycle_v1]，无 modelCatalog 字符串；list_models 实发 success——「无 cap 字符串≠无 list_models」实证，能力探测以实发为准。system/init 只在首个 turn 出现（启动输入前不发射）。",
+        "artifacts": [
+          "scripts/claudecode-phase0/dumps/turn.jsonl",
+          "scripts/claudecode-phase0/README.md"
+        ],
+        "checked_at": "2026-09-04T12:48:10Z"
+      }
+    },
+    {
+      "id": "p0-5-hooks-probe",
+      "title": "Phase 0.5 hooks 探针（--settings 内联 HTTP hook）",
+      "description": "用 --settings '{\"hooks\":…}' 内联 HTTP hook + 本地 token 鉴权接收端（仅 127.0.0.1），dump SessionStart/Stop/UserPromptSubmit/ConfigChange 的 POST 原文。PostModelSwitch 只在 ≥2.1.251 通道补测（本机 2.1.234=文档级不存在）。归档本机既有静默失效样本为 fixture（7823 死端点现状复查、transcript hook_non_blocking_error+exitCode:127 行）。Managed 跨层合并：本机无落点，标记『无可测环境』（非硬门失败）。",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "设计 §6 Phase 0.5（M4/S2/S3）",
+      "notes": "接收端脚本+POST 原文归档入 scripts/claudecode-phase0/。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "4 事件 POST 原文归档（UserPromptSubmit/Stop/ConfigChange×2/SessionEnd），token URL 路径段鉴权可行；SessionStart 在 --settings 层不触发（2.1.234 实测，matcher 显式与否均然）；ConfigChange 要求文件预存于 cascade；R2-S7 裸 initialize 不干扰 settings hooks 实证；S3 静默失效 fixture 归档（exit 127 transcript + 7823 死端点复查）；Managed 无可测环境记档；PostModelSwitch 按文档门未测。",
+        "artifacts": [
+          "scripts/claudecode-phase0/hooks_probe.py",
+          "scripts/claudecode-phase0/dumps/hooks-posts.jsonl",
+          "scripts/claudecode-phase0/dumps/hooks.jsonl",
+          "scripts/claudecode-phase0/dumps/fixture-hook-silent-failure.jsonl",
+          "scripts/claudecode-phase0/README.md"
+        ],
+        "checked_at": "2026-09-04T12:52:06Z"
+      }
+    },
+    {
+      "id": "p0-6-env-priority-matrix",
+      "title": "Phase 0.6 env 优先级四元矩阵",
+      "description": "受控组合『进程 env（含空串）× settings.env × --model』，以 assistant message.model 为判据，产出 §3.4 四元矩阵（进程 env × settings.env × 网关改写 × assistant.model）。禁止只读 settings.json 下结论。结论回填设计 §3.4 并同步 CLAUDE.md。",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "设计 §6 Phase 0.6（S6）、§3.4",
+      "notes": "需要真实模型 turn（会产生少量 API 调用经 bigmodel 网关）。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "6 受控组合 × 真实 turn 全部落档：--model > 进程 env(仅 canonical id) > settings.model > settings 层 env；未知 id 忽略、空串=unset；DEFAULT_* 别名不作用主线程；网关改写 opus/sonnet→glm-5.3、haiku→glm-5.3-flash；四元矩阵回填设计 §3.4 + CLAUDE.md Claude Code 节。",
+        "artifacts": [
+          "scripts/claudecode-phase0/env_matrix_probe.py",
+          "scripts/claudecode-phase0/dumps/env-matrix.json",
+          "docs/2026-09-04-claudecode-official-capability-upgrade-design.md",
+          "CLAUDE.md"
+        ],
+        "checked_at": "2026-09-04T12:55:20Z"
+      }
+    },
+    {
+      "id": "p0-7-gateway-retest",
+      "title": "Phase 0.7 网关 /v1/models 复测",
+      "description": "对 cc-switch 本地网关（127.0.0.1:15721，若仍在监听）与 bigmodel 直连的 /v1/models，按双路由 × 双鉴权头（x-api-key 与 Authorization: Bearer <ANTHROPIC_AUTH_TOKEN>）重放一次，确认『cc-switch 本地代理不透传』结论是否仍成立。凭据脱敏归档。注意：当前活体 runtime env 已变为 bigmodel 直连（相对 §0.4 快照漂移），复测需以当下真实配置为准记录。",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "设计 §6 Phase 0.7、§2.3",
+      "notes": "只读取证，curl 即可。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "双路由×双头重放完成；两处相对设计快照漂移实证：/claude-desktop+Bearer 现 200+4 模型（OpenAI 风格列表）、bigmodel 直连现空 data[]；/claude 404 维持；x-api-key 在 cc-switch 401。结论：网关 /v1/models 面随配置漂移，只能作降级链一级。",
+        "artifacts": [
+          "scripts/claudecode-phase0/dumps/gateway-retest.json",
+          "scripts/claudecode-phase0/dumps/gateway-raw-2-claude-desktop-bearer.json",
+          "scripts/claudecode-phase0/README.md"
+        ],
+        "checked_at": "2026-09-04T12:56:26Z"
+      }
+    },
+    {
+      "id": "p0-8-evidence-pack",
+      "title": "Phase 0 证据包归档收口（全案硬门）",
+      "description": "汇总 7 探针产物：dump 归档目录、探针脚本入仓清单（scripts/claudecode-phase0/，对标 DSH_TURN_REPRO 供 CLI 升级后复测）、设计文档回填（§3.4 矩阵、§0.4 现状刷新）、§7.1 红线清单逐项核对（每个当已核实的形状是否已有 dump）。红线项未齐 → 禁止进入 Phase 1 编码。",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "p0-1-control-plane-probe",
+        "p0-2-generation-matrix",
+        "p0-3-catalog-dual-dump",
+        "p0-4-cap-detection",
+        "p0-5-hooks-probe",
+        "p0-6-env-priority-matrix",
+        "p0-7-gateway-retest"
+      ],
+      "source": "设计 §6 Phase 0、§7.1；kickoff 指令 3",
+      "notes": "硬门收口单元。",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p1-1-model-catalog-impl",
+      "title": "Phase 1 模型目录真值链重构",
+      "description": "重构 AvailableModels()（agent/claudecode）：①主源 initialize.models（typed）——会话建立时发送 initialize 并缓存 models（value/resolvedModel/displayName/effort 字段）；②刷新/对照 list_models——成功体形状以 Phase 0 dump 为准，未知形状 fail closed 跳过；③观测补充——assistant message.model 从 usage 旁路（session.go:461-466）接线进目录，维护 seen-alive 集合与请求名→改写名映射；④降级源与网关修正——settings.json 三槽位别名保留为降级源；usesCustomGateway 排除 loopback（127.0.0.1/localhost）代理型 base URL，loopback 型不拉 /v1/models 落到别名/观测级；真网关读 ANTHROPIC_AUTH_TOKEN + 双头（x-api-key+Bearer）拉取；⑤wire 三键——槽位（现有 id）+ 新增 optional resolved（resolvedModel 方向）+ 观测改写名单独键（建议 observedModel），不复用 core.ModelOption.Alias（R2-S2）。Mac wire 变化同步进 docs/protocol/ canonical pack。",
+      "status": "pending",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [
+        "p0-8-evidence-pack"
+      ],
+      "source": "设计 §6 Phase 1.1–1.5",
+      "notes": "iOS CCCodeBridgeModel 增补 resolved/observedModel 字段属 p1-3/p2-2 接线，本 todo 先落 Mac 侧 wire 产出。",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p1-1-model-catalog-tests",
+      "title": "Phase 1 定向测试（fixture=真实 dump）",
+      "description": "定向测试类：控制协议 fixture 必须用 Phase 0 dump 的真实 control_response 原文；未知 subtype/失败响应让功能降级而非测试绿；降级链各级（initialize→list_models→观测→别名）覆盖；usesCustomGateway loopback/真网关分类；fail closed 全程不伪装。",
+      "status": "pending",
+      "phase": "phase1",
+      "kind": "tests",
+      "depends_on": [
+        "p1-1-model-catalog-impl"
+      ],
+      "source": "设计 §7.1/§7.2",
+      "notes": "D3 级：相关测试组，不默认全量。",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p1-2-model-catalog-regression",
+      "title": "Phase 1 Release 安装与运行态验证",
+      "description": "按 MacBridge 唯一路径：Release 构建 → 覆盖安装 /Applications → killall CordCodeLink + pkill cordcode-bridge-runtime → open 重启 → 运行态核验（进程代际晚于构建 + 新版本特征输出 + 8777 新 PID 监听）。功能面：模型目录从 initialize.models 真值化（日志可观测：init 缓存条目数/resolved 值）；iPhone 模型列表一致性属 owner 真机验收项，单列矩阵待验，不冒充完成。cc-switch 改配置刷新延迟 ≤ 一次会话启动/事件周期（日志级验证）。",
+      "status": "pending",
+      "phase": "phase1",
+      "kind": "regression",
+      "depends_on": [
+        "p1-1-model-catalog-tests"
+      ],
+      "source": "设计 §6 Phase 1 验收、§7.2；kickoff 指令 9",
+      "notes": "禁止临时构建产物测试。",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p1-3-doc-sync",
+      "title": "Phase 1 protocol pack + CHANGELOG + CLAUDE.md 同步",
+      "description": "docs/protocol/ canonical pack 同步 wire 变化（模型行 resolved/observedModel 键）；iOS mirror（../cordcode-ios-claudecode-official/docs/protocol/）同步；CHANGELOG.md [Unreleased] 追加条目；CLAUDE.md 上游源码优先门表格补 Claude Code 行（版本锚三段式，§10 建议）。docs/ 改动立即 commit（两仓各自）。",
+      "status": "pending",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [
+        "p1-1-model-catalog-tests"
+      ],
+      "source": "设计 §7.4、§10；kickoff 指令 10；iOS CLAUDE.md docs 立即 commit 规则",
+      "notes": "双仓各自单独 commit。",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p2-0-s8-owner-ruling",
+      "title": "S8 owner 裁决：interrupt 后留进程 vs 仍 Close",
+      "description": "Phase 2 编码前向 owner 呈现两案并等待拍板：(a) interrupt=停 turn、留进程（Close 仍走 stdin EOF 跑 Stop hooks 的既有路径不受影响）；(b) interrupt 后仍 Close。该选择与 Phase 3 Stop hook 定向刷新耦合，编码前写死。不得自行选择。用 AskUserQuestion 呈现，记录裁决入状态 notes 与设计文档回填。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "p1-2-model-catalog-regression"
+      ],
+      "source": "设计 §6 Phase 2.4、§8 风险 8；kickoff 指令 6",
+      "notes": "owner 产品裁决，阻塞 Phase 2 全部编码（kickoff 措辞：推进到 Phase 2 编码前）。",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p2-1-control-send-envelope-impl",
+      "title": "Phase 2.1 发送侧控制封装",
+      "description": "统一信封（§3.1 request 嵌套）+ request_id 配对收件（stdout 读循环新增 control_response case）+ 超时 + 错误透传到 iOS 事件面（fail visibly）。当前 stdin 只写 user 与 control_response、stdout 无 control_response case（HEAD 已复核），本单元补齐收发闭环。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "p2-0-s8-owner-ruling"
+      ],
+      "source": "设计 §6 Phase 2.1、§3.1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p2-1-control-send-envelope-tests",
+      "title": "Phase 2.1 发送侧封装定向测试",
+      "description": "request_id 配对（乱序/无关 id 忽略）、超时、错误透传、未知 subtype fail closed；fixture 用 Phase 0 真实 control_response 原文。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "p2-1-control-send-envelope-impl"
+      ],
+      "source": "设计 §7.1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p2-2-set-model-impl",
+      "title": "Phase 2.2 set_model 直达 + iOS adapter 接线",
+      "description": "Mac：set_model 控制帧替换『下次 spawn --model 生效』；'default'/null 重置语义对齐 SDK。iOS：CCCodeBridgeBackendClient 补 BackendModelSetting conformance（现状未 conform、原生 App 不调 switch_model；选择器只写本地、上送走 send_message.model）；CCCodeBridgeModel 增补 resolved/观测键字段解码。能力位先行：缺位时 iOS 维持现状路径。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "p2-1-control-send-envelope-tests"
+      ],
+      "source": "设计 §6 Phase 2.2、§7.3.1/7.3.2",
+      "notes": "跨仓 coherent change：Mac canonical + iOS 接线同步。",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p2-2-set-model-tests",
+      "title": "Phase 2.2 set_model 定向测试（双仓）",
+      "description": "Mac：set_model 发送+回执+失败降级（回退下次 spawn 生效）测试；iOS：adapter conformance + resolved 字段解码定向测试 + .claudeCode if-compare 清单核查（§7.3.4，约 29 处/12 文件）。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "p2-2-set-model-impl"
+      ],
+      "source": "设计 §7.3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p2-3-set-permission-mode-impl",
+      "title": "Phase 2.3 set_permission_mode 受限直达 + 冲突表落实",
+      "description": "只对 default/acceptEdits/bypassPermissions/dontAsk 发送 CLI 控制帧（活会话禁 plan/auto 不变）。冲突表四行落实：SetLiveMode 对 plan/auto 拒 false 维持；ExitPlanMode 批准=纯 allow 不动；本地 auto-answer 仅作能力位缺失/CLI 拒收时缺位回退（避免双应答）；sessionActive 真值语义维持、受限四档之外不新增旁路。若未来要以官方控制帧离开 plan mode 需另开产品裁决。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "p2-2-set-model-tests"
+      ],
+      "source": "设计 §6 Phase 2.3（M3/R2-S3）",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p2-3-set-permission-mode-tests",
+      "title": "Phase 2.3 权限模式定向测试",
+      "description": "受限四档外不发帧（plan/auto 拒绝路径回归）、CLI 拒收/能力位缺失时本地 auto-answer 回退不双应答、sessionActive 语义维持（闲置 resume vs 运行中不可切）。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "p2-3-set-permission-mode-impl"
+      ],
+      "source": "设计 §6 Phase 2.3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p2-4-interrupt-impl",
+      "title": "Phase 2.4 interrupt（按 S8 裁决实现）",
+      "description": "按 p2-0 裁决实现：iOS Stop 语义发 interrupt cancel_queued:true；回执按 init capabilities（interrupt_receipt_v1/interrupt_cancel_queued_v1）解析；新能力位如实广告，缺位保持 abort→Close 杀进程现状，禁止把合成 turn_completed{aborted} 冒充官方 interrupt 回执。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "p2-3-set-permission-mode-tests"
+      ],
+      "source": "设计 §6 Phase 2.4、§7.3.3",
+      "notes": "实现形态（留进程 vs Close）以 p2-0 裁决为准。",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p2-4-interrupt-tests",
+      "title": "Phase 2.4 interrupt 定向测试",
+      "description": "能力位解析、缺位降级杀进程、回执映射 iOS 事件面、S8 裁决形态的行为断言。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "p2-4-interrupt-impl"
+      ],
+      "source": "设计 §7.3.3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p2-5-regression",
+      "title": "Phase 2 Release 安装与运行态验证",
+      "description": "Release 构建 + /Applications 覆盖安装 + 重启 + 运行态核验（进程代际+特征输出）。定向功能验证：会话内模型切换即时生效、权限模式切换走 CLI 控制帧（日志可见 control_request/response 往返）、interrupt 行为符合 S8 裁决。owner 真机验收矩阵单列。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "p2-4-interrupt-tests"
+      ],
+      "source": "设计 §7.2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p2-6-doc-sync",
+      "title": "Phase 2 protocol pack + CHANGELOG",
+      "description": "能力位（interrupt 等）与 wire 变化同步 docs/protocol/ canonical pack + iOS mirror；CHANGELOG 追加。docs 立即 commit（双仓各自）。",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "p2-5-regression"
+      ],
+      "source": "设计 §7.4；kickoff 指令 10",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p3-1-hooks-layer-impl",
+      "title": "Phase 3.1 hooks 事件层（仅自 spawn 会话）",
+      "description": "只对 CordCode 自 spawn 会话用 --settings '{\"hooks\":…}' 内联 HTTP hook（官方 flag，hooks 数组跨层 merge 不打掉 cc-switch hooks）；Management API 新增 /internal/hooks/claude（token 鉴权、仅 127.0.0.1）；不订阅 PermissionRequest（避免与 stdio can_use_tool 双应答）；活性检测心跳自检（exit 127/死端点→回退轮询+如实上报事件源状态）；Managed 层默认关（本机无落点）。",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [
+        "p2-6-doc-sync"
+      ],
+      "source": "设计 §6 Phase 3.1–3.4（M4/S2/S3）",
+      "notes": "外部会话维持轮询为默认（M4），本层不取代。",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p3-1-hooks-layer-tests",
+      "title": "Phase 3 hooks 定向测试",
+      "description": "hook 事件→ Management API 接收→事件面映射测试（fixture=Phase 0.5 POST 原文）；活性检测用 exit 127 fixture；失活回退轮询路径测试。",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "tests",
+      "depends_on": [
+        "p3-1-hooks-layer-impl"
+      ],
+      "source": "设计 §7.1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p3-2-hooks-regression",
+      "title": "Phase 3 Release 安装与 Stop 事件验证",
+      "description": "Release 构建+安装+运行态核验；自 spawn 会话 Stop 事件驱动的定向刷新（transcript_path 单文件）可观测；hook 失活时行为与现状一致（回退轮询）。",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "regression",
+      "depends_on": [
+        "p3-1-hooks-layer-tests"
+      ],
+      "source": "设计 §6 Phase 3.5 验收",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p3-3-doc-sync",
+      "title": "Phase 3 CHANGELOG 同步",
+      "description": "CHANGELOG [Unreleased] 追加 hooks 事件层条目；（若 wire 变化）protocol pack 同步；立即 commit。",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [
+        "p3-2-hooks-regression"
+      ],
+      "source": "设计 §7.4；kickoff 指令 10",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p4-1-fixture-boundary-impl",
+      "title": "Phase 4.1 文件面边界层固化",
+      "description": "transcriptindex+JSONL 解析标注『无合同边界层』：真实会话归档 fixture 包（锁 type 枚举与关键字段形状）；appendJSONLRecord（custom-title）加命名空间前缀防撞；对照官方 rename_session 控制请求评估迁移（Phase 0.1 dump 为据，未 dump 前维持现状）；写入策略文档化。本 Phase 不删除任何文件面代码。",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "impl",
+      "depends_on": [
+        "p3-3-doc-sync"
+      ],
+      "source": "设计 §6 Phase 4.1/4.2（S1/R2-S5）",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p4-1-fixture-boundary-tests",
+      "title": "Phase 4 fixture 回归测试",
+      "description": "fixture 包 diff 回归测试（CLI 大版本升级跑 fixture diff 的机制入测试）；custom-title 命名空间防撞测试。",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "tests",
+      "depends_on": [
+        "p4-1-fixture-boundary-impl"
+      ],
+      "source": "设计 §6 Phase 4.1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p4-2-regression",
+      "title": "Phase 4 Release 安装与标题回归",
+      "description": "Release 构建+安装+运行态核验；custom-title 命名空间迁移后会话标题在 iOS 正常显示（日志/接口级验证；真机 UI 属 owner 验收矩阵）。",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "regression",
+      "depends_on": [
+        "p4-1-fixture-boundary-tests"
+      ],
+      "source": "设计 §7.2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p4-3-doc-sync",
+      "title": "Phase 4 CHANGELOG + 边界层文档收口",
+      "description": "CHANGELOG 追加；文件面边界纪律写入 GO_BRIDGE_ARCHITECTURE.md Claude Code 节；立即 commit。",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "impl",
+      "depends_on": [
+        "p4-2-regression"
+      ],
+      "source": "设计 §7.4",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    }
+  ]
+}

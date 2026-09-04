@@ -1,0 +1,15 @@
+{
+ "captured_at": "2026-09-04T13:05:00Z",
+ "cc_switch": {"pid": 95162, "listen": "127.0.0.1:15721"},
+ "results": [
+  {"target": "cc-switch /claude-desktop/v1/models", "auth": "x-api-key", "http": 401, "body": {"error": {"message": "认证失败: Claude Desktop gateway 缺少 Authorization 头", "type": "proxy_error"}}},
+  {"target": "cc-switch /claude-desktop/v1/models", "auth": "Authorization: Bearer", "http": 200, "models": ["claude-fable-5", "claude-haiku-4-5 (supports1m)", "claude-opus-5 (supports1m)", "claude-sonnet-5", "...full list in raw archive"]},
+  {"target": "cc-switch /claude/v1/models", "auth": "x-api-key", "http": 404, "body": "<empty>"},
+  {"target": "bigmodel /api/anthropic/v1/models", "auth": "x-api-key", "http": 200, "models": []},
+  {"target": "bigmodel /api/anthropic/v1/models", "auth": "Bearer", "http": 200, "models": []}
+ ],
+ "drift_vs_design_0.4": [
+  "/claude-desktop + Bearer NOW returns 200 with model list (design snapshot: bigmodel key rejected)",
+  "bigmodel direct /v1/models NOW returns empty data[] (design snapshot: 10 models)"
+ ]
+}

@@ -261,6 +261,16 @@ glm-5.x）。评审时刻 runtime 换代（PID 74112）后仍然成立——这�
 活体样本。Phase 0 探针 4 必须产出「进程 env × settings.env × 网关改写 ×
 assistant.model」四元矩阵，禁止只读 settings.json 下结论。
 
+**Phase 0.6 实测回填（2026-09-04，CLI 2.1.234，bigmodel 直连；dump=
+`scripts/claudecode-phase0/dumps/env-matrix.json`）**：模型选取优先级实测为
+`--model` flag > 进程 env `ANTHROPIC_MODEL`（仅 canonical id 生效；未知 id 如
+`glm-5.3` 被忽略、空串=unset）> user settings.`model` > settings 层 env。
+`ANTHROPIC_DEFAULT_*` 别名**不作用于主线程模型**（haiku 别名 glm-4.7 未生效）。
+执行侧改写在网关：opus/sonnet→`glm-5.3`、haiku→`glm-5.3-flash`；请求侧
+（system/init.model）恒为 canonical。对 CordCode 的推论：可靠选模型只有
+spawn 时 `--model` 与会话内 `set_model`；真值执行模型只能靠
+assistant `message.model` 观测（Phase 1 三键链的实证基础）。
+
 ### 3.5 transcript_path 异步写入
 
 [文档] hooks payload 的 `transcript_path` 可能滞后；需要最终助手文本应使用 Stop 的

@@ -1,0 +1,48 @@
+{
+ "captured_at": "2026-09-04T12:54:25Z",
+ "cli": "2.1.234",
+ "results": [
+  {
+   "combo": "A-baseline",
+   "init_model": "claude-opus-5[1m]",
+   "assistant_message_model": [
+    "glm-5.3"
+   ]
+  },
+  {
+   "combo": "B-procenv-model-haiku",
+   "init_model": "claude-haiku-4-5-20251001",
+   "assistant_message_model": [
+    "glm-5.3-flash"
+   ]
+  },
+  {
+   "combo": "C-flag-model-haiku",
+   "init_model": "claude-haiku-4-5-20251001",
+   "assistant_message_model": [
+    "glm-5.3-flash"
+   ]
+  },
+  {
+   "combo": "D-settings-model-sonnet",
+   "init_model": "claude-sonnet-5",
+   "assistant_message_model": [
+    "glm-5.3"
+   ]
+  },
+  {
+   "combo": "E-settings-env-model-haiku",
+   "init_model": "claude-opus-5[1m]",
+   "assistant_message_model": [
+    "glm-5.3"
+   ]
+  },
+  {
+   "combo": "F-procenv-model-empty",
+   "init_model": "claude-opus-5[1m]",
+   "assistant_message_model": [
+    "glm-5.3"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,10 @@
+{
+  "scenario": "hooks",
+  "verdicts": {
+    "initialize_bare": {
+      "request_id": "req_h1",
+      "verdict": "success",
+      "response_subtype": "success"
+    }
+  }
+}
