@@ -106,3 +106,17 @@ iOS（claudecode/official-capability-ios）：`8c707a1e` Phase 2 接线 → `138
 | 5 权限档即时生效 | ✅ | 符合预期 |
 
 验收矩阵 5/5 通过（#1 带 owner 豁免项；#2 修复后待 owner 复测一次）。
+
+### 追记：第二轮复测发现深层回归（已修复 fdc27c5，2026-09-04 23:34 部署）
+
+owner 复测确认命令回显气泡消失，但发现新症状：切模型后的下一回合整回合丢失
+（问题 B 气泡消失、回复 B 接在回复 A 后）。生产日志 + kernel 复现测试双证根因：
+上轮修复（cf7ef6e）让 caveat/<local-command-stdout> 行归一化后零事件，但它们仍按
+内容行进 kernel 内容 transition——kernel 拒绝零事件 transition 且拒绝不推进
+ledger cursor，后续所有行以 "Claude source batch gap" 全拒（23:17:15 生产日志
+四连 rejected），投影停在 A 回合；iOS 只剩 stdout live 流，表现为 B 丢失错位。
+
+修复（fdc27c5）：纯回显行（isClaudeEchoOnlyUserRow：全部 text 块归一化后为空且
+无 tool_result）按非内容行路由（仅推进 cursor）。复现测试用真实 transcript 行序列
+同形驱动，修复前三回合 gap 全拒、修复后 A/“/model haiku”/B 三回合结构完整。
+runtime 重启后 kernel 内存态重建，受影响会话重开即自愈。
