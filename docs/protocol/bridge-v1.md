@@ -869,6 +869,18 @@ Wire behavior:
   Variant}`) — no agent-global mutable selection. `list_models` model items
   gain optional `variants: string[]` containing exactly those live keys
   (empty/absent = no variant selector for that model).
+- Canonical additive revision (claudecode Phase 1, 2026-09-04, dump-verified):
+  `list_models` model items gain optional `resolved: string` and
+  `observedModel: string` (claude backend; other backends omit both).
+  `resolved` mirrors the CLI's official alias→canonical mapping
+  (`initialize.models[].resolvedModel`, e.g. `sonnet` → `claude-sonnet-5`);
+  `observedModel` carries the execution-side model actually observed in
+  assistant `message.model` after gateway rewriting (e.g. `glm-5.3`). Three
+  keys — slot `id` (request-side name) / `resolved` (canonical) /
+  `observedModel` (execution) — are three different facts and must not be
+  conflated. Both keys appear only when the backend has that truth; clients
+  treat them as display truth, never as send targets (sending still uses
+  `id`).
 - Approvals surface through the existing `permission_request` events (SSE
   `permission.asked`) and are answered by folding bridge `allow`/`deny` onto
   the official reply literals (1.18 probes `once`/`reject` first and falls

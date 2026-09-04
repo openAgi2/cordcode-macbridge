@@ -264,6 +264,13 @@ export interface BridgeRequest<TParams = Record<string, unknown>> {
 // Model item in `list_models` results. `variants` (canonical additive revision,
 // E1b sample-verified) carries exactly the live `/provider…models[modelID].variants`
 // keys for that model — empty/absent means the model has no variant selector.
+// `resolved` / `observedModel` (canonical additive revision, claudecode Phase 1
+// 2026-09-04, dump-verified): `resolved` is the canonical model id the CLI
+// resolves this item's `id` to (claude `initialize.models[].resolvedModel`,
+// 别名→canonical). `observedModel` is the execution-side model actually seen in
+// assistant `message.model` after gateway rewriting (exact-match observation
+// only; rewrite mappings are unstable and never guessed). Both keys are
+// optional and present only when the backend has that truth.
 export interface BridgeModelItem {
   id: string;
   name: string;
@@ -274,6 +281,8 @@ export interface BridgeModelItem {
   defaultReasoningEffort?: string;
   isDefault?: boolean;
   variants?: string[];
+  resolved?: string;
+  observedModel?: string;
 }
 
 // `send_message` model parameter. `variant` (canonical additive revision, E1b

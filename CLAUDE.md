@@ -466,6 +466,7 @@ brief `连接中` blip on iOS clients.
 
 | 产品 | 本机官方源码 | GitHub |
 | --- | --- | --- |
+| Claude Code | 官方文档 + Agent SDK 类型契约 + cli 定点取证（无开源源码；版本锚三段式：PATH CLI 2.1.234 × Desktop 2.1.258 × SDK 配对 2.1.260，Phase 0 证据包 `scripts/claudecode-phase0/`） | <https://github.com/anthropics/claude-agent-sdk-typescript> + <https://code.claude.com/docs> |
 | Codex / Codex app-server / Remote Control | `/Users/jacklee/Projects/codex` | <https://github.com/openai/codex> |
 | Grok Build | `/Users/jacklee/Projects/grok-build` | <https://github.com/xai-org/grok-build> |
 | DeepSeek Harness（dsh） | `/Users/jacklee/Projects/deepseek-harness` | <https://github.com/deepseek-ai/deepseek-harness> |
