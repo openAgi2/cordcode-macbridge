@@ -1069,7 +1069,12 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 			// and deliver nothing. currentTurnID is threaded as the file-order fallback turn for rows
 			// whose parent chain has no admitted owner (mapper degrades to file-order attribution,
 			// not content refereeing, guardrail #4).
-			if e.UUID != "" && e.Message != nil && (e.Type == "user" || e.Type == "assistant") {
+			// Echo-only rows（caveat/<local-command-stdout> 等归一化后无任何可见
+			// 内容的 user 行，isClaudeEchoOnlyUserRow）按非内容行处理：仅推进
+			// ledger cursor（acknowledge），不进内容 transition——kernel 拒绝零
+			// 事件 transition 且拒绝不推进 cursor，会让后续所有行以 gap 全拒
+			//（owner 真机 2026-09-04 23:17：问题 B/回复 B 整回合丢失）。
+			if e.UUID != "" && e.Message != nil && (e.Type == "user" || e.Type == "assistant") && !isClaudeEchoOnlyUserRow(e) {
 				h.applyClaudeLiveSourceRecord(scanned, backendID, sessionID, traceCorrelation, &currentTurnID, &runningObserved, cachedPID, &heldTerminals, &turnText)
 				continue
 			}
@@ -3050,4 +3055,29 @@ func claudeNormalizedUserText(blocks []claudeRelayContentBlock) string {
 		}
 	}
 	return strings.Join(segments, "\n\n")
+}
+
+// isClaudeEchoOnlyUserRow 报告「纯回显」user 行：全部文本块经 CLI 命令回显
+// 归一化（claudecode.NormalizeClaudeUserText）后无任何可见内容、且不含
+// tool_result/其他结构块。这类行（<local-command-caveat>、<local-command-
+// stdout/stderr> 等）是协议噪音，按非内容行路由（仅推进 cursor），不进
+// 内容 transition——kernel 拒绝零事件内容行，且拒绝会卡死 ledger cursor。
+// <command-name> 行不在此列（归一化为 "/cmd args" 紧凑行，仍是可见内容）。
+func isClaudeEchoOnlyUserRow(e claudeTranscriptRelayEntry) bool {
+	if e.Type != "user" || e.Message == nil {
+		return false
+	}
+	blocks := claudeRelayContentBlocks(e.Message.Content)
+	if len(blocks) == 0 {
+		return false
+	}
+	for _, b := range blocks {
+		if b.Type != "text" {
+			return false // tool_result/其他结构块：内容行，永不按 echo 跳过
+		}
+		if strings.TrimSpace(claudecode.NormalizeClaudeUserText(b.Text)) != "" {
+			return false
+		}
+	}
+	return true
 }
