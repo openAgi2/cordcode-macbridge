@@ -30,11 +30,11 @@
   },
   "reports": {
     "completion_report_path": "docs/2026-09-04-claudecode-official-capability-upgrade-design完成情况.md",
-    "completion_report_status": "missing",
-    "last_generated_at": null,
-    "based_on_queue_hash": null
+    "completion_report_status": "current",
+    "last_generated_at": "2026-09-04T14:22:33Z",
+    "based_on_queue_hash": "b6300716c723"
   },
-  "updated_at": "2026-09-04T14:07:04Z",
+  "updated_at": "2026-09-04T14:22:33Z",
   "todos": [
     {
       "id": "p0-1-control-plane-probe",
@@ -770,7 +770,7 @@
       "id": "p4-1-fixture-boundary-impl",
       "title": "Phase 4.1 文件面边界层固化",
       "description": "transcriptindex+JSONL 解析标注『无合同边界层』：真实会话归档 fixture 包（锁 type 枚举与关键字段形状）；appendJSONLRecord（custom-title）加命名空间前缀防撞；对照官方 rename_session 控制请求评估迁移（Phase 0.1 dump 为据，未 dump 前维持现状）；写入策略文档化。本 Phase 不删除任何文件面代码。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase4",
       "kind": "impl",
       "depends_on": [
@@ -780,20 +780,27 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "implementation",
+        "status": "present",
+        "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "fixture 包（真实会话保形脱敏样本，12 记录 10 type + 3 system subtype）锁 type 枚举与信封形状；custom-title 写入加 cordcode: 命名空间（读取双接受存量）；rename_session 对照结论文档化（实测 success、有意不迁移：控制帧只能达存活会话）；写入策略入 GO_BRIDGE_ARCHITECTURE Claude Code 节；未删除任何文件面代码。",
+        "artifacts": [
+          "agent/claudecode/testdata/transcript-shapes/fixture.jsonl",
+          "agent/claudecode/session_mutation.go",
+          "agent/claudecode/continuation.go",
+          "GO_BRIDGE_ARCHITECTURE.md",
+          "git:09e1688",
+          "git:92f9ba1"
+        ],
+        "checked_at": "2026-09-04T14:22:33Z"
       }
     },
     {
       "id": "p4-1-fixture-boundary-tests",
       "title": "Phase 4 fixture 回归测试",
       "description": "fixture 包 diff 回归测试（CLI 大版本升级跑 fixture diff 的机制入测试）；custom-title 命名空间防撞测试。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase4",
       "kind": "tests",
       "depends_on": [
@@ -803,20 +810,22 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "3 用例全绿：type 枚举锁（漂移=强制人工核对）、信封解码（含消息记录关键字段）、命名空间往返（新/旧/外来 type）。",
+        "artifacts": [
+          "agent/claudecode/transcript_shapes_test.go"
+        ],
+        "checked_at": "2026-09-04T14:22:33Z"
       }
     },
     {
       "id": "p4-2-regression",
       "title": "Phase 4 Release 安装与标题回归",
       "description": "Release 构建+安装+运行态核验；custom-title 命名空间迁移后会话标题在 iOS 正常显示（日志/接口级验证；真机 UI 属 owner 验收矩阵）。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase4",
       "kind": "regression",
       "depends_on": [
@@ -826,20 +835,23 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Release 构建（68f04affaa0f）→覆盖安装→重启→运行态核验：PID 88934 新代际、8777 新 PID、cordcode:custom-title 特征字符串内嵌、hooks 健康端点实测 probeOk=true。退出审计抓到 2 处回归（rename 测试旧锁定 + v0 status 契约）均已修复并全量重跑绿——审计真实生效。标题显示真机验收属 owner 矩阵。",
+        "artifacts": [
+          "git:68f04af",
+          "/tmp/cc-release-build-final.log"
+        ],
+        "checked_at": "2026-09-04T14:22:33Z"
       }
     },
     {
       "id": "p4-3-doc-sync",
       "title": "Phase 4 CHANGELOG + 边界层文档收口",
       "description": "CHANGELOG 追加；文件面边界纪律写入 GO_BRIDGE_ARCHITECTURE.md Claude Code 节；立即 commit。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase4",
       "kind": "impl",
       "depends_on": [
@@ -849,13 +861,16 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "CHANGELOG Phase 4 条目 + GO_BRIDGE_ARCHITECTURE 边界纪律注记（commit 92f9ba1）。",
+        "artifacts": [
+          "CHANGELOG.md",
+          "GO_BRIDGE_ARCHITECTURE.md"
+        ],
+        "checked_at": "2026-09-04T14:22:33Z"
       }
     }
   ]
