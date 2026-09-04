@@ -94,3 +94,15 @@ iOS（claudecode/official-capability-ios）：`8c707a1e` Phase 2 接线 → `138
 | 5 | 会话内改权限档（如 acceptEdits） | iPhone 设置权限模式 | 当前会话即时生效（appliesTo=current_session） |
 
 > 逐行回报 ✅/❌ + 现象即可；#4 也可由 agent 代查日志。
+
+## 7. owner 真机验收结果（2026-09-04 22:47，修复后部署 cf7ef6e）
+
+| # | 结果 | 说明 |
+| --- | --- | --- |
+| 1 模型列表三键 | ✅（瑕疵豁免） | 官方槽位列表正确、观测名（glm-5.3）显示；resolved 前缀未显示——owner 裁决"不是核心问题，可以不修" |
+| 2 会话内切模型即时生效 | ✅ + 已修复 | 即时生效确认；截图（glm-vision 代阅）证实"一堆提示"=0 条错误，实为 3 条 CLI 命令回显 XML 气泡（`<local-command-*>`），系 live 投影路径缺归一化（冷历史已有）——commit cf7ef6e 修复（导出 NormalizeClaudeUserText 并接入 live 投影两处）+2 回归测试+已部署。注意：已入库的旧 XML 行不回改，重测请再切一次模型看新行 |
+| 3 停止=停回合留进程 | ✅ | 符合预期（S8 裁决 a 行为） |
+| 4 Stop hook 定向刷新 | ✅（agent 代查） | 本代 runtime 日志 4 次 `claude hook: Stop → targeted refresh`（22:43–22:57，owner 测试会话 f4c4439b） |
+| 5 权限档即时生效 | ✅ | 符合预期 |
+
+验收矩阵 5/5 通过（#1 带 owner 豁免项；#2 修复后待 owner 复测一次）。
