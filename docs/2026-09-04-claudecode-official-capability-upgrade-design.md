@@ -1,11 +1,11 @@
 # Claude Code backend 官方能力收敛升级设计（source-first 对齐四 backend 重构范式）
 
-状态：**v2.1 修订稿（2026-09-04）**。v1 经一轮评审「修改后通过（APPROVE WITH
-CHANGES）」（`docs/2026-09-04-claudecode-official-capability-upgrade-design-review.md`），
-v2 采纳 B1–B3 / M1–M6 / S1–S10 与两项裁决（记录 §11.1–11.5）；v2 经二轮评审
-「通过（APPROVE）」（`docs/2026-09-04-claudecode-official-capability-upgrade-design-review-r2.md`），
-v2.1 落实二轮建议 R2-S1..S7（记录 §11.6，无不采纳项）。
-未进入实施；实施前必须完成 §6 Phase 0 证据门并重新生成来源清单。
+状态：**v2.2 修订稿（2026-09-04）**。v1 一轮「修改后通过」（…design-review.md），
+v2 采纳 B1–B3 / M1–M6 / S1–S10 与两项裁决（§11.1–11.5）；v2 二轮「通过」（
+…design-review-r2.md），v2.1 落实 R2-S1..S7（§11.6）；v2.1 三轮「通过（APPROVE），
+设计层可以停」（…design-review-r3.md），v2.2 落实 R3-S1..S4 与 HEAD 锚注记
+（§11.7，无不采纳项）。未进入实施；实施前必须完成 §6 Phase 0 证据门并重新生成
+来源清单。
 
 范式参照：`docs/2026-08-16-dsh-web-backend-design.md`、
 `docs/2026-08-20-opencode-web-source-first-convergence-plan.md`、
@@ -23,7 +23,8 @@ v2.1 落实二轮建议 R2-S1..S7（记录 §11.6，无不采纳项）。
 分支=plan/approval-layer
 提交=1d60760（v2 与一轮评审已随 0514e97 入库；390ed6e 只改 go-bridge RPC 信封、
   不向 Claude stdin 发控制请求——"发送侧控制=零"仍成立，一轮评审 §0 已核）
-未提交状态=未跟踪二轮评审文件与本 v2.1 修订
+未提交状态=已修改设计稿（v2.2 相对入库 v2=0514e97 的跟踪修改）；未跟踪 r2/r3
+  两份评审文件（R3-S1）
 任务预期分支=本方案定位为 plan/approval-layer 续作（评审 M3 冻结，owner 经 2026-09-04 修订指示采纳）；
   文件暂存于本工作树 docs/、未提交；进入实施前按该配对落分支，配对未定时改 agent/claudecode 或 iOS 视为 P0 来源门失败
 配套仓库路径/分支/提交=/Users/jacklee/Projects/cordcode-macbridge / main / a2200cf4771b7ded4a09577bdcf9599d145d93c1（只读参照四份范式文档与 CLAUDE.md）
@@ -142,7 +143,7 @@ iOS 侧代码。
 
 | 控制请求 subtype | 证据 | 语义 |
 |---|---|---|
-| `initialize` | [SDK] sdk.d.ts:3989-3994 | 会话初始化：返回 `commands` / `agents` / `output_style` / **`models: ModelInfo[]`** / 账户信息。`ModelInfo`（sdk.d.ts:1266+）字段完整：`value`（API 调用用的 id）/ **`resolvedModel`（别名→canonical，官方例 'sonnet' → 'claude-sonnet-5'——正是 iOS「haiku → glm-5.3」行渲染需要的字段）** / `displayName` / `description` / `supportsEffort` / `supportedEffortLevels` / `supportsAdaptiveThinking` / `supportsFastMode` / `supportsAutoMode`。SDK `Query.supportedModels()`（:2738）即取自 initialize 缓存。注意 initialize 有副作用（hooks 注册、first-attached-client-wins、`perTaskStopAffordance`），入 Phase 0 探针清单。本机 streaming spawn 的成功体**[待实测]** |
+| `initialize` | [SDK] sdk.d.ts:3989-3994 | 会话初始化：返回 `commands` / `agents` / `output_style` / **`models: ModelInfo[]`** / 账户信息。`ModelInfo`（sdk.d.ts:1266+）字段完整：`value`（API 调用用的 id）/ **`resolvedModel`（别名→canonical，官方例 'sonnet' → 'claude-sonnet-5'——正是 iOS 三键行渲染需要的 canonical 键；注意 canonical 与观测改写名是两件事：`sonnet` 的 resolved 是 `claude-sonnet-5`，观测改写名可能是 `glm-5.3`，haiku 族主改写更不是 glm-5.3，见 §3.3；R3-S2）** / `displayName` / `description` / `supportsEffort` / `supportedEffortLevels` / `supportsAdaptiveThinking` / `supportsFastMode` / `supportsAutoMode`。SDK `Query.supportedModels()`（:2738）即取自 initialize 缓存。注意 initialize 有副作用（hooks 注册、first-attached-client-wins、`perTaskStopAffordance`），入 Phase 0 探针清单。本机 streaming spawn 的成功体**[待实测]** |
 | `list_models` | [SDK] sdk.d.ts:4051-4053 | `{subtype:'list_models'}`。JSDoc："Requests the worker's selectable model catalog… the worker's provider, settings cascade, and enforcement policy decide which models the session can run, so the thin client must **ask rather than read its own getModelOptions()**"，面向 thin-client 场景。**SDK 中不存在成功响应类型**（全 package 仅此一处 JSDoc 提及 `modelCatalog`）——成功体先 dump 再写解析器（M1）。CLI 2.1.234 支持性**[待实测]**；`caps.modelCatalog` 非 typed cap（见 M2），能力探测=在 init `capabilities[]`（sdk.d.ts:5131-5134，open set，JSDoc 仅点名 `interrupt_receipt_v1`/`interrupt_cancel_queued_v1`/`queued_notifications`）里搜字符串 + 以实发结果为准 |
 | `set_model` | [SDK] sdk.d.ts:4377-4384 | `{subtype:'set_model', model?: string\|null}`；省略/null/`'default'` 重置为会话默认模型。会话内切换。**[待实测]** |
 | `set_permission_mode` | [SDK] sdk.d.ts:4389+ | 会话内权限模式切换；`mode` **必填**，enum 含 `default`/`plan`/`acceptEdits`/`dontAsk`/`auto`/`bypassPermissions`。使用边界见 §6 Phase 2（活会话禁 plan/auto）。**[待实测]** |
@@ -189,7 +190,7 @@ SDK 侧确认的相关选项：`canUseTool`（sdk.d.ts:1454）、`forkSession`�
 | 外部 turn 事件总线 | 无 server；hooks 是唯一官方跨进程信号，但注入面受 M4 裁决收缩 | [文档]+架构事实 |
 | 官方 API `/v1/models` | api.anthropic.com 存在该端点，**官方鉴权是 `x-api-key`**；`Authorization: Bearer` 用于 WIF 短时 token，**不是把 API key 当 Bearer 的官方用法**（M6 修正）。网关兼容性参差：bigmodel 有（10 模型），cc-switch 本地代理不透传（**[实测]**，Phase 0 复测） | [实测]+[文档] |
 
-### 2.4 现状盘点（树内 @ 390ed6e；发送侧控制通道闲置 + 三个准确性修正）
+### 2.4 现状盘点（树内 @ 1d60760，其后仅 docs 提交、"发送侧=零"等源码结论未变；实施前按 HEAD 重核；发送侧控制通道闲置 + 三个准确性修正）
 
 | 现状 | 树内锚点 | 与目标的差距 |
 |---|---|---|
@@ -382,7 +383,9 @@ L3 不删除任何文件面代码，只加边界纪律。
    canonical，官方方向）；槽位短名沿用现有 wire `id`（haiku/sonnet/opus）；
    **不复用 `core.ModelOption.Alias`**——其语义是 canonical 的**短名**（方向
    相反），且当前 wire 从不下发 Alias（settings_models.go 不填、
-   modelItemsForWire 只发 id/name；R2-S2）。观测改写名单独键，不与 resolved 混排。
+   modelItemsForWire 只发 id/name；R2-S2）。观测改写名单独键（wire 键名 Phase 1
+   实施时定，建议 `observedModel`，同步进 docs/protocol/ canonical pack；探针前
+   不强制——R3-S3），不与 resolved 混排。
 2. **刷新/对照：`list_models`**——thin-client 场景的目录刷新；成功体形状以 Phase 0
    dump 为准，未知形状 fail closed 跳过。
 3. **观测补充**：assistant `message.model` 从 usage 旁路**接线进目录**（session.go:
@@ -470,7 +473,7 @@ L3 不删除任何文件面代码，只加边界纪律。
 - **未取得样本前禁止当已核实的形状**（评审 §5 红线清单）：`list_models` 成功体、
   本机 streaming spawn 的 `initialize` 成功体、`set_model`/`set_permission_mode`/
   `interrupt` 的 control_response 原文、PostModelSwitch/Stop/SessionStart HTTP POST
-  原文、`--settings` 与 user hooks 合并后的 effective hooks。
+  原文、`rename_session` 成功体（R3-S4）、`--settings` 与 user hooks 合并后的 effective hooks。
 - 探针脚本保留入仓（对标 DSH_TURN_REPRO），供 CLI 升级后复测。
 - 控制协议 fixture 用真实 control_response 原文；未知 subtype/失败响应必须让功能
   降级而非测试绿。
@@ -632,6 +635,21 @@ v2.1 全部采纳，无不采纳项：
 | R2-S5 | `rename_session` 进 Phase 0.1 发送清单，与 Phase 4.2 对齐 | §6 Phase 0.1、Phase 4.2 |
 | R2-S6 | initialize 类型行号 :3989；§11.1 B1 落点纠错；bypassPermissions 探针单列记录（需 `allowDangerouslySkipPermissions`，本地 auto-approve 无历史可推断） | §2.1、§5、§10、§6 Phase 0.1、§11.1 |
 | R2-S7 | `initialize.hooks`（SDK callback matcher，走 `hook_callback`）与 `--settings` HTTP hook（settings 层）是两套机制；`hooks_applied` 只管前者；补"省略 initialize.hooks 不影响 --settings HTTP hook"对照项 | §6 Phase 0.3 |
+
+### 11.7 第三轮评审（r3）采纳记录（v2.1 → v2.2，2026-09-04）
+
+r3 结论：**通过（APPROVE），设计层可以停，下一步是 Phase 0 证据包**；报告
+`docs/2026-09-04-claudecode-official-capability-upgrade-design-review-r3.md`。
+v2.2 全部采纳，无不采纳项；按 r3 §2 要求**不追**瞬时 sqlite 计数（文档已声明
+漂移，haiku 多映射事实为锚）：
+
+| 项 | 内容 | 落点 |
+|---|---|---|
+| R3-S1 | §0.1 未提交状态纠错：设计稿是已跟踪修改（相对入库 v2=0514e97），未跟踪的是 r2/r3 评审 | §0.1 |
+| R3-S2 | `resolvedModel` 例子不再用「haiku → glm-5.3」（那是观测改写名且非 haiku 主改写）；改为「`sonnet` → resolved `claude-sonnet-5`，观测可能是 `glm-5.3`」，写明 canonical 与观测是两件事 | §2.1 |
+| R3-S3 | 观测改写名 wire 键名：Phase 1 实施时定（建议 `observedModel`）并进 protocol pack，探针前不强制 | §6 Phase 1.1 |
+| R3-S4 | `rename_session` 成功体补进 §7.1「未 dump 不得当已核实」红线清单，与其他 control_response 同等 | §7.1 |
+| 附注 | §2.4 树内锚 390ed6e → 1d60760（其后仅 docs 提交，"发送侧=零"结论未变；实施前按 HEAD 重核） | §2.4 |
 
 ---
 
