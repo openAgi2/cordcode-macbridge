@@ -14,6 +14,45 @@
   只读 HTTP 请求，仅 list 类，未执行任何命令、未发送任何消息）与**源码/文档结论**分开标注。
   Claude 无本机官方源码仓，以官方文档 + CLI 2.1.234 实测 dump（仓内归档）为准。
 
+## 修订记录
+
+- **v1.0（2026-09-04 调研/成文）**：初版，commit `b1b08e8` 入库。
+- **v1.1（2026-09-04）**：按独立评审报告
+  [docs/2026-09-04-slash-command-skill-cross-backend-survey-review.md](2026-09-04-slash-command-skill-cross-backend-survey-review.md)
+  （结论：**有条件通过**——主结论全部独立坐实，作立项基线前须修 2 条 A 级）修订。评审全部
+  14 项（A1/A2 + B1–B12）与未核实 #3 的收口建议，本轮**逐项亲验后全部采纳，无不采纳项**；
+  亲验方式与逐项处置见下表。
+
+| 评审项 | 处置 | 亲验与说明 |
+| --- | --- | --- |
+| A1 Codex §6.3 RespondPermission 写错 | **采纳** | 亲验：`session.go:121-123` 实为 `Events`/`CurrentSessionID`/`Alive`；`RespondPermission` 在 `plan_review.go:104` 且代理到已实现的计划审批应答；`ErrNotSupported` 的是 `RespondQuestion`/`RejectQuestion`（`session.go:135-136`）。误引来源：v1.0 沿用了 09-03 计划调研 §4.4 的时点结论（当时为真，plan 审批落地 commit `654dd8b` 后过时），未按当前树复核——已改写 §6.3 |
+| A2 DSH §3.4「权限无入口」引退役 backend | **采纳** | 亲验：`SelectionSheets.swift:230-231` 属退役 `.deepSeek`；`.deepSeekWeb` 在 `:232-233`；`prefersComposerPermissionModes` 对 `.deepSeek/.deepSeekWeb` 均为 true（`Services/Backend/BackendModels.swift:80-87`，且兜底于 capability 之前——stale hello 仍显示）。DSH permission 的 iOS 写入口已存在（composer 权限菜单 → `set_permission_mode` → Mac `commands/execute /permission`）；`/` 面板对 DSH 的增量 = 整表命令（含 `/plan`）+ 技能组。§3.4/§3.5-D 已改写 |
+| B1 Codex 斜杠枚举 ~70 → 59 | 采纳 | 亲验 awk 计数 = 59 个变体 |
+| B2 六 subtype dump 引用错文件 | 采纳 | 亲验 `main-summary.json` 8 verdicts 覆盖除 bypass 外全部；bypassPermissions 单独在 `bypass-summary.json` |
+| B3 OC 聚合行号 | 采纳 | 亲验 `:46` 是 `Default{INIT,REVIEW}`；聚合散布 `:105`(mcp)/`:134`(skills)/`:166 Command.list` |
+| B4 DSH 转发 allowlist 路径张冠李戴 | 采纳 | 亲验 `API_REMOTE_FORWARDED_EVENTS` 真身在 `remotes/src/remote-events.ts:16-35`（含 `commands/change`，**不含** `command/run|done`——后者只走 session/follow，正文原句已对）；`gateway/src/stream-protocol.ts` 是 mux 帧类型 |
+| B5 OC `/skill` 11 → 12 | 采纳 | v1.0 为笔误（探针原始输出即 12 行）；本轮活体重探仍 12。已注明计数随本机技能库增减 |
+| B6 Grok pager builtin ~60 → 71 | 采纳 | 亲验 `Arc::new(` 计数 = 71（含 hidden） |
+| B7 catalog `session/list` 行号 | 采纳 | 亲验 `:78-80` 是子进程单例注释；RPC 调用 `:319`（`:262` 起为 section） |
+| B8 `handlePlanBroadcast` 行号 | 采纳 | 亲验 `:670-679` 为注释块、函数在 `:680` |
+| B9 iOS 行号三处 | 采纳 | 亲验 `agentTag :144`（146 是 modelTag）、`mapWirePlanReview :1542`、`PlanModeEntryAction :412`；另补正文件路径为 `Services/Backend/BackendModels.swift` |
+| B10 活体命令顺序 | 采纳 | 亲验本人探针原始输出即 name 排序（compact/export/feedback/goal/permission/plan）；v1.0 按截图顺序誊写。集合不变 |
+| B11 execute payload 归属混淆 | 采纳 | 亲验 CordCode 生产 `commandsExecuteRequest` 仅 `{AgentID, Line}` 无 images；`/plan off`+images 是官方 fixture/web 客户端形状。已拆开表述 |
+| B12 `command_exec.rs` 路径缺前缀 | 采纳 | 补 `app-server-protocol/src/protocol/` 前缀（§6.2 三处 `v2/*.rs` 同步补全） |
+| 未核实 #3 部分收口 | 采纳 | 亲验同一 dump：`skills` 为 **22 个名字字符串**（首元素 audit-plan，非对象）；`initialize.commands` 键全集 `{name, description, argumentHint, aliases}`，22/48 带 hint。#3 改写为仅剩「无独立 source 字段 / `aliases` 语义未核对」两点开放 |
+
+修订时点来源清单（P0 门，2026-09-04 修订开始时实测）：
+
+```text
+本仓=/Users/jacklee/Projects/cordcode-macbridge-plan-approval  plan/approval-layer  b1b08e8（v1.0 入库后无源码提交）
+  未提交状态=未跟踪 docs/…survey-review.md（评审报告，owner 侧写入）+ docs/…survey-brief.md（owner 指令，v1.0 即在）
+配套 iOS=main db7972cf（与 v1.0 一致，未变）
+辅助 Mac=claudecode/official-capability  1b2a0224（v1.0 钉 ee46068 后该树继续前进至 31/31 收口报告，
+  仍未合入 main——「在途」定性不变；dumps 文件未变，本轮 B2/#3 亲验均按当前树重读）
+上游四仓：与 v1.0 钉位一致，未变
+本轮新活体：仅 OpenCode GET /skill 计数复核（12）；其余亲验为源码行号/计数/dump 重读
+```
+
 ---
 
 ## 0. 来源清单（P0 门，2026-09-04 调研开始时实测）
@@ -119,8 +158,9 @@ owner 截图里的技能名单 = 这个共享库的投影。
   `packages/plan/plan-mode/src/index.ts:226`）、permission（`packages/interaction/permission-presets/src/index.ts:257`）、
   compact、export、goal、feedback；`/model` 不在 host 表（纯客户端 contribution）。
 - **Plan 是否在列表里**：**是**。`/plan` 是 host 端真命令，`input.hint='[off|message]'`，`images:true`。
-  **活体**（0.1.1-rc.2，`POST /api/commands/list`，真实 sessionId）：返回 6 条 =
-  `plan / permission / compact / export / feedback / goal`——与 owner 截图命令集完全一致
+  **活体**（0.1.1-rc.2，`POST /api/commands/list`，真实 sessionId）：返回 6 条——host `list()` 按
+  name 排序，wire 顺序 = `compact / export / feedback / goal / permission / plan`（v1.1 修正：v1.0
+  误按截图菜单顺序誊写；集合不变）——与 owner 截图命令集完全一致
   （截图中的 `model` 来自客户端 contribution，不在 host 目录，与源码结论吻合）。
   **技能活体**（0.1.1-rc.2 旧路径 `POST /api/skill.list`，payload 直传 `{sessionId}`）：返回
   `{skills:[{name, description, modelInvocable}]}` 共 8 条 = `~/.agents/skills` 全集，与截图技能集一致。
@@ -133,8 +173,10 @@ owner 截图里的技能名单 = 这个共享库的投影。
 - **命令执行**：`POST /api/commands/execute`（envelope `[DSH] packages/client/connection/src/client/rpc.ts:60-73`
   `ClientRequest{type:'client-request', rpcId, method, payload}`；`POST /api/<method>` 形态与 CordCode
   dsh-web wire 客户端一致——[Mac] `agent/dsh-web/wire.go:186` `Client.Call`，注释明言同构）。
-  **payload 实证**：`{args:{agentId:<sessionId>, line:'/plan off', images:[]}}`（[DSH]
-  `fixture.ts:3412-3432`；[Mac] `agent/dsh-web/permission_mode.go:111-131` 生产代码同形）。
+  **payload（v1.1 拆开表述）**：官方 fixture（含 `/plan off` 样本）为
+  `{args:{agentId, line, images:[...]}}`（[DSH] `fixture.ts:3412-3432`，属官方 web 客户端路径）；
+  CordCode **生产形状**仅 `{args:{agentId, line}}`——`commandsExecuteRequest` 无 images 字段
+  （[Mac] `agent/dsh-web/permission_mode.go:111-131`）。
 - **成功/失败/未知命令**：未知或语法不命中 → handler 返回 `undefined`，**不写任何日志**（[DSH]
   `packages/interaction/commands/src/index.ts:332-400` `execute`；`parseCommand:118` 正则
   `/^\/([a-z][a-z0-9_-]*)/`）；命中则先 append `command/run` → handler → `command/done`（durable
@@ -157,8 +199,10 @@ owner 截图里的技能名单 = 这个共享库的投影。
   session/prompt，host 侧注入——这是官方语义，不是 CordCode 的错误路径）。
 - **双客户端**：命令生命周期 `command/run|done` 经 `session/follow` 流广播，**每个客户端渲染为常驻
   flow node**（[DSH] `packages/client/ui-commands/src/client/service.ts:440-447` 注释原文）；本地提交 ack
-  `command/executed` 只发执行端（service.ts:41）。全局事件转发 allowlist 见 [DSH]
-  `packages/api/gateway/src/stream-protocol.ts:16-35`。
+  `command/executed` 只发执行端（service.ts:41）。全局事件转发 allowlist（`API_REMOTE_FORWARDED_EVENTS`，
+  含 `commands/change`、`approval/request`(waterfall) 等，**不含 `command/run|done`**——命令生命周期只走
+  上述 session/follow）在 [DSH] `packages/api/remotes/src/remote-events.ts:16-35`（v1.1 修正：v1.0 误指
+  `gateway/src/stream-protocol.ts`，该文件是 mux 帧类型定义，非 allowlist）。
 
 ### 3.3 CordCode Mac 现状（@bdc2cda）
 
@@ -174,12 +218,19 @@ owner 截图里的技能名单 = 这个共享库的投影。
 ### 3.4 iOS 现状（@db7972cf）
 
 - 无 `/` 面板（输入条按钮清单无命令项，[iOS] `App/ChatInputAccessoryView.swift:118-147`）。
-- DSH permission preset **无 iOS 入口**（[iOS] `Views/Chat/SelectionSheets.swift:230-231` 明文「权限模式由
-  MacBridge DSH_PERMISSION_MODE 预设控制」）。
+- DSH permission **已有 iOS 入口（v1.1 修正，推翻 v1.0 表述）**：产品 `.deepSeekWeb` 的
+  `prefersComposerPermissionModes == true`（[iOS] `Services/Backend/BackendModels.swift:80-87`，该
+  判定先于 capability 兜底——stale hello 也显示，与官方 web 对齐），叠加 dsh-web `ModeSwitcher`
+  广告的 `permission_mode` capability → **composer 权限模式菜单已显示**，经
+  `set_permission_mode` → [Mac] `commands/execute /permission` 写入。v1.0 引用的
+  `SelectionSheets.swift:230-231`「DSH_PERMISSION_MODE 预设」文案属**退役 `.deepSeek`** 分支；
+  `.deepSeekWeb` 分支在 `:232-233`（官方审批策略文案）。**`/` 面板对 DSH 的增量 = 整表 host 命令
+  （含 `/plan`）+ 技能组，不是第一次获得 permission 写路径。**
 - `/plan` 文本原样作为 `send_message.content` 发出（[iOS] `Services/Bridge/CCCodeBridgeClient.swift:370-383`，
   无拦截层）→ 按 §3.2 官方语义进模型当普通文本，不进 plan。
 - **DSH `/plan` 之后的 plan-review 卡 iOS 已能接住**（backend-agnostic 的 `permissionKind=plan_review`
-  路径，[iOS] `CCCodeBridgeBackendClient.swift:1539` / `App/TaskDockView.swift:260`）——面板接线后无需改卡面。
+  路径，[iOS] `CCCodeBridgeBackendClient.swift:1542 mapWirePlanReview`（v1.1 行号修正）/
+  `App/TaskDockView.swift:260`）——面板接线后无需改卡面。
 
 ### 3.5 接入选项（非方案；四态：supported / deliberately unsupported / not applicable / future）
 
@@ -196,8 +247,9 @@ owner 截图里的技能名单 = 这个共享库的投影。
   现有 `send_message` 已是官方通道（无需新 execute）。supported（源码+注释背书；未做端到端活体验证，
   见未核实 #1）。
 - **D. 命令与技能必须拆开**：目录分两个来源、执行两条语义（execute RPC vs prompt 文本）；`/model`
-  建议路由到已有模型面板（独立 RPC `session/selectModel`，[Mac] `agent/dsh-web/models.go:184-198` 已接），
-  `/permission` 可路由到 permission 面或命令通道（两者官方等价，前者是后者的唯一写路径）。
+  建议路由到已有模型面板（独立 RPC `session/selectModel`，[Mac] `agent/dsh-web/models.go:184-198` 已接）；
+  `/permission` 路由到**既有** composer 权限菜单入口即可（§3.4 v1.1 修正：iOS 已显示且已走
+  `set_permission_mode` → `commands/execute /permission`，面板不为其新增写路径）。
 - **not applicable**：DSH 无 agent 切换类；`/export`（ZIP 下载）在 iOS 的呈现形态属产品决策。
 
 ---
@@ -215,12 +267,14 @@ owner 截图里的技能名单 = 这个共享库的投影。
   [Skill] [Workflow] 标记 + MCP prompts（`/servername:promptname (MCP)`）。
 - **程序化目录（对桥最关键）**：CLI 2.1.234 在 CordCode 同款 spawn 参数下——
   - **stdout `system/init` 帧**已带 `slash_commands`（48 个名字）、`terminal_slash_commands`（终端专属
-    集）、`skills`、`agents`、`permissionMode`、`tools`、`mcp_servers`、`plugins`
+    集）、`skills`（**22 个名字字符串**，首元素 audit-plan——v1.1 亲验收口，非对象结构）、`agents`、
+    `permissionMode`、`tools`、`mcp_servers`、`plugins`
     （**实测 dump**：[Mac-claudecode-official@ee46068] `scripts/claudecode-phase0/dumps/envmx-A-baseline.jsonl`
     stdout 帧 keys 实录；该帧 CordCode adapter 今天就在读——[Mac] `agent/claudecode/session.go:417-418`
     `case "system"` → `handleSystem:435`，但未消费 `slash_commands`/`skills` 字段）。
-  - **控制面 `initialize` 请求**返回 `commands`（48 项，`{name, description(尾缀 " (user)" 标用户定义),
-    argumentHint}`）、`agents`（11 项）、`models`、`current_permission_mode`（**实测 dump**：
+  - **控制面 `initialize` 请求**返回 `commands`（48 项，键全集 `{name, description(尾缀 " (user)"
+    标用户定义), argumentHint, aliases}`——22/48 带 hint，v1.1 亲验；**无独立 source 字段**，来源仅
+    description 尾缀）、`agents`（11 项）、`models`、`current_permission_mode`（**实测 dump**：
     `dumps/main.jsonl` req_1 成功体；SDK 类型锚 [SDK] sdk.d.ts:3989-3994）。
   - 官方文档确认 system/init 的 `slash_commands` 就是程序化命令面（agent-sdk/skills："The `system/init`
     message lists the ones available in your session in its `slash_commands` field. Commands that need an
@@ -247,9 +301,10 @@ owner 截图里的技能名单 = 这个共享库的投影。
   `/effort` `/fast` `/color` `/rename` `/mcp` `/config key=value`；`/compact` 程序化可用（SDK 文档示例：
   发 `/compact` 文本，完成信号= `system/compact_boundary` 消息带 `compact_metadata.pre_tokens` 与
   `trigger:"manual"`；需已有对话历史，否则 success 结束 + "Not enough messages to compact."）。
-- **模式影响**：`set_permission_mode` 控制请求（**实测 dump** 六 subtype 全 success：initialize/
-  list_models/set_model/set_permission_mode(含 bypass)/interrupt(cancel_queued)/rename_session，
-  [Mac-claudecode-official@ee46068] `dumps/main-summary.json`；SDK 类型 sdk.d.ts:4389+，mode enum
+- **模式影响**：`set_permission_mode` 控制请求（**实测 dump** 六 subtype 全 success——
+  initialize/list_models/set_model/set_permission_mode/interrupt(cancel_queued)/rename_session 见
+  `dumps/main-summary.json`，bypassPermissions 档单独在 `dumps/bypass-summary.json`（v1.1 修正引用
+  文件）；[Mac-claudecode-official@ee46068]；SDK 类型 sdk.d.ts:4389+，mode enum
   default/plan/acceptEdits/dontAsk/auto/bypassPermissions）；`set_model`（sdk.d.ts:4377-4384）。
   注意在途分支已把这些接进 bridge（`docs/2026-09-04-claudecode-official-capability-upgrade-design.md`
   §2/§6；Phase 2 commit a863505）。
@@ -278,9 +333,9 @@ owner 截图里的技能名单 = 这个共享库的投影。
 ### 4.4 iOS 现状（@db7972cf）
 
 - 无 `/` 面板；**Claude Plan 入口已交付**（[iOS] `App/ChatUIKitContainerView.swift:5939
-  makePermissionModeMenu` + `SelectionSheets.swift:345 setMode` + `BackendModels.swift:409
-  PlanModeEntryAction`；RPC 三件套 `CCCodeBridgeClient.swift:832,844`）——这就是官方模式通道，**不是**
-  slash 面。
+  makePermissionModeMenu` + `SelectionSheets.swift:345 setMode` +
+  `Services/Backend/BackendModels.swift:412 PlanModeEntryAction`（v1.1 行号/路径修正）；RPC 三件套
+  `CCCodeBridgeClient.swift:832,844`）——这就是官方模式通道，**不是** slash 面。
 - `/plan` 文本发出 = 字面文本进模型（不在程序化命令表，CLI 不会当命令处理）——与「Plan 入口已另行
   交付」互不冲突。
 
@@ -311,15 +366,17 @@ owner 截图里的技能名单 = 这个共享库的投影。
   web/desktop 输入 `/` 弹 popover（[OC] `packages/app/src/components/prompt-input/slash-popover.tsx:22`）。
 - **列表数据源（server API，非本地扫描）**：
   - `GET /command`（[OC] `packages/opencode/src/server/routes/instance/httpapi/groups/instance.ts:139`
-    `HttpApiEndpoint.get("command",...)`；聚合 `packages/opencode/src/command/index.ts:46` 起：内置
-    `init`/`review` + MCP prompts（source:"mcp"）+ **全部技能注册为命令（source:"skill"）**）。
+    `HttpApiEndpoint.get("command",...)`；内置表 `command/index.ts:46 Default{INIT,REVIEW}`，聚合在
+    `:105`（MCP prompts，source:"mcp"）/`:134`（**全部技能注册为命令**，source:"skill"）/`:166
+    Command.list`——v1.1 行号修正，v1.0 误以 `:46` 为聚合起点）。
   - `GET /skill`（同文件 `:159-168`；技能发现 `packages/opencode/src/skill/index.ts:173
     discoverSkills`：`~/.claude/skills`、`~/.agents/skills`、项目 `.claude`/`.agents`、config
     `{skill,skills}` 目录、`skills.paths`、`skills.urls`）。
   - `GET /agent`（[OC] `packages/opencode/src/agent/agent.ts:35-55` Info schema；内置 build/**plan**/
     explore/general/compaction/title/summary）。
 - **活体（1.18.20，Basic Auth GET）**：`/command` 返回 14 条 = 2 命令（init、review，source:"command"）
-  + 12 技能（source:"skill"，模板即 SKILL.md 正文）；`/skill` 11 条带 `location`（横跨
+  + 12 技能（source:"skill"，模板即 SKILL.md 正文）；`/skill` **12** 条带 `location`（v1.1 修正计数，
+  v1.0 误写 11——探针原始输出即 12 行；计数随本机技能库增减，评审时刻活体复核仍 12；横跨
   `~/.agents/skills`、`~/.config/opencode/skills`、`~/.claude/skills`）；`/agent` 7 个（**plan 为
   built-in primary**，build agent 的 permission 表含对 `~/.claude/skills/*` 的 external_directory
   allow——技能库共享的运行时证据）。
@@ -372,8 +429,9 @@ owner 截图里的技能名单 = 这个共享库的投影。
 
 ### 5.4 iOS 现状（@db7972cf）
 
-- 无 `/` 面板；输入条有通用 `agentTag`（[iOS] `App/ChatInputAccessoryView.swift:146`）与
-  `ChatViewModel+AgentSelection.swift`——**opencode-web 的 plan agent 是否已能经此选择未核实**（#7）。
+- 无 `/` 面板；输入条有通用 `agentTag`（[iOS] `App/ChatInputAccessoryView.swift:144`，v1.1 行号修正，
+  146 是 modelTag）与 `ChatViewModel+AgentSelection.swift`——**opencode-web 的 plan agent 是否已能经此
+  选择未核实**（#7）。
 - 无 permission/mode 入口（opencode-web 不广告 `permission_mode`）。
 
 ### 5.5 接入选项
@@ -395,9 +453,9 @@ owner 截图里的技能名单 = 这个共享库的投影。
 ### 6.1 官方 `/` 面板（源码 @50fffd5）
 
 - **打开方式**：TUI 输入 `/` 弹内置枚举（[Codex] `codex-rs/tui/src/slash_command.rs:12
-  pub enum SlashCommand`，~70 条；动态 service-tier 命令 `tui/src/bottom_pane/slash_commands.rs:84
-  commands_for_input`）。**无自定义斜杠命令**（全仓无 `~/.codex/commands` 类机制；`codex-rs/prompts`
-  crate 是内置系统提示词不是用户命令）。
+  pub enum SlashCommand`，**59 个变体**——v1.1 亲验计数，v1.0 写「~70 条」偏大；动态 service-tier 命令
+  `tui/src/bottom_pane/slash_commands.rs:84 commands_for_input`）。**无自定义斜杠命令**（全仓无
+  `~/.codex/commands` 类机制；`codex-rs/prompts` crate 是内置系统提示词不是用户命令）。
 - **列表数据源**：TUI 本地枚举 + `model/list` 派生——**协议层没有命令目录方法**（§6.2）。
 - **技能（独立子系统，非命令）**：SKILL.md 发现（[Codex] `codex-rs/ext/skills/src/host_roots.rs:73
   roots_from_layer_stack`：项目 config skills、`~/.agents/skills`(:103-108)、`$CODEX_HOME/skills`、
@@ -416,16 +474,18 @@ owner 截图里的技能名单 = 这个共享库的投影。
 ### 6.2 官方执行通道
 
 - **没有命令 list/execute 面**：`command/*` 全家是 **OS 进程沙箱执行**（[Codex]
-  `v2/command_exec.rs:21-30 CommandExecParams` 注释原文 "Run a standalone command (argv vector) in the
-  server sandbox without creating a thread or turn"）与 shell 字符串（`thread/shellCommand`，
-  `v2/thread.rs:1126`）——**与斜杠命令无关**。TUI 斜杠动作在协议层散落为独立方法：
+  `app-server-protocol/src/protocol/v2/command_exec.rs:21-30 CommandExecParams` 注释原文 "Run a
+  standalone command (argv vector) in the server sandbox without creating a thread or turn"）与 shell
+  字符串（`thread/shellCommand`，`app-server-protocol/src/protocol/v2/thread.rs:1126`）——**与斜杠命令
+  无关**。TUI 斜杠动作在协议层散落为独立方法：
   `/compact`→**`thread/compact/start`**（common.rs:657；进度走 turn/item 通知，完成发
   `thread/compacted`:1917）；`/model`→`model/list`(:1043)+`thread/settings/update.model/effort`；`/plan`→
   `thread/settings/update.collaborationMode`（或 `turn/start.collaborationMode:972`）；`/review`→
   `review/start`:1037；`/recap`→`getConversationSummary`:1375；`/init`→本地 prompt 当普通消息。
 - **技能执行**：模型侧 `skills_list`/`skills_read` 工具（[Codex] `ext/skills/src/tools/mod.rs:58`）+
   提示词目录注入；**用户侧 = `$<skill-name>` mention**：`turn/start` input 的
-  `UserInput::Skill{name, path}`（[Codex] `v2/turn.rs:419`；app-server README.md:2119 有 JSON 原文示例）。
+  `UserInput::Skill{name, path}`（[Codex] `app-server-protocol/src/protocol/v2/turn.rs:419`（v1.1 补全
+  路径前缀）；app-server README.md:2119 有 JSON 原文示例）。
 - **collaborationMode（Plan）**：`ModeKind{Plan,Default}`（[Codex] `protocol/src/config_types.rs:673`）；
   `turn/start.collaborationMode` 与 `thread/settings/update.collaborationMode` 字段**均标 EXPERIMENTAL**
   （`v2/turn.rs:244`、`v2/thread.rs:265`）；预设列表 `collaborationMode/list`:1112；实验门：未声明
@@ -449,7 +509,13 @@ owner 截图里的技能名单 = 这个共享库的投影。
   （`thread/settings/update`）、`:31 planImplementationCodingMessage = "Implement the plan."`。
 - **无命令/技能调用**：`skills/list`、`collaborationMode/list`、`thread/compact/start` 均未接
   （[Mac] `agent/codex-remote/` grep 无）。
-- RespondPermission 为 `ErrNotSupported`（[Mac] `session.go:121-123`，既有调研已记录）。
+- **计划审批应答已实现（v1.1 修正，推翻 v1.0 表述）**：`RespondPermission` 在
+  [Mac] `agent/codex-remote/plan_review.go:104`，代理到 `RespondSessionPermission`（计划审批卡的
+  approve/requestChanges/quit 应答路径，产品已交付）；真正 `ErrNotSupported` 的是
+  `RespondQuestion`/`RejectQuestion`（`session.go:135-136`）。v1.0 曾把 `session.go:121-123` 误标为
+  RespondPermission 不支持——该三行实为 `Events`/`CurrentSessionID`/`Alive`；误引根源是沿用了
+  09-03 计划调研 §4.4 的时点结论（彼时为真，plan 审批落地 commit `654dd8b` 后即过时），未按当前树
+  复核。引用本节时以本条为准。
 
 ### 6.4 iOS 现状（@db7972cf）
 
@@ -475,10 +541,10 @@ owner 截图里的技能名单 = 这个共享库的投影。
 
 - **打开方式**：TUI 输入 `/` 弹下拉（pager 层）。
 - **列表数据源（双层）**：
-  - pager 本地全集（~60 条，[Grok] `crates/codegen/xai-grok-pager/src/slash/commands/mod.rs:75
-    builtin_commands()`）：tutorial、settings、dashboard、…、model、effort、context、compact、…、
-    **plan**、view-plan、…、skills、… 等，动作经 `CommandResult::{Action, QueueCommand, PassThrough,
-    Error}` 表达（`slash/command.rs`）。
+  - pager 本地全集（**71 项注册、含 hidden**——v1.1 亲验计数，v1.0 写「~60 条」偏小；[Grok]
+    `crates/codegen/xai-grok-pager/src/slash/commands/mod.rs:75 builtin_commands()`）：tutorial、
+    settings、dashboard、…、model、effort、context、compact、…、**plan**、view-plan、…、skills、… 等，
+    动作经 `CommandResult::{Action, QueueCommand, PassThrough, Error}` 表达（`slash/command.rs`）。
   - shell 端 builtin（agent core 解析）：[Grok] `crates/codegen/xai-grok-shell/src/session/slash_commands.rs:66
     BUILTIN_COMMANDS`（compact、always-approve/yolo、flush、dream、memory、context、hooks-*、plugins、
     reload-plugins、session-info、feedback、deep-research、workflow、goal；`PROMPT_COMMANDS` 含 loop）。
@@ -537,11 +603,13 @@ owner 截图里的技能名单 = 这个共享库的投影。
 - **list**：未接。[Mac] `agent/grokbuild/acp_types.go:102 initializeResult` 只解码
   protocolVersion/agentCapabilities/agentInfo/authMethods/`_meta`（仅 `modelState` 被消费，
   `session.go:309-311`）——`availableCommands` 在 `_meta` 里但未解码；catalog 子进程
-  （`grok agent --no-leader stdio`，[Mac] `catalog_session_list.go:78-80`）只用于 `session/list` +
-  模型目录，未调 `x.ai/commands/list`。
+  （`grok agent --no-leader stdio`；子进程单例注释 [Mac] `catalog_session_list.go:78-80`，`session/list`
+  RPC 调用 `:319`、frozen item 定义 `:262` 起——v1.1 行号修正）只用于 `session/list` + 模型目录，
+  未调 `x.ai/commands/list`。
 - **execute**：prompt 文本通道未用于命令；SetMode 只写内存（[Mac] `grokbuild.go:573`；全包无
   `session/set_mode` 调用）；模型切换是真实接线（`session.go:480` `session/set_model`）。
-- plan 审批卡走 leader 广播 `x.ai/exit_plan_mode`（[Mac] `leader_subscriber.go:672`，已交付）。
+- plan 审批卡走 leader 广播 `x.ai/exit_plan_mode`（[Mac] `leader_subscriber.go:680
+  handlePlanBroadcast`，v1.1 行号修正——`:670-679` 为注释块；已交付）。
 
 ### 7.4 iOS 现状（@db7972cf）
 
@@ -613,9 +681,12 @@ owner 截图里的技能名单 = 这个共享库的投影。
    host pre-step 注入的完整链路未做活体验证（源码+官方注释背书；探针仅覆盖 list 类）。
 2. **DSH rc.2 与 master 的事件载体差异**：`API_REMOTE_FORWARDED_EVENTS`（mux 转发 allowlist）核实自
    master；0.1.1-rc.2 的 apiproxy 形态未逐项对照（影响第二客户端对 `commands/change` 类事件的感知面）。
-3. **Claude `system/init` 的 `skills` 数组元素结构**：dump 确认键存在与 `slash_commands` 内容（48 项），
-   `skills` 元素的逐字段结构未 dump；`initialize.commands` 的 description 尾缀 `(user)` 是唯一来源
-   标记，未见独立 source 字段。
+3. **Claude 目录字段残余（v1.1 部分收口）**：原开放项「`system/init` 的 `skills` 数组元素结构」已由
+   同一 dump 亲验收口——`skills` 为 **22 个名字字符串**（非对象，首元素 `audit-plan`），
+   `slash_commands` 48 个名字，`initialize.commands` 键全集 `{name, description, argumentHint,
+   aliases}`（22/48 带 hint），已写入 §4.1。仍开放两点：**无独立 source 字段**（用户定义的标记只有
+   description 尾缀 `(user)`，插件/内置项无区分位）；`aliases` 字段的语义与消费方式未在文档/类型中
+   核对。
 4. **Codex 装机版与 checkout 差异**：ChatGPT.app codex-cli 0.153.0-alpha.5 vs checkout main@50fffd5
    未逐项 diff（skills/app-server 面）；TUI `/plan` 双客户端模式下 Desktop 模式指示漂移问题（另案
    文档 §4.4 既有问题）未验。
