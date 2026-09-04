@@ -87,7 +87,7 @@ func scanClaudeContinuityWindow(
 		if json.Unmarshal(scanner.Bytes(), &envelope) != nil {
 			continue
 		}
-		if info.CustomTitle == "" && envelope.Type == "custom-title" {
+		if info.CustomTitle == "" && isClaudeCustomTitleRecord(envelope.Type) {
 			info.CustomTitle = strings.TrimSpace(envelope.CustomTitle)
 		}
 		if info.CreatedAt.IsZero() && envelope.Timestamp != "" {
