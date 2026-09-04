@@ -39,7 +39,7 @@ func TestRenameSession_AppendsCustomTitleAndUpdatesListSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(%q): %v", path, err)
 	}
-	if got := string(content); !containsAll(got, `"type":"custom-title"`, `"customTitle":"新的会话标题"`) {
+	if got := string(content); !containsAll(got, `"type":"cordcode:custom-title"`, `"customTitle":"新的会话标题"`) {
 		t.Fatalf("session file missing custom-title record: %s", got)
 	}
 

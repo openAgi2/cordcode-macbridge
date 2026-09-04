@@ -244,3 +244,12 @@ func (h *Handlers) nudgeClaudeRelay(sessionID string) {
 	default:
 	}
 }
+
+// claudeHookStatusPath is the health-status GET endpoint (Bearer auth).
+const claudeHookStatusPath = "/internal/hooks/claude/status"
+
+// handleClaudeHookStatus reports the honest hook-source health (S3).
+func (s *ManagementServer) handleClaudeHookStatus(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(s.claudeHookHealth.snapshot())
+}

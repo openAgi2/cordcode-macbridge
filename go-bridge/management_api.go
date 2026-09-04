@@ -254,6 +254,15 @@ func (s *ManagementServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveClaudeHook(w, r)
 		return
 	}
+	// hooks 事件源健康状态（S3 如实上报）：独立 GET 端点，保持 /internal/status
+	// 的 v0 observed 契约（R11：恰好 5 个 string 字段）字节稳定。
+	if r.URL.Path == claudeHookStatusPath && r.Method == http.MethodGet {
+		if !s.checkAuth(w, r) {
+			return
+		}
+		s.handleClaudeHookStatus(w, r)
+		return
+	}
 
 	if !s.checkAuth(w, r) {
 		return
@@ -385,7 +394,6 @@ func (s *ManagementServer) handleStatus(w http.ResponseWriter, _ *http.Request) 
 		"displayName": displayName,
 		"uptime":      s.now().Sub(s.startedAt).String(),
 		"version":     runtimeVersion,
-		"claudeHooks": s.claudeHookHealth.snapshot(),
 	}
 	if s.admission != nil {
 		s.syncAdmissionInputs()
