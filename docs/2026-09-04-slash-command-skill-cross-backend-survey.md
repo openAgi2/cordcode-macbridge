@@ -22,6 +22,14 @@
   （结论：**有条件通过**——主结论全部独立坐实，作立项基线前须修 2 条 A 级）修订。评审全部
   14 项（A1/A2 + B1–B12）与未核实 #3 的收口建议，本轮**逐项亲验后全部采纳，无不采纳项**；
   亲验方式与逐项处置见下表。
+- **v1.2（2026-09-04）**：第二轮评审
+  [docs/2026-09-04-slash-command-skill-cross-backend-survey-review-r2.md](2026-09-04-slash-command-skill-cross-backend-survey-review-r2.md)
+  （结论：**通过**——上一轮 14 项逐项复核均已落到正文而非仅修订表，可作立项事实输入；无新必改）。
+  建议级 2 项**采纳**：R2-S1 `command/index.ts:46` 精确为 `export const Default = {` 起始行（INIT/REVIEW
+  值在 :47-48）；R2-S2 `parseCommand` 正则补全前瞻断言（本轮亲验 `index.ts:119`，见 §3.2——`/plan`
+  不会误配 `/plan/path` 类前缀，立项解析命令行时以此为准）。本轮起 r1/r2 两份评审报告随正文成套入档
+  （owner 指示 + `0514e97` 先例）；调研指令 survey-brief 同批入库（本档作者决定：正文文首链接指向它，
+  入库保持「指令 → 调研 → 评审」链在仓内自含可追溯）。
 
 | 评审项 | 处置 | 亲验与说明 |
 | --- | --- | --- |
@@ -178,8 +186,9 @@ owner 截图里的技能名单 = 这个共享库的投影。
   CordCode **生产形状**仅 `{args:{agentId, line}}`——`commandsExecuteRequest` 无 images 字段
   （[Mac] `agent/dsh-web/permission_mode.go:111-131`）。
 - **成功/失败/未知命令**：未知或语法不命中 → handler 返回 `undefined`，**不写任何日志**（[DSH]
-  `packages/interaction/commands/src/index.ts:332-400` `execute`；`parseCommand:118` 正则
-  `/^\/([a-z][a-z0-9_-]*)/`）；命中则先 append `command/run` → handler → `command/done`（durable
+  `packages/interaction/commands/src/index.ts:332-400` `execute`；`parseCommand:118-119` 正则
+  `/^\/([a-z][a-z0-9_-]*)(?=$|[\t\n\r ])/u`——v1.2 补全前瞻断言：命令名后必须紧跟行尾/空白，
+  `/plan` 不会误配 `/plan/path` 类前缀）；命中则先 append `command/run` → handler → `command/done`（durable
   会话日志事件对）；handler 出错 = `result {kind:'error', text}`（仍算已执行、有日志）；传输层失败 =
   `{ok:false, error:{code,message,details}}`。
 - **技能不走 execute**：UI 选中技能只把 `/name ` 字面文本放进输入框，随普通 `session/prompt` 发送
@@ -366,7 +375,8 @@ owner 截图里的技能名单 = 这个共享库的投影。
   web/desktop 输入 `/` 弹 popover（[OC] `packages/app/src/components/prompt-input/slash-popover.tsx:22`）。
 - **列表数据源（server API，非本地扫描）**：
   - `GET /command`（[OC] `packages/opencode/src/server/routes/instance/httpapi/groups/instance.ts:139`
-    `HttpApiEndpoint.get("command",...)`；内置表 `command/index.ts:46 Default{INIT,REVIEW}`，聚合在
+    `HttpApiEndpoint.get("command",...)`；内置表 `command/index.ts:46-48 Default{INIT,REVIEW}`（:46 为
+    `export const Default = {` 起始行，INIT/REVIEW 值在 :47-48——R2-S1 精确化），聚合在
     `:105`（MCP prompts，source:"mcp"）/`:134`（**全部技能注册为命令**，source:"skill"）/`:166
     Command.list`——v1.1 行号修正，v1.0 误以 `:46` 为聚合起点）。
   - `GET /skill`（同文件 `:159-168`；技能发现 `packages/opencode/src/skill/index.ts:173
