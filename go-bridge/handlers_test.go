@@ -2826,10 +2826,12 @@ func TestClaudeFileRelayAndAgentRelayRunConcurrentlyRaceFree(t *testing.T) {
 	appendClaudeFileRelayTranscript(t, path,
 		`{"type":"assistant","uuid":"both-asst","message":{"id":"msg_both","role":"assistant","content":[{"type":"text","text":"file done"}],"stop_reason":"end_turn"}}`)
 
-	// 4. Overlap window: collect events until output from BOTH relays is observed.
+	// 4. Overlap window（官方单源模型，2026-09-05）：agent relay（stdout，官方
+	// 消费面）活跃时，file-relay 的 assistant 完成态正文不再作为第二来源投递
+	// （owner 真机「回复重复」根因）——断言 stdout 流式到达且 file-relay 不重复。
 	deadline = time.Now().Add(2 * time.Second)
-	var sawAgentText, sawFileText bool
-	for time.Now().Before(deadline) && !(sawAgentText && sawFileText) {
+	var sawAgentText, sawDuplicateFileText bool
+	for time.Now().Before(deadline) && !sawAgentText {
 		m := readEventOrTimeout(t, clientConn, 300*time.Millisecond)
 		if m == nil {
 			continue
@@ -2840,7 +2842,7 @@ func TestClaudeFileRelayAndAgentRelayRunConcurrentlyRaceFree(t *testing.T) {
 				case "agent partial":
 					sawAgentText = true
 				case "file done":
-					sawFileText = true
+					sawDuplicateFileText = true
 				}
 			}
 		}
@@ -2848,8 +2850,8 @@ func TestClaudeFileRelayAndAgentRelayRunConcurrentlyRaceFree(t *testing.T) {
 	if !sawAgentText {
 		t.Fatal("agent relay sidecar did not deliver its event concurrently with the file relay")
 	}
-	if !sawFileText {
-		t.Fatal("file relay did not deliver its text concurrently with the agent relay")
+	if sawDuplicateFileText {
+		t.Fatal("file relay re-delivered assistant content while the stdout relay owns it (duplicate source)")
 	}
 
 	handlers.mu.Lock()

@@ -1074,7 +1074,23 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 			// ledger cursor（acknowledge），不进内容 transition——kernel 拒绝零
 			// 事件 transition 且拒绝不推进 cursor，会让后续所有行以 gap 全拒
 			//（owner 真机 2026-09-04 23:17：问题 B/回复 B 整回合丢失）。
+			//
+			// 官方单源模型（owner 2026-09-04 复测「回复重复」）：agent relay
+			// （stdout，官方唯一消费面）活跃时，assistant 完成态行由 stdout 权威
+			// 供给（流式差量收口，见 relayEvents 的 turnId 补全）；file-relay 对
+			// assistant 行仅推进 cursor，防止双源向同一 item 各 append 一份正文。
+			// user 行照常进 batch（turn uuid 身份的唯一建立者）。外部会话（无
+			// agent relay）保持 file-relay 全量内容。
 			if e.UUID != "" && e.Message != nil && (e.Type == "user" || e.Type == "assistant") && !isClaudeEchoOnlyUserRow(e) {
+				if e.Type == "assistant" && h.agentRelayActive(sessionID) {
+					h.acknowledgeClaudeSourceRow(backendID, sessionID, traceCorrelation, scanned.ByteEnd)
+					emitClaudeSourceTrace(claudeSourceTraceRecord{
+						Phase: "live", IngestDomain: "source_only", BackendID: backendID,
+						SessionID: sessionID, Correlation: traceCorrelation, Record: scanned,
+						FileOrderTurnID: currentTurnID, Transition: "stdout_owns_assistant_content",
+					})
+					continue
+				}
 				h.applyClaudeLiveSourceRecord(scanned, backendID, sessionID, traceCorrelation, &currentTurnID, &runningObserved, cachedPID, &heldTerminals, &turnText)
 				continue
 			}
@@ -2855,6 +2871,13 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 				slog.Debug("go-bridge: relayEvents unmapped event", "backendID", backendID, "sessionID", sessionID, "eventType", ev.Type)
 				continue
 			}
+			// 官方流式对齐（owner 2026-09-04 复测反馈「无流式输出」）：claude stdout
+			// 的流式增量（CLI stream_event → EventText）没有 uuid 身份（CLI 不回显
+			// user 帧），SSV2 reducer 跳过无身份 delta——iOS 只能等 file-relay 完成
+			// 态整段。此处补当前 active turn 身份（file-relay user 行建立的 turnID），
+			// 流式增量经 IngestLive 进投影 patch（官方 SDK 消费者的 stream_event
+			// 打字机等价物）；完成帧在 session 侧已做流式差量，不双份。
+			h.backfillClaudeStreamTurnID(backendID, sessionID, eventName, data)
 
 			// Sync session runtimeState from relayed events to memory sessionRegistry
 			if eventName == "turn_started" {
@@ -3080,4 +3103,38 @@ func isClaudeEchoOnlyUserRow(e claudeTranscriptRelayEntry) bool {
 		}
 	}
 	return true
+}
+
+// agentRelayActive reports whether an agent stdout relay currently owns this
+// session's live event stream（官方消费面）。受 h.mu 保护。
+func (h *Handlers) agentRelayActive(sessionID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.agentRelayRunning[sessionID]
+}
+
+// backfillClaudeStreamTurnID 给 claude stdout 流式增量（无 uuid 身份——CLI
+// 不回显 user 帧）补当前 active turn 身份，使 SSV2 reducer 不再跳过
+// （reducer 对无 turnId/itemId 的 text_delta 直接 return）。官方 SDK 消费者
+// 的 stream_event 打字机等价物。完成帧在 session 侧已做流式差量，不双份。
+func (h *Handlers) backfillClaudeStreamTurnID(backendID, sessionID, eventName string, data interface{}) {
+	if backendID != "claude" && backendID != "claudecode" {
+		return
+	}
+	if eventName != "text_delta" && eventName != "reasoning_delta" {
+		return
+	}
+	dataMap, ok := data.(map[string]interface{})
+	if !ok {
+		return
+	}
+	if _, has := dataMap["turnId"]; has {
+		return
+	}
+	if _, has := dataMap["itemId"]; has {
+		return
+	}
+	if active := h.projectionKernel.ActiveTurnID(backendID, sessionID); active != "" {
+		dataMap["turnId"] = active
+	}
 }
