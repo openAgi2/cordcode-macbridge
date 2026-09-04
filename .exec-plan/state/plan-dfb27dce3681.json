@@ -488,25 +488,23 @@
       "id": "phase3-ios-plancard-regression",
       "title": "Phase 3 iOS 真机安装核验",
       "description": "交付前一次 scripts/run.sh device（有连接真机时，探测以 devicectl 为准）；安装启动成功 + 日志级核验。UI 视觉验收归 phase4-owner-acceptance-matrix（owner 授权后）。",
-      "status": "blocked",
+      "status": "done",
       "phase": "phase3",
       "kind": "regression",
       "depends_on": [
         "phase3-ios-plancard-tests"
       ],
       "source": "方案 §5 Phase 3 验收",
-      "notes": "\n[2026-09-04] 真机探测：devicectl list devices 显示 chuck?iPhone11 与 iPhone 16 Pro 均 unavailable；iOS 侧 wire/plancard 测试已全绿，仅真机安装级 regression 被环境阻断。",
+      "notes": "\n[2026-09-04] 真机探测：devicectl list devices 显示 chuck?iPhone11 与 iPhone 16 Pro 均 unavailable；iOS 侧 wire/plancard 测试已全绿，仅真机安装级 regression 被环境阻断。\n[2026-09-04 09:5x] owner 连接 iPhone 16 Pro，安装+回连核验通过，block 解除。",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "mixed",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "blocked：2026-09-04 devicectl 探测两台实体 iPhone（chuck?iPhone11、iPhone 16 Pro）均 unavailable，无连接真机，无法执行 scripts/run.sh device 安装与日志级真机核验。需 owner 连接任一真机后解除。",
+        "status": "present",
+        "attestation": "re-verified",
+        "summary": "解除 block（owner 2026-09-04 连接 iPhone 16 Pro）：devicectl 探测 iPhone 16 Pro available(paired)（xctrace 误报 Offline，按红线以 devicectl 为准，--device 显式指定 CoreDevice UUID）；scripts/run.sh device 构建安装启动成功（\"Launched application with org.openagi.cordcode\"，构建来源 iOS 仓 dbf0c048 clean）；devicectl 确认设备已装 CordCode 1.0.0；日志级核验：09:55:07 go-bridge.log hello_ack sent ok=true device=dev_c5ad42a3051f461e970b0ea0332c0646 catalog_cursor_epoch_v2=true——新装 App 成功回连 Mac 正式 runtime。UI 视觉验收归 phase4-owner-acceptance-matrix。",
         "artifacts": [
-          "devicectl list devices 输出：2 台均 unavailable（2026-09-04）"
-        ],
-        "checked_at": null
+          "/tmp/plan-approval-ios-device.log（run.sh device 全输出：构建→安装→启动 全部完成）",
+          "go-bridge.log 2026-09-04 09:55:07 iPhone 16 Pro hello_ack ok=true"
+        ]
       }
     },
     {
