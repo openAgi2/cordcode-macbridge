@@ -18,8 +18,11 @@ import (
 // 官方模型参照：Claude CLI stream-json 的 stream_event 逐 token 流式 +
 // 完成帧差量收口（Agent SDK 消费者行为）；transcript 行只做冷启动基线。
 
-// ① 无身份流式 delta 补 turnId 后，kernel IngestLive 路径把正文 append 进
-// active turn 的 assistant item（reducer 不再跳过）。
+// ① 无身份流式 delta 补 turnId 后，经**生产全链路**（deltaBatcher 攒批 →
+// EventPublisher → IngestLive）把正文 append 进 active turn 的 assistant item。
+// d5f5e30 假绿教训（owner 2026-09-05 复盘）：当时直连 kernel.IngestLive 绕过了
+// deltaBatcher，而 emit() 重组 payload 丢 turnId——测试绿、生产全程无流式。
+// 本测试从 batcher 入口驱动，锁住「身份必须穿过攒批层」。
 func TestBackfillClaudeStreamTurnID_AppendsToActiveTurn(t *testing.T) {
 	handlers := newTestHandlers(t)
 	const sessionID = "stream-backfill"
@@ -56,20 +59,19 @@ func TestBackfillClaudeStreamTurnID_AppendsToActiveTurn(t *testing.T) {
 		t.Fatalf("ActiveTurnID empty after user row batch")
 	}
 
-	// 无身份流式 delta（session stdout 路径的 wire 形状）→ 补全 → IngestLive
-	data := map[string]interface{}{"delta": "回复B前半"}
-	handlers.backfillClaudeStreamTurnID("claude", sessionID, "text_delta", data)
-	if got, _ := data["turnId"].(string); got != active {
+	// 无身份流式 delta（session stdout 路径的 wire 形状）→ 补全 → **经生产链路**
+	// （relayEvents 的 deltaBatcher.Send；data 形状 = mapAgentEvent 输出 + backfill）
+	raw := map[string]interface{}{"delta": "回复B前半"}
+	handlers.backfillClaudeStreamTurnID("claude", sessionID, "text_delta", raw)
+	if got, _ := raw["turnId"].(string); got != active {
 		t.Fatalf("backfilled turnId = %q, want %q", got, active)
 	}
-	result := handlers.projectionKernel.IngestLive(EventMessage{
-		BackendID: "claude", SessionID: sessionID, BridgeEpoch: "e",
-		PerSessionSeq: 10001,
-		Event: "text_delta", Data: data,
+	handlers.deltaBatcher.Send(LogicalEvent{
+		BackendID: "claude", SessionID: sessionID,
+		Event: "text_delta", Data: raw,
 	})
-	if result != ProjectionIngestApplied {
-		t.Fatalf("IngestLive result = %v, want Applied", result)
-	}
+	handlers.deltaBatcher.FlushAll()
+
 	// 已有身份/非流式事件不动
 	data2 := map[string]interface{}{"delta": "x", "itemId": "other"}
 	handlers.backfillClaudeStreamTurnID("claude", sessionID, "text_delta", data2)
@@ -77,7 +79,7 @@ func TestBackfillClaudeStreamTurnID_AppendsToActiveTurn(t *testing.T) {
 		t.Fatalf("must not overwrite itemId-bearing delta")
 	}
 
-	// 投影：turn 的 assistant 文本含流式增量
+	// 投影：turn 的 assistant 文本含流式增量（穿过了 batcher 的身份透传）
 	projection, ok := handlers.projectionKernel.reducer.Snapshot("claude", sessionID)
 	if !ok {
 		t.Fatal("no projection")
@@ -96,7 +98,7 @@ func TestBackfillClaudeStreamTurnID_AppendsToActiveTurn(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("streamed delta missing from projection turns=%+v", projection.Turns)
+		t.Fatalf("streamed delta missing from projection after batcher/publisher/kernel chain; turns=%+v", projection.Turns)
 	}
 }
 

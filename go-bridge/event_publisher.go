@@ -1034,9 +1034,17 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 	seq := p.seq
 	perSessionSeq := 0
 	if logical.BackendID != "" && logical.SessionID != "" {
-		key := logical.BackendID + "\x00" + logical.SessionID
-		p.perSessionSeq[key]++
-		perSessionSeq = p.perSessionSeq[key]
+		if p.kernel != nil {
+			// 单一发号源（owner 2026-09-05 复盘）：与 Kernel 的 Claude source batch
+			// 共用同一 per-session 原子发号器，live 事件序号恒大于 batch 已推进的
+			// reducer rev——否则 file-relay user 行 batch 先行时，后到的 stdout 流式
+			// delta 会被 reducer 幂等门（PerSessionSeq <= lastAppliedRev）静默跳过。
+			perSessionSeq = int(p.kernel.IssueSessionSeq(logical.BackendID, logical.SessionID))
+		} else {
+			key := logical.BackendID + "\x00" + logical.SessionID
+			p.perSessionSeq[key]++
+			perSessionSeq = p.perSessionSeq[key]
+		}
 	}
 	msg := EventMessage{
 		Type:          "event",

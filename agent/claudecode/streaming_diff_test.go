@@ -294,24 +294,30 @@ func TestHistoryDrainingSuppressesStreamAndAssistant(t *testing.T) {
 	cs := newTestClaudeSession(t)
 	cs.historyDraining.Store(true)
 
-	cs.handleStreamEvent(map[string]any{"event": map[string]any{"type": "message_start", "message": map[string]any{"id": "m1"}}})
-	cs.handleStreamEvent(map[string]any{"event": map[string]any{"type": "content_block_delta", "index": float64(0), "delta": map[string]any{"type": "text_delta", "text": "history"}}})
+	// 新语义（owner 2026-09-05 复盘，2.1.234 真样本：--resume 不重放历史到
+	// stdout，stream_event 只属于新 turn）：潜在重放帧是完整 assistant 帧，
+	// 在 drain 窗口内仍被丢弃……
 	cs.handleAssistant(map[string]any{"message": map[string]any{"id": "m1", "content": []any{map[string]any{"type": "text", "text": "history"}}}})
-
 	if evts := collectAllEvents(cs); len(evts) != 0 {
-		t.Fatalf("history drain emitted events: %#v", evts)
+		t.Fatalf("history drain emitted replayed assistant frame: %#v", evts)
 	}
 
-	cs.handleResult(map[string]any{"type": "result", "result": "done", "session_id": "test-session"})
-	if cs.historyDraining.Load() {
-		t.Fatal("historyDraining should be false after first result")
-	}
-
+	// ……而首条 stream_event 事件驱动关闭 drain 并正常 emit（不再整窗口丢弃
+	// 流式头几帧——旧实现靠 12s watchdog 侥幸早关才没丢）。
 	cs.handleStreamEvent(map[string]any{"event": map[string]any{"type": "message_start", "message": map[string]any{"id": "m2"}}})
+	if cs.historyDraining.Load() {
+		t.Fatal("drain should close on first stream_event")
+	}
 	cs.handleStreamEvent(map[string]any{"event": map[string]any{"type": "content_block_delta", "index": float64(0), "delta": map[string]any{"type": "text_delta", "text": "live"}}})
 	texts := eventContents(collectAllEvents(cs), core.EventText)
 	if len(texts) != 1 || texts[0] != "live" {
 		t.Fatalf("post-drain text events = %#v, want [live]", texts)
+	}
+
+	// result 关闭路径仍有效（drain 已关时为幂等 no-op）。
+	cs.handleResult(map[string]any{"type": "result", "result": "done", "session_id": "test-session"})
+	if cs.historyDraining.Load() {
+		t.Fatal("historyDraining should be false after result")
 	}
 }
 

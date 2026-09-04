@@ -26,9 +26,13 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		return "text_delta", eventData(ev, payload), false
 
 	case core.EventTextReplace:
-		return "message_updated", eventData(ev, map[string]interface{}{
+		payload := map[string]interface{}{
 			"content": ev.Content,
-		}), false
+		}
+		if ev.TurnID != "" {
+			payload["turnId"] = ev.TurnID
+		}
+		return "message_updated", eventData(ev, payload), false
 
 	case core.EventThinking:
 		payload := map[string]interface{}{
@@ -147,9 +151,13 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 			}
 			return "turn_completed", eventData(ev, payload), true
 		}
-		return "text_delta", eventData(ev, map[string]interface{}{
+		deltaPayload := map[string]interface{}{
 			"delta": ev.Content,
-		}), false
+		}
+		if ev.TurnID != "" {
+			deltaPayload["turnId"] = ev.TurnID
+		}
+		return "text_delta", eventData(ev, deltaPayload), false
 
 	case core.EventError:
 		msg := "unknown error"

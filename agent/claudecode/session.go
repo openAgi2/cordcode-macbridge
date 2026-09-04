@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -65,6 +66,16 @@ type claudeSession struct {
 	ctrlPending      map[string]chan controlResponse
 	initCapabilities atomic.Value // stores map[string]struct{} — system/init capabilities（随首个 turn 出现）
 	onAssistantModel func(requested, observed string)
+
+	// client uuid turn 身份（owner 2026-09-05 复盘，官方 SDK user_message_uuid 契约）：
+	// Send 在输入 user 帧自带 uuid（CLI 2.1.234 真样本实证：transcript user 行采纳该
+	// uuid、result 帧回盖 user_message_uuid）——file-relay 侧 turn 身份与本侧 stdout
+	// 事件身份天然统一，不再依赖 ActiveTurnID 反查。active = 当前进行中 turn 的 uuid；
+	// pending = turn 进行中再次 Send 时 CLI queue 的后续 uuid（FIFO）。result 收口时
+	// 按 user_message_uuid 消费到匹配位置。
+	clientTurnMu       sync.Mutex
+	activeClientUUID   string
+	pendingClientUUIDs []string
 
 	model            string
 	maxContextTokens int
@@ -289,15 +300,13 @@ func newClaudeSession(ctx context.Context, workDir, cliBin string, cliExtraArgs 
 	cs.sessionID.Store(sessionID)
 	cs.alive.Store(true)
 
-	// historyDraining: --resume 启动后的历史重放期。
-	// 仅对明确 resume 已知 session id 时开启；
-	// 空 sessionID 或 ContinueSession 不开启。
+	// historyDraining: --resume 启动后的历史重放防御期。
+	// 仅对明确 resume 已知 session id 时开启；空 sessionID 或 ContinueSession 不开启。
 	//
-	// watchdog 时序：go-bridge 侧 drainHistoryEvents 等 WaitForHistoryDrain 最多 10s（handlers.go），
-	// 此处 watchdog 设 12s 作为最后兜底（略高于 go-bridge 的 10s，让 go-bridge 先超时打日志，
-	// session 侧只在真正卡死时强制关闭）。3s 对历史较长的 --resume 过短：CLI 重放完整历史时
-	// 首个 result 帧常在 3s 后才到达，过早 force-close 会让真实 turn 的事件被错误处理（真机症状：
-	// 流式中断 + 从头输出）。正常路径由 handleResult 收到 result 帧时 markHistoryDrained 关闭。
+	// 关闭时序（owner 2026-09-05 复盘后）：正常路径由 handleStreamEvent 收到首条
+	// stream_event 时关闭（CLI 2.1.234 真样本：--resume 不重放历史；stream_event 只
+	// 属于新 turn）。handleResult 兜底关闭；12s watchdog 是最后兜底（go-bridge 已移除
+	// 同步 drainHistoryEvents 等待，此 watchdog 不再与它配对，仅防真实卡死）。
 	if sessionID != "" && sessionID != core.ContinueSession {
 		cs.historyDraining.Store(true)
 		time.AfterFunc(12*time.Second, func() {
@@ -531,7 +540,7 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 	}
 	if divergent && !cs.historyDraining.Load() {
 		slog.Warn("claudeSession: checkpoint diverged from streamed text; replacing with full text")
-		evt := core.Event{Type: core.EventTextReplace, Content: fullText}
+		evt := core.Event{Type: core.EventTextReplace, Content: fullText, TurnID: cs.currentClientTurnID()}
 		select {
 		case cs.events <- cs.scopeEvent(evt):
 		case <-cs.ctx.Done():
@@ -558,7 +567,7 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 			toolUseID, _ := item["id"].(string)
 			inputSummary := summarizeInput(toolName, item["input"])
 			input, _ := item["input"].(map[string]any)
-			evt := core.Event{Type: core.EventToolUse, ToolName: toolName, ToolInput: inputSummary, ToolInputRaw: input, RequestID: toolUseID}
+			evt := core.Event{Type: core.EventToolUse, ToolName: toolName, ToolInput: inputSummary, ToolInputRaw: input, RequestID: toolUseID, TurnID: cs.currentClientTurnID()}
 			select {
 			case cs.events <- cs.scopeEvent(evt):
 			case <-cs.ctx.Done():
@@ -572,7 +581,7 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 				continue
 			}
 			if thinking, ok := item["thinking"].(string); ok && thinking != "" {
-				evt := core.Event{Type: core.EventThinking, Content: thinking}
+				evt := core.Event{Type: core.EventThinking, Content: thinking, TurnID: cs.currentClientTurnID()}
 				select {
 				case cs.events <- cs.scopeEvent(evt):
 				case <-cs.ctx.Done():
@@ -622,7 +631,7 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 				if delta == "" {
 					continue
 				}
-				evt := core.Event{Type: core.EventText, Content: delta}
+				evt := core.Event{Type: core.EventText, Content: delta, TurnID: cs.currentClientTurnID()}
 				select {
 				case cs.events <- cs.scopeEvent(evt):
 				case <-cs.ctx.Done():
@@ -635,7 +644,13 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 
 func (cs *claudeSession) handleStreamEvent(raw map[string]any) {
 	if cs.historyDraining.Load() {
-		return
+		// 事件驱动关闭（owner 2026-09-05 复盘）：CLI 2.1.234 真样本（resume 探针，
+		// /tmp 探针 frames）证明 --resume 不重放历史到 stdout——重放帧（若未来版本
+		// 出现）是完整 assistant/user 帧，走 handleAssistant/handleUser 的 drain 门，
+		// 不经此处；stream_event 只在新 turn 生成时出现。因此首条 stream_event 即
+		// 当前 turn 的首个输出，立即关闭 drain 窗口，流式头几帧不再被 12s watchdog
+		// 侥幸窗口丢弃。go-bridge 侧同步 drainHistoryEvents 已一并移除（10s 白等）。
+		cs.markHistoryDrained()
 	}
 	ev, ok := raw["event"].(map[string]any)
 	if !ok {
@@ -684,13 +699,111 @@ func (cs *claudeSession) handleStreamEvent(raw map[string]any) {
 	}
 }
 
+// rollbackClientTurn 撤销一次未成功写出的 Send 记账（writeJSON 失败 = 帧未达
+// CLI，uuid 不应占用队列位）。
+func (cs *claudeSession) rollbackClientTurn(id string) {
+	cs.clientTurnMu.Lock()
+	defer cs.clientTurnMu.Unlock()
+	if cs.activeClientUUID == id {
+		if len(cs.pendingClientUUIDs) > 0 {
+			cs.activeClientUUID = cs.pendingClientUUIDs[0]
+			cs.pendingClientUUIDs = cs.pendingClientUUIDs[1:]
+		} else {
+			cs.activeClientUUID = ""
+		}
+		return
+	}
+	for i, queued := range cs.pendingClientUUIDs {
+		if queued == id {
+			cs.pendingClientUUIDs = append(cs.pendingClientUUIDs[:i], cs.pendingClientUUIDs[i+1:]...)
+			return
+		}
+	}
+}
+
+// newClientTurnUUID 生成 v4 形态 UUID 作为输入 user 帧的 client uuid。
+// CLI 对该字段的消费已由 2.1.234 真样本实证（transcript 采纳 + result 回盖）。
+func newClientTurnUUID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand 失败在本机属不可恢复环境错误；退化为时间戳 ID 仍保证唯一，
+		// 但失去标准 UUID 形态——CLI 是否接受未证明，保留 panic 语义更诚实。
+		panic("crypto/rand failed: " + err.Error())
+	}
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// registerClientTurn 为一次 Send 分配 client uuid：无 active turn 时立即占用，
+// 否则进 FIFO 队列（CLI 会把 turn 进行中的后续消息 queue 成后续 turn）。
+func (cs *claudeSession) registerClientTurn() string {
+	id := newClientTurnUUID()
+	cs.clientTurnMu.Lock()
+	defer cs.clientTurnMu.Unlock()
+	if cs.activeClientUUID == "" {
+		cs.activeClientUUID = id
+	} else {
+		cs.pendingClientUUIDs = append(cs.pendingClientUUIDs, id)
+	}
+	return id
+}
+
+// currentClientTurnID 返回当前进行中 turn 的 client uuid（stdout 事件的 turnId）。
+func (cs *claudeSession) currentClientTurnID() string {
+	cs.clientTurnMu.Lock()
+	defer cs.clientTurnMu.Unlock()
+	return cs.activeClientUUID
+}
+
+// settleClientTurn 在 result 收口时消费 client uuid 队列：stamped 是 CLI 回盖的
+// user_message_uuid（2.1.234 真样本：result 帧恒带）。匹配 active 或队列成员时，
+// 消费到该位置（含）并让下一个排队 uuid 接管；无 stamp 的老 producer 保守清空
+// active（防下一个 turn 串位）。返回本次收口 turn 的 uuid（供 EventResult 绑定）。
+func (cs *claudeSession) settleClientTurn(stamped string) string {
+	cs.clientTurnMu.Lock()
+	defer cs.clientTurnMu.Unlock()
+	settled := cs.activeClientUUID
+	popNext := func() {
+		if len(cs.pendingClientUUIDs) > 0 {
+			cs.activeClientUUID = cs.pendingClientUUIDs[0]
+			cs.pendingClientUUIDs = cs.pendingClientUUIDs[1:]
+		} else {
+			cs.activeClientUUID = ""
+		}
+	}
+	if stamped == "" {
+		if cs.activeClientUUID != "" {
+			slog.Warn("claudeSession: result frame without user_message_uuid; clearing active client turn", "activeClientUUID", cs.activeClientUUID)
+		}
+		popNext()
+		return settled
+	}
+	if stamped == cs.activeClientUUID {
+		popNext()
+		return settled
+	}
+	for i, queued := range cs.pendingClientUUIDs {
+		if queued == stamped {
+			// CLI 合并了 prompt batch（SDK user_message_uuids 契约），中途 uuid
+			// 不再会有独立 turn——消费到 stamped（含），其后排队者接管。
+			cs.pendingClientUUIDs = cs.pendingClientUUIDs[i+1:]
+			popNext()
+			return stamped
+		}
+	}
+	// stamp 不认识（外部注入的 turn？）：不动队列，仅告警——归属链由 file-relay 兜底。
+	slog.Warn("claudeSession: result user_message_uuid matches no known client turn", "stamped", stamped, "activeClientUUID", cs.activeClientUUID)
+	return settled
+}
+
 func (cs *claudeSession) emitTextDelta(index int, text string) {
 	if text == "" || cs.historyDraining.Load() {
 		return
 	}
 	cs.streamState.ensure()
 	cs.streamState.streamedTextByIdx[index] += text
-	evt := core.Event{Type: core.EventText, Content: text}
+	evt := core.Event{Type: core.EventText, Content: text, TurnID: cs.currentClientTurnID()}
 	select {
 	case cs.events <- cs.scopeEvent(evt):
 	case <-cs.ctx.Done():
@@ -702,7 +815,7 @@ func (cs *claudeSession) emitThinkingDelta(thinking string) {
 	if thinking == "" || cs.historyDraining.Load() {
 		return
 	}
-	evt := core.Event{Type: core.EventThinking, Content: thinking}
+	evt := core.Event{Type: core.EventThinking, Content: thinking, TurnID: cs.currentClientTurnID()}
 	select {
 	case cs.events <- cs.scopeEvent(evt):
 	case <-cs.ctx.Done():
@@ -794,6 +907,7 @@ func (cs *claudeSession) handleUser(raw map[string]any) {
 				ToolResult:  resultText,
 				ToolSuccess: &success,
 				RequestID:   toolUseID,
+				TurnID:      cs.currentClientTurnID(),
 				ToolMatches: parseClaudeToolMatches(toolName, contentValue, isError),
 			}
 			select {
@@ -835,10 +949,17 @@ func (cs *claudeSession) handleResult(raw map[string]any) {
 		}
 	}
 
+	// 官方收口校验（client uuid 契约）：result 帧回盖 user_message_uuid，据消费
+	// client turn 队列（匹配/无 stamp 两种路径见 settleClientTurn）。settled 是
+	// 本 turn 的 client uuid——EventResult 以它作 turnId，投影精确收口该 turn。
+	stamped, _ := raw["user_message_uuid"].(string)
+	settled := cs.settleClientTurn(stamped)
+
 	evt := core.Event{
 		Type:         core.EventResult,
 		Content:      content,
 		SessionID:    cs.CurrentSessionID(),
+		TurnID:       settled,
 		Done:         true,
 		InputTokens:  inputTokens,
 		OutputTokens: outputTokens,
@@ -938,11 +1059,21 @@ func (cs *claudeSession) Send(prompt string, images []core.ImageAttachment, file
 		return fmt.Errorf("session process is not running")
 	}
 
+	// client uuid（官方 SDK user_message_uuid 契约）：输入 user 帧自带 uuid，
+	// CLI 把它写进 transcript user 行并在 result 帧回盖 user_message_uuid——
+	// stdout 事件身份与 file-relay turn 身份由此统一（owner 2026-09-05 复盘）。
+	clientTurnUUID := cs.registerClientTurn()
+
 	if len(images) == 0 && len(files) == 0 {
-		return cs.writeJSON(map[string]any{
+		if err := cs.writeJSON(map[string]any{
 			"type":    "user",
+			"uuid":    clientTurnUUID,
 			"message": map[string]any{"role": "user", "content": prompt},
-		})
+		}); err != nil {
+			cs.rollbackClientTurn(clientTurnUUID)
+			return err
+		}
+		return nil
 	}
 
 	attachDir := filepath.Join(cs.workDir, ".cc-connect", "attachments")
@@ -997,10 +1128,15 @@ func (cs *claudeSession) Send(prompt string, images []core.ImageAttachment, file
 	}
 	parts = append(parts, map[string]any{"type": "text", "text": textPart})
 
-	return cs.writeJSON(map[string]any{
+	if err := cs.writeJSON(map[string]any{
 		"type":    "user",
+		"uuid":    clientTurnUUID,
 		"message": map[string]any{"role": "user", "content": parts},
-	})
+	}); err != nil {
+		cs.rollbackClientTurn(clientTurnUUID)
+		return err
+	}
+	return nil
 }
 
 func extFromMime(mime string) string {

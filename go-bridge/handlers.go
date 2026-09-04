@@ -2643,14 +2643,15 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 			return
 		}
 
-		// resume 时 claude --resume 会输出完整历史，先排空历史事件。
-		// Codex / Grok 不重放 transcript 作为事件流（Grok 历史走 HistoryProvider 落盘），
-		// drain 只会空转甚至在有持续 session/update 时占满至 10s，拖垮 send_message 的 RPC 时延。
-		// DSH 同理：live-only 无 resume（每进程惰性新建 root session），握手后到首条
-		// session/prompt 前没有任何事件。
+		// resume 时历史重放的排水。Codex / Grok / DSH 不重放 transcript 作为事件流。
+		// claudecode 同样移除同步等待（owner 2026-09-05 复盘）：CLI 2.1.234 真样本
+		// 证明 --resume 不重放历史到 stdout，10s 同步等待是纯自加延迟（每次 send
+		// 白等满超时）；潜在重放帧由 agent 侧 historyDraining 门丢弃，且该窗口现由
+		// 首条 stream_event 事件驱动关闭（session.go handleStreamEvent），12s watchdog
+		// 兜底仍在。
 		if resumeID != "" {
 			switch agent.Name() {
-			case "codex", "grokbuild", "dsh":
+			case "codex", "grokbuild", "dsh", "claudecode":
 				// skip drain
 			default:
 				drainHistoryEvents(sess)

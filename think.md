@@ -10,7 +10,40 @@
 | remote-web 集中测试轮 | 12 门浏览器端验收矩阵 + 4 web-push 取证门（owner 2026-09-02 裁决：先 iOS 任务 → 整体迁移 remote-web → 集中测试）。入口 iOS 仓 `.exec-plan/state/plan-4fe9645c3a36.json` 注记 | iOS App 端任务完成 + remote-web 整体迁移完成 | pending 非阻断；功能路径已真机验证过，16 门属迁移后回归确认（2026-09-02） |
 | iOS 进入 Codex / DSH / Grok 计划模式 | 三条都是「Mac 进入计划 → iPhone 能批；iPhone 自己切不进」。Codex 入口文档 `docs/2026-09-04-codex-ios-plan-mode-entry.md`（owner 2026-09-04：先不做 iOS 开启 Codex Plan，后续再调研）。DSH = Mac 标准套餐 + `/plan`（`commands/execute`）；Grok iOS Plan 只写 agent 内存。禁止合成一个全 backend Plan 按钮 | Codex 批准路径已交付（Mac App Plan → iPhone 卡 → 批准实施，owner 真机 2026-09-04） | **挂起**（2026-09-04）；Codex 批准面已绿，入口未开工 |
 
-## 2026-09-04 Codex 计划：iPhone 能批、不能开
+## 2026-09-05 Claude Code 流式「假绿」复盘：deltaBatcher 丢 turnId + client uuid 官方解法
+
+owner 三轮复测（无流式 → 重复 → 无流式且完成态无内容），第三轮修复 d5f5e30 部署后
+仍无流式且切走再切回才见正文。生产日志（01:03 会话 93cd4a10「讲个法国笑话」）+
+transcript + 源码三层根因：
+
+1. **deltaBatcher 丢 turnId（假绿主犯）**：relayEvents 给 stdout 流式增量补的
+   turnId（backfillClaudeStreamTurnID）经 33ms 攒批器时被丢弃——`delta_batcher.go`
+   emit() 重组 data 只保留 `delta`+`itemId`，claude 增量恰好无 itemId → 出批后
+   又是无身份增量，reducer 照旧跳过。stdout 全程在流（seq=1→1335）但投影正文为 0。
+   **d5f5e30 的单测直接调 kernel.IngestLive，绕过了 batcher → 测试绿、生产挂。**
+   教训：凡走攒批/重组中间层的事件管线，集成测试必须从 batcher 入口驱动，不许
+   直连 kernel。
+2. **双源同时哑火**：d5f5e30 把 file-relay assistant 行在 agent-relay 活跃期改
+   cursor-only（stdout 权威），但 stdout 内容因 #1 全被跳过 → 期间无任何源写正文
+   → 完成态广播空回合；切回触发全量 rehydrate 才恢复。「关掉兜底前必须证明主源
+   真的通」，方向对但顺序错。
+3. **resume drain 固定 10s**：长会话 resume 历史重放超 10s 窗口，每次发消息先烧
+   10s 空白（user 行 01:03:30 才落盘，首 token 01:03:33.8）。
+
+**官方机制实测（2.1.234 真样本，/tmp 探针 + frames.json）**：输入 user 帧带自造
+`uuid` → **transcript user 行 uuid 就是它**（file-relay 建的 turn 身份 = 发送方
+uuid，双平面身份统一）；**result 帧回盖 `user_message_uuid`**（2.1.234 盖收口帧；
+SDK 0.3.260 契约新版盖首条回复帧）。这就是官方对「CLI 不回显 user 帧、stdout 无
+身份」的解法——发起方自持身份，不再反查 ActiveTurnID 猜归属。t3code 对照：其
+Claude 集成不是 ACP（ACP 只用于 Cursor/Grok），是官方 npm SDK 内嵌 Node + 发起方
+自造 turnId + 自有 DB 做 SoT、transcript 不当事件源。
+
+修复方案（owner 2026-09-05 拍板）：① batcher 透传 turnId；② Send 自造 client
+uuid 写输入帧，stdout 事件（含完成差量）以此作 turnId，result 的
+user_message_uuid 校验收口，ActiveTurnID 反查降级兜底；③ drain 事件驱动
+（前提：resume 重放期不含 stream_event，需探针取证）。
+
+# 2026-09-04 Codex 计划：iPhone 能批、不能开
 
 owner 真机：Mac Codex App 计划模式发任务 → iPhone 同步计划正文并点批准执行，通过。
 iPhone 不能自己切入 Codex Plan（与 DSH 相同：入口在 Mac）。owner 裁决入口先不做。

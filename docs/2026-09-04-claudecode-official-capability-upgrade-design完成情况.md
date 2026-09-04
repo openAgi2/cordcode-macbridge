@@ -142,3 +142,48 @@ owner 复测确认归位修复生效；新反馈「发消息后空白几秒→�
 
 待 owner 复测：新建会话发消息（本地正常网关时）应看到打字机流式、无重复、无整段跳变。
 已知边界：上游 429 限流期间的等待是官方行为（CLI 自身也在重试）。
+
+### 追记 3：第四轮复测「无流式且完成态无内容」——假绿复盘与官方 client uuid 身份链（2026-09-05）
+
+owner 复测 d5f5e30：全程无流式；完成态不加载正文，切走再切回才显示。调查（01:03 会话
+93cd4a10 生产日志 + transcript + 源码 + CLI 真实探针）结论——**d5f5e30 部署的是一组
+"测试绿、生产挂"的修复**：
+
+1. **deltaBatcher 丢 turnId（假绿主犯）**：relayEvents 补的 turnId 经 33ms 攒批器时被
+   emit() 重组丢弃（只保留 delta+itemId）→ 出批后又是无身份增量，reducer 照旧跳过。
+   d5f5e30 单测直连 kernel.IngestLive 绕过攒批器 → 测试全绿，生产 stdout 流量 1335 帧
+   全部无效。教训已入 think.md：凡有攒批/重组中间层的事件管线，集成测试必须从中间层
+   入口驱动。
+2. **双序号域幂等门（第二层，本轮新发现）**：Claude source batch 在 Kernel 锁内自取
+   PerSessionSeq，live 事件走 publisher 独立计数器——两域打同一 reducer 幂等门
+   （seq ≤ rev 即跳）。file-relay user 行 batch 先行推高 rev 时，后到的 stdout 流式
+   delta 即使带身份也会被静默跳过（间歇性）。修复 = Kernel 每 session 原子发号器
+   （IssueSessionSeq）作为唯一取号源，publisher 与 batch 都从它取号。
+3. **drain 固定 10s（自加延迟）**：CLI 2.1.234 真实探针证明 `--resume` 不重放历史到
+   stdout（重放帧是完整 assistant/user 帧，且实测为零）；handleSendMessage 里同步
+   drainHistoryEvents 的 10s 等待纯属白等。移除 claudecode 的同步 drain，drain 窗口改
+   事件驱动（首条 stream_event 即关，重放防御语义保留，12s watchdog 兜底仍在）。
+
+**官方机制采纳（方案一，owner 2026-09-05 拍板）**：Claude Agent SDK 的 client uuid 契约
+（`user_message_uuid`）——消费者提交 user 帧自带 uuid，CLI 写进 transcript user 行并在
+result 帧回盖。真样本（2.1.234 探针，fixture 已入
+`agent/claudecode/testdata/client-uuid/turn-stream.jsonl`）实证三点：输入帧 uuid 被
+transcript 原样采纳；result 恒带 user_message_uuid；stream_event 序列即官方流式面。
+t3code 对照（owner 问询）：其 Claude 集成不是 ACP，是官方 npm SDK 内嵌 Node + 发起方
+自造 turnId + 自有 DB 做 SoT——身份模型与本修复一致。
+
+实施（commit 链见 §5 追记）：Send 自造 v4 uuid 写入输入 user 帧（active+FIFO 队列记账，
+writeJSON 失败回滚）；stdout 全事件面（流式/思考/工具/完成差量/收口）绑 client uuid 作
+TurnID；result 按 user_message_uuid 对账消费队列（无 stamp 保守清空防串位）；
+deltaBatcher 透传 turnId（不同 turn 不合并）；mapAgentEvent TextReplace/result 非 Done
+分支透传 turnId。ActiveTurnID 反查降级为兜底（无 uuid 路径）。iOS 零改动（text_delta
+的 turnId 是既有 wire 字段）。
+
+测试：batcher 3 例（透传/不跨 turn 合并/同 turn 合并）；agent 6 例（帧盖章/流式身份/
+官方 stamp 收口/FIFO 队列/无 stamp 清空/drain 事件驱动）+ 真样本 fixture；
+TestBackfillClaudeStreamTurnID 改造为经 deltaBatcher→publisher→kernel 生产全链路（正是
+它先抓到双序号域断点）；drain 旧语义测试按真样本证据更新。全量回归绿（go-bridge +
+agent/claudecode + core）。
+
+待 owner 复测：会话发消息应看到（a）发送后不再有固定 ~10s 空白；（b）逐字打字机流式；
+（c）完成态正文即时可见、无需切回；（d）连续两条消息排队场景不串回合。

@@ -47,6 +47,12 @@ type deltaChunk struct {
 	// OpenCode/Claude live frames carry itemId==turnId. Dropping it makes
 	// ProjectionReducer skip every text_delta (headRev only advances on turn_completed).
 	itemID string
+	// turnID is the client-uuid turn attribution for Claude stdout deltas
+	// (agent-side Send stamps the input user frame; mapAgentEvent carries it as
+	// turnId). emit() rebuilds the payload from scratch — any identity field not
+	// carried here is silently dropped and the SSV2 reducer skips the delta
+	// (owner 2026-09-05 复盘：backfill 的 turnId 在此丢失 → 全程无流式假绿）。
+	turnID string
 }
 
 type deltaAccum struct {
@@ -141,10 +147,12 @@ func (d *DeltaBatcher) tryAccumulate(ev LogicalEvent) bool {
 			d.accums[key] = a
 		}
 		itemID := extractDeltaItemID(ev.Data)
-		if n := len(a.chunks); n > 0 && a.chunks[n-1].eventType == ev.Event && a.chunks[n-1].itemID == itemID {
+		turnID := extractDeltaTurnID(ev.Data)
+		if n := len(a.chunks); n > 0 && a.chunks[n-1].eventType == ev.Event &&
+			a.chunks[n-1].itemID == itemID && a.chunks[n-1].turnID == turnID {
 			a.chunks[n-1].text += deltaStr
 		} else {
-			a.chunks = append(a.chunks, deltaChunk{eventType: ev.Event, text: deltaStr, itemID: itemID})
+			a.chunks = append(a.chunks, deltaChunk{eventType: ev.Event, text: deltaStr, itemID: itemID, turnID: turnID})
 		}
 		a.totalBytes += len(deltaStr)
 		overflow = a.totalBytes >= deltaBatchMaxPendingBytes
@@ -196,6 +204,9 @@ func (d *DeltaBatcher) emit(a *deltaAccum) {
 		if c.itemID != "" {
 			data["itemId"] = c.itemID
 		}
+		if c.turnID != "" {
+			data["turnId"] = c.turnID
+		}
 		d.sender.PublishLogical(LogicalEvent{
 			BackendID:   a.backendID,
 			SessionID:   a.sessionID,
@@ -231,6 +242,19 @@ func extractDeltaItemID(data interface{}) string {
 		return ""
 	}
 	if s, ok := m["itemId"].(string); ok {
+		return s
+	}
+	return ""
+}
+
+// extractDeltaTurnID keeps the Claude client-uuid turn attribution across the
+// batch window (same passthrough contract as extractDeltaItemID).
+func extractDeltaTurnID(data interface{}) string {
+	m, ok := data.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	if s, ok := m["turnId"].(string); ok {
 		return s
 	}
 	return ""
