@@ -71,6 +71,10 @@ type Agent struct {
 	// 缓存、list_models 刷新通道、message.model 观测映射。
 	catalog catalogState
 
+	// hookSettingsProvider 返回自 spawn 会话的 --settings 内联 hooks JSON
+	//（Phase 3：Management API 接收端可用时非空；空=纯轮询=现状）。
+	hookSettingsProvider func() (string, bool)
+
 	mu sync.RWMutex
 
 	// pinStore persists MacBridge-owned session pin (置顶) metadata for SessionPinner.
@@ -208,7 +212,7 @@ func New(opts map[string]any) (core.Agent, error) {
 		}
 	}
 
-	return &Agent{
+	a := &Agent{
 		workDir:          workDir,
 		cliBin:           cliBin,
 		cliExtraArgs:     cliExtraArgs,
@@ -224,7 +228,13 @@ func New(opts map[string]any) (core.Agent, error) {
 		routerAPIKey:     routerAPIKey,
 		spawnOpts:        spawnOpts,
 		pinStore:         pinstore.FromOpts(opts),
-	}, nil
+	}
+	// Phase 3：自 spawn 会话的 --settings 内联 hooks 提供者（go-bridge main 注入，
+	// spawn 时延迟解析 Management 端点）。缺失=纯轮询=现状。
+	if p, ok := opts["hook_settings_provider"].(func() (string, bool)); ok {
+		a.hookSettingsProvider = p
+	}
+	return a, nil
 }
 
 // normalizeEffort maps user-friendly aliases to Claude CLI --effort values.
@@ -517,9 +527,15 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	// When router_url is set, --verbose conflicts with --output-format stream-json
 	// (verbose emits non-JSON text to stdout that corrupts the JSON stream).
 	disableVerbose := a.routerURL != ""
+	hookSettings := ""
+	if a.hookSettingsProvider != nil {
+		if payload, ok := a.hookSettingsProvider(); ok {
+			hookSettings = payload
+		}
+	}
 	a.mu.Unlock()
 
-	sess, err := newClaudeSession(ctx, workDir, cliBin, cliExtraArgs, cliArgsFlag, model, effort, sessionID, mode, tools, disTools, extraEnv, platformPrompt, disableVerbose, spawnOpts, maxTok)
+	sess, err := newClaudeSession(ctx, workDir, cliBin, cliExtraArgs, cliArgsFlag, model, effort, sessionID, mode, tools, disTools, extraEnv, platformPrompt, disableVerbose, spawnOpts, maxTok, hookSettings)
 	if err != nil {
 		return nil, err
 	}

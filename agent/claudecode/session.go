@@ -125,13 +125,20 @@ func baseClaudeInnerArgs(disableVerbose bool) []string {
 	return innerArgs
 }
 
-func newClaudeSession(ctx context.Context, workDir, cliBin string, cliExtraArgs []string, cliArgsFlag string, model, effort, sessionID, mode string, allowedTools, disallowedTools []string, extraEnv []string, platformPrompt string, disableVerbose bool, spawnOpts core.SpawnOptions, maxContextTokens int) (*claudeSession, error) {
+func newClaudeSession(ctx context.Context, workDir, cliBin string, cliExtraArgs []string, cliArgsFlag string, model, effort, sessionID, mode string, allowedTools, disallowedTools []string, extraEnv []string, platformPrompt string, disableVerbose bool, spawnOpts core.SpawnOptions, maxContextTokens int, hookSettings string) (*claudeSession, error) {
 	sessionCtx, cancel := context.WithCancel(ctx)
 
 	// innerArgs are Claude Code CLI flags — when a wrapper is used with
 	// cliArgsFlag these get bundled into a single passthrough string.
 	// outerArgs are flags the wrapper itself understands (e.g. --model).
 	innerArgs := baseClaudeInnerArgs(disableVerbose)
+
+	if hookSettings != "" {
+		// Phase 3：仅自 spawn 会话注入 --settings 内联 HTTP hooks（指向本地
+		// Management API；hooks 数组跨层 merge，不打掉用户层 hooks——Phase 0
+		// 实证）。空=纯轮询=现状。
+		innerArgs = append(innerArgs, "--settings", hookSettings)
+	}
 
 	if mode != "" && mode != "default" {
 		innerArgs = append(innerArgs, "--permission-mode", mode)

@@ -80,6 +80,10 @@ type Handlers struct {
 	agents                 map[string]core.Agent
 	sessions               *sessionRegistry
 	runningMap             *runningMapCache
+	// claudeRelayNudges：sessionID → file-relay 立即轮询通道（Phase 3 Stop hook
+	// 事件驱动定向刷新；hooks_sink.go）。
+	nudgeMu           sync.Mutex
+	claudeRelayNudges map[string]chan struct{}
 	opencodeSessionOptions map[string]opencodeSessionOptions
 	contentRefs            map[string]string
 	contentRefOrder        []string

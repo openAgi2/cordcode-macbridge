@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-04T13:44:25Z",
+  "updated_at": "2026-09-04T13:48:13Z",
   "todos": [
     {
       "id": "p0-1-control-plane-probe",
@@ -610,7 +610,7 @@
       "id": "p2-5-regression",
       "title": "Phase 2 Release 安装与运行态验证",
       "description": "Release 构建 + /Applications 覆盖安装 + 重启 + 运行态核验（进程代际+特征输出）。定向功能验证：会话内模型切换即时生效、权限模式切换走 CLI 控制帧（日志可见 control_request/response 往返）、interrupt 行为符合 S8 裁决。owner 真机验收矩阵单列。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "regression",
       "depends_on": [
@@ -620,20 +620,23 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Release 构建（commit ee460685e90e）→ 覆盖安装 → 双进程名重启 → 运行态核验：PID 93323 启动 21:47:54 晚于构建 21:46:54、8777 新 PID、Phase 2 特征字符串 official interrupt receipt 内嵌新二进制、无临时产物残留。行为层（iPhone 停止=留进程、会话内切模型即时生效）属 owner 真机验收矩阵。",
+        "artifacts": [
+          "git:ee46068",
+          "/tmp/cc-release-build-p2.log"
+        ],
+        "checked_at": "2026-09-04T13:48:13Z"
       }
     },
     {
       "id": "p2-6-doc-sync",
       "title": "Phase 2 protocol pack + CHANGELOG",
       "description": "能力位（interrupt 等）与 wire 变化同步 docs/protocol/ canonical pack + iOS mirror；CHANGELOG 追加。docs 立即 commit（双仓各自）。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "impl",
       "depends_on": [
@@ -643,20 +646,25 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "bridge-v1.md 增补 Phase 2 wire 语义段（switch_model 会话内直达/abort=interrupt 留进程/live_model_switch_failed/best-effort send 路径）；iOS mirror 同步；CHANGELOG Phase 2 条目；双仓各自 commit（ee46068 / 74357a1d）。",
+        "artifacts": [
+          "docs/protocol/bridge-v1.md",
+          "CHANGELOG.md",
+          "git:ee46068",
+          "git:74357a1d"
+        ],
+        "checked_at": "2026-09-04T13:48:13Z"
       }
     },
     {
       "id": "p3-1-hooks-layer-impl",
       "title": "Phase 3.1 hooks 事件层（仅自 spawn 会话）",
       "description": "只对 CordCode 自 spawn 会话用 --settings '{\"hooks\":…}' 内联 HTTP hook（官方 flag，hooks 数组跨层 merge 不打掉 cc-switch hooks）；Management API 新增 /internal/hooks/claude（token 鉴权、仅 127.0.0.1）；不订阅 PermissionRequest（避免与 stdio can_use_tool 双应答）；活性检测心跳自检（exit 127/死端点→回退轮询+如实上报事件源状态）；Managed 层默认关（本机无落点）。",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "phase3",
       "kind": "impl",
       "depends_on": [

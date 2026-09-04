@@ -321,3 +321,15 @@ func (a *Agent) EffortsForModel(ctx context.Context, model string) ([]string, st
 	static := a.AvailableReasoningEfforts()
 	return static, "", true
 }
+
+// InvalidateSettingsModels drops the settings.json alias cache (mtime guard
+// included) and refreshes the official catalog via the live session. Wired to
+// the ConfigChange hook (Phase 3): settings-layer rewrites (cc-switch) become
+// push-driven instead of waiting for the next mtime-based lazy reload.
+func (a *Agent) InvalidateSettingsModels(ctx context.Context) {
+	a.mu.Lock()
+	a.settingsModelsCache = nil
+	a.settingsModelsMtime = time.Time{}
+	a.mu.Unlock()
+	a.refreshCatalogViaListModels(ctx)
+}

@@ -811,6 +811,11 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 	// 开始轮询监视新内容（process live 与否都继续；live 只影响 death/TTL 路径）。
 	ticker := time.NewTicker(claudeFileRelayPollInterval)
 	defer ticker.Stop()
+	// Phase 3 事件驱动定向刷新：Stop hook 经 Management API nudge 本通道，
+	// 立即消费 transcript 尾部而不等 3s tick（hooks 失活时退化为纯轮询=现状）。
+	nudgeCh := make(chan struct{}, 1)
+	h.registerClaudeRelayNudge(sessionID, nudgeCh)
+	defer h.unregisterClaudeRelayNudge(sessionID, nudgeCh)
 	lastMeaningfulGrowth := time.Now()
 	runningObserved := false
 	processDeathMisses := 0
@@ -880,7 +885,12 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 		}
 		heldTerminals = nil
 	}
-	for range ticker.C {
+	for {
+		select {
+		case <-ticker.C:
+		case <-nudgeCh:
+			// Phase 3 Stop hook 事件驱动的立即轮询（定向刷新；失活时纯轮询兜底）
+		}
 		if !h.relayKindIs(sessionID, relayKindClaudeFile) {
 			slog.Info("go-bridge: claudeSessionFileRelay superseded by agent relay", "sessionID", sessionID)
 			flushHeldTerminals()
