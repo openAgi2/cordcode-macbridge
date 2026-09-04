@@ -881,6 +881,18 @@ Wire behavior:
   conflated. Both keys appear only when the backend has that truth; clients
   treat them as display truth, never as send targets (sending still uses
   `id`).
+- Canonical additive revision (claudecode Phase 2, 2026-09-04, dump-verified):
+  for the claude backend, `switch_model` with a non-empty `sessionId` now
+  switches the RUNNING session through the official `set_model` control
+  request (S8 ruling keeps the process alive). `abort_generation` on claude
+  resolves to the official `interrupt` (`cancel_queued:true`) when the CLI
+  advertises `interrupt_receipt_v1` — the interrupted turn's official result
+  frame is the terminal (no synthetic `aborted` event on that path); CLIs
+  without the capability keep the legacy close-process behavior. A live
+  `switch_model` the CLI rejects returns wire error
+  `live_model_switch_failed` (agent-global selection still applies to the
+  next session spawn); `send_message.model` live-switch failures stay
+  best-effort (logged, message proceeds).
 - Approvals surface through the existing `permission_request` events (SSE
   `permission.asked`) and are answered by folding bridge `allow`/`deny` onto
   the official reply literals (1.18 probes `once`/`reject` first and falls
