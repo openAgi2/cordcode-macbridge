@@ -299,6 +299,15 @@ main；退役目录（agent/codex、agent/codex-web、agent/dsh、agent/opencode
   plan_exit question 桥已能答 Yes/No；requestChanges 无原生反馈通道是产品语义缺口。
 - dsh plan 投影（active/pending）消费（§2.1 结论位）：第二批或 plan 状态指示需求出现
   时再接。
+- claude 外部 turn 计划审批不可达（2026-09-04 owner 验收实测确认，已知产品边界）：
+  claude 后端无共享事件总线——owner 在 Mac 自己的 Claude App/终端里发起的 plan turn，
+  ExitPlanMode 审批提示只存在于该外部进程内部，runtime 没有控制通道可感知
+  （生产日志佐证：测试时间窗 plan_review/permission_request 0 条；与「外部 turn 无
+  流式」为同一架构限制，think.md 2026-07-05）。计划卡只覆盖 iOS 经 CordCode 发起的
+  会话（runtime 子进程 `--permission-mode plan` → 控制协议上报 ExitPlanMode，
+  Phase 4 生产路径自验已通过）。若要覆盖外部 turn，需基于 transcript 轮询推断
+  pending ExitPlanMode 且无上行应答通道，属于第二批独立设计项。grok（leader plan
+  broadcast 跨进程）与 dsh（mux agent 级广播）不受此边界影响。
 
 ## 9. 红线合规自查
 
