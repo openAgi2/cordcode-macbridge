@@ -1823,6 +1823,15 @@ func modelItemsForWire(agent core.Agent, ccModels []core.ModelOption, currentMod
 			copy(variants, m.Variants)
 			item["variants"] = variants
 		}
+		// claudecode Phase 1 三键（canonical additive）：resolved = CLI 官方
+		// resolvedModel（别名→canonical）；observedModel = 网关改写后的执行侧
+		// 观测名（assistant message.model）。可选键，仅在真值存在时下发。
+		if m.Resolved != "" {
+			item["resolved"] = m.Resolved
+		}
+		if m.Observed != "" {
+			item["observedModel"] = m.Observed
+		}
 		models = append(models, item)
 	}
 	return models

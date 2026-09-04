@@ -59,6 +59,12 @@ type claudeSession struct {
 	// enter this registry; there is no independently writable v1 registry.
 	claudeUserInputReg *claudeUserInputRegistry
 
+	// 发送侧控制协议（control_channel.go）：request_id → 等待中的响应通道。
+	ctrlReqSeq       atomic.Int64
+	ctrlMu           sync.Mutex
+	ctrlPending      map[string]chan controlResponse
+	onAssistantModel func(requested, observed string)
+
 	model            string
 	maxContextTokens int
 	usageMu          sync.Mutex
@@ -426,6 +432,8 @@ func (cs *claudeSession) handleReadLoopLine(line string) {
 		cs.handleStreamEvent(raw)
 	case "control_request":
 		cs.handleControlRequest(raw)
+	case "control_response":
+		cs.dispatchControlResponse(raw)
 	case "control_cancel_request":
 		requestID, _ := raw["request_id"].(string)
 		slog.Debug("claudeSession: permission cancelled", "request_id", requestID)
@@ -464,6 +472,11 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 			model = cs.model
 		}
 		cs.emitContextUsage(usage, model)
+		// 目录观测层（Phase 1）：assistant message.model 是唯一可靠的执行侧
+		// 模型真值（网关改写后），catalog 高亮与 observedModel 键来自这里。
+		if observed, _ := msg["model"].(string); observed != "" && cs.onAssistantModel != nil {
+			cs.onAssistantModel(cs.model, observed)
+		}
 	}
 	contentArr, ok := msg["content"].([]any)
 	if !ok {

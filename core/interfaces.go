@@ -524,6 +524,15 @@ type ModelOption struct {
 	// Variants (canonical §6.11.1 additive revision, opencode-web): the live
 	// model-specific variant keys from /provider. nil/empty = no selector.
 	Variants []string
+	// Resolved (claudecode Phase 1, 2026-09-04 design §6 Phase 1.1/R2-S2):
+	// canonical model id the CLI resolves this option's Name to (claude
+	// initialize.models resolvedModel, 别名→canonical 官方方向). Empty = not
+	// reported. NOT a short alias — do not conflate with Alias (方向相反).
+	Resolved string
+	// Observed (claudecode Phase 1): the execution-side model actually seen in
+	// assistant message.model after gateway rewriting. Empty = no live
+	// observation for this row.
+	Observed string
 }
 
 // UsageReporter is an optional interface for agents that can report account or

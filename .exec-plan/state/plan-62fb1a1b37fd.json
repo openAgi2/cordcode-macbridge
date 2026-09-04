@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-04T12:56:26Z",
+  "updated_at": "2026-09-04T13:12:47Z",
   "todos": [
     {
       "id": "p0-1-control-plane-probe",
@@ -229,7 +229,7 @@
       "id": "p0-8-evidence-pack",
       "title": "Phase 0 证据包归档收口（全案硬门）",
       "description": "汇总 7 探针产物：dump 归档目录、探针脚本入仓清单（scripts/claudecode-phase0/，对标 DSH_TURN_REPRO 供 CLI 升级后复测）、设计文档回填（§3.4 矩阵、§0.4 现状刷新）、§7.1 红线清单逐项核对（每个当已核实的形状是否已有 dump）。红线项未齐 → 禁止进入 Phase 1 编码。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0",
       "kind": "impl",
       "depends_on": [
@@ -245,20 +245,23 @@
       "notes": "硬门收口单元。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "七探针全绿收口：dump 目录+探针脚本+README 结论入仓（commit 31a5afe）；§7.1 红线清单逐项核对（9 项：6 dump ✅、SessionStart --settings 层边界记档、PostModelSwitch 代际不可得、effective hooks 行为级证据）；设计 §3.4 矩阵回填；secret scan 零泄漏；Phase 1 编码解锁。",
+        "artifacts": [
+          "scripts/claudecode-phase0/README.md",
+          "git:31a5afe"
+        ],
+        "checked_at": "2026-09-04T12:58:45Z"
       }
     },
     {
       "id": "p1-1-model-catalog-impl",
       "title": "Phase 1 模型目录真值链重构",
       "description": "重构 AvailableModels()（agent/claudecode）：①主源 initialize.models（typed）——会话建立时发送 initialize 并缓存 models（value/resolvedModel/displayName/effort 字段）；②刷新/对照 list_models——成功体形状以 Phase 0 dump 为准，未知形状 fail closed 跳过；③观测补充——assistant message.model 从 usage 旁路（session.go:461-466）接线进目录，维护 seen-alive 集合与请求名→改写名映射；④降级源与网关修正——settings.json 三槽位别名保留为降级源；usesCustomGateway 排除 loopback（127.0.0.1/localhost）代理型 base URL，loopback 型不拉 /v1/models 落到别名/观测级；真网关读 ANTHROPIC_AUTH_TOKEN + 双头（x-api-key+Bearer）拉取；⑤wire 三键——槽位（现有 id）+ 新增 optional resolved（resolvedModel 方向）+ 观测改写名单独键（建议 observedModel），不复用 core.ModelOption.Alias（R2-S2）。Mac wire 变化同步进 docs/protocol/ canonical pack。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1",
       "kind": "impl",
       "depends_on": [
@@ -268,20 +271,27 @@
       "notes": "iOS CCCodeBridgeModel 增补 resolved/observedModel 字段属 p1-3/p2-2 接线，本 todo 先落 Mac 侧 wire 产出。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "真值链落地：①会话建立发送 initialize（裸请求）缓存 models 为主源（beginCatalogSync，fail closed：错误/超时/未知形状保留旧目录）；②list_models 活会话刷新（refreshCatalogViaListModels，无副作用）；③assistant message.model 观测接线（onAssistantModel 回调→catalogState.observed 精确匹配映射）；④wire 三键 id/resolved/observedModel（core.ModelOption 新增 Resolved/Observed，modelItemsForWire 可选下发，不复用 Alias）；⑤usesRealGateway 分类（显式 routerURL/provider=真网关含 loopback CCR；env loopback=GUI 泄漏代理不算→别名/观测级）；⑥fetchModelsFromAPI 补 AUTH_TOKEN+双头；⑦EffortsForModel per-model 真值（haiku 无 effort、目录外行回落静态表）。新文件 control_channel.go（信封+request_id 配对+超时，stdout control_response case 新增）+ model_catalog.go。",
+        "artifacts": [
+          "agent/claudecode/control_channel.go",
+          "agent/claudecode/model_catalog.go",
+          "agent/claudecode/claudecode.go",
+          "agent/claudecode/session.go",
+          "core/interfaces.go",
+          "go-bridge/handlers.go"
+        ],
+        "checked_at": "2026-09-04T13:12:47Z"
       }
     },
     {
       "id": "p1-1-model-catalog-tests",
       "title": "Phase 1 定向测试（fixture=真实 dump）",
       "description": "定向测试类：控制协议 fixture 必须用 Phase 0 dump 的真实 control_response 原文；未知 subtype/失败响应让功能降级而非测试绿；降级链各级（initialize→list_models→观测→别名）覆盖；usesCustomGateway loopback/真网关分类；fail closed 全程不伪装。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1",
       "kind": "tests",
       "depends_on": [
@@ -291,13 +301,19 @@
       "notes": "D3 级：相关测试组，不默认全量。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "13 个新定向测试全绿 + 既有回归全绿（agent/go-bridge/core 18 包）：fixture=Phase 0 dump 真实 control_response 原文（testdata/control_protocol/，逐字提取）；fail closed（6 种畸形形状整包拒绝）；request_id 配对（真实信封往返端到端）；三键渲染；观测 guard（identity/空值不记录）；S7 分类（CCR loopback=真网关 vs env loopback=泄漏代理）；双头鉴权（httptest 捕获断言）；per-model effort 真值；wire 可选键缺席断言。既有 TestAvailableModels_GatewayMergesAliasAndAPI 语义保持（真网关合并仍优先于别名降级）。",
+        "artifacts": [
+          "agent/claudecode/model_catalog_test.go",
+          "agent/claudecode/testdata/control_protocol/initialize_response.json",
+          "agent/claudecode/testdata/control_protocol/list_models_response.json",
+          "agent/claudecode/testdata/control_protocol/interrupt_response.json",
+          "go-bridge/concentrated_activation_test.go"
+        ],
+        "checked_at": "2026-09-04T13:12:47Z"
       }
     },
     {

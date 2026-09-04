@@ -1,0 +1,11 @@
+{
+ "type": "control_response",
+ "response": {
+  "subtype": "success",
+  "request_id": "req_7",
+  "response": {
+   "still_queued": [],
+   "cancelled": []
+  }
+ }
+}
