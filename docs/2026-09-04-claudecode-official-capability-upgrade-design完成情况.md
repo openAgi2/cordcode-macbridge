@@ -120,3 +120,25 @@ ledger cursor，后续所有行以 "Claude source batch gap" 全拒（23:17:15 �
 无 tool_result）按非内容行路由（仅推进 cursor）。复现测试用真实 transcript 行序列
 同形驱动，修复前三回合 gap 全拒、修复后 A/“/model haiku”/B 三回合结构完整。
 runtime 重启后 kernel 内存态重建，受影响会话重开即自愈。
+
+### 追记 2：第三轮复测「无流式/回复重复」——官方消费模型对齐（d5f5e30，2026-09-05 00:52 部署）
+
+owner 复测确认归位修复生效；新反馈「发消息后空白几秒→一次性加载→回复B回复B→去重、无流式」。
+取证（93cd4a10 transcript + 生产日志）三层根因：
+
+1. 「等几秒」主因＝**bigmodel 429 速率限制重试 68 秒**（transcript 六连 rate_limit_error 行，
+   15:50:37→15:51:11，上游限流，非 CordCode bug）；次因＝resume history drain 固定 10s 超时
+   （既有机制）。
+2. 「无流式」＝架构缺口：claude stdout 流式增量（CLI stream_event）无 uuid 身份（CLI 不回显
+   user 帧），SSV2 reducer 跳过无身份 delta——iOS 只能等 file-relay 完成态整段（3s 粒度）。
+3. 「回复重复」＝stdout 流与 file-relay 完成态行**双源向同一 item 各 append 一份**。
+
+修复（对照 Agent SDK 官方消费模型：stream_event 打字机 + 完成帧差量收口）：
+- relayEvents 给无身份流式 delta 补 kernel.ActiveTurnID（file-relay user 行建立的 turn 身份）
+  → 流式增量经 IngestLive 进投影 patch（打字机）；完成帧 session 侧已有流式差量。
+- 官方单源：agent relay（stdout）活跃时 file-relay 的 assistant 行退为 cursor-only（不双份）；
+  user 行照常建 turn 身份；外部会话保持 file-relay 全量。
+- 测试 5 例新增/更新（含真实 429 行集消费、双源不重复断言）；全量回归绿。
+
+待 owner 复测：新建会话发消息（本地正常网关时）应看到打字机流式、无重复、无整段跳变。
+已知边界：上游 429 限流期间的等待是官方行为（CLI 自身也在重试）。
