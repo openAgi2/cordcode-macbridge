@@ -4405,10 +4405,15 @@ func (h *Handlers) handleSetPermissionMode(conn Connection, msg WireMessage, age
 
 	switcher.SetMode(params.Mode)
 	appliesTo := "new_sessions"
+	// sessionActive：目标会话当前是否在 runtime 会话表中（有后端活进程）。plan 等
+	// 只能随会话启动生效的模式，客户端据此区分「下次发送 resume 即生效」与
+	// 「当前会话无法切入，需要新会话」。
+	sessionActive := false
 	if params.SessionID != "" {
 		h.mu.Lock()
 		sess, ok := h.getSession(params.SessionID)
 		h.mu.Unlock()
+		sessionActive = ok
 		if ok {
 			if live, ok := sess.(core.LiveModeSwitcher); ok && live.SetLiveMode(switcher.GetMode()) {
 				appliesTo = "current_session"
@@ -4421,12 +4426,14 @@ func (h *Handlers) handleSetPermissionMode(conn Connection, msg WireMessage, age
 	// (web composer label / any future iOS consumer), not just the requester. dsh official-UI
 	// slash switches stay transcript-only (no host event) — reload re-syncs those.
 	h.publishEvent(LogicalEvent{SessionID: params.SessionID, BackendID: msg.BackendID, Event: "permission_mode_changed", Broadcast: true, Targets: []Connection{conn}, Data: map[string]interface{}{
-		"mode":      current,
-		"appliesTo": appliesTo,
+		"mode":          current,
+		"appliesTo":     appliesTo,
+		"sessionActive": sessionActive,
 	}})
 	conn.SendResult(msg.RequestID, map[string]interface{}{
-		"mode":      current,
-		"appliesTo": appliesTo,
+		"mode":          current,
+		"appliesTo":     appliesTo,
+		"sessionActive": sessionActive,
 	}, nil)
 }
 

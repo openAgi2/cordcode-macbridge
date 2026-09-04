@@ -833,8 +833,39 @@ func TestSetPermissionModeAppliesToLiveSessionWhenSupported(t *testing.T) {
 	if got := data["appliesTo"]; got != "current_session" {
 		t.Fatalf("appliesTo = %#v, want current_session", got)
 	}
+	if got := data["sessionActive"]; got != true {
+		t.Fatalf("sessionActive = %#v, want true (session registered)", got)
+	}
 	if session.liveMode != "full-access" {
 		t.Fatalf("session liveMode = %q, want full-access", session.liveMode)
+	}
+}
+
+func TestSetPermissionModeReportsSessionInactiveForUnregisteredSession(t *testing.T) {
+	handlers := newTestHandlers(t)
+	agent := &fakeAgent{name: "claudecode", mode: "default"}
+	conn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.handleSetPermissionMode(conn, WireMessage{
+		RequestID: "req_set_mode",
+		BackendID: "claudecode",
+		Params: mustJSONRaw(t, map[string]any{
+			"sessionId": "ses_not_running",
+			"mode":      "plan",
+		}),
+	}, agent)
+
+	messages := readJSONMaps(t, clientConn, 2)
+	data, _ := messages[1]["data"].(map[string]any)
+	if got := data["mode"]; got != "plan" {
+		t.Fatalf("mode = %#v, want plan", got)
+	}
+	if got := data["appliesTo"]; got != "new_sessions" {
+		t.Fatalf("appliesTo = %#v, want new_sessions", got)
+	}
+	if got := data["sessionActive"]; got != false {
+		t.Fatalf("sessionActive = %#v, want false (no live session; resume send will carry mode)", got)
 	}
 }
 
