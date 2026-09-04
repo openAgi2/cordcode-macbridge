@@ -449,9 +449,9 @@ func TestNormalizeClaudeUserText(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := normalizeClaudeUserText(tc.in)
+			got := NormalizeClaudeUserText(tc.in)
 			if got != tc.want {
-				t.Fatalf("normalizeClaudeUserText(%q) = %q, want %q", tc.in, got, tc.want)
+				t.Fatalf("NormalizeClaudeUserText(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
 	}

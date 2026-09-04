@@ -1514,7 +1514,7 @@ func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHisto
 					// <command-args>, <local-command-stdout|stderr|caveat>) into a
 					// compact user-readable form, or drop it entirely. See
 					// normalizeClaudeUserText.
-					normalized := normalizeClaudeUserText(block.Text)
+					normalized := NormalizeClaudeUserText(block.Text)
 					if normalized == "" {
 						continue
 					}
@@ -1599,7 +1599,7 @@ func IsTaskNotificationOrigin(kind string) bool {
 //   - <local-command-stdout|stderr|caveat>...</...> → "" (filtered out).
 //
 // Text without any of these tags is returned unchanged.
-func normalizeClaudeUserText(text string) string {
+func NormalizeClaudeUserText(text string) string {
 	if localCommandRe.MatchString(text) {
 		return ""
 	}
@@ -1843,7 +1843,7 @@ func extractTextContent(raw json.RawMessage) string {
 		if block.Type != "text" || block.Text == "" {
 			continue
 		}
-		if normalized := normalizeClaudeUserText(block.Text); normalized != "" {
+		if normalized := NormalizeClaudeUserText(block.Text); normalized != "" {
 			segments = append(segments, normalized)
 		}
 	}

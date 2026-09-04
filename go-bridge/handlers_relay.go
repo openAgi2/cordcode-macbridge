@@ -2072,7 +2072,7 @@ func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *
 		if isClaudeUserInterruptRelayEntry(e) {
 			return out // interrupt marker — no user_message, no new turn
 		}
-		text := claudeConcatTextBlocks(blocks)
+		text := claudeNormalizedUserText(blocks)
 		if strings.TrimSpace(text) == "" {
 			return out
 		}
@@ -3030,4 +3030,24 @@ func (h *Handlers) FlushRelayOutboxes() {
 			slog.Warn("go-bridge: relay outbox flush failed", "deviceID", safeID(device.DeviceID), "error", err)
 		}
 	}
+}
+
+// claudeNormalizedUserText joins an entry's text blocks with the same CLI
+// slash-command normalization the cold rich-history path applies
+// (agent/claudecode.NormalizeClaudeUserText): <local-command-stdout|stderr|
+// caveat> echoes drop entirely, <command-name>/<command-args> collapse to a
+// compact "/cmd args" line. Without this the live file-relay projection
+// rendered the raw XML tags as user bubbles (owner 真机 2026-09-04 #2) while
+// cold history showed the normalized form — same transcript, two renderings.
+func claudeNormalizedUserText(blocks []claudeRelayContentBlock) string {
+	segments := make([]string, 0, len(blocks))
+	for _, b := range blocks {
+		if b.Type != "text" || b.Text == "" {
+			continue
+		}
+		if normalized := claudecode.NormalizeClaudeUserText(b.Text); normalized != "" {
+			segments = append(segments, normalized)
+		}
+	}
+	return strings.Join(segments, "\n\n")
 }
