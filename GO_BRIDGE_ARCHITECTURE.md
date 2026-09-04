@@ -150,6 +150,16 @@ turn 完成时，在线订阅设备收到事件；未在线设备的通知写入
 
 ### Claude Code
 
+> **文件面边界纪律（2026-09-04，官方能力收敛升级 Phase 4）**：`~/.claude/projects` 的
+> transcript JSONL 是 Claude CLI 的**无合同**存储。CordCode 自有记录一律带 `cordcode:`
+> 命名空间前缀（custom-title），读取双接受存量裸 type；形状以真实 fixture 锁定
+> （`agent/claudecode/testdata/transcript-shapes/`，10 类 type 枚举 + 回归测试），CLI
+> 大版本升级跑 fixture diff。官方 `rename_session` 控制请求已实测可用（Phase 0 dump）
+> 但有意不迁移：控制帧只能达存活会话，append 写入对任意历史会话可用（对照结论见
+> session_mutation.go 注释）。模型目录真值链、会话内控制（set_model/
+> set_permission_mode/interrupt 留进程）、hooks 事件层见
+> `docs/2026-09-04-claudecode-official-capability-upgrade-design.md`。
+
 - 每个活跃 session 对应独立 Claude CLI 进程；
 - iOS 发起的 turn 可通过该 session 的 stdout 实时推送；
 - runtime 以 `--include-partial-messages` 启动 Claude CLI，流式 partial 进入 `text_delta` /
