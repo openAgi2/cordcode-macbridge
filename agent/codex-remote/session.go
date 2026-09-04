@@ -118,9 +118,6 @@ func (s *remoteSession) CancelTurn(ctx context.Context) error {
 	return s.agent.CancelTurnForThread(ctx, s.threadID)
 }
 
-func (s *remoteSession) RespondPermission(string, core.PermissionResult) error {
-	return core.ErrNotSupported
-}
 func (s *remoteSession) Events() <-chan core.Event { return s.events }
 func (s *remoteSession) CurrentSessionID() string  { return s.threadID }
 func (s *remoteSession) Alive() bool {

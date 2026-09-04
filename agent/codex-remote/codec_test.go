@@ -2,6 +2,7 @@ package codexremote
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -82,5 +83,93 @@ func TestDecodeTurnCompletedCarriesDurationMs(t *testing.T) {
 		`{"threadId":"th","turn":{"id":"turn2","status":"completed"}}`)})
 	if len(events) != 1 || events[0].DurationMs != 0 {
 		t.Fatalf("absent durationMs must decode 0: %+v", events)
+	}
+}
+
+func TestRemoteCodecEmitsPlanReviewAfterOfficialPlanItem(t *testing.T) {
+	codec := NewLiveCodec()
+	codec.Decode(Notification{Method: "turn/started", Params: json.RawMessage(`{"threadId":"th","turn":{"id":"turn-1"}}`)})
+	if events := codec.Decode(Notification{Method: "item/plan/delta", Params: json.RawMessage(
+		`{"threadId":"th","turnId":"turn-1","itemId":"turn-1-plan","delta":"# Draft\n"}`)}); len(events) != 0 {
+		t.Fatalf("plan delta must not emit timeline events: %+v", events)
+	}
+	if codec.UnknownMethods()["item/plan/delta"] != 0 {
+		t.Fatal("item/plan/delta is official and must not count as unknown")
+	}
+	if events := codec.Decode(Notification{Method: "item/started", Params: json.RawMessage(
+		`{"threadId":"th","turnId":"turn-1","item":{"type":"plan","id":"turn-1-plan","text":""}}`)}); len(events) != 0 {
+		t.Fatalf("plan item start is not a tool: %+v", events)
+	}
+	if events := codec.Decode(Notification{Method: "item/completed", Params: json.RawMessage(
+		`{"threadId":"th","turnId":"turn-1","item":{"type":"plan","id":"turn-1-plan","text":"# Final plan\n- first\n- second\n"}}`)}); len(events) != 0 {
+		t.Fatalf("completed plan waits for turn/completed: %+v", events)
+	}
+	completed := codec.Decode(Notification{Method: "turn/completed", Params: json.RawMessage(
+		`{"threadId":"th","turn":{"id":"turn-1","status":"completed"}}`)})
+	if len(completed) != 2 {
+		t.Fatalf("events = %d, want plan_review + turn result: %+v", len(completed), completed)
+	}
+	review := completed[0]
+	if review.Type != core.EventPermissionRequest || review.PermissionKind != "plan_review" || review.RequestID != "turn-1-plan" {
+		t.Fatalf("review = %+v", review)
+	}
+	if review.PlanReview == nil || review.PlanReview.Content != "# Final plan\n- first\n- second\n" || review.PlanReview.Title != "Final plan" {
+		t.Fatalf("plan payload = %+v", review.PlanReview)
+	}
+	if got := strings.Join(review.PermissionActions, ","); got != "approve,requestChanges,quit" {
+		t.Fatalf("actions = %q", got)
+	}
+	if completed[1].Type != core.EventResult || !completed[1].Done {
+		t.Fatalf("turn result = %+v", completed[1])
+	}
+}
+
+func TestRemoteCodecNoPlanReviewWithoutPlanItem(t *testing.T) {
+	codec := NewLiveCodec()
+	codec.Decode(Notification{Method: "turn/started", Params: json.RawMessage(`{"threadId":"th","turn":{"id":"turn-1"}}`)})
+	completed := codec.Decode(Notification{Method: "turn/completed", Params: json.RawMessage(
+		`{"threadId":"th","turn":{"id":"turn-1","status":"completed"}}`)})
+	if len(completed) != 1 || completed[0].Type != core.EventResult {
+		t.Fatalf("no plan item → no review card: %+v", completed)
+	}
+}
+
+func TestRemoteCodecFailedTurnDoesNotEmitPlanReview(t *testing.T) {
+	codec := NewLiveCodec()
+	codec.Decode(Notification{Method: "turn/started", Params: json.RawMessage(`{"threadId":"th","turn":{"id":"turn-1"}}`)})
+	codec.Decode(Notification{Method: "item/completed", Params: json.RawMessage(
+		`{"threadId":"th","turnId":"turn-1","item":{"type":"plan","id":"turn-1-plan","text":"# Plan\n"}}`)})
+	completed := codec.Decode(Notification{Method: "turn/completed", Params: json.RawMessage(
+		`{"threadId":"th","turn":{"id":"turn-1","status":"failed","error":{"message":"boom"}}}`)})
+	if len(completed) != 1 || completed[0].Type != core.EventError {
+		t.Fatalf("failed turn = %+v", completed)
+	}
+}
+
+func TestRemoteCodecNewTurnCancelsPendingPlanReview(t *testing.T) {
+	codec := NewLiveCodec()
+	codec.Decode(Notification{Method: "turn/started", Params: json.RawMessage(`{"threadId":"th","turn":{"id":"turn-1"}}`)})
+	codec.Decode(Notification{Method: "item/completed", Params: json.RawMessage(
+		`{"threadId":"th","turnId":"turn-1","item":{"type":"plan","id":"turn-1-plan","text":"# Plan\n"}}`)})
+	codec.Decode(Notification{Method: "turn/completed", Params: json.RawMessage(
+		`{"threadId":"th","turn":{"id":"turn-1","status":"completed"}}`)})
+	next := codec.Decode(Notification{Method: "turn/started", Params: json.RawMessage(`{"threadId":"th","turn":{"id":"turn-2"}}`)})
+	if len(next) != 2 || next[0].Type != core.EventPermissionResolved || next[0].RequestID != "turn-1-plan" {
+		t.Fatalf("new turn must close the implement prompt: %+v", next)
+	}
+	if next[1].Type != core.EventTurnStarted {
+		t.Fatalf("started = %+v", next[1])
+	}
+}
+
+func TestRemoteCodecEmptyPlanTextDoesNotEmitReview(t *testing.T) {
+	codec := NewLiveCodec()
+	codec.Decode(Notification{Method: "turn/started", Params: json.RawMessage(`{"threadId":"th","turn":{"id":"turn-1"}}`)})
+	codec.Decode(Notification{Method: "item/completed", Params: json.RawMessage(
+		`{"threadId":"th","turnId":"turn-1","item":{"type":"plan","id":"turn-1-plan","text":"  \n"}}`)})
+	completed := codec.Decode(Notification{Method: "turn/completed", Params: json.RawMessage(
+		`{"threadId":"th","turn":{"id":"turn-1","status":"completed"}}`)})
+	if len(completed) != 1 || completed[0].Type != core.EventResult {
+		t.Fatalf("whitespace plan must not synthesize a review card: %+v", completed)
 	}
 }

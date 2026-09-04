@@ -21,13 +21,30 @@ type LiveCodec struct {
 	turnByThread  map[string]string
 	retryByThread map[string]int
 	unknown       map[string]int
+	// inFlightPlan is the proposed-plan item for the current turn (official
+	// ThreadItem::Plan). The completed item is authoritative; item/plan/delta
+	// must not be concatenated (app-server-protocol v2 item.rs).
+	inFlightPlan map[string]codexProposedPlan
+	// awaitingPlanReview is a plan item waiting for the client-orchestrated
+	// "Implement this plan?" action (TUI plan_implementation.rs — not a wire
+	// approval request). Keyed by the official plan item id.
+	awaitingPlanReview map[string]codexProposedPlan
+}
+
+type codexProposedPlan struct {
+	threadID string
+	turnID   string
+	itemID   string
+	text     string
 }
 
 func NewLiveCodec() *LiveCodec {
 	return &LiveCodec{
-		turnByThread:  map[string]string{},
-		retryByThread: map[string]int{},
-		unknown:       map[string]int{},
+		turnByThread:       map[string]string{},
+		retryByThread:      map[string]int{},
+		unknown:            map[string]int{},
+		inFlightPlan:       map[string]codexProposedPlan{},
+		awaitingPlanReview: map[string]codexProposedPlan{},
 	}
 }
 
@@ -66,6 +83,13 @@ func (c *LiveCodec) Decode(n Notification) []core.Event {
 	case "item/agentMessage/delta":
 		c.resetRetry(n)
 		return decodeRemoteAgentMessageDelta(n)
+	case "item/plan/delta":
+		// Official PlanDelta is streaming text for a proposed-plan item.
+		// Completed item content is authoritative and may not match the
+		// concatenated deltas — consume so it is not counted unknown, wait
+		// for item/completed.
+		c.resetRetry(n)
+		return nil
 	case "item/reasoning/summaryTextDelta", "item/reasoning/textDelta":
 		c.resetRetry(n)
 		return decodeRemoteReasoningDelta(n)
@@ -118,8 +142,17 @@ func (c *LiveCodec) decodeTurnStarted(n Notification) []core.Event {
 	c.mu.Lock()
 	c.turnByThread[params.ThreadID] = params.Turn.ID
 	delete(c.retryByThread, params.ThreadID)
+	delete(c.inFlightPlan, params.ThreadID)
+	superseded := c.takeAwaitingPlanLocked(params.ThreadID)
 	c.mu.Unlock()
-	return []core.Event{{Type: core.EventTurnStarted, SessionID: params.ThreadID, ThreadID: params.ThreadID, TurnID: params.Turn.ID}}
+	started := core.Event{Type: core.EventTurnStarted, SessionID: params.ThreadID, ThreadID: params.ThreadID, TurnID: params.Turn.ID}
+	if superseded.itemID == "" {
+		return []core.Event{started}
+	}
+	return []core.Event{
+		{Type: core.EventPermissionResolved, SessionID: params.ThreadID, ThreadID: params.ThreadID, RequestID: superseded.itemID, Content: "cancel"},
+		started,
+	}
 }
 
 func (c *LiveCodec) decodeTurnCompleted(n Notification) []core.Event {
@@ -144,6 +177,13 @@ func (c *LiveCodec) decodeTurnCompleted(n Notification) []core.Event {
 	c.mu.Lock()
 	delete(c.turnByThread, params.ThreadID)
 	delete(c.retryByThread, params.ThreadID)
+	plan := c.inFlightPlan[params.ThreadID]
+	delete(c.inFlightPlan, params.ThreadID)
+	emitReview := params.Turn.Status != remoteTurnStatusFailed &&
+		plan.turnID == params.Turn.ID && strings.TrimSpace(plan.text) != ""
+	if emitReview {
+		c.awaitingPlanReview[plan.itemID] = plan
+	}
 	c.mu.Unlock()
 	event := core.Event{SessionID: params.ThreadID, ThreadID: params.ThreadID, TurnID: params.Turn.ID, Done: true}
 	if params.Turn.DurationMs != nil {
@@ -159,7 +199,10 @@ func (c *LiveCodec) decodeTurnCompleted(n Notification) []core.Event {
 		return []core.Event{event}
 	}
 	event.Type = core.EventResult
-	return []core.Event{event}
+	if !emitReview {
+		return []core.Event{event}
+	}
+	return []core.Event{codexPlanReviewEvent(plan), event}
 }
 
 type remoteOfficialError struct{ message string }
@@ -225,6 +268,9 @@ func (c *LiveCodec) decodeItemStarted(n Notification) []core.Event {
 		return []core.Event{remoteToolUseEvent(params, item, "WebSearch", item.Query)}
 	case "dynamicToolCall":
 		return []core.Event{remoteToolUseEvent(params, item, item.Tool, string(remoteOrEmpty(item.Arguments)))}
+	case "plan":
+		// Proposed-plan item start: wait for item/completed (authoritative text).
+		return nil
 	default:
 		return nil
 	}
@@ -268,6 +314,9 @@ func (c *LiveCodec) decodeItemCompleted(n Notification) []core.Event {
 		return []core.Event{{Type: core.EventToolResult, SessionID: params.ThreadID, ThreadID: params.ThreadID, TurnID: params.TurnID, ItemID: item.ID, ToolName: item.Tool, RequestID: item.ID, ToolStatus: item.ToolStatus, ToolResult: string(remoteOrEmpty(item.Arguments))}}
 	case "webSearch":
 		return []core.Event{{Type: core.EventToolResult, SessionID: params.ThreadID, ThreadID: params.ThreadID, TurnID: params.TurnID, ItemID: item.ID, ToolName: "WebSearch", RequestID: item.ID}}
+	case "plan":
+		c.rememberInFlightPlan(params.ThreadID, params.TurnID, item.ID, item.Text)
+		return nil
 	default:
 		// userMessage, agentMessage and reasoning are represented by item/started
 		// or their delta notifications; completed snapshots must not duplicate.

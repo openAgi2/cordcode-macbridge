@@ -150,8 +150,11 @@ func TestRemoteHistoryMapsOfficialItemVariants(t *testing.T) {
 	if step := turn.Parts[4]["step"].(map[string]any); step["toolName"] != "custom" || step["status"] != "failed" {
 		t.Fatalf("dynamic step = %+v", step)
 	}
-	if step := turn.Parts[5]["step"].(map[string]any); step["status"] != "completed" {
-		t.Fatalf("plan status = %+v", step)
+	if part := turn.Parts[5]; part["type"] != "text" || part["content"] != "do it" {
+		t.Fatalf("plan part = %+v", part)
+	}
+	if _, hasPresentation := turn.Parts[5]["presentation"]; hasPresentation {
+		t.Fatalf("plan must not use an iOS-unknown presentation: %+v", turn.Parts[5])
 	}
 	if step := turn.Parts[6]["step"].(map[string]any); step["toolName"] != "WebSearch" {
 		t.Fatalf("search step = %+v", step)

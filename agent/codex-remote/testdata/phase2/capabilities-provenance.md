@@ -8,7 +8,8 @@ operations are intentionally absent:
 | Capability | Why it is absent |
 | --- | --- |
 | `model_switch`, `provider_switch` | No payload-preserving Remote `model/list`, `config/read`, or `thread/settings/update` capture; no adapter is enabled. |
-| `permission_resolve`, `structured_user_input_v1`, `question_reply` | No target Remote server-request payload was observed; the event pump rejects requests with `-32601`. |
+| `permission_resolve` | Advertised via `SessionPermissionResponder` for the client-orchestrated Plan follow-through (`ThreadItem::Plan` → synthesized `plan_review` card → `turn/start` `"Implement the plan."` + Default mode). This is not a Remote `serverRequest` approval; command/fileChange requestApproval still has no sampled payload and stays fail-closed. |
+| `structured_user_input_v1`, `question_reply` | No target Remote server-request payload was observed; the event pump rejects requests with `-32601`. |
 | `session_mutation`, `session_delete` | No sampled Remote archive/rename/delete/fork response and no corresponding adapter interface. |
 | `session_pagination`, `compression` | No Remote cursor/turn-compaction capability was frozen; the history reader uses bounded client-side trimming only. |
 

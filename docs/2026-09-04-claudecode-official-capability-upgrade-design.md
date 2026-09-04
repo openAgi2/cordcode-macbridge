@@ -1,8 +1,10 @@
 # Claude Code backend 官方能力收敛升级设计（source-first 对齐四 backend 重构范式）
 
-状态：**v2 修订稿（2026-09-04）**。v1 经评审「修改后通过（APPROVE WITH CHANGES）」，
-评审报告：`docs/2026-09-04-claudecode-official-capability-upgrade-design-review.md`；
-本轮修订逐项采纳 B1–B3 / M1–M6 / S1–S10 与两项裁决建议，采纳记录见 §11（无不采纳项）。
+状态：**v2.1 修订稿（2026-09-04）**。v1 经一轮评审「修改后通过（APPROVE WITH
+CHANGES）」（`docs/2026-09-04-claudecode-official-capability-upgrade-design-review.md`），
+v2 采纳 B1–B3 / M1–M6 / S1–S10 与两项裁决（记录 §11.1–11.5）；v2 经二轮评审
+「通过（APPROVE）」（`docs/2026-09-04-claudecode-official-capability-upgrade-design-review-r2.md`），
+v2.1 落实二轮建议 R2-S1..S7（记录 §11.6，无不采纳项）。
 未进入实施；实施前必须完成 §6 Phase 0 证据门并重新生成来源清单。
 
 范式参照：`docs/2026-08-16-dsh-web-backend-design.md`、
@@ -19,11 +21,9 @@
 ```text
 仓库路径=/Users/jacklee/Projects/cordcode-macbridge-plan-approval（本 session 工作树）
 分支=plan/approval-layer
-提交=390ed6efe18b793ef5ccd886c007c93ba010e964（v1 撰写时为 aabbfe6；其后仅新增 390ed6e
-  "feat(plan): set_permission_mode 响应补 sessionActive"，该提交只改 go-bridge RPC 信封，
-  不向 Claude stdin 发控制请求——评审 §0 已核，"发送侧控制=零"在 HEAD 仍成立）
-未提交状态=修改 .exec-plan/state/plan-dfb27dce3681.json（与本方案无关）；
-  未跟踪本方案文件（v1→v2）与评审文件（docs/2026-09-04-claudecode-official-capability-upgrade-design-review.md）
+提交=1d60760（v2 与一轮评审已随 0514e97 入库；390ed6e 只改 go-bridge RPC 信封、
+  不向 Claude stdin 发控制请求——"发送侧控制=零"仍成立，一轮评审 §0 已核）
+未提交状态=未跟踪二轮评审文件与本 v2.1 修订
 任务预期分支=本方案定位为 plan/approval-layer 续作（评审 M3 冻结，owner 经 2026-09-04 修订指示采纳）；
   文件暂存于本工作树 docs/、未提交；进入实施前按该配对落分支，配对未定时改 agent/claudecode 或 iOS 视为 P0 来源门失败
 配套仓库路径/分支/提交=/Users/jacklee/Projects/cordcode-macbridge / main / a2200cf4771b7ded4a09577bdcf9599d145d93c1（只读参照四份范式文档与 CLAUDE.md）
@@ -67,11 +67,13 @@ cc-switch=/Applications/CC Switch.app，本地网关 127.0.0.1:15721（评审复
 cc-switch DB=~/.cc-switch/cc-switch.db（providers / proxy_config / proxy_request_logs，只读取证）
 settings.json 重写=2026-09-04 11:41:59（cc-switch 整份重写；hooks 块并非 cc-switch 独占——
   SuperIsland、7823 PermissionRequest、ai-reminder 共存于同一文件，评审 §7 已核）
-网关模型改写（sqlite 计数，评审 S5 补全分布）=
-  claude-sonnet-5→glm-5.3（7564）、claude-fable-5→glm-5.3（641）
-  claude-opus-4-8→glm-5.2（6943）、claude-haiku-4-5→glm-5.3-flash（66）
-  identity：claude-sonnet-5→claude-sonnet-5（3037）等
-  ——改写映射随 cc-switch 供应商配置变，不能假设某别名族总是同一目标
+网关模型改写（sqlite 全量计数，2026-09-04 v2.1 时刻刷新；计数随使用漂移，教训以多映射事实为准）=
+  claude-sonnet-5→glm-5.3（7603）、claude-fable-5→glm-5.3（677）、claude-opus-5→glm-5.3（584）
+  claude-opus-4-8→glm-5.2（6943）
+  identity：claude-sonnet-5→claude-sonnet-5（3069）、claude-opus-4-8→claude-opus-4-8（2002）等
+  haiku 族多映射并存（R2-S4）：identity（538）、→glm-4.7（325）、→glm-5.3-flash（85，另有
+    claude-haiku-4-5-20251001 变体 152）、→mimo-v2.5（50）、→glm-5-turbo（6）等
+  ——改写映射随 cc-switch 供应商配置与时间变，同一别名族会漂到不同目标，不能假设单映射
 网关 /v1/models（撰写窗口实测）=/claude-desktop 路由要求自有 Authorization token（bigmodel key 被拒"token 无效"）；/claude 路由无响应体；评审未复测（避免打网关），复测入 Phase 0
 bigmodel 直连 /v1/models 实测=10 个模型（glm-4.5 … glm-5.3-flash），无 "1M" 变体
 CordCode runtime 进程 env（评审时刻 PID 74112 复核仍真）=ANTHROPIC_BASE_URL=http://127.0.0.1:15721/claude-desktop（GUI 层泄漏）、
@@ -140,7 +142,7 @@ iOS 侧代码。
 
 | 控制请求 subtype | 证据 | 语义 |
 |---|---|---|
-| `initialize` | [SDK] sdk.d.ts:3987-3994 | 会话初始化：返回 `commands` / `agents` / `output_style` / **`models: ModelInfo[]`** / 账户信息。`ModelInfo`（sdk.d.ts:1266+）字段完整：`value`（API 调用用的 id）/ **`resolvedModel`（别名→canonical，官方例 'sonnet' → 'claude-sonnet-5'——正是 iOS「haiku → glm-5.3」行渲染需要的字段）** / `displayName` / `description` / `supportsEffort` / `supportedEffortLevels` / `supportsAdaptiveThinking` / `supportsFastMode` / `supportsAutoMode`。SDK `Query.supportedModels()`（:2738）即取自 initialize 缓存。注意 initialize 有副作用（hooks 注册、first-attached-client-wins、`perTaskStopAffordance`），入 Phase 0 探针清单。本机 streaming spawn 的成功体**[待实测]** |
+| `initialize` | [SDK] sdk.d.ts:3989-3994 | 会话初始化：返回 `commands` / `agents` / `output_style` / **`models: ModelInfo[]`** / 账户信息。`ModelInfo`（sdk.d.ts:1266+）字段完整：`value`（API 调用用的 id）/ **`resolvedModel`（别名→canonical，官方例 'sonnet' → 'claude-sonnet-5'——正是 iOS「haiku → glm-5.3」行渲染需要的字段）** / `displayName` / `description` / `supportsEffort` / `supportedEffortLevels` / `supportsAdaptiveThinking` / `supportsFastMode` / `supportsAutoMode`。SDK `Query.supportedModels()`（:2738）即取自 initialize 缓存。注意 initialize 有副作用（hooks 注册、first-attached-client-wins、`perTaskStopAffordance`），入 Phase 0 探针清单。本机 streaming spawn 的成功体**[待实测]** |
 | `list_models` | [SDK] sdk.d.ts:4051-4053 | `{subtype:'list_models'}`。JSDoc："Requests the worker's selectable model catalog… the worker's provider, settings cascade, and enforcement policy decide which models the session can run, so the thin client must **ask rather than read its own getModelOptions()**"，面向 thin-client 场景。**SDK 中不存在成功响应类型**（全 package 仅此一处 JSDoc 提及 `modelCatalog`）——成功体先 dump 再写解析器（M1）。CLI 2.1.234 支持性**[待实测]**；`caps.modelCatalog` 非 typed cap（见 M2），能力探测=在 init `capabilities[]`（sdk.d.ts:5131-5134，open set，JSDoc 仅点名 `interrupt_receipt_v1`/`interrupt_cancel_queued_v1`/`queued_notifications`）里搜字符串 + 以实发结果为准 |
 | `set_model` | [SDK] sdk.d.ts:4377-4384 | `{subtype:'set_model', model?: string\|null}`；省略/null/`'default'` 重置为会话默认模型。会话内切换。**[待实测]** |
 | `set_permission_mode` | [SDK] sdk.d.ts:4389+ | 会话内权限模式切换；`mode` **必填**，enum 含 `default`/`plan`/`acceptEdits`/`dontAsk`/`auto`/`bypassPermissions`。使用边界见 §6 Phase 2（活会话禁 plan/auto）。**[待实测]** |
@@ -167,9 +169,10 @@ SDK 侧确认的相关选项：`canUseTool`（sdk.d.ts:1454）、`forkSession`�
   的 PermissionRequest hook 指向 `http://127.0.0.1:7823/hooks/permission`；评审时刻
   **7823 无监听**——HTTP hook 静默失效的现成样本。**CordCode 不订阅
   PermissionRequest**（避免与 stdio `can_use_tool` 通道双应答，S2）。
-- **层级与合并（S4，拆开表述）**：标量优先级 = Managed > `--settings` > user
-  （`~/.claude/settings.json`）> project（`.claude/settings.json`）> local
-  （`.claude/settings.local.json`）；**hooks 数组跨层 merge 不是替换**（官方原文
+- **层级与合并（S4 拆开表述；标量顺序按 R2-S1 修正）**：标量优先级（官方
+  高→低）= Managed > `--settings`（command line）> **local
+  （`.claude/settings.local.json`）> project（`.claude/settings.json`）> user
+  （`~/.claude/settings.json`）**；**hooks 数组跨层 merge 不是替换**（官方原文
   "merge rather than replacing"）。推论：CordCode `--settings` 内联 hooks 追加生效、
   不会打掉 cc-switch 的 PermissionRequest hook——既是优点（共存）也是双 hook 风险
   （见 S2 不订阅决定）。
@@ -200,7 +203,7 @@ SDK 侧确认的相关选项：`canUseTool`（sdk.d.ts:1454）、`forkSession`�
 | **`message.model` 并未接入目录**（M6 修正）：只在 usage 块用于 `emitContextUsage`（session.go:461-466），不进 catalog/GetModel | session.go:461-466 | Phase 1 观测源=「字段在帧上，尚未接线」，非"已有真值" |
 | 外部 turn = transcript 全目录轮询（目录发现 60s + file-relay 3s，评审核验） | CLAUDE.md backend runtime model 节 | Phase 3 范围收缩后维持轮询为默认（M4） |
 | bridge 共写用户 JSONL（custom-title 记录）+ sidecar；官方另有 `rename_session` 控制请求未用 | session_mutation.go、SDK union | Phase 4 对照（S1） |
-| iOS 现状（M5）：选择器只写本地 `selectedModelInfo`、真正上送是 `send_message.model`；`CCCodeBridgeBackendClient` **未** conform `BackendModelSetting`，原生 App 不调 `switch_model`；取消按钮=abort→Claude 路径 `Close()`（stdin EOF→SIGTERM→SIGKILL）+**合成** `turn_completed{aborted}`，非 CLI interrupt；`CCCodeBridgeModel` 无 alias/resolved 字段（Mac `core.ModelOption.Alias` 已有，core/interfaces.go:523） | iOS main 核验（§0.2） | §7.3 按"能力位先行/后接线"重写 |
+| iOS 现状（M5）：选择器只写本地 `selectedModelInfo`、真正上送是 `send_message.model`；`CCCodeBridgeBackendClient` **未** conform `BackendModelSetting`，原生 App 不调 `switch_model`；取消按钮=abort→Claude 路径 `Close()`（stdin EOF→SIGTERM→SIGKILL）+**合成** `turn_completed{aborted}`，非 CLI interrupt；`CCCodeBridgeModel` 无 alias/resolved 字段（Mac `core.ModelOption.Alias` 虽在 core/interfaces.go:523，但其语义是 canonical 的**短名**、与 `resolvedModel` 方向相反，且当前 wire 不下发 Alias，不可承载——见 §6 Phase 1.1，R2-S2） | iOS main 核验（§0.2） | §7.3 按"能力位先行/后接线"重写 |
 | P0 源码门表格无 claude 行 | CLAUDE.md 上游源码优先门 | §10 补齐（三段式版本锚，S9） |
 
 ---
@@ -236,15 +239,17 @@ Phase 0 探针矩阵必须按这两行分别出结论，**不得合并成单一�
 
 ### 3.3 模型改写发生在网关侧，且映射不稳定（S5）
 
-[实测] 网关改写分布：`claude-sonnet-5→glm-5.3`（7564）、`claude-fable-5→glm-5.3`
-（641）、`claude-opus-4-8→glm-5.2`（6943）、identity `claude-sonnet-5→claude-sonnet-5`
-（3037）等。映射随 cc-switch 供应商配置变化。因此：
+[实测] 网关改写分布（2026-09-04 v2.1 时刻，全量计数见 §0.4）：sonnet/fable/
+opus-5 族多被改写为 glm-5.3、opus-4-8 族为 glm-5.2、存在大量 identity 行；
+**haiku 族同时改写为 6+ 个不同目标**（identity / glm-4.7 / glm-5.3-flash /
+mimo-v2.5 / glm-5-turbo / …）——同一别名族随供应商配置与时间漂移到不同目标
+（R2-S4）。因此：
 
 - CLI 侧任何"目录"（initialize.models / list_models / settings 别名）反映的是
   **请求侧模型名**；
 - 真值以响应 `message.model` 为准（字段在帧上，Phase 1 接线）；
-- iOS 目录行必须按**三列**展示：请求名（别名/目录 value）/ 网关改写名（观测到的
-  message.model）/ 别名槽位；不得假设某别名族总是同一目标。
+- iOS 目录行按**三键**展示：槽位（wire `id`，请求侧名）/ `resolved`（canonical）/
+  观测改写名（`message.model`）；不得假设某别名族总是同一目标。
 
 ### 3.4 settings.json env 与进程 env 优先级（悬案，Phase 0 矩阵探针）
 
@@ -266,7 +271,7 @@ assistant.model」四元矩阵，禁止只读 settings.json 下结论。
 
 ```text
 ┌─ iOS (cordcode) ──────────────────────────────────────────────┐
-│  能力位门控的新接线（§7.3）：模型三列行 / set_model / interrupt │
+│  能力位门控的新接线（§7.3）：模型三键行 / set_model / interrupt │
 └──────────────┬────────────────────────────────────────────────┘
 ┌─ go-bridge claudecode backend ─▼──────────────────────────────┐
 │ L1 交互协议层  stream-json + control protocol（收发两侧）      │
@@ -301,7 +306,7 @@ L3 不删除任何文件面代码，只加边界纪律。
 | spawn / turn 事件流 | stream-json（`--output-format stream-json --input-format stream-json --permission-prompt-tool stdio --include-partial-messages [--verbose]`，session.go:108-118） | 不变 | A | [SDK] 契约 |
 | 权限决策（can_use_tool 往返） | 已实现 | 不变 | A | [SDK]+[树内] |
 | AskUserQuestion | 已实现 | 不变 | A | [树内] user_input.go |
-| **会话 initialize（目录+cap 探测）** | 从不发送 initialize | 会话建立时发送，缓存 models/capabilities/commands | A | [SDK] :3987 |
+| **会话 initialize（目录+cap 探测）** | 从不发送 initialize | 会话建立时发送，缓存 models/capabilities/commands | A | [SDK] :3989 |
 | plan approval / 权限模式 | 本地状态模拟 + SetLiveMode 拒 plan/auto + D5 纯 allow（**已落地**） | `set_permission_mode` 直达，但**仅** default/acceptEdits/bypassPermissions/dontAsk；活会话继续禁 plan/auto；ExitPlanMode 批准保持纯 allow（冲突表见 Phase 2.3） | A | [SDK] :4389 |
 | 会话内模型切换 | 仅下次 spawn `--model` 生效；iOS 不调 switch_model | `set_model` 直达（iOS adapter 先行，§7.3） | A | [SDK] :4377 |
 | 取消/中断 turn | abort→Close()（杀进程）+ 合成 aborted | `interrupt`（新能力位；缺位保持杀进程，禁止假装） | A | [SDK] |
@@ -332,16 +337,25 @@ L3 不删除任何文件面代码，只加边界纪律。
    streaming（sdk.d.ts:2588-2590、:3980）——纯 `-p` 对照组可做但**不得作为放行
    判据**。信封按 §3.1（`request` 嵌套）。逐项发送并记录 control_response 原文：
    `initialize` → `list_models` → `set_model` → `set_permission_mode` →
-   `interrupt(cancel_queued:true)`。三种合法结论：success / unknown subtype /
-   无响应（各自 fail closed 语义不同，禁止混淆）。
+   `interrupt(cancel_queued:true)` → `rename_session`（成功体归档，供 Phase 4.2
+   迁移评估；R2-S5）。三种合法结论：success / unknown subtype /
+   无响应（各自 fail closed 语义不同，禁止混淆）。`set_permission_mode` 的
+   `bypassPermissions` 档**单独记录**是 success 还是被拒（SDK 注明该 mode 需
+   `allowDangerouslySkipPermissions`；今天的本地 auto-approve 不经过 CLI，没有
+   可推断的历史行为——R2-S6）。
 2. **代际矩阵（B3）**：上表按「PATH CLI 2.1.234（CordCode spawn 真值）× Desktop
    2.1.258（外部会话真值）」两行分别出结论；PostModelSwitch 在 2.1.234 记
    "文档级不存在"，不消耗探针预算冒充 unknown。
 3. **目录双 dump（M1）**：`initialize` 成功体与 `list_models` 成功体**并排 dump**
    （audit-plan 双策略）：是否必须先 initialize 才认 list_models；两者 `models`
    是否同构；`resolvedModel` 在 cc-switch 别名场景下解析成什么。**dump 之前禁止写
-   任何解析器**。同时记录 initialize 副作用（hooks 注册、first-attached-client-wins、
-   perTaskStopAffordance）对生产会话的影响。
+   任何解析器**。同时记录 initialize 副作用（first-attached-client-wins、
+   perTaskStopAffordance）。注意**两套 hook 不是一件事**（R2-S7）：
+   `initialize.hooks` 是 SDK callback matcher（随后走 `hook_callback` 控制请求）；
+   Phase 3 的 `--settings` HTTP hook 是 settings 层、由 CLI 自己 POST；
+   `hooks_applied`（sdk.d.ts:4003-4006）只描述 initialize 携带的 SDK hooks
+   集合替换先前集合。对照项（非硬门）：确认省略 `initialize.hooks` 的裸
+   initialize 不影响 `--settings` HTTP hook 触发。
 4. **cap 探测（M2）**：在 init `capabilities[]` 里搜字符串 `modelCatalog`（可能不
    在）；以 `list_models`/`initialize` 实发结果为最终判据。"无 cap 字符串"≠"无
    list_models"，禁止等价化。
@@ -363,14 +377,17 @@ L3 不删除任何文件面代码，只加边界纪律。
 `AvailableModels()` 重构，每级 fail closed：
 
 1. **主源：`initialize.models`（typed）**——会话建立时发送 `initialize`，缓存
-   `models`（含 `value`/`resolvedModel`/`displayName`/effort 能力字段）。别名行
-   渲染复用 `core.ModelOption.Alias`（core/interfaces.go:523）+ `resolvedModel`，
-   **不另造平行字段**（M5）。
+   `models`（含 `value`/`resolvedModel`/`displayName`/effort 能力字段）。Mac wire
+   新增 optional **`resolved`** 字段承载 `resolvedModel`（别名 `value` →
+   canonical，官方方向）；槽位短名沿用现有 wire `id`（haiku/sonnet/opus）；
+   **不复用 `core.ModelOption.Alias`**——其语义是 canonical 的**短名**（方向
+   相反），且当前 wire 从不下发 Alias（settings_models.go 不填、
+   modelItemsForWire 只发 id/name；R2-S2）。观测改写名单独键，不与 resolved 混排。
 2. **刷新/对照：`list_models`**——thin-client 场景的目录刷新；成功体形状以 Phase 0
    dump 为准，未知形状 fail closed 跳过。
 3. **观测补充**：assistant `message.model` 从 usage 旁路**接线进目录**（session.go:
    461-466 现只进 emitContextUsage）——维护 "seen alive" 集合与「请求名→改写名」
-   观测映射（§3.3 三列展示）。PostModelSwitch 仅在 ≥2.1.251 且 hook 开放时接入
+   观测映射（§3.3 三键展示）。PostModelSwitch 仅在 ≥2.1.251 且 hook 开放时接入
    （当前=不可得，见 §3.2）。
 4. **降级源与网关修正（S7）**：settings.json 三槽位别名保留为降级源（当
    initialize/list_models 均不可用或未支持时）；`usesCustomGateway` 排除 loopback
@@ -379,8 +396,9 @@ L3 不删除任何文件面代码，只加边界纪律。
    修复后的拉取：读 `ANTHROPIC_AUTH_TOKEN` + 双头发送（`x-api-key` + Bearer），
    定位为**网关兼容双头**（非官方标准鉴权，M6）。"真网关"与"GUI 泄漏代理"不得
    归为同类。
-5. **显示（S5）**：目录行三列（请求名 / 观测改写名 / 别名槽位）；同名槽位合并；
-   当前真实模型高亮以观测 `message.model` 为准。
+5. **显示（S5）**：目录行三键——槽位（wire `id`，请求侧名）/ `resolved`
+   （canonical）/ 观测改写名（observed `message.model`）；同名槽位合并；当前
+   真实模型高亮以观测值为准。haiku 族多映射（§0.4）正是三键并存的理由。
 
 验收：iPhone 模型列表与 Mac 实际可用模型一致（用户原始诉求），当前真实模型高亮
 正确；cc-switch 改配置后 iOS 刷新延迟 ≤ 一次会话启动/事件周期。
@@ -393,11 +411,16 @@ L3 不删除任何文件面代码，只加边界纪律。
 2. `set_model`：替换"下次 spawn 生效"；iOS 侧先补 adapter 接线（§7.3）；
    `'default'` 重置语义对齐。
 3. `set_permission_mode`（**受限**，M3）：只对 `default` / `acceptEdits` /
-   `bypassPermissions` / `dontAsk` 发送 CLI 控制帧；**继续禁止**运行中切
-   `plan`/`auto`（维持 SetLiveMode false + sessionActive 语义）；ExitPlanMode
-   批准保持纯 `allow`（D5 不动）。若未来要以官方控制帧离开 plan mode，另开产品
-   裁决，不藏在"替换本地模拟"里。与既有本地 auto-answer（session.go:850-873）
-   的关系按冲突表处理：CLI 帧生效后本地 auto-answer 仅作缺位回退，避免双应答。
+   `bypassPermissions` / `dontAsk` 发送 CLI 控制帧；若未来要以官方控制帧离开
+   plan mode，另开产品裁决，不藏在"替换本地模拟"里。与已落地 plan 审批层的
+   **冲突表**（R2-S3；§2.4/§5/§8 风险 7 引用于此）：
+
+   | 已落地机制 | 树内锚点 | Phase 2 交互规则 |
+   |---|---|---|
+   | `SetLiveMode` 对 plan/auto 显式返回 false | session.go:1236-1243 | 维持不变、不放宽；运行中切 plan/auto 继续禁止 |
+   | ExitPlanMode 批准 = 纯 `allow`（D5：不透传 updatedPermissions/setMode） | session.go:1003-1030 | 不动；批准后写操作仍走 iOS 权限卡 |
+   | 本地 auto-answer（bypassPermissions/acceptEdits/dontAsk 在 can_use_tool 到达前自动应答） | session.go:850-873 | CLI 控制帧生效后仅作缺位回退（能力位缺失/CLI 拒收时），避免双应答 |
+   | `sessionActive` 真值（闲置 resume 可带 `--permission-mode` vs 运行中不可切） | handlers.go handleSetPermissionMode（390ed6e） | 维持其语义；受限四档之外不新增旁路 |
 4. `interrupt`：iOS Stop 语义发 `cancel_queued:true`；回执按 init capabilities
    （`interrupt_receipt_v1`/`interrupt_cancel_queued_v1`）解析。**实施前二选一
    裁决（S8，owner/engineering）**：(a) interrupt=停 turn、留进程（Close 仍走
@@ -430,8 +453,8 @@ L3 不删除任何文件面代码，只加边界纪律。
 1. transcriptindex + JSONL 解析标注"无合同边界层"：真实会话归档 fixture 包，锁
    type 枚举与关键字段形状；CLI 大版本升级跑 fixture diff 回归。
 2. `appendJSONLRecord`（custom-title）与 sidecar：custom 记录类型加命名空间前缀
-   防撞；**对照官方 `rename_session` 控制请求**（Phase 0 dump 其成功体后评估迁移，
-   未 dump 前维持现状）；写入策略文档化（对齐 dsh 坑 2"共写对齐在位写者"纪律）。
+   防撞；**对照官方 `rename_session` 控制请求**（成功体 dump 已列入 Phase 0.1
+   发送清单，R2-S5；未 dump 前维持现状）；写入策略文档化（对齐 dsh 坑 2"共写对齐在位写者"纪律）。
 3. 候选（非本期阻断）：`get_context_usage` 把 usage/context 从文件面升 A；
    `ConfigChange` hook 减少 settings mtime 轮询。
 4. 本 Phase 不删除任何文件面代码——文件面从"默认手段"降级为"显式边界"。
@@ -463,10 +486,11 @@ L3 不删除任何文件面代码，只加边界纪律。
 原则：**Mac 先广告能力位，iOS 后接线；缺位时维持现状路径，禁止把旧 runtime 的
 行为假装成新官方能力**。
 
-1. **模型行**：复用 `core.ModelOption.Alias`（已有，core/interfaces.go:523）+
-   initialize `resolvedModel` 透传；iOS `CCCodeBridgeModel` 增补 alias/resolved
-   字段（wire 变化进 docs/protocol/ canonical pack）；三列渲染（请求名/观测改写
-   名/槽位）。
+1. **模型行**：Mac wire 新增 optional `resolved`（映射 initialize
+   `resolvedModel`，别名→canonical）；槽位短名用现有 `id`；观测改写名另键。
+   iOS `CCCodeBridgeModel` 增补 `resolved`（及观测键）字段（wire 变化进
+   docs/protocol/ canonical pack）。**不复用 `core.ModelOption.Alias`**
+   （方向相反、wire 不下发，R2-S2）。
 2. **set_model**：iOS 侧先补 `CCCodeBridgeBackendClient` 对 `BackendModelSetting`
    的 conformance（现状未 conform、原生 App 不调 switch_model；选择器只写本地、
    上送走 `send_message.model`）——adapter 接线完成后再谈选择器状态同步。
@@ -489,7 +513,7 @@ CHANGELOG 按节追加。
 |---|---|---|
 | 1 | CLI 2.1.234 不支持 `list_models`/`initialize.models`（SDK 配对 2.1.260，不同代） | Phase 0 探针硬门（代际矩阵）；不支持则 Phase 1 降级到观测+别名层，方案仍成立 |
 | 2 | hooks 事件版本门（PostModelSwitch ≥2.1.251）与双代 CLI 并存 | §3.2 代际矩阵分列出结论；2.1.234 记文档级缺失；产品是否升级 CordCode CLI 另裁决 |
-| 3 | cc-switch 场景：CLI 目录是请求侧名、真实执行被网关改写且映射不稳定（含 identity 行） | 真值以 `message.model` 为准；三列展示；§3.3 分布数据 |
+| 3 | cc-switch 场景：CLI 目录是请求侧名、真实执行被网关改写且映射不稳定（含 identity 行） | 真值以 `message.model` 为准；三键展示；§3.3 分布数据 |
 | 4 | Managed 注入=admin/企业策略面/本机无落点 | 默认关（M4）；外部会话保持轮询不算失败；未来开启走单独 owner 裁决+卸载 |
 | 5 | hooks 静默失效（exit 127 非阻塞，本机有样本） | 活性检测=Phase 3 验收硬条件；失活自动回退轮询 |
 | 6 | settings.json env vs 进程 env 优先级未证（三值悬案活体样本） | Phase 0 探针 6 四元矩阵；结论回填 §3.4 并入 CLAUDE.md |
@@ -521,7 +545,7 @@ CHANGELOG 按节追加。
 
 ```text
 Agent SDK 类型契约 = /Users/jacklee/Projects/claude-agent-sdk-npm/package/sdk.d.ts（0.3.260，配对 claudeCodeVersion 2.1.260）
-  · SDKControlRequest 信封 :4285-4291（request 嵌套）  · SDKControlInitializeResponse.models :3987-3994
+  · SDKControlRequest 信封 :4285-4291（request 嵌套）  · SDKControlInitializeResponse.models :3989-3994
   · ModelInfo（value/resolvedModel/displayName/effort 能力）:1266+   · SDKControlListModelsRequest :4051（成功体无类型）
   · SDKControlSetModelRequest :4377   · SDKControlSetPermissionModeRequest :4389（mode 必填）
   · Query.supportedModels :2738   · 磁盘 listSessions :992   · canUseTool :1454 / forkSession :1574 / hooks :1595 / resume :1910
@@ -550,7 +574,7 @@ CLAUDE.md「上游源码优先门」表格建议同步补一行（版本锚三�
 
 | 项 | 内容 | 落点 |
 |---|---|---|
-| B1 | 控制信封 `request` 非 `payload`；control_response 嵌套；stdout 无配对 case | §3.1 重写（含树内/SDK 双锚）；§2.4、§6 Phase 2.1、风险 10 |
+| B1 | 控制信封 `request` 非 `payload`；control_response 嵌套；stdout 无配对 case | §3.1 重写（含树内/SDK 双锚）；§2.4、§6 Phase 2.1（v2.1 纠正：原落点误写"风险 10"，该风险属 list_models 无类型，R2-S6） |
 | B2 | Phase 0 探针 spawn 必须逐字复用 `baseClaudeInnerArgs`（无 `-p`、stdin 保持打开、同 env 注入）；`-p` 对照不作判据 | §6 Phase 0.1 重写 |
 | B3 | 双代 CLI（PATH 2.1.234 / Desktop 2.1.258 / SDK 配对 2.1.260）；PostModelSwitch ≥2.1.251 版本门；Phase 0/1/3 拆代际矩阵 | §0.3、§3.2 新增矩阵、§6 Phase 0.2、风险 2 |
 
@@ -592,6 +616,22 @@ CLAUDE.md「上游源码优先门」表格建议同步补一行（版本锚三�
 
 **无。** 评审全部阻断项、必改项、建议与两项裁决建议均已在 v2 落实；评审 §5 红线
 （未 dump 形状不得当已核实）已内化为 §7.1 纪律。
+
+### 11.6 第二轮评审（r2）采纳记录（v2 → v2.1，2026-09-04）
+
+r2 结论：**通过（APPROVE）**，不阻塞进入 Phase 0；报告
+`docs/2026-09-04-claudecode-official-capability-upgrade-design-review-r2.md`。
+v2.1 全部采纳，无不采纳项：
+
+| 项 | 内容 | 落点 |
+|---|---|---|
+| R2-S1 | 标量优先级官方顺序 Managed > `--settings` > local > project > user（v2 把 user/project/local 写反） | §2.2 |
+| R2-S2 | 不用 `ModelOption.Alias` 承载 `resolvedModel`（方向相反、wire 从不下发 Alias）；Mac wire 新增 optional `resolved`；槽位名沿用 `id` | §2.4、§6 Phase 1.1/1.5、§7.3.1 |
+| R2-S3 | 「冲突表」从段落做成四行真表（SetLiveMode / D5 / 本地 auto-answer / sessionActive） | §6 Phase 2.3 |
+| R2-S4 | haiku 多映射分布（identity 538 / glm-4.7 325 / glm-5.3-flash 85+152 / mimo-v2.5 50 / glm-5-turbo 6 等，v2.1 时刻实测），删除单映射 66 | §0.4、§3.3、§6 Phase 1.5 |
+| R2-S5 | `rename_session` 进 Phase 0.1 发送清单，与 Phase 4.2 对齐 | §6 Phase 0.1、Phase 4.2 |
+| R2-S6 | initialize 类型行号 :3989；§11.1 B1 落点纠错；bypassPermissions 探针单列记录（需 `allowDangerouslySkipPermissions`，本地 auto-approve 无历史可推断） | §2.1、§5、§10、§6 Phase 0.1、§11.1 |
+| R2-S7 | `initialize.hooks`（SDK callback matcher，走 `hook_callback`）与 `--settings` HTTP hook（settings 层）是两套机制；`hooks_applied` 只管前者；补"省略 initialize.hooks 不影响 --settings HTTP hook"对照项 | §6 Phase 0.3 |
 
 ---
 

@@ -426,12 +426,12 @@ func mapRemoteHistoryItem(turn *core.TurnScopedHistoryTurn, item remoteThreadIte
 		if strings.TrimSpace(item.Text) == "" {
 			return
 		}
-		status := "unknown"
-		if turn.Status == remoteTurnStatusCompleted {
-			status = remoteTurnStatusCompleted
-		}
-		step := map[string]any{"id": item.ID, "toolName": "Plan", "status": status, "output": item.Text}
-		turn.Parts = append(turn.Parts, map[string]any{"type": "tool", "step": step, "itemId": item.ID})
+		// Official ThreadItem::Plan is markdown in the transcript, not a tool.
+		// Do not send presentation:"plan": iOS TextPresentation only decodes
+		// progress/final, and an unknown value fails the whole projection part.
+		turn.Parts = append(turn.Parts, map[string]any{
+			"type": "text", "content": item.Text, "itemId": item.ID,
+		})
 	case "webSearch":
 		step := map[string]any{"id": item.ID, "toolName": "WebSearch", "status": remoteTurnStatusCompleted, "title": item.Query}
 		turn.Parts = append(turn.Parts, map[string]any{"type": "tool", "step": step, "itemId": item.ID})
