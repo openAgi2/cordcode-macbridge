@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-04T13:48:13Z",
+  "updated_at": "2026-09-04T14:07:04Z",
   "todos": [
     {
       "id": "p0-1-control-plane-probe",
@@ -664,7 +664,7 @@
       "id": "p3-1-hooks-layer-impl",
       "title": "Phase 3.1 hooks 事件层（仅自 spawn 会话）",
       "description": "只对 CordCode 自 spawn 会话用 --settings '{\"hooks\":…}' 内联 HTTP hook（官方 flag，hooks 数组跨层 merge 不打掉 cc-switch hooks）；Management API 新增 /internal/hooks/claude（token 鉴权、仅 127.0.0.1）；不订阅 PermissionRequest（避免与 stdio can_use_tool 双应答）；活性检测心跳自检（exit 127/死端点→回退轮询+如实上报事件源状态）；Managed 层默认关（本机无落点）。",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase3",
       "kind": "impl",
       "depends_on": [
@@ -674,20 +674,28 @@
       "notes": "外部会话维持轮询为默认（M4），本层不取代。",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "implementation",
+        "status": "present",
+        "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "落地：Management API /internal/hooks/claude/{token}（路径 token 鉴权，Bearer 前特判）；自 spawn 会话 --settings 内联 5 事件 hooks（PermissionRequest/SessionStart 按证据缺席）；Stop→file-relay nudge 立即定向刷新（ticker|nudge select）；ConfigChange→别名缓存失效+list_models 目录刷新；心跳自检门控（自检前 spawn 不带 hooks=纯轮询现状）；/internal/status 如实上报 receipts/probeOK/lastReceiptAt。",
+        "artifacts": [
+          "go-bridge/hooks_sink.go",
+          "go-bridge/management_api.go",
+          "go-bridge/handlers_relay.go",
+          "go-bridge/main.go",
+          "agent/claudecode/claudecode.go",
+          "agent/claudecode/session.go",
+          "git:00d2e1e"
+        ],
+        "checked_at": "2026-09-04T14:07:04Z"
       }
     },
     {
       "id": "p3-1-hooks-layer-tests",
       "title": "Phase 3 hooks 定向测试",
       "description": "hook 事件→ Management API 接收→事件面映射测试（fixture=Phase 0.5 POST 原文）；活性检测用 exit 127 fixture；失活回退轮询路径测试。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "tests",
       "depends_on": [
@@ -697,20 +705,23 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "8 用例全绿：路径 token 鉴权（正/错）、真实 Stop POST fixture 解析派发、未知形状 fail closed 不计收、订阅集断言（5 事件+2 禁订）、holder 三态门控、Stop→nudge 通道触发/未注册 no-op/unregister 幂等、ConfigChange→invalidator 调用、健康快照如实性。",
+        "artifacts": [
+          "go-bridge/hooks_sink_test.go",
+          "go-bridge/testdata/claude_hooks/stop_post.json"
+        ],
+        "checked_at": "2026-09-04T14:07:04Z"
       }
     },
     {
       "id": "p3-2-hooks-regression",
       "title": "Phase 3 Release 安装与 Stop 事件验证",
       "description": "Release 构建+安装+运行态核验；自 spawn 会话 Stop 事件驱动的定向刷新（transcript_path 单文件）可观测；hook 失活时行为与现状一致（回退轮询）。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "regression",
       "depends_on": [
@@ -720,20 +731,23 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Release 构建（00d2e1ee63a6）→覆盖安装→重启→运行态核验：PID 45650 新代际（22:06:24>构建 22:05:33）、8777 新 PID；**生产 runtime 日志出现特征输出 mgmt: claude hooks endpoint probe ok**（心跳自检全链路真实验证，非产物级）；/internal/status 实测返回 claudeHooks={probeOk:true,receipts:1,lastReceiptAt:...}（S3 如实上报运行态验证）。Stop→定向刷新的会话级行为属 owner 真机矩阵；hook 失活路径=纯轮询由 provider 门控与 ticker 兜底保证（单测覆盖）。",
+        "artifacts": [
+          "git:00d2e1e",
+          "/tmp/cc-release-build-p3.log"
+        ],
+        "checked_at": "2026-09-04T14:07:04Z"
       }
     },
     {
       "id": "p3-3-doc-sync",
       "title": "Phase 3 CHANGELOG 同步",
       "description": "CHANGELOG [Unreleased] 追加 hooks 事件层条目；（若 wire 变化）protocol pack 同步；立即 commit。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "impl",
       "depends_on": [
@@ -743,13 +757,13 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "CHANGELOG Phase 3 条目追加（无 wire 变化，protocol pack 无需更新）。",
+        "artifacts": "CHANGELOG.md",
+        "checked_at": "2026-09-04T14:07:04Z"
       }
     },
     {
