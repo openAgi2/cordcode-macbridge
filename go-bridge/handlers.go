@@ -2583,6 +2583,21 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 	sess, ok := h.getSession(params.SessionID)
 	h.mu.Unlock()
 
+	// 会话内模型直达（Phase 2.2）：send_message.model 在既有 next-spawn 语义
+	// 之上，对活跃会话补发官方 set_model。best-effort：失败仅记录、消息照发
+	// （模型真值由观测层回写；切换失败不吞消息——2026-09-02 unknown-model
+	// 软化兜底同源裁决）。
+	if ok && sess != nil {
+		if live, isLive := sess.(core.LiveModelSwitcher); isLive {
+			if modelID := selectedModelParam(agent, params.Model); modelID != "" {
+				if err := live.SetModelLive(h.ctx, modelID); err != nil {
+					slog.Info("go-bridge: live set_model failed on send; continuing with current model",
+						"sessionID", params.SessionID, "model", modelID, "error", err)
+				}
+			}
+		}
+	}
+
 	// ok=true 但 sess==nil 表示 registry 里只有 markRunning/markIdle 建的占位 stub，
 	// 尚无真实 agent 会话——必须走 StartSession（对真实 id 即 --resume）续接，
 	// 否则下面 sess.Send 会对 nil 接口派发而 panic（2026-06-30 真机复现的崩溃）。
@@ -3191,6 +3206,25 @@ func (h *Handlers) handleAbortGeneration(conn Connection, msg WireMessage) {
 			cancel()
 		}
 		return
+	}
+
+	// S8 裁决方案 a（owner 2026-09-04）：claude 的官方 interrupt = 停 turn、留进程。
+	// CancelTurn 走官方 interrupt 控制帧（claudeSession 内按 interrupt_receipt_v1
+	// 能力位 fail closed）；成功后不删会话、不 Close、不合成 aborted——被打断
+	// turn 的官方 result 帧经既有 handleResult 收口，进程保留可继续发消息。
+	// 能力位缺失或 CLI 拒收时 CancelTurn 返回错误，回落下方既有
+	// delete+Close+合成路径（现状行为，不伪装官方回执）。
+	if backendID == "claude" || backendID == "claudecode" {
+		if tc, ok := t.session.(core.TurnCanceler); ok {
+			cancelCtx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+			err := tc.CancelTurn(cancelCtx)
+			cancel()
+			if err == nil {
+				return
+			}
+			slog.Info("go-bridge: official interrupt unavailable; falling back to close path",
+				"sessionID", sessionID, "backendID", backendID, "error", err)
+		}
 	}
 
 	h.mu.Lock()
@@ -4366,6 +4400,26 @@ func (h *Handlers) handleSwitchModel(conn Connection, msg WireMessage, agent cor
 	}
 
 	ms.SetModel(params.Model)
+
+	// 会话内直达（Phase 2.2，能力位先行）：带 sessionId 且目标会话支持官方
+	// set_model 时立即切换运行中会话；失败如实回错（fail visibly）——agent 级
+	// SetModel 已更新（下次 spawn 生效），但当前会话未切换，不得报 Ok。
+	if params.SessionID != "" {
+		h.mu.Lock()
+		sess, ok := h.getSession(params.SessionID)
+		h.mu.Unlock()
+		if ok && sess != nil {
+			if live, isLive := sess.(core.LiveModelSwitcher); isLive {
+				if err := live.SetModelLive(context.Background(), params.Model); err != nil {
+					conn.SendResult(msg.RequestID, nil, &WireError{
+						Code:    "live_model_switch_failed",
+						Message: fmt.Sprintf("model applies to next session spawn; live switch failed: %v", err),
+					})
+					return
+				}
+			}
+		}
+	}
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
 }
 
@@ -4424,7 +4478,20 @@ func (h *Handlers) handleSetPermissionMode(conn Connection, msg WireMessage, age
 		h.mu.Unlock()
 		sessionActive = ok
 		if ok {
-			if live, ok := sess.(core.LiveModeSwitcher); ok && live.SetLiveMode(switcher.GetMode()) {
+			// Phase 2.3（M3 受限）：先走官方 set_permission_mode 控制帧（受限
+			// 四档；成功体回显 mode 并同步本地 auto-answer 状态位）。能力位缺
+			// 失/CLI 拒收回落既有本地 SetLiveMode 模拟——缺位回退，避免双应答。
+			if ctrl, isCtrl := sess.(core.LivePermissionModeSwitcher); isCtrl {
+				if err := ctrl.SetPermissionModeLive(context.Background(), switcher.GetMode()); err == nil {
+					appliesTo = "current_session"
+				} else {
+					slog.Info("go-bridge: live set_permission_mode fell back to local simulation",
+						"sessionID", params.SessionID, "mode", switcher.GetMode(), "error", err)
+					if live, ok2 := sess.(core.LiveModeSwitcher); ok2 && live.SetLiveMode(switcher.GetMode()) {
+						appliesTo = "current_session"
+					}
+				}
+			} else if live, ok2 := sess.(core.LiveModeSwitcher); ok2 && live.SetLiveMode(switcher.GetMode()) {
 				appliesTo = "current_session"
 			}
 		}

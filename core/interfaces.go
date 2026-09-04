@@ -915,6 +915,27 @@ type LiveModeSwitcher interface {
 	SetLiveMode(mode string) bool
 }
 
+// LiveModelSwitcher is implemented by agent sessions that can switch the
+// model of a RUNNING session through the backend's official control plane
+// (claudecode set_model, design 2026-09-04 §6 Phase 2.2). Empty or "default"
+// resets to the session default per the official semantics. Implementations
+// fail visibly: a backend rejection/timeout returns an error instead of
+// pretending the switch took effect.
+type LiveModelSwitcher interface {
+	SetModelLive(ctx context.Context, model string) error
+}
+
+// LivePermissionModeSwitcher is implemented by agent sessions that can push a
+// permission-mode switch to a RUNNING session via the backend's official
+// control plane (claudecode set_permission_mode). Implementations restrict
+// the live-switch mode set (claude: default/acceptEdits/bypassPermissions/
+// dontAsk — plan/auto stay spawn-time only) and return an error when the
+// backend rejects or does not support the switch; callers fall back to the
+// local simulation path (缺位回退, never double-answer).
+type LivePermissionModeSwitcher interface {
+	SetPermissionModeLive(ctx context.Context, mode string) error
+}
+
 // PermissionModeInfo describes a permission mode for display.
 type PermissionModeInfo struct {
 	Key    string

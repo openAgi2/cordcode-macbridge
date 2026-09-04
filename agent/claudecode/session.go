@@ -63,6 +63,7 @@ type claudeSession struct {
 	ctrlReqSeq       atomic.Int64
 	ctrlMu           sync.Mutex
 	ctrlPending      map[string]chan controlResponse
+	initCapabilities atomic.Value // stores map[string]struct{} — system/init capabilities（随首个 turn 出现）
 	onAssistantModel func(requested, observed string)
 
 	model            string
@@ -441,6 +442,14 @@ func (cs *claudeSession) handleReadLoopLine(line string) {
 }
 
 func (cs *claudeSession) handleSystem(raw map[string]any) {
+	switch raw["subtype"] {
+	case "init":
+		// capabilities（含 interrupt_receipt_v1 等）只在首个 turn 的 system/init
+		// 出现（Phase 0 实证）；入库供控制操作做能力门。
+		cs.storeInitCapabilities(raw)
+	case "status":
+		cs.syncPermissionModeFromStatus(raw)
+	}
 	if sid, ok := raw["session_id"].(string); ok && sid != "" {
 		cs.sessionID.Store(sid)
 		if cs.historyDraining.Load() {

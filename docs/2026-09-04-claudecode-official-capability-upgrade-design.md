@@ -439,6 +439,8 @@ L3 不删除任何文件面代码，只加边界纪律。
    裁决（S8，owner/engineering）**：(a) interrupt=停 turn、留进程（Close 仍走
    stdin EOF 跑 Stop hooks 的既有路径不受影响）；(b) interrupt 后仍 Close。该
    选择与 Phase 3 Stop hook 定向刷新耦合，必须在编码前写死。
+   **【裁决结果 2026-09-04：owner 选 (a) 停回合、留进程】**——中断后进程保留、
+   可继续发消息（无重 spawn 延迟）；会话真正关闭时仍走既有 Close 路径。
 5. 能力门：控制 subtype 未获 CLI 支持（Phase 0 探针结论）→ 该功能保持现状实现
    并在 capability 面如实降级，不伪装支持。
 

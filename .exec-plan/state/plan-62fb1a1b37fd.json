@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-04T13:12:47Z",
+  "updated_at": "2026-09-04T13:44:25Z",
   "todos": [
     {
       "id": "p0-1-control-plane-probe",
@@ -320,7 +320,7 @@
       "id": "p1-2-model-catalog-regression",
       "title": "Phase 1 Release 安装与运行态验证",
       "description": "按 MacBridge 唯一路径：Release 构建 → 覆盖安装 /Applications → killall CordCodeLink + pkill cordcode-bridge-runtime → open 重启 → 运行态核验（进程代际晚于构建 + 新版本特征输出 + 8777 新 PID 监听）。功能面：模型目录从 initialize.models 真值化（日志可观测：init 缓存条目数/resolved 值）；iPhone 模型列表一致性属 owner 真机验收项，单列矩阵待验，不冒充完成。cc-switch 改配置刷新延迟 ≤ 一次会话启动/事件周期（日志级验证）。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1",
       "kind": "regression",
       "depends_on": [
@@ -330,20 +330,23 @@
       "notes": "禁止临时构建产物测试。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Release 构建（runtime commit 432baf08201e）→ /Applications 覆盖安装 → killall+pkill 双进程名重启 → 运行态核验：PID 18957 启动 21:15:41 晚于构建 21:14:56、8777 新 PID 监听、无临时产物残留、runtime.json pid/port 匹配、二进制内嵌新特征字符串 catalog source=initialize（产物门）。行为层（catalog 日志行+iPhone 三键）待 owner 首个 claude 会话验收（真机矩阵单列）。组件级：18 包单测全绿。",
+        "artifacts": [
+          "git:432baf0",
+          "/tmp/cc-release-build.log"
+        ],
+        "checked_at": "2026-09-04T13:16:37Z"
       }
     },
     {
       "id": "p1-3-doc-sync",
       "title": "Phase 1 protocol pack + CHANGELOG + CLAUDE.md 同步",
       "description": "docs/protocol/ canonical pack 同步 wire 变化（模型行 resolved/observedModel 键）；iOS mirror（../cordcode-ios-claudecode-official/docs/protocol/）同步；CHANGELOG.md [Unreleased] 追加条目；CLAUDE.md 上游源码优先门表格补 Claude Code 行（版本锚三段式，§10 建议）。docs/ 改动立即 commit（两仓各自）。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1",
       "kind": "impl",
       "depends_on": [
@@ -353,20 +356,27 @@
       "notes": "双仓各自单独 commit。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "canonical pack 三键（types.ts BridgeModelItem + bridge-v1.md 增补段）已落并 commit 432baf0；iOS mirror 同步 commit 1380f052（两仓各自单独 commit）；CHANGELOG [Unreleased] 模型目录真值化条目；CLAUDE.md 上游源码优先门补 Claude Code 行（版本锚三段式）。",
+        "artifacts": [
+          "docs/protocol/bridge-v1.md",
+          "docs/protocol/schema/bridge-v1.types.ts",
+          "CHANGELOG.md",
+          "CLAUDE.md",
+          "git:432baf0",
+          "git:1380f052"
+        ],
+        "checked_at": "2026-09-04T13:14:49Z"
       }
     },
     {
       "id": "p2-0-s8-owner-ruling",
       "title": "S8 owner 裁决：interrupt 后留进程 vs 仍 Close",
       "description": "Phase 2 编码前向 owner 呈现两案并等待拍板：(a) interrupt=停 turn、留进程（Close 仍走 stdin EOF 跑 Stop hooks 的既有路径不受影响）；(b) interrupt 后仍 Close。该选择与 Phase 3 Stop hook 定向刷新耦合，编码前写死。不得自行选择。用 AskUserQuestion 呈现，记录裁决入状态 notes 与设计文档回填。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "impl",
       "depends_on": [
@@ -376,20 +386,22 @@
       "notes": "owner 产品裁决，阻塞 Phase 2 全部编码（kickoff 措辞：推进到 Phase 2 编码前）。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "manual",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "owner 2026-09-04 经 AskUserQuestion 拍板：方案 (a) interrupt=停 turn、留进程——中断后进程保留可继续发消息（无重 spawn 延迟），会话真正关闭时仍走既有 Close（Stop hooks 照跑）；与 Phase 3 Stop 事件刷新协同。Phase 2 编码解锁。",
+        "artifacts": [
+          ".exec-plan/state/plan-62fb1a1b37fd.json"
+        ],
+        "checked_at": "2026-09-04T13:27:52Z"
       }
     },
     {
       "id": "p2-1-control-send-envelope-impl",
       "title": "Phase 2.1 发送侧控制封装",
       "description": "统一信封（§3.1 request 嵌套）+ request_id 配对收件（stdout 读循环新增 control_response case）+ 超时 + 错误透传到 iOS 事件面（fail visibly）。当前 stdin 只写 user 与 control_response、stdout 无 control_response case（HEAD 已复核），本单元补齐收发闭环。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "impl",
       "depends_on": [
@@ -399,20 +411,23 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "发送侧封装在 Phase 1 control_channel.go 落地（信封 §3.1 + request_id 配对收件 stdout control_response case + 超时）；本 Phase 补齐 sendControlExpectSuccess（error subtype→controlError fail visibly）。S8(a) 裁决已回填设计文档 §6 Phase 2.4。",
+        "artifacts": [
+          "agent/claudecode/control_channel.go",
+          "agent/claudecode/control_ops.go"
+        ],
+        "checked_at": "2026-09-04T13:44:25Z"
       }
     },
     {
       "id": "p2-1-control-send-envelope-tests",
       "title": "Phase 2.1 发送侧封装定向测试",
       "description": "request_id 配对（乱序/无关 id 忽略）、超时、错误透传、未知 subtype fail closed；fixture 用 Phase 0 真实 control_response 原文。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "tests",
       "depends_on": [
@@ -422,20 +437,23 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "信封/配对/超时/错误透传测试（Phase 1 model_catalog_test.go TestSendControlRequest_EnvelopeAndPairing + TestControlOpTimeout_FailsClosed + control_ops_test.go 错误帧用例）。",
+        "artifacts": [
+          "agent/claudecode/model_catalog_test.go",
+          "agent/claudecode/control_ops_test.go"
+        ],
+        "checked_at": "2026-09-04T13:44:25Z"
       }
     },
     {
       "id": "p2-2-set-model-impl",
       "title": "Phase 2.2 set_model 直达 + iOS adapter 接线",
       "description": "Mac：set_model 控制帧替换『下次 spawn --model 生效』；'default'/null 重置语义对齐 SDK。iOS：CCCodeBridgeBackendClient 补 BackendModelSetting conformance（现状未 conform、原生 App 不调 switch_model；选择器只写本地、上送走 send_message.model）；CCCodeBridgeModel 增补 resolved/观测键字段解码。能力位先行：缺位时 iOS 维持现状路径。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "impl",
       "depends_on": [
@@ -445,20 +463,25 @@
       "notes": "跨仓 coherent change：Mac canonical + iOS 接线同步。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Mac：SetModelLive 官方 set_model 直达（default/null 重置语义对齐 SDK；CLI 拒收 controlError）；handleSwitchModel 带 sessionId 时直达、失败回 live_model_switch_failed（fail visibly）；handleSendMessage 对活跃会话 best-effort 直达（失败仅记录、消息照发）。iOS：CCCodeBridgeBackendClient conform BackendModelSetting（nil→default 重置）、模型行三键解码+真值优先副标题。§7.3.2 分期：adapter 先行，选择器状态同步后议（send_message.model 路径已触发会话内直达）。",
+        "artifacts": [
+          "agent/claudecode/control_ops.go",
+          "go-bridge/handlers.go",
+          "../cordcode-ios-claudecode-official/OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeBackendClient.swift",
+          "../cordcode-ios-claudecode-official/OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeClient.swift"
+        ],
+        "checked_at": "2026-09-04T13:44:25Z"
       }
     },
     {
       "id": "p2-2-set-model-tests",
       "title": "Phase 2.2 set_model 定向测试（双仓）",
       "description": "Mac：set_model 发送+回执+失败降级（回退下次 spawn 生效）测试；iOS：adapter conformance + resolved 字段解码定向测试 + .claudeCode if-compare 清单核查（§7.3.4，约 29 处/12 文件）。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "tests",
       "depends_on": [
@@ -468,20 +491,23 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Mac 3 用例（信封/default 重置/CLI 错误可见）+ iOS 3 用例（三键解码/旧行兼容/副标题真值）全绿；.claudeCode if-compare 清单核查（33 处，模型/停止路径无过时分支）。",
+        "artifacts": [
+          "agent/claudecode/control_ops_test.go",
+          "../cordcode-ios-claudecode-official/OpenCodeiOS/OpenCodeiOSTests/CCCodeBridgePhase2Tests.swift"
+        ],
+        "checked_at": "2026-09-04T13:44:25Z"
       }
     },
     {
       "id": "p2-3-set-permission-mode-impl",
       "title": "Phase 2.3 set_permission_mode 受限直达 + 冲突表落实",
       "description": "只对 default/acceptEdits/bypassPermissions/dontAsk 发送 CLI 控制帧（活会话禁 plan/auto 不变）。冲突表四行落实：SetLiveMode 对 plan/auto 拒 false 维持；ExitPlanMode 批准=纯 allow 不动；本地 auto-answer 仅作能力位缺失/CLI 拒收时缺位回退（避免双应答）；sessionActive 真值语义维持、受限四档之外不新增旁路。若未来要以官方控制帧离开 plan mode 需另开产品裁决。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "impl",
       "depends_on": [
@@ -491,20 +517,24 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "受限四档（default/acceptEdits/bypassPermissions/dontAsk）官方直达；plan/auto 拒绝；成功体回显 mode 同步本地 auto-answer 状态位；system/status 广播帧反向同步（任何切换路径后本地状态保真）；handleSetPermissionMode 官方帧优先、CLI 拒收回落本地 SetLiveMode（缺位回退不双应答）；sessionActive 语义维持。",
+        "artifacts": [
+          "agent/claudecode/control_ops.go",
+          "go-bridge/handlers.go",
+          "core/interfaces.go"
+        ],
+        "checked_at": "2026-09-04T13:44:25Z"
       }
     },
     {
       "id": "p2-3-set-permission-mode-tests",
       "title": "Phase 2.3 权限模式定向测试",
       "description": "受限四档外不发帧（plan/auto 拒绝路径回归）、CLI 拒收/能力位缺失时本地 auto-answer 回退不双应答、sessionActive 语义维持（闲置 resume vs 运行中不可切）。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "tests",
       "depends_on": [
@@ -514,20 +544,22 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "受限集拒绝（plan/auto/weird）/成功同步本地档/权限广播同步 3 组用例全绿。",
+        "artifacts": [
+          "agent/claudecode/control_ops_test.go"
+        ],
+        "checked_at": "2026-09-04T13:44:25Z"
       }
     },
     {
       "id": "p2-4-interrupt-impl",
       "title": "Phase 2.4 interrupt（按 S8 裁决实现）",
       "description": "按 p2-0 裁决实现：iOS Stop 语义发 interrupt cancel_queued:true；回执按 init capabilities（interrupt_receipt_v1/interrupt_cancel_queued_v1）解析；新能力位如实广告，缺位保持 abort→Close 杀进程现状，禁止把合成 turn_completed{aborted} 冒充官方 interrupt 回执。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "impl",
       "depends_on": [
@@ -537,20 +569,23 @@
       "notes": "实现形态（留进程 vs Close）以 p2-0 裁决为准。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "S8(a)：claudeSession 实现 core.TurnCanceler——interrupt_receipt_v1 能力位门（system/init capabilities，Phase 0 dump 真值）+ interrupt{cancel_queued:true}；handleAbortGeneration claude 分支成功即留进程（不删会话、不 Close、不合成 aborted，官方 result 帧收口）；能力位缺失/CLI 拒收回落既有 delete+Close+合成路径。",
+        "artifacts": [
+          "agent/claudecode/control_ops.go",
+          "go-bridge/handlers.go"
+        ],
+        "checked_at": "2026-09-04T13:44:25Z"
       }
     },
     {
       "id": "p2-4-interrupt-tests",
       "title": "Phase 2.4 interrupt 定向测试",
       "description": "能力位解析、缺位降级杀进程、回执映射 iOS 事件面、S8 裁决形态的行为断言。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "tests",
       "depends_on": [
@@ -560,13 +595,15 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "能力门（无 caps 拒绝/有 caps CLI 错误拒绝）/官方回执（cancel_queued:true 信封）/超时 fail closed 用例全绿。",
+        "artifacts": [
+          "agent/claudecode/control_ops_test.go"
+        ],
+        "checked_at": "2026-09-04T13:44:25Z"
       }
     },
     {
