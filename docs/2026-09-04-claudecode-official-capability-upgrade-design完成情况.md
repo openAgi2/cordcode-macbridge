@@ -188,6 +188,32 @@ agent/claudecode + core）。
 待 owner 复测：会话发消息应看到（a）发送后不再有固定 ~10s 空白；（b）逐字打字机流式；
 （c）完成态正文即时可见、无需切回；（d）连续两条消息排队场景不串回合。
 
+### 追记 5：三项候选收尾（2026-09-05，owner 指令当日完成）
+
+§4 诚实清单中的三项「未实施」当日交付（CLI 升级评估同时执行）：
+
+1. **CLI 升级 2.1.234 → 2.1.261**（Mac commit a200da6）：隔离安装 → 探针复测六项全绿
+   （控制面六 subtype / get_context_usage 三模式 / Pre+PostModelSwitch 实证触发 /
+   既有 hooks 照常 / changelog 无相关破坏 / transcript type 集与形状锁零新 type）→
+   全局升级。证据：`scripts/claudecode-phase0/README.md` 2026-09-05 节。
+2. **PostModelSwitch 观测接入**（a200da6）：hooks 订阅集 +PostModelSwitch（Pre 有阻塞
+   语义不订）；`to_model`（网关改写观测名）经 `Agent.ObserveModelSwitch` 进目录
+   observed 层；订阅集与分发各有单测。**§4 该行从「CLI 2.1.234 文档级不存在」变为
+   已接入**。
+3. **get_context_usage 升 A**（a200da6）：自 spawn 会话每 turn 收口后异步
+   detail=summary 官方全量窗口占用（含 system prompt/tools/memory 分类 + 官方
+   maxTokens），成功覆盖流帧 usage 近似值，fail closed；真样本 fixture 驱动 3 组
+   单测。**§4 该行从「候选（非本期阻断）」变为已交付**。
+4. **iOS 选择器直调 switch_model**（iOS commit 1ab76fc5）：门控 = 会话已建立 +
+   backendKind==claudeCode + BackendModelSetting conformance；nil 选择 = default
+   重置；失败不回滚（send_message.model 兜底）。3 用例模拟器全绿。**§4 该行从
+   「设计 §7.3.2 分期」变为已接线**。
+
+生产部署：Release（runtime a200da6，11:33:40Z 构建）已覆盖安装 /Applications，
+运行态核验（PID 46939 代际晚于构建、8777 新 PID、内嵌 get_context_usage 特征
+符号、hooks probe ok、无违规残留）。行为层验收（iPhone 选择器即时切换、上下文条
+真值、PostModelSwitch 日志行）待 owner 复测。
+
 ### 追记 4：第五轮复测「外部回合被压制」——单源门按回合发起方收窄（2026-09-05）
 
 owner 复测 f4027ca：**iOS 发消息打字机流式 ✅（主链路修复确认）**。两个新现象：
