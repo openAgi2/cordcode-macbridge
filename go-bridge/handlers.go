@@ -1303,6 +1303,21 @@ func (h *Handlers) handleSetObservationScope(conn Connection, msg WireMessage) {
 		}
 	}
 	h.broadcaster.ReconcileObservationSubscriptions(conn, req.BackendID, keep)
+	// 打开即拉活（2026-09-05 复测修正）：iOS 打开 claude 会话的真实入口是本方法
+	// （get_session → fetch_todos → set_observation_scope），不经 handleResumeSession。
+	// full_stream（正在看）时对无活跃 worker 的会话 best-effort spawn——让
+	// get_context_usage 详细上下文/会话内控制/首条消息流式在打开时就绪。helper
+	// 自带 registry 预检去重，租约续期（leaseSeconds）重复调用零成本；milestones_only
+	// 等旁路观察不拉活。
+	if req.DeliveryMode == scopeFullStream && req.BackendID == "claude" {
+		if agent, ok := h.getAgent(req.BackendID); ok && agent.Name() == "claudecode" {
+			for _, sid := range observedSessions {
+				if sid != "" {
+					h.startClaudeSessionOnOpen(agent, sid, msg)
+				}
+			}
+		}
+	}
 	// INFO so flapping/delivery-gap forensics can see mode without Debug log level.
 	// hasSubscriber after Subscribe is the forensic for candidateTargets=0 regressions.
 	hasSub := false
