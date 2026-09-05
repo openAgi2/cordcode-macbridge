@@ -62,7 +62,8 @@ class Receiver(BaseHTTPRequestHandler):
         pass
 
 
-HOOK_EVENTS = ["SessionStart", "Stop", "UserPromptSubmit", "ConfigChange", "SessionEnd"]
+HOOK_EVENTS = ["SessionStart", "Stop", "UserPromptSubmit", "ConfigChange", "SessionEnd",
+               "PreModelSwitch", "PostModelSwitch"]
 
 
 def main() -> None:
@@ -99,7 +100,18 @@ def main() -> None:
 
     # R2-S7: bare initialize (no hooks field) — settings hooks must survive it
     p.send(req("req_h1", {"subtype": "initialize"}))
-    p.expect_response("req_h1", "initialize_bare")
+    resp_h1 = p.expect_response("req_h1", "initialize_bare")
+    init_models_seen = []
+    if resp_h1:
+        outer = resp_h1.get("response") or {}
+        # success payload is double-nested: envelope.response.response (controlPayload
+        # in agent/claudecode/model_catalog.go:89)
+        inner = outer.get("response") if isinstance(outer.get("response"), dict) else outer
+        for m in (inner.get("models") or []):
+            if isinstance(m, dict) and m.get("value"):
+                init_models_seen.append(m["value"])
+    p.init_models_seen = init_models_seen
+    p.meta(init_models_seen=init_models_seen[:20])
 
     p.send({"type": "user", "message": {"role": "user", "content": "Reply with exactly one word: pong"}})
     end = time.monotonic() + 90
@@ -128,6 +140,25 @@ def main() -> None:
     time.sleep(3)
     (proj / "settings.json").write_text('{"model": "haiku"}\n')
     time.sleep(3)
+
+    # ModelSwitch (2026-09-05, CLI >=2.1.251 only): trigger a real switch via
+    # set_model control and capture Pre/PostModelSwitch POST bodies.
+    switch_target = None
+    for m in (getattr(p, "init_models_seen", None) or []):
+        # pick a real slot distinct from the session default so the switch is
+        # observable (default -> <slot> -> default)
+        if isinstance(m, str) and m and m != "default":
+            switch_target = m
+            break
+    p.meta(model_switch_target=switch_target,
+           note="set_model-driven switch; on 2.1.234 PostModelSwitch is documented-absent")
+    if switch_target:
+        p.send(req("req_h2", {"subtype": "set_model", "model": switch_target}))
+        p.expect_response("req_h2", "set_model_switch")
+        time.sleep(4)
+        p.send(req("req_h3", {"subtype": "set_model", "model": "default"}))
+        p.expect_response("req_h3", "set_model_reset_default")
+        time.sleep(4)
 
     p.finish()
     srv.shutdown()

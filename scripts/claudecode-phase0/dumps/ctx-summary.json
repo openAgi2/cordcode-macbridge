@@ -1,0 +1,25 @@
+{
+  "scenario": "ctx",
+  "verdicts": {
+    "initialize": {
+      "request_id": "req_x1",
+      "verdict": "success",
+      "response_subtype": "success"
+    },
+    "get_context_usage_summary": {
+      "request_id": "req_x2",
+      "verdict": "success",
+      "response_subtype": "success"
+    },
+    "get_context_usage_full": {
+      "request_id": "req_x3",
+      "verdict": "success",
+      "response_subtype": "success"
+    },
+    "get_context_usage_default_detail": {
+      "request_id": "req_x4",
+      "verdict": "success",
+      "response_subtype": "success"
+    }
+  }
+}

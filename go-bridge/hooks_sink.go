@@ -47,6 +47,12 @@ type ClaudeHookEvent struct {
 	FilePath string `json:"file_path"`
 	// SessionEnd-only.
 	Reason string `json:"reason"`
+	// PostModelSwitch-only（2.1.261 dump，scripts/claudecode-phase0/dumps/
+	// hooks-posts.jsonl）：from/to_model 是网关改写后的观测名，requested_model
+	// 是控制请求的槽位名（default 重置时为 null）。
+	FromModel      string `json:"from_model"`
+	ToModel        string `json:"to_model"`
+	RequestedModel string `json:"requested_model"`
 }
 
 // ClaudeHookSink consumes parsed hook events. Implemented by *Handlers.
@@ -115,11 +121,13 @@ func (s *ManagementServer) serveClaudeHook(w http.ResponseWriter, r *http.Reques
 }
 
 // claudeHookSettingsJSON builds the --settings inline payload for self-spawned
-// sessions. Only events that actually fire from the --settings layer on this
-// CLI generation are subscribed (Phase 0 证据)；PermissionRequest 故意缺席（S2），
-// SessionStart 不触发（--settings 层不发射，Phase 0）。
+// sessions. Only events that actually fire from the --settings layer are
+// subscribed (Phase 0 证据)；PermissionRequest 故意缺席（S2），SessionStart 不
+// 触发（--settings 层不发射，Phase 0）。PostModelSwitch 需 CLI ≥2.1.251
+// （2.1.261 dump 实证触发，body 含 requested/from/to 观测名）；PreModelSwitch
+// 有阻塞/确认语义，CordCode 只观测不拦截，不订阅。
 func claudeHookSettingsJSON(url string) string {
-	events := []string{"Stop", "StopFailure", "UserPromptSubmit", "ConfigChange", "SessionEnd"}
+	events := []string{"Stop", "StopFailure", "UserPromptSubmit", "ConfigChange", "SessionEnd", "PostModelSwitch"}
 	hooks := make(map[string]any, len(events))
 	for _, ev := range events {
 		hooks[ev] = []map[string]any{{
@@ -177,6 +185,13 @@ type claudeConfigInvalidator interface {
 	InvalidateSettingsModels(ctx context.Context)
 }
 
+// claudeModelSwitchObserver is implemented by the claudecode Agent (catalog
+// observed layer on PostModelSwitch: requested slot → gateway-rewritten
+// execution model).
+type claudeModelSwitchObserver interface {
+	ObserveModelSwitch(requested, toModel string)
+}
+
 // HandleClaudeHook implements ClaudeHookSink on *Handlers.
 //
 // Stop → 事件驱动定向刷新：立即 nudge 该会话的 transcript file-relay（不等
@@ -203,6 +218,21 @@ func (h *Handlers) HandleClaudeHook(ev ClaudeHookEvent) {
 		}
 	case "UserPromptSubmit", "SessionEnd":
 		slog.Debug("claude hook observed", "event", ev.Event, "sessionID", ev.SessionID, "reason", ev.Reason)
+	case "PostModelSwitch":
+		// 官方观测面 #2（2026-09-05，CLI 2.1.261）：to_model 是网关改写后的
+		// 执行名——与 assistant message.model 同一真值平面，写入目录 observed 层
+		//（三键链高亮/observedModel 键）。requested 为 null（default 重置）时跳过
+		// （无请求侧键可挂，assistant 帧观测照常覆盖）。
+		slog.Info("claude hook: PostModelSwitch", "sessionID", ev.SessionID,
+			"requested", ev.RequestedModel, "from", ev.FromModel, "to", ev.ToModel)
+		h.mu.Lock()
+		agent := h.agents["claudecode"]
+		h.mu.Unlock()
+		if ev.RequestedModel != "" {
+			if obs, ok := agent.(claudeModelSwitchObserver); ok {
+				obs.ObserveModelSwitch(ev.RequestedModel, ev.ToModel)
+			}
+		}
 	default:
 		slog.Debug("claude hook: unhandled event ignored (fail closed)", "event", ev.Event)
 	}

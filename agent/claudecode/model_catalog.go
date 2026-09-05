@@ -220,6 +220,14 @@ func (a *Agent) observeAssistantModel(requested, observed string) {
 	a.catalog.observe(requested, observed)
 }
 
+// ObserveModelSwitch records a PostModelSwitch hook observation（官方观测面
+// #2，CLI ≥2.1.251，2026-09-05 接入）：to_model 是网关改写后的执行名，与
+// assistant message.model 同一真值平面。补充 #1 的盲区：/model 类会话内切换
+// 不经 assistant 帧时也能保住 observed 映射。
+func (a *Agent) ObserveModelSwitch(requested, toModel string) {
+	a.catalog.observe(requested, toModel)
+}
+
 // initCatalogOptions renders the initialize/list_models catalog as wire
 // options with resolved + observed keys.
 func (a *Agent) initCatalogOptions() []core.ModelOption {

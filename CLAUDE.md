@@ -466,7 +466,7 @@ brief `连接中` blip on iOS clients.
 
 | 产品 | 本机官方源码 | GitHub |
 | --- | --- | --- |
-| Claude Code | 官方文档 + Agent SDK 类型契约 + cli 定点取证（无开源源码；版本锚三段式：PATH CLI 2.1.234 × Desktop 内嵌 CLI 2.1.260（2.1.258 目录并存，活体进程以 2.1.260 为准，2026-09-05 校正） × SDK 配对 2.1.260，Phase 0 证据包 `scripts/claudecode-phase0/`；RC 客户端协议证据包 `scripts/claudecode-rc-probe/`（no-go：无订阅，复用条件见 think.md 2026-09-05 条目）） | <https://github.com/anthropics/claude-agent-sdk-typescript> + <https://code.claude.com/docs> |
+| Claude Code | 官方文档 + Agent SDK 类型契约 + cli 定点取证（无开源源码；版本锚三段式：PATH CLI 2.1.261（2026-09-05 从 2.1.234 升级，探针复测六项全绿）× Desktop 内嵌 CLI 2.1.260（2.1.258 目录并存，活体进程以 2.1.260 为准，2026-09-05 校正） × SDK 配对 2.1.260，Phase 0 证据包 `scripts/claudecode-phase0/`；RC 客户端协议证据包 `scripts/claudecode-rc-probe/`（no-go：无订阅，复用条件见 think.md 2026-09-05 条目）） | <https://github.com/anthropics/claude-agent-sdk-typescript> + <https://code.claude.com/docs> |
 | Codex / Codex app-server / Remote Control | `/Users/jacklee/Projects/codex` | <https://github.com/openai/codex> |
 | Grok Build | `/Users/jacklee/Projects/grok-build` | <https://github.com/xai-org/grok-build> |
 | DeepSeek Harness（dsh） | `/Users/jacklee/Projects/deepseek-harness` | <https://github.com/deepseek-ai/deepseek-harness> |

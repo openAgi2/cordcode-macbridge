@@ -93,7 +93,7 @@ func TestClaudeHookSettingsJSON_SubscriptionSet(t *testing.T) {
 		t.Fatalf("payload not valid JSON: %v", err)
 	}
 	hooks := parsed["hooks"].(map[string]any)
-	want := []string{"Stop", "StopFailure", "UserPromptSubmit", "ConfigChange", "SessionEnd"}
+	want := []string{"Stop", "StopFailure", "UserPromptSubmit", "ConfigChange", "SessionEnd", "PostModelSwitch"}
 	if len(hooks) != len(want) {
 		t.Fatalf("events = %v", hooks)
 	}
@@ -102,7 +102,7 @@ func TestClaudeHookSettingsJSON_SubscriptionSet(t *testing.T) {
 			t.Errorf("event %q missing", ev)
 		}
 	}
-	for _, banned := range []string{"PermissionRequest", "SessionStart"} {
+	for _, banned := range []string{"PermissionRequest", "SessionStart", "PreModelSwitch"} {
 		if _, ok := hooks[banned]; ok {
 			t.Errorf("event %q must NOT be subscribed", banned)
 		}
@@ -179,6 +179,57 @@ func (f *fakeConfigInvalidator) ListSessions(context.Context) ([]core.AgentSessi
 func (f *fakeConfigInvalidator) Stop() error { return nil }
 func (f *fakeConfigInvalidator) InvalidateSettingsModels(context.Context) {
 	f.calls++
+}
+
+// PostModelSwitch（2.1.261 dump 真样本形状）→ claudecode agent observed 层收到
+// requested→to 映射；requested 为空（default 重置）跳过；未注册 agent no-op。
+func TestHandleClaudeHook_PostModelSwitchObserves(t *testing.T) {
+	h := newTestHandlers(t)
+	fake := &fakeModelSwitchObserver{name: "claudecode"}
+	h.agents["claudecode"] = fake
+	// body 形状来自 scripts/claudecode-phase0/dumps/hooks-posts.jsonl（脱敏）
+	h.HandleClaudeHook(ClaudeHookEvent{
+		Event: "PostModelSwitch", SessionID: "e3362fd9",
+		FromModel: "glm-5.3", ToModel: "glm-5.3[1M]",
+		RequestedModel: "opus",
+	})
+	if len(fake.observed) != 1 || fake.observed["opus"] != "glm-5.3[1M]" {
+		t.Fatalf("observed = %v", fake.observed)
+	}
+	// requested null（default 重置）：无请求侧键，跳过
+	h.HandleClaudeHook(ClaudeHookEvent{
+		Event: "PostModelSwitch", SessionID: "e3362fd9",
+		FromModel: "glm-5.3[1M]", ToModel: "glm-5.3[1m]",
+	})
+	if len(fake.observed) != 1 {
+		t.Fatalf("default reset must not add a mapping: %v", fake.observed)
+	}
+	// 未注册 claudecode agent：no-op 不 panic
+	delete(h.agents, "claudecode")
+	h.HandleClaudeHook(ClaudeHookEvent{
+		Event: "PostModelSwitch", SessionID: "s",
+		RequestedModel: "sonnet", ToModel: "glm-5.3",
+	})
+}
+
+type fakeModelSwitchObserver struct {
+	name     string
+	observed map[string]string
+}
+
+func (f *fakeModelSwitchObserver) Name() string { return f.name }
+func (f *fakeModelSwitchObserver) StartSession(context.Context, string) (core.AgentSession, error) {
+	return nil, nil
+}
+func (f *fakeModelSwitchObserver) ListSessions(context.Context) ([]core.AgentSessionInfo, error) {
+	return nil, nil
+}
+func (f *fakeModelSwitchObserver) Stop() error { return nil }
+func (f *fakeModelSwitchObserver) ObserveModelSwitch(requested, toModel string) {
+	if f.observed == nil {
+		f.observed = make(map[string]string)
+	}
+	f.observed[requested] = toModel
 }
 
 // exit-127 fixture（S3 静默失效）语义：端点收不到 POST 时行为=纯轮询——

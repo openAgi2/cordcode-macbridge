@@ -4,8 +4,7 @@
 > 每轮收口/交接时核对「状态」列并更新。做完了就把整行删掉。
 
 | 后续案 | 是什么 / 入口 | 前置依赖 | 状态（更新于） |
-| --- | --- | --- | --- |
-| iOS 发送 Grok 模型应用条目 id | iOS send_message 的 model 回发 transcript 底层 id（glm-5.3），目录外触发 unknown model id；Mac 端 a0b0f11 已软化兜底（消息可发出），根治需 iOS 改发 list_models 条目 id | 无（可与其它 iOS 任务合并） | Mac 兜底已部署（2026-09-02）；iOS 侧未开工 |
+| --- | --- | --- | --- || iOS 发送 Grok 模型应用条目 id | iOS send_message 的 model 回发 transcript 底层 id（glm-5.3），目录外触发 unknown model id；Mac 端 a0b0f11 已软化兜底（消息可发出），根治需 iOS 改发 list_models 条目 id | 无（可与其它 iOS 任务合并） | Mac 兜底已部署（2026-09-02）；iOS 侧未开工 |
 | Grok follower 交互升级 | iOS 无缝接力 Mac 端 grok 任务的根治路径（iOS 作为 leader 客户端，消息进同一 full-capability agent，per-client 能力路由 + mid-turn interjection）。入口 `docs/2026-08-28-grokbuild-leader-mode-design.md` §9/§15 D-3 | ~~source-first 冻结 follower 上行可用性~~ **前置调查已完成（2026-09-03，上游 72a61251）**：① 权限应答官方支持——`session/request_permission` 与 ask_user_question 同属共享交互集（server.rs is_interaction_request，广播全订阅者 + 缓存重放 + first-answer-wins），应答为标准 ACP response，上行无方法门、response 不被 id 改写触碰；② 插话官方支持——上行客户端消息全部无条件转发 agent（server.rs Acp 分发），mid-turn 语义 = server-authoritative 共享队列 + `x.ai/queue/interject`（expected_version 乐观锁，owner 仅归属非权限门），`x.ai/queue/changed` 全客户端广播；③ 无 writer 仲裁阻塞——协议只有 session_driver（管下行 driver-only reverse request 的路由），driver 断线自动转移，交互类刻意排除在 driver-only 外。共享集还含 exit_plan_mode / mcp/elicit 两类免费顺带。实现期仍需真实 wire fixture 锚定（checkout 72a61251 ≠ 安装版 5e9a5852，question 轨道已在安装版活体验证过路由） | **question 已交付**（2026-09-03 owner 矩阵四行全过：iPhone 可答/静默收口/断线恢复/关开关回退；四轮修复 1fc6f1f/fdb7d97/ceffc9c/8c1ac9b，复盘见下方 2026-09-03 条目）；**permission 已交付**（2026-09-03 commit 1661e91，§24 计划→exec-plan 三元组，Mac 单仓 iOS 零改动：leader 门加宽+registry kind/byWire+AnswerPermission+SessionPermissionResponder 路由；单测 5 例+包全量绿+Release 四门过；owner 真机矩阵四步全过——TUI 发起权限 turn→iPhone 卡出现、iPhone 允许→任务继续+Mac 弹窗自动收口、iPhone 拒绝路径、Mac 先答→iPhone 卡自动消失；grok TUI 5 档 vs iOS 允许/拒绝的选项差异为跨后端通用卡设计现状，范围扩展另案；另：grok 权限全放行排障教训——Ctrl+O 是 yolo 全放行开关、`[ui] permission_mode` 持久化，测试前两者都要处于 ask 态）；**exit_plan_mode + 选项透传已交付（2026-09-03 §25，owner 真机验收：程度可接受）**：plan 审批复用 §24 permission 管道（iPhone 允许→approved/拒绝→cancelled，标题取计划首个标题行，MCP 表单仍 observe-only）；权限卡选项透传（实收 options kind 动态映射 permissionActions：allow_always→「总是允许」三键卡、reject_always 有意不透传、execute→bash 等类别行；permissionOutcome kind 精确化 always→allow_always）；两轨（leader+OFF）同步；leader_plan_test 5 例 + leader_permission_options_test 6 例 + §24 兼容全绿；owner 后续裁决：iOS 当前两键计划卡（标题行+允许/拒绝）程度可接受；完整体验（计划文档全文展示+Mac 端全按钮集）属专门计划方案、须跨 backend 通用，本轮不编码，调研文档先行（指令已细化交写文档 agent）；interjection 后置 Phase B（iOS UI 产品决策，§24.6） |
 | remote-web 集中测试轮 | 12 门浏览器端验收矩阵 + 4 web-push 取证门（owner 2026-09-02 裁决：先 iOS 任务 → 整体迁移 remote-web → 集中测试）。入口 iOS 仓 `.exec-plan/state/plan-4fe9645c3a36.json` 注记 | iOS App 端任务完成 + remote-web 整体迁移完成 | pending 非阻断；功能路径已真机验证过，16 门属迁移后回归确认（2026-09-02） |
 | iOS 进入 Codex / DSH / Grok 计划模式 | 三条都是「Mac 进入计划 → iPhone 能批；iPhone 自己切不进」。Codex 入口文档 `docs/2026-09-04-codex-ios-plan-mode-entry.md`（owner 2026-09-04：先不做 iOS 开启 Codex Plan，后续再调研）。DSH = Mac 标准套餐 + `/plan`（`commands/execute`）；Grok iOS Plan 只写 agent 内存。禁止合成一个全 backend Plan 按钮 | Codex 批准路径已交付（Mac App Plan → iPhone 卡 → 批准实施，owner 真机 2026-09-04） | **挂起**（2026-09-04）；Codex 批准面已绿，入口未开工 |
@@ -105,6 +104,38 @@ RC 硬要求订阅（API key 不支持）→ 路线 A（Desktop host + bridge �
 CLI 2.1.234/2.1.260 二进制内嵌 `/v1/code/sessions` 客户端实现与 API 表。
 无订阅期间「Desktop 实时显示 iOS 消息」仍无官方路径（上方「无跨进程总
 线」结论不变）。
+
+## 2026-09-05 官方能力三项收尾：CLI 升 2.1.261 + get_context_usage 升 A + iOS 选择器直调
+
+owner 指令三项（选择器直调 / CLI 升级评估 / get_context_usage 升 A）当日完成：
+
+1. **CLI 升级评估→执行**：隔离安装 2.1.261 → 探针复测六项全绿（控制面六 subtype
+   全 success、get_context_usage 三模式 success、Pre/PostModelSwitch 实证触发、
+   既有 hooks 照常、changelog 234→261 无控制面/stream-json 输出变更、transcript
+   type 集与形状锁 fixture 零新 type）→ 全局升级。**探针 env 坑**：mirror 刷新误抓
+   Desktop 会话 env（无 ANTHROPIC 键）+ `CLAUDE_CODE_ENTRYPOINT=claude-desktop-3p`
+   下 CLI 走 Desktop 认证通道 → "Not logged in"、Stop 不触发（196ms synthetic 假
+   turn）。重建 mirror = settings.json env 块（cc-switch 当前解析态）。**成功体嵌套**：
+   initialize/list_models/get_context_usage 载荷在 `response.response` 双层，interrupt/
+   set_model 裸键在第一层。
+2. **PostModelSwitch 接入**（2.1.261 dump）：`to_model` 是网关改写后观测名（glm-5.3 →
+   glm-5.3[1M]）、`requested_model` 是槽位名（default 重置时 null）、`source:"sdk"`。
+   hooks 订阅集 +PostModelSwitch（Pre 有阻塞语义不订）；HandleClaudeHook → Agent
+   .ObserveModelSwitch → catalog.observe（补 assistant 帧观测的盲区：/model 类会话内
+   切换不经 assistant 帧时也保住 observed 映射）。
+3. **get_context_usage 升 A**：自 spawn 会话每 turn 收口后异步取 detail=summary（不打
+   per-category API），全量窗口占用（含 system prompt/tools/memory 分类）+ 官方
+   maxTokens，成功覆盖流帧 usage 近似值；fail closed。fixture=
+   `agent/claudecode/testdata/context-usage/get_context_usage-summary-2.1.261.json`
+   （2.1.261 字段超出 SDK 0.3.260 类型声明——autoCompactThreshold/messageBreakdown/
+   skills/slashCommands/apiUsage，dump-first 纪律的直接受益）。
+4. **iOS 选择器直调 switch_model**（设计 §7.3.2 收尾）：ChatViewModel.selectModel →
+   pushModelSelectionToBackend（门控：会话已建立 + backendKind==claudeCode +
+   BackendModelSetting conformance；nil 选择 = default 重置；失败不回滚——Mac fail
+   visibly + send_message.model 仍是权威重试路径）。**门控必须含 backendKind**：
+   CCCodeBridgeBackendClient 是全部 bridge backend 共用类，仅 conformance 判定会把
+   其他四个 backend 也带进直调（设计非目标 §9.3）。
+
 
 # 2026-09-04 Codex 计划：iPhone 能批、不能开
 

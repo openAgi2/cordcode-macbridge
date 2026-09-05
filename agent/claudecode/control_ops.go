@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // control_ops.go —— 会话内控制操作（设计 §6 Phase 2，S8 裁决方案 a）。
@@ -183,6 +185,54 @@ func (cs *claudeSession) CancelTurn(ctx context.Context) error {
 	slog.Info("claudeSession: official interrupt receipt",
 		"still_queued", len(stillQueued), "cancelled", len(cancelled))
 	return nil
+}
+
+// GetContextUsageLive fetches the authoritative full-window context occupancy
+// from the live CLI（usage/context 升 A，2026-09-05）via the get_context_usage
+// control request. detail=summary：不打 per-category token-count API，取
+// 「上一次响应 usage + 本地估算」的官方全量口径（含 system prompt / tools /
+// memory files，流帧 usage 不覆盖这些）。
+//
+// 能力门（fail closed）：success 但载荷形状不符（老 CLI/未知代际）返回 nil，
+// 调用方保持流帧 usage 的既有语义，不猜。
+func (cs *claudeSession) GetContextUsageLive(ctx context.Context) *core.ContextUsage {
+	cctx, cancel := context.WithTimeout(ctx, opTimeout)
+	defer cancel()
+	resp, err := cs.sendControlRequest(cctx, map[string]any{
+		"subtype": "get_context_usage",
+		"detail":  "summary",
+	})
+	if err != nil {
+		return nil
+	}
+	payload, ok := controlPayload(resp)
+	if !ok {
+		return nil
+	}
+	return occupancyFromContextUsagePayload(payload)
+}
+
+// emitProtocolContextUsage broadcasts one EventContextUsageUpdated from the
+// control-plane truth and records it as lastUsage（覆盖流帧 usage 的近似值）。
+// 只许在非读循环 goroutine 调用——sendControlRequest 的回包由读循环分发，
+// 在读循环内同步等待会死锁。
+func (cs *claudeSession) emitProtocolContextUsage() {
+	usage := cs.GetContextUsageLive(cs.ctx)
+	if usage == nil {
+		return
+	}
+	if cs.historyDraining.Load() {
+		return
+	}
+	cs.rememberContextUsage(usage)
+	select {
+	case cs.events <- cs.scopeEvent(core.Event{
+		Type:         core.EventContextUsageUpdated,
+		SessionID:    cs.CurrentSessionID(),
+		ContextUsage: usage,
+	}):
+	case <-cs.ctx.Done():
+	}
 }
 
 // ---- system/status 广播同步 ----------------------------------------------

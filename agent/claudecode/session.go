@@ -994,6 +994,11 @@ func (cs *claudeSession) handleResult(raw map[string]any) {
 	cs.activeMsgID.Store("")
 	cs.emittedText.Store("")
 	cs.streamState.reset()
+	// get_context_usage 官方真值（升 A，2026-09-05）：turn 收口后异步取一次
+	// 全量窗口占用，成功则覆盖流帧 usage 的近似值（lastUsage + 事件面都更新）；
+	// 失败（老 CLI / 未知形状 / 超时）静默保持既有语义。goroutine 必须——读循环
+	// 不能同步等控制回包（emitProtocolContextUsage 注释）。
+	go cs.emitProtocolContextUsage()
 }
 
 func (cs *claudeSession) handleControlRequest(raw map[string]any) {

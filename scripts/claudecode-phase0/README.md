@@ -148,3 +148,32 @@ cc-switch（PID 95162，127.0.0.1:15721）仍在监听。2026-09-04 复测相对
   帧（--verbose）；本机活样本 `SessionStart:startup` exit=127（死的 cc-event-hook.sh）——
   S3 静默失效证据在控制流探针里也可见。
 - `system/init.apiKeySource="none"`（env 双 key 存在时仍报 none——字段语义待 Phase 1 不依赖）。
+
+## 2026-09-05 复测：CLI 升级 2.1.234 → 2.1.261（六项全绿 + 两个新证据面）
+
+背景：owner 指令三项收尾（选择器直调 / CLI 升级评估解锁 PostModelSwitch /
+get_context_usage 升 A）。评估路径：隔离安装 `npm i --prefix /tmp/claude-261
+@anthropic-ai/claude-code@2.1.261` → 探针复测 → changelog 234→261 无控制面 /
+stream-json 输出格式变更 → transcript type 集与形状锁 fixture 零新 type →
+全局升级（`claude --version` = 2.1.261）。
+
+复测结果（本节 dumps 为 2.1.261 覆写，2.1.234 原始证据在 git 31a5afe）：
+
+| 项 | 结果 | 证据 |
+|---|---|---|
+| 控制面六 subtype | 全 success | dumps/main-summary.json |
+| `get_context_usage`（新场景 `ctx`：init → 真实 turn → summary/full/default 三模式） | 全 success，富载荷 | dumps/ctx.jsonl req_x2/x3/x4；fixture `agent/claudecode/testdata/context-usage/get_context_usage-summary-2.1.261.json`（total 19626 / max 200000 / 分类明细；2.1.261 字段超出 SDK 0.3.260 类型声明：autoCompactThreshold / messageBreakdown / skills / slashCommands / apiUsage 等） |
+| PostModelSwitch / PreModelSwitch hooks | **实证触发**（set_model 直达引发，default→slot→default 两轮） | dumps/hooks-posts.jsonl：body 含 `from_model`/`to_model`（**网关改写后观测名**，glm-5.3 → glm-5.3[1M]）、`requested_model`（default 重置时 null）、`source:"sdk"` |
+| Stop / ConfigChange / UserPromptSubmit / SessionEnd | 照常 | 同上 |
+| transcript 形状 | 与 fixture 零新 type（atis-latch/attachment/queue-operation 等既有枚举内） | 当日 workdir-* 会话 type 集合 diff |
+| interrupt 早期 turn 忽略 | 2.1.261 官方修复（changelog） | 上游 CHANGELOG |
+
+**env mirror 重建注记**：本日 mirror 曾失效（刷新误抓 Desktop 会话 env——无
+ANTHROPIC 键；`CLAUDE_CODE_ENTRYPOINT=claude-desktop-3p` 下 CLI 走 Desktop 认证
+通道，无显式 provider env 即 "Not logged in"）。重建 = 从 `~/.claude/settings.json`
+env 块复制 ANTHROPIC_*/API_TIMEOUT 等（即当前 cc-switch 解析态，bigmodel 直连）。
+失败症状（196ms `<synthetic>` + "Not logged in" + Stop 不触发）已入档，供诊断。
+
+**成功体嵌套提醒**：initialize/list_models/get_context_usage 的成功载荷在
+`control_response.response.response` 双层（controlChannel/controlPayload 处理）；
+interrupt/set_model 等裸键在第一层 response。探针脚本 scenario 解析已按此对齐。

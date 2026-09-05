@@ -366,11 +366,48 @@ def scenario_turn() -> None:
     p.finish()
 
 
+def scenario_ctx() -> None:
+    """get_context_usage probe (2026-09-05 升 A 候选调研；SDK 0.3.260
+    SDKControlGetContextUsageRequest/Response 契约先行，dump 后才许写解析器)。
+
+    Flow: initialize -> one real turn (populate context) -> get_context_usage
+    detail=summary -> detail=full. Every control_response 原文归档。
+    """
+    p = Probe("ctx")
+    p.start()
+    p.send(req("req_x1", {"subtype": "initialize"}))
+    p.expect_response("req_x1", "initialize")
+    p.send({"type": "user", "message": {"role": "user", "content": "Reply with exactly one word: pong"}})
+    end = time.monotonic() + 120
+    while time.monotonic() < end:
+        line = p.read_line(min(2.0, end - time.monotonic()))
+        if line is None:
+            if p.proc.poll() is not None:
+                break
+            continue
+        p.record("in", line)
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if obj.get("type") == "result":
+            p.meta(note="turn result frame seen")
+            break
+    p.send(req("req_x2", {"subtype": "get_context_usage", "detail": "summary"}))
+    p.expect_response("req_x2", "get_context_usage_summary")
+    p.send(req("req_x3", {"subtype": "get_context_usage", "detail": "full"}))
+    p.expect_response("req_x3", "get_context_usage_full")
+    p.send(req("req_x4", {"subtype": "get_context_usage"}))
+    p.expect_response("req_x4", "get_context_usage_default_detail")
+    p.finish()
+
+
 SCENARIOS = {
     "main": scenario_main,
     "bare-list": scenario_bare_list,
     "bypass": scenario_bypass,
     "turn": scenario_turn,
+    "ctx": scenario_ctx,
 }
 
 if __name__ == "__main__":

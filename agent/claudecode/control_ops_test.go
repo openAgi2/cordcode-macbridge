@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -74,6 +75,76 @@ func TestSetModelLive_SendsOfficialEnvelope(t *testing.T) {
 	if cs.model != "sonnet" {
 		t.Errorf("session model not updated: %q", cs.model)
 	}
+}
+
+// get_context_usage（升 A，2026-09-05）：真样本 fixture 驱动——CLI 2.1.261
+// dump（scripts/claudecode-phase0/dumps/ctx.jsonl req_x2，detail=summary）。
+func TestGetContextUsageLive_RealPayload(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "context-usage", "get_context_usage-summary-2.1.261.json"))
+	if err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("fixture JSON: %v", err)
+	}
+	var gotInner map[string]any
+	cs, r := pipeSession(t, func(env map[string]any) map[string]any {
+		inner, _ := env["request"].(map[string]any)
+		gotInner = inner
+		rid, _ := env["request_id"].(string)
+		return ctrlFrame(rid, payload)
+	})
+	defer r.Close()
+
+	usage := cs.GetContextUsageLive(context.Background())
+	if usage == nil {
+		t.Fatalf("usage = nil for real payload")
+	}
+	if gotInner["subtype"] != "get_context_usage" || gotInner["detail"] != "summary" {
+		t.Fatalf("envelope inner = %v", gotInner)
+	}
+	// fixture 锚值（锁形状）：total 19626 / max 200000 / System prompt 2724 /
+	// System tools 13989 / Messages 1（deferred 变体与未知分类不映射）
+	if usage.UsedTokens != 19626 || usage.ContextWindow != 200000 {
+		t.Fatalf("tokens = %d/%d", usage.UsedTokens, usage.ContextWindow)
+	}
+	if usage.SystemTokens != 2724 || usage.ToolsTokens != 13989 || usage.MessageTokens != 1 {
+		t.Fatalf("breakdown = %d/%d/%d", usage.SystemTokens, usage.ToolsTokens, usage.MessageTokens)
+	}
+}
+
+// fail closed：error 信封 / 未知形状（缺 totalTokens 或 maxTokens）→ nil，
+// 调用方保持流帧 usage 语义。
+func TestGetContextUsageLive_FailClosed(t *testing.T) {
+	t.Run("error-envelope", func(t *testing.T) {
+		cs, r := pipeSession(t, func(env map[string]any) map[string]any {
+			rid, _ := env["request_id"].(string)
+			return errFrame(rid, "boom")
+		})
+		defer r.Close()
+		if cs.GetContextUsageLive(context.Background()) != nil {
+			t.Fatalf("error envelope must yield nil")
+		}
+	})
+	t.Run("unknown-shape", func(t *testing.T) {
+		cs, r := pipeSession(t, func(env map[string]any) map[string]any {
+			rid, _ := env["request_id"].(string)
+			return ctrlFrame(rid, map[string]any{"unrelated": true})
+		})
+		defer r.Close()
+		if cs.GetContextUsageLive(context.Background()) != nil {
+			t.Fatalf("unknown shape must yield nil")
+		}
+	})
+	t.Run("parser-guard", func(t *testing.T) {
+		if occupancyFromContextUsagePayload(map[string]any{}) != nil {
+			t.Fatalf("empty payload must yield nil")
+		}
+		if occupancyFromContextUsagePayload(map[string]any{"totalTokens": 10.0, "maxTokens": 0.0}) != nil {
+			t.Fatalf("non-positive window must yield nil")
+		}
+	})
 }
 
 func TestSetModelLive_DefaultResets(t *testing.T) {

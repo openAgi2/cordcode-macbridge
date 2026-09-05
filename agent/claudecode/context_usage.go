@@ -69,6 +69,52 @@ func occupancyFromClaudeUsageMap(usage map[string]any, model string, maxContextT
 	return occupancyFromClaudeUsage(raw, model, maxContextTokens)
 }
 
+// occupancyFromContextUsagePayload decodes a get_context_usage control
+// response payload into core.ContextUsage（usage/context 升 A，2026-09-05）。
+// 真样本：CLI 2.1.261 dump（scripts/claudecode-phase0/dumps/ctx.jsonl req_x2，
+// fixture=testdata/context-usage/get_context_usage-summary-2.1.261.json）。
+// Fail closed：totalTokens/maxTokens 缺失或非正 ⇒ nil（未知形状不猜）。
+// 相比流帧 usage（API 调用维度），该源给出全量窗口占用——system prompt /
+// system tools / memory files / skills 都计入，ContextWindow 用官方 maxTokens
+// 而不是模型名推断。
+func occupancyFromContextUsagePayload(payload map[string]any) *core.ContextUsage {
+	total, okT := payload["totalTokens"].(float64)
+	maxTokens, okM := payload["maxTokens"].(float64)
+	if !okT || !okM || total <= 0 || maxTokens <= 0 {
+		return nil
+	}
+	u := &core.ContextUsage{
+		UsedTokens:    int(total),
+		ContextWindow: int(maxTokens),
+	}
+	if rawMax, ok := payload["rawMaxTokens"].(float64); ok && rawMax > float64(maxTokens) {
+		u.ContextWindow = int(rawMax)
+	}
+	if cats, ok := payload["categories"].([]any); ok {
+		for _, c := range cats {
+			cm, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			name, _ := cm["name"].(string)
+			tokens, _ := cm["tokens"].(float64)
+			if tokens <= 0 {
+				continue
+			}
+			// dsh web 同款 breakdown 投影位；未知分类忽略（不猜语义）。
+			switch name {
+			case "System prompt":
+				u.SystemTokens = int(tokens)
+			case "System tools":
+				u.ToolsTokens = int(tokens)
+			case "Messages":
+				u.MessageTokens = int(tokens)
+			}
+		}
+	}
+	return u
+}
+
 func loadClaudeContextUsage(path, model string, maxContextTokens int) *core.ContextUsage {
 	if path == "" {
 		return nil
