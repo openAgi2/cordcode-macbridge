@@ -2798,8 +2798,53 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 
 var claudeResumeOwnerCheckTimeout = 2 * time.Second
 
-func preflightClaudeResume(rootCtx context.Context, agent core.Agent, sessionID string) *WireError {
-	if err := rootCtx.Err(); err != nil {
+// startClaudeSessionOnOpen best-effort spawns the claude worker when iOS
+// OPENS a session（打开即拉活，2026-09-05）。复用 send 侧的 preflight（外部
+// worker 正在执行时放弃；live-but-idle 放行）与双检去重；任何失败只记日志——
+// 视图/观察路径（file-relay + resume 响应）不受影响，首次 send_message 仍会
+// 走既有按需创建兜底。
+func (h *Handlers) startClaudeSessionOnOpen(agent core.Agent, sessionID string, msg WireMessage) {
+	if sessionID == "" {
+		return
+	}
+	go func() {
+		// 预检（与 send 侧 !ok || sess == nil 同语义）：registry 已有真实会话
+		// 直接返回；占位 stub（ok 但 nil）照常 spawn 顶替。
+		h.mu.Lock()
+		existing, existingOk := h.getSession(sessionID)
+		h.mu.Unlock()
+		if existingOk && existing != nil {
+			return
+		}
+		if wireErr := preflightClaudeResume(h.ctx, agent, sessionID); wireErr != nil {
+			slog.Info("go-bridge: open-spawn skipped", "sessionID", sessionID,
+				"code", wireErr.Code, "message", wireErr.Message)
+			return
+		}
+		startAt := time.Now()
+		sess, err := agent.StartSession(h.ctx, sessionID)
+		if err != nil {
+			slog.Info("go-bridge: open-spawn failed (file-relay view-only fallback)",
+				"sessionID", sessionID, "error", err)
+			return
+		}
+		h.mu.Lock()
+		existing, existingOk = h.getSession(sessionID)
+		if existingOk && existing != nil {
+			h.mu.Unlock()
+			_ = sess.Close()
+			slog.Info("go-bridge: open-spawn raced with concurrent creation, keeping existing",
+				"sessionID", sessionID)
+			return
+		}
+		h.putSessionWithMeta(sessionID, msg.BackendID, extractDir(msg), sess)
+		h.mu.Unlock()
+		slog.Info("go-bridge: open-spawn ready (detailed context + in-session control now live)",
+			"sessionID", sessionID, "elapsed_ms", time.Since(startAt).Milliseconds())
+	}()
+}
+
+func preflightClaudeResume(rootCtx context.Context, agent core.Agent, sessionID string) *WireError {	if err := rootCtx.Err(); err != nil {
 		return &WireError{Code: "request.cancelled", Message: err.Error()}
 	}
 	lister, ok := agent.(core.LiveSessionLister)
@@ -4354,13 +4399,21 @@ func (h *Handlers) handleResumeSession(conn Connection, msg WireMessage, agent c
 
 	h.subscribeConnToSession(conn, msg, h.resolveSessionIDForActiveSession(params.SessionID), extractDir(msg))
 
-	// 对于 claudecode session：如果没有活跃 AgentSession（外部 Desktop 创建），
-	// 启动基于 transcript 文件监视的事件转发，使 iOS 能收到 turn_started/turn_completed 等事件。
+	// 对于 claudecode session：如果没有活跃 AgentSession（外部 Desktop 创建或
+	// 本次运行尚未拉活），启动基于 transcript 文件监视的事件转发，使 iOS 能收到
+	// turn_started/turn_completed 等事件。
 	if agent.Name() == "claudecode" {
 		h.mu.Lock()
 		sess, hasSess := h.getSession(params.SessionID)
 		h.mu.Unlock()
 		if !hasSess || sess == nil {
+			// 打开即拉活（owner 2026-09-05 问询「为何须发消息后才显示详细上下文」）：
+			// spawn claude --resume，让 get_context_usage（详细上下文）/ 会话内控制 /
+			// 首条消息免冷启动在打开时就绪。旧「不在 resume 启动进程」的理由（--resume
+			// 重放历史撑爆 events channel）已被探针推翻（2.1.234 实测重放为零，
+			// handleSendMessage 同注；潜在重放帧由 historyDraining 门丢弃）。
+			// best-effort：失败只记日志，file-relay 观察路径照常兜底。
+			h.startClaudeSessionOnOpen(agent, params.SessionID, msg)
 			h.startClaudeSessionFileRelay(params.SessionID, conn, msg.BackendID)
 		}
 	}

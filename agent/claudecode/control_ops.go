@@ -212,6 +212,11 @@ func (cs *claudeSession) GetContextUsageLive(ctx context.Context) *core.ContextU
 	return occupancyFromContextUsagePayload(payload)
 }
 
+// claudeInitialContextFetchDelay: spawn 后首次 get_context_usage 的等待，
+// 让 CLI 完成 boot/init。1.5s 覆盖 node 启动 + init 帧；即便偏早，控制帧在
+// stdin 排队、opTimeout 兜底，失败只是静默少一次快照。
+const claudeInitialContextFetchDelay = 1500 * time.Millisecond
+
 // emitProtocolContextUsage broadcasts one EventContextUsageUpdated from the
 // control-plane truth and records it as lastUsage（覆盖流帧 usage 的近似值）。
 // 只许在非读循环 goroutine 调用——sendControlRequest 的回包由读循环分发，
@@ -221,15 +226,14 @@ func (cs *claudeSession) GetContextUsageLive(ctx context.Context) *core.ContextU
 // 半初始化 session（测试直接驱动 handleResult：无 stdin / 无 ctx / 未 alive）
 // 与已 Close 会话必须在此短路——writeJSONContext 对 nil stdin 解引用、
 // context.WithTimeout 对 nil ctx panic，均会击穿整个测试二进制（间歇 2/7 FAIL）。
+// 注意 historyDraining 门不适用：get_context_usage 是实时官方快照，不是
+// transcript 重放伪影——resume 后的 idle 会话（drain 窗口未关）也如实可用。
 func (cs *claudeSession) emitProtocolContextUsage() {
 	if !cs.alive.Load() || cs.stdin == nil || cs.ctx == nil {
 		return
 	}
 	usage := cs.GetContextUsageLive(cs.ctx)
 	if usage == nil {
-		return
-	}
-	if cs.historyDraining.Load() {
 		return
 	}
 	cs.rememberContextUsage(usage)

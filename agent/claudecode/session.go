@@ -325,6 +325,16 @@ func newClaudeSession(ctx context.Context, workDir, cliBin string, cliExtraArgs 
 
 	go cs.readLoop(stdout, &stderrBuf)
 
+	// 打开即拉活的首次全量占用（owner 2026-09-05）：进程就绪后 ~1.5s 取一次
+	// get_context_usage——iOS 只是打开会话（未发消息）也能立刻看到详细上下文
+	// （工具/系统 prompt 分类）；此后每 turn 收口仍有权威刷新。延迟让 CLI 完成
+	// 启动（boot/init 帧）；失败静默（老 CLI/超时 → 维持文件面简单版）。
+	time.AfterFunc(claudeInitialContextFetchDelay, func() {
+		if cs.alive.Load() {
+			cs.emitProtocolContextUsage()
+		}
+	})
+
 	return cs, nil
 }
 

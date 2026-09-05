@@ -220,3 +220,57 @@ func TestHandleSendMessage_PreflightScopeExcludesNewAndOtherBackend(t *testing.T
 		})
 	}
 }
+
+// 打开即拉活（2026-09-05）：iOS 打开 claude 会话时 best-effort spawn——
+// dead/live-idle 放行并注册；registry 已有会话不重复 spawn；外部 worker
+// 正在执行时放弃。
+func TestStartClaudeSessionOnOpen_SpawnsAndRegisters(t *testing.T) {
+	h := newTestHandlers(t)
+	agent := &ownerCheckAgent{unsupportedMutationAgent: &unsupportedMutationAgent{name: "claudecode"}}
+	h.startClaudeSessionOnOpen(agent, "open-1", WireMessage{BackendID: "claudecode", RequestID: "r1"})
+
+	deadline := time.After(3 * time.Second)
+	for agent.starts == 0 {
+		select {
+		case <-deadline:
+			t.Fatalf("open-spawn never called StartSession")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	h.mu.Lock()
+	sess, ok := h.getSession("open-1")
+	h.mu.Unlock()
+	if !ok || sess == nil {
+		t.Fatalf("open-spawn session not registered")
+	}
+
+	// registry 已有会话：再次 open 不重复 spawn。
+	h.startClaudeSessionOnOpen(agent, "open-1", WireMessage{BackendID: "claudecode", RequestID: "r2"})
+	time.Sleep(100 * time.Millisecond)
+	if agent.starts != 1 {
+		t.Fatalf("starts = %d, want 1 (existing session must skip)", agent.starts)
+	}
+}
+
+func TestStartClaudeSessionOnOpen_ExecutingExternalWorkerSkips(t *testing.T) {
+	h := newTestHandlers(t)
+	agent := &ownerCheckAgent{
+		unsupportedMutationAgent: &unsupportedMutationAgent{name: "claudecode"},
+		proc:                     core.LiveSessionProcess{SessionID: "x", PID: 42, Live: true, Executing: true},
+	}
+	h.startClaudeSessionOnOpen(agent, "exec-1", WireMessage{BackendID: "claudecode", RequestID: "r1"})
+	time.Sleep(200 * time.Millisecond)
+	if agent.starts != 0 {
+		t.Fatalf("starts = %d, executing external worker must skip", agent.starts)
+	}
+}
+
+func TestStartClaudeSessionOnOpen_EmptySessionIDNoop(t *testing.T) {
+	h := newTestHandlers(t)
+	agent := &ownerCheckAgent{unsupportedMutationAgent: &unsupportedMutationAgent{name: "claudecode"}}
+	h.startClaudeSessionOnOpen(agent, "", WireMessage{BackendID: "claudecode"})
+	time.Sleep(50 * time.Millisecond)
+	if agent.starts != 0 {
+		t.Fatalf("empty session id must not spawn")
+	}
+}

@@ -395,3 +395,50 @@ func (cs *claudeSession) lastUsageSnapshotForTest() *core.ContextUsage {
 	c := *cs.lastUsage
 	return &c
 }
+
+// drain 窗口期照常快照（打开即拉活配套）：resume 后 idle 会话的
+// historyDraining 尚未关闭（首条 stream_event 未到），get_context_usage 是
+// 实时官方快照而非重放伪影，必须照常发事件——否则「打开未发消息」时
+// 首取（spawn+1.5s）永远落在 drain 窗口内被丢弃。
+func TestEmitProtocolContextUsage_DuringHistoryDraining(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "context-usage", "get_context_usage-summary-2.1.261.json"))
+	if err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("fixture JSON: %v", err)
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Skipf("pipe: %v", err)
+	}
+	cs := &claudeSession{
+		stdin:  w,
+		done:   make(chan struct{}),
+		ctx:    context.Background(),
+		events: make(chan core.Event, 4),
+	}
+	cs.alive.Store(true)
+	cs.historyDraining.Store(true) // resume idle：drain 窗口开启
+	defer r.Close()
+	go func() {
+		var env map[string]any
+		if err := json.NewDecoder(r).Decode(&env); err != nil {
+			return
+		}
+		rid, _ := env["request_id"].(string)
+		cs.dispatchControlResponse(ctrlFrame(rid, payload))
+	}()
+
+	cs.emitProtocolContextUsage() // 同步驱动（非读循环）
+
+	select {
+	case evt := <-cs.events:
+		if evt.Type != core.EventContextUsageUpdated || evt.ContextUsage == nil || evt.ContextUsage.UsedTokens != 19626 {
+			t.Fatalf("evt = %+v", evt)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("drain 窗口期必须照常发出官方快照")
+	}
+}
