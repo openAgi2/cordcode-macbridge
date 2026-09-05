@@ -116,3 +116,22 @@ get_context_usage 升 A）。触发面：未走完整初始化的 session 对象
 代际吻合。**放行条件 = 处理 §5 P0**（agent/claudecode flaky panic 修复
 或至少在文档中撤回「全量回归绿」的当前有效性声明）；P1/P2 为文档修订，
 不阻断。
+
+## 7. 处置复核与闭环（2026-09-05，处置 f75a261）
+
+审计方独立复核（不采信回执文字）：**三项全部通过，审计闭环放行。**
+
+| 项 | 复核方法 | 结果 |
+| --- | --- | --- |
+| P0 修复 | 读 f75a261 diff（三重门 `!alive \|\| stdin==nil \|\| ctx==nil` 与回执一致；新测试从 handleResult 入口驱动且注释记录了修复前 7 跑 2 挂基线）；`go test ./agent/claudecode/ -count=1` **6/6 独立运行全绿**（修复前实测 7 跑 2 挂）；`go test ./go-bridge/... -count=1` 全量 ok | ✅ |
+| P1-1/P1-2 | 追记 6 diff：§1 hooks 行补 dump 覆写注记；SessionStart 注记给出两层机制区分 | ✅（见下注） |
+| P2 | 追记 6 关账记录（(a)(b)(c) 追记 4 轮确认、(d) 单测锁定如实标注无真机复测） | ✅ |
+| 部署 | 只读核验：8777 = PID 10006（lstart 12:44:33，晚于 f75a261 12:43:42）、`/Applications` 身份、无违规残留、日志 12:44:33.583 `mgmt: claude hooks endpoint probe ok` | ✅ |
+
+注（P1-2 精确化，审计方接受）：处置方复核指出审计所见 `SessionStart:startup`
+帧是 **stdout 的 `system/hook_started` 用户层 hook 执行帧**（owner settings
+的死 cc-event-hook 脚本），与 `--settings` 内联 HTTP hook 的 POST 层是两套
+机制；HTTP POST 层 9 帧无 SessionStart（与本审计对 hooks-posts.jsonl 的观察
+自洽）。「--settings 层 SessionStart 不触发」在 2.1.261 复核仍成立。该两层
+区分已写入注记，防止后续再误读——审计原表述「需按新版复核」由此收口为
+「断言成立，注记精确化」。
