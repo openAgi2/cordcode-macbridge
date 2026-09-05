@@ -1,0 +1,24 @@
+Claude Code doctor
+
+Running: npm-global (2.1.234)
+Commit: 7215ba60b06d
+Platform: darwin-arm64
+Path: /opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
+Config install method: global
+Search: OK (bundled)
+Auto-updates: disabled (set by env: DISABLE_AUTOUPDATER)
+Auto-update channel: latest
+Last update attempt: none recorded
+
+Remote Control
+Remote Control is only available when using Claude via api.anthropic.com. ANTHROPIC_BASE_URL is set and does not point at api.anthropic.com, so this session is using a custom endpoint — unset it (or run in a shell without it) to use Remote Control.
+- Not connected to the Anthropic API (api.anthropic.com)
+- Not signed in to claude.ai
+- claude.ai subscription auth not active
+- Sign-in is missing the user:profile scope
+- Feature-flag evaluation disabled (disabled by CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)
+- Remote Control rollout could not be verified for this account (no server response this session)
+
+No installation issues found.
+
+For a full setup checkup that can also fix issues, run /doctor in a Claude Code session.

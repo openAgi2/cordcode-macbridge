@@ -1,0 +1,3 @@
+2026-09-05T02:36:36.282Z [DEBUG] MDM settings load completed in 0ms
+2026-09-05T02:36:36.296Z [DEBUG] Broken symlink or missing file encountered for settings.json at path: /Library/Application Support/ClaudeCode/managed-settings.json
+2026-09-05T02:36:36.297Z [DEBUG] Broken symlink or missing file encountered for settings.json at path: /private/tmp/rc-probe/work/.claude/settings.local.json
