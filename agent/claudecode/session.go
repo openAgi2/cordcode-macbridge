@@ -72,10 +72,14 @@ type claudeSession struct {
 	// uuid、result 帧回盖 user_message_uuid）——file-relay 侧 turn 身份与本侧 stdout
 	// 事件身份天然统一，不再依赖 ActiveTurnID 反查。active = 当前进行中 turn 的 uuid；
 	// pending = turn 进行中再次 Send 时 CLI queue 的后续 uuid（FIFO）。result 收口时
-	// 按 user_message_uuid 消费到匹配位置。
+	// 按 user_message_uuid 消费到匹配位置。selfTurnUUIDs 是本 epoch 全部自持 uuid
+	// （settle 后保留——晚到的同 turn 文件行仍属 stdout 权威；rollback 移除），供
+	// go-bridge 判定「stdout 单源模型」只对自有 turn 成立，外部进程写入同一
+	// transcript 的回合不经本 stdout，file-relay 必须继续供正文。
 	clientTurnMu       sync.Mutex
 	activeClientUUID   string
 	pendingClientUUIDs []string
+	selfTurnUUIDs      map[string]struct{}
 
 	model            string
 	maxContextTokens int
@@ -704,6 +708,7 @@ func (cs *claudeSession) handleStreamEvent(raw map[string]any) {
 func (cs *claudeSession) rollbackClientTurn(id string) {
 	cs.clientTurnMu.Lock()
 	defer cs.clientTurnMu.Unlock()
+	delete(cs.selfTurnUUIDs, id)
 	if cs.activeClientUUID == id {
 		if len(cs.pendingClientUUIDs) > 0 {
 			cs.activeClientUUID = cs.pendingClientUUIDs[0]
@@ -741,12 +746,29 @@ func (cs *claudeSession) registerClientTurn() string {
 	id := newClientTurnUUID()
 	cs.clientTurnMu.Lock()
 	defer cs.clientTurnMu.Unlock()
+	if cs.selfTurnUUIDs == nil {
+		cs.selfTurnUUIDs = make(map[string]struct{})
+	}
+	cs.selfTurnUUIDs[id] = struct{}{}
 	if cs.activeClientUUID == "" {
 		cs.activeClientUUID = id
 	} else {
 		cs.pendingClientUUIDs = append(cs.pendingClientUUIDs, id)
 	}
 	return id
+}
+
+// OwnsClientTurn 实现 core.ClientTurnOwner：turn 身份（= transcript user 行 uuid）
+// 是否由本会话进程发起（本 epoch 自持集）。settle 后保留——晚到的同 turn assistant
+// 文件行仍属 stdout 权威，不得因 result 已收口就放行 file-relay 双份。
+func (cs *claudeSession) OwnsClientTurn(turnUUID string) bool {
+	if turnUUID == "" {
+		return false
+	}
+	cs.clientTurnMu.Lock()
+	defer cs.clientTurnMu.Unlock()
+	_, ok := cs.selfTurnUUIDs[turnUUID]
+	return ok
 }
 
 // currentClientTurnID 返回当前进行中 turn 的 client uuid（stdout 事件的 turnId）。

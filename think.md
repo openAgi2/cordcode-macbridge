@@ -43,6 +43,32 @@ uuid 写输入帧，stdout 事件（含完成差量）以此作 turnId，result 
 user_message_uuid 校验收口，ActiveTurnID 反查降级兜底；③ drain 事件驱动
 （前提：resume 重放期不含 stream_event，需探针取证）。
 
+## 追记：双序号域 + 单源门范围错误（第四/五轮复测）
+
+**双序号域幂等门**（全链路测试抓到的第二层）：Claude source batch 在 Kernel 锁内
+自取 PerSessionSeq、live 事件走 publisher 独立计数器——两域打同一 reducer 幂等门
+（seq ≤ lastAppliedRev 即跳）。file-relay user 行 batch 先行推高 rev 时，后到的
+stdout 流式 delta 即使带身份也被静默跳过（间歇性）。修复 = Kernel 每 session
+原子发号器（IssueSessionSeq）唯一取号源，publisher 与 batch 都从它取号。
+
+**drain 真相**：2.1.234 真样本证明 `--resume` 根本不重放历史到 stdout——
+handleSendMessage 的同步 10s drainHistoryEvents 是纯自加延迟，已移除；drain 窗口
+改首条 stream_event 事件驱动关闭（重放防御语义保留，12s watchdog 兜底）。
+
+**stdout 单源门范围错误**（owner 第五轮复测：Mac Desktop 发消息 iOS 永远卡执行中）：
+`agentRelayActive(sessionID)` 过粗——本进程 idle 存活期间，外部进程（Desktop/
+Terminal worker）写同一 transcript 的回合不经本 stdout，却被「stdout 权威」压制
+assistant 行 → iOS 收到问题卡执行中、无正文无终态。修复 = 门收窄为
+`agentRelayActive && agentOwnsClaudeTurn(currentTurnID)`：core.ClientTurnOwner
+（claude 自持 client uuid 集，settle 后保留）判定回合归属；外部回合照常走
+file-relay 全量。**教训：单源模型的「源」必须按回合发起方判定，不能按会话存活
+判定。**
+
+**Mac Desktop 不实时显示 iOS 消息**（owner 第五轮问询）：Claude Desktop 不监听
+transcript 的外部写入（无跨进程事件总线——正是我们自己产品需要 file polling 旁观
+Desktop 的原因）。数据已持久写入会话文件，Desktop 侧重开会话即可见；不是
+CordCode 可修的 bug。
+
 # 2026-09-04 Codex 计划：iPhone 能批、不能开
 
 owner 真机：Mac Codex App 计划模式发任务 → iPhone 同步计划正文并点批准执行，通过。

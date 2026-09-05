@@ -29,6 +29,20 @@ type fakeAgentSession struct {
 	historyDrainDone chan struct{}
 	closeOnce        sync.Once
 	closed           bool
+	// ownsClientTurns 让 fakeAgentSession 可选实现 core.ClientTurnOwner
+	// （claude stdout 单源门：只有自有回合才压制 file-relay 正文）。nil = 未实现
+	// 语义由 agentOwnsClaudeTurn 的类型断言处理（不实现接口）。非 nil map 为
+	// 逐 uuid 判定（外部回合 = 不在 map 中）。
+	ownsClientTurns map[string]bool
+}
+
+// OwnsClientTurn 仅在 ownsClientTurns 字段非 nil 时生效（方法集恒存在；判定门
+// 以字段为开关，避免为每个测试场景定义新类型）。
+func (f *fakeAgentSession) OwnsClientTurn(turnUUID string) bool {
+	if f.ownsClientTurns == nil {
+		return false
+	}
+	return f.ownsClientTurns[turnUUID]
 }
 
 func (f *fakeAgentSession) Send(prompt string, _ []core.ImageAttachment, _ []core.FileAttachment) error {

@@ -1076,13 +1076,16 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 			//（owner 真机 2026-09-04 23:17：问题 B/回复 B 整回合丢失）。
 			//
 			// 官方单源模型（owner 2026-09-04 复测「回复重复」）：agent relay
-			// （stdout，官方唯一消费面）活跃时，assistant 完成态行由 stdout 权威
-			// 供给（流式差量收口，见 relayEvents 的 turnId 补全）；file-relay 对
-			// assistant 行仅推进 cursor，防止双源向同一 item 各 append 一份正文。
-			// user 行照常进 batch（turn uuid 身份的唯一建立者）。外部会话（无
-			// agent relay）保持 file-relay 全量内容。
+			// （stdout，官方唯一消费面）活跃时，**自有回合**（core.ClientTurnOwner——
+			// 本进程 Send 自带 client uuid 发起，user 行 uuid ∈ 自持集）的 assistant
+			// 完成态行由 stdout 权威供给（流式差量收口，见 relayEvents 的 turnId 补全）；
+			// file-relay 对其仅推进 cursor，防止双源向同一 item 各 append 一份正文。
+			// 外部回合（owner 2026-09-05 复测：Mac Desktop/Terminal worker 写同一
+			// transcript）不经本进程 stdout——必须继续由 file-relay 供正文与终态，
+			// 否则 iOS 永远卡执行中。user 行照常进 batch（turn uuid 身份的唯一建立者）。
+			// 无会话对象/未实现接口的 backend 视为非自有（file-relay 供内容，安全方向）。
 			if e.UUID != "" && e.Message != nil && (e.Type == "user" || e.Type == "assistant") && !isClaudeEchoOnlyUserRow(e) {
-				if e.Type == "assistant" && h.agentRelayActive(sessionID) {
+				if e.Type == "assistant" && h.agentRelayActive(sessionID) && h.agentOwnsClaudeTurn(sessionID, currentTurnID) {
 					h.acknowledgeClaudeSourceRow(backendID, sessionID, traceCorrelation, scanned.ByteEnd)
 					emitClaudeSourceTrace(claudeSourceTraceRecord{
 						Phase: "live", IngestDomain: "source_only", BackendID: backendID,
@@ -3111,6 +3114,27 @@ func (h *Handlers) agentRelayActive(sessionID string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.agentRelayRunning[sessionID]
+}
+
+// agentOwnsClaudeTurn 判断 turn（身份 = transcript user 行 uuid）是否由本 bridge
+// 会话进程发起：查注册的 AgentSession 并类型断言 core.ClientTurnOwner（claude
+// 自持 client uuid 集）。无会话对象、未实现接口或空 turnID 均返回 false——
+// file-relay 保持供内容（安全方向：宁可双源去重，不可内容断供）。
+func (h *Handlers) agentOwnsClaudeTurn(sessionID, turnID string) bool {
+	if turnID == "" {
+		return false
+	}
+	h.mu.Lock()
+	sess, ok := h.getSession(sessionID)
+	h.mu.Unlock()
+	if !ok {
+		return false
+	}
+	owner, ok := sess.(core.ClientTurnOwner)
+	if !ok {
+		return false
+	}
+	return owner.OwnsClientTurn(turnID)
 }
 
 // backfillClaudeStreamTurnID 给 claude stdout 流式增量（无 uuid 身份——CLI

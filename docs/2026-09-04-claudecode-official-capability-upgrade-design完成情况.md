@@ -187,3 +187,28 @@ agent/claudecode + core）。
 
 待 owner 复测：会话发消息应看到（a）发送后不再有固定 ~10s 空白；（b）逐字打字机流式；
 （c）完成态正文即时可见、无需切回；（d）连续两条消息排队场景不串回合。
+
+### 追记 4：第五轮复测「外部回合被压制」——单源门按回合发起方收窄（2026-09-05）
+
+owner 复测 f4027ca：**iOS 发消息打字机流式 ✅（主链路修复确认）**。两个新现象：
+
+1. **Mac Desktop 不实时显示 iOS 发的消息**（重启 Desktop 才见）：非 CordCode bug。
+   Claude Desktop 不监听 transcript 的外部写入（官方无跨进程事件总线——正是我们
+   产品需要 file polling 旁观 Desktop 的原因，方向反过来同理）。数据已持久写入
+   会话文件；Desktop 侧重开会话即可见，无需重启整个 App。
+2. **Mac Desktop 发消息（问题 2）→ iOS 收到问题、卡「执行中」永远无回复**：回归，
+   根因是 d5f5e30 的 stdout 单源门 `agentRelayActive(sessionID)` 过粗——按**会话
+   存活**而非**回合发起方**判定。本进程（iOS 侧 CLI 子进程）idle 存活期间，Desktop
+   worker 写同一 transcript 的外部回合不经本 stdout，assistant 行却被「stdout 权威」
+   压制为 cursor-only → iOS 无正文、无终态（heldTerminals 也不触发），永远执行中。
+
+修复：门收窄为 `agentRelayActive && agentOwnsClaudeTurn(currentTurnID)`。新增
+core.ClientTurnOwner 可选接口（agent/claudecode 实现自持 client uuid 集——
+register 添加 / settle 后保留（晚到的同 turn 文件行仍属 stdout 权威）/ rollback
+移除）；file-relay 用 file-order currentTurnID（user 行 uuid）查询归属，外部回合
+照常全量供正文与终态。无会话对象/未实现接口判非自有（file-relay 供内容，安全方向）。
+
+测试：新增 TestFileRelayProjectsExternalTurnWhileAgentRelayActive（owner 复测场景
+回归锁：外部回合在 agent relay 活跃时正文 + turn_completed 均达 iOS）+
+TestOwnsClientTurnSelfSet（自持集四态）；既有 cursor-only 测试改为声明自有回合。
+全量回归绿。

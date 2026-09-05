@@ -167,3 +167,32 @@ func TestDrainClosesOnFirstStreamEvent(t *testing.T) {
 		t.Fatalf("streamed text dropped while drain window was open: %d events", len(evts))
 	}
 }
+
+// 自持集判定（core.ClientTurnOwner）：file-relay 的 stdout 单源门据此区分自有
+// 回合与外部回合（Mac Desktop worker 写同一 transcript）。
+func TestOwnsClientTurnSelfSet(t *testing.T) {
+	cs := newTestClaudeSession(t)
+	self := cs.registerClientTurn()
+	if !cs.OwnsClientTurn(self) {
+		t.Fatal("registered uuid must be owned")
+	}
+	if cs.OwnsClientTurn("desktop-generated-uuid") {
+		t.Fatal("foreign uuid must not be owned")
+	}
+	if cs.OwnsClientTurn("") {
+		t.Fatal("empty turn must not be owned")
+	}
+
+	// settle 后保留：晚到的同 turn assistant 文件行仍属 stdout 权威
+	cs.settleClientTurn(self)
+	if !cs.OwnsClientTurn(self) {
+		t.Fatal("settled uuid must stay owned (late file rows)")
+	}
+
+	// rollback 撤销：帧未达 CLI 的 uuid 不得留在自持集
+	rolled := cs.registerClientTurn()
+	cs.rollbackClientTurn(rolled)
+	if cs.OwnsClientTurn(rolled) {
+		t.Fatal("rolled-back uuid must not be owned")
+	}
+}

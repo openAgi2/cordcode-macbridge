@@ -936,6 +936,19 @@ type LivePermissionModeSwitcher interface {
 	SetPermissionModeLive(ctx context.Context, mode string) error
 }
 
+// ClientTurnOwner is implemented by agent sessions that originate turns with a
+// self-held client uuid (claudecode: the input user frame carries a uuid the
+// CLI adopts into the transcript user row — official SDK user_message_uuid
+// contract). The file-relay layer asks it to decide whether a transcript turn
+// (identity = user row uuid) belongs to THIS process's stdout stream: only
+// self-owned turns may be treated as stdout-authoritative for assistant
+// content; turns written by other processes (Mac Desktop/Terminal workers on
+// the same transcript) never appear on this stdout and must keep the file as
+// their content source (owner 2026-09-05 复测：外部回合被压制 → iOS 永远执行中).
+type ClientTurnOwner interface {
+	OwnsClientTurn(turnUUID string) bool
+}
+
 // PermissionModeInfo describes a permission mode for display.
 type PermissionModeInfo struct {
 	Key    string

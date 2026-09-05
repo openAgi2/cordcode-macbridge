@@ -121,6 +121,9 @@ func TestFileRelayAssistantRowCursorOnlyWhenAgentRelayActive(t *testing.T) {
 		alivePIDs: map[int]bool{4242: true},
 	}
 	handlers.RegisterAgent("claude", agent)
+	// 自有回合声明（core.ClientTurnOwner）：u-a 由本进程发起 → stdout 权威压制
+	// file-relay assistant 正文。外部回合不进 ownsClientTurns（见下个测试）。
+	handlers.putSession(sessionID, &fakeAgentSession{events: make(chan core.Event, 1), ownsClientTurns: map[string]bool{"u-a": true}})
 	serverConn, clientConn, cleanup := openTestConn(t)
 	t.Cleanup(cleanup)
 	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "claude", SessionID: sessionID})
@@ -213,5 +216,73 @@ func TestFileRelayAssistantRowStillProjectsWhenNoAgentRelay(t *testing.T) {
 	}
 	if !sawText {
 		t.Fatalf("external session assistant content must still project")
+	}
+}
+
+// ④ 外部回合（owner 2026-09-05 复测回归锁）：agent relay 活跃（本进程 idle 存活）
+// 但新回合由外部进程（Mac Desktop/Terminal worker）发起——user 行 uuid 不在
+// ClientTurnOwner 自持集。此时 stdout 永远看不到该回合，file-relay 必须继续供
+// 正文与终态；否则 iOS 收到问题 2 后永远卡「执行中」。
+func TestFileRelayProjectsExternalTurnWhileAgentRelayActive(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	withFastClaudeFileRelay(t)
+	const sessionID = "external-turn-while-relay-active"
+	path := writeClaudeFileRelayTranscript(t, home, sessionID,
+		`{"type":"user","uuid":"u-self","message":{"role":"user","content":"问题1(iOS发起)"}}`,
+		`{"type":"assistant","uuid":"as-self","parentUuid":"u-self","message":{"id":"msg-self","role":"assistant","content":[{"type":"text","text":"回复1(stdout已供)"}],"stop_reason":"end_turn"}}`,
+	)
+	handlers := newTestHandlers(t)
+	agent := &fakeAgent{
+		name: "claudecode",
+		liveProcesses: map[string]core.LiveSessionProcess{
+			sessionID: {SessionID: sessionID, PID: 4242, Live: true},
+		},
+		alivePIDs: map[int]bool{4242: true},
+	}
+	handlers.RegisterAgent("claude", agent)
+	// 本进程只发起过 u-self；外部回合 u-ext 不在自持集。
+	handlers.putSession(sessionID, &fakeAgentSession{events: make(chan core.Event, 1), ownsClientTurns: map[string]bool{"u-self": true}})
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "claude", SessionID: sessionID})
+	handlers.startClaudeSessionFileRelayAt(sessionID, serverConn, "claude", nil)
+	client := &websocketClient{conn: clientConn}
+	_ = client.readEvents(t, 1) // 初始 idle，确保初扫完成
+
+	// 本进程存活（agent relay active——S8 停回合留进程）
+	handlers.mu.Lock()
+	handlers.agentRelayRunning[sessionID] = true
+	handlers.mu.Unlock()
+
+	// Mac Desktop worker 追加外部回合：user u-ext + assistant（含终态）
+	appendClaudeFileRelayTranscript(t, path,
+		`{"type":"user","uuid":"u-ext","parentUuid":"as-self","message":{"role":"user","content":"问题2(Mac发起)"}}`,
+		`{"type":"assistant","uuid":"as-ext","parentUuid":"u-ext","message":{"id":"msg-ext","role":"assistant","content":[{"type":"text","text":"回复2(外部)"}],"stop_reason":"end_turn"}}`,
+	)
+
+	var sawReply, sawCompleted bool
+	deadline := time.Now().Add(4 * time.Second)
+	_ = client.conn.SetReadDeadline(deadline)
+	for !(sawReply && sawCompleted) && time.Now().Before(deadline) {
+		var ev map[string]any
+		if err := client.conn.ReadJSON(&ev); err != nil {
+			break
+		}
+		data, _ := ev["data"].(map[string]any)
+		if delta, _ := data["delta"].(string); strings.Contains(delta, "回复2(外部)") {
+			sawReply = true
+		}
+		if ev["event"] == "turn_completed" {
+			if tid, _ := data["turnId"].(string); strings.Contains(tid, "u-ext") {
+				sawCompleted = true
+			}
+		}
+	}
+	if !sawReply {
+		t.Fatal("external turn assistant content must project while agent relay active (owner 2026-09-05 复测：iOS 永远执行中)")
+	}
+	if !sawCompleted {
+		t.Fatal("external turn must reach turn_completed (stuck-running regression)")
 	}
 }
