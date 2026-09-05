@@ -1,0 +1,20 @@
+{
+  "scenario": "bare-list",
+  "verdicts": {
+    "list_models_before_initialize": {
+      "request_id": "req_b1",
+      "verdict": "success",
+      "response_subtype": "success"
+    },
+    "initialize_after_bare_list": {
+      "request_id": "req_b2",
+      "verdict": "success",
+      "response_subtype": "success"
+    },
+    "list_models_after_initialize": {
+      "request_id": "req_b3",
+      "verdict": "success",
+      "response_subtype": "success"
+    }
+  }
+}

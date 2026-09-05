@@ -146,7 +146,6 @@ func (k *ProjectionKernel) ApplyClaudeSourceRecordBatch(
 	}
 
 	transactionReducer := k.reducer.cloneSessionReducer(batch.BackendID, batch.SessionID)
-	nextSeq := transactionReducer.lastInputSequence(batch.BackendID, batch.SessionID)
 	applied := 0
 	for index, event := range events {
 		if claudeSourceBatchFaultHook != nil {
@@ -154,7 +153,11 @@ func (k *ProjectionKernel) ApplyClaudeSourceRecordBatch(
 				return rejected, err
 			}
 		}
-		nextSeq++
+		// 单一发号源（owner 2026-09-05 复盘）：batch 事件与 publisher live 事件
+		// 从同一 per-session 原子发号器取号。此前 batch 从 reducer 当前
+		// lastInputSequence 连续自取号，与 publisher 独立计数器两个序号域打同一
+		// reducer 幂等门——batch 先行推高 rev 时后到的 live 流式 delta 被静默跳过。
+		nextSeq := int(k.IssueSessionSeq(batch.BackendID, batch.SessionID))
 		before := transactionReducer.LastAppliedRev(batch.BackendID, batch.SessionID)
 		transactionReducer.Apply(projectionReducerEvent(
 			batch.BackendID,

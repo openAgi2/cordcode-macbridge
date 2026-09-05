@@ -30,6 +30,9 @@ type ManagementConfig struct {
 	Handlers     *Handlers
 	Token        string
 	DataDir      *DataDir
+	// ClaudeHookHolder（Phase 3）：自 spawn 会话 --settings hooks 端点的延迟
+	// 解析 holder；Heartbeat 自检通过时翻转其 probeOK。可为 nil（单测）。
+	ClaudeHookHolder *claudeHookConfigHolder
 	PairingStore PairingSessionStore
 	DeviceStore  TrustedDeviceStore
 	BridgeID     string
@@ -103,6 +106,8 @@ type ManagementServer struct {
 	relayStatusMu       sync.RWMutex
 	relayStatusProvider RelayConnectionStatusProvider
 	admission           *admission.AdmissionMachine
+	// claudeHookHealth 如实记录 hooks 事件源的活性状态（S3，Phase 3 验收硬条件）。
+	claudeHookHealth claudeHookHealth
 }
 
 // NewManagementServer 创建管理 API 服务器实例。
@@ -243,6 +248,22 @@ func (s *ManagementServer) Shutdown() {
 
 // ServeHTTP 路由 /internal/* 请求到对应处理函数。
 func (s *ManagementServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// claude hooks 端点先于 Bearer 鉴权：HTTP hook 配置无法设置 headers
+	// （Phase 0 实证），token 走 URL 路径段，由该 handler 自行校验。
+	if strings.HasPrefix(r.URL.Path, claudeHookEndpointPath) && r.Method == http.MethodPost {
+		s.serveClaudeHook(w, r)
+		return
+	}
+	// hooks 事件源健康状态（S3 如实上报）：独立 GET 端点，保持 /internal/status
+	// 的 v0 observed 契约（R11：恰好 5 个 string 字段）字节稳定。
+	if r.URL.Path == claudeHookStatusPath && r.Method == http.MethodGet {
+		if !s.checkAuth(w, r) {
+			return
+		}
+		s.handleClaudeHookStatus(w, r)
+		return
+	}
+
 	if !s.checkAuth(w, r) {
 		return
 	}

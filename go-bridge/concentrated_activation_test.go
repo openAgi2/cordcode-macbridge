@@ -172,3 +172,26 @@ func firstLineDiff(a, b string) string {
 	}
 	return "<tail>"
 }
+
+// TestListModelsWireItemCarriesResolvedAndObserved: claudecode Phase 1 三键
+// (canonical additive) —— resolved / observedModel 是可选键，仅真值存在时下发。
+func TestListModelsWireItemCarriesResolvedAndObserved(t *testing.T) {
+	fake := &optionsAgent{}
+	models := []core.ModelOption{
+		{Name: "sonnet", Desc: "Sonnet", Resolved: "claude-sonnet-5", Observed: "glm-5.3"},
+		{Name: "haiku", Desc: "Haiku"},
+	}
+	items := modelItemsForWire(fake, models, "sonnet")
+	if len(items) != 2 {
+		t.Fatalf("items = %+v", items)
+	}
+	if items[0]["resolved"] != "claude-sonnet-5" || items[0]["observedModel"] != "glm-5.3" {
+		t.Fatalf("sonnet three-key row = %+v", items[0])
+	}
+	if _, has := items[1]["resolved"]; has {
+		t.Fatal("haiku declares no resolved — the key must be absent, not empty")
+	}
+	if _, has := items[1]["observedModel"]; has {
+		t.Fatal("haiku declares no observed — the key must be absent, not empty")
+	}
+}

@@ -150,6 +150,24 @@ turn 完成时，在线订阅设备收到事件；未在线设备的通知写入
 
 ### Claude Code
 
+> **文件面边界纪律（2026-09-04，官方能力收敛升级 Phase 4）**：`~/.claude/projects` 的
+> transcript JSONL 是 Claude CLI 的**无合同**存储。CordCode 自有记录一律带 `cordcode:`
+> 命名空间前缀（custom-title），读取双接受存量裸 type；形状以真实 fixture 锁定
+> （`agent/claudecode/testdata/transcript-shapes/`，10 类 type 枚举 + 回归测试），CLI
+> 大版本升级跑 fixture diff。官方 `rename_session` 控制请求已实测可用（Phase 0 dump）
+> 但有意不迁移：控制帧只能达存活会话，append 写入对任意历史会话可用（对照结论见
+> session_mutation.go 注释）。模型目录真值链、会话内控制（set_model/
+> set_permission_mode/interrupt 留进程）、hooks 事件层见
+> `docs/2026-09-04-claudecode-official-capability-upgrade-design.md`。
+>
+> **2026-09-05 CLI 升级 2.1.261 + 两项官方面接入**：CordCode spawn 所用 PATH CLI
+> 从 2.1.234 升至 2.1.261（六项探针复测全绿，见 `scripts/claudecode-phase0/README.md`
+> 2026-09-05 节）。hooks 订阅集新增 **PostModelSwitch**（需 CLI ≥2.1.251；Pre 有
+> 阻塞语义不订）——`to_model` 是网关改写后的执行名，写入目录 observed 层（三键链）。
+> usage/context 升 A：自 spawn 会话每 turn 收口后异步发 `get_context_usage`
+> （detail=summary）官方全量窗口占用（含 system prompt/tools/memory），成功则覆盖
+> 流帧 usage 近似值；失败 fail closed 保持既有语义。
+
 - 每个活跃 session 对应独立 Claude CLI 进程；
 - iOS 发起的 turn 可通过该 session 的 stdout 实时推送；
 - runtime 以 `--include-partial-messages` 启动 Claude CLI，流式 partial 进入 `text_delta` /

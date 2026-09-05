@@ -2,6 +2,7 @@ package gobridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -218,5 +219,90 @@ func TestHandleSendMessage_PreflightScopeExcludesNewAndOtherBackend(t *testing.T
 				t.Fatalf("StartSession calls = %v, want one", tc.agent.startCalls)
 			}
 		})
+	}
+}
+
+// 打开即拉活（2026-09-05）：iOS 打开 claude 会话时 best-effort spawn——
+// dead/live-idle 放行并注册；registry 已有会话不重复 spawn；外部 worker
+// 正在执行时放弃。
+func TestStartClaudeSessionOnOpen_SpawnsAndRegisters(t *testing.T) {
+	h := newTestHandlers(t)
+	agent := &ownerCheckAgent{unsupportedMutationAgent: &unsupportedMutationAgent{name: "claudecode"}}
+	h.startClaudeSessionOnOpen(agent, "open-1", WireMessage{BackendID: "claudecode", RequestID: "r1"})
+
+	deadline := time.After(3 * time.Second)
+	for agent.starts == 0 {
+		select {
+		case <-deadline:
+			t.Fatalf("open-spawn never called StartSession")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	h.mu.Lock()
+	sess, ok := h.getSession("open-1")
+	h.mu.Unlock()
+	if !ok || sess == nil {
+		t.Fatalf("open-spawn session not registered")
+	}
+
+	// registry 已有会话：再次 open 不重复 spawn。
+	h.startClaudeSessionOnOpen(agent, "open-1", WireMessage{BackendID: "claudecode", RequestID: "r2"})
+	time.Sleep(100 * time.Millisecond)
+	if agent.starts != 1 {
+		t.Fatalf("starts = %d, want 1 (existing session must skip)", agent.starts)
+	}
+}
+
+func TestStartClaudeSessionOnOpen_ExecutingExternalWorkerSkips(t *testing.T) {
+	h := newTestHandlers(t)
+	agent := &ownerCheckAgent{
+		unsupportedMutationAgent: &unsupportedMutationAgent{name: "claudecode"},
+		proc:                     core.LiveSessionProcess{SessionID: "x", PID: 42, Live: true, Executing: true},
+	}
+	h.startClaudeSessionOnOpen(agent, "exec-1", WireMessage{BackendID: "claudecode", RequestID: "r1"})
+	time.Sleep(200 * time.Millisecond)
+	if agent.starts != 0 {
+		t.Fatalf("starts = %d, executing external worker must skip", agent.starts)
+	}
+}
+
+func TestStartClaudeSessionOnOpen_EmptySessionIDNoop(t *testing.T) {
+	h := newTestHandlers(t)
+	agent := &ownerCheckAgent{unsupportedMutationAgent: &unsupportedMutationAgent{name: "claudecode"}}
+	h.startClaudeSessionOnOpen(agent, "", WireMessage{BackendID: "claudecode"})
+	time.Sleep(50 * time.Millisecond)
+	if agent.starts != 0 {
+		t.Fatalf("empty session id must not spawn")
+	}
+}
+
+// 打开即拉活入口修正（2026-09-05 复测）：iOS 打开 claude 会话的真实链路是
+// set_observation_scope(full_stream)——full_stream 触发 open-spawn，milestones_only
+// 旁路观察不拉活。
+func TestSetObservationScopeFullStreamTriggersOpenSpawn(t *testing.T) {
+	h := newTestHandlers(t)
+	agent := &ownerCheckAgent{unsupportedMutationAgent: &unsupportedMutationAgent{name: "claudecode"}}
+	h.agents["claude"] = agent
+	conn := &relayBroadcastCaptureConn{device: &TrustedDeviceRecord{DeviceID: "dev_open1"}}
+
+	scope := json.RawMessage(`{"backendId":"claude","sessionIds":["open-scope-1"],"deliveryMode":"full_stream","includeRunningSessionSignals":true,"leaseSeconds":90}`)
+	h.handleSetObservationScope(conn, WireMessage{RequestID: "req-os1", BackendID: "claude", Params: scope})
+
+	deadline := time.After(3 * time.Second)
+	for agent.starts == 0 {
+		select {
+		case <-deadline:
+			t.Fatalf("full_stream scope must trigger open-spawn")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	// milestones_only 旁路观察不拉活。
+	agent.starts = 0
+	scopeMilestones := json.RawMessage(`{"backendId":"claude","sessionIds":["open-scope-2"],"deliveryMode":"milestones_only","includeRunningSessionSignals":true,"leaseSeconds":90}`)
+	h.handleSetObservationScope(conn, WireMessage{RequestID: "req-os2", BackendID: "claude", Params: scopeMilestones})
+	time.Sleep(200 * time.Millisecond)
+	if agent.starts != 0 {
+		t.Fatalf("milestones_only must not spawn, starts = %d", agent.starts)
 	}
 }

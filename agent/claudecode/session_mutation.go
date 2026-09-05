@@ -47,8 +47,17 @@ func (a *Agent) RenameSession(ctx context.Context, sessionID, title string) (*co
 	if err != nil {
 		return nil, err
 	}
+	// 文件面边界（设计 §6 Phase 4.2）：custom 记录带 cordcode 命名空间前缀防撞——
+	// transcript 是 Claude CLI 的无合同存储，未来官方若引入同名 type 不得与我们的
+	// 记录互相覆盖。读取侧同时接受新旧两种 type（存量会话不迁移）。
+	//
+	// 官方 rename_session 对照（Phase 0.1 dump req_8，2026-09-04）：控制请求在
+	// CLI 2.1.234 上实测 success（裸成功体）。有意不迁移：rename_session 只能发给
+	// 存活会话（stdin 控制帧），iOS 重命名常发生在会话不活跃时；appendJSONLRecord
+	// 对任意历史会话可用且是我们自己的在位写者（dsh 坑 2 纪律）。活会话路径若未来
+	// 迁移，须以 rename_session 成功回执为准、append 降级为缺位回退，另开任务。
 	if err := appendJSONLRecord(sessionPath, map[string]any{
-		"type":        "custom-title",
+		"type":        "cordcode:custom-title",
 		"timestamp":   time.Now().UTC().Format(time.RFC3339Nano),
 		"sessionId":   sessionID,
 		"customTitle": title,
@@ -180,7 +189,7 @@ func scanClaudeSessionMeta(path, projectDir, sessionID string) (claudeSessionMet
 		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
 			continue
 		}
-		if entry.Type == "custom-title" {
+		if isClaudeCustomTitleRecord(entry.Type) {
 			trimmed := strings.TrimSpace(entry.CustomTitle)
 			if trimmed != "" {
 				title = trimmed
@@ -331,3 +340,9 @@ func removeClaudeSessionSidecar(projectDir, sessionID string) error {
 
 var _ core.SessionRenamer = (*Agent)(nil)
 var _ core.SessionArchiver = (*Agent)(nil)
+
+// isClaudeCustomTitleRecord 匹配 CordCode 写入的 custom-title 记录：
+// 命名空间前缀（新写入，Phase 4.2 防撞）与历史裸 type（存量会话）双接受。
+func isClaudeCustomTitleRecord(recordType string) bool {
+	return recordType == "cordcode:custom-title" || recordType == "custom-title"
+}

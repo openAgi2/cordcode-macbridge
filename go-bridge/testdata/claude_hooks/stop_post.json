@@ -1,0 +1,12 @@
+{
+ "hook_event_name": "Stop",
+ "session_id": "325e5eb1-6436-4a26-a61f-b430cf7e49f5",
+ "cwd": "/Users/jacklee/Projects/cordcode-macbridge-claudecode-official/scripts/claudecode-phase0/dumps/workdir-hooks",
+ "permission_mode": "bypassPermissions",
+ "prompt_id": "c0c31100-ad18-4bb8-ac5c-48aafff5e6b8",
+ "stop_hook_active": false,
+ "last_assistant_message": "pong",
+ "effort": {
+  "level": "max"
+ }
+}

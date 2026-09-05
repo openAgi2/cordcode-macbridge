@@ -4,13 +4,150 @@
 > 每轮收口/交接时核对「状态」列并更新。做完了就把整行删掉。
 
 | 后续案 | 是什么 / 入口 | 前置依赖 | 状态（更新于） |
-| --- | --- | --- | --- |
-| iOS 发送 Grok 模型应用条目 id | iOS send_message 的 model 回发 transcript 底层 id（glm-5.3），目录外触发 unknown model id；Mac 端 a0b0f11 已软化兜底（消息可发出），根治需 iOS 改发 list_models 条目 id | 无（可与其它 iOS 任务合并） | Mac 兜底已部署（2026-09-02）；iOS 侧未开工 |
+| --- | --- | --- | --- || iOS 发送 Grok 模型应用条目 id | iOS send_message 的 model 回发 transcript 底层 id（glm-5.3），目录外触发 unknown model id；Mac 端 a0b0f11 已软化兜底（消息可发出），根治需 iOS 改发 list_models 条目 id | 无（可与其它 iOS 任务合并） | Mac 兜底已部署（2026-09-02）；iOS 侧未开工 |
 | Grok follower 交互升级 | iOS 无缝接力 Mac 端 grok 任务的根治路径（iOS 作为 leader 客户端，消息进同一 full-capability agent，per-client 能力路由 + mid-turn interjection）。入口 `docs/2026-08-28-grokbuild-leader-mode-design.md` §9/§15 D-3 | ~~source-first 冻结 follower 上行可用性~~ **前置调查已完成（2026-09-03，上游 72a61251）**：① 权限应答官方支持——`session/request_permission` 与 ask_user_question 同属共享交互集（server.rs is_interaction_request，广播全订阅者 + 缓存重放 + first-answer-wins），应答为标准 ACP response，上行无方法门、response 不被 id 改写触碰；② 插话官方支持——上行客户端消息全部无条件转发 agent（server.rs Acp 分发），mid-turn 语义 = server-authoritative 共享队列 + `x.ai/queue/interject`（expected_version 乐观锁，owner 仅归属非权限门），`x.ai/queue/changed` 全客户端广播；③ 无 writer 仲裁阻塞——协议只有 session_driver（管下行 driver-only reverse request 的路由），driver 断线自动转移，交互类刻意排除在 driver-only 外。共享集还含 exit_plan_mode / mcp/elicit 两类免费顺带。实现期仍需真实 wire fixture 锚定（checkout 72a61251 ≠ 安装版 5e9a5852，question 轨道已在安装版活体验证过路由） | **question 已交付**（2026-09-03 owner 矩阵四行全过：iPhone 可答/静默收口/断线恢复/关开关回退；四轮修复 1fc6f1f/fdb7d97/ceffc9c/8c1ac9b，复盘见下方 2026-09-03 条目）；**permission 已交付**（2026-09-03 commit 1661e91，§24 计划→exec-plan 三元组，Mac 单仓 iOS 零改动：leader 门加宽+registry kind/byWire+AnswerPermission+SessionPermissionResponder 路由；单测 5 例+包全量绿+Release 四门过；owner 真机矩阵四步全过——TUI 发起权限 turn→iPhone 卡出现、iPhone 允许→任务继续+Mac 弹窗自动收口、iPhone 拒绝路径、Mac 先答→iPhone 卡自动消失；grok TUI 5 档 vs iOS 允许/拒绝的选项差异为跨后端通用卡设计现状，范围扩展另案；另：grok 权限全放行排障教训——Ctrl+O 是 yolo 全放行开关、`[ui] permission_mode` 持久化，测试前两者都要处于 ask 态）；**exit_plan_mode + 选项透传已交付（2026-09-03 §25，owner 真机验收：程度可接受）**：plan 审批复用 §24 permission 管道（iPhone 允许→approved/拒绝→cancelled，标题取计划首个标题行，MCP 表单仍 observe-only）；权限卡选项透传（实收 options kind 动态映射 permissionActions：allow_always→「总是允许」三键卡、reject_always 有意不透传、execute→bash 等类别行；permissionOutcome kind 精确化 always→allow_always）；两轨（leader+OFF）同步；leader_plan_test 5 例 + leader_permission_options_test 6 例 + §24 兼容全绿；owner 后续裁决：iOS 当前两键计划卡（标题行+允许/拒绝）程度可接受；完整体验（计划文档全文展示+Mac 端全按钮集）属专门计划方案、须跨 backend 通用，本轮不编码，调研文档先行（指令已细化交写文档 agent）；interjection 后置 Phase B（iOS UI 产品决策，§24.6） |
 | remote-web 集中测试轮 | 12 门浏览器端验收矩阵 + 4 web-push 取证门（owner 2026-09-02 裁决：先 iOS 任务 → 整体迁移 remote-web → 集中测试）。入口 iOS 仓 `.exec-plan/state/plan-4fe9645c3a36.json` 注记 | iOS App 端任务完成 + remote-web 整体迁移完成 | pending 非阻断；功能路径已真机验证过，16 门属迁移后回归确认（2026-09-02） |
 | iOS 进入 Codex / DSH / Grok 计划模式 | 三条都是「Mac 进入计划 → iPhone 能批；iPhone 自己切不进」。Codex 入口文档 `docs/2026-09-04-codex-ios-plan-mode-entry.md`（owner 2026-09-04：先不做 iOS 开启 Codex Plan，后续再调研）。DSH = Mac 标准套餐 + `/plan`（`commands/execute`）；Grok iOS Plan 只写 agent 内存。禁止合成一个全 backend Plan 按钮 | Codex 批准路径已交付（Mac App Plan → iPhone 卡 → 批准实施，owner 真机 2026-09-04） | **挂起**（2026-09-04）；Codex 批准面已绿，入口未开工 |
 
-## 2026-09-04 Codex 计划：iPhone 能批、不能开
+## 2026-09-05 Claude Code 流式「假绿」复盘：deltaBatcher 丢 turnId + client uuid 官方解法
+
+owner 三轮复测（无流式 → 重复 → 无流式且完成态无内容），第三轮修复 d5f5e30 部署后
+仍无流式且切走再切回才见正文。生产日志（01:03 会话 93cd4a10「讲个法国笑话」）+
+transcript + 源码三层根因：
+
+1. **deltaBatcher 丢 turnId（假绿主犯）**：relayEvents 给 stdout 流式增量补的
+   turnId（backfillClaudeStreamTurnID）经 33ms 攒批器时被丢弃——`delta_batcher.go`
+   emit() 重组 data 只保留 `delta`+`itemId`，claude 增量恰好无 itemId → 出批后
+   又是无身份增量，reducer 照旧跳过。stdout 全程在流（seq=1→1335）但投影正文为 0。
+   **d5f5e30 的单测直接调 kernel.IngestLive，绕过了 batcher → 测试绿、生产挂。**
+   教训：凡走攒批/重组中间层的事件管线，集成测试必须从 batcher 入口驱动，不许
+   直连 kernel。
+2. **双源同时哑火**：d5f5e30 把 file-relay assistant 行在 agent-relay 活跃期改
+   cursor-only（stdout 权威），但 stdout 内容因 #1 全被跳过 → 期间无任何源写正文
+   → 完成态广播空回合；切回触发全量 rehydrate 才恢复。「关掉兜底前必须证明主源
+   真的通」，方向对但顺序错。
+3. **resume drain 固定 10s**：长会话 resume 历史重放超 10s 窗口，每次发消息先烧
+   10s 空白（user 行 01:03:30 才落盘，首 token 01:03:33.8）。
+
+**官方机制实测（2.1.234 真样本，/tmp 探针 + frames.json）**：输入 user 帧带自造
+`uuid` → **transcript user 行 uuid 就是它**（file-relay 建的 turn 身份 = 发送方
+uuid，双平面身份统一）；**result 帧回盖 `user_message_uuid`**（2.1.234 盖收口帧；
+SDK 0.3.260 契约新版盖首条回复帧）。这就是官方对「CLI 不回显 user 帧、stdout 无
+身份」的解法——发起方自持身份，不再反查 ActiveTurnID 猜归属。t3code 对照：其
+Claude 集成不是 ACP（ACP 只用于 Cursor/Grok），是官方 npm SDK 内嵌 Node + 发起方
+自造 turnId + 自有 DB 做 SoT、transcript 不当事件源。
+
+修复方案（owner 2026-09-05 拍板）：① batcher 透传 turnId；② Send 自造 client
+uuid 写输入帧，stdout 事件（含完成差量）以此作 turnId，result 的
+user_message_uuid 校验收口，ActiveTurnID 反查降级兜底；③ drain 事件驱动
+（前提：resume 重放期不含 stream_event，需探针取证）。
+
+## 追记：双序号域 + 单源门范围错误（第四/五轮复测）
+
+**双序号域幂等门**（全链路测试抓到的第二层）：Claude source batch 在 Kernel 锁内
+自取 PerSessionSeq、live 事件走 publisher 独立计数器——两域打同一 reducer 幂等门
+（seq ≤ lastAppliedRev 即跳）。file-relay user 行 batch 先行推高 rev 时，后到的
+stdout 流式 delta 即使带身份也被静默跳过（间歇性）。修复 = Kernel 每 session
+原子发号器（IssueSessionSeq）唯一取号源，publisher 与 batch 都从它取号。
+
+**drain 真相**：2.1.234 真样本证明 `--resume` 根本不重放历史到 stdout——
+handleSendMessage 的同步 10s drainHistoryEvents 是纯自加延迟，已移除；drain 窗口
+改首条 stream_event 事件驱动关闭（重放防御语义保留，12s watchdog 兜底）。
+
+**stdout 单源门范围错误**（owner 第五轮复测：Mac Desktop 发消息 iOS 永远卡执行中）：
+`agentRelayActive(sessionID)` 过粗——本进程 idle 存活期间，外部进程（Desktop/
+Terminal worker）写同一 transcript 的回合不经本 stdout，却被「stdout 权威」压制
+assistant 行 → iOS 收到问题卡执行中、无正文无终态。修复 = 门收窄为
+`agentRelayActive && agentOwnsClaudeTurn(currentTurnID)`：core.ClientTurnOwner
+（claude 自持 client uuid 集，settle 后保留）判定回合归属；外部回合照常走
+file-relay 全量。**教训：单源模型的「源」必须按回合发起方判定，不能按会话存活
+判定。**
+
+**Mac Desktop 不实时显示 iOS 消息**（owner 第五轮问询 + 2026-09-05 追查）：Claude Desktop 不监听
+transcript 的外部写入（无跨进程事件总线——正是我们自己产品需要 file polling 旁观
+Desktop 的原因）。数据已持久写入会话文件，Desktop 侧重开会话即可见；不是
+CordCode 可修的 bug。2026-09-05 取证补全：Desktop Code tab 自己也是「每会话一个私有
+CLI 子进程」模型（活体：`Claude-3p/claude-code/2.1.260/claude --resume=<id>
+--input/output-format stream-json`，版本比 CLAUDE.md 锚的 2.1.258 新）；无本地监听端口/
+IPC、深链只有导航级路由（`claude://code/continue|new|needs-input`、`claude://resume`）、
+`claude attach` 只服务 `--bg` 后台会话体系。GitHub 已知问题类别（#53717/#48955）。
+Codex/OpenCode/DSH 能实时同步是因为有共享 server/bus，Claude 没有——此为架构差异。
+
+**2026-09-05 重大发现：官方 Remote Control 已是多端同步会话架构**（
+<https://code.claude.com/docs/en/remote-control>，本机 bundled CLI 2.1.260 已支持
+`--remote-control`；owner settings 的 `remoteControlAtStartup` 未开启）：本地 CLI 出站
+HTTPS 注册 Anthropic API，claude.ai/code 与官方手机 App 作为远程 surface 流式收发——
+「终端/浏览器/手机可互换发消息、subagent/workflow 进度全端同步」，transcript 存
+Anthropic 服务器做同步锚点；Desktop 是 RC surface 之一（resume 带 RC 的会话会 reattach
+到同一 claude.ai 会话；Trusted Devices 列 Desktop 为可 view/steer 端）。对 CordCode 的
+潜在路线 A（codex-remote 同构）：Desktop 托管会话 + 开 RC，bridge 作为 RC 远程客户端接入
+→ iOS 回合在 Desktop 托管进程执行 → Desktop 原生直播（用户愿望直接满足），iPhone 侧
+事件全来自官方流。障碍：RC「远程客户端 ↔ Anthropic 服务器」wire 协议无公开文档（官方
+客户端仅 claude.ai/code 与官方 App），需真实 fixture probe（类比 codex-remote 当初）；
+认证走 claude.ai 账号；transcript 上 Anthropic 云（产品语义变化，须 owner 裁决）。路线 B：
+维持现状等官方开放。**未裁决，仅登记。**
+
+**2026-09-05 probe 收口 + 裁决：no-go（无订阅）**（报告
+`docs/2026-09-05-claudecode-rc-client-probe.md`，证据包
+`scripts/claudecode-rc-probe/`）：owner 确认**无 Pro/Max/Team 订阅**，而
+RC 硬要求订阅（API key 不支持）→ 路线 A（Desktop host + bridge 远程客
+户端）与 F1（SDK bridge worker host）**全部搁置**，唯一恢复条件 = 未来
+订阅。本机另有两条独立阻塞已实锤：user settings env 块的网关 base URL +
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`（shell env / project settings
+覆盖均无效，doctor 实验取证）；Desktop Code tab 会话走 cc-switch 本地代理
+（`127.0.0.1:15721/claude-desktop`，host 注入优先于 user settings）而非
+官方直连。**正面遗产（未来订阅后直接复用，勿重新调研）**：Agent SDK
+0.3.260 的 `/bridge`（`createCodeSession`→cse_* 会话、`POST
+/v1/code/sessions/{id}/bridge` mint worker JWT=注册+bump epoch、
+`attachBridgeSession` 全套控制回调/20s 心跳/4090 接管关闭码/outboundOnly
+镜像模式）与 `/browser`（SSE 读+POST 写 `query()`）是官方 @alpha 接入面；
+CLI 2.1.234/2.1.260 二进制内嵌 `/v1/code/sessions` 客户端实现与 API 表。
+无订阅期间「Desktop 实时显示 iOS 消息」仍无官方路径（上方「无跨进程总
+线」结论不变）。
+
+## 2026-09-05 官方能力三项收尾：CLI 升 2.1.261 + get_context_usage 升 A + iOS 选择器直调
+
+owner 指令三项（选择器直调 / CLI 升级评估 / get_context_usage 升 A）当日完成：
+
+1. **CLI 升级评估→执行**：隔离安装 2.1.261 → 探针复测六项全绿（控制面六 subtype
+   全 success、get_context_usage 三模式 success、Pre/PostModelSwitch 实证触发、
+   既有 hooks 照常、changelog 234→261 无控制面/stream-json 输出变更、transcript
+   type 集与形状锁 fixture 零新 type）→ 全局升级。**探针 env 坑**：mirror 刷新误抓
+   Desktop 会话 env（无 ANTHROPIC 键）+ `CLAUDE_CODE_ENTRYPOINT=claude-desktop-3p`
+   下 CLI 走 Desktop 认证通道 → "Not logged in"、Stop 不触发（196ms synthetic 假
+   turn）。重建 mirror = settings.json env 块（cc-switch 当前解析态）。**成功体嵌套**：
+   initialize/list_models/get_context_usage 载荷在 `response.response` 双层，interrupt/
+   set_model 裸键在第一层。
+2. **PostModelSwitch 接入**（2.1.261 dump）：`to_model` 是网关改写后观测名（glm-5.3 →
+   glm-5.3[1M]）、`requested_model` 是槽位名（default 重置时 null）、`source:"sdk"`。
+   hooks 订阅集 +PostModelSwitch（Pre 有阻塞语义不订）；HandleClaudeHook → Agent
+   .ObserveModelSwitch → catalog.observe（补 assistant 帧观测的盲区：/model 类会话内
+   切换不经 assistant 帧时也保住 observed 映射）。
+3. **get_context_usage 升 A**：自 spawn 会话每 turn 收口后异步取 detail=summary（不打
+   per-category API），全量窗口占用（含 system prompt/tools/memory 分类）+ 官方
+   maxTokens，成功覆盖流帧 usage 近似值；fail closed。fixture=
+   `agent/claudecode/testdata/context-usage/get_context_usage-summary-2.1.261.json`
+   （2.1.261 字段超出 SDK 0.3.260 类型声明——autoCompactThreshold/messageBreakdown/
+   skills/slashCommands/apiUsage，dump-first 纪律的直接受益）。
+4. **iOS 选择器直调 switch_model**（设计 §7.3.2 收尾）：ChatViewModel.selectModel →
+   pushModelSelectionToBackend（门控：会话已建立 + backendKind==claudeCode +
+   BackendModelSetting conformance；nil 选择 = default 重置；失败不回滚——Mac fail
+   visibly + send_message.model 仍是权威重试路径）。**门控必须含 backendKind**：
+   CCCodeBridgeBackendClient 是全部 bridge backend 共用类，仅 conformance 判定会把
+   其他四个 backend 也带进直调（设计非目标 §9.3）。
+5. **打开即拉活（owner 问询「为何须发消息才见详细上下文」→ 当日两轮修复）**：根因
+   = 详细上下文唯一来源是运行中进程的 get_context_usage，进程此前延迟到 send_message
+   才 spawn（旧理由「--resume 重放撑爆 events channel」已被探针推翻）。第一轮挂
+   handleResumeSession 未生效——**owner 复测 + 日志证实 iOS 打开 claude 会话的真实
+   链路是 get_session→fetch_todos→set_observation_scope，不经 resume_session**（教训：
+   挂钩前先看真实调用链，入口假设要日志验证）。第二轮挂 set_observation_scope
+   （full_stream 才拉活，milestones_only 旁路不拉；租约续期靠 registry 预检去重），
+   spawn 后 1.5s 首取官方全量口径；emitProtocolContextUsage 移除 drain 门（实时快照
+   非重放伪影，resume idle 会话的 drain 窗口内也如实可用）。owner 2026-09-05 13:26
+   真机 ✅，生产日志两例 open-spawn ready（79f35e86 / 3451bf01）。
+
+
+# 2026-09-04 Codex 计划：iPhone 能批、不能开
 
 owner 真机：Mac Codex App 计划模式发任务 → iPhone 同步计划正文并点批准执行，通过。
 iPhone 不能自己切入 Codex Plan（与 DSH 相同：入口在 Mac）。owner 裁决入口先不做。

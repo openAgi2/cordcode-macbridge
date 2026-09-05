@@ -1,0 +1,25 @@
+Error: You must be logged in to use Remote Control.
+
+Remote Control is only available with claude.ai subscriptions. Please use `/login` to sign in with your claude.ai account.
+[debug] Remote Control auth state:
+  isBareMode=false
+  hasOAuthAccessToken=false
+  oauthScopes=none
+  hasClaudeAIInferenceScope=false
+  isClaudeAISubscriber=false
+  hasProfileScope=false
+  oauthAccount.organizationUuid=set
+  ANTHROPIC_API_KEY=set
+  ANTHROPIC_AUTH_TOKEN=set
+  apiKeyHelper=unset
+  CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR=unset
+  CLAUDE_CODE_OAUTH_TOKEN=unset
+  ANTHROPIC_UNIX_SOCKET=unset
+  3P env=none
+  isGrowthBookEnabled=false
+  telemetryDisabledBy=CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+  DISABLE_GROWTHBOOK=unset
+  hasFreshGrowthBookFeatures=false
+  growthBookFeaturesLoaded=490
+  growthBookLastFetched=23d ago
+  tengu_ccr_bridge=true

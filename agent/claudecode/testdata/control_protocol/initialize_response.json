@@ -1,0 +1,422 @@
+{
+ "type": "control_response",
+ "response": {
+  "subtype": "success",
+  "request_id": "req_1",
+  "response": {
+   "commands": [
+    {
+     "name": "audit-plan",
+     "description": "Audit a plan/design/spec doc that describes how to parse an external data format (JSONL transcripts, API responses, wire protocols, file formats), forcing every content-shape claim to be backed by a real sample dump — not memory, not analogous formats, not \"it should look like X\". Use when the user runs /audit-plan <doc> to break the recurring \"each review round catches one unverified content type\" failure pattern. Do not use for plain code review within one's own codebase, or docs describing already-implemented behavior (verified by reading the implementation). (user)",
+     "argumentHint": "<plan-or-doc-file>"
+    },
+    {
+     "name": "exec-plan",
+     "description": "Drive a plan document (docs/…, plan.md, roadmap) to completion as a durable, proof-carrying task queue persisted under .exec-plan/state/. Use when the user wants to execute or resume a phased plan across sessions, enforce impl+tests+regression gating backed by real evidence, audit whether \"done\" tasks are actually proven, or auto-generate an audit-ready completion report. Do not use for one-off bug fixes, plain code review, or ad-hoc todo management without a plan file. (user)",
+     "argumentHint": "<plan-file> [start|audit]"
+    },
+    {
+     "name": "handoff-doc",
+     "description": "Generate a standardized handoff document under the project's handoffs/ directory so another agent or a future session can continue the work without losing context. Use when the user wants a session handoff, transfer note, or resumable context package. Automatically preserves active exec-plan state (plan / queue / resume command) when present. (user)",
+     "argumentHint": ""
+    },
+    {
+     "name": "ios-real-device-doc",
+     "description": "Create or upgrade repo-aware iOS real-device testing docs, regression checklists, and validation runbooks. Use this whenever the user asks for a 真机测试方案文档, 测试 checklist, backend validation guide, XCUITest runbook, QA/回归文档, or wants a doc another agent can follow on a connected iPhone without extra explanation. Always use it when the doc must include preflight steps, device detection/UDID, launchctl/port checks, blocked vs N/A rules, automation gate order, existing smoke UITest or launch-hook reuse, service/backend selection, evidence requirements, acceptance-log templates, or an honest automation-gap analysis that should not need a later rewrite. (user)",
+     "argumentHint": "<output-doc-path?>"
+    },
+    {
+     "name": "skill-creator",
+     "description": "Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy. (user)",
+     "argumentHint": ""
+    },
+    {
+     "name": "supervise",
+     "description": "Audit a development agent's work against a design doc's roadmap, issue numbered 监工指令 directives, and verify completion reports independently. Use when the user wants you to act as supervisor over another agent's implementation work — issuing \"监工指令 N 号\" directives, preventing roadmap drift, or auditing whether claimed-complete work actually meets the design framework. Use when the user runs /supervise <doc>, says \"你当监工\", \"审计开发 agent\", \"下发监工指令\", or pastes a developer agent's completion report for verification. Do not use for direct implementation, code review without a design doc, one-off bug fixes, or when you are yourself the implementation agent. (user)",
+     "argumentHint": "<design-doc> [start|issue|audit|status|exit]"
+    },
+    {
+     "name": "takeover",
+     "description": "Read a handoff document, rebuild working context, validate it against the current project state, and continue the task immediately. Use when the user wants to resume work from a saved handoff file or asks an agent to take over a previous session. When the handoff carries exec-plan context, resumes the correct next exec-plan action automatically. (user)",
+     "argumentHint": "<handoff-file>"
+    },
+    {
+     "name": "deep-research",
+     "description": "Deep research harness — fan-out web searches, fetch sources, adversarially verify claims, synthesize a cited report. (dynamic workflow)",
+     "argumentHint": ""
+    },
+    {
+     "name": "code-review:code-review",
+     "description": "(code-review) Code review a pull request",
+     "argumentHint": ""
+    },
+    {
+     "name": "feature-dev:feature-dev",
+     "description": "(feature-dev) Guided feature development with codebase understanding and architecture focus",
+     "argumentHint": "Optional feature description"
+    },
+    {
+     "name": "frontend-design:frontend-design",
+     "description": "(frontend-design) Guidance for distinctive, intentional visual design when building new UI or reshaping an existing one. Helps with aesthetic direction, typography, and making choices that don't read as templated defaults.",
+     "argumentHint": "",
+     "aliases": [
+      "frontend-design"
+     ]
+    },
+    {
+     "name": "dataviz",
+     "description": "Use this skill whenever you are about to create ANY chart, graph, plot, dashboard, or data visualization, in ANY output medium — an HTML or React artifact, inline SVG, plotting code in any library (matplotlib, plotly, d3, Recharts, …), an image/PNG you will render and upload, or a chart shared into Slack. Read it BEFORE writing the first line of chart code, choosing chart colors, building a stat tile / meter / KPI row, or laying out a dashboard. Produces visualizations that read as one system — elegant, accessible, consistent in light and dark — using a brand-neutral placeholder palette you swap for your own. Teaches a design-system-agnostic method: a form heuristic, a color formula with a runnable validator, mark specs, and interaction rules. A validated default palette is documented in `references/palette.md` — swap that file's values for your brand's. Triggers on: \"chart\", \"graph\", \"plot\", \"data viz\", \"visualization\", \"dashboard\", \"analytics\", \"visualize data\", \"categorical colors\", \"sequential / diverging palette\", \"stat tile\", \"sparkline\", \"heatmap\", \"legend\", \"axis\", \"tooltip\", \"chart colors\", \"color by series\".",
+     "argumentHint": ""
+    },
+    {
+     "name": "update-config",
+     "description": "Use this skill to configure the Claude Code harness via settings.json. Automated behaviors (\"from now on when X\", \"each time X\", \"whenever X\", \"before/after X\") require hooks configured in settings.json - the harness executes these, not Claude, so memory/preferences cannot fulfill them. Also use for: permissions (\"allow X\", \"add permission\", \"move permission to\"), env vars (\"set X=Y\"), hook troubleshooting, or any changes to settings.json/settings.local.json files. Examples: \"allow npm commands\", \"add bq permission to global settings\", \"move permission to user settings\", \"set DEBUG=true\", \"when claude stops show X\". For simple settings like theme/model, suggest the /config command.",
+     "argumentHint": ""
+    },
+    {
+     "name": "verify",
+     "description": "Verify that a code change actually does what it's supposed to by exercising it end-to-end and observing behavior — drive the affected flow, not just tests or typecheck. Run before committing nontrivial changes; bootstraps this repo's project verify skill if none exists yet. Don't invoke it on a diff that only touches tests, docs, or other code with no runtime surface to drive (a change to product source always has one) — there's nothing to observe.",
+     "argumentHint": ""
+    },
+    {
+     "name": "debug",
+     "description": "Enable debug logging for this session and help diagnose issues",
+     "argumentHint": "[issue description]"
+    },
+    {
+     "name": "code-review",
+     "description": "Review the current diff, or a PR number/branch/path target, for correctness bugs and reuse/simplification/efficiency cleanups at the given effort level (low/medium: fewer, high-confidence findings; high→max: broader coverage, may include uncertain findings); with no level given, it reuses the level you typed last. Pass --comment to post findings as inline PR comments, or --fix to apply the findings to the working tree after the review.",
+     "argumentHint": "[low|medium|high|xhigh|max] [--fix] [--comment] [<pr#>|<branch>|<path>]",
+     "aliases": [
+      "review"
+     ]
+    },
+    {
+     "name": "simplify",
+     "description": "Review the changed code for reuse, simplification, efficiency, and altitude cleanups, then apply the fixes. Quality only — it does not hunt for bugs; use /code-review for that.",
+     "argumentHint": "[<target>]"
+    },
+    {
+     "name": "batch",
+     "description": "Research and plan a large-scale change, then execute it in parallel across 5–30 isolated worktree agents that each open a PR.",
+     "argumentHint": "<instruction>"
+    },
+    {
+     "name": "fewer-permission-prompts",
+     "description": "Scan your transcripts for common read-only Bash and MCP tool calls, then add a prioritized allowlist to project .claude/settings.json to reduce permission prompts.",
+     "argumentHint": ""
+    },
+    {
+     "name": "doctor",
+     "description": "Health-check the user's Claude Code setup and fix issues: diagnose installation health — what the `claude doctor` terminal diagnostics cover — from local data (duplicate or leftover installs, PATH, unparseable settings files, broken or colliding agent definitions, skills whose frontmatter fails to parse); find unused skills, MCP servers, and plugins versus their context cost and disable dead weight; deduplicate local CLAUDE.md files against checked-in ones; trim checked-in CLAUDE.md files by cutting content a session could derive from the codebase (directory layouts, tech-stack lists, architecture overviews) while keeping gotchas, rationale, and non-standard conventions; migrate always-loaded CLAUDE.md guidance into lazy skills and nested CLAUDE.md files; flag slow hooks and context-heavy extensions; check the installed version is current; make auto mode the default permission mode; and pre-approve frequently denied read-only commands. Use when the user asks for a doctor run, checkup, audit, tune-up, or cleanup of their Claude Code setup or configuration.",
+     "argumentHint": "",
+     "aliases": [
+      "checkup"
+     ]
+    },
+    {
+     "name": "loop",
+     "description": "Run a prompt or slash command on a recurring interval (e.g. /loop 5m /foo, defaults to 10m)",
+     "argumentHint": "[interval] <prompt>",
+     "aliases": [
+      "proactive"
+     ]
+    },
+    {
+     "name": "claude-api",
+     "description": "Reference for the Claude API / Anthropic SDK — model ids, pricing, params, streaming, tool use, MCP, agents, caching, token counting, model migration.\nTRIGGER — read BEFORE opening the target file; don't skip because it \"looks like a one-liner\" — whenever: the prompt names Claude/Anthropic in any form (Claude, Anthropic, Fable, Opus, Sonnet, Haiku, `anthropic`, `@anthropic-ai`, `claude-*`, `us.anthropic.*`, `[1m]`); the user asks about an LLM (pricing/model choice/limits/caching) — never answer from memory; OR the task is LLM-shaped with provider unstated (agent/MCP/tool-definition/multi-agent/RAG/LLM-judge/computer-use; generate/summarize/extract/classify/rewrite/converse over NL; debugging refusals/cutoffs/streaming/tool-calls/tokens).\nSKIP only when another provider is being worked on (overrides all triggers): OpenAI/GPT/Gemini/Llama/Mistral/Cohere/Ollama named in the query; OR `grep -rE 'openai|langchain_openai|google.generativeai|genai|mistralai|cohere|ollama'` over the project hits (run this grep FIRST if no provider named — don't Read the file).",
+     "argumentHint": ""
+    },
+    {
+     "name": "run",
+     "description": "Launch and drive this project's app to see a change working. Use when asked to run, start, or screenshot the app, or to confirm a change works in the real app (not just tests). First looks for a project skill that already covers launching the app; otherwise falls back to built-in patterns per project type (CLI, server, TUI, Electron, browser-driven, library).",
+     "argumentHint": ""
+    },
+    {
+     "name": "run-skill-generator",
+     "description": "Author or improve the run-<unit> skill — a per-project skill that tells agents how to build, launch, and drive this project's app. Use when the user asks to set up the project, get it running, write run instructions, or verify build/run steps work from a clean environment.",
+     "argumentHint": ""
+    },
+    {
+     "name": "agents",
+     "description": "(removed) Ask Claude to create/manage subagents, or edit .claude/agents/",
+     "argumentHint": ""
+    },
+    {
+     "name": "auto-mode-setup",
+     "description": "Set up and customise auto mode — environment context, plus optional rule tweaks",
+     "argumentHint": "[--request-id <uuid>] (--wizard posture=… scope=… depth=… --propose | --expect-sha256 <64-hex> --apply-file <path>)"
+    },
+    {
+     "name": "autocompact",
+     "description": "Configure the auto-compact window size",
+     "argumentHint": "[auto|<tokens>]"
+    },
+    {
+     "name": "clear",
+     "description": "Start a new session with empty context; previous session stays on disk (resumable with /resume)",
+     "argumentHint": "[name]",
+     "aliases": [
+      "reset",
+      "new"
+     ]
+    },
+    {
+     "name": "color",
+     "description": "Set the prompt bar color for this session",
+     "argumentHint": "[red|blue|green|yellow|purple|orange|pink|cyan|default]"
+    },
+    {
+     "name": "compact",
+     "description": "Free up context by summarizing the conversation so far",
+     "argumentHint": "<optional custom summarization instructions>"
+    },
+    {
+     "name": "config",
+     "description": "Set a setting by key",
+     "argumentHint": "key=value",
+     "aliases": [
+      "settings"
+     ]
+    },
+    {
+     "name": "context",
+     "description": "Show current context usage",
+     "argumentHint": ""
+    },
+    {
+     "name": "effort",
+     "description": "Set effort level for model usage",
+     "argumentHint": "<low|medium|high|xhigh|max|ultracode|auto>"
+    },
+    {
+     "name": "fast",
+     "description": "Toggle fast mode (Opus 5)",
+     "argumentHint": "[on|off]"
+    },
+    {
+     "name": "heapdump",
+     "description": "Dump the JS heap to ~/Desktop",
+     "argumentHint": ""
+    },
+    {
+     "name": "init",
+     "description": "Initialize a new CLAUDE.md file with codebase documentation",
+     "argumentHint": ""
+    },
+    {
+     "name": "mcp",
+     "description": "Manage MCP servers",
+     "argumentHint": "[reconnect|enable|disable [<server>|all]]"
+    },
+    {
+     "name": "model",
+     "description": "Set the AI model for Claude Code",
+     "argumentHint": "<model>"
+    },
+    {
+     "name": "__remote-workflow",
+     "description": "Run the workflow script delivered in this session environment (server-launched sessions only)",
+     "argumentHint": ""
+    },
+    {
+     "name": "workflow-launch-exec",
+     "description": "Execute a server-launched workflow handoff (workflow_launch event sessions only)",
+     "argumentHint": ""
+    },
+    {
+     "name": "reload-skills",
+     "description": "Pick up skills added or changed on disk during this session",
+     "argumentHint": ""
+    },
+    {
+     "name": "rename",
+     "description": "Rename the current conversation",
+     "argumentHint": "[name]",
+     "aliases": [
+      "name"
+     ]
+    },
+    {
+     "name": "security-review",
+     "description": "Complete a security review of the pending changes on the current branch",
+     "argumentHint": ""
+    },
+    {
+     "name": "usage",
+     "description": "Show session cost, plan usage, and what's contributing to your limits",
+     "argumentHint": "",
+     "aliases": [
+      "cost",
+      "stats"
+     ]
+    },
+    {
+     "name": "insights",
+     "description": "Generate a report analyzing your Claude Code sessions",
+     "argumentHint": ""
+    },
+    {
+     "name": "recap",
+     "description": "Generate a one-line session recap now",
+     "argumentHint": ""
+    },
+    {
+     "name": "goal",
+     "description": "Set a goal — keep working until the condition is met",
+     "argumentHint": ""
+    },
+    {
+     "name": "team-onboarding",
+     "description": "Help teammates ramp on Claude Code with a guide from your usage",
+     "argumentHint": ""
+    }
+   ],
+   "agents": [
+    {
+     "name": "claude",
+     "description": "Catch-all for any task that doesn't fit a more specific agent. FleetView's default when no agent name is typed."
+    },
+    {
+     "name": "claude-code-guide",
+     "description": "Use this agent when the user asks questions (\"Can Claude...\", \"Does Claude...\", \"How do I...\") about: (1) Claude Code (the CLI tool) - features, hooks, slash commands, MCP servers, settings, IDE integrations, keyboard shortcuts; (2) Claude Agent SDK - building custom agents; (3) Claude API (formerly Anthropic API) - Messages API for directly passing messages to Claude, Tool Runner (`client.beta.messages.tool_runner`) for running an agentic loop over your own tools, manual tool-use loops, Managed Agents for server-hosted agents with a managed sandbox, prompt caching, and general Anthropic SDK usage; (4) Claude Tag (Claude in Slack) - what it is, setting it up for a Slack workspace, `/install-slack-app`; (5) `claude plugin eval` (writing and running plugin eval suites, its JSON/report, sandbox, CI, early-access enablement) and the `/skill-doctor` report. **IMPORTANT:** Before spawning a new agent, check if there is already a running or recently completed claude-code-guide agent that you can continue via SendMessage.",
+     "model": "haiku"
+    },
+    {
+     "name": "code-simplifier:code-simplifier",
+     "description": "Simplifies and refines code for clarity, consistency, and maintainability while preserving all functionality. Focuses on recently modified code unless instructed otherwise.",
+     "model": "opus"
+    },
+    {
+     "name": "Explore",
+     "description": "Fast read-only search agent for locating code. Use it to find files by pattern (eg. \"src/components/**/*.tsx\"), grep for symbols or keywords (eg. \"API endpoints\"), or answer \"where is X defined / which files reference Y.\" Do NOT use it for code review, design-doc auditing, cross-file consistency checks, or open-ended analysis — it reads excerpts rather than whole files and will miss content past its read window. When calling, specify search breadth: \"quick\" for a single targeted lookup, \"medium\" for moderate exploration, or \"very thorough\" to search across multiple locations and naming conventions."
+    },
+    {
+     "name": "feature-dev:code-architect",
+     "description": "Designs feature architectures by analyzing existing codebase patterns and conventions, then providing comprehensive implementation blueprints with specific files to create/modify, component designs, data flows, and build sequences",
+     "model": "sonnet"
+    },
+    {
+     "name": "feature-dev:code-explorer",
+     "description": "Deeply analyzes existing codebase features by tracing execution paths, mapping architecture layers, understanding patterns and abstractions, and documenting dependencies to inform new development",
+     "model": "sonnet"
+    },
+    {
+     "name": "feature-dev:code-reviewer",
+     "description": "Reviews code for bugs, logic errors, security vulnerabilities, code quality issues, and adherence to project conventions, using confidence-based filtering to report only high-priority issues that truly matter",
+     "model": "sonnet"
+    },
+    {
+     "name": "general-purpose",
+     "description": "General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks. When you are searching for a keyword or file and are not confident that you will find the right match in the first few tries use this agent to perform the search for you."
+    },
+    {
+     "name": "glm-vision",
+     "description": "识别/分析本地图片的默认入口（GLM-5.3-flash 经嵌套 claude，全局 CLAUDE.md 指定的优先路径）。凡读图、看截图、分析图片内容时优先委派此 agent；zai MCP 视觉工具仅在其失败后备用。",
+     "model": "haiku"
+    },
+    {
+     "name": "Plan",
+     "description": "Software architect agent for designing implementation plans. Use this when you need to plan the implementation strategy for a task. Returns step-by-step plans, identifies critical files, and considers architectural trade-offs."
+    },
+    {
+     "name": "statusline-setup",
+     "description": "Use this agent to configure the user's Claude Code status line setting.",
+     "model": "sonnet"
+    }
+   ],
+   "output_style": "default",
+   "available_output_styles": [
+    "default",
+    "Proactive",
+    "Explanatory",
+    "Learning"
+   ],
+   "models": [
+    {
+     "value": "default",
+     "resolvedModel": "claude-opus-5[1m]",
+     "displayName": "Default (recommended)",
+     "description": "Use the default model (currently Opus 5 (1M context)) · $5/$25 per Mtok",
+     "supportsEffort": true,
+     "supportedEffortLevels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ],
+     "supportsAdaptiveThinking": true,
+     "supportsFastMode": true,
+     "supportsAutoMode": true
+    },
+    {
+     "value": "opus[1m]",
+     "resolvedModel": "claude-opus-5[1m]",
+     "displayName": "Opus (1M context)",
+     "description": "Opus 5 with 1M context · Best for everyday, complex tasks · $5/$25 per Mtok",
+     "supportsEffort": true,
+     "supportedEffortLevels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ],
+     "supportsAdaptiveThinking": true,
+     "supportsFastMode": true,
+     "supportsAutoMode": true
+    },
+    {
+     "value": "sonnet",
+     "resolvedModel": "claude-sonnet-5",
+     "displayName": "Sonnet",
+     "description": "Sonnet 5 · Efficient for routine tasks · $3/$15 per Mtok",
+     "supportsEffort": true,
+     "supportedEffortLevels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ],
+     "supportsAdaptiveThinking": true,
+     "supportsAutoMode": true
+    },
+    {
+     "value": "sonnet[1m]",
+     "resolvedModel": "claude-sonnet-5[1m]",
+     "displayName": "Sonnet 5 (1M context)",
+     "description": "Sonnet 5 for long sessions · $3/$15 per Mtok",
+     "supportsEffort": true,
+     "supportedEffortLevels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ],
+     "supportsAdaptiveThinking": true,
+     "supportsAutoMode": true
+    },
+    {
+     "value": "haiku",
+     "resolvedModel": "claude-haiku-4-5-20251001",
+     "displayName": "Haiku",
+     "description": "Haiku 4.5 · Fastest for quick answers · $1/$5 per Mtok"
+    }
+   ],
+   "account": {
+    "tokenSource": "ANTHROPIC_AUTH_TOKEN",
+    "apiProvider": "firstParty"
+   },
+   "pid": 45633,
+   "current_permission_mode": "bypassPermissions",
+   "remote_control_auto_enable": false,
+   "remote_control_auto_on_by_default": false,
+   "ide_rc_auto_enable_gate": false,
+   "fast_mode_state": "off",
+   "fast_mode_disabled_reason": "sdk_opt_in_required"
+  }
+ }
+}

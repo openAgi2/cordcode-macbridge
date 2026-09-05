@@ -78,7 +78,7 @@ func claudeGraphResolvedTurn(
 		}
 		// Tool-result rows remain owned by their nearest prior user ancestor; ordinary user text
 		// establishes a new turn.
-		hasUserText := strings.TrimSpace(claudeConcatTextBlocks(claudeRelayContentBlocks(entry.Message.Content))) != ""
+		hasUserText := strings.TrimSpace(claudeNormalizedUserText(claudeRelayContentBlocks(entry.Message.Content))) != ""
 		if hasUserText {
 			return identity, nil
 		}

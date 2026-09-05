@@ -1,0 +1,10 @@
+{
+  "scenario": "turn",
+  "verdicts": {
+    "initialize": {
+      "request_id": "req_t1",
+      "verdict": "success",
+      "response_subtype": "success"
+    }
+  }
+}

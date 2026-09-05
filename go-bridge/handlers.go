@@ -80,6 +80,10 @@ type Handlers struct {
 	agents                 map[string]core.Agent
 	sessions               *sessionRegistry
 	runningMap             *runningMapCache
+	// claudeRelayNudges：sessionID → file-relay 立即轮询通道（Phase 3 Stop hook
+	// 事件驱动定向刷新；hooks_sink.go）。
+	nudgeMu           sync.Mutex
+	claudeRelayNudges map[string]chan struct{}
 	opencodeSessionOptions map[string]opencodeSessionOptions
 	contentRefs            map[string]string
 	contentRefOrder        []string
@@ -1299,6 +1303,21 @@ func (h *Handlers) handleSetObservationScope(conn Connection, msg WireMessage) {
 		}
 	}
 	h.broadcaster.ReconcileObservationSubscriptions(conn, req.BackendID, keep)
+	// 打开即拉活（2026-09-05 复测修正）：iOS 打开 claude 会话的真实入口是本方法
+	// （get_session → fetch_todos → set_observation_scope），不经 handleResumeSession。
+	// full_stream（正在看）时对无活跃 worker 的会话 best-effort spawn——让
+	// get_context_usage 详细上下文/会话内控制/首条消息流式在打开时就绪。helper
+	// 自带 registry 预检去重，租约续期（leaseSeconds）重复调用零成本；milestones_only
+	// 等旁路观察不拉活。
+	if req.DeliveryMode == scopeFullStream && req.BackendID == "claude" {
+		if agent, ok := h.getAgent(req.BackendID); ok && agent.Name() == "claudecode" {
+			for _, sid := range observedSessions {
+				if sid != "" {
+					h.startClaudeSessionOnOpen(agent, sid, msg)
+				}
+			}
+		}
+	}
 	// INFO so flapping/delivery-gap forensics can see mode without Debug log level.
 	// hasSubscriber after Subscribe is the forensic for candidateTargets=0 regressions.
 	hasSub := false
@@ -1822,6 +1841,15 @@ func modelItemsForWire(agent core.Agent, ccModels []core.ModelOption, currentMod
 			variants := make([]string, len(m.Variants))
 			copy(variants, m.Variants)
 			item["variants"] = variants
+		}
+		// claudecode Phase 1 三键（canonical additive）：resolved = CLI 官方
+		// resolvedModel（别名→canonical）；observedModel = 网关改写后的执行侧
+		// 观测名（assistant message.model）。可选键，仅在真值存在时下发。
+		if m.Resolved != "" {
+			item["resolved"] = m.Resolved
+		}
+		if m.Observed != "" {
+			item["observedModel"] = m.Observed
 		}
 		models = append(models, item)
 	}
@@ -2574,6 +2602,21 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 	sess, ok := h.getSession(params.SessionID)
 	h.mu.Unlock()
 
+	// 会话内模型直达（Phase 2.2）：send_message.model 在既有 next-spawn 语义
+	// 之上，对活跃会话补发官方 set_model。best-effort：失败仅记录、消息照发
+	// （模型真值由观测层回写；切换失败不吞消息——2026-09-02 unknown-model
+	// 软化兜底同源裁决）。
+	if ok && sess != nil {
+		if live, isLive := sess.(core.LiveModelSwitcher); isLive {
+			if modelID := selectedModelParam(agent, params.Model); modelID != "" {
+				if err := live.SetModelLive(h.ctx, modelID); err != nil {
+					slog.Info("go-bridge: live set_model failed on send; continuing with current model",
+						"sessionID", params.SessionID, "model", modelID, "error", err)
+				}
+			}
+		}
+	}
+
 	// ok=true 但 sess==nil 表示 registry 里只有 markRunning/markIdle 建的占位 stub，
 	// 尚无真实 agent 会话——必须走 StartSession（对真实 id 即 --resume）续接，
 	// 否则下面 sess.Send 会对 nil 接口派发而 panic（2026-06-30 真机复现的崩溃）。
@@ -2615,14 +2658,15 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 			return
 		}
 
-		// resume 时 claude --resume 会输出完整历史，先排空历史事件。
-		// Codex / Grok 不重放 transcript 作为事件流（Grok 历史走 HistoryProvider 落盘），
-		// drain 只会空转甚至在有持续 session/update 时占满至 10s，拖垮 send_message 的 RPC 时延。
-		// DSH 同理：live-only 无 resume（每进程惰性新建 root session），握手后到首条
-		// session/prompt 前没有任何事件。
+		// resume 时历史重放的排水。Codex / Grok / DSH 不重放 transcript 作为事件流。
+		// claudecode 同样移除同步等待（owner 2026-09-05 复盘）：CLI 2.1.234 真样本
+		// 证明 --resume 不重放历史到 stdout，10s 同步等待是纯自加延迟（每次 send
+		// 白等满超时）；潜在重放帧由 agent 侧 historyDraining 门丢弃，且该窗口现由
+		// 首条 stream_event 事件驱动关闭（session.go handleStreamEvent），12s watchdog
+		// 兜底仍在。
 		if resumeID != "" {
 			switch agent.Name() {
-			case "codex", "grokbuild", "dsh":
+			case "codex", "grokbuild", "dsh", "claudecode":
 				// skip drain
 			default:
 				drainHistoryEvents(sess)
@@ -2769,8 +2813,53 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 
 var claudeResumeOwnerCheckTimeout = 2 * time.Second
 
-func preflightClaudeResume(rootCtx context.Context, agent core.Agent, sessionID string) *WireError {
-	if err := rootCtx.Err(); err != nil {
+// startClaudeSessionOnOpen best-effort spawns the claude worker when iOS
+// OPENS a session（打开即拉活，2026-09-05）。复用 send 侧的 preflight（外部
+// worker 正在执行时放弃；live-but-idle 放行）与双检去重；任何失败只记日志——
+// 视图/观察路径（file-relay + resume 响应）不受影响，首次 send_message 仍会
+// 走既有按需创建兜底。
+func (h *Handlers) startClaudeSessionOnOpen(agent core.Agent, sessionID string, msg WireMessage) {
+	if sessionID == "" {
+		return
+	}
+	go func() {
+		// 预检（与 send 侧 !ok || sess == nil 同语义）：registry 已有真实会话
+		// 直接返回；占位 stub（ok 但 nil）照常 spawn 顶替。
+		h.mu.Lock()
+		existing, existingOk := h.getSession(sessionID)
+		h.mu.Unlock()
+		if existingOk && existing != nil {
+			return
+		}
+		if wireErr := preflightClaudeResume(h.ctx, agent, sessionID); wireErr != nil {
+			slog.Info("go-bridge: open-spawn skipped", "sessionID", sessionID,
+				"code", wireErr.Code, "message", wireErr.Message)
+			return
+		}
+		startAt := time.Now()
+		sess, err := agent.StartSession(h.ctx, sessionID)
+		if err != nil {
+			slog.Info("go-bridge: open-spawn failed (file-relay view-only fallback)",
+				"sessionID", sessionID, "error", err)
+			return
+		}
+		h.mu.Lock()
+		existing, existingOk = h.getSession(sessionID)
+		if existingOk && existing != nil {
+			h.mu.Unlock()
+			_ = sess.Close()
+			slog.Info("go-bridge: open-spawn raced with concurrent creation, keeping existing",
+				"sessionID", sessionID)
+			return
+		}
+		h.putSessionWithMeta(sessionID, msg.BackendID, extractDir(msg), sess)
+		h.mu.Unlock()
+		slog.Info("go-bridge: open-spawn ready (detailed context + in-session control now live)",
+			"sessionID", sessionID, "elapsed_ms", time.Since(startAt).Milliseconds())
+	}()
+}
+
+func preflightClaudeResume(rootCtx context.Context, agent core.Agent, sessionID string) *WireError {	if err := rootCtx.Err(); err != nil {
 		return &WireError{Code: "request.cancelled", Message: err.Error()}
 	}
 	lister, ok := agent.(core.LiveSessionLister)
@@ -3182,6 +3271,25 @@ func (h *Handlers) handleAbortGeneration(conn Connection, msg WireMessage) {
 			cancel()
 		}
 		return
+	}
+
+	// S8 裁决方案 a（owner 2026-09-04）：claude 的官方 interrupt = 停 turn、留进程。
+	// CancelTurn 走官方 interrupt 控制帧（claudeSession 内按 interrupt_receipt_v1
+	// 能力位 fail closed）；成功后不删会话、不 Close、不合成 aborted——被打断
+	// turn 的官方 result 帧经既有 handleResult 收口，进程保留可继续发消息。
+	// 能力位缺失或 CLI 拒收时 CancelTurn 返回错误，回落下方既有
+	// delete+Close+合成路径（现状行为，不伪装官方回执）。
+	if backendID == "claude" || backendID == "claudecode" {
+		if tc, ok := t.session.(core.TurnCanceler); ok {
+			cancelCtx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+			err := tc.CancelTurn(cancelCtx)
+			cancel()
+			if err == nil {
+				return
+			}
+			slog.Info("go-bridge: official interrupt unavailable; falling back to close path",
+				"sessionID", sessionID, "backendID", backendID, "error", err)
+		}
 	}
 
 	h.mu.Lock()
@@ -4306,13 +4414,21 @@ func (h *Handlers) handleResumeSession(conn Connection, msg WireMessage, agent c
 
 	h.subscribeConnToSession(conn, msg, h.resolveSessionIDForActiveSession(params.SessionID), extractDir(msg))
 
-	// 对于 claudecode session：如果没有活跃 AgentSession（外部 Desktop 创建），
-	// 启动基于 transcript 文件监视的事件转发，使 iOS 能收到 turn_started/turn_completed 等事件。
+	// 对于 claudecode session：如果没有活跃 AgentSession（外部 Desktop 创建或
+	// 本次运行尚未拉活），启动基于 transcript 文件监视的事件转发，使 iOS 能收到
+	// turn_started/turn_completed 等事件。
 	if agent.Name() == "claudecode" {
 		h.mu.Lock()
 		sess, hasSess := h.getSession(params.SessionID)
 		h.mu.Unlock()
 		if !hasSess || sess == nil {
+			// 打开即拉活（owner 2026-09-05 问询「为何须发消息后才显示详细上下文」）：
+			// spawn claude --resume，让 get_context_usage（详细上下文）/ 会话内控制 /
+			// 首条消息免冷启动在打开时就绪。旧「不在 resume 启动进程」的理由（--resume
+			// 重放历史撑爆 events channel）已被探针推翻（2.1.234 实测重放为零，
+			// handleSendMessage 同注；潜在重放帧由 historyDraining 门丢弃）。
+			// best-effort：失败只记日志，file-relay 观察路径照常兜底。
+			h.startClaudeSessionOnOpen(agent, params.SessionID, msg)
 			h.startClaudeSessionFileRelay(params.SessionID, conn, msg.BackendID)
 		}
 	}
@@ -4357,6 +4473,26 @@ func (h *Handlers) handleSwitchModel(conn Connection, msg WireMessage, agent cor
 	}
 
 	ms.SetModel(params.Model)
+
+	// 会话内直达（Phase 2.2，能力位先行）：带 sessionId 且目标会话支持官方
+	// set_model 时立即切换运行中会话；失败如实回错（fail visibly）——agent 级
+	// SetModel 已更新（下次 spawn 生效），但当前会话未切换，不得报 Ok。
+	if params.SessionID != "" {
+		h.mu.Lock()
+		sess, ok := h.getSession(params.SessionID)
+		h.mu.Unlock()
+		if ok && sess != nil {
+			if live, isLive := sess.(core.LiveModelSwitcher); isLive {
+				if err := live.SetModelLive(context.Background(), params.Model); err != nil {
+					conn.SendResult(msg.RequestID, nil, &WireError{
+						Code:    "live_model_switch_failed",
+						Message: fmt.Sprintf("model applies to next session spawn; live switch failed: %v", err),
+					})
+					return
+				}
+			}
+		}
+	}
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
 }
 
@@ -4415,7 +4551,20 @@ func (h *Handlers) handleSetPermissionMode(conn Connection, msg WireMessage, age
 		h.mu.Unlock()
 		sessionActive = ok
 		if ok {
-			if live, ok := sess.(core.LiveModeSwitcher); ok && live.SetLiveMode(switcher.GetMode()) {
+			// Phase 2.3（M3 受限）：先走官方 set_permission_mode 控制帧（受限
+			// 四档；成功体回显 mode 并同步本地 auto-answer 状态位）。能力位缺
+			// 失/CLI 拒收回落既有本地 SetLiveMode 模拟——缺位回退，避免双应答。
+			if ctrl, isCtrl := sess.(core.LivePermissionModeSwitcher); isCtrl {
+				if err := ctrl.SetPermissionModeLive(context.Background(), switcher.GetMode()); err == nil {
+					appliesTo = "current_session"
+				} else {
+					slog.Info("go-bridge: live set_permission_mode fell back to local simulation",
+						"sessionID", params.SessionID, "mode", switcher.GetMode(), "error", err)
+					if live, ok2 := sess.(core.LiveModeSwitcher); ok2 && live.SetLiveMode(switcher.GetMode()) {
+						appliesTo = "current_session"
+					}
+				}
+			} else if live, ok2 := sess.(core.LiveModeSwitcher); ok2 && live.SetLiveMode(switcher.GetMode()) {
 				appliesTo = "current_session"
 			}
 		}

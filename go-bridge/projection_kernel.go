@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -729,6 +730,27 @@ type ProjectionKernel struct {
 	// Sourced from Handlers via SetTurnCheckpointStager; nil in unit tests that do
 	// not exercise the checkpoint path.
 	stageTurnCheckpoint func(backendID, sessionID string, turnN int)
+
+	// seqIssuer 是该 session 所有进入 reducer 的事件的单一 PerSessionSeq 发号源
+	// （owner 2026-09-05 复盘：此前 batch 在 Kernel 锁内自取号、live 走 publisher
+	// 独立计数器，两个序号域打同一个 reducer 幂等门（PerSessionSeq <= lastAppliedRev
+	// 即跳）——file-relay user 行 batch 先行时，后到的 stdout 流式 delta 序号可能
+	// ≤ rev 被静默跳过，流式间歇性失效。发号器原子单调，号只增不复用，跨
+	// publisher 重建延续；reducer 幂等门不要求连续（deltaBatcher 合并本就跳号）。
+	seqIssuer sync.Map // backendID\x00sessionID → *atomic.Int64
+}
+
+// IssueSessionSeq 从单一发号器取该 session 的下一个 PerSessionSeq（≥1，单调）。
+// batch（projection_source_transaction.go）与 EventPublisher.publish 都从这里取号，
+// 保证任何进入 reducer 的事件序号全局唯一递增。空键返回 0（保持 reducer 对
+// 无 session 事件的跳过语义）。
+func (k *ProjectionKernel) IssueSessionSeq(backendID, sessionID string) int64 {
+	if k == nil || backendID == "" || sessionID == "" {
+		return 0
+	}
+	key := backendID + "\x00" + sessionID
+	v, _ := k.seqIssuer.LoadOrStore(key, new(atomic.Int64))
+	return v.(*atomic.Int64).Add(1)
 }
 
 func NewProjectionKernel(reducer *ProjectionReducer, store projectionCheckpointPersistence) *ProjectionKernel {

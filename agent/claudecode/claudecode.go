@@ -67,6 +67,14 @@ type Agent struct {
 	settingsModelsCache []core.ModelOption
 	settingsModelsMtime time.Time
 
+	// catalog：模型目录真值链状态（model_catalog.go）——initialize.models 主源
+	// 缓存、list_models 刷新通道、message.model 观测映射。
+	catalog catalogState
+
+	// hookSettingsProvider 返回自 spawn 会话的 --settings 内联 hooks JSON
+	//（Phase 3：Management API 接收端可用时非空；空=纯轮询=现状）。
+	hookSettingsProvider func() (string, bool)
+
 	mu sync.RWMutex
 
 	// pinStore persists MacBridge-owned session pin (置顶) metadata for SessionPinner.
@@ -204,7 +212,7 @@ func New(opts map[string]any) (core.Agent, error) {
 		}
 	}
 
-	return &Agent{
+	a := &Agent{
 		workDir:          workDir,
 		cliBin:           cliBin,
 		cliExtraArgs:     cliExtraArgs,
@@ -220,7 +228,13 @@ func New(opts map[string]any) (core.Agent, error) {
 		routerAPIKey:     routerAPIKey,
 		spawnOpts:        spawnOpts,
 		pinStore:         pinstore.FromOpts(opts),
-	}, nil
+	}
+	// Phase 3：自 spawn 会话的 --settings 内联 hooks 提供者（go-bridge main 注入，
+	// spawn 时延迟解析 Management 端点）。缺失=纯轮询=现状。
+	if p, ok := opts["hook_settings_provider"].(func() (string, bool)); ok {
+		a.hookSettingsProvider = p
+	}
+	return a, nil
 }
 
 // normalizeEffort maps user-friendly aliases to Claude CLI --effort values.
@@ -318,41 +332,37 @@ func (a *Agent) configuredModels() []core.ModelOption {
 }
 
 func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
-	// custom 网关场景（Claude Code Router 或 ANTHROPIC_BASE_URL 非空）：settingsModels 的 3-slot
-	// 别名只是 owner 子集映射（haiku/sonnet/opus → 当前 *_MODEL_NAME），网关 /v1/models 才是完整模型源
-	//（含 GLM/DeepSeek 等）。故不短路 alias，合并 alias + fetchModelsFromAPI（去重，alias 优先保留 Desc）。
-	// 官方 anthropic 场景（无网关）：settingsModels 是权威源（owner 别名映射），保持短路。
-	// 详见 docs/2026-06-30-claudecode-models-from-settings-json.md + t3code-adoption-plan §5.1 缺口4。
-	if a.usesCustomGateway() {
-		if models := a.mergeGatewayModels(ctx); len(models) > 0 {
-			return models
-		}
-		return defaultClaudeModels()
-	}
-	if models := a.settingsModels(); len(models) > 0 {
+	// 真值链（设计 §6 Phase 1，Phase 0 证据 CLI 2.1.234）：官方控制面目录是主源。
+	// ① initialize.models：会话建立时发送并缓存（含 resolved canonical、effort 真值）。
+	if models := a.initCatalogOptions(); len(models) > 0 {
 		return models
+	}
+	// ② list_models 刷新：有活会话时用无副作用的控制请求补拉（thin-client 场景）。
+	a.refreshCatalogViaListModels(ctx)
+	if models := a.initCatalogOptions(); len(models) > 0 {
+		return models
+	}
+	// ③ 真网关（显式 routerURL/provider 配置，或非 loopback env）：alias + 网关
+	// /v1/models 全量合并（GLM/DeepSeek 等必须可见，§5.1 缺口4 语义保持）。
+	if a.usesRealGateway() {
+		if models := a.mergeGatewayModels(ctx); len(models) > 0 {
+			return a.enrichObservations(models)
+		}
+	}
+	// ④ 降级源：settings.json 三槽位别名。loopback 代理型 env"网关"（GUI 泄漏的
+	// cc-switch URL）不拉 /v1/models、不进网关合并分支，落别名/观测级（S7）。
+	if models := a.settingsModels(); len(models) > 0 {
+		return a.enrichObservations(models)
 	}
 	if models := a.configuredModels(); len(models) > 0 {
-		return models
-	}
-	if models := a.fetchModelsFromAPI(ctx); len(models) > 0 {
-		return models
+		return a.enrichObservations(models)
 	}
 	return defaultClaudeModels()
 }
 
-// usesCustomGateway 判定是否走 custom 网关：routerURL（Claude Code Router，agent 构造注入）
-// 或 ANTHROPIC_BASE_URL 环境变量非空。此时网关 /v1/models 是完整模型源（非官方默认端点）。
-func (a *Agent) usesCustomGateway() bool {
-	a.mu.RLock()
-	routerURL := a.routerURL
-	a.mu.RUnlock()
-	return routerURL != "" || os.Getenv("ANTHROPIC_BASE_URL") != ""
-}
-
 // mergeGatewayModels 合并 settingsModels（owner 3-slot 别名）与 fetchModelsFromAPI（网关 /v1/models
 // 全量）。按 Name 去重，alias 优先（保留其 Desc，避免被网关同名项覆盖显示名）。fetchModelsFromAPI
-// 无白名单，GLM/DeepSeek 等第三方 id 全可见。
+// 无白名单，GLM/DeepSeek 等第三方 id 全可见。只在 usesRealGateway（非 loopback 真网关）时进入。
 func (a *Agent) mergeGatewayModels(ctx context.Context) []core.ModelOption {
 	alias := a.settingsModels()
 	api := a.fetchModelsFromAPI(ctx)
@@ -410,6 +420,11 @@ func (a *Agent) fetchModelsFromAPI(ctx context.Context) []core.ModelOption {
 		apiKey = os.Getenv("ANTHROPIC_API_KEY")
 	}
 	if apiKey == "" {
+		// 自定义网关 spawn 用 ANTHROPIC_AUTH_TOKEN（providerEnvLocked），目录拉取
+		// 必须读同一个来源，否则网关场景永远拿不到 key（设计 §2.4/§6 Phase 1.4）。
+		apiKey = os.Getenv("ANTHROPIC_AUTH_TOKEN")
+	}
+	if apiKey == "" {
 		return nil
 	}
 	if baseURL == "" {
@@ -429,7 +444,12 @@ func (a *Agent) fetchModelsFromAPI(ctx context.Context) []core.ModelOption {
 	if err != nil {
 		return nil
 	}
+	// 网关兼容双头（设计 §6 Phase 1.4，M6 定位：非官方标准鉴权）：官方 anthropic 用
+	// x-api-key；多数第三方网关（Phase 0 复测：cc-switch /claude-desktop）要求
+	// Authorization: Bearer。两个头都发，谁认谁收；官方端点对 Bearer 中的 API key
+	// 不买账但也不影响 x-api-key 生效。
 	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -507,9 +527,23 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	// When router_url is set, --verbose conflicts with --output-format stream-json
 	// (verbose emits non-JSON text to stdout that corrupts the JSON stream).
 	disableVerbose := a.routerURL != ""
+	hookSettings := ""
+	if a.hookSettingsProvider != nil {
+		if payload, ok := a.hookSettingsProvider(); ok {
+			hookSettings = payload
+		}
+	}
 	a.mu.Unlock()
 
-	return newClaudeSession(ctx, workDir, cliBin, cliExtraArgs, cliArgsFlag, model, effort, sessionID, mode, tools, disTools, extraEnv, platformPrompt, disableVerbose, spawnOpts, maxTok)
+	sess, err := newClaudeSession(ctx, workDir, cliBin, cliExtraArgs, cliArgsFlag, model, effort, sessionID, mode, tools, disTools, extraEnv, platformPrompt, disableVerbose, spawnOpts, maxTok, hookSettings)
+	if err != nil {
+		return nil, err
+	}
+	// 目录真值链（Phase 1）：会话建立即发送 initialize 采集官方目录（主源），
+	// 并把本会话登记为 list_models 刷新通道；assistant message.model 观测回填。
+	sess.onAssistantModel = a.observeAssistantModel
+	a.beginCatalogSync(sess)
+	return sess, nil
 }
 
 func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, error) {
@@ -1480,7 +1514,7 @@ func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHisto
 					// <command-args>, <local-command-stdout|stderr|caveat>) into a
 					// compact user-readable form, or drop it entirely. See
 					// normalizeClaudeUserText.
-					normalized := normalizeClaudeUserText(block.Text)
+					normalized := NormalizeClaudeUserText(block.Text)
 					if normalized == "" {
 						continue
 					}
@@ -1565,7 +1599,7 @@ func IsTaskNotificationOrigin(kind string) bool {
 //   - <local-command-stdout|stderr|caveat>...</...> → "" (filtered out).
 //
 // Text without any of these tags is returned unchanged.
-func normalizeClaudeUserText(text string) string {
+func NormalizeClaudeUserText(text string) string {
 	if localCommandRe.MatchString(text) {
 		return ""
 	}
@@ -1809,7 +1843,7 @@ func extractTextContent(raw json.RawMessage) string {
 		if block.Type != "text" || block.Text == "" {
 			continue
 		}
-		if normalized := normalizeClaudeUserText(block.Text); normalized != "" {
+		if normalized := NormalizeClaudeUserText(block.Text); normalized != "" {
 			segments = append(segments, normalized)
 		}
 	}

@@ -314,3 +314,97 @@ func TestDeltaBatchDoesNotMergeAcrossItemIDs(t *testing.T) {
 		t.Fatalf("second = %#v", d1)
 	}
 }
+
+// TestDeltaBatchPreservesTurnIDAcrossFlush（owner 2026-09-05 复盘回归锁）：
+// claude stdout 流式增量经 relayEvents 补 turnId（client uuid）后进攒批器，
+// emit() 重组 payload 必须保留 turnId——否则出批后又是无身份增量，SSV2 reducer
+// 跳过（d5f5e30 假绿：单测直连 kernel 绕过 batcher，生产全程无流式）。
+func TestDeltaBatchPreservesTurnIDAcrossFlush(t *testing.T) {
+	capture := &captureSender{}
+	d := NewDeltaBatcher(capture)
+	defer d.Stop()
+
+	d.Send(LogicalEvent{
+		BackendID: "claude",
+		SessionID: "ses_1",
+		Event:     "text_delta",
+		Data:      map[string]interface{}{"delta": "回复前半", "turnId": "client-uuid-a"},
+	})
+	d.FlushAll()
+
+	evs, _ := capture.snapshot()
+	if len(evs) != 1 {
+		t.Fatalf("expected 1 frame, got %d", len(evs))
+	}
+	data, _ := evs[0].Data.(map[string]interface{})
+	if data["turnId"] != "client-uuid-a" {
+		t.Fatalf("turnId dropped across batch flush: %#v", data)
+	}
+	if data["delta"] != "回复前半" {
+		t.Fatalf("delta = %#v", data)
+	}
+}
+
+// 不同 turnId 的 delta 不得合并进同一 chunk（归属会串 turn）。
+func TestDeltaBatchDoesNotMergeAcrossTurnIDs(t *testing.T) {
+	capture := &captureSender{}
+	d := NewDeltaBatcher(capture)
+	defer d.Stop()
+
+	d.Send(LogicalEvent{
+		BackendID: "claude",
+		SessionID: "ses_1",
+		Event:     "text_delta",
+		Data:      map[string]interface{}{"delta": "A", "turnId": "uuid-a"},
+	})
+	d.Send(LogicalEvent{
+		BackendID: "claude",
+		SessionID: "ses_1",
+		Event:     "text_delta",
+		Data:      map[string]interface{}{"delta": "B", "turnId": "uuid-b"},
+	})
+	d.FlushAll()
+
+	evs, _ := capture.snapshot()
+	if len(evs) != 2 {
+		t.Fatalf("expected 2 frames for distinct turnIds, got %d", len(evs))
+	}
+	d0, _ := evs[0].Data.(map[string]interface{})
+	d1, _ := evs[1].Data.(map[string]interface{})
+	if d0["turnId"] != "uuid-a" || d0["delta"] != "A" {
+		t.Fatalf("first = %#v", d0)
+	}
+	if d1["turnId"] != "uuid-b" || d1["delta"] != "B" {
+		t.Fatalf("second = %#v", d1)
+	}
+}
+
+// 同 turnId 连续 delta 照常合并（流式打字机主路径不退化）。
+func TestDeltaBatchMergesSameTurnIDDeltas(t *testing.T) {
+	capture := &captureSender{}
+	d := NewDeltaBatcher(capture)
+	defer d.Stop()
+
+	d.Send(LogicalEvent{
+		BackendID: "claude",
+		SessionID: "ses_1",
+		Event:     "text_delta",
+		Data:      map[string]interface{}{"delta": "A", "turnId": "uuid-a"},
+	})
+	d.Send(LogicalEvent{
+		BackendID: "claude",
+		SessionID: "ses_1",
+		Event:     "text_delta",
+		Data:      map[string]interface{}{"delta": "B", "turnId": "uuid-a"},
+	})
+	d.FlushAll()
+
+	evs, _ := capture.snapshot()
+	if len(evs) != 1 {
+		t.Fatalf("expected 1 merged frame, got %d", len(evs))
+	}
+	data, _ := evs[0].Data.(map[string]interface{})
+	if data["delta"] != "AB" || data["turnId"] != "uuid-a" {
+		t.Fatalf("merged = %#v", data)
+	}
+}

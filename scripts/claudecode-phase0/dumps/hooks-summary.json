@@ -1,0 +1,20 @@
+{
+  "scenario": "hooks",
+  "verdicts": {
+    "initialize_bare": {
+      "request_id": "req_h1",
+      "verdict": "success",
+      "response_subtype": "success"
+    },
+    "set_model_switch": {
+      "request_id": "req_h2",
+      "verdict": "success",
+      "response_subtype": "success"
+    },
+    "set_model_reset_default": {
+      "request_id": "req_h3",
+      "verdict": "success",
+      "response_subtype": "success"
+    }
+  }
+}

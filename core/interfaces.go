@@ -524,6 +524,15 @@ type ModelOption struct {
 	// Variants (canonical §6.11.1 additive revision, opencode-web): the live
 	// model-specific variant keys from /provider. nil/empty = no selector.
 	Variants []string
+	// Resolved (claudecode Phase 1, 2026-09-04 design §6 Phase 1.1/R2-S2):
+	// canonical model id the CLI resolves this option's Name to (claude
+	// initialize.models resolvedModel, 别名→canonical 官方方向). Empty = not
+	// reported. NOT a short alias — do not conflate with Alias (方向相反).
+	Resolved string
+	// Observed (claudecode Phase 1): the execution-side model actually seen in
+	// assistant message.model after gateway rewriting. Empty = no live
+	// observation for this row.
+	Observed string
 }
 
 // UsageReporter is an optional interface for agents that can report account or
@@ -904,6 +913,40 @@ type WorkspaceAgentOptionSnapshotter interface {
 // apply a mode change immediately without restarting the process.
 type LiveModeSwitcher interface {
 	SetLiveMode(mode string) bool
+}
+
+// LiveModelSwitcher is implemented by agent sessions that can switch the
+// model of a RUNNING session through the backend's official control plane
+// (claudecode set_model, design 2026-09-04 §6 Phase 2.2). Empty or "default"
+// resets to the session default per the official semantics. Implementations
+// fail visibly: a backend rejection/timeout returns an error instead of
+// pretending the switch took effect.
+type LiveModelSwitcher interface {
+	SetModelLive(ctx context.Context, model string) error
+}
+
+// LivePermissionModeSwitcher is implemented by agent sessions that can push a
+// permission-mode switch to a RUNNING session via the backend's official
+// control plane (claudecode set_permission_mode). Implementations restrict
+// the live-switch mode set (claude: default/acceptEdits/bypassPermissions/
+// dontAsk — plan/auto stay spawn-time only) and return an error when the
+// backend rejects or does not support the switch; callers fall back to the
+// local simulation path (缺位回退, never double-answer).
+type LivePermissionModeSwitcher interface {
+	SetPermissionModeLive(ctx context.Context, mode string) error
+}
+
+// ClientTurnOwner is implemented by agent sessions that originate turns with a
+// self-held client uuid (claudecode: the input user frame carries a uuid the
+// CLI adopts into the transcript user row — official SDK user_message_uuid
+// contract). The file-relay layer asks it to decide whether a transcript turn
+// (identity = user row uuid) belongs to THIS process's stdout stream: only
+// self-owned turns may be treated as stdout-authoritative for assistant
+// content; turns written by other processes (Mac Desktop/Terminal workers on
+// the same transcript) never appear on this stdout and must keep the file as
+// their content source (owner 2026-09-05 复测：外部回合被压制 → iOS 永远执行中).
+type ClientTurnOwner interface {
+	OwnsClientTurn(turnUUID string) bool
 }
 
 // PermissionModeInfo describes a permission mode for display.

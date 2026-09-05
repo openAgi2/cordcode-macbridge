@@ -1,0 +1,1155 @@
+{
+ "categories": [
+  {
+   "name": "System prompt",
+   "tokens": 2724,
+   "color": "promptBorder"
+  },
+  {
+   "name": "System tools",
+   "tokens": 13989,
+   "color": "inactive"
+  },
+  {
+   "name": "MCP tools (deferred)",
+   "tokens": 6446,
+   "color": "inactive",
+   "isDeferred": true
+  },
+  {
+   "name": "System tools (deferred)",
+   "tokens": 20671,
+   "color": "inactive",
+   "isDeferred": true
+  },
+  {
+   "name": "Custom agents",
+   "tokens": 346,
+   "color": "permission"
+  },
+  {
+   "name": "Memory files",
+   "tokens": 12066,
+   "color": "claude"
+  },
+  {
+   "name": "Skills",
+   "tokens": 1974,
+   "color": "warning"
+  },
+  {
+   "name": "Messages",
+   "tokens": 1,
+   "color": "purple_FOR_SUBAGENTS_ONLY"
+  },
+  {
+   "name": "Autocompact buffer",
+   "tokens": 33000,
+   "color": "inactive"
+  },
+  {
+   "name": "Free space",
+   "tokens": 135900,
+   "color": "promptBorder"
+  }
+ ],
+ "totalTokens": 19626,
+ "maxTokens": 200000,
+ "rawMaxTokens": 200000,
+ "autocompactSource": "unknown-model",
+ "percentage": 10,
+ "gridRows": [
+  [
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "System prompt",
+    "tokens": 2724,
+    "percentage": 1,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "System tools",
+    "tokens": 13989,
+    "percentage": 7,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "System tools",
+    "tokens": 13989,
+    "percentage": 7,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "System tools",
+    "tokens": 13989,
+    "percentage": 7,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "System tools",
+    "tokens": 13989,
+    "percentage": 7,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "System tools",
+    "tokens": 13989,
+    "percentage": 7,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "System tools",
+    "tokens": 13989,
+    "percentage": 7,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "System tools",
+    "tokens": 13989,
+    "percentage": 7,
+    "squareFullness": 0.9944999999999995
+   },
+   {
+    "color": "permission",
+    "isFilled": true,
+    "categoryName": "Custom agents",
+    "tokens": 346,
+    "percentage": 0,
+    "squareFullness": 0.173
+   },
+   {
+    "color": "claude",
+    "isFilled": true,
+    "categoryName": "Memory files",
+    "tokens": 12066,
+    "percentage": 6,
+    "squareFullness": 1
+   }
+  ],
+  [
+   {
+    "color": "claude",
+    "isFilled": true,
+    "categoryName": "Memory files",
+    "tokens": 12066,
+    "percentage": 6,
+    "squareFullness": 1
+   },
+   {
+    "color": "claude",
+    "isFilled": true,
+    "categoryName": "Memory files",
+    "tokens": 12066,
+    "percentage": 6,
+    "squareFullness": 1
+   },
+   {
+    "color": "claude",
+    "isFilled": true,
+    "categoryName": "Memory files",
+    "tokens": 12066,
+    "percentage": 6,
+    "squareFullness": 1
+   },
+   {
+    "color": "claude",
+    "isFilled": true,
+    "categoryName": "Memory files",
+    "tokens": 12066,
+    "percentage": 6,
+    "squareFullness": 1
+   },
+   {
+    "color": "claude",
+    "isFilled": true,
+    "categoryName": "Memory files",
+    "tokens": 12066,
+    "percentage": 6,
+    "squareFullness": 1
+   },
+   {
+    "color": "warning",
+    "isFilled": true,
+    "categoryName": "Skills",
+    "tokens": 1974,
+    "percentage": 1,
+    "squareFullness": 0.987
+   },
+   {
+    "color": "purple_FOR_SUBAGENTS_ONLY",
+    "isFilled": true,
+    "categoryName": "Messages",
+    "tokens": 1,
+    "percentage": 0,
+    "squareFullness": 0.0005
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   }
+  ],
+  [
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   }
+  ],
+  [
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   }
+  ],
+  [
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   }
+  ],
+  [
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   }
+  ],
+  [
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   }
+  ],
+  [
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   }
+  ],
+  [
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "promptBorder",
+    "isFilled": true,
+    "categoryName": "Free space",
+    "tokens": 135900,
+    "percentage": 68,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "Autocompact buffer",
+    "tokens": 33000,
+    "percentage": 17,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "Autocompact buffer",
+    "tokens": 33000,
+    "percentage": 17,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "Autocompact buffer",
+    "tokens": 33000,
+    "percentage": 17,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "Autocompact buffer",
+    "tokens": 33000,
+    "percentage": 17,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "Autocompact buffer",
+    "tokens": 33000,
+    "percentage": 17,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "Autocompact buffer",
+    "tokens": 33000,
+    "percentage": 17,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "Autocompact buffer",
+    "tokens": 33000,
+    "percentage": 17,
+    "squareFullness": 1
+   }
+  ],
+  [
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "Autocompact buffer",
+    "tokens": 33000,
+    "percentage": 17,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "Autocompact buffer",
+    "tokens": 33000,
+    "percentage": 17,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "Autocompact buffer",
+    "tokens": 33000,
+    "percentage": 17,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "Autocompact buffer",
+    "tokens": 33000,
+    "percentage": 17,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "Autocompact buffer",
+    "tokens": 33000,
+    "percentage": 17,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "Autocompact buffer",
+    "tokens": 33000,
+    "percentage": 17,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "Autocompact buffer",
+    "tokens": 33000,
+    "percentage": 17,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "Autocompact buffer",
+    "tokens": 33000,
+    "percentage": 17,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "Autocompact buffer",
+    "tokens": 33000,
+    "percentage": 17,
+    "squareFullness": 1
+   },
+   {
+    "color": "inactive",
+    "isFilled": true,
+    "categoryName": "Autocompact buffer",
+    "tokens": 33000,
+    "percentage": 17,
+    "squareFullness": 0.5
+   }
+  ]
+ ],
+ "model": "glm-5.3",
+ "memoryFiles": [
+  {
+   "path": "/Users/jacklee/.claude/CLAUDE.md",
+   "type": "User",
+   "tokens": 362
+  },
+  {
+   "path": "/Users/jacklee/Projects/cordcode-macbridge-claudecode-official/CLAUDE.md",
+   "type": "Project",
+   "tokens": 10632
+  },
+  {
+   "path": "/Users/jacklee/.claude/projects/-Users-jacklee-Projects-cordcode-macbridge/memory/MEMORY.md",
+   "type": "AutoMem",
+   "tokens": 1072
+  }
+ ],
+ "mcpTools": [
+  {
+   "name": "mcp__plugin_context7_context7__query-docs",
+   "serverName": "plugin_context7_context7",
+   "tokens": 860,
+   "isLoaded": false
+  },
+  {
+   "name": "mcp__plugin_context7_context7__resolve-library-id",
+   "serverName": "plugin_context7_context7",
+   "tokens": 1464,
+   "isLoaded": false
+  },
+  {
+   "name": "mcp__zai-mcp-server__analyze_data_visualization",
+   "serverName": "zai-mcp-server",
+   "tokens": 504,
+   "isLoaded": false
+  },
+  {
+   "name": "mcp__zai-mcp-server__analyze_image",
+   "serverName": "zai-mcp-server",
+   "tokens": 442,
+   "isLoaded": false
+  },
+  {
+   "name": "mcp__zai-mcp-server__analyze_video",
+   "serverName": "zai-mcp-server",
+   "tokens": 446,
+   "isLoaded": false
+  },
+  {
+   "name": "mcp__zai-mcp-server__diagnose_error_screenshot",
+   "serverName": "zai-mcp-server",
+   "tokens": 516,
+   "isLoaded": false
+  },
+  {
+   "name": "mcp__zai-mcp-server__extract_text_from_screenshot",
+   "serverName": "zai-mcp-server",
+   "tokens": 530,
+   "isLoaded": false
+  },
+  {
+   "name": "mcp__zai-mcp-server__ui_diff_check",
+   "serverName": "zai-mcp-server",
+   "tokens": 492,
+   "isLoaded": false
+  },
+  {
+   "name": "mcp__zai-mcp-server__ui_to_artifact",
+   "serverName": "zai-mcp-server",
+   "tokens": 678,
+   "isLoaded": false
+  },
+  {
+   "name": "mcp__zai-mcp-server__understand_technical_diagram",
+   "serverName": "zai-mcp-server",
+   "tokens": 514,
+   "isLoaded": false
+  }
+ ],
+ "agents": [
+  {
+   "agentType": "code-simplifier:code-simplifier",
+   "source": "plugin",
+   "tokens": 68
+  },
+  {
+   "agentType": "feature-dev:code-architect",
+   "source": "plugin",
+   "tokens": 86
+  },
+  {
+   "agentType": "feature-dev:code-explorer",
+   "source": "plugin",
+   "tokens": 74
+  },
+  {
+   "agentType": "feature-dev:code-reviewer",
+   "source": "plugin",
+   "tokens": 78
+  },
+  {
+   "agentType": "glm-vision",
+   "source": "userSettings",
+   "tokens": 40
+  }
+ ],
+ "slashCommands": {
+  "totalCommands": 24,
+  "includedCommands": 24,
+  "tokens": 1403
+ },
+ "skills": {
+  "totalSkills": 22,
+  "includedSkills": 22,
+  "tokens": 1974,
+  "skillFrontmatter": [
+   {
+    "name": "audit-plan",
+    "source": "userSettings",
+    "tokens": 4
+   },
+   {
+    "name": "exec-plan",
+    "source": "userSettings",
+    "tokens": 4
+   },
+   {
+    "name": "handoff-doc",
+    "source": "userSettings",
+    "tokens": 120
+   },
+   {
+    "name": "ios-real-device-doc",
+    "source": "userSettings",
+    "tokens": 7
+   },
+   {
+    "name": "skill-creator",
+    "source": "userSettings",
+    "tokens": 5
+   },
+   {
+    "name": "supervise",
+    "source": "userSettings",
+    "tokens": 4
+   },
+   {
+    "name": "takeover",
+    "source": "userSettings",
+    "tokens": 3
+   },
+   {
+    "name": "code-review:code-review",
+    "source": "plugin",
+    "pluginName": "code-review",
+    "tokens": 18
+   },
+   {
+    "name": "feature-dev:feature-dev",
+    "source": "plugin",
+    "pluginName": "feature-dev",
+    "tokens": 8
+   },
+   {
+    "name": "frontend-design:frontend-design",
+    "source": "plugin",
+    "pluginName": "frontend-design",
+    "tokens": 11
+   },
+   {
+    "name": "dataviz",
+    "source": "built-in",
+    "tokens": 482
+   },
+   {
+    "name": "update-config",
+    "source": "built-in",
+    "tokens": 236
+   },
+   {
+    "name": "keybindings-help",
+    "source": "built-in",
+    "tokens": 83
+   },
+   {
+    "name": "code-review",
+    "source": "built-in",
+    "tokens": 151
+   },
+   {
+    "name": "simplify",
+    "source": "built-in",
+    "tokens": 63
+   },
+   {
+    "name": "fewer-permission-prompts",
+    "source": "built-in",
+    "tokens": 64
+   },
+   {
+    "name": "loop",
+    "source": "built-in",
+    "tokens": 115
+   },
+   {
+    "name": "claude-api",
+    "source": "built-in",
+    "tokens": 361
+   },
+   {
+    "name": "workflow-authoring",
+    "source": "built-in",
+    "tokens": 84
+   },
+   {
+    "name": "run",
+    "source": "built-in",
+    "tokens": 123
+   },
+   {
+    "name": "init",
+    "source": "built-in",
+    "tokens": 22
+   },
+   {
+    "name": "security-review",
+    "source": "built-in",
+    "tokens": 6
+   }
+  ]
+ },
+ "autoCompactThreshold": 167000,
+ "isAutoCompactEnabled": true,
+ "messageBreakdown": {
+  "toolCallTokens": 0,
+  "toolResultTokens": 0,
+  "attachmentTokens": 3384,
+  "assistantMessageTokens": 35,
+  "userMessageTokens": 8,
+  "redirectedContextTokens": 0,
+  "unattributedTokens": 0,
+  "toolCallsByType": [],
+  "attachmentsByType": [
+   {
+    "name": "skill_listing",
+    "tokens": 1618
+   },
+   {
+    "name": "agent_listing_delta",
+    "tokens": 1077
+   },
+   {
+    "name": "hook_non_blocking_error",
+    "tokens": 494
+   },
+   {
+    "name": "deferred_tools_delta",
+    "tokens": 172
+   },
+   {
+    "name": "total_tokens_reminder",
+    "tokens": 23
+   }
+  ]
+ },
+ "apiUsage": {
+  "input_tokens": 19178,
+  "output_tokens": 12,
+  "cache_creation_input_tokens": 0,
+  "cache_read_input_tokens": 448
+ }
+}

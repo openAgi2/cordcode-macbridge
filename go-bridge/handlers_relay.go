@@ -811,6 +811,11 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 	// 开始轮询监视新内容（process live 与否都继续；live 只影响 death/TTL 路径）。
 	ticker := time.NewTicker(claudeFileRelayPollInterval)
 	defer ticker.Stop()
+	// Phase 3 事件驱动定向刷新：Stop hook 经 Management API nudge 本通道，
+	// 立即消费 transcript 尾部而不等 3s tick（hooks 失活时退化为纯轮询=现状）。
+	nudgeCh := make(chan struct{}, 1)
+	h.registerClaudeRelayNudge(sessionID, nudgeCh)
+	defer h.unregisterClaudeRelayNudge(sessionID, nudgeCh)
 	lastMeaningfulGrowth := time.Now()
 	runningObserved := false
 	processDeathMisses := 0
@@ -880,7 +885,12 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 		}
 		heldTerminals = nil
 	}
-	for range ticker.C {
+	for {
+		select {
+		case <-ticker.C:
+		case <-nudgeCh:
+			// Phase 3 Stop hook 事件驱动的立即轮询（定向刷新；失活时纯轮询兜底）
+		}
 		if !h.relayKindIs(sessionID, relayKindClaudeFile) {
 			slog.Info("go-bridge: claudeSessionFileRelay superseded by agent relay", "sessionID", sessionID)
 			flushHeldTerminals()
@@ -1059,7 +1069,31 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 			// and deliver nothing. currentTurnID is threaded as the file-order fallback turn for rows
 			// whose parent chain has no admitted owner (mapper degrades to file-order attribution,
 			// not content refereeing, guardrail #4).
-			if e.UUID != "" && e.Message != nil && (e.Type == "user" || e.Type == "assistant") {
+			// Echo-only rows（caveat/<local-command-stdout> 等归一化后无任何可见
+			// 内容的 user 行，isClaudeEchoOnlyUserRow）按非内容行处理：仅推进
+			// ledger cursor（acknowledge），不进内容 transition——kernel 拒绝零
+			// 事件 transition 且拒绝不推进 cursor，会让后续所有行以 gap 全拒
+			//（owner 真机 2026-09-04 23:17：问题 B/回复 B 整回合丢失）。
+			//
+			// 官方单源模型（owner 2026-09-04 复测「回复重复」）：agent relay
+			// （stdout，官方唯一消费面）活跃时，**自有回合**（core.ClientTurnOwner——
+			// 本进程 Send 自带 client uuid 发起，user 行 uuid ∈ 自持集）的 assistant
+			// 完成态行由 stdout 权威供给（流式差量收口，见 relayEvents 的 turnId 补全）；
+			// file-relay 对其仅推进 cursor，防止双源向同一 item 各 append 一份正文。
+			// 外部回合（owner 2026-09-05 复测：Mac Desktop/Terminal worker 写同一
+			// transcript）不经本进程 stdout——必须继续由 file-relay 供正文与终态，
+			// 否则 iOS 永远卡执行中。user 行照常进 batch（turn uuid 身份的唯一建立者）。
+			// 无会话对象/未实现接口的 backend 视为非自有（file-relay 供内容，安全方向）。
+			if e.UUID != "" && e.Message != nil && (e.Type == "user" || e.Type == "assistant") && !isClaudeEchoOnlyUserRow(e) {
+				if e.Type == "assistant" && h.agentRelayActive(sessionID) && h.agentOwnsClaudeTurn(sessionID, currentTurnID) {
+					h.acknowledgeClaudeSourceRow(backendID, sessionID, traceCorrelation, scanned.ByteEnd)
+					emitClaudeSourceTrace(claudeSourceTraceRecord{
+						Phase: "live", IngestDomain: "source_only", BackendID: backendID,
+						SessionID: sessionID, Correlation: traceCorrelation, Record: scanned,
+						FileOrderTurnID: currentTurnID, Transition: "stdout_owns_assistant_content",
+					})
+					continue
+				}
 				h.applyClaudeLiveSourceRecord(scanned, backendID, sessionID, traceCorrelation, &currentTurnID, &runningObserved, cachedPID, &heldTerminals, &turnText)
 				continue
 			}
@@ -2062,7 +2096,7 @@ func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *
 		if isClaudeUserInterruptRelayEntry(e) {
 			return out // interrupt marker — no user_message, no new turn
 		}
-		text := claudeConcatTextBlocks(blocks)
+		text := claudeNormalizedUserText(blocks)
 		if strings.TrimSpace(text) == "" {
 			return out
 		}
@@ -2840,6 +2874,13 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 				slog.Debug("go-bridge: relayEvents unmapped event", "backendID", backendID, "sessionID", sessionID, "eventType", ev.Type)
 				continue
 			}
+			// 官方流式对齐（owner 2026-09-04 复测反馈「无流式输出」）：claude stdout
+			// 的流式增量（CLI stream_event → EventText）没有 uuid 身份（CLI 不回显
+			// user 帧），SSV2 reducer 跳过无身份 delta——iOS 只能等 file-relay 完成
+			// 态整段。此处补当前 active turn 身份（file-relay user 行建立的 turnID），
+			// 流式增量经 IngestLive 进投影 patch（官方 SDK 消费者的 stream_event
+			// 打字机等价物）；完成帧在 session 侧已做流式差量，不双份。
+			h.backfillClaudeStreamTurnID(backendID, sessionID, eventName, data)
 
 			// Sync session runtimeState from relayed events to memory sessionRegistry
 			if eventName == "turn_started" {
@@ -3019,5 +3060,105 @@ func (h *Handlers) FlushRelayOutboxes() {
 		if err := h.relayOutbox.Flush(device.DeviceID, sender); err != nil {
 			slog.Warn("go-bridge: relay outbox flush failed", "deviceID", safeID(device.DeviceID), "error", err)
 		}
+	}
+}
+
+// claudeNormalizedUserText joins an entry's text blocks with the same CLI
+// slash-command normalization the cold rich-history path applies
+// (agent/claudecode.NormalizeClaudeUserText): <local-command-stdout|stderr|
+// caveat> echoes drop entirely, <command-name>/<command-args> collapse to a
+// compact "/cmd args" line. Without this the live file-relay projection
+// rendered the raw XML tags as user bubbles (owner 真机 2026-09-04 #2) while
+// cold history showed the normalized form — same transcript, two renderings.
+func claudeNormalizedUserText(blocks []claudeRelayContentBlock) string {
+	segments := make([]string, 0, len(blocks))
+	for _, b := range blocks {
+		if b.Type != "text" || b.Text == "" {
+			continue
+		}
+		if normalized := claudecode.NormalizeClaudeUserText(b.Text); normalized != "" {
+			segments = append(segments, normalized)
+		}
+	}
+	return strings.Join(segments, "\n\n")
+}
+
+// isClaudeEchoOnlyUserRow 报告「纯回显」user 行：全部文本块经 CLI 命令回显
+// 归一化（claudecode.NormalizeClaudeUserText）后无任何可见内容、且不含
+// tool_result/其他结构块。这类行（<local-command-caveat>、<local-command-
+// stdout/stderr> 等）是协议噪音，按非内容行路由（仅推进 cursor），不进
+// 内容 transition——kernel 拒绝零事件内容行，且拒绝会卡死 ledger cursor。
+// <command-name> 行不在此列（归一化为 "/cmd args" 紧凑行，仍是可见内容）。
+func isClaudeEchoOnlyUserRow(e claudeTranscriptRelayEntry) bool {
+	if e.Type != "user" || e.Message == nil {
+		return false
+	}
+	blocks := claudeRelayContentBlocks(e.Message.Content)
+	if len(blocks) == 0 {
+		return false
+	}
+	for _, b := range blocks {
+		if b.Type != "text" {
+			return false // tool_result/其他结构块：内容行，永不按 echo 跳过
+		}
+		if strings.TrimSpace(claudecode.NormalizeClaudeUserText(b.Text)) != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// agentRelayActive reports whether an agent stdout relay currently owns this
+// session's live event stream（官方消费面）。受 h.mu 保护。
+func (h *Handlers) agentRelayActive(sessionID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.agentRelayRunning[sessionID]
+}
+
+// agentOwnsClaudeTurn 判断 turn（身份 = transcript user 行 uuid）是否由本 bridge
+// 会话进程发起：查注册的 AgentSession 并类型断言 core.ClientTurnOwner（claude
+// 自持 client uuid 集）。无会话对象、未实现接口或空 turnID 均返回 false——
+// file-relay 保持供内容（安全方向：宁可双源去重，不可内容断供）。
+func (h *Handlers) agentOwnsClaudeTurn(sessionID, turnID string) bool {
+	if turnID == "" {
+		return false
+	}
+	h.mu.Lock()
+	sess, ok := h.getSession(sessionID)
+	h.mu.Unlock()
+	if !ok {
+		return false
+	}
+	owner, ok := sess.(core.ClientTurnOwner)
+	if !ok {
+		return false
+	}
+	return owner.OwnsClientTurn(turnID)
+}
+
+// backfillClaudeStreamTurnID 给 claude stdout 流式增量（无 uuid 身份——CLI
+// 不回显 user 帧）补当前 active turn 身份，使 SSV2 reducer 不再跳过
+// （reducer 对无 turnId/itemId 的 text_delta 直接 return）。官方 SDK 消费者
+// 的 stream_event 打字机等价物。完成帧在 session 侧已做流式差量，不双份。
+func (h *Handlers) backfillClaudeStreamTurnID(backendID, sessionID, eventName string, data interface{}) {
+	if backendID != "claude" && backendID != "claudecode" {
+		return
+	}
+	if eventName != "text_delta" && eventName != "reasoning_delta" {
+		return
+	}
+	dataMap, ok := data.(map[string]interface{})
+	if !ok {
+		return
+	}
+	if _, has := dataMap["turnId"]; has {
+		return
+	}
+	if _, has := dataMap["itemId"]; has {
+		return
+	}
+	if active := h.projectionKernel.ActiveTurnID(backendID, sessionID); active != "" {
+		dataMap["turnId"] = active
 	}
 }

@@ -182,6 +182,11 @@ func Main() {
 		"deepseek":  "dsh",
 	}
 
+	// Phase 3：claude hooks 事件层。holder 先于 agents 创建（agent 构造时注入
+	// provider 闭包），Management API 启动后 set 端点并心跳自检；自检通过前
+	// provider 返回 ok=false，spawn 不带 --settings（纯轮询=现状，S3 fail-closed）。
+	claudeHooks := &claudeHookConfigHolder{}
+
 	for _, id := range strings.Split(*drivers, ",") {
 		id = strings.TrimSpace(id)
 		if id == "" {
@@ -206,6 +211,11 @@ func Main() {
 			pinStore:          pinStore,
 			dataDir:           *dataDirPath,
 		})
+		// Phase 3：claude 自 spawn 会话的 --settings hooks 提供者（Management
+		// 端点启动并通过心跳自检后生效；否则纯轮询=现状）。
+		if agentName == "claudecode" {
+			agentOpts["hook_settings_provider"] = claudeHooks.SettingsProvider()
+		}
 
 		agent, err := core.CreateAgent(agentName, agentOpts)
 		if err != nil {
@@ -379,7 +389,8 @@ func Main() {
 			RuntimeIdentity: admission.RuntimeIdentity{
 				PID: int32(os.Getpid()), BridgeEpoch: managementBridgeEpoch(bridgeEpoch),
 			},
-			TopologyProvider: topologyProvider,
+			TopologyProvider:   topologyProvider,
+			ClaudeHookHolder:   claudeHooks,
 		}
 		mgmtSrv = NewManagementServer(mgmtCfg)
 
@@ -393,6 +404,18 @@ func Main() {
 		}
 		managementURL = fmt.Sprintf("http://%s:%d", *managementHost, actualPort)
 		slog.Info("go-bridge: 管理 API 就绪", "url", managementURL)
+
+		// Phase 3 心跳自检（S3 验收硬条件）：端点真实可达（路由+路径 token 鉴权+
+		// 解析）后 hooks 才对自 spawn 会话生效；失败=纯轮询=现状，不伪装事件驱动。
+		claudeHooks.set(managementURL, *managementToken)
+		probeBody := strings.NewReader(`{"hook_event_name":"Heartbeat"}`)
+		probeResp, probeErr := http.Post(managementURL+claudeHookEndpointPath+*managementToken, "application/json", probeBody)
+		if probeErr == nil {
+			_ = probeResp.Body.Close()
+		}
+		if probeErr != nil || probeResp == nil || probeResp.StatusCode != http.StatusOK {
+			slog.Warn("go-bridge: claude hooks endpoint self-probe failed; staying on polling-only", "error", probeErr)
+		}
 	}
 
 	// P1-6: product 模式（已配置 managementHost+token）下，ready frame 必须携带非空 managementUrl。

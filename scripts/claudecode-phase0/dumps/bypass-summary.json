@@ -1,0 +1,15 @@
+{
+  "scenario": "bypass",
+  "verdicts": {
+    "initialize": {
+      "request_id": "req_c1",
+      "verdict": "success",
+      "response_subtype": "success"
+    },
+    "set_permission_mode_bypassPermissions": {
+      "request_id": "req_c2",
+      "verdict": "success",
+      "response_subtype": "success"
+    }
+  }
+}
