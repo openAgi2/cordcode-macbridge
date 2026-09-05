@@ -88,6 +88,24 @@ Anthropic 服务器做同步锚点；Desktop 是 RC surface 之一（resume 带 
 认证走 claude.ai 账号；transcript 上 Anthropic 云（产品语义变化，须 owner 裁决）。路线 B：
 维持现状等官方开放。**未裁决，仅登记。**
 
+**2026-09-05 probe 收口 + 裁决：no-go（无订阅）**（报告
+`docs/2026-09-05-claudecode-rc-client-probe.md`，证据包
+`scripts/claudecode-rc-probe/`）：owner 确认**无 Pro/Max/Team 订阅**，而
+RC 硬要求订阅（API key 不支持）→ 路线 A（Desktop host + bridge 远程客
+户端）与 F1（SDK bridge worker host）**全部搁置**，唯一恢复条件 = 未来
+订阅。本机另有两条独立阻塞已实锤：user settings env 块的网关 base URL +
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`（shell env / project settings
+覆盖均无效，doctor 实验取证）；Desktop Code tab 会话走 cc-switch 本地代理
+（`127.0.0.1:15721/claude-desktop`，host 注入优先于 user settings）而非
+官方直连。**正面遗产（未来订阅后直接复用，勿重新调研）**：Agent SDK
+0.3.260 的 `/bridge`（`createCodeSession`→cse_* 会话、`POST
+/v1/code/sessions/{id}/bridge` mint worker JWT=注册+bump epoch、
+`attachBridgeSession` 全套控制回调/20s 心跳/4090 接管关闭码/outboundOnly
+镜像模式）与 `/browser`（SSE 读+POST 写 `query()`）是官方 @alpha 接入面；
+CLI 2.1.234/2.1.260 二进制内嵌 `/v1/code/sessions` 客户端实现与 API 表。
+无订阅期间「Desktop 实时显示 iOS 消息」仍无官方路径（上方「无跨进程总
+线」结论不变）。
+
 # 2026-09-04 Codex 计划：iPhone 能批、不能开
 
 owner 真机：Mac Codex App 计划模式发任务 → iPhone 同步计划正文并点批准执行，通过。

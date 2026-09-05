@@ -9,7 +9,14 @@
 
 ## 0. 总结论
 
-**当前环境条件性 no-go；工程可行性证据强于预期，续期条件明确。**
+**no-go（资格前提不满足）——owner 于 2026-09-05 确认无 Pro/Max/Team
+订阅**；RC 官方硬要求订阅（API key 不支持），因此路线 A（Desktop host +
+bridge 远程客户端）与 F1（SDK bridge worker host）**全部搁置**，除非未来
+订阅。工程可行性证据（官方 SDK @alpha 接入面）已勘明归档，未来订阅后可
+直接续用，无需重新调研协议面。
+
+（2026-09-05 调研时点的中间结论为「当前环境条件性 no-go」，订阅裁决后
+升级为最终 no-go；以下正文保留中间判定过程作为依据链。）
 
 按指令三个硬门：
 
@@ -103,8 +110,8 @@ opus/sonnet→glm-5.3 改写对 RC 会话失效**，执行消耗 claude.ai 订�
 当前认证形态 = 网关 token（settings env 的 `ANTHROPIC_AUTH_TOKEN`/
 `ANTHROPIC_API_KEY`）。keychain 无 `Claude Code-credentials` 条目、
 `~/.claude/.credentials.json` 不存在 → **本机从未以 claude.ai OAuth 登录**。
-owner 是否持有 Pro/Max/Team 订阅账号，本机证据无法证明（Desktop 走
-cc-switch token，未体现 claude.ai 登录）——owner 决策点。
+**owner 2026-09-05 确认：不持有 Pro/Max/Team 订阅**——RC 资格前提
+（订阅硬要求，API key 不支持）不满足，此项为最终阻塞，非配置可解。
 
 ## 3. B 组：RC 客户端协议面（静态层完整，活体阻塞）
 
@@ -365,13 +372,16 @@ opt-in backend 变体（非替换）：现有 stream-json 子进程模型继续�
    行为）；
 5. Cloudflare 对 claude.ai 面（api.anthropic.com 面理论上不受影响，未验）。
 
-### owner 决策点清单
+### owner 决策点清单（2026-09-05 裁决后收口）
 
-1. **模型执行语义**：RC 会话走 api.anthropic.com（网关 glm 改写失效、
-   消耗 claude.ai 订阅）——接受为 opt-in 第二形态，还是不做？
-2. **隐私语义**：transcript 存 Anthropic 服务器——接受？
-3. **资格前提**：是否持有 Pro/Max/Team 订阅？
-4. **probe 续期授权**：M0 动作清单（登录 + 临时改全局 settings + Desktop
-   实验授权）是否放行？
-5. **形态选择**（M1 实验后再裁）：路线 A（Desktop host + bridge 远程
-   客户端）vs F1（bridge host + 官方端 viewer）。
+1. ~~模型执行语义~~：随订阅前提一并搁置——无订阅则不存在该取舍。
+2. **隐私语义**：同上，仅在恢复该路线时再裁。
+3. ~~资格前提~~：**已裁决（2026-09-05）：无 Pro/Max/Team 订阅 → RC
+   全路线搁置**。唯一恢复条件 = 未来订阅（Pro/Max；Team/Enterprise 需
+   管理员开 RC toggle）。
+4. ~~probe 续期授权~~：随 3 失效。若未来订阅，按 §8 续期成本 M0→M1
+   执行即可，协议面证据包可复用。
+5. **无订阅期间的现状确认**：Claude backend 维持现有形态（网关 glm 执行 +
+   stream-json 子进程 + file-relay 旁观 Desktop）；「Desktop 实时显示 iOS
+   消息」在无订阅下仍无官方路径（think.md「无跨进程总线」结论不变，RC
+   是唯一官方多端同步通道且被订阅门挡住）。
