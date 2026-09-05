@@ -36,9 +36,18 @@ CLI 版本锚（三段式）=PATH CLI 2.1.234（实测双锚：--version + syste
 | 0.2 代际矩阵 | `README.md` 代际矩阵表（PATH CLI 2.1.234 × Desktop 2.1.258 分行） |
 | 0.3 目录双 dump | main.jsonl req_1 vs req_2（程序化比对同构）+ bare-list 对照 |
 | 0.4 cap 探测 | `dumps/turn.jsonl`（system/init capabilities 原文） |
-| 0.5 hooks | `dumps/hooks-posts.jsonl`（4 事件 POST 原文）+ `dumps/fixture-hook-silent-failure.jsonl`（S3） |
+| 0.5 hooks | `dumps/hooks-posts.jsonl`（POST 原文）+ `dumps/fixture-hook-silent-failure.jsonl`（S3） |
 | 0.6 env 矩阵 | `dumps/env-matrix.json`（6 组合 × 真实 turn） |
 | 0.7 网关复测 | `dumps/gateway-retest.json` + gateway-raw-*.json |
+
+> **dump 覆写注记（audit P1-1）**：本表 hooks 行按 31a5afe 入库时（CLI 2.1.234，
+> 4 事件 POST）描述；现行 dumps/ 已被 2026-09-05 的 2.1.261 复测覆盖写（9 行 POST：
+> UserPromptSubmit / Stop / ConfigChange×2 / Pre×2 / Post×2 / SessionEnd）。
+> 2.1.234 原始证据在 git 31a5afe。**「--settings 层 SessionStart 不触发」在
+> 2.1.261 上复核仍成立**（HTTP POST 层 9 帧无 SessionStart）；复测流里的
+> `SessionStart:startup` 出现于 stdout `system/hook_started|hook_response` 帧——
+> 那是用户层 hook（死 cc-event-hook.sh 等）的执行帧，与 `--settings` HTTP hook
+> 是两套机制（README「顺带取证」节，两代 CLI 同象），勿混淆。
 
 结论要点：六 subtype 在 2.1.234 全 success；list_models 与 initialize.models 同构且无需先 init；
 resolvedModel=canonical（cc-switch 别名不改目录）；capabilities 无 modelCatalog 但 list_models 可用；
@@ -242,3 +251,32 @@ register 添加 / settle 后保留（晚到的同 turn 文件行仍属 stdout �
 回归锁：外部回合在 agent relay 活跃时正文 + turn_completed 均达 iOS）+
 TestOwnsClientTurnSelfSet（自持集四态）；既有 cursor-only 测试改为声明自有回合。
 全量回归绿。
+
+### 追记 6：审计回执——P0 panic 修复 + P1/P2 文档关账（2026-09-05）
+
+审计报告：`docs/2026-09-05-audit-2026-09-04-claudecode-official-capability-upgrade-design完成情况.md`
+（8e8082e）。证据体系结论「成立」；以下为逐项处置：
+
+**P0（阻断，已修复）**：追记 5（a200da6）引入的 `handleResult → go
+emitProtocolContextUsage → sendControlRequest` 在半初始化 session（测试直接驱动
+handleResult：无 stdin / 无 ctx）上 nil 解引用 panic——实测复现 3/6 FAIL，栈坐实
+`writeJSONContext` 对 nil `cs.stdin`（session.go:1406）。修复 =
+`emitProtocolContextUsage` 生命周期门（`!alive || stdin==nil || ctx==nil` 短路；
+真实 spawn 会话恒过门，生产行为不变）。**补测按审计建议从 handleResult 入口驱动**
+（中间层入口纪律第三次应验）：① bare session 不 panic（无门控时 goroutine 微秒级
+击穿二进制）；② 全链路正向（handleResult → goroutine → 控制帧 → pipe 回真样本
+fixture → `EventContextUsageUpdated` + lastUsage 被官方真值覆盖）。修复后 **10/10
+全量绿**。附带发现：handleResult 自身对 nil `cs.ctx` 也有同步 panic 路径
+（`select` 求值 `cs.ctx.Done()`），仅影响更裸的测试构造，门控同批覆盖。
+
+**P1-1（已改）**：§1 表 hooks 行补 dump 覆写注记（见上）。
+
+**P1-2（已复核，断言成立）**：见 §1 注记——HTTP POST 层 SessionStart 在 2.1.261
+仍不触发；审计所指「SessionStart:startup 帧」为 stdout 用户层 hook 执行帧，两套
+机制。
+
+**P2（已关账）**：追记 3「待 owner 复测」（a）（b）（c）由追记 4 轮 owner 复测
+确认（「iOS 发消息打字机流式 ✅ 主链路修复确认」——无固定空白/流式/完成态即时
+一并覆盖）；（d）排队场景未显式复测，FIFO 队列语义由 `client_uuid_test` 单测锁定，
+无回归报告。追记 4 两现象：现象 2（外部回合压制）owner 三场景复测 1-3 全过
+（bc2d3d1 部署后）；现象 1（Desktop 不实时）确认为官方限制非缺陷（think.md 收口）。

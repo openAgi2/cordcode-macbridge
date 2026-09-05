@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // control_ops_test.go —— Phase 2 会话内控制操作定向测试。
@@ -304,4 +306,92 @@ func TestControlOpTimeout_FailsClosed(t *testing.T) {
 	if time.Since(start) > 5*time.Second {
 		t.Fatalf("CancelTurn ignored its deadline")
 	}
+}
+
+// audit P0 回归（2026-09-05）：handleResult 是异步 get_context_usage 的入口
+// （中间层入口驱动纪律——追记 3 的教训在此应验）。半初始化 session（无 stdin/
+// 无 ctx/未 alive，测试直接驱动 handleResult 的常态）必须被生命周期门短路，
+// 否则 goroutine 在 writeJSONContext 的 nil stdin 上解引用、击穿整个测试二进制
+// （修复前实测 7 次全量 2 次 panic FAIL）。
+func TestHandleResultProtocolUsageGatedOnBareSession(t *testing.T) {
+	// 半初始化：有 ctx/events/done（handleResult 同步路径本身需要），但无 stdin、
+	// 未 alive——异步控制面必须被生命周期门短路。
+	cs := &claudeSession{
+		done:   make(chan struct{}),
+		ctx:    context.Background(),
+		events: make(chan core.Event, 4),
+	}
+	cs.handleResult(map[string]any{"subtype": "success", "result": "x"})
+	// 无门控时 goroutine 会在微秒级 panic；给足跑出来的窗口。
+	time.Sleep(100 * time.Millisecond)
+}
+
+// 正向全链路（audit P0 补测）：从 handleResult 入口驱动，经 goroutine →
+// sendControlRequest → pipe 回 control_response（真样本 fixture）→ 事件面收到
+// EventContextUsageUpdated 且 lastUsage 被官方真值覆盖。
+func TestHandleResultEmitsProtocolContextUsageEndToEnd(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "context-usage", "get_context_usage-summary-2.1.261.json"))
+	if err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("fixture JSON: %v", err)
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Skipf("pipe: %v", err)
+	}
+	cs := &claudeSession{
+		stdin:  w,
+		done:   make(chan struct{}),
+		ctx:    context.Background(),
+		events: make(chan core.Event, 4),
+	}
+	cs.alive.Store(true)
+	defer r.Close()
+	go func() {
+		var env map[string]any
+		if err := json.NewDecoder(r).Decode(&env); err != nil {
+			return
+		}
+		inner, _ := env["request"].(map[string]any)
+		if inner["subtype"] != "get_context_usage" {
+			t.Errorf("inner = %v, want get_context_usage", inner)
+		}
+		rid, _ := env["request_id"].(string)
+		cs.dispatchControlResponse(ctrlFrame(rid, payload))
+	}()
+
+	cs.handleResult(map[string]any{"subtype": "success", "result": "x"})
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case evt := <-cs.events:
+			if evt.Type != core.EventContextUsageUpdated {
+				continue
+			}
+			if evt.ContextUsage == nil || evt.ContextUsage.UsedTokens != 19626 || evt.ContextUsage.ContextWindow != 200000 {
+				t.Fatalf("usage = %+v", evt.ContextUsage)
+			}
+			if last := cs.lastUsageSnapshotForTest(); last == nil || last.UsedTokens != 19626 {
+				t.Fatalf("lastUsage not covered by protocol truth: %+v", last)
+			}
+			return
+		case <-deadline:
+			t.Fatalf("EventContextUsageUpdated not emitted within 2s")
+		}
+	}
+}
+
+// lastUsageSnapshotForTest mirrors GetContextUsage() for assertions.
+func (cs *claudeSession) lastUsageSnapshotForTest() *core.ContextUsage {
+	cs.usageMu.Lock()
+	defer cs.usageMu.Unlock()
+	if cs.lastUsage == nil {
+		return nil
+	}
+	c := *cs.lastUsage
+	return &c
 }

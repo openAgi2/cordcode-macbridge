@@ -216,7 +216,15 @@ func (cs *claudeSession) GetContextUsageLive(ctx context.Context) *core.ContextU
 // control-plane truth and records it as lastUsage（覆盖流帧 usage 的近似值）。
 // 只许在非读循环 goroutine 调用——sendControlRequest 的回包由读循环分发，
 // 在读循环内同步等待会死锁。
+//
+// 生命周期门（audit P0，2026-09-05）：控制面只在真实 spawn 的会话上存在。
+// 半初始化 session（测试直接驱动 handleResult：无 stdin / 无 ctx / 未 alive）
+// 与已 Close 会话必须在此短路——writeJSONContext 对 nil stdin 解引用、
+// context.WithTimeout 对 nil ctx panic，均会击穿整个测试二进制（间歇 2/7 FAIL）。
 func (cs *claudeSession) emitProtocolContextUsage() {
+	if !cs.alive.Load() || cs.stdin == nil || cs.ctx == nil {
+		return
+	}
 	usage := cs.GetContextUsageLive(cs.ctx)
 	if usage == nil {
 		return
