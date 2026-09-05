@@ -211,8 +211,12 @@ agent/claudecode + core）。
 
 生产部署：Release（runtime a200da6，11:33:40Z 构建）已覆盖安装 /Applications，
 运行态核验（PID 46939 代际晚于构建、8777 新 PID、内嵌 get_context_usage 特征
-符号、hooks probe ok、无违规残留）。行为层验收（iPhone 选择器即时切换、上下文条
-真值、PostModelSwitch 日志行）待 owner 复测。
+符号、hooks probe ok、无违规残留）。
+
+**行为层验收（owner 2026-09-05 12:20 真机通过）**：① iPhone 选择器切换模型——
+生产日志同刻出现 `PostModelSwitch sessionID=93cd4a10 requested=sonnet
+from=glm-4.7 to=glm-5.3-flash[1M]`（observed 层实测记录网关真实改写，含 1M
+变体）；② 上下文点击后出现系统/工具/记忆全量口径 ✅。三项候选收尾全部关账。
 
 ### 追记 4：第五轮复测「外部回合被压制」——单源门按回合发起方收窄（2026-09-05）
 
