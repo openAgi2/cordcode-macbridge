@@ -64,10 +64,29 @@ assistant 行 → iOS 收到问题卡执行中、无正文无终态。修复 = �
 file-relay 全量。**教训：单源模型的「源」必须按回合发起方判定，不能按会话存活
 判定。**
 
-**Mac Desktop 不实时显示 iOS 消息**（owner 第五轮问询）：Claude Desktop 不监听
+**Mac Desktop 不实时显示 iOS 消息**（owner 第五轮问询 + 2026-09-05 追查）：Claude Desktop 不监听
 transcript 的外部写入（无跨进程事件总线——正是我们自己产品需要 file polling 旁观
 Desktop 的原因）。数据已持久写入会话文件，Desktop 侧重开会话即可见；不是
-CordCode 可修的 bug。
+CordCode 可修的 bug。2026-09-05 取证补全：Desktop Code tab 自己也是「每会话一个私有
+CLI 子进程」模型（活体：`Claude-3p/claude-code/2.1.260/claude --resume=<id>
+--input/output-format stream-json`，版本比 CLAUDE.md 锚的 2.1.258 新）；无本地监听端口/
+IPC、深链只有导航级路由（`claude://code/continue|new|needs-input`、`claude://resume`）、
+`claude attach` 只服务 `--bg` 后台会话体系。GitHub 已知问题类别（#53717/#48955）。
+Codex/OpenCode/DSH 能实时同步是因为有共享 server/bus，Claude 没有——此为架构差异。
+
+**2026-09-05 重大发现：官方 Remote Control 已是多端同步会话架构**（
+<https://code.claude.com/docs/en/remote-control>，本机 bundled CLI 2.1.260 已支持
+`--remote-control`；owner settings 的 `remoteControlAtStartup` 未开启）：本地 CLI 出站
+HTTPS 注册 Anthropic API，claude.ai/code 与官方手机 App 作为远程 surface 流式收发——
+「终端/浏览器/手机可互换发消息、subagent/workflow 进度全端同步」，transcript 存
+Anthropic 服务器做同步锚点；Desktop 是 RC surface 之一（resume 带 RC 的会话会 reattach
+到同一 claude.ai 会话；Trusted Devices 列 Desktop 为可 view/steer 端）。对 CordCode 的
+潜在路线 A（codex-remote 同构）：Desktop 托管会话 + 开 RC，bridge 作为 RC 远程客户端接入
+→ iOS 回合在 Desktop 托管进程执行 → Desktop 原生直播（用户愿望直接满足），iPhone 侧
+事件全来自官方流。障碍：RC「远程客户端 ↔ Anthropic 服务器」wire 协议无公开文档（官方
+客户端仅 claude.ai/code 与官方 App），需真实 fixture probe（类比 codex-remote 当初）；
+认证走 claude.ai 账号；transcript 上 Anthropic 云（产品语义变化，须 owner 裁决）。路线 B：
+维持现状等官方开放。**未裁决，仅登记。**
 
 # 2026-09-04 Codex 计划：iPhone 能批、不能开
 
