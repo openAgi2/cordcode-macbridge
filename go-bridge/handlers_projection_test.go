@@ -1831,6 +1831,83 @@ func TestRichHistorySystemEntryToProjectionEvent(t *testing.T) {
 	}
 }
 
+// TestRichHistoryCommandAndPlanModeEntriesRouteToReducerEvents：dsh-web 冷拉
+// 折叠出的 system 结构部件（command / plan_mode）必须路由为 session_command /
+// session_plan_mode hydrate 事件（进 reducer），不再走 system_message 文本路。
+func TestRichHistoryCommandAndPlanModeEntriesRouteToReducerEvents(t *testing.T) {
+	current := "user-before"
+	cmd := core.RichHistoryEntry{
+		ID:      "s-hist:cmd:c1",
+		Role:    "system",
+		Parts:   []map[string]any{{"type": "command", "commandId": "c1", "name": "compact", "kind": "success", "text": "Compacted 20 history items (~11695 tokens)."}},
+	}
+	events := openCodeRichHistoryEntryToProjectionEvents(cmd, &current, true)
+	if len(events) != 1 || events[0].Event != "session_command" {
+		t.Fatalf("command entry events = %+v", events)
+	}
+	// 斜杠命令是官方 turn 边界（rework ⑧）：命令行之后的首个 assistant 行必须
+	// 自持身份，不得折回命令前最后一个 user turn。
+	if current != "" {
+		t.Fatalf("command row must reset flat attribution, current = %q", current)
+	}
+	d := events[0].Data
+	if d["commandId"] != "c1" || d["name"] != "compact" || d["kind"] != "success" ||
+		d["text"] != "Compacted 20 history items (~11695 tokens)." {
+		t.Fatalf("command event data = %+v", d)
+	}
+
+	// goal 命令行：history part 的 "line"（history.go appendCommandEntry 按
+	// 官方 goalCommandText 生成）必须路由为 session_command.inputLine，
+	// 与 live 路径（codec SessionCommandEvent.InputLine）同形。
+	goalCmd := core.RichHistoryEntry{
+		ID:   "s-hist:cmd:g1",
+		Role: "system",
+		Parts: []map[string]any{{
+			"type": "command", "commandId": "g1", "name": "goal", "kind": "success",
+			"line": "/goal 创作钢铁侠故事10000字左右，并写入 /tmp/demo-plan102.txt",
+		}},
+	}
+	events = openCodeRichHistoryEntryToProjectionEvents(goalCmd, &current, true)
+	if len(events) != 1 || events[0].Event != "session_command" {
+		t.Fatalf("goal command entry events = %+v", events)
+	}
+	if got := events[0].Data["inputLine"]; got != "/goal 创作钢铁侠故事10000字左右，并写入 /tmp/demo-plan102.txt" {
+		t.Fatalf("goal inputLine = %v, want the official /goal echo line", got)
+	}
+
+	plan := core.RichHistoryEntry{
+		ID:   "s-hist:plan-mode",
+		Role: "system",
+		Parts: []map[string]any{
+			{"type": "plan_mode", "active": true, "pending": false},
+		},
+	}
+	current = "user-before-plan"
+	events = openCodeRichHistoryEntryToProjectionEvents(plan, &current, true)
+	if len(events) != 1 || events[0].Event != "session_plan_mode" {
+		t.Fatalf("plan entry events = %+v", events)
+	}
+	if events[0].Data["active"] != true || events[0].Data["pending"] != false {
+		t.Fatalf("plan event data = %+v", events[0].Data)
+	}
+	// plan_mode 是会话级快照，不构成 turn 边界：归属指针不得被重置。
+	if current != "user-before-plan" {
+		t.Fatalf("plan_mode must keep attribution, current = %q", current)
+	}
+
+	// 无结构部件的 system 行仍走既有 system_message 文本路（Codex compact 摘要等）。
+}
+
+// TestSessionCommandPlanModeDeniedForSyncV2Raw：投影封条（K4）必须包含
+// dsh-web 命令/计划帧——syncV2 客户端只从 projection 拿命令行与芯片。
+func TestSessionCommandPlanModeDeniedForSyncV2Raw(t *testing.T) {
+	for _, name := range []string{"session_command", "session_plan_mode"} {
+		if !isSessionSyncV2RawTimelineEvent(name) {
+			t.Fatalf("%s must be deny-listed for syncV2 raw delivery", name)
+		}
+	}
+}
+
 func TestOpenCodeProjectionHydrateFromRichHistory(t *testing.T) {
 	handlers := NewHandlers()
 	agent := &fakeAgent{
@@ -2196,5 +2273,51 @@ func TestGrokBuildProjectionHydratePendingQuestionGate(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "requires_action") {
 		t.Fatalf("pending question must keep execution in requires_action: %s", string(raw))
+	}
+}
+
+// TestRichHistoryContextInjectionEntryToProjectionEvent：settle 通知冷拉行
+// （role context_injection + typed payload）→ 与 live 同形的 context_injection
+// 事件（itemId/kind + 可选 form/summary/text/senderSessionId + journal 时间），
+// 不重置 flat 归属（注入不是官方 turn 边界）。空 payload fail-closed。
+func TestRichHistoryContextInjectionEntryToProjectionEvent(t *testing.T) {
+	current := "user-turn-before-settle"
+	at := time.UnixMilli(1722244000000)
+	entry := core.RichHistoryEntry{
+		ID:      "ctxinj:2",
+		Role:    "context_injection",
+		Content: "Background subagent sess-bg finished after 1 round.",
+		ContextInjection: &core.ContextInjectionEvent{
+			ItemID:          "ctxinj:2",
+			Kind:            "subagent-settled",
+			Form:            "notice",
+			Summary:         "Background subagent sess-bg finished after 1 round.",
+			Text:            "Background subagent sess-bg finished after 1 round.\n已生成封神榜第一章。",
+			SenderSessionID: "sess-bg",
+		},
+		Timestamp: at,
+	}
+	events := openCodeRichHistoryEntryToProjectionEvents(entry, &current, true)
+	if len(events) != 1 || events[0].Event != "context_injection" {
+		t.Fatalf("events = %+v", events)
+	}
+	d := events[0].Data
+	if d["itemId"] != "ctxinj:2" || d["kind"] != "subagent-settled" || d["form"] != "notice" ||
+		d["summary"] != "Background subagent sess-bg finished after 1 round." ||
+		d["senderSessionId"] != "sess-bg" {
+		t.Fatalf("event data = %+v", d)
+	}
+	if d["timestampMillis"] != at.UnixMilli() {
+		t.Fatalf("timestampMillis = %v", d["timestampMillis"])
+	}
+	// 注入不是官方 turn 边界：归属指针保持（后续 assistant 行仍折回其 user turn）。
+	if current != "user-turn-before-settle" {
+		t.Fatalf("injection must keep attribution, current = %q", current)
+	}
+
+	// 空 payload / role 不带结构体：不造事件。
+	bare := core.RichHistoryEntry{ID: "ctxinj:9", Role: "context_injection", Content: "x"}
+	if evs := openCodeRichHistoryEntryToProjectionEvents(bare, &current, true); len(evs) != 0 {
+		t.Fatalf("bare entry must be dropped, got %+v", evs)
 	}
 }

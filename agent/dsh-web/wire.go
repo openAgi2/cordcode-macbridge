@@ -152,11 +152,30 @@ type Client struct {
 	rpcPrefix  string
 }
 
+// defaultUnaryTimeout bounds one unary /api call when the caller's context
+// carries no deadline. Var so tests can shrink it (rework ⑨ regression).
+var defaultUnaryTimeout = 30 * time.Second
+
+// unaryCtx picks the deadline for a unary call: the caller's own context when
+// it already carries one, else the package default above. The shared default
+// client deliberately sets NO http.Client.Timeout — that field is a hard cap
+// per-request contexts can only shorten, never extend, and it silently clipped
+// commands/execute at 30s while the handler allowed 90s+ (owner 2026-09-06
+// 02:17 /compact: Mac aborted the POST at exactly 30s "Client.Timeout exceeded
+// while awaiting headers", official execute's request-owned signal then killed
+// the compaction seat-side "This operation was aborted"; rework ⑨).
+func unaryCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, defaultUnaryTimeout)
+}
+
 // NewClient builds a client for baseURL. A nil httpClient gets a default with
-// a short timeout; per-call contexts bound the actual deadlines.
+// no blanket timeout; unary calls are bounded per-call (see unaryCtx).
 func NewClient(baseURL string, httpClient *http.Client) *Client {
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 30 * time.Second}
+		httpClient = &http.Client{}
 	}
 	return &Client{
 		BaseURL:    strings.TrimRight(baseURL, "/"),
@@ -205,6 +224,8 @@ func (c *Client) Call(ctx context.Context, method string, payload any, out any) 
 		return fmt.Errorf("dshweb: marshal request for %s: %w", method, err)
 	}
 
+	ctx, cancel := unaryCtx(ctx)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.BaseURL+"/api/"+method, bytes.NewReader(body))
 	if err != nil {
@@ -284,6 +305,8 @@ func (c *Client) Respond(ctx context.Context, rpcID string, ok bool, value any, 
 		return false, fmt.Errorf("dshweb: marshal respond: %w", err)
 	}
 
+	ctx, cancel := unaryCtx(ctx)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.BaseURL+"/api/respond", bytes.NewReader(body))
 	if err != nil {

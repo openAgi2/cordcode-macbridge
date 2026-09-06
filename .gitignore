@@ -63,3 +63,7 @@ handoffs/handoff-20260824-2257.md
 .zcode/
 /dumps/
 /default.profraw
+.exec-plan/state/plan-4112d14c1d2b.json
+handoffs/handoff-20260905-1807.md
+# 2026-09-06 dsh 空白屏诊断的临时 wire 捕获程序（证据在 /tmp，不进 git）
+.scratch-wirecap/

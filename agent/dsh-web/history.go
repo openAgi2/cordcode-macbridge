@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -95,18 +96,23 @@ func (a *Agent) getRichHistory(ctx context.Context, client *Client, sessionID st
 	return entries, nil
 }
 
-// countMappableEntries estimates mapped-entry yield: turn boundaries plus
-// user messages.
+// countMappableEntries estimates mapped-entry yield: turn boundaries, user
+// messages, and settled slash commands (each folds to one system row).
+//
+// Pages without any boundary event — a mid-turn chunk window; reasoning-heavy
+// turns expand to thousands of assistant/chunk + step rows per 50-message
+// page — map to ZERO new entries: they only extend the tail of the turn whose
+// turn/end row is counted by its own page. 2026-09-06 incident: the previous
+// len(evs)/8 fallback estimated such a page (8417 events, 0 boundaries) at
+// 1052 phantom entries, blew the walk budget after two pages, and iPhone
+// cold-open showed only the final turn of a 10-turn session.
 func countMappableEntries(evs []apiHistoryEntry) int {
 	n := 0
 	for _, e := range evs {
 		switch e.Event.Type {
-		case "turn/end", "user/message":
+		case "turn/end", "user/message", "command/done":
 			n++
 		}
-	}
-	if n == 0 {
-		n = len(evs) / 8
 	}
 	return n
 }
@@ -151,20 +157,103 @@ func mapHistoryEvents(sessionID string, evs []apiHistoryEntry) []core.RichHistor
 
 	var entries []core.RichHistoryEntry
 	acc := &dshTurnAccumulator{sessionID: sessionID}
+	// host 斜杠命令 + 计划模式折叠（command_fold.go；与 live codec 同一官方
+	// 折叠，冷拉/直播同形）。run→done 按 commandId 续接 name/args；plan 投影
+	// 只出末尾一条 {active, pending} 快照（非时间线节点，与官方一致）。
+	runningCommands := map[string]runningCommand{}
+	plan := &planFold{}
+	// goal 投影整值快照（goal/change 全量替换；live codec 同一语义）。
+	goal := (*core.GoalEvent)(nil)
+	// turn 内 settle 注入行缓冲：折叠 turn 模型无法把独立行插进气泡内部，
+	// 「turn N 进行中结算」按时间归属渲染在该 turn 之后（live reducer 同位——
+	// turn skeleton 先 append、ctx turn 后 append；官方 web 逐行展开时插在
+	// journal 原位正文之间，是同一 journal 顺序在两种排版下的投影）。2026-09-06
+	// owner 报障：旧实现注入行先于所属 turn 入列，iPhone 上读作「回复开头的一
+	// 串通知」。
+	var pendingInjections []core.RichHistoryEntry
 	flushTurn := func(endSeq int64, endTime int64) {
 		if entry, ok := acc.flush(endSeq, endTime); ok {
 			entries = append(entries, entry)
 		}
+		if len(pendingInjections) > 0 {
+			entries = append(entries, pendingInjections...)
+			pendingInjections = nil
+		}
+	}
+	appendCommandEntry := func(commandID, name, args, kind, text string, at int64) {
+		part := map[string]any{
+			"type":      "command",
+			"commandId": commandID,
+			"kind":      kind,
+		}
+		if name != "" {
+			part["name"] = name
+		}
+		if args != "" {
+			part["args"] = args
+		}
+		if text != "" {
+			part["text"] = text
+		}
+		if name == "goal" {
+			// 官方 goalCommandText（goal 专属输入行气泡；与 live codec 同式）。
+			part["line"] = "/goal" + strings.TrimRight(args, " \t\n\r\v\f")
+		}
+		entries = append(entries, core.RichHistoryEntry{
+			ID:        fmt.Sprintf("%s:cmd:%s", sessionID, commandID),
+			Role:      "system",
+			Parts:     []map[string]any{part},
+			Timestamp: dshLogTime(at),
+		})
 	}
 	for _, e := range evs {
 		switch e.Event.Type {
 		case "turn/start":
-			acc.start(e.Event.Seq, e.Event.Time)
+			// 官方 turn 号（journal ground truth {"turn": N}）：冷拉 entry 身份
+			// 与 live codec adoptTurn 同式（dshw-<prefix>-t<N>），冷基线与
+			// live 事件在一个身份上合并。缺失/非法时保持 fallback 身份。
+			var d struct {
+				Turn int `json:"turn"`
+			}
+			turnNum := 0
+			if jsonUnmarshal(e.Event.Data, &d) == nil && d.Turn >= 1 {
+				turnNum = d.Turn
+			}
+			acc.start(e.Event.Seq, e.Event.Time, turnNum)
 		case "turn/end":
 			flushTurn(e.Event.Seq, e.Event.Time)
 		case "user/message":
 			var d dshUserMessageData
 			if jsonUnmarshal(e.Event.Data, &d) != nil {
+				continue
+			}
+			if d.Source != nil && d.Source.Kind == "subagent-settled" {
+				// 官方 settle 通知（同 live codec 分支）：独立 context_injection
+				// 行，与 live 同 id（"ctxinj:<seq>"）防冷热重复；Summary 空 =
+				// 未知形状，静默丢（fail-open）。turn 进行中 → 缓冲到该 turn
+				// flush 之后（flushTurn）；turn 外保持原位。
+				if strings.TrimSpace(d.Source.Summary) == "" {
+					continue
+				}
+				entry := core.RichHistoryEntry{
+					ID:      fmt.Sprintf("ctxinj:%d", e.Event.Seq),
+					Role:    "context_injection",
+					Content: joinTextBlocks(d.Content),
+					ContextInjection: &core.ContextInjectionEvent{
+						ItemID:          fmt.Sprintf("ctxinj:%d", e.Event.Seq),
+						Kind:            d.Source.Kind,
+						Form:            d.Source.Form,
+						Summary:         d.Source.Summary,
+						Text:            joinTextBlocks(d.Content),
+						SenderSessionID: d.Source.SenderSessionID,
+					},
+					Timestamp: dshLogTime(e.Event.Time),
+				}
+				if acc.open {
+					pendingInjections = append(pendingInjections, entry)
+				} else {
+					entries = append(entries, entry)
+				}
 				continue
 			}
 			if d.Source == nil || d.Source.Kind != "user" {
@@ -174,8 +263,15 @@ func mapHistoryEvents(sessionID string, evs []apiHistoryEntry) []core.RichHistor
 			if strings.TrimSpace(text) == "" {
 				continue
 			}
+			// user 行落在 turn 内 → 归属所属 dshw turn（live applyUserMessage
+			// 同式：TurnID=activeTurnID）；turn 外（attach 前残留形）保持
+			// sessionID:seq fallback。
+			userID := fmt.Sprintf("%s:%d", sessionID, e.Event.Seq)
+			if acc.open && acc.turnNum >= 1 {
+				userID = dshwTurnID(sessionID, acc.turnNum)
+			}
 			entries = append(entries, core.RichHistoryEntry{
-				ID:        fmt.Sprintf("%s:%d", sessionID, e.Event.Seq),
+				ID:        userID,
 				Role:      "user",
 				Content:   text,
 				Timestamp: dshLogTime(e.Event.Time),
@@ -186,9 +282,130 @@ func mapHistoryEvents(sessionID string, evs []apiHistoryEntry) []core.RichHistor
 				continue
 			}
 			acc.addMessage(e.Event.Seq, e.Event.Time, d, outputs)
+		case "command/run":
+			var d dshCommandRunData
+			if jsonUnmarshal(e.Event.Data, &d) != nil {
+				continue
+			}
+			commandID := strings.TrimSpace(d.CommandID)
+			name := strings.TrimSpace(d.Name)
+			if commandID == "" || name == "" {
+				continue
+			}
+			args := ""
+			argsPresent := false
+			if d.Args != nil {
+				args = *d.Args
+				argsPresent = true
+			}
+			runningCommands[commandID] = runningCommand{name: name, args: args, argsPresent: argsPresent}
+			plan.onCommandRun(commandID, name, args, argsPresent)
+		case "command/done":
+			var d dshCommandDoneData
+			if jsonUnmarshal(e.Event.Data, &d) != nil {
+				continue
+			}
+			commandID := strings.TrimSpace(d.CommandID)
+			if commandID == "" || (d.Kind != "success" && d.Kind != "error") {
+				continue
+			}
+			name, args := "", ""
+			if run, ok := runningCommands[commandID]; ok {
+				name, args = run.name, run.args
+				delete(runningCommands, commandID)
+			}
+			text := ""
+			if d.Text != nil {
+				text = *d.Text
+			}
+			plan.onCommandDone(commandID, d.Kind)
+			appendCommandEntry(commandID, name, args, d.Kind, text, e.Event.Time)
+		case "plan/mode":
+			var d struct {
+				Active bool `json:"active"`
+			}
+			if jsonUnmarshal(e.Event.Data, &d) != nil {
+				continue
+			}
+			plan.onPlanMode(d.Active)
+		case "goal/change":
+			// 官方全量快照替换（domain.ts）：snapshot 形状整值覆盖，clear 墓碑
+			// 置空。解码失败跳过该行（冷拉容错：下一快照会整值覆盖）。
+			var d struct {
+				Operation string          `json:"operation"`
+				Goal      *core.GoalEvent `json:"goal"`
+			}
+			if jsonUnmarshal(e.Event.Data, &d) != nil {
+				continue
+			}
+			switch d.Operation {
+			case "create", "edit", "pause", "resume", "complete", "block":
+				if d.Goal != nil {
+					goal = d.Goal
+				}
+			case "clear":
+				goal = nil
+			}
+		case "tool-workflow/run-start", "tool-workflow/agent-start", "tool-workflow/agent-end", "tool-workflow/run-end":
+			// 并行子代理 workflow 折叠（workflow_fold.go；与 live codec 同一折叠）。
+			// run-start 在 journal 原位 append workflow part（官方 keyed chat 节点
+			// 锚定 run-start 位置），后续事件原地改同一 part。turn 未开 → 整 run
+			// 跳过（无锚定）。interrupted 由 reducer turn 终态 fixup 注入，不在此处理。
+			acc.foldWorkflowEvent(e.Event.Type, e.Event.Data)
 		}
 	}
 	flushTurn(0, 0) // torn tail: serve the committed prefix
+	// Torn-tail runs without done keep one running row each (official unsettled
+	// card; settle rows were already emitted inline at their done). Sorted for
+	// deterministic order.
+	pendingIDs := make([]string, 0, len(runningCommands))
+	for id := range runningCommands {
+		pendingIDs = append(pendingIDs, id)
+	}
+	sort.Strings(pendingIDs)
+	for _, id := range pendingIDs {
+		run := runningCommands[id]
+		appendCommandEntry(id, run.name, run.args, "running", "", 0)
+	}
+	// Plan-mode snapshot: one trailing part consumed by the hydrate router into a
+	// session_plan_mode event (official folds to inactive when the log has none).
+	active, pending := plan.view()
+	entries = append(entries, core.RichHistoryEntry{
+		ID:   fmt.Sprintf("%s:plan-mode", sessionID),
+		Role: "system",
+		Parts: []map[string]any{{
+			"type":    "plan_mode",
+			"active":  active,
+			"pending": pending,
+		}},
+	})
+	// Goal snapshot: one trailing part consumed by the hydrate router into a
+	// session_goal event (official projection is whole-snapshot; absent goal
+	// carries phase "none" so the far side clears any stale banner).
+	goalPart := map[string]any{"type": "goal", "phase": "none"}
+	if goal != nil {
+		goalPart = map[string]any{
+			"type":      "goal",
+			"id":        goal.ID,
+			"revision":  goal.Revision,
+			"objective": goal.Objective,
+			"phase":     goal.Phase,
+		}
+		if goal.BlockedReason != nil {
+			goalPart["blockedReason"] = map[string]any{
+				"code":    goal.BlockedReason.Code,
+				"message": goal.BlockedReason.Message,
+			}
+		}
+		if goal.MaxGoalRounds > 0 {
+			goalPart["maxGoalRounds"] = goal.MaxGoalRounds
+		}
+	}
+	entries = append(entries, core.RichHistoryEntry{
+		ID:    fmt.Sprintf("%s:goal", sessionID),
+		Role:  "system",
+		Parts: []map[string]any{goalPart},
+	})
 	return entries
 }
 
@@ -221,6 +438,7 @@ type dshToolResultData struct {
 type dshTurnAccumulator struct {
 	sessionID string
 	open      bool
+	turnNum   int // 官方 turn 号（turn/start {"turn": N}）；0 = 未知 → fallback 身份
 	startSeq  int64
 	startTime int64
 	thinking  strings.Builder
@@ -231,10 +449,16 @@ type dshTurnAccumulator struct {
 	model     string
 	provider  string
 	hasData   bool
+	// workflowFold 折叠状态（workflow_fold.go；live codec 同一折叠）+ parts 索引：
+	// run-start 在 journal 原位 append 一个 workflow part，后续事件原地改该 part
+	// （官方 keyed chat 节点语义——卡锚定 run-start 位置，成员随事件更新）。
+	workflowFold workflowFold
+	workflowIdx  map[string]int
 }
 
-func (t *dshTurnAccumulator) start(seq int64, at int64) {
+func (t *dshTurnAccumulator) start(seq int64, at int64, turn int) {
 	t.open = true
+	t.turnNum = turn
 	t.startSeq = seq
 	t.startTime = at
 }
@@ -249,7 +473,7 @@ func (t *dshTurnAccumulator) flushPendingReasoning() {
 
 func (t *dshTurnAccumulator) addMessage(seq int64, at int64, d dshAssistantData, outputs map[string]string) {
 	if !t.open {
-		t.start(seq, at)
+		t.start(seq, at, 0)
 	}
 	t.hasData = true
 	if d.Message.Source != nil {
@@ -315,8 +539,16 @@ func (t *dshTurnAccumulator) flush(endSeq int64, endTime int64) (core.RichHistor
 		t.reset()
 		return core.RichHistoryEntry{}, false
 	}
+	// 身份与 live 同源（dshw-<prefix>-t<N>）：冷基线 assistant turn 与 live
+	// 事件在一个身份上合并（goal 轮无 user 行，若沿用「上一个 user 行折叠」
+	// 的平坦归属，多轮输出会全部折进同一 turn——owner 2026-09-06 01:49
+	// rework ⑧）。turn 号未知（attach 前残留形）保持 sessionID:seq fallback。
+	entryID := fmt.Sprintf("%s:%d", t.sessionID, t.startSeq)
+	if t.turnNum >= 1 {
+		entryID = dshwTurnID(t.sessionID, t.turnNum)
+	}
 	entry := core.RichHistoryEntry{
-		ID:         fmt.Sprintf("%s:%d", t.sessionID, t.startSeq),
+		ID:         entryID,
 		Role:       "assistant",
 		Content:    t.content.String(),
 		Thinking:   t.thinking.String(),
@@ -334,6 +566,69 @@ func (t *dshTurnAccumulator) flush(endSeq int64, endTime int64) (core.RichHistor
 	}
 	t.reset()
 	return entry, true
+}
+
+// foldWorkflowEvent 把一条 tool-workflow/* journal 事件折叠进当前开放 turn 的
+// parts（run-start 在 journal 原位 append workflow part，后续事件原地改同一
+// part——官方 keyed chat 节点锚定 run-start 位置的冷拉对位）。turn 未开
+// （journal 残留形）或折叠违规 → false 跳过（冷拉 fail-open：官方 append 时已
+// 保证不变量，违规=解析脱节，下一快照/直播路径仍是权威）。
+// interrupted 不在此注入：converter 对该 entry 发 turn_completed，reducer 终态
+// fixup（官方 locationCold 语义）统一处理冷热两路。
+func (t *dshTurnAccumulator) foldWorkflowEvent(eventType string, data []byte) bool {
+	if !t.open {
+		return false
+	}
+	if err := foldWorkflowJournalEvent(&t.workflowFold, eventType, data); err != nil {
+		return false
+	}
+	runID := workflowEventRunID(eventType, data)
+	snapshot, ok := t.workflowFold.snapshot(runID)
+	if !ok {
+		return false
+	}
+	part := map[string]any{
+		"type":           "workflow",
+		"workflowId":     snapshot.RunID,
+		"workflowName":   snapshot.Name,
+		"workflowStatus": snapshot.Status,
+		"workflowPhases": workflowPhasesToPartMaps(snapshot.Phases),
+	}
+	if idx, ok := t.workflowIdx[runID]; ok {
+		t.parts[idx] = part
+	} else {
+		if t.workflowIdx == nil {
+			t.workflowIdx = map[string]int{}
+		}
+		t.workflowIdx[runID] = len(t.parts)
+		t.parts = append(t.parts, part)
+	}
+	t.hasData = true
+	return true
+}
+
+// workflowPhasesToPartMaps 把折叠快照的 phase 分组转成 part map 的 wire 形状
+//（键与 go-bridge ProjectionPart JSON 标签一致：phase/members/seq/label/
+// childSessionId/status；phase nil → JSON null = 未分阶段身份）。
+func workflowPhasesToPartMaps(phases []core.WorkflowRunPhase) []map[string]any {
+	out := make([]map[string]any, 0, len(phases))
+	for _, phase := range phases {
+		var phaseValue any
+		if phase.Phase != nil {
+			phaseValue = *phase.Phase
+		}
+		members := make([]map[string]any, 0, len(phase.Members))
+		for _, m := range phase.Members {
+			members = append(members, map[string]any{
+				"seq":            m.Seq,
+				"label":          m.Label,
+				"childSessionId": m.ChildSessionID,
+				"status":         m.Status,
+			})
+		}
+		out = append(out, map[string]any{"phase": phaseValue, "members": members})
+	}
+	return out
 }
 
 func (t *dshTurnAccumulator) reset() {
@@ -371,7 +666,13 @@ func toolStepTitle(name string, arguments []byte) string {
 			return ""
 		}
 	}
-	for _, key := range []string{"command", "file_path", "path", "pattern", "query", "url"} {
+	// 键序 = 官方工具族的展示语义：coding 工具的主参数在前；
+	// `description` 是官方 subagent 工具的展示摘要参数（tool-subagent
+	// src/index.ts：3-5 词 "description of the delegated task, for display"，
+	// 官方 Tool call 行 `Tool call · subagent · <description>` 的文本源）；
+	// `prompt` 是 subagent 无 description 时的最后兜底（长文，截断展示）。
+	// 2026-09-05 owner 报障：iOS subagent 工具行标题为空——旧键表不认这两个键。
+	for _, key := range []string{"command", "file_path", "path", "pattern", "query", "url", "description", "prompt"} {
 		if v, ok := args[key].(string); ok && strings.TrimSpace(v) != "" {
 			title := strings.TrimSpace(v)
 			// rune 截断：字节截断会把 CJK 命令切成非法 UTF-8（live ticker 也走这里）。

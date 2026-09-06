@@ -198,6 +198,15 @@ export type BridgeRPCMethod =
   | "list_agents"
   | "list_permission_modes"
   | "set_permission_mode"
+  // DSH「/」命令面板（docs/2026-09-04 §5.2；capability "session_commands"，仅 dsh-web）。
+  // session 域：list 强依赖 sessionId（官方 commands/list 键名 agentId）。
+  // execute 的 line 是完整官方 slash 行（"/plan"），绝不是 user message。
+  | "list_session_commands"
+  | "execute_session_command"
+  // DSH 目标横条动作（2026-09-05；capability "session_goal"，仅 dsh-web）。
+  // 官方 goals/pause|resume|edit|clear 透传；目标创建走 /goal host command，
+  // 不是本 RPC 的 action。失败 goal_failed 原文透传座位错误。
+  | "mutate_session_goal"
   | "create_session"
   | "send_message"
   | "abort_generation"
@@ -293,6 +302,42 @@ export interface BridgeSendMessageModel {
   id: string;
   providerId: string;
   variant?: string;
+}
+
+// `list_session_commands` result row（DSH 命令面板，docs/2026-09-04 §5.2）。
+// name 不含前导 '/'，官方 name 排序；hint 映射官方嵌套 input.hint——compact/export
+// 官方无 input 键 → hint 为空串（键保留，非 OMIT，客户端不得把空串当缺失渲染）。
+// 官方 input.images 第一期有意丢弃（无图片命令面）。
+export interface BridgeSessionCommand {
+  name: string;
+  description: string;
+  hint: string;
+}
+
+// `execute_session_command` result data（官方 settle 透传，2026-09-05 返工）。
+// resultKind 官方注册表恒为 "success"|"error"——"error" 一律走 RPC 失败，不出现在
+// 成功响应里；resultText 是官方人读反馈（"Plan mode on. …" 等，客户端成功提示的
+// 权威来源）。官方零值字段省键下发（optional 解码；静默 settle 只回 {ok:true}）。
+export interface BridgeSessionCommandExecution {
+  ok: boolean;
+  commandId?: string;
+  resultKind?: string;
+  resultText?: string;
+}
+
+// `mutate_session_goal` params（DSH 目标横条动作，2026-09-05）。action ∈
+// pause|resume|edit|clear；edit 必须携带非空 objective，其余 action 忽略该字段。
+// 每次 action 前后端经 session.list 投影取最新 CAS ref——客户端不得本地乐观改
+// phase，横条状态由 session_goal 投影链路权威承载。
+export interface BridgeMutateSessionGoalParams {
+  sessionId: string;
+  action: "pause" | "resume" | "edit" | "clear";
+  objective?: string;
+}
+
+// `mutate_session_goal` result data。
+export interface BridgeSessionGoalMutation {
+  ok: boolean;
 }
 
 export interface BridgeResult<TData = unknown> {
@@ -395,6 +440,15 @@ export type BridgeEventName =
   // {attempt, message, next?}. Turn stays alive — control-plane only, never settles
   // turn state, not mailbox-durable. Canonical doc: bridge-v1.md (2026-08-19).
   | "session_retry_status"
+  // dsh-web host slash-command lifecycle + plan-mode/goal snapshots (2026-09-05,
+  // official DeepSeek harness web UI parity). Legacy-client raw frames only: for
+  // session_sync_v2 connections these are reduced into the projection (command
+  // system turn / planMode / goal) and sealed from raw delivery (K4). Canonical
+  // doc: bridge-v1.md 「Session command timeline」 + 「Session-level plan-mode
+  // snapshot」 + 「Session-level goal snapshot」.
+  | "session_command"
+  | "session_plan_mode"
+  | "session_goal"
   | "sync_invalidate";
 
 export interface BridgeEvent<TData = unknown> {
@@ -633,7 +687,88 @@ export type BridgeProjectionPart =
       resolvedAt?: number; // epoch-ms when the interaction reached a terminal status
       resolutionSource?: "ios" | "mac" | "other_client" | "backend";
       diagnosticCode?: string; // e.g. invalid_backend_request for malformed/failed
+    }
+  | {
+      // dsh-web host slash-command lifecycle (2026-09-05, official GenericCommandCard
+      // parity). command/run→done folded by commandId into ONE persistent completed
+      // system turn (turnId "cmd:<commandId>"); the settle upsert replaces the running
+      // row wholesale. commandKind carries the row state; commandText is the official
+      // settle text verbatim (empty → clients fall back to the official locale labels
+      // 执行中…/指令失败/已完成, never bridge-synthesized copy). Additive; absent on
+      // other backends. See bridge-v1.md 「Session command timeline」.
+      type: "command";
+      itemId?: string; // ≡ commandId
+      commandId: string;
+      commandName?: string; // empty on done-only rows (official CommandNode.name=null)
+      commandKind: "running" | "success" | "error";
+      commandText?: string;
+      // Official goal command-input echo (ui-goal goalCommandText: "/goal" + args
+      // right-trimmed; goal only — plan/compact have no user bubble officially).
+      // Non-empty → clients render the official GoalCommandInputView right-aligned
+      // user bubble above the command card (leading "/goal" token as a command
+      // chip, objective plain text, no message actions). Empty → no bubble.
+      // Additive (2026-09-06 rework ⑥).
+      commandLine?: string;
+    }
+  | {
+      // dsh-web context-injection row (2026-09-06 §13.3, official ContextInjectionRow
+      // parity) — the settle notice a finished background subagent injects into its
+      // parent session (official continuation.ts: user/message with
+      // source{kind:"subagent-settled", form:"notice", summary, senderSessionId}).
+      // ONE completed system turn per itemId (turnId "ctx:<itemId>"); itemId
+      // "ctxinj:<journal-seq>" is identical from live and cold, so replay folds in
+      // place (idempotent whole-value upsert). contextKind is the official
+      // source.kind verbatim (the row label is the bare kind); contextSummary is
+      // the collapsed one-line settle summary; contextText is the model-facing full
+      // body (expanded); contextSenderSessionId is the settled child session id.
+      // Empty-summary notices are unknown shapes and drop fail-open; other
+      // injection kinds (goal/agent-instructions/skill-catalog/agent-message)
+      // remain known-drops (方案 §13.7). Injection rows never arm execution.phase.
+      // Additive; absent on other backends. See bridge-v1.md 「Context injection rows」.
+      type: "context_injection";
+      itemId: string; // "ctxinj:<seq>"; the fold key
+      contextKind: string; // "subagent-settled"
+      contextForm?: string; // "notice"
+      contextSummary?: string;
+      contextText?: string;
+      contextSenderSessionId?: string;
+    }
+  | {
+      // dsh-web parallel-subagent workflow card (2026-09-06, official ui-workflow-run
+      // WorkflowRunPanel parity). tool-workflow/{run-start,agent-start,agent-end,
+      // run-end} journal events are folded by agent/dsh-web workflow_fold.go into one
+      // whole-value snapshot per run (workflowId); upserted in place on the owning
+      // assistant turn's parts (op upsert_workflow). workflowStatus: running |
+      // completed | failed | cancelled | interrupted — "interrupted" is reducer-injected
+      // on turn terminal states (official locationClosed semantics; CordCode records
+      // the granularity difference: turn-level here vs official step/turn-level).
+      // workflowPhases groups members by phase identity in first-appearance order:
+      // phase null = 未分阶段 (official undefined/"missing"), phase "" = 空阶段名
+      // (official empty-string identity) — two distinct identities, never merged.
+      // Tapping a RUNNING member (official navigableMembers parity) is a client-side
+      // navigation: the iOS component emits its own subagentMemberTap
+      // {childSessionId} native event; nothing flows back over this protocol.
+      // Additive; absent on other backends. See bridge-v1.md 「Part vocabulary: workflow」.
+      type: "workflow";
+      workflowId: string; // the fold/upsert key (official run id)
+      workflowName: string;
+      workflowStatus: "running" | "completed" | "failed" | "cancelled" | "interrupted";
+      workflowPhases: BridgeWorkflowPhase[];
     };
+
+/** One member row of a workflow card (official WorkflowRunMemberData parity). */
+export interface BridgeWorkflowMember {
+  seq: number; // positive integer, unique within the run
+  label: string;
+  childSessionId?: string; // empty for members the backend never started
+  status: "running" | "completed" | "failed" | "cancelled" | "interrupted";
+}
+
+/** One phase-grouped member table (official WorkflowRunPhaseData parity). */
+export interface BridgeWorkflowPhase {
+  phase: string | null; // null = 未分阶段; "" = 空阶段名 (distinct identity)
+  members: BridgeWorkflowMember[];
+}
 
 /** Canonical structured-input question (design §6.1). Ids derived: questionId = interactionId+"_q_"+i. */
 export interface BridgeUserInputQuestion {
@@ -741,6 +876,51 @@ export interface BridgeSessionProjection {
   updatedAt?: number; // epoch-ms
   execution: BridgeExecutionView;
   turns: BridgeTurnProjection[];
+  /**
+   * dsh-web plan-mode snapshot (2026-09-05, official plan projection wire view).
+   * Additive; absent = backend has no plan-mode projection (chip absent). The chip
+   * formula mirrors the official PlanModeControl: target = pending ? !active :
+   * active — render the chip only when target is true; tap executes "/plan off".
+   */
+  planMode?: BridgePlanModeView;
+  /**
+   * dsh-web goal snapshot (2026-09-05, official goal projection whole-snapshot wire
+   * view). Additive; absent = backend has no goal projection (banner absent). The
+   * banner contract mirrors the official GoalBar: render NOTHING for absent /
+   * phase "none" / phase "complete"; actions call mutate_session_goal. Goal state
+   * is not a timeline row (official parity: banner-only).
+   */
+  goal?: BridgeGoalView;
+}
+
+/**
+ * Official plan-projection view ({active, pending}); see packages/plan/plan-mode
+ * planProjectionDefinition. pending means a /plan on|off command is settling (or a
+ * succeeded wanted change awaiting the plan/mode confirmation frame).
+ */
+export interface BridgePlanModeView {
+  active: boolean;
+  pending: boolean;
+}
+
+/**
+ * Official goal-projection view (packages/goal, whole-snapshot semantics). phase
+ * "none" is CordCode's encoding of the official cleared/null projection: a clear
+ * emits phase "none" (id/revision/objective empty/zero) so a patch can clear a
+ * stale far-side banner; clients MUST treat "none" identically to an absent
+ * goal field. blockedReason carries the official tooltip text on the blocked
+ * phase only.
+ */
+export interface BridgeGoalView {
+  // Serialized unconditionally by runtimes ≥ 2026-09-06 (empty string / 0 on
+  // "none" or fresh goals) so strict decoders never hit a missing key; older
+  // runtimes omitted zero-valued keys — clients MUST tolerate absence too.
+  id: string;
+  revision: number; // CAS ref for goals/<verb> mutations
+  objective: string;
+  phase: "active" | "paused" | "blocked" | "complete" | "none";
+  blockedReason?: { code: string; message: string };
+  maxGoalRounds?: number;
 }
 
 /** Incremental part operation (main streaming path). Applies to a specific (turnId, messageId). */
@@ -749,6 +929,7 @@ export type BridgePartOp =
   | { turnId: string; messageId: string; op: "set_thinking"; text: string }
   | { turnId: string; messageId: string; op: "upsert_tool"; part: Extract<BridgeProjectionPart, { type: "tool" }> }
   | { turnId: string; messageId: string; op: "upsert_user_input"; part: Extract<BridgeProjectionPart, { type: "user_input" }> }
+  | { turnId: string; messageId: string; op: "upsert_workflow"; part: Extract<BridgeProjectionPart, { type: "workflow" }> }
   | { turnId: string; messageId: string; op: "replace_parts"; parts: BridgeProjectionPart[] };
 
 /** Push frame `projection_patch`: baseRev→syncRev incremental delta (coalesced 50–100ms server-side). */
@@ -764,6 +945,10 @@ export interface BridgeProjectionPatch {
   turnStateOps?: BridgeTurnStateOp[];
   /** Phase 3: authoritative ids that invalidate local optimistic ids (absent in Phase 1–2). */
   replacesClientIds?: string[];
+  /** dsh-web plan-mode snapshot when it changed in this delta (additive; absent = unchanged). */
+  planMode?: BridgePlanModeView;
+  /** dsh-web goal snapshot when it changed in this delta (additive; absent = unchanged). */
+  goal?: BridgeGoalView;
 }
 
 /** Push frame `projection_snapshot`: full projection at syncRev (epoch mismatch / recovery). */

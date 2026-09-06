@@ -171,6 +171,28 @@ type SetPermissionModeParams struct {
 	Directory string `json:"directory,omitempty"`
 }
 
+// Session commands (DSH slash-command panel, docs/2026-09-04 §5.2). list is
+// session-domain: the official commands/list remote requires the exact
+// agentId, so sessionId is mandatory (not omitempty-with-fallback like the
+// agent-level params above).
+type ListSessionCommandsParams struct {
+	SessionID string `json:"sessionId"`
+	Directory string `json:"directory,omitempty"`
+}
+
+type ExecuteSessionCommandParams struct {
+	SessionID string `json:"sessionId"`
+	Line      string `json:"line"` // complete official slash line, e.g. "/plan"
+	Directory string `json:"directory,omitempty"`
+}
+
+type MutateSessionGoalParams struct {
+	SessionID string `json:"sessionId"`
+	Action    string `json:"action"`    // pause | resume | clear | edit
+	Objective string `json:"objective,omitempty"` // edit only
+	Directory string `json:"directory,omitempty"`
+}
+
 type SetProviderParams struct {
 	Provider  string `json:"provider"`
 	Directory string `json:"directory,omitempty"`

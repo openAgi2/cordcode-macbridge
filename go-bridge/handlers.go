@@ -1639,6 +1639,12 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleListPermissionModes(conn, msg, agent)
 	case "set_permission_mode":
 		h.handleSetPermissionMode(conn, msg, agent)
+	case "list_session_commands":
+		h.handleListSessionCommands(conn, msg, agent)
+	case "execute_session_command":
+		h.handleExecuteSessionCommand(conn, msg, agent)
+	case "mutate_session_goal":
+		h.handleMutateSessionGoal(conn, msg, agent)
 	case "set_agent_preset":
 		h.handleSetAgentPreset(conn, msg, agent)
 	case "create_session":

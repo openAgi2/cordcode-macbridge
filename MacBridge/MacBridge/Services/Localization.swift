@@ -211,6 +211,8 @@ enum L10n {
     static var pairNewDevice: String { tr("pair_new_device") }
     static var scanWithCCCode: String { tr("scan_with_cccode") }
     static var manualCode: String { tr("manual_code") }
+    static var pairingID: String { tr("pairing_id") }
+    static var pairingCopyID: String { tr("pairing_copy_id") }
     static var waitingForDevice: String { tr("waiting_for_device") }
     static var creatingPairingSession: String { tr("creating_pairing_session") }
     static var securityHint1: String { tr("security_hint_1") }
@@ -648,6 +650,8 @@ enum L10n {
             "pair_new_device": "Pair New Device",
             "scan_with_cccode": "Scan with CordCode on iPhone",
             "manual_code": "Manual code:",
+            "pairing_id": "Pairing ID:",
+            "pairing_copy_id": "Copy pairing ID",
             "waiting_for_device": "Waiting for device...",
             "creating_pairing_session": "Creating pairing session...",
             "security_hint_1": "Only approve devices you recognize.",
@@ -1042,6 +1046,8 @@ enum L10n {
             "pair_new_device": "配对新设备",
             "scan_with_cccode": "使用 iPhone 上的 CordCode 扫码",
             "manual_code": "手动码：",
+            "pairing_id": "配对 ID：",
+            "pairing_copy_id": "复制配对 ID",
             "waiting_for_device": "等待设备连接…",
             "creating_pairing_session": "正在创建配对会话…",
             "security_hint_1": "仅批准你识别的设备。",

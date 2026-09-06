@@ -64,6 +64,35 @@ func (a *Agent) ListBackgroundTasks(ctx context.Context) ([]core.BackgroundTask,
 	if err := client.Call(ctx, "session.list", sessionListRequest{}, &val); err != nil {
 		return nil, err
 	}
+	// 两遍扫描（嵌套真值）：官方 session.list 只给 parentSessionId（直接父）。
+	// pass 1 收集 subagent 行的 session→parent 映射；pass 2 对每行求
+	// ParentTaskID（直接父本身也是 subagent 行时才非空，depth-1 为 ""）与
+	// RootSessionID（沿链上溯到第一个非 subagent 祖先）。visited 防御环链。
+	subagentParent := make(map[string]string, len(val.Items))
+	for _, item := range val.Items {
+		if item.Origin == "subagent" && item.ParentSessionID != "" {
+			subagentParent[item.SessionID] = item.ParentSessionID
+		}
+	}
+	rootOf := func(sessionID string) (root, parentTask string) {
+		parent := subagentParent[sessionID]
+		if parent == "" {
+			return "", ""
+		}
+		if _, nested := subagentParent[parent]; nested {
+			parentTask = parent
+		}
+		root = parent
+		visited := map[string]bool{sessionID: true}
+		for {
+			next, ok := subagentParent[root]
+			if !ok || next == "" || visited[root] {
+				return root, parentTask
+			}
+			visited[root] = true
+			root = next
+		}
+	}
 	out := make([]core.BackgroundTask, 0, 8)
 	for _, item := range val.Items {
 		if item.Origin != "subagent" || item.ParentSessionID == "" {
@@ -73,10 +102,12 @@ func (a *Agent) ListBackgroundTasks(ctx context.Context) ([]core.BackgroundTask,
 		if item.Running {
 			status = "running"
 		}
+		rootSessionID, parentTaskID := rootOf(item.SessionID)
 		task := core.BackgroundTask{
 			TaskID:              item.SessionID,
 			BackendID:           BackendID,
-			RootSessionID:       item.ParentSessionID,
+			RootSessionID:       rootSessionID,
+			ParentTaskID:        parentTaskID,
 			AgentID:             item.SessionID,
 			Title:               titleFromProjections(item.Projections),
 			Status:              status,
@@ -85,6 +116,13 @@ func (a *Agent) ListBackgroundTasks(ctx context.Context) ([]core.BackgroundTask,
 		}
 		if stats, ok := decodeProjection[dshSessionStats](item.Projections, "sessionStats"); ok {
 			task.ToolUseCount = stats.Steps
+			// 官方耗时真值（dsh-v0.1.3-alpha.1 packages/session/session-stats
+			// /src/types.ts）：llmMs = 模型墙钟合计、toolMs = 工具墙钟合计，
+			// 官方 StatsLine 即以此显示会话用时。列表行无 startedAt/finishedAt
+			// 对，钟表跨度会把空闲时间计入；>0 才填（0 = unknown，wire 省略）。
+			if workMs := stats.LLMMs + stats.ToolMs; workMs > 0 {
+				task.DurationMillis = workMs
+			}
 		}
 		if usage, ok := decodeProjection[dshTokenUsage](item.Projections, "tokenUsage"); ok {
 			task.TokenCount = usage.UncachedInput + usage.Output + usage.CacheRead + usage.CacheWrite

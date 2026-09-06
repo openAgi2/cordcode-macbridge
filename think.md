@@ -9,6 +9,101 @@
 | remote-web 集中测试轮 | 12 门浏览器端验收矩阵 + 4 web-push 取证门（owner 2026-09-02 裁决：先 iOS 任务 → 整体迁移 remote-web → 集中测试）。入口 iOS 仓 `.exec-plan/state/plan-4fe9645c3a36.json` 注记 | iOS App 端任务完成 + remote-web 整体迁移完成 | pending 非阻断；功能路径已真机验证过，16 门属迁移后回归确认（2026-09-02） |
 | iOS 进入 Codex / DSH / Grok 计划模式 | 三条都是「Mac 进入计划 → iPhone 能批；iPhone 自己切不进」。Codex 入口文档 `docs/2026-09-04-codex-ios-plan-mode-entry.md`（owner 2026-09-04：先不做 iOS 开启 Codex Plan，后续再调研）。DSH = Mac 标准套餐 + `/plan`（`commands/execute`）；Grok iOS Plan 只写 agent 内存。禁止合成一个全 backend Plan 按钮 | Codex 批准路径已交付（Mac App Plan → iPhone 卡 → 批准实施，owner 真机 2026-09-04） | **挂起**（2026-09-04）；Codex 批准面已绿，入口未开工 |
 
+## 2026-09-06（下午）dsh-web 重启落在 turn 进行中：live-only 播种被提交成权威基线，冷拉只剩最后一轮
+
+上午刚修完 countMappableEntries 幻影预算截断，下午 owner 复测同一会话又只剩最后一轮
+回复。这次不是分页，是**基线完整性**维度缺了一档：
+
+1. **根因**：16:01 之前的 runtime 部署窗口里，runtime 在一个 turn 进行中被重启（安装
+   覆盖）。重启后 live mux 在 ~14s 内把投影 kernel 播种出**只有在飞 turn** 的状态；
+   随后 iOS 冷拉命中 2026-08-16 矩阵的 dsh-web 分支 `hasKernel && (live || !forceCold)`
+   → live-only admission，把这份残缺状态直接提交成权威基线（headRev 15/16/18、0ms
+   hydrate——没有走 journal walk）。此后所有 sinceRev 增量都从这个残缺基线出发，
+   iPhone 只剩最后一个回复。上午能好，是因为当时会话 idle，冷拉走的是空 kernel →
+   pathless 重建全量（headRev 574）。
+2. **修复**：kernel session 增加 `coldBaseline` 标记（冷源 hydrate / checkpoint 恢复
+   提交才置位；live-only admission 的提交身份由 `live-only:` source 前缀识别，不置位）。
+   dsh-web 冷拉矩阵改为 `hasKernel && baselineComplete && (live || !forceCold)` 才走
+   live-only，其中 `baselineComplete = HasColdBaseline || kernel 含 t1 覆盖`
+   （`dshw-<prefix>-t1` 可解析 → 本代内出生的会话，避免每次重连 mid-turn 都全量重建）。
+   残缺基线 → pathless 冷重建：**空 reducer 起跑**（carry 会把在飞 turn 抢跑到历史
+   前面）+ commit 时 `unionLiveTurns` 把在飞 turn 整行 union 回来（pendingLive 之外的
+   pre-admission 内容不丢）+ SyncRev 泵到 live 头（防 2026-08-16 fence 464→10 回退类）。
+3. **教训**：
+   - 「hasKernel」只证明有状态，不证明状态**完整**。live-only admission 矩阵必须覆盖
+     「基线从哪来」维度：直播播种 ≠ 冷基线。类似矩阵加新 backend 时，把「状态完整性
+     判据」和「状态存在判据」分开写。
+   - runtime 重启时间窗（安装覆盖/120min 兜底/崩溃自愈）与在飞 turn 相交是常态部署
+     事件，不是边角——每条 live-only 快路径都要回答「重启窗口里种出的状态凭什么可信」。
+   - 事故会话恢复验证走的是产品路径探针：Management API 铸临时配对设备（platform:
+     "probe" 避开 ReplaceDevice legacy 身份碰撞）→ `?token=&deviceId=` 连 8777 →
+     sinceRev=0 冷拉 → revoke。冷拉回 34 turns、headRev=808（事故时 16/18/148）。
+     bridge RPC 响应 payload 在 `data` 字段不在 `result`。
+
+## 2026-09-06 dsh 注入行跑到回复开头 + iOS 入口按钮看不见：折叠排序与 z-order 两案
+
+owner 同一轮报了两件事，两案根因不同层：
+
+**案 1（Mac 冷拉排序）**：子代理结算行（context_injection）在 iPhone 上出现在所属
+回复的最前面，官方 Web 是插在正文中间。链路：冷拉 mapper 把 turn 内到达的注入行
+**立即**入列，而该 turn 的 assistant 输出要等 turn/end 才由 accumulator 整体落位
+→ 注入行永远排在所属 turn 之前。直播路径恰好相反（turn skeleton 先 append、ctx
+turn 后 append → 注入行在 turn 之后）。修复：`mapHistoryEvents` 把 `acc.open` 期间
+的注入行缓冲到 `flushTurn` 之后释放（`pendingInjections`），冷热同位。折叠 turn
+模型下无法把独立行插进气泡内部，官方「正文中」的最近似投影 = 所属 turn 之后；
+官方逐行排版与折叠排版是同一 journal 顺序的两种投影，不算语义偏离。
+
+**案 2（iOS z-order）**：后台任务入口按钮（连同会话导航按钮）在消息页不可见也
+不可点，但徽标拉取 RPC 一直在跑（按钮 isHidden=false、capability 门通过）。
+`ChatUIKitContainerView.syncTimelineRendererVisibility()` 每次渲染同步把全屏
+`messageWebView` bringSubviewToFront，然后逐个把胶囊/上下文圈/滚底钮等捞回最前
+层——**捞回名单是白名单制**，sessionNavButton / backgroundTasksButton 不在名单
+里，被不透明网页内容永久埋住（applyBottomOverlayZOrder 同病）。教训：
+
+- **全屏层 re-front 必须配白名单审计**：往底栏加任何新浮层，先 grep 两处 z-order
+  整理（syncTimelineRendererVisibility + applyBottomOverlayZOrder），不在名单
+  里就会在第一次渲染同步后被埋；「按钮看不见」但「能力/RPC 在跑」时优先怀疑
+  z-order 而不是 capability。
+- **诊断顺序**：日志证明按钮逻辑活着（badge fetch 在跑）→ 截图逐元素比对（胶囊
+  可见而左侧两钮不见 → 同排不同命 → 差异只在 z-order 名单）。
+
+两案都由「官方 Web 有、iPhone 没有/位置不对」类报障触发：先分清 Mac 真值层
+（投影内容/顺序）还是 iOS 展示层（渲染/z-order/分组），一层一案，不要混查。
+
+## 2026-09-06 dsh-web 冷打开「只剩最后一个 turn」：countMappableEntries 幻影预算截断分页
+
+owner 报障：「讲个二郎神的故事」会话 10 轮对话，iPhone 冷打开只看到最后一次回复，
+连用户气泡都没有。三层取证定位（未让 owner 跑任何命令）：
+
+1. **先把官方 journal 当真值**：`~/.dsh/sessions/<dir>/session.jsonl.zstd` 解出
+   11015 行——32 条 user/message 里只有 3 条是真人消息（其余 plugin/goal/
+   agent-instructions/skill-catalog/subagent-settled 注入，官方本就隐藏），
+   10 个 turn、2 次 compaction、14 次 goal/change。真值时间线 = 33 条投影条目。
+2. **mapper 无罪**：journal 直喂 `mapHistoryEvents` 输出完整 33 条。对活座位
+   （127.0.0.1:3080）跑真实 `getRichHistory` 分页取数只回 3 条（1 assistant + 2
+   快照）→ 断点在分页 walk。python 复刻同一 walk 却能走完 5 页拿全 77805 个
+   事件 → 算法对，Go 实现有鬼。
+3. **真凶**：`countMappableEntries` 的 `if n == 0 { n = len(evs)/8 }` 兜底。按
+   官方 50 条消息一页分页时，**reasoning 重会话的页可以整页落在单个 turn 中段**
+   （8417 个 assistant/chunk + step 事件，零 turn/end / user/message /
+   command/done）→ 真实 mappable=0，兜底估成 8417/8=1052 条幻影条目 → budget
+   （hydrate limit=0 → 500）两页即爆 → walk 提前终止 → 投影只剩最后一个 turn
+   的尾巴。`len/8` 假设「每条消息≈8 个事件」，reasoning 流下实际 169:1。
+
+修复（history.go）：零边界页如实计 0（它只延伸既有 turn 的尾部，该 turn 的条目由
+其 turn/end 所在页计数）；回归测试 `TestRichHistoryWalksThroughMidTurnChunkPages`
+用 4001 条 chunk 页复刻「旧代码一页即停」。活座位复测：同会话完整拉回 33 条。
+
+教训：
+- **估算兜底是隐形截断器**：预算/估算逻辑出错时不报错、不告警，只让结果悄悄变少，
+  症状（「截断这么多」）与代码位置（估算器）隔着一层。分页 walk 的每页计数应
+  打进日志（本次若有 `page N: events=X mappable=Y collected=Z` 日志，第一轮就
+  能定位）。
+- **同一 walk 双实现对照**（python 复刻 vs Go 实测）是分隔「API 语义问题」与
+  「实现 bug」的最快手段；比读代码猜快一个数量级。
+- 大会话回归 fixture 必须含「chunk 重页」形态：普通两页 fixture（边界事件均匀
+  分布）永远测不到兜底路径。
+
 ## 2026-09-05 Claude Code 流式「假绿」复盘：deltaBatcher 丢 turnId + client uuid 官方解法
 
 owner 三轮复测（无流式 → 重复 → 无流式且完成态无内容），第三轮修复 d5f5e30 部署后

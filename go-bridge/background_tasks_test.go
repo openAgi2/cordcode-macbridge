@@ -293,3 +293,32 @@ func TestBackgroundTasksChangedControlPlaneEventAllowed(t *testing.T) {
 		t.Fatal("missing backend ID must be rejected")
 	}
 }
+
+// TestBackgroundTaskToWireDurationPrecedence：durationMillis 优先级——显式
+// 工作墙钟（DSH sessionStats llmMs+toolMs）优先；无显式值时保留既有
+// finishedAt−startedAt 派生；两者皆无 → OMIT（unknown 不落 0）。
+func TestBackgroundTaskToWireDurationPrecedence(t *testing.T) {
+	// 显式值赢：即使 startedAt/finishedAt 也在（钟表跨度会把空闲计入）。
+	explicit := core.BackgroundTask{
+		TaskID: "t1", StartedAt: time.UnixMilli(1000), FinishedAt: time.UnixMilli(60000),
+		DurationMillis: 187834,
+	}
+	w := backgroundTaskToWire(explicit)
+	if w["durationMillis"] != int64(187834) {
+		t.Fatalf("explicit duration must win, got %v", w["durationMillis"])
+	}
+	// 无显式 → 派生（既有 claude 语义不变）。
+	derived := core.BackgroundTask{
+		TaskID: "t2", StartedAt: time.UnixMilli(1000), FinishedAt: time.UnixMilli(61000),
+	}
+	w = backgroundTaskToWire(derived)
+	if w["durationMillis"] != int64(60000) {
+		t.Fatalf("derived duration = %v, want 60000", w["durationMillis"])
+	}
+	// 双无 → OMIT。
+	bare := core.BackgroundTask{TaskID: "t3", UpdatedAt: time.UnixMilli(1000)}
+	w = backgroundTaskToWire(bare)
+	if _, has := w["durationMillis"]; has {
+		t.Fatalf("unknown duration must be omitted, got %v", w["durationMillis"])
+	}
+}

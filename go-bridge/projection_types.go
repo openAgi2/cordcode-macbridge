@@ -96,6 +96,66 @@ type ProjectionPart struct {
 	UserInputResolvedAt       int64       `json:"resolvedAt,omitempty"`
 	UserInputResolutionSource string      `json:"resolutionSource,omitempty"` // ios|mac|other_client|backend
 	UserInputDiagnosticCode   string      `json:"diagnosticCode,omitempty"`
+
+	// command (Type=="command") — dsh-web host slash-command lifecycle part. The
+	// official GenericCommandCard truth: run→done folded by commandId into one
+	// persistent system turn. CommandKind carries running|success|error (row
+	// state); CommandText is the official settle text verbatim (empty → client
+	// falls back to the official locale labels, never bridge-synthesized copy).
+	// CommandLine is the official goal command-input echo (ui-goal
+	// goalCommandText "/goal" + args.TrimRight; goal only — plan/compact have no
+	// user bubble officially). Empty → no bubble.
+	// Additive; absent on other backends. See bridge-v1.md「Session command」.
+	CommandID   string `json:"commandId,omitempty"`
+	CommandName string `json:"commandName,omitempty"`
+	CommandKind string `json:"commandKind,omitempty"` // running | success | error
+	CommandText string `json:"commandText,omitempty"`
+	CommandLine string `json:"commandLine,omitempty"`
+
+	// context_injection (Type=="context_injection") — dsh-web 上下文注入行
+	// （官方 ContextInjectionRow 对位：user/message source.kind!="user" 的注入
+	// 上下文，当前唯一生产者是 subagent-settled settle 通知）。ContextKind 是
+	// 官方 source.kind 逐字（客户端行 label 用裸 kind，官方 context-provenance
+	// 语义）；ContextForm 官方 source.form（"notice"）；ContextSummary 是折叠行
+	// 一行结算（notice 的全部要点，官方 ContextBody noticeSummary）；ContextText
+	// 是 model-facing 全文（展开体）；ContextSenderSession 是 settle 的子会话 id。
+	// Additive；其他 backend 恒缺。See bridge-v1.md「Context injection rows」.
+	ContextKind          string `json:"contextKind,omitempty"`
+	ContextForm          string `json:"contextForm,omitempty"`
+	ContextSummary       string `json:"contextSummary,omitempty"`
+	ContextText          string `json:"contextText,omitempty"`
+	ContextSenderSession string `json:"contextSenderSessionId,omitempty"`
+
+	// workflow (Type=="workflow") — dsh-web 并行子代理 workflow 卡（官方
+	// ui-workflow-run WorkflowRunPanel 对位；tool-workflow/* 四事件按 runId 经
+	// agent/dsh-web workflow_fold.go 折叠成整值快照）。按 WorkflowID 在所属
+	// assistant turn 的 parts 里原地 upsert（upsert_workflow op）。WorkflowStatus:
+	// running | completed | failed | cancelled | interrupted（interrupted 由
+	// reducer turn 终态注入，官方 locationClosed 语义）。WorkflowPhase.Phase
+	// nil = 未分阶段（官方 missing），非 nil 空串 = 空阶段名（独立身份）；分组
+	// 按首现顺序。Additive；其他 backend 恒缺。See bridge-v1.md「Part
+	// vocabulary: workflow」。
+	WorkflowID     string                     `json:"workflowId,omitempty"`
+	WorkflowName   string                     `json:"workflowName,omitempty"`
+	WorkflowStatus string                     `json:"workflowStatus,omitempty"`
+	WorkflowPhases []WorkflowPhaseProjection  `json:"workflowPhases,omitempty"`
+}
+
+// WorkflowMemberProjection 是 workflow 卡一个成员（官方 WorkflowRunMemberData
+// 对位）。Status: running | completed | failed | cancelled | interrupted。
+type WorkflowMemberProjection struct {
+	Seq            int    `json:"seq"`
+	Label          string `json:"label"`
+	ChildSessionID string `json:"childSessionId,omitempty"`
+	Status         string `json:"status"`
+}
+
+// WorkflowPhaseProjection 是按 phase 身份分组的成员表（官方
+// WorkflowRunPhaseData 对位）。Phase nil = 未分阶段（官方 undefined → null →
+// key "missing"）；非 nil 空串 = 空阶段名（官方 value:0: 独立身份）。
+type WorkflowPhaseProjection struct {
+	Phase   *string                    `json:"phase"`
+	Members []WorkflowMemberProjection `json:"members"`
 }
 
 // MessageProjection is one user/assistant/system message within a turn.
@@ -141,6 +201,43 @@ type ExecutionView struct {
 	ActiveTurnID string `json:"activeTurnId,omitempty"`
 }
 
+// PlanModeView is the dsh-web plan-mode projection snapshot ({active, pending};
+// the official plan projection wire view). The client chip formula mirrors the
+// official PlanModeControl: target = pending ? !active : active — chip renders
+// only when target is true, tap executes /plan off. Additive; absent on sessions
+// without plan-mode state.
+type PlanModeView struct {
+	Active  bool `json:"active"`
+	Pending bool `json:"pending"`
+}
+
+// GoalBlockedReasonView mirrors the official blocked explanation ({code, message}).
+type GoalBlockedReasonView struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// GoalView is the dsh-web goal projection snapshot (official GoalSnapshot wire
+// view). The banner contract mirrors the official GoalBar: nothing renders for
+// phase complete / "none" / absent; active/paused/blocked show phase label +
+// objective + actions (active→pause, paused→resume, always edit/clear). Phase
+// "none" is the CordCode encoding of the official cleared/null projection — it
+// lets a patch clear a stale far-side banner.
+//
+// id/revision/objective serialize unconditionally (empty/zero included, phase
+// "none" included) since 2026-09-06: strict decoders treat a missing key as a
+// hard error (an active goal with revision 0 used to drop the key and fail the
+// whole snapshot client-side). Older runtimes omitted zero-valued keys;
+// clients MUST tolerate absence (defaults) as well.
+type GoalView struct {
+	ID             string                  `json:"id"`
+	Revision       int64                   `json:"revision"`
+	Objective      string                  `json:"objective"`
+	Phase          string                  `json:"phase"` // active | paused | blocked | complete | none
+	BlockedReason  *GoalBlockedReasonView  `json:"blockedReason,omitempty"`
+	MaxGoalRounds  int                     `json:"maxGoalRounds,omitempty"`
+}
+
 // SessionProjection is the authoritative per-(backendId,sessionId) projection. SyncRev belongs
 // to the ProjectionReducer/Kernel commit chain; it is intentionally distinct from transport
 // EventPublisher per-session sequence. Push and pull read the same committed Kernel head.
@@ -151,15 +248,21 @@ type SessionProjection struct {
 	UpdatedAt   int64            `json:"updatedAt,omitempty"`
 	Execution   ExecutionView    `json:"execution"`
 	Turns       []TurnProjection `json:"turns"`
+	// PlanMode is the dsh-web plan-mode snapshot (additive; nil = backend has no
+	// plan-mode projection, chip absent).
+	PlanMode *PlanModeView `json:"planMode,omitempty"`
+	// Goal is the dsh-web goal snapshot (additive; nil = backend has no goal
+	// projection, banner absent; non-nil Phase "none" = explicitly no goal).
+	Goal *GoalView `json:"goal,omitempty"`
 }
 
 // PartOp is one incremental part operation targeting a specific (turnId, messageId).
 type PartOp struct {
 	TurnID    string           `json:"turnId"`
 	MessageID string           `json:"messageId"`
-	Op        string           `json:"op"`              // append_text | set_thinking | upsert_tool | upsert_user_input | replace_parts
+	Op        string           `json:"op"`              // append_text | set_thinking | upsert_tool | upsert_user_input | upsert_workflow | replace_parts
 	Text      string           `json:"text,omitempty"`  // append_text / set_thinking
-	Part      *ProjectionPart  `json:"part,omitempty"`  // upsert_tool / upsert_user_input
+	Part      *ProjectionPart  `json:"part,omitempty"`  // upsert_tool / upsert_user_input / upsert_workflow
 	Parts     []ProjectionPart `json:"parts,omitempty"` // replace_parts
 }
 
@@ -172,6 +275,12 @@ type ProjectionPatch struct {
 	PartOps           []PartOp         `json:"partOps,omitempty"`
 	TurnStateOps      []TurnStateOp    `json:"turnStateOps,omitempty"`
 	ReplacesClientIDs []string         `json:"replacesClientIds,omitempty"`
+	// PlanMode carries the dsh-web plan-mode snapshot when it changed in this
+	// delta (additive; absent = unchanged).
+	PlanMode *PlanModeView `json:"planMode,omitempty"`
+	// Goal carries the dsh-web goal snapshot when it changed in this delta
+	// (additive; absent = unchanged; Phase "none" = goal cleared).
+	Goal *GoalView `json:"goal,omitempty"`
 }
 
 // TurnStateOp is one turnStateOps entry of ProjectionPatch (turn_detail_lazy_v1,
