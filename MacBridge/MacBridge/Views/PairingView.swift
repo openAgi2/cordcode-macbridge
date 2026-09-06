@@ -6,6 +6,7 @@ struct PairingView: View {
     var showsHeader = true
     @AppStorage("bridgeDisplayName") private var bridgeDisplayName = ""
     @State private var copiedCode = false
+    @State private var copiedID = false
     @State private var copiedLink = false
     @State private var isDetailsExpanded = false
     /// Flow C: which QR to show — the iOS deep-link code or the web https code.
@@ -67,8 +68,8 @@ struct PairingView: View {
             case .creating:
                 ProgressView(L10n.creatingPairingSession)
 
-            case .waitingForClaim(_, let code, let payload):
-                waitingView(code: code, payload: payload)
+            case .waitingForClaim(let sessionId, let code, let payload):
+                waitingView(sessionId: sessionId, code: code, payload: payload)
 
             case .claimed(let deviceName, let platform):
                 claimedView(deviceName: deviceName, platform: platform)
@@ -106,17 +107,17 @@ struct PairingView: View {
         }
     }
 
-    private func waitingView(code: String, payload: String) -> some View {
+    private func waitingView(sessionId: String, code: String, payload: String) -> some View {
         let webPayload = viewModel.webQrPayload
         let activePayload: String = (qrTarget == .web && !webPayload.isEmpty) ? webPayload : payload
         return ViewThatFits(in: .horizontal) {
             HStack(alignment: .top, spacing: 28) {
                 qrSection(payload: activePayload, webPayload: webPayload)
-                waitingInstructions(code: code, payload: payload)
+                waitingInstructions(sessionId: sessionId, code: code, payload: payload)
             }
             VStack(alignment: .leading, spacing: 20) {
                 qrSection(payload: activePayload, webPayload: webPayload)
-                waitingInstructions(code: code, payload: payload)
+                waitingInstructions(sessionId: sessionId, code: code, payload: payload)
             }
         }
     }
@@ -179,7 +180,7 @@ struct PairingView: View {
             .accessibilityLabel(L10n.pairingQRCode)
     }
 
-    private func waitingInstructions(code: String, payload: String) -> some View {
+    private func waitingInstructions(sessionId: String, code: String, payload: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             instruction(1, L10n.pairingStepScan)
             instruction(2, L10n.pairingStepConfirm)
@@ -205,6 +206,30 @@ struct PairingView: View {
                 .buttonStyle(.borderless)
                 .help(copiedCode ? L10n.pairingCopied : L10n.pairingCopyCode)
                 .accessibilityLabel(copiedCode ? L10n.pairingCopied : L10n.pairingCopyCode)
+            }
+
+            // P1-7 后手动连接需要 pairingId + manualCode 双因子：高熵会话 ID 也展示出来，
+            // 供 iOS「高级 → 手动连接」逐字输入；视觉上保持次要（兜底路径，不抢二维码主流程）。
+            HStack(spacing: 8) {
+                Text(L10n.pairingID)
+                    .foregroundStyle(.secondary)
+                Text(sessionId)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(sessionId, forType: .string)
+                    copiedID = true
+                    Task {
+                        try? await Task.sleep(for: .seconds(2))
+                        copiedID = false
+                    }
+                } label: {
+                    Image(systemName: copiedID ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.borderless)
+                .help(copiedID ? L10n.pairingCopied : L10n.pairingCopyID)
+                .accessibilityLabel(copiedID ? L10n.pairingCopied : L10n.pairingCopyID)
             }
 
             if let remaining = viewModel.remainingSeconds {
