@@ -8,6 +8,8 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 func bgTaskFixtureSessionList() map[string]any {
@@ -75,6 +77,10 @@ func TestListBackgroundTasksMapsSubagentRows(t *testing.T) {
 	if running.ToolUseCount != 31 {
 		t.Fatalf("toolUseCount = %d, want 31 (sessionStats.steps)", running.ToolUseCount)
 	}
+	// 官方耗时真值：sessionStats llmMs+toolMs（模型墙钟 + 工具墙钟）。
+	if running.DurationMillis != 182817+5017 {
+		t.Fatalf("durationMillis = %d, want %d (llmMs+toolMs)", running.DurationMillis, 182817+5017)
+	}
 	if running.TokenCount != 1700 {
 		t.Fatalf("tokenCount = %d, want 1700 (uncached+output+cacheRead+cacheWrite)", running.TokenCount)
 	}
@@ -90,8 +96,77 @@ func TestListBackgroundTasksMapsSubagentRows(t *testing.T) {
 		t.Fatalf("no-title row should fall back to a placeholder id fragment, got %q", done.Title)
 	}
 	// 无 stats 投影 → 统计保持未知（0，wire OMIT），不编造。
-	if done.ToolUseCount != 0 || done.TokenCount != 0 {
-		t.Fatalf("unknown stats must stay zero, got tools=%d tokens=%d", done.ToolUseCount, done.TokenCount)
+	if done.ToolUseCount != 0 || done.TokenCount != 0 || done.DurationMillis != 0 {
+		t.Fatalf("unknown stats must stay zero, got tools=%d tokens=%d dur=%d",
+			done.ToolUseCount, done.TokenCount, done.DurationMillis)
+	}
+}
+
+// TestListBackgroundTasksNestedChainRootWalk：嵌套真值——subagent 的
+// subagent：ParentTaskID 只在直接父也是 subagent 行时非空（depth-1 为 ""）；
+// RootSessionID 沿 parentSessionId 链上溯到第一个非 subagent 祖先；环链
+// 防御不死循环（取防御截断前的祖先）。
+func TestListBackgroundTasksNestedChainRootWalk(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+	f.handlers["session.list"] = fakeRPCResponse{value: map[string]any{
+		"items": []any{
+			map[string]any{
+				"sessionId": "session-root-1", "updatedAt": 1786942288185, "running": false,
+			},
+			map[string]any{
+				"sessionId": "sub-mid", "updatedAt": 1786942290000, "running": true,
+				"parentSessionId": "session-root-1", "origin": "subagent",
+				"projections": map[string]any{"asOfSeq": 1, "values": map[string]any{}},
+			},
+			map[string]any{
+				"sessionId": "sub-deep", "updatedAt": 1786942295000, "running": true,
+				"parentSessionId": "sub-mid", "origin": "subagent",
+				"projections": map[string]any{"asOfSeq": 1, "values": map[string]any{}},
+			},
+			// 环链（官方不可能出现；防御验证不死循环）。
+			map[string]any{
+				"sessionId": "cyc-a", "updatedAt": 1786942296000, "running": false,
+				"parentSessionId": "cyc-b", "origin": "subagent",
+				"projections": map[string]any{"asOfSeq": 1, "values": map[string]any{}},
+			},
+			map[string]any{
+				"sessionId": "cyc-b", "updatedAt": 1786942297000, "running": false,
+				"parentSessionId": "cyc-a", "origin": "subagent",
+				"projections": map[string]any{"asOfSeq": 1, "values": map[string]any{}},
+			},
+		},
+	}}
+
+	tasks, err := a.ListBackgroundTasks(context.Background())
+	if err != nil {
+		t.Fatalf("ListBackgroundTasks: %v", err)
+	}
+	byID := map[string]core.BackgroundTask{}
+	for _, task := range tasks {
+		byID[task.TaskID] = task
+	}
+	mid, ok := byID["sub-mid"]
+	if !ok {
+		t.Fatalf("sub-mid missing: %+v", tasks)
+	}
+	// depth-1：父是根会话 → 无 ParentTaskID，root=根会话。
+	if mid.ParentTaskID != "" || mid.RootSessionID != "session-root-1" {
+		t.Fatalf("depth-1 row: parent=%q root=%q", mid.ParentTaskID, mid.RootSessionID)
+	}
+	deep := byID["sub-deep"]
+	// depth-2：父是 sub-mid（同为 subagent 行）→ ParentTaskID=sub-mid，
+	// root 上溯两跳到 session-root-1。
+	if deep.ParentTaskID != "sub-mid" || deep.RootSessionID != "session-root-1" {
+		t.Fatalf("depth-2 row: parent=%q root=%q (want sub-mid / session-root-1)",
+			deep.ParentTaskID, deep.RootSessionID)
+	}
+	// 环链：官方不可能出现（parentSessionId 无环）；防御目标只是不死循环
+	// ——走到这里已证明终止，root 取任意截断祖先即可。
+	cycA := byID["cyc-a"]
+	if cycA.RootSessionID != "cyc-a" && cycA.RootSessionID != "cyc-b" {
+		t.Fatalf("cycle row root = %q, want a truncated ancestor (cyc-a/cyc-b)", cycA.RootSessionID)
 	}
 }
 

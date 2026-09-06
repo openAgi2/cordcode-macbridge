@@ -175,6 +175,13 @@ func backgroundTaskToWire(t core.BackgroundTask) map[string]any {
 	}
 	if !t.FinishedAt.IsZero() {
 		wire["finishedAt"] = t.FinishedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if t.DurationMillis > 0 {
+		// Explicit work wall time (DSH official sessionStats llmMs+toolMs) wins:
+		// list rows carry no startedAt/finishedAt pair, and clock-span duration
+		// would bill idle time the task never spent working.
+		wire["durationMillis"] = t.DurationMillis
+	} else if !t.FinishedAt.IsZero() && !t.StartedAt.IsZero() {
 		wire["durationMillis"] = t.FinishedAt.Sub(t.StartedAt).Milliseconds()
 	}
 	if t.TokenCount > 0 {

@@ -94,6 +94,9 @@ list_models
 list_agents
 list_permission_modes
 set_permission_mode
+list_session_commands
+execute_session_command
+mutate_session_goal
 create_session
 send_message
 abort_generation
@@ -179,8 +182,9 @@ scope only to keep the CI guard satisfied.
 
 | scope | RPCs | default for a paired device |
 |---|---|---|
-| `session.read` | `get_session`, `get_session_messages`, `get_session_projection`, `list_sessions`, `list_pinned_sessions`, `fetch_todos`, `check_pending_notifications`, `get_turn_diff`, `get_full_thread_diff` | ✅ |
-| `session.write` | `create_session`, `send_message`, `abort_generation`, `resume_session`, `delete_session`, `rename_session`, `archive_session`, `set_session_pinned`, `compress_context`, `resolve_permission`, `question_reply`, `question_reject`, `resolve_user_input`, `share_session`, `set_observation_scope` | ✅ |
+| `session.read` | `get_session`, `get_session_messages`, `get_session_projection`, `list_sessions`, `list_pinned_sessions`, `fetch_todos`, `check_pending_notifications`, `get_turn_diff`, `get_full_thread_diff`, `list_session_commands` | ✅ |
+| `session.write` | `create_session`, `send_message`, `abort_generation`, `resume_session`, `delete_session`, `rename_session`, `archive_session`, `set_session_pinned`, `compress_context`, `resolve_permission`, `question_reply`, `question_reject`, `resolve_user_input`, `share_session`, `set_observation_scope`, `execute_session_command`,
+`mutate_session_goal` | ✅ |
 | `config.read` | `list_providers`, `list_models`, `list_agents`, `list_permission_modes`, `get_usage`, `list_memory_files`, `read_memory_file`, `run_diagnostics` | ✅ |
 | `config.write` | `set_provider`, `switch_model`, `set_permission_mode` | ✅ |
 | `workspace.read` | `get_workspace_diff`, `read_file_v2`, `list_directory`, `get_git_context`, `fetch_content_chunk`, `check_pull_request_support` | ✅ |
@@ -292,6 +296,9 @@ question_asked
 question_resolved
 user_input_requested
 user_input_resolved
+session_command
+session_plan_mode
+session_goal
 turn_diff_ready
 projection_patch
 projection_snapshot
@@ -797,6 +804,17 @@ Wire behavior:
   (command/run rows, no discrete host event) and therefore emit nothing; clients
   re-sync those on the next `list_permission_modes` fetch.
   The `permission_mode` capability derives from the ModeSwitcher interface.
+- `list_session_commands` / `execute_session_command` transparently bridge the
+  official host-command surface (`commands/list` / `commands/execute` Typert
+  remotes; the composer `/` menu's data source). Executing is a host action —
+  never a user message. The `session_commands` capability derives from the
+  SessionCommandCatalog interface; only `dsh-web` implements it. See
+  「Capability: `session_commands`」 below.
+- `mutate_session_goal` transparently bridges the official goal surface
+  (`goals/pause|resume|edit|clear` Typert remotes; the GoalBar action buttons'
+  data path). The `session_goal` capability derives from the
+  SessionGoalController interface; only `dsh-web` implements it. See
+  「Capability: `session_goal`」 below.
 - Not supported in phase 1 (existing generic `not_supported` paths; iOS hides the
   entries): `delete_session`, git surface (`get_git_context` / PR suite /
   `commit_and_push` / branch / worktree), diff suite, `fetch_todos`, `get_usage`,
@@ -1221,8 +1239,8 @@ params: `{}`（跨 session 全量；排序 updatedAt 降序，服务端计算）
 {
   taskId: string,            // 稳定任务 ID（claude sidechain agent id / dsh 子 session id）
   backendId: string,
-  rootSessionId: string,     // 所属父 session
-  parentTaskId?: string,     // 嵌套父任务（claude depth≥2）
+  rootSessionId: string,     // 顶层根 session（非 subagent 的祖先；2026-09-06 起沿 parentSessionId 链上溯求真值）
+  parentTaskId?: string,     // 嵌套父任务：直接父本身也是 subagent 行时才出现（dsh depth≥2；depth-1 无此字段）
   agentId?: string,
   title: string,             // 真实指令/标题文本
   agentName?: string,        // general-purpose 等
@@ -1235,6 +1253,13 @@ params: `{}`（跨 session 全量；排序 updatedAt 降序，服务端计算）
 }
 ```
 
+`durationMillis` 优先级（2026-09-06 起）：显式**工作墙钟**优先——dsh-web 行取官方
+`sessionStats` 投影 `llmMs + toolMs`（模型墙钟合计 + 工具墙钟合计，官方 StatsLine 的
+用时真值；dsh 列表行无 `startedAt/finishedAt` 对，钟表跨度会把空闲时间计入）；无显
+式值时保留既有 `finishedAt − startedAt` 派生（claude sidechain）；两者皆无 → OMIT。
+dsh 嵌套真值同批补齐：`parentTaskId` 在直接父也是 subagent 行时指向该父会话 id，
+`rootSessionId` 沿 `parentSessionId` 链上溯到第一个非 subagent 祖先（环链防御截断）。
+
 ### RPC: `background_tasks.get`
 
 params: `{ taskId }` → `{ task, instruction, nestedTasks: BackgroundTaskSummary[], capabilities: { cancel: boolean, retry: boolean } }`。`capabilities` 反映真实可操作性：dsh-web 运行中任务 `cancel=true`（官方 `session.cancel` 面）；终态任务与无取消面的 backend 恒 false。`retry` 当前所有 backend 均 false（无真实重试面，不假装）。错误码：`task_not_found`。
@@ -1242,6 +1267,97 @@ params: `{ taskId }` → `{ task, instruction, nestedTasks: BackgroundTaskSummar
 ### RPC: `background_tasks.cancel`（Phase 5，capability `background_task_cancel`）
 
 params: `{ taskId }` → `{ cancelled: true }`。仅在 backend 声明 `background_task_cancel`（实现取消面：dsh-web 官方 `session.cancel`）时可调；未声明 backend 诚实返回 `not_supported`（Claude sidechain 无 bridge 侧取消路径，不提供假取消）。`clear`/`retry` 暂无协议面：无真实数据源支撑，待 runtime 提供真实表面再增补（roadmap Phase D 逐 backend 开放原则）。
+
+### Capability: `session_commands`（DSH「/」命令面板）
+
+session 域 host 命令目录 + 执行（现仅 `dsh-web`）。capability 由 backend agent 实现
+`core.SessionCommandCatalog` 派生（与 `permission_mode`←ModeSwitcher 同模板）；未声明的
+backend 两个 RPC 诚实返回 `not_supported`，iOS 不画 `/` 按钮。第一期仅目录 + 无参执行：
+不含技能面板、参数输入 UI、`/plan off`、`/model`（后者不在官方 host 命令目录）。
+
+执行语义（与官方 rc.2 逐字对齐，方案 `docs/2026-09-04-dsh-slash-command-panel-implementation.md`）：
+
+- 命令执行是 **host 动作**，绝不是 user message——把 `/plan` 当 `send_message` 发就是
+  「模型把 /plan 当聊天」的那个 bug。
+- 官方执行后会向会话日志追加 durable 副产物事件。2026-09-05 起 `command/run|done` 与
+  `plan/mode` 在 dsh-web codec 是受映射内容事件：折叠为时间线命令行
+  （`session_command` → `command` part 的 system turn，官方 GenericCommandCard 呈现）与
+  计划模式芯片（`session_plan_mode` → projection `planMode`）——成功反馈的权威面是
+  时间线行 + 芯片，不是弹窗。`compaction/{start,prune,summary,end}` 与
+  `feedback/record` 仍 Class ② known-drop（不 reset、不进时间线，与官方投影一致）；
+  `goal/change` 2026-09-05 起同为受映射内容事件（不进时间线，但折叠为 session 级
+  目标投影快照 `session_goal`，见下方「Session-level goal snapshot (`goal`)」）。
+- iOS 面板第一期范围（owner 2026-09-05 裁决）：仅 `/plan` `/compact` `/goal` 三个命令；
+  其余官方命令（`/export`、`/feedback`、`/permission` 等）不在 iOS 面板——`/permission`
+  继续走现有权限模式菜单（`set_permission_mode`）。
+- `/export` 成功 settle 行文案为官方固定「Session log download requested.」，iPhone 本机
+  无产物（仅 Mac web 在线时 ZIP 落到那边浏览器）——不在 iOS 面板的原因。
+
+### Capability: `session_goal`（DSH 目标横条）
+
+session 域目标状态 + 动作（现仅 `dsh-web`）。capability 由 backend agent 实现
+`core.SessionGoalController` 派生（与 `session_commands`←SessionCommandCatalog 同模板，
+两个独立官方 surface：ui-goal GoalBar vs ui-commands 命令面板）；未声明的 backend
+`mutate_session_goal` 诚实返回 `not_supported`，iOS 不画横条。目标状态本身不经
+capability 门：它由 `session_goal` 投影事件承载（见「Session-level goal snapshot
+(`goal`)」），所有客户端都能看到横条；capability 只门四个动作按钮的 RPC。
+
+### RPC: `list_session_commands`
+
+params: `{ sessionId }`（session 域：官方 `commands/list` 强依赖 `agentId`；空 `sessionId`
+→ `invalid_params`）→
+
+```ts
+{
+  commands: Array<{
+    name: string,         // 不含前导 '/'，官方 name 排序（compact, export, feedback, goal, permission, plan）
+    description: string,
+    hint: string          // 官方 input.hint 映射；compact/export 无 input 键 → 空串（键保留）
+  }>
+}
+```
+
+bridge 自有 `{commands:[…]}` 包装；官方响应是裸数组，由 dsh-web 经中间 wire 类型解码映射
+（`input.images` 第一期有意丢弃）。backend 调用失败 → `list_failed`（message 带原文）。
+
+### RPC: `execute_session_command`
+
+params: `{ sessionId, line }`（`line` = 完整官方 slash 行，如 `"/plan"`；第一期无参数 UI，
+客户端只拼 `/`+name。空 `sessionId`/空 `line` → `invalid_params`）→
+`{ ok: true, commandId?, resultKind?, resultText? }`。
+
+成功响应透传官方 settle（2026-09-05「点了没反应」返工）：`resultKind` 恒为官方
+`"success"`（`"error"` 一律走 RPC 失败，不出现在成功响应里）；`resultText` 是官方
+人读反馈（`"Plan mode on. …"`、`"No compactable history yet."`、`/goal` 用法文案、
+`/export` 落盘说明等）。**成功反馈的权威面是时间线命令行 + 计划芯片**（同日二次返工：
+官方 web 真值是持久命令行，不是弹窗）——`resultText` 主要服务于 RPC 诊断与无投影
+旧客户端；客户端不得再弹自造成功提示，也不得自造状态文案。官方零值字段省键下发
+（静默 settle 只回 `{ok:true}`）。
+
+失败语义：官方 `result.kind=="error"` 或命令未命中 → RPC 失败（`execute_failed`），
+message 用官方 `result.text` 原文（或固定 `command not matched`——官方对未知命令返回
+undefined 且不写日志，CordCode 把「commandId 与 result.kind 都空」判为未命中）。成功
+不合成 user 消息、不走 projection 文本。
+
+### RPC: `mutate_session_goal`
+
+params: `{ sessionId, action, objective? }`（`action` ∈ `pause` | `resume` | `edit` |
+`clear`；`edit` 必须携带非空 `objective`，其余 action 忽略该字段。空 `sessionId` /
+未知 `action` / 空 edit objective → `invalid_params`）→ `{ ok: true }`。
+
+对 dsh-web 后端透明转发官方目标动作（`goals/pause|resume|edit|clear` Typert remotes）：
+agent 每次动作前先经 `session.list` 投影读取**最新**目标快照作为 CAS ref
+（`args: {agentId: <sessionId>, ref: {id, revision}}`，edit 另带
+`request: {objective}`），不使用 codec 侧可能滞后的视图。会话当前无目标 → 失败
+（message `session has no current goal`，不发起 verb 调用）。目标创建不是本 RPC 的
+action——创建即 `/goal` host command（`execute_session_command`）。
+
+失败语义：backend 未实现 `SessionGoalController` → `not_supported`；官方语义拒绝
+（如 `cannot pause goal "…" from phase "complete"; expected active`）或座位调用失败 →
+`goal_failed`，message 原样透传座位错误文本——这是 GoalBar inline
+`${message} (${code})` 的文本源，bridge 不得改写。成功不合成消息；横条状态更新由
+座位 `goal/change` → `session_goal` → projection patch 链路权威承载，客户端不得
+本地乐观改 phase。
 
 ### Event: `background_tasks_changed`（Phase 5）
 
@@ -1529,6 +1645,152 @@ status. Snapshot/patch round-trips preserve the part and its `questions` (deep-c
 checkpoint with a `pending` part whose responder handle was lost after process restart is
 recovered to `unavailable` via the Kernel private recovery transaction (design §10.3), never left
 as a clickable-but-unanswerable UI.
+
+#### Part vocabulary: `command` (dsh-web host slash-command timeline)
+
+`BridgeProjectionPart` gains an additive `type: "command"` variant for the dsh-web host
+slash-command lifecycle (2026-09-05, official DeepSeek harness web UI parity — the persistent
+command rows in the conversation timeline). The MacBridge Projection Kernel is the single
+writer: it reduces `session_command` events into exactly ONE completed **system turn** per
+command (`turnId "cmd:<commandId>"`); the settle (`kind: success|error`) upsert replaces the
+running row wholesale. Clients map it read-only into the official command-card presentation:
+leading icon (red state dot on error), `commandName` title, settle summary, expandable
+multiline `commandText` body. Command rows never arm `execution.phase`.
+
+| Field | Purpose |
+|-------|---------|
+| `commandId: string` | Official seat `command/run` id; the fold key (with the turn id). |
+| `commandName?: string` | Official command name without `/`. Empty on done-only rows (official `CommandNode.name=null`) — clients fall back to the locale label. |
+| `commandKind: "running" \| "success" \| "error"` | Row state. running → 执行中…；error → 指令失败；success → 已完成 when `commandText` is empty (official locale labels; the bridge never synthesizes copy). |
+| `commandText?: string` | Official settle text verbatim (`"Plan mode on. Use /plan off to leave."`, `"Compacted 20 history items (…)"`, `/goal` usage text, …). |
+| `commandLine?: string` | Official goal command-input echo (`ui-goal` `goalCommandText`: `"/goal" + args` right-trimmed; **goal only** — `plan`/`compact` have no user bubble officially). Non-empty → clients render the official `GoalCommandInputView` right-aligned user bubble ABOVE the command card: leading `/goal` token as a command chip, the objective as plain text (a further `/goal` inside the objective is prose), no ordinary message actions. Empty/absent → no bubble. Additive (2026-09-06 rework ⑥). |
+
+Live source: dsh-web codec folds official `command/run`/`command/done` seat events (durable
+side-products of `execute_session_command` **and** of commands typed into the Mac web client) by
+`commandId`. Cold hydrate: the dsh-web history mapper folds the same events from
+`session.history` into system rich-history parts routed through the identical reducer events —
+live and cold produce the same rows. Unsettled torn-tail runs keep a `running` row (the official
+unsettled card). `compaction/{start,prune,summary,end}` and `feedback/record` remain
+control-plane (no timeline surface), mirroring the official web projection; `goal/change` is
+likewise no timeline row but IS folded into the session-level goal projection snapshot
+(see 「Session-level goal snapshot (`goal`)」 below).
+
+#### Part vocabulary: `context_injection` (dsh-web settle-notice rows)
+
+`BridgeProjectionPart` gains an additive `type: "context_injection"` variant for dsh-web
+context-injection rows — the official `ContextInjectionRow` parity (2026-09-06, §13.3). The
+current sole producer is the subagent **settle notice**: when a background subagent finishes
+(official `continuation.ts`), dsh injects a `user/message` into the parent session with
+`source{kind: "subagent-settled", form: "notice", summary, senderSessionId}`; the official web
+UI renders it as「上下文注入 · subagent-settled · \<summary\」 with the model-facing body on
+expand. The MacBridge Projection Kernel is the single writer: it reduces `context_injection`
+events into exactly ONE completed **system turn** per itemId (`turnId "ctx:<itemId>"`,
+`itemId "ctxinj:<journal-seq>"` — identical from live and cold, so replay folds in place).
+Injection rows never arm `execution.phase` and never reset turn attribution (an injection is
+not an official turn boundary).
+
+| Field | Purpose |
+|-------|---------|
+| `itemId: string` | `"ctxinj:<seq>"`; the fold key (with the turn id). |
+| `contextKind: string` | Official `source.kind` verbatim (`"subagent-settled"`; the row label is the bare kind, official context-provenance semantics). |
+| `contextForm?: string` | Official `source.form` (`"notice"`). |
+| `contextSummary?: string` | One-line settle summary (official noticeSummary: "Background subagent … finished/was stopped/ran out of room/declined/failed"). Collapsed-row text. |
+| `contextText?: string` | Model-facing full body (settlement summary + closing message, newline-joined). Expanded body; absent → collapsed row only. |
+| `contextSenderSessionId?: string` | The settled child session id. |
+
+Clients render the row read-only: icon + `上下文注入 / Context injection` title (official
+locale.ts verbatim) + bare `contextKind` label + `contextSummary`; tapping expands the full
+`contextText`. Fail-open semantics: a settle notice with an empty `summary` is an unknown shape
+and is dropped silently (no row, no stream reset); other injection kinds (`goal`,
+`agent-instructions`, `skill-catalog`, `agent-message`) remain known-drops (deliberately
+unsupported, 方案 §13.7) — the codec never treats them as protocol violations. Live source:
+dsh-web codec `user/message` `source.kind == "subagent-settled"` branch. Cold hydrate: the
+history mapper folds the same rows into typed `context_injection` rich-history entries routed
+through the identical reducer event.
+
+#### Part vocabulary: `workflow` (dsh-web parallel-subagent workflow cards)
+
+`BridgeProjectionPart` gains an additive `type: "workflow"` variant for dsh-web parallel
+subagent runs — the official `WorkflowRunPanel` (ui-workflow-run) parity (2026-09-06). The
+official journal emits four tool events per run (`tool-workflow/run-start`,
+`tool-workflow/agent-start`, `tool-workflow/agent-end`, `tool-workflow/run-end`);
+`agent/dsh-web workflow_fold.go` folds them (official `workflowRunDefinition` semantics — run
+`{id, name}`, members `{seq, label, phase?, childId}` appended in order, outcome settled by
+seq, stopReason on run-end) into ONE whole-value snapshot per `workflowId`. The same fold runs
+in the live codec and the cold history walk, so live and cold produce identical parts. The
+reducer upserts the part in place on the owning assistant turn's parts (`PartOp` `upsert_workflow`,
+keyed by `workflowId`); the owning turn must already exist (fail-closed otherwise). The raw
+`workflow_run` event is deny-listed for syncV2 raw delivery — the projection part is the single
+source of truth.
+
+| Field | Purpose |
+|-------|---------|
+| `workflowId: string` | Official run id; the upsert key. |
+| `workflowName: string` | Official run name (e.g. `plan109-subagent-rewrite`). |
+| `workflowStatus: string` | `running \| completed \| failed \| cancelled \| interrupted`. From official `statusFromStopReason` (`error→failed`); `running` while stopReason is unset. `interrupted` is **reducer-injected** when the owning turn reaches a terminal state while the run is still open (official `locationClosed`; recorded difference: CordCode marks per-turn, official per enclosing step/turn). |
+| `workflowPhases: BridgeWorkflowPhase[]` | Members grouped by phase identity, first-appearance order. `phase: null` = 未分阶段 (official missing); `phase: ""` = 空阶段名 — two distinct identities, never merged. Member: `{seq, label, childSessionId?, status}`; member status mirrors run-status derivation (unsettled → `running`). |
+
+Client rendering mirrors the official panel: run header (`workflowName` + 「{count} 个成员」
++ status), one section per phase (null → 未分阶段, "" → 空阶段名, plus per-section status
+summary 运行中 N/已完成 N/失败 N/已取消 N/已中断 N), one row per member (dot + label +
+status). Disclosure: `clean` (all completed) auto-collapses, `running`/`abnormal` auto-open;
+a user toggle always overrides the auto state. Member rows are informational; navigation
+(official `navigableMembers`) is client-side — iOS renders a RUNNING member with a
+`childSessionId` tappable, emitting its own native `subagentMemberTap {childSessionId}`
+event (never flows over this protocol). Live source: dsh-web codec `tool-workflow/*` cases.
+Cold hydrate: history mapper folds the same journal events into `workflow` rich-history parts
+anchored at the run-start journal position (official keyed-chat-node anchoring), routed
+through the identical reducer event.
+
+#### Session-level goal snapshot (`goal`)
+
+`BridgeSessionProjection` / `BridgeProjectionPatch` gain an additive `goal?: GoalView` — the
+official goal-projection wire view (packages/goal, whole-snapshot semantics). The dsh-web codec
+folds `goal/change` frames (snapshot ops `create|edit|pause|resume|complete|block` carry the
+full `{id, revision, objective, phase, blockedReason?, maxGoalRounds}`; op `clear` carries only
+`{cleared:{id, revision}}`) and emits `session_goal` only when the snapshot value changes; the
+reducer stores it on the projection (absent = no goal state, banner absent). Cold hydrate folds
+the same events from `session.history` through the identical reducer event, so live and cold
+produce the same state.
+
+```ts
+goal?: {
+  id?: string,               // absent when phase == "none" (cleared encoding)
+  revision?: number,         // CAS ref for goals/<verb> mutations
+  objective?: string,        // absent when phase == "none"
+  phase: "active" | "paused" | "blocked" | "complete" | "none",
+  blockedReason?: { code: string, message: string },  // blocked phase only
+  maxGoalRounds?: number,
+}
+```
+
+`phase: "none"` is CordCode's encoding of the official cleared/null goal projection: the wire
+event for a `clear` carries `{phase: "none"}` (goal fields absent), letting a patch clear a
+stale far-side banner without a `goal: null` key on every subsequent patch. Clients MUST treat
+`none` identically to an absent goal field (render nothing).
+
+The client banner formula mirrors the official GoalBar (packages/client/ui-goal GoalBar.tsx):
+render NOTHING for undefined / absent / `phase == "none"` / `phase == "complete"` / a goal id
+matching a previously cleared id; otherwise render the phase label (进行中的目标 /
+已暂停的目标 / 受阻的目标) + objective + phase icon, with the blocked tooltip carrying
+`blockedReason.message`. Actions: pause icon only when `active`; resume icon only when
+`paused`; edit + clear always (edit opens an inline strip pre-filled with the objective —
+Enter saves, Esc cancels, empty disables save; clear removes the goal). Actions call
+`mutate_session_goal`; failures surface inline as `${message} (${code})` (the seat error text
+passes through verbatim via the RPC's `goal_failed` code). Goal creation is NOT a banner
+action — it is the `/goal` host command (`execute_session_command`). The goal state is
+**not** a timeline row (official parity: banner-only).
+
+#### Session-level plan-mode snapshot (`planMode`)
+
+`BridgeSessionProjection` / `BridgeProjectionPatch` gain an additive `planMode?: { active,
+pending }` — the official plan-projection wire view (packages/plan/plan-mode). The dsh-web codec
+folds `command/run|done` (name `plan`, args present) + `plan/mode` frames into the view and emits
+`session_plan_mode` only when it changes; the reducer stores it on the projection (absent = no
+plan-mode state, chip absent). The client chip formula mirrors the official `PlanModeControl`:
+`target = pending ? !active : active` — render the `Plan ×` chip only when `target` is true; a
+tap executes `execute_session_command "/plan off"`; the composer placeholder switches in plan
+mode. Plan mode is **not** a timeline row (official parity: chip-only).
 
 ## Projection Window (server-owned windowing) — FROZEN SPEC (not advertised)
 

@@ -44,6 +44,20 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 	if _, ok := agent.(core.ModeSwitcher); ok {
 		caps = append(caps, "permission_mode")
 	}
+	// session_commands（DSH 命令面板，方案 2026-09-04 §5.1）：per-session host 命令
+	// 目录 + 执行（官方 commands/list + commands/execute 透传；list 强依赖
+	// agentId，属 session 域）。现仅 dsh-web 实现 SessionCommandCatalog；其他
+	// backend 不广告 → iOS 不画 / 按钮。与零消费死接口 CommandProvider 无关。
+	if _, ok := agent.(core.SessionCommandCatalog); ok {
+		caps = append(caps, "session_commands")
+	}
+	// session_goal（DSH 目标横条）：官方 goals/<verb> 动词透传（pause/resume/
+	// clear/edit）。现仅 dsh-web 实现 SessionGoalController；其他 backend 不广
+	// 告 → iOS 不画横条动作。与 session_commands 分开广告：命令面板与目标横条
+	// 是两个独立官方 surface（ui-commands / ui-goal），一个 backend 可只有其一。
+	if _, ok := agent.(core.SessionGoalController); ok {
+		caps = append(caps, "session_goal")
+	}
 	if _, ok := agent.(core.SessionRenamer); ok {
 		if _, ok := agent.(core.SessionArchiver); ok {
 			caps = append(caps, "session_mutation")

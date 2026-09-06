@@ -335,6 +335,11 @@ const (
 	EventUserInputRequested  EventType = "user_input_requested"  // 结构化用户输入交互产生（pending/failed），权威 payload 在 Event.UserInput（设计 §10.1）
 	EventUserInputResolved   EventType = "user_input_resolved"   // 结构化用户输入交互被解决（answered/rejected/auto_resolved/unavailable）
 	EventRetryStatus         EventType = "retry_status"          // transient provider-retry notice (serve keeps the turn alive; wire session_retry_status)
+	EventSessionCommand      EventType = "session_command"       // dsh-web host 斜杠命令生命周期（command/run|done 按 commandId 折叠；权威 payload 在 Event.SessionCommand）
+	EventSessionPlanMode     EventType = "session_plan_mode"     // dsh-web 计划模式投影 {active, pending}（官方 plan projection view；权威 payload 在 Event.PlanMode）
+	EventSessionGoal         EventType = "session_goal"         // dsh-web 目标投影整值快照（官方 goal projection view；权威 payload 在 Event.Goal，nil = 已清除）
+	EventContextInjection    EventType = "context_injection"    // dsh-web 上下文注入行（user/message source.kind!="user"，当前仅 subagent-settled；权威 payload 在 Event.ContextInjection）
+	EventWorkflowRun         EventType = "workflow_run"         // dsh-web 并行子代理 workflow 卡整值快照（tool-workflow/* 四事件按 runId 折叠；权威 payload 在 Event.WorkflowRun）
 )
 
 // UserQuestion represents a structured question from AskUserQuestion.
@@ -414,6 +419,110 @@ type UserInputInteraction struct {
 	ResolvedAt       int64               `json:"resolvedAt,omitempty"`
 	ResolutionSource string              `json:"resolutionSource,omitempty"`
 	DiagnosticCode   string              `json:"diagnosticCode,omitempty"`
+}
+
+// SessionCommandEvent 是一次 host 斜杠命令生命周期的权威 payload（dsh-web
+// command/run + command/done 按 commandId 折叠；镜像官方 CommandNode）。Kind:
+// running（run 已见、done 未到）| success | error。Name/Args 来自 run 帧；仅见
+// done 时 Name 为空（官方 CommandNode.name 可空，客户端按官方 locale 回退）。
+// Text 是官方 settle 文案逐字（done 无文案时为空，客户端按官方 locale 回退
+// 「已完成/指令失败」；绝不由桥自造状态文案）。
+// InputLine 是官方 goal 命令输入行回显（ui-goal goal-command-input.ts
+// goalCommandText："/goal" + args.TrimRight；只有 goal 注册 command-input 节点，
+// plan/compact 官方无用户气泡）。空 = 非 goal 命令或无 run 帧。
+type SessionCommandEvent struct {
+	CommandID string `json:"commandId"`
+	Name      string `json:"name,omitempty"`
+	Args      string `json:"args,omitempty"`
+	Kind      string `json:"kind"` // running | success | error
+	Text      string `json:"text,omitempty"`
+	InputLine string `json:"inputLine,omitempty"`
+}
+
+// PlanModeEvent 是 dsh-web 计划模式投影的 {active, pending} 快照（官方 plan
+// projection 的 wire view：pending = wanted 非 null 且 wanted != active，即一次
+// 尚未在下个 accepted pre-step 落地的模式选择）。客户端 chip 公式与官方一致：
+// target = pending ? !active : active；target 为假不显示。
+type PlanModeEvent struct {
+	Active  bool `json:"active"`
+	Pending bool `json:"pending"`
+}
+
+// ContextInjectionEvent 是 dsh-web 上下文注入行的权威 payload（官方
+// continuation.ts 注入父会话的 user/message source 逐字段映射；官方 UI 渲染为
+// ContextInjectionRow「上下文注入 · <kind> · <summary>」）。当前唯一生产者是
+// subagent-settled settle 通知（form="notice"）。Summary 为官方 source.summary
+// 逐字（折叠行的一行结算，notice 语义通常不展开即可读）；Text 是 model-facing
+// 全文（结算摘要 + 结语，展开体）。SenderSessionID 是 settle 的子会话 id。
+// Summary 空则 codec/历史两路都静默丢（fail-open，不造行）。
+type ContextInjectionEvent struct {
+	ItemID          string `json:"itemId"`
+	Kind            string `json:"kind"`
+	Form            string `json:"form,omitempty"`
+	Summary         string `json:"summary,omitempty"`
+	Text            string `json:"text,omitempty"`
+	SenderSessionID string `json:"senderSessionId,omitempty"`
+}
+
+// WorkflowRunStatus 枚举（官方 WorkflowRunStatus 对位；interrupted 仅由投影
+// reducer turn 终态注入，折叠层不产）。
+const (
+	WorkflowStatusRunning     = "running"
+	WorkflowStatusCompleted   = "completed"
+	WorkflowStatusFailed      = "failed"
+	WorkflowStatusCancelled   = "cancelled"
+	WorkflowStatusInterrupted = "interrupted"
+)
+
+// WorkflowRunMember 是 workflow 卡一个成员的投影数据（官方 WorkflowRunMemberData
+// 对位）。Status: running（agent-start 已见、agent-end 未到）| completed | failed |
+// cancelled（agent-end outcome）| interrupted（turn 终态注入，官方 locationClosed）。
+type WorkflowRunMember struct {
+	Seq            int    `json:"seq"`
+	Label          string `json:"label"`
+	ChildSessionID string `json:"childSessionId,omitempty"`
+	Status         string `json:"status"`
+}
+
+// WorkflowRunPhase 是按 phase 身份分组的成员表（官方 WorkflowRunPhaseData 对位）。
+// Phase 三态身份：nil = 未分阶段（官方 phase undefined → null → key "missing"）；
+// 非 nil 空串 = 空阶段名（官方 value:0: 独立身份）；非空 = 阶段名。分组按首现顺序。
+type WorkflowRunPhase struct {
+	Phase   *string            `json:"phase"`
+	Members []WorkflowRunMember `json:"members"`
+}
+
+// WorkflowRunEvent 是 dsh-web 并行子代理 workflow 卡的整值快照（官方
+// ui-workflow-run workflow-definition.ts 折叠 + projectWorkflow 视图投影的
+// CordCode wire view；live codec 与 history 冷拉经 workflow_fold.go 单一折叠真值
+// 产出）。Name 是 run-start 的官方 run 名；Status: running（run-end 未到）|
+// completed | cancelled | failed（run-end stopReason 映射）| interrupted（reducer
+// turn 终态注入——折叠层不知 turn 闭合，官方 locationClosed 语义由投影层补）。
+type WorkflowRunEvent struct {
+	RunID  string             `json:"runId"`
+	Name   string             `json:"name"`
+	Status string             `json:"status"`
+	Phases []WorkflowRunPhase `json:"phases"`
+}
+
+// GoalBlockedReason 是目标受阻时的官方规范化解释（goal/change 全量快照内字段）。
+type GoalBlockedReason struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// GoalEvent 是 dsh-web 目标投影的整值快照（官方 goal projection 的 wire view：
+// goal/change 为全量快照替换语义，无折叠）。渲染契约镜像官方 GoalBar：
+// phase==complete 或无目标不渲染横条；active/paused/blocked 显示相位标签 +
+// objective + 动作（active→pause、paused→resume、恒有 edit/clear）。
+// Event.Goal 为 nil 表示目标已被清除（clear 墓碑）。
+type GoalEvent struct {
+	ID             string             `json:"id"`
+	Revision       int64              `json:"revision"`
+	Objective      string             `json:"objective"`
+	Phase          string             `json:"phase"` // active | paused | blocked | complete
+	BlockedReason *GoalBlockedReason `json:"blockedReason,omitempty"`
+	MaxGoalRounds int                `json:"maxGoalRounds,omitempty"`
 }
 
 // FileChange describes one structured file mutation emitted by an agent.
@@ -510,6 +619,21 @@ type Event struct {
 	// 旧单题 QuestionID/QuestionText/QuestionOpts 字段只服务 legacy `.off` 路径；
 	// v2 adapter 只填充 UserInput（设计 §10.1）。projection 不保存答案正文。
 	UserInput *UserInputInteraction
+	// dsh-web host 斜杠命令生命周期（EventSessionCommand 的权威 payload）。
+	// 折叠语义镜像官方 conversation-nodes/command.ts（run→running 行，done→settle）。
+	SessionCommand *SessionCommandEvent
+	// dsh-web 计划模式投影快照（EventSessionPlanMode 的权威 payload）。
+	PlanMode *PlanModeEvent
+	// dsh-web 目标投影整值快照（EventSessionGoal 的权威 payload；nil = 已清除）。
+	Goal *GoalEvent
+	// dsh-web 上下文注入行（EventContextInjection 的权威 payload；官方
+	// ContextMessageNode 对位——user/message source.kind!="user" 的注入上下文，
+	// 当前只 subagent-settled settle 通知）。
+	ContextInjection *ContextInjectionEvent
+	// dsh-web 并行子代理 workflow 卡整值快照（EventWorkflowRun 的权威 payload；
+	// 官方 ui-workflow-run WorkflowRunChatData 对位，折叠真值在
+	// agent/dsh-web/workflow_fold.go）。
+	WorkflowRun *WorkflowRunEvent
 }
 
 // HistoryEntry is one turn in a conversation.
@@ -540,6 +664,9 @@ type RichHistoryEntry struct {
 	ModelID         string     `json:"modelId,omitempty"`
 	ProviderID      string     `json:"providerId,omitempty"`
 	ModelName       string     `json:"modelName,omitempty"`
+	// ContextInjection 非空 = Role "context_injection" 行（dsh subagent-settled
+	// settle 通知的冷拉载体；Content 同 Text）。其他 role 恒 nil。
+	ContextInjection *ContextInjectionEvent `json:"contextInjection,omitempty"`
 }
 
 // Todo represents one backend-managed todo item for a session.
@@ -611,7 +738,8 @@ type BackgroundTask struct {
 	TaskID              string
 	BackendID           string
 	RootSessionID       string
-	ParentTaskID        string // nested parent (Claude parentAgentId); "" for depth-1
+	ParentTaskID        string // nested parent (Claude parentAgentId / DSH subagent-of-subagent); "" for depth-1
+	DurationMillis      int64  // explicit work wall time (DSH sessionStats llmMs+toolMs); 0 = unknown, wire omits
 	AgentID             string // Claude sidechain agent id / DSH sub-session id
 	Title               string // task instruction/description (real text, not invented)
 	AgentName           string // general-purpose 等

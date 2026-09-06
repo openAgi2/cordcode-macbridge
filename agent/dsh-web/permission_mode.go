@@ -16,15 +16,12 @@ package dshweb
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
-
-const commandsExecuteMethod = "commands/execute"
 
 const (
 	permissionModeReadOnly         = "read-only"
@@ -91,52 +88,16 @@ func (s *dshSession) SetLiveMode(mode string) bool {
 	return true
 }
 
-type commandsExecuteRequest struct {
-	Args commandsExecuteArgs `json:"args"`
-}
-
-type commandsExecuteArgs struct {
-	AgentID string `json:"agentId"`
-	Line    string `json:"line"`
-}
-
-type commandsExecuteValue struct {
-	CommandID string `json:"commandId"`
-	Result    struct {
-		Kind string `json:"kind"`
-		Text string `json:"text,omitempty"`
-	} `json:"result"`
-}
-
 func (a *Agent) applySessionPermission(sessionID, mode string) error {
 	if sessionID == "" {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	client, err := a.clientFor(ctx)
-	if err != nil {
-		return err
-	}
 	// Official chrome payload: Remote args { agentId, line }. The gateway
 	// rejects anything that is not exactly one plain-object `args` field.
-	var out commandsExecuteValue
-	err = client.Call(ctx, commandsExecuteMethod, commandsExecuteRequest{
-		Args: commandsExecuteArgs{
-			AgentID: sessionID,
-			Line:    "/permission " + mode,
-		},
-	}, &out)
-	if err != nil {
-		return err
-	}
-	if strings.EqualFold(out.Result.Kind, "error") {
-		return fmt.Errorf("dsh-web: /permission %s: %s", mode, out.Result.Text)
-	}
-	if out.CommandID == "" && out.Result.Kind == "" {
-		return fmt.Errorf("dsh-web: /permission %s: command not matched", mode)
-	}
-	return nil
+	_, err := a.ExecuteSessionCommand(ctx, sessionID, "/permission "+mode)
+	return err
 }
 
 func (a *Agent) persistPermissionDefault(mode string) {

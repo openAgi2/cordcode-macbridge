@@ -211,6 +211,8 @@ func TestSessionSyncV2RawTimelineClassification(t *testing.T) {
 		"permission_request", "permission_resolved", "permission_asked",
 		"context_compressing", "context_compressed",
 		"session_state_changed", "delivery_reconcile_required", "error",
+		// dsh-web 命令/快照/注入行：投影 SoT（K4/§13.3 封条）。
+		"session_command", "session_plan_mode", "session_goal", "context_injection",
 	} {
 		if !isSessionSyncV2RawTimelineEvent(event) {
 			t.Errorf("%s must be projection-owned raw timeline content", event)

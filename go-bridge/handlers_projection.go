@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -493,15 +494,22 @@ func (h *Handlers) ensureProjectionHydrated(
 		// turn 未入 session.history cut，且重建的 turn 身份与 live 流不同源——
 		// fence 把 kernel 从 464 回退到 10，后续 live 补丁身份脱节 iOS 不渲染，
 		// 并诱发连续重建循环（16:07 四连 fence）。正确矩阵：
-		//   * 已有 kernel：live 或非 forceCold → live-only（保 rev/身份）
+		//   * 完整基线（coldBaseline，或本代内出生的会话——live 状态覆盖 t1）：
+		//     live 或非 forceCold → live-only（保 rev/身份）
+		//   * 残缺基线：2026-09-06 真机复发——runtime 在 turn 进行中重启，live
+		//     mux 事件把 kernel 只播种出在飞 turn（无任何冷源基线）；旧矩阵
+		//     「hasKernel 即 live-only」把该残缺状态提交成权威基线，iOS 冷拉
+		//     只剩最后一个回复。此时必须落回 pathless 冷重建：kernel 侧空
+		//     reducer 起跑 + commit 时 union 回在飞 live turn（身份已同源——
+		//     dshwTurnID 冷热共用，2026-09-06 rework ⑧）。
 		//   * 尚无 kernel：即使 registry 已 live（刚 StartSession / mux 尚未
-		//     入核），也走 pathless history 播种。旧条件 `live || …` 会在空
-		//     kernel 上 live-only admission，首张 snapshot turnCount=1，历史
-		//     被丢掉（真机 16:26:16）。
+		//     入核），也走 pathless history 播种（真机 16:26:16）。
 		// 脱活 forceCold 与从未见过的会话仍 fall through 到 pathless。
 		_, live := h.getSession(sessionID)
 		hasKernel := h.projectionKernel.HasReducerState(backendID, sessionID)
-		if hasKernel && (live || !forceColdInspection) {
+		baselineComplete := h.projectionKernel.HasColdBaseline(backendID, sessionID) ||
+			dshWebKernelCoversSessionStart(h.projectionKernel, backendID, sessionID)
+		if hasKernel && baselineComplete && (live || !forceColdInspection) {
 			return h.ensureLiveOnlyProjectionAdmission(backendID, sessionID)
 		}
 	}
@@ -617,6 +625,48 @@ func (h *Handlers) ensureProjectionHydrated(
 	case <-time.After(budget):
 		return fmt.Errorf("%w; retry after hydrate completes", errProjectionHydrating)
 	}
+}
+
+// dshWebKernelCoversSessionStart reports whether the kernel's committed turn rows
+// already contain the session's FIRST journal turn (dshw-<prefix>-t1). The identity
+// is minted identically by the live codec and the cold history mapper (dshwTurnID,
+// 2026-09-06 rework ⑧), so "t1 present" proves the live-ingested state spans the
+// whole session — a session born under this bridge epoch (StartSession → first turn
+// ingested live) and worth keeping via the fast live-only admission. A kernel seeded
+// only since a mid-session runtime restart starts at tN (N>1) and must cold-rebuild.
+// Foreign/unparsable rows (cmd:/ctx:/tests) prove nothing → false (fall to rebuild;
+// the kernel-side union makes rebuild content-safe regardless).
+func dshWebKernelCoversSessionStart(kernel *ProjectionKernel, backendID, sessionID string) bool {
+	if kernel == nil {
+		return false
+	}
+	snap, ok := kernel.CommittedSnapshot(backendID, sessionID)
+	if !ok {
+		return false
+	}
+	for _, turn := range snap.Turns {
+		if n, ok := dshwTurnNumberOf(turn.TurnID); ok && n == 1 {
+			return true
+		}
+	}
+	return false
+}
+
+// dshwTurnNumberOf parses the official journal turn number out of a dshw turn
+// identity ("dshw-<prefix>-tN"). ok=false for foreign/system turn rows.
+func dshwTurnNumberOf(turnID string) (int, bool) {
+	if !strings.HasPrefix(turnID, "dshw-") {
+		return 0, false
+	}
+	idx := strings.LastIndex(turnID, "-t")
+	if idx < 0 {
+		return 0, false
+	}
+	num, err := strconv.Atoi(turnID[idx+2:])
+	if err != nil || num < 1 {
+		return 0, false
+	}
+	return num, true
 }
 
 func (h *Handlers) prepareProjectionHydrateSource(
@@ -1305,6 +1355,37 @@ func hydrateUserInputEventsFromPart(part map[string]any, turnID string) []projec
 	return out
 }
 
+// hydrateWorkflowEventsFromPart turns one cold-folded workflow part (history.go
+// dshTurnAccumulator.foldWorkflowEvent; keys mirror ProjectionPart JSON tags)
+// into a single whole-value workflow_run hydrate event. Wire shape is identical
+// to the live path (events.go EventWorkflowRun) so the reducer upserts cold and
+// live through one case. Fail-closed: a part without workflowId or phases yields
+// nothing.
+func hydrateWorkflowEventsFromPart(part map[string]any, turnID string) []projectionHydrateEvent {
+	workflowID := dataString(part, "workflowId")
+	if workflowID == "" || turnID == "" {
+		return nil
+	}
+	phases, ok := part["workflowPhases"]
+	if !ok || phases == nil {
+		return nil
+	}
+	status := dataString(part, "workflowStatus")
+	if status == "" {
+		status = "running"
+	}
+	return []projectionHydrateEvent{{
+		Event: "workflow_run",
+		Data: map[string]interface{}{
+			"turnId":          turnID,
+			"workflowId":      workflowID,
+			"workflowName":    dataString(part, "workflowName"),
+			"workflowStatus":  status,
+			"workflowPhases":  phases,
+		},
+	}}
+}
+
 // copyOptionalStepField copies a non-nil, non-empty step field into the target hydration
 // event data under the same key. It deliberately forwards whatever the upstream builder
 // produced (including structured fileChanges []any / toolInput string / title string)
@@ -1699,6 +1780,16 @@ func openCodeRichHistoryEntryToProjectionEvents(
 						hasPendingUserInput = true
 					}
 					emittedContent = true
+				case "workflow":
+					// dsh-web 并行子代理 workflow 卡（history.go 冷拉折叠的整值
+					// part → 一次 workflow_run hydrate 事件；reducer 按 workflowId
+					// 原地 upsert，与 live 路径同形）。
+					events := hydrateWorkflowEventsFromPart(part, turnID)
+					if len(events) == 0 {
+						continue
+					}
+					out = append(out, events...)
+					emittedContent = true
 				}
 			}
 		}
@@ -1743,6 +1834,81 @@ func openCodeRichHistoryEntryToProjectionEvents(
 		}
 		return out
 	case "system":
+		// dsh-web folded host-command rows / plan-mode snapshot ride as structured
+		// system parts (agent/dsh-web history.go): each folds to its reducer event
+		// (session_command → command part on a completed system turn; plan_mode →
+		// session-level planMode). Rows with none of these keep the legacy
+		// system_message text path.
+		if len(entry.Parts) > 0 {
+			var out []projectionHydrateEvent
+			handled := false
+			emittedCommand := false
+			for _, part := range entry.Parts {
+				switch strings.TrimSpace(fmt.Sprint(part["type"])) {
+				case "command":
+					commandID := strings.TrimSpace(fmt.Sprint(part["commandId"]))
+					kind := strings.TrimSpace(fmt.Sprint(part["kind"]))
+					if commandID == "" || kind == "" {
+						continue
+					}
+					handled = true
+					data := map[string]interface{}{
+						"commandId": commandID,
+						"kind":      kind,
+					}
+					for key, wireKey := range map[string]string{"name": "name", "args": "args", "text": "text", "line": "inputLine"} {
+						if v, ok := part[key]; ok {
+							data[wireKey] = v
+						}
+					}
+					if !entry.Timestamp.IsZero() {
+						data["timestampMillis"] = entry.Timestamp.UnixMilli()
+					}
+					out = append(out, projectionHydrateEvent{Event: "session_command", Data: data})
+					emittedCommand = true
+				case "plan_mode":
+					handled = true
+					active, _ := part["active"].(bool)
+					pending, _ := part["pending"].(bool)
+					out = append(out, projectionHydrateEvent{
+						Event: "session_plan_mode",
+						Data:  map[string]interface{}{"active": active, "pending": pending},
+					})
+				case "goal":
+					handled = true
+					data := map[string]interface{}{
+						"phase": strings.TrimSpace(fmt.Sprint(part["phase"])),
+					}
+					for key, wireKey := range map[string]string{"id": "id", "objective": "objective"} {
+						if v, ok := part[key]; ok {
+							data[wireKey] = v
+						}
+					}
+					if v, ok := part["revision"]; ok {
+						data["revision"] = v
+					}
+					if v, ok := part["maxGoalRounds"]; ok {
+						data["maxGoalRounds"] = v
+					}
+					if v, ok := part["blockedReason"]; ok {
+						data["blockedReason"] = v
+					}
+					out = append(out, projectionHydrateEvent{Event: "session_goal", Data: data})
+				}
+			}
+			if handled {
+				// dsh-web 斜杠命令是官方 turn 边界：journal 真值（dsh-v0.1.3-alpha.1）
+				// 中 command/done 恒落在 turn/end 与下一 turn/start 之间，且 goal 轮
+				// 没有 user 行。命令行之后的首个 assistant 行必须自持 entry 身份
+				// （官方 turn id），不得折回命令前最后一个 user turn——否则 goal 多轮
+				// 输出全部合并进同一 turn、命令卡聚到尾部（owner 2026-09-06 01:49
+				// rework ⑧）。plan_mode / goal 是会话级快照，不构成边界，不重置。
+				if emittedCommand {
+					*currentTurnID = ""
+				}
+				return out
+			}
+		}
 		text := strings.TrimSpace(entry.Content)
 		if text == "" {
 			return nil
@@ -1760,6 +1926,35 @@ func openCodeRichHistoryEntryToProjectionEvents(
 			data["timestampMillis"] = entry.Timestamp.UnixMilli()
 		}
 		return []projectionHydrateEvent{{Event: "system_message", Data: data}}
+	case "context_injection":
+		// dsh-web settle-notice row (agent/dsh-web history.go): typed entry — the
+		// cold twin of the live context_injection event. Same data shape and same
+		// "ctxinj:<seq>" itemId, so cold hydrate lands on the identical turn the
+		// live stream upserted (idempotent whole-value upsert in the reducer).
+		if entry.ContextInjection == nil {
+			return nil
+		}
+		ci := entry.ContextInjection
+		data := map[string]interface{}{
+			"itemId": ci.ItemID,
+			"kind":   ci.Kind,
+		}
+		if ci.Form != "" {
+			data["form"] = ci.Form
+		}
+		if ci.Summary != "" {
+			data["summary"] = ci.Summary
+		}
+		if ci.Text != "" {
+			data["text"] = ci.Text
+		}
+		if ci.SenderSessionID != "" {
+			data["senderSessionId"] = ci.SenderSessionID
+		}
+		if !entry.Timestamp.IsZero() {
+			data["timestampMillis"] = entry.Timestamp.UnixMilli()
+		}
+		return []projectionHydrateEvent{{Event: "context_injection", Data: data}}
 	default:
 		return nil
 	}

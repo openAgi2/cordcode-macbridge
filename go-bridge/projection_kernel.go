@@ -11,6 +11,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -635,6 +636,14 @@ type projectionKernelSession struct {
 	hydrate               *projectionHydrateTransaction
 	hydrateDone           chan struct{}
 	lastPersistedRev      int
+	// coldBaseline marks whether the committed baseline ever came from a full
+	// cold-source hydrate this bridge epoch (pathless/file replay, or a
+	// checkpoint restore committed through the cold path). A kernel seeded
+	// ONLY by live ingestion since a runtime restart holds just the in-flight
+	// turn and is NOT a complete baseline — dsh-web 真机 2026-09-06：重启落在
+	// turn 进行中，live-only admission 把该残缺状态提交成权威基线，iOS 冷拉
+	// 只剩最后一个回复。
+	coldBaseline          bool
 	committedSourceCursor int64 // last transcript cut committed into SoT; catch-up when source advances
 	committedSource       ProjectionSourceDescriptor
 	claudeSourceState     *ClaudeSourceState
@@ -645,6 +654,11 @@ type projectionKernelSession struct {
 	waiters               []chan struct{}
 	lastWriteErr          error
 }
+
+// liveOnlyAdmissionSourcePrefix is the source identity prefix minted ONLY by
+// ensureLiveOnlyProjectionAdmission (handlers_projection.go). BeginHydrateTransaction
+// derives tx.liveOnlyAdmission from it; the two sites must stay bound.
+const liveOnlyAdmissionSourcePrefix = "live-only:"
 
 type projectionHydrateTransaction struct {
 	source      ProjectionSourceDescriptor
@@ -660,6 +674,17 @@ type projectionHydrateTransaction struct {
 	// fixed for the transaction; process death during hydrate is closed by the live side
 	// (relay-before-hydrate + synthesized turn_aborted, §3.2/§3.3), never by re-polling liveness.
 	sourceIsLive bool
+	// liveOnlyAdmission marks the keep-carried-baseline admission (source identity
+	// "live-only:*", minted only by ensureLiveOnlyProjectionAdmission). Its commit
+	// preserves kernel state without any cold-source ingest and therefore must NOT
+	// set session.coldBaseline.
+	liveOnlyAdmission bool
+	// unionLiveTurns marks the dsh-web rebuild over a live-only-seeded kernel
+	// (2026-09-06 修复): the cold replay runs on an EMPTY reducer (turn order stays
+	// journal-true) and the commit UNIONS back live turn rows missing from the cold
+	// cut (the in-flight turn), instead of either carrying the stale partial baseline
+	// (old bug: history lost) or dropping pre-admission live turns.
+	unionLiveTurns bool
 	// sourceIngestComplete is set true once cold-source ingest finishes (design §3.3 rule #2 /
 	// D6 / K1 of the cold-start plan, guardrail #6). WaitHydrateCommitReady will not commit until
 	// this is true, so readiness is decided from authoritative source-EOF + turn terminal state
@@ -835,6 +860,31 @@ func (k *ProjectionKernel) HasReducerState(backendID, sessionID string) bool {
 	return ok
 }
 
+// HasColdBaseline reports whether the committed baseline for the session ever came
+// from a full cold-source hydrate this bridge epoch. Live-only seeding (mux events
+// since a runtime restart) leaves it false: that state may cover only the in-flight
+// turn and must not be served as the complete session (dsh-web 2026-09-06).
+func (k *ProjectionKernel) HasColdBaseline(backendID, sessionID string) bool {
+	if k == nil {
+		return false
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.sessionLocked(backendID, sessionID).coldBaseline
+}
+
+// CommittedSnapshot returns the authoritative reducer's committed projection for the
+// session (ok=false when no committed state exists). Read-only; callers must not
+// mutate the returned value.
+func (k *ProjectionKernel) CommittedSnapshot(backendID, sessionID string) (SessionProjection, bool) {
+	if k == nil {
+		return SessionProjection{}, false
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.reducer.Snapshot(backendID, sessionID)
+}
+
 func (k *ProjectionKernel) BeginHydrate(backendID, sessionID string, explicitRetry, sourceChanged bool) bool {
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -996,6 +1046,15 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 	}
 	catchUpFrom := session.committedSourceCursor
 	wasReadyCatchUp := session.status.Phase == ProjectionHydrateReady && source.Path != "" && source.Cursor > catchUpFrom
+	// dsh-web live-only-seeded kernel rebuild（2026-09-06 真机复发）：runtime 在
+	// turn 进行中重启后，live mux 事件只把 kernel 播种出在飞 turn（从未有冷源
+	// 基线）。此状态下 pathless 冷重建必须空 reducer 起跑（journal 序即 turn
+	// 序），commit 时 union 回冷 cut 缺失的 live turn——见 unionLiveTurns。
+	dshWebLiveSeeded := backendID == "dsh-web" && source.Path == "" && len(source.Segments) == 0 &&
+		!session.coldBaseline && func() bool {
+			_, ok := k.reducer.Snapshot(backendID, sessionID)
+			return ok
+		}()
 	tx := &projectionHydrateTransaction{
 		source:           source,
 		startCut:         source.Cursor,
@@ -1003,11 +1062,17 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 		liveArrived:      make(chan struct{}, 1),
 		coldArmedTurnIDs: make(map[string]struct{}),
 		sourceIsLive:     sourceIsLive,
+		liveOnlyAdmission: strings.HasPrefix(source.Identity, liveOnlyAdmissionSourcePrefix),
+		unionLiveTurns:   dshWebLiveSeeded,
 	}
 	if source.Path == "" {
 		if pathlessFullRebuildSource(backendID, source) {
 			// OpenCode / Claude pathless (no Path, no Segments) rebuild starts EMPTY.
 			// tx.reducer is already a fresh NewProjectionReducer(); do NOT Restore.
+		} else if dshWebLiveSeeded {
+			// dsh-web live-seeded rebuild: also start EMPTY. Carrying the restart-window
+			// partial baseline would prepend the in-flight turn ahead of the cold journal
+			// replay (turn order breaks); the union at commit restores it in order.
 		} else if !sourceChanged && len(source.Segments) == 0 {
 			// Codex pathless degenerate no-file case: keep carried live baseline.
 			// Claude composite Segments are handled via checkpoint Restore below (not here).
@@ -1282,7 +1347,11 @@ func (k *ProjectionKernel) CommitHydrateTransaction(
 	// execution (real device 2026-08-20: user_message patches then sinceRev=0
 	// hydrate committed {"phase":"idle"}). Turns still come from the cold source;
 	// execution takes the in-flight max (running/requires_action > idle).
-	baseline = mergeHydrateBaselineWithLiveExecution(baseline, liveSnap, liveOK)
+	if tx.unionLiveTurns {
+		baseline = unionColdBaselineWithLiveTurns(baseline, liveSnap, liveOK)
+	} else {
+		baseline = mergeHydrateBaselineWithLiveExecution(baseline, liveSnap, liveOK)
+	}
 	k.reducer.Restore(backendID, sessionID, baseline)
 	appliedPendingIDs := make([]string, 0, len(tx.pendingLive))
 	for _, msg := range tx.pendingLive {
@@ -1298,6 +1367,11 @@ func (k *ProjectionKernel) CommitHydrateTransaction(
 		patch = &pendingPatch
 	}
 	session.status = ProjectionHydrationStatus{Phase: ProjectionHydrateReady}
+	if !tx.liveOnlyAdmission {
+		// Cold-source (or checkpoint-restored) baseline committed: this epoch now
+		// holds a complete baseline. Live-only carries keep whatever the flag was.
+		session.coldBaseline = true
+	}
 	session.committedSourceCursor = tx.startCut
 	session.committedSource = cloneProjectionSourceDescriptor(tx.source)
 	session.hydrate = nil
@@ -1343,6 +1417,35 @@ func mergeHydrateBaselineWithLiveExecution(cold, live SessionProjection, liveOK 
 		}
 	}
 	return cold
+}
+
+// unionColdBaselineWithLiveTurns is the dsh-web live-seeded rebuild commit merge
+// (2026-09-06). The cold replay on the empty tx reducer carries journal order and
+// the full history; pre-admission live turn rows (the in-flight turn since the
+// runtime restart — NOT in pendingLive, and possibly outside the session.history
+// cut) are unioned back after the cold turns, preserving their streaming content
+// and running status. SyncRev is pumped to the pre-commit live head so the commit
+// can never deliver a rev rollback to the replica (2026-08-16 fence 464→10 class).
+func unionColdBaselineWithLiveTurns(cold, live SessionProjection, liveOK bool) SessionProjection {
+	merged := mergeHydrateBaselineWithLiveExecution(cold, live, liveOK)
+	if !liveOK {
+		return merged
+	}
+	have := make(map[string]struct{}, len(merged.Turns))
+	for _, turn := range merged.Turns {
+		have[turn.TurnID] = struct{}{}
+	}
+	for _, turn := range live.Turns {
+		if _, dup := have[turn.TurnID]; dup {
+			continue
+		}
+		merged.Turns = append(merged.Turns, turn)
+		have[turn.TurnID] = struct{}{}
+	}
+	if merged.SyncRev < live.SyncRev {
+		merged.SyncRev = live.SyncRev
+	}
+	return merged
 }
 
 func (k *ProjectionKernel) HydrateSource(backendID, sessionID string) (ProjectionSourceDescriptor, bool) {

@@ -74,6 +74,15 @@ func isSessionSyncV2RawTimelineEvent(event string) bool {
 		"context_compressing", "context_compressed",
 		"session_state_changed", "session_running_signal",
 		"delivery_reconcile_required",
+		// dsh-web host slash-command lifecycle + plan-mode/goal snapshots: reduced
+		// into the command system turn / SessionProjection.planMode/.goal (K4 seal).
+		"session_command", "session_plan_mode", "session_goal",
+		// dsh-web context-injection settle rows: reduced into the ctx:<itemId>
+		// system turn (§13.3 seal, same rule as session_command).
+		"context_injection",
+		// dsh-web parallel-subagent workflow cards: reduced into the workflow part
+		// on the owning assistant turn (same K4 seal).
+		"workflow_run",
 		"error":
 		return true
 	default:

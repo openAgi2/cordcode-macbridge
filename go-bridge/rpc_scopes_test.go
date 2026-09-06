@@ -15,6 +15,8 @@ var dispatchedRPCMethods = []string{
 	"hello",
 	"list_providers", "set_provider", "list_models", "list_agents",
 	"list_permission_modes", "set_permission_mode", "set_agent_preset",
+	"list_session_commands", "execute_session_command", // DSH 命令面板（2026-09-04 方案）
+	"mutate_session_goal", // DSH 目标横条动作（官方 goals/<verb> 透传）
 	"create_session", "send_message", "abort_generation",
 	"get_session", "get_session_messages", "get_session_projection",
 	"get_session_projection_window",

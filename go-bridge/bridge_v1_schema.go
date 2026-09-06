@@ -40,7 +40,40 @@ const (
 	// 2026-08-23: set_observation_scope result data includes per-session
 	// Subscribe + observer-attach outcome. Unconditional {ok:true} is forbidden
 	// when attach is required and failed. Failure code observation_attach_failed.
-	BridgeProtocolSchemaRevision = "2026-08-23"
+	//
+	// 2026-09-05: DSH「/」命令面板（docs/2026-09-04 §5.2）。新增 capability
+	// `session_commands`（SessionCommandCatalog 派生，现仅 dsh-web）+ RPC
+	// `list_session_commands` / `execute_session_command`（scope session.read/
+	// session.write）。extensible 非破坏性新增；旧客户端未知方法走既有
+	// method_not_found，无 cap 行为不变。
+	//
+	// 2026-09-05（同日二次返工）: 命令反馈官方真值化——新增 part variant `command`
+	// （dsh-web host 斜杠命令时间线行，command/run|done 按 commandId 折叠为单个
+	// completed system turn）、live event 名 `session_command` / `session_plan_mode`
+	// （syncV2 raw deny-list 封条，projection 为 SoT）、SessionProjection/Patch 可选
+	// 字段 `planMode`（官方 plan 投影视图 {active, pending}）。仍是 extensible
+	// 非破坏性新增（新 part type、新 event 名、可选字段），schemaRevision 维持
+	// 2026-09-05（同日 additive 合并）。
+	//
+	// 2026-09-05（同日三次返工）: 目标横条官方化——live event 名 `session_goal`
+	//（官方 goal 投影整值快照；phase "none" = 已清除）、SessionProjection/Patch
+	// 可选字段 `goal`、capability `session_goal`（SessionGoalController 派生，现仅
+	// dsh-web）+ RPC `mutate_session_goal`（scope session.write）。仍是 extensible
+	// 非破坏性新增，schemaRevision 维持 2026-09-05（同日 additive 合并）。
+	//
+	// 2026-09-06: 上下文注入行——新 part `context_injection`（dsh subagent-settled
+	// settle 通知，官方 ContextInjectionRow 对位；turnId "ctx:<itemId>"，live/cold
+	// 同 id 幂等 upsert）+ live event 名 `context_injection` + BackgroundTaskSummary
+	// 真值补齐（durationMillis 显式工作墙钟优先、dsh 嵌套 parentTaskId/rootSessionId
+	// 链上溯）。全部非破坏性新增，schemaRevision 维持 2026-09-05。
+	//
+	// 2026-09-06（同日二次）: 并行子代理 workflow 卡——新 part `workflow`（dsh-web
+	// tool-workflow/* 四事件按 runId 折叠成整值快照，官方 ui-workflow-run
+	// WorkflowRunPanel 对位；按 workflowId 在所属 assistant turn 原地 upsert）+
+	// 新 PartOp `upsert_workflow` + live event 名 `workflow_run`（syncV2 raw
+	// deny-list 封条，projection 为 SoT）。全部非破坏性新增，schemaRevision 维持
+	// 2026-09-05。
+	BridgeProtocolSchemaRevision = "2026-09-05"
 )
 
 type BridgeV1Protocol struct {

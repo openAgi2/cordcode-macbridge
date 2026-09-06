@@ -303,6 +303,118 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 			"resolvedAt":    ui.ResolvedAt,
 		}), false
 
+	case core.EventSessionCommand:
+		// dsh-web host slash-command lifecycle (command/run|done folded by commandId).
+		// Projects through the Kernel as a `command` part on a completed system turn —
+		// the timeline row is the official GenericCommandCard truth (name + settle text).
+		// Raw frame is deny-listed for syncV2 clients (projection is the SoT).
+		if ev.SessionCommand == nil {
+			return "", nil, false
+		}
+		sc := ev.SessionCommand
+		data := map[string]interface{}{
+			"commandId": sc.CommandID,
+			"kind":      sc.Kind,
+		}
+		if sc.Name != "" {
+			data["name"] = sc.Name
+		}
+		if sc.Args != "" {
+			data["args"] = sc.Args
+		}
+		if sc.Text != "" {
+			data["text"] = sc.Text
+		}
+		if sc.InputLine != "" {
+			data["inputLine"] = sc.InputLine
+		}
+		return "session_command", data, false
+
+	case core.EventSessionPlanMode:
+		// dsh-web plan-mode projection snapshot ({active, pending}; official plan
+		// projection wire view). Stored on SessionProjection.planMode; chip formula
+		// target = pending ? !active : active lives on the client.
+		if ev.PlanMode == nil {
+			return "", nil, false
+		}
+		return "session_plan_mode", map[string]interface{}{
+			"active":  ev.PlanMode.Active,
+			"pending": ev.PlanMode.Pending,
+		}, false
+
+	case core.EventSessionGoal:
+		// dsh-web goal whole-snapshot (official goal projection wire view).
+		// Stored on SessionProjection.goal; a cleared goal carries phase "none"
+		// so the client drops any stale banner.
+		data := map[string]interface{}{
+			"phase": "none",
+		}
+		if ev.Goal != nil {
+			data = map[string]interface{}{
+				"id":        ev.Goal.ID,
+				"revision":  ev.Goal.Revision,
+				"objective": ev.Goal.Objective,
+				"phase":     ev.Goal.Phase,
+			}
+			if ev.Goal.BlockedReason != nil {
+				data["blockedReason"] = map[string]interface{}{
+					"code":    ev.Goal.BlockedReason.Code,
+					"message": ev.Goal.BlockedReason.Message,
+				}
+			}
+			if ev.Goal.MaxGoalRounds > 0 {
+				data["maxGoalRounds"] = ev.Goal.MaxGoalRounds
+			}
+		}
+		return "session_goal", data, false
+
+	case core.EventContextInjection:
+		// dsh-web context-injection row (official ContextInjectionRow parity —
+		// the settle notice a finished subagent injects into its parent session).
+		// Projects through the Kernel as a `context_injection` part on a completed
+		// system turn (turnId "ctx:<itemId>"), mirroring session_command. Raw frame
+		// is deny-listed for syncV2 clients (projection is the SoT).
+		if ev.ContextInjection == nil {
+			return "", nil, false
+		}
+		ci := ev.ContextInjection
+		data := map[string]interface{}{
+			"itemId": ci.ItemID,
+			"kind":   ci.Kind,
+		}
+		if ci.Form != "" {
+			data["form"] = ci.Form
+		}
+		if ci.Summary != "" {
+			data["summary"] = ci.Summary
+		}
+		if ci.Text != "" {
+			data["text"] = ci.Text
+		}
+		if ci.SenderSessionID != "" {
+			data["senderSessionId"] = ci.SenderSessionID
+		}
+		return "context_injection", data, false
+
+	case core.EventWorkflowRun:
+		// dsh-web parallel-subagent workflow card (official ui-workflow-run
+		// WorkflowRunChatData parity; folded whole-value by agent/dsh-web
+		// workflow_fold.go from tool-workflow/* events). Projects through the
+		// Kernel as a `workflow` part upserted in place by workflowId on the
+		// owning assistant turn. Raw frame is deny-listed for syncV2 clients
+		// (projection is the SoT).
+		if ev.WorkflowRun == nil {
+			return "", nil, false
+		}
+		wr := ev.WorkflowRun
+		return "workflow_run", eventData(ev, map[string]interface{}{
+			"turnId":          ev.TurnID,
+			"workflowId":      wr.RunID,
+			"workflowName":    wr.Name,
+			"workflowStatus":  wr.Status,
+			"workflowPhases":  workflowPhasesToWire(wr.Phases),
+		}), false
+
 	default:
 		slog.Debug("go-bridge: unhandled event type", "type", ev.Type)
 		return "", nil, false
@@ -317,6 +429,37 @@ func eventData(ev core.Event, payload map[string]interface{}) map[string]interfa
 		payload["parentStreamId"] = ev.ParentStreamID
 	}
 	return payload
+}
+
+// workflowPhasesToWire serializes the folded workflow phase groups for the
+// workflow_run logical event ([]{phase: string|null, members:[{seq,label,
+// childSessionId,status}]}). phase null mirrors the official missing identity
+// (undefined → null → key "missing"); the empty string stays a distinct
+// identity (official value:0:). Must stay in lockstep with
+// workflowPhasesFromWire (projection_reducer.go) and the ProjectionPart JSON
+// tags (projection_types.go).
+func workflowPhasesToWire(phases []core.WorkflowRunPhase) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(phases))
+	for _, phase := range phases {
+		var phaseValue interface{}
+		if phase.Phase != nil {
+			phaseValue = *phase.Phase
+		}
+		members := make([]map[string]interface{}, 0, len(phase.Members))
+		for _, m := range phase.Members {
+			members = append(members, map[string]interface{}{
+				"seq":            m.Seq,
+				"label":          m.Label,
+				"childSessionId": m.ChildSessionID,
+				"status":         m.Status,
+			})
+		}
+		out = append(out, map[string]interface{}{
+			"phase":   phaseValue,
+			"members": members,
+		})
+	}
+	return out
 }
 
 // planToWire serializes the plan-review payload for permission_request events

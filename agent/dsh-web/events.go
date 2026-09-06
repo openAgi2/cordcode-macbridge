@@ -9,10 +9,16 @@ package dshweb
 import "encoding/json"
 
 // dshSource is the shared source discriminant (user/plugin/model/tool kinds).
+// Form/Summary/SenderSessionID are the subagent-settled settle-notice fields
+// (official continuation.ts SubagentSettledMessageSource); absent on every
+// other kind — additive, zero risk to existing decodes.
 type dshSource struct {
-	Kind   string `json:"kind"`
-	Plugin string `json:"plugin,omitempty"`
-	CallID string `json:"callId,omitempty"`
+	Kind            string `json:"kind"`
+	Plugin          string `json:"plugin,omitempty"`
+	CallID          string `json:"callId,omitempty"`
+	Form            string `json:"form,omitempty"`
+	Summary         string `json:"summary,omitempty"`
+	SenderSessionID string `json:"senderSessionId,omitempty"`
 }
 
 // dshModelSource extends the source discriminant with the model attribution

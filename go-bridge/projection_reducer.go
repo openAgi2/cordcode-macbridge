@@ -55,13 +55,25 @@ type projectionSession struct {
 	tools       map[string]ProjectionPart   // tool callId -> latest tool part (upsert_tool)
 	upsertTurns map[string]TurnProjection   // turnId -> latest whole-turn snapshot (upsertTurns)
 	userInputs  map[string]userInputPending // interactionId -> latest user_input part + owning turn (upsert_user_input)
+	workflows   map[string]workflowPending  // workflow runId -> latest workflow part + owning turn (upsert_workflow)
 	execution   *ExecutionView              // pending execution change
+	planMode    *PlanModeView               // pending dsh-web plan-mode change (patch.planMode)
+	goal        *GoalView                   // pending dsh-web goal change (patch.goal)
 }
 
 // userInputPending captures a pending upsert_user_input PartOp: the owning assistant turn/message
 // and the latest user_input part. Keyed by interactionId so repeated requested/resolved events for
 // the same interaction coalesce into one in-place upsert (design §6.1: no second "answered" card).
 type userInputPending struct {
+	turnID string
+	part   ProjectionPart
+}
+
+// workflowPending captures a pending upsert_workflow PartOp: the owning assistant
+// turn/message and the latest workflow part. Keyed by runId so every
+// tool-workflow fold event for the same run coalesces into one in-place upsert
+// (official workflow-run keyed chat node parity).
+type workflowPending struct {
 	turnID string
 	part   ProjectionPart
 }
@@ -81,6 +93,7 @@ func cloneProjectionSessionState(source *projectionSession) *projectionSession {
 		tools:               make(map[string]ProjectionPart, len(source.tools)),
 		upsertTurns:         make(map[string]TurnProjection, len(source.upsertTurns)),
 		userInputs:          make(map[string]userInputPending, len(source.userInputs)),
+		workflows:           make(map[string]workflowPending, len(source.workflows)),
 	}
 	for turnID := range source.publishedTurnShells {
 		cloned.publishedTurnShells[turnID] = struct{}{}
@@ -101,9 +114,21 @@ func cloneProjectionSessionState(source *projectionSession) *projectionSession {
 		pending.part = cloneProjectionPart(pending.part)
 		cloned.userInputs[key] = pending
 	}
+	for key, pending := range source.workflows {
+		pending.part = cloneProjectionPart(pending.part)
+		cloned.workflows[key] = pending
+	}
 	if source.execution != nil {
 		execution := *source.execution
 		cloned.execution = &execution
+	}
+	if source.planMode != nil {
+		planMode := *source.planMode
+		cloned.planMode = &planMode
+	}
+	if source.goal != nil {
+		cloned.goal = new(GoalView)
+		*cloned.goal = cloneGoalViewGo(*source.goal)
 	}
 	return cloned
 }
@@ -356,6 +381,7 @@ func (ps *projectionSession) settleOtherOpenTurns(activeTurnID string, completed
 			t.CompletedAt = completedAt
 		}
 		classifyProjectionTextPresentation(t.Assistant, true)
+		ps.interruptRunningWorkflowParts(t)
 		if ps.upsertTurns != nil {
 			ps.upsertTurns[t.TurnID] = *t
 		}
@@ -378,10 +404,10 @@ func (ps *projectionSession) stageTurnForFlush(turnID string) {
 	}
 }
 
-// stageOwningTurnsForPendingParts ensures every pending tool / user_input PartOp has a
-// turn shell in upsertTurns. Codec reset after a Mac-side question answer emits a new
-// persist-only turn_started; without this, FlushPatch ships upsert_tool alone and iOS
-// drops it (owner 2026-08-16: Mac 覆盖后出现权限框，iPhone 没有).
+// stageOwningTurnsForPendingParts ensures every pending tool / user_input / workflow
+// PartOp has a turn shell in upsertTurns. Codec reset after a Mac-side question answer
+// emits a new persist-only turn_started; without this, FlushPatch ships upsert_tool alone
+// and iOS drops it (owner 2026-08-16: Mac 覆盖后出现权限框，iPhone 没有).
 func (ps *projectionSession) stageOwningTurnsForPendingParts() {
 	if ps == nil {
 		return
@@ -390,6 +416,9 @@ func (ps *projectionSession) stageOwningTurnsForPendingParts() {
 		ps.stageTurnForFlush(ps.projection.Execution.ActiveTurnID)
 	}
 	for _, pending := range ps.userInputs {
+		ps.stageTurnForFlush(pending.turnID)
+	}
+	for _, pending := range ps.workflows {
 		ps.stageTurnForFlush(pending.turnID)
 	}
 }
@@ -431,6 +460,128 @@ func findUserInputPart(msg *MessageProjection, interactionID string) int {
 		}
 	}
 	return -1
+}
+
+// upsertWorkflowPart inserts or replaces (in place, by workflowId) a workflow part
+// in the assistant message (official workflow-run keyed chat node parity: one card
+// per run, updated in place — never a second card). Returns the index of the part.
+func upsertWorkflowPart(msg *MessageProjection, part ProjectionPart) int {
+	if idx := findWorkflowPart(msg, part.WorkflowID); idx >= 0 {
+		msg.Parts[idx] = part
+		return idx
+	}
+	msg.Parts = append(msg.Parts, part)
+	return len(msg.Parts) - 1
+}
+
+// findWorkflowPart returns the index of the workflow part with the given runId, or -1.
+func findWorkflowPart(msg *MessageProjection, runID string) int {
+	if msg == nil || runID == "" {
+		return -1
+	}
+	for i := range msg.Parts {
+		if msg.Parts[i].Type == "workflow" && msg.Parts[i].WorkflowID == runID {
+			return i
+		}
+	}
+	return -1
+}
+
+// workflowPhasesFromWire decodes the workflowPhases array of a workflow_run event
+// ([]{phase: string|null, members:[{seq,label,childSessionId,status}]}; produced by
+// events.go workflowPhasesToWire and the cold hydrate converter). phase null = the
+// official missing identity (未分阶段); the empty string stays a distinct identity
+// (空阶段名). Malformed entries are skipped fail-closed — the fold upstream already
+// guarantees the shape, so garbage here means a desynchronized producer.
+func workflowPhasesFromWire(raw interface{}) []WorkflowPhaseProjection {
+	// Wire 是 JSON 数组：live（events.go workflowPhasesToWire）原生构造
+	// []map[string]interface{}，hydrate/JSON 回放是 []interface{}——两种都收
+	//（同一 wire 契约的两种 Go 表示）。
+	list, ok := raw.([]interface{})
+	if !ok {
+		typed, ok2 := raw.([]map[string]interface{})
+		if !ok2 {
+			return nil
+		}
+		list = make([]interface{}, len(typed))
+		for i, v := range typed {
+			list[i] = v
+		}
+	}
+	out := make([]WorkflowPhaseProjection, 0, len(list))
+	for _, item := range list {
+		m, _ := item.(map[string]interface{})
+		if m == nil {
+			continue
+		}
+		group := WorkflowPhaseProjection{}
+		if phase, present := m["phase"].(string); present {
+			p := phase
+			group.Phase = &p
+		}
+		for _, memberRaw := range wireSlice(m["members"]) {
+			mm, _ := memberRaw.(map[string]interface{})
+			if mm == nil {
+				continue
+			}
+			group.Members = append(group.Members, WorkflowMemberProjection{
+				Seq:            int(dataInt64(mm, "seq")),
+				Label:          dataString(mm, "label"),
+				ChildSessionID: dataString(mm, "childSessionId"),
+				Status:         dataString(mm, "status"),
+			})
+		}
+		out = append(out, group)
+	}
+	return out
+}
+
+// wireSlice normalizes a JSON-array wire value's two Go representations
+// ([]interface{} from JSON decode, []map[string]interface{} from the live
+// native builder) into []interface{}.
+func wireSlice(raw interface{}) []interface{} {
+	if list, ok := raw.([]interface{}); ok {
+		return list
+	}
+	if typed, ok := raw.([]map[string]interface{}); ok {
+		out := make([]interface{}, len(typed))
+		for i, v := range typed {
+			out[i] = v
+		}
+		return out
+	}
+	return nil
+}
+
+// interruptRunningWorkflowParts mirrors the official locationClosed inference
+// (projectWorkflow: a run whose anchor turn closed without run-end is interrupted,
+// and so are its unsettled members). CordCode applies it at turn granularity when
+// the turn settles (turn_completed / turn_aborted / turn_error / zombie settle):
+// every workflow part still status running in that turn gets its running members
+// and the run itself marked interrupted. Idempotent — a late genuine run_end
+// whole-value upsert overrides with the true outcome.
+func (ps *projectionSession) interruptRunningWorkflowParts(turn *TurnProjection) {
+	if ps == nil || turn == nil || turn.Assistant == nil {
+		return
+	}
+	for i := range turn.Assistant.Parts {
+		part := &turn.Assistant.Parts[i]
+		if part.Type != "workflow" || part.WorkflowStatus != "running" || part.WorkflowID == "" {
+			continue
+		}
+		part.WorkflowStatus = "interrupted"
+		for pi := range part.WorkflowPhases {
+			for mi := range part.WorkflowPhases[pi].Members {
+				if part.WorkflowPhases[pi].Members[mi].Status == "running" {
+					part.WorkflowPhases[pi].Members[mi].Status = "interrupted"
+				}
+			}
+		}
+		if pending, ok := ps.workflows[part.WorkflowID]; ok && pending.turnID == turn.TurnID {
+			pending.part = *part
+			ps.workflows[part.WorkflowID] = pending
+		}
+	}
 }
 
 func questionOptionsToUserInputOptions(raw interface{}) []map[string]interface{} {
@@ -617,6 +768,7 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			tools:               make(map[string]ProjectionPart),
 			upsertTurns:         make(map[string]TurnProjection),
 			userInputs:          make(map[string]userInputPending),
+			workflows:           make(map[string]workflowPending),
 		}
 		r.sessions[key] = ps
 	}
@@ -714,6 +866,166 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 				}},
 			},
 		})
+
+	case "session_command":
+		// dsh-web host slash-command lifecycle (official GenericCommandCard truth).
+		// One completed system turn per commandId — running→settle replaces the
+		// part wholesale via upsertTurn merge (System non-nil replaces). Never
+		// touches execution.phase: a command is not a model turn.
+		commandID := dataString(data, "commandId")
+		kind := dataString(data, "kind")
+		if commandID == "" || (kind != "running" && kind != "success" && kind != "error") {
+			return
+		}
+		commit()
+		timestamp := dataInt64(data, "timestampMillis")
+		turnID := "cmd:" + commandID
+		ps.upsertTurn(TurnProjection{
+			TurnID:      turnID,
+			Status:      "completed",
+			StartedAt:   timestamp,
+			CompletedAt: timestamp,
+			System: &MessageProjection{
+				ID:   turnID,
+				Role: "system",
+				Parts: []ProjectionPart{{
+					Type:         "command",
+					ItemID:       commandID,
+					CommandID:    commandID,
+					CommandName:  dataString(data, "name"),
+					CommandKind:  kind,
+					CommandText:  dataString(data, "text"),
+					CommandLine:  dataString(data, "inputLine"),
+				}},
+			},
+		})
+
+	case "context_injection":
+		// dsh-web context-injection row (official ContextInjectionRow parity —
+		// subagent-settled settle notice injected into the parent session). One
+		// completed system turn per itemId (turnId "ctx:<itemId>"); whole-value
+		// upsert, idempotent across live replay and cold hydrate (same
+		// "ctxinj:<seq>" id from both paths). Never touches execution.phase.
+		itemID := dataString(data, "itemId")
+		kind := dataString(data, "kind")
+		if itemID == "" || kind == "" {
+			return
+		}
+		commit()
+		timestamp := dataInt64(data, "timestampMillis")
+		turnID := "ctx:" + itemID
+		ps.upsertTurn(TurnProjection{
+			TurnID:      turnID,
+			Status:      "completed",
+			StartedAt:   timestamp,
+			CompletedAt: timestamp,
+			System: &MessageProjection{
+				ID:   turnID,
+				Role: "system",
+				Parts: []ProjectionPart{{
+					Type:                 "context_injection",
+					ItemID:               itemID,
+					ContextKind:          kind,
+					ContextForm:          dataString(data, "form"),
+					ContextSummary:       dataString(data, "summary"),
+					ContextText:          dataString(data, "text"),
+					ContextSenderSession: dataString(data, "senderSessionId"),
+				}},
+			},
+		})
+
+	case "workflow_run":
+		// dsh-web parallel-subagent workflow card (official ui-workflow-run
+		// WorkflowRunChatData parity). Whole-value snapshot folded upstream
+		// (agent/dsh-web workflow_fold.go); the reducer only anchors + upserts
+		// in place by workflowId (subagent_part wholesale-upsert pattern) — it
+		// never builds the phase groups (guardrail §3/§4: no consumer referee).
+		// The owning turn must already exist (workflow runs start inside a turn
+		// whose frames created it); identityless frames are dropped fail-closed
+		// rather than fabricating a phantom turn.
+		runID := dataString(data, "workflowId")
+		if runID == "" {
+			return
+		}
+		turnID := dataString(data, "turnId")
+		// runId is the cross-source identity: once live or hydrate established
+		// the owning turn, keep it (mirrors the userInputs cross-source rule).
+		if existing, ok := ps.workflows[runID]; ok && existing.turnID != "" {
+			turnID = existing.turnID
+		}
+		if turnID == "" {
+			return
+		}
+		t := ps.turnByID(turnID)
+		if t == nil {
+			return // owning turn must already exist (fail-closed, no phantom turn)
+		}
+		commit()
+		if t.Assistant == nil {
+			t.Assistant = &MessageProjection{ID: turnID, Role: "assistant"}
+		}
+		part := ProjectionPart{
+			Type:            "workflow",
+			WorkflowID:      runID,
+			WorkflowName:    dataString(data, "workflowName"),
+			WorkflowStatus:  dataString(data, "workflowStatus"),
+			WorkflowPhases:  workflowPhasesFromWire(data["workflowPhases"]),
+		}
+		if part.WorkflowStatus == "" {
+			part.WorkflowStatus = "running"
+		}
+		upsertWorkflowPart(t.Assistant, part)
+		ps.workflows[runID] = workflowPending{turnID: turnID, part: part}
+		ps.stageTurnForFlush(turnID)
+
+	case "session_plan_mode":
+		// dsh-web plan-mode snapshot ({active, pending}); stored whole-value on
+		// the session projection (official projection view semantics: last wins).
+		active, _ := data["active"].(bool)
+		pending, _ := data["pending"].(bool)
+		view := PlanModeView{Active: active, Pending: pending}
+		if ps.projection.PlanMode != nil && *ps.projection.PlanMode == view {
+			return
+		}
+		commit()
+		ps.projection.PlanMode = &view
+		ps.planMode = &view
+
+	case "session_goal":
+		// dsh-web goal whole-snapshot (official goal projection: last wins; a
+		// cleared goal arrives as phase "none"). Unknown phases are dropped
+		// fail-closed (codec already resets on unknown phase live; hydrate rows
+		// with garbage never fabricate banner state).
+		phase := dataString(data, "phase")
+		switch phase {
+		case "active", "paused", "blocked", "complete", "none":
+		default:
+			return
+		}
+		var view GoalView
+		if phase != "none" {
+			view = GoalView{
+				ID:            dataString(data, "id"),
+				Revision:      dataInt64(data, "revision"),
+				Objective:     dataString(data, "objective"),
+				Phase:         phase,
+				MaxGoalRounds: int(dataInt64(data, "maxGoalRounds")),
+			}
+			if br, ok := data["blockedReason"].(map[string]interface{}); ok {
+				view.BlockedReason = &GoalBlockedReasonView{
+					Code:    dataString(br, "code"),
+					Message: dataString(br, "message"),
+				}
+			}
+		} else {
+			view = GoalView{Phase: "none"}
+		}
+		if ps.projection.Goal != nil && goalViewEqualGo(*ps.projection.Goal, view) {
+			return
+		}
+		commit()
+		ps.projection.Goal = &view
+		ps.goal = &view
 
 	case "text_delta":
 		// Turn attribution: legacy/live frames carry the turn id AS itemId (no turnId);
@@ -1322,6 +1634,7 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 				turn.DetailInline = true
 			}
 			classifyProjectionTextPresentation(turn.Assistant, true)
+			ps.interruptRunningWorkflowParts(turn)
 			ps.upsertTurns[turnID] = *turn
 		}
 		// Completing the active turn also settles any older zombie running/pending turns
@@ -1375,6 +1688,7 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		ps.upsertTurn(terminal)
 		if turn := ps.turnByID(turnID); turn != nil {
 			classifyProjectionTextPresentation(turn.Assistant, true)
+			ps.interruptRunningWorkflowParts(turn)
 			ps.upsertTurns[turnID] = *turn
 		}
 		// Settling other open turns mirrors turn_completed: at most one live turn, so a
@@ -1467,6 +1781,10 @@ func (r *ProjectionReducer) Restore(backendID, sessionID string, projection Sess
 	// Every other construction path makes this map; Restore without it panicked
 	// on the first live ask after a hydrate commit (nil map assignment).
 	userInputs := make(map[string]userInputPending)
+	// workflowRuns likewise: a live workflow_run for a run already folded by the
+	// cold baseline keeps its owning turn (cross-source identity, see
+	// workflow_run); pending assignment without the map would panic.
+	workflowRuns := make(map[string]workflowPending)
 	for _, turn := range projection.Turns {
 		if turn.Assistant == nil {
 			continue
@@ -1474,6 +1792,9 @@ func (r *ProjectionReducer) Restore(backendID, sessionID string, projection Sess
 		for _, part := range turn.Assistant.Parts {
 			if part.Type == "user_input" && part.UserInputInteractionID != "" {
 				userInputs[part.UserInputInteractionID] = userInputPending{turnID: turn.TurnID, part: part}
+			}
+			if part.Type == "workflow" && part.WorkflowID != "" {
+				workflowRuns[part.WorkflowID] = workflowPending{turnID: turn.TurnID, part: part}
 			}
 		}
 	}
@@ -1495,6 +1816,7 @@ func (r *ProjectionReducer) Restore(backendID, sessionID string, projection Sess
 		tools:       make(map[string]ProjectionPart),
 		upsertTurns: make(map[string]TurnProjection),
 		userInputs:  userInputs,
+		workflows:   workflowRuns,
 	}
 }
 
@@ -1555,13 +1877,22 @@ func (r *ProjectionReducer) flushLocked(ps *projectionSession) (ProjectionPatch,
 	ps.stageOwningTurnsForPendingParts()
 	headRev := ps.projection.SyncRev
 	if headRev == ps.lastFlushedRev && len(ps.textAppends) == 0 && len(ps.thinking) == 0 &&
-		len(ps.tools) == 0 && len(ps.upsertTurns) == 0 && len(ps.userInputs) == 0 && ps.execution == nil {
+		len(ps.tools) == 0 && len(ps.upsertTurns) == 0 && len(ps.userInputs) == 0 && len(ps.workflows) == 0 &&
+		ps.execution == nil && ps.planMode == nil && ps.goal == nil {
 		return ProjectionPatch{}, false
 	}
 	patch := ProjectionPatch{BaseRev: ps.lastFlushedRev, SyncRev: headRev}
 	if ps.execution != nil {
 		e := *ps.execution
 		patch.Execution = &e
+	}
+	if ps.planMode != nil {
+		pm := *ps.planMode
+		patch.PlanMode = &pm
+	}
+	if ps.goal != nil {
+		g := cloneGoalViewGo(*ps.goal)
+		patch.Goal = &g
 	}
 	for _, t := range ps.upsertTurns {
 		patch.UpsertTurns = append(patch.UpsertTurns, cloneTurn(t))
@@ -1590,13 +1921,22 @@ func (r *ProjectionReducer) flushLocked(ps *projectionSession) (ProjectionPatch,
 		part := cloneProjectionPart(u.part)
 		patch.PartOps = append(patch.PartOps, PartOp{TurnID: u.turnID, MessageID: u.turnID, Op: "upsert_user_input", Part: &part})
 	}
+	// workflow upserts: one PartOp per run (in-place upsert by workflowId, official
+	// keyed-node parity). Owning message id is the assistant turn/message id.
+	for _, w := range ps.workflows {
+		part := cloneProjectionPart(w.part)
+		patch.PartOps = append(patch.PartOps, PartOp{TurnID: w.turnID, MessageID: w.turnID, Op: "upsert_workflow", Part: &part})
+	}
 	// Clear pending; next patch will be delta from this head.
 	ps.textAppends = make(map[string][]string)
 	ps.thinking = make(map[string]string)
 	ps.tools = make(map[string]ProjectionPart)
 	ps.upsertTurns = make(map[string]TurnProjection)
 	ps.userInputs = make(map[string]userInputPending)
+	ps.workflows = make(map[string]workflowPending)
 	ps.execution = nil
+	ps.planMode = nil
+	ps.goal = nil
 	ps.lastFlushedRev = headRev
 	return patch, true
 }
@@ -1620,7 +1960,8 @@ func (r *ProjectionReducer) DropPendingPatch(backendID, sessionID string) bool {
 	}
 	headRev := ps.projection.SyncRev
 	if headRev == ps.lastFlushedRev && len(ps.textAppends) == 0 && len(ps.thinking) == 0 &&
-		len(ps.tools) == 0 && len(ps.upsertTurns) == 0 && len(ps.userInputs) == 0 && ps.execution == nil {
+		len(ps.tools) == 0 && len(ps.upsertTurns) == 0 && len(ps.userInputs) == 0 && ps.execution == nil &&
+		ps.planMode == nil && ps.goal == nil {
 		return false
 	}
 	ps.textAppends = make(map[string][]string)
@@ -1636,6 +1977,8 @@ func (r *ProjectionReducer) DropPendingPatch(backendID, sessionID string) bool {
 	ps.upsertTurns = make(map[string]TurnProjection)
 	ps.userInputs = make(map[string]userInputPending)
 	ps.execution = nil
+	ps.planMode = nil
+	ps.goal = nil
 	ps.lastFlushedRev = headRev
 	return true
 }
@@ -1909,6 +2252,39 @@ func cloneSessionProjection(s SessionProjection) SessionProjection {
 			out.Turns[i] = cloneTurn(s.Turns[i])
 		}
 	}
+	if s.PlanMode != nil {
+		pm := *s.PlanMode
+		out.PlanMode = &pm
+	}
+	if s.Goal != nil {
+		g := cloneGoalViewGo(*s.Goal)
+		out.Goal = &g
+	}
+	return out
+}
+
+// goalViewEqualGo compares two goal views by value (BlockedReason by content).
+func goalViewEqualGo(a, b GoalView) bool {
+	if a.ID != b.ID || a.Revision != b.Revision || a.Objective != b.Objective ||
+		a.Phase != b.Phase || a.MaxGoalRounds != b.MaxGoalRounds {
+		return false
+	}
+	if (a.BlockedReason == nil) != (b.BlockedReason == nil) {
+		return false
+	}
+	if a.BlockedReason != nil && *a.BlockedReason != *b.BlockedReason {
+		return false
+	}
+	return true
+}
+
+// cloneGoalViewGo deep-copies a goal view (BlockedReason pointer independent).
+func cloneGoalViewGo(g GoalView) GoalView {
+	out := g
+	if g.BlockedReason != nil {
+		br := *g.BlockedReason
+		out.BlockedReason = &br
+	}
 	return out
 }
 
@@ -1967,6 +2343,19 @@ func cloneProjectionPart(part ProjectionPart) ProjectionPart {
 		out.SubagentBlocks = make([]ProjectionPart, len(part.SubagentBlocks))
 		for i := range part.SubagentBlocks {
 			out.SubagentBlocks[i] = cloneProjectionPart(part.SubagentBlocks[i])
+		}
+	}
+	if len(part.WorkflowPhases) > 0 {
+		// WorkflowPhases carries a *string identity + nested member slices; deep-copy
+		// both so the terminal interrupt fixup mutating the reducer's copy can never
+		// alias a delivered patch part (same contract as SubagentBlocks).
+		out.WorkflowPhases = make([]WorkflowPhaseProjection, len(part.WorkflowPhases))
+		for i := range part.WorkflowPhases {
+			out.WorkflowPhases[i].Members = append([]WorkflowMemberProjection(nil), part.WorkflowPhases[i].Members...)
+			if part.WorkflowPhases[i].Phase != nil {
+				p := *part.WorkflowPhases[i].Phase
+				out.WorkflowPhases[i].Phase = &p
+			}
 		}
 	}
 	return out
