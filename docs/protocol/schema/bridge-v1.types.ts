@@ -906,16 +906,18 @@ export interface BridgePlanModeView {
 /**
  * Official goal-projection view (packages/goal, whole-snapshot semantics). phase
  * "none" is CordCode's encoding of the official cleared/null projection: a clear
- * emits {phase:"none"} (goal fields absent) so a patch can clear a stale far-side
- * banner; clients MUST treat "none" identically to an absent goal field.
- * blockedReason carries the official tooltip text on the blocked phase only.
+ * emits phase "none" (id/revision/objective empty/zero) so a patch can clear a
+ * stale far-side banner; clients MUST treat "none" identically to an absent
+ * goal field. blockedReason carries the official tooltip text on the blocked
+ * phase only.
  */
 export interface BridgeGoalView {
-  // id/revision/objective are present for every phase except "none" (cleared
-  // encoding carries {phase:"none"} only).
-  id?: string;
-  revision?: number; // CAS ref for goals/<verb> mutations
-  objective?: string;
+  // Serialized unconditionally by runtimes ≥ 2026-09-06 (empty string / 0 on
+  // "none" or fresh goals) so strict decoders never hit a missing key; older
+  // runtimes omitted zero-valued keys — clients MUST tolerate absence too.
+  id: string;
+  revision: number; // CAS ref for goals/<verb> mutations
+  objective: string;
   phase: "active" | "paused" | "blocked" | "complete" | "none";
   blockedReason?: { code: string; message: string };
   maxGoalRounds?: number;

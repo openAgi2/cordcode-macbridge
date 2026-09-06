@@ -1755,9 +1755,11 @@ produce the same state.
 
 ```ts
 goal?: {
-  id?: string,               // absent when phase == "none" (cleared encoding)
-  revision?: number,         // CAS ref for goals/<verb> mutations
-  objective?: string,        // absent when phase == "none"
+  id: string,                // always serialized since 2026-09-06 (empty on "none");
+                             // older runtimes omitted zero/empty values — tolerate absence
+  revision: number,          // CAS ref for goals/<verb> mutations; always serialized
+                             // since 2026-09-06 (0 on "none" / a fresh goal)
+  objective: string,         // always serialized since 2026-09-06 (empty on "none")
   phase: "active" | "paused" | "blocked" | "complete" | "none",
   blockedReason?: { code: string, message: string },  // blocked phase only
   maxGoalRounds?: number,
@@ -1765,7 +1767,8 @@ goal?: {
 ```
 
 `phase: "none"` is CordCode's encoding of the official cleared/null goal projection: the wire
-event for a `clear` carries `{phase: "none"}` (goal fields absent), letting a patch clear a
+event for a `clear` carries `phase: "none"` (id/revision/objective serialize as empty/zero on
+2026-09-06+ runtimes; older runtimes omitted the keys), letting a patch clear a
 stale far-side banner without a `goal: null` key on every subsequent patch. Clients MUST treat
 `none` identically to an absent goal field (render nothing).
 

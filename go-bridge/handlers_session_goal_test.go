@@ -6,7 +6,9 @@ package gobridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -131,5 +133,34 @@ func TestMutateSessionGoalHandlerRejections(t *testing.T) {
 	}
 	if msg, _ := errObj["message"].(string); msg == "" || agent.mutateErr.Error() == "" || msg != agent.mutateErr.Error() {
 		t.Fatalf("message must carry the seat error verbatim: %q", msg)
+	}
+}
+
+// TestGoalViewZeroValuesAlwaysSerialized：2026-09-06 协议修复——id/revision/
+// objective 去掉 omitempty。此前 revision=0（或空 id/objective）的 active goal
+// 在 wire 上缺键，iOS SessionGoalView 严格解码器把缺键当硬错误，整快照解码
+// 失败。现在零值/空值也必须原样落键（phase "none" 同样），客户端可安全假设
+// 键恒在（但仍须容忍旧 runtime 的键缺席）。
+func TestGoalViewZeroValuesAlwaysSerialized(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		goal  GoalView
+		phase string
+	}{
+		{"active goal with zero revision", GoalView{Phase: "active"}, `"revision":0`},
+		{"cleared encoding none", GoalView{Phase: "none"}, `"phase":"none"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			patch := ProjectionPatch{SyncRev: 7, Goal: &tc.goal}
+			raw, err := json.Marshal(patch)
+			if err != nil {
+				t.Fatalf("marshal patch: %v", err)
+			}
+			for _, key := range []string{`"id":""`, `"revision":0`, `"objective":""`, tc.phase} {
+				if !strings.Contains(string(raw), key) {
+					t.Fatalf("patch goal wire missing %s: %s", key, raw)
+				}
+			}
+		})
 	}
 }

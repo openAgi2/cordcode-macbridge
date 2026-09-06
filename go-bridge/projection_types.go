@@ -223,10 +223,16 @@ type GoalBlockedReasonView struct {
 // objective + actions (active→pause, paused→resume, always edit/clear). Phase
 // "none" is the CordCode encoding of the official cleared/null projection — it
 // lets a patch clear a stale far-side banner.
+//
+// id/revision/objective serialize unconditionally (empty/zero included, phase
+// "none" included) since 2026-09-06: strict decoders treat a missing key as a
+// hard error (an active goal with revision 0 used to drop the key and fail the
+// whole snapshot client-side). Older runtimes omitted zero-valued keys;
+// clients MUST tolerate absence (defaults) as well.
 type GoalView struct {
-	ID             string                  `json:"id,omitempty"`
-	Revision       int64                   `json:"revision,omitempty"`
-	Objective      string                  `json:"objective,omitempty"`
+	ID             string                  `json:"id"`
+	Revision       int64                   `json:"revision"`
+	Objective      string                  `json:"objective"`
 	Phase          string                  `json:"phase"` // active | paused | blocked | complete | none
 	BlockedReason  *GoalBlockedReasonView  `json:"blockedReason,omitempty"`
 	MaxGoalRounds  int                     `json:"maxGoalRounds,omitempty"`
