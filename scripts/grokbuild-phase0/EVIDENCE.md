@@ -38,6 +38,27 @@
 - **gateway**：`--no-leader stdio` 模式无 gateway 通道（gateway 属 leader 拓扑）；本轮不适用。
 - 结论：CMU 只能靠 stdout 通知 + `plan_mode.json` 文件（§P7）；`updates.jsonl` 不能充当模式确认源——与方案 §5.3「updates.jsonl 最后一条 CMU 绝不充当确认来源」一致，且 1.0.13 实测**根本没有** CMU 进 jsonl。
 
+## P6 — 真实 turn 生命周期（终态/usage/取消/hostTurn 反馈形状）
+
+`[样本]` p6-turns.json（探针 `p6_turn.py`；隔离 home `/tmp/grokbuild-probe-home-p6`，单一测试会话内四 turn 顺序执行；313 处 UUID 脱敏，cwd 路径保留——与既有样本口径一致；owner 已按 P4P6-CONFIRM.md 授权 ≤4 次模型调用）：
+
+| Turn | 输入 | response stopReason | 模型消耗 | 关键形状 |
+| --- | --- | --- | --- | --- |
+| A | `/hooks-list` | `end_turn` | **0**（totalTokens=0） | 反馈正文经 `session/update` agent_message_chunk、`_meta.hostTurn=true`，正文 "Loaded hooks (9)" |
+| B | `/hooks-add relative.sh`（相对路径） | `end_turn` | **0** | 正文 "Failed to add hook path: Hook path must be absolute."，hostTurn=true——失败也是正常 settle，不是 RPC reject |
+| C | 真实 prompt「只回复 ok」 | `end_turn` | **1 次**（modelCalls=1，grok-4.6，totalTokens=14691，costUsdTicks=35159400≈$0.0035） | 完整流：user echo → agent_thought_chunk×25 → agent_message_chunk → response_completed → turn_completed → prompt_complete → last_turn_summary → ACU |
+| D | 长 prompt 后 ~1s `session/cancel` | `cancelled` | D 自身**无 usage 报告**（turn_completed 无 usage 字段；response `_meta` 沿用 C 的快照值） | 取消后 prompt 响应（id 7）自行以 `stopReason=cancelled` + `_meta.cancellationCategory=MidTurnAbort` 终结 |
+
+关键结论（服务 1b/D1）：
+
+1. **正常终态集合 = `end_turn`**。取消终态实测值 **`cancelled`** + `cancellationCategory=MidTurnAbort`（response `_meta`、ext TurnCompleted `_meta`、prompt_complete 三处一致）。`[源码]` 终态全集 end_turn/cancelled/max_tokens/refusal；硬错误 = RPC reject（无 stopReason、无 turn_completed）——dispatcher 必须两路都终结。
+2. **prompt future 在取消时也会终结**：`session/cancel` 是 notification（无 id、无响应帧），取消后原 `session/prompt` 响应以 cancelled 自行返回——1b terminal future 不得只等 end_turn。
+3. **usage 三处、无独立 usage 通知**：① `session/prompt` response `result._meta`（totalTokens/inputTokens/outputTokens/cachedReadTokens/reasoningTokens + `usage{modelCalls,apiDurationMs,costUsdTicks,modelUsage{grok-4.6-build{…}}}`）；② ext `_x.ai/session_notification` TurnCompleted `usage.totals`（camelCase 同构 + elapsed_ms）；③ `response_completed` update 的 anthropic 风格 snake_case 键（cache_creation_input_tokens/cache_read_input_tokens/…）。
+4. **hostTurn 反馈（§7 正文组）类型判据实证**：A/B 零模型（totalTokens=0）+ agent_message_chunk 正文（含失败文案）+ end_turn settle + `_meta.hostTurn=true`。失败文案与成功文案同轨，无独立错误通知。
+5. **ext 三轨全形状**：`_x.ai/sessions/changed`（upsert 会话元数据：title/cwd/modelId/reasoningEffort/activity…）、`_x.ai/queue/changed`（队列条目 kind:"prompt" + position）、`_x.ai/session_notification`（hook_execution / session_summary_generated / TurnCompleted{prompt_id,stop_reason,elapsed_ms}）；终了 `_x.ai/session/prompt_complete {sessionId,promptId,stopReason,agentResult,cancellationCategory}`（取消时 agentResult=null）。
+6. 噪音剔除：A/D 中 `hook_execution … exit 127`（SuperIsland 全局 hooks）与 P0 相同，属用户全局配置，与任务无关。
+7. **费用口径**：预估上限 4 次、实际 C 证实 1 次 + D 已开始生成（部分流是否计费上游未报告）；A/B 零模型。在授权范围内。
+
 ## P7 — Pending 恢复判定（决定性）
 
 `[样本]` 链条（p7-*，隔离 home，session `01a07b3d-8fb7-…`）：
@@ -77,6 +98,7 @@
 ## 副作用与复位记录
 
 - 隔离 home：`/tmp/grokbuild-probe-home-{p0,p1,p2,p7,p7clean,p3}` 全部为临时目录，未触碰 `~/.grok` 用户会话；可整体删除复位。认证文件为只读复制。
+- P6 追加：`/tmp/grokbuild-probe-home-p6`（四 turn 测试会话）取证完成后整目录删除复位（2026-09-07）；无外发消息（feedback 未执行）；`/tmp/grokbuild-p6-out` 中间产物随归档后清理。
 - `~/.grok` 唯一 touched：`grok --version`（只读）。未动 leader、真实会话、配置。
 - 探针进程全部正常退出（rc=0）并 reap；无残留 grok 进程（`pgrep -fl "grok agent"` 复核见 regression 归档）。
 - 隔离 home 内观察到的 `session_start` hook 失败（SuperIsland `cc-event-hook.sh` exit 127）来自**用户全局 hooks 配置**，与本任务无关，仅样本记录。

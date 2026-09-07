@@ -162,16 +162,29 @@ func acuSameSet(a, b []core.SessionCommand) bool {
 	return true
 }
 
-// --- D1 admission (§1 D1 / §4.1) ---
+// --- D1 admission (§1 D1 / §4.1 / §7 正文组) ---
 //
 // Grok 面板目录 = 官方可执行目录 ∩ 已验证反馈类型准入集合。待样本项不展示；
 // context 与未接入的 pager-local surface 第一批排除；新命令不得只因出现在
-// 目录就自动获准。P6 取证未完成前准入集合为空（fail closed：面板空目录、
-// capability 不广告），p0b 样本落地后逐类型填充。
+// 目录就自动获准。
+//
+// P6 后准入的「正文组」类型判据（scripts/grokbuild-phase0/ADMISSION.md 终表）：
+// host-turn 本地 built-in 命令 —— 零模型（totalTokens=0）、反馈正文经
+// agent_message_chunk(_meta.hostTurn=true)（成功与失败文案同轨）、end_turn settle。
+// 证据：samples/p6-turns.json A(hooks-list 成功)/B(hooks-add 非法路径失败) +
+// [源码] slash_exec.rs builtin 表全部本地执行 ok_end_turn(0)。官方 1.0.13 会话
+// ACU（p3-acu-session-new.json，27 条）中该家族 = 5 条 hooks-*；hooks-remove/
+// hooks-trust/hooks-untrust 按同一类型判据准入（未逐一取样，终表有标注）。
+// 其余各组（无输出组/状态组/skills·workflows·goal）未取证，一律不进。
 var (
 	// grokAdmittedCommands lists feedback types admitted by P6 evidence.
-	// Empty until the P6 evidence gates pass — do not pre-populate.
-	grokAdmittedCommands = map[string]struct{}{}
+	grokAdmittedCommands = map[string]struct{}{
+		"hooks-list":    {},
+		"hooks-add":     {},
+		"hooks-remove":  {},
+		"hooks-trust":   {},
+		"hooks-untrust": {},
+	}
 
 	// grokExcludedCommands are ruled out of the first wave regardless of
 	// evidence: context is pager-local (ShowContextInfo, no shell detail);

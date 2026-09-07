@@ -134,10 +134,52 @@ func TestApplyGrokAdmission(t *testing.T) {
 		t.Fatalf("D1 intersection wrong: %+v", got)
 	}
 
-	// Pre-P6 (empty admission): honest empty panel.
+	// Empty-admission mechanism guard: the intersection must collapse to an
+	// honest empty panel (the pre-P6 shipped state; P6 has since filled the
+	// default table — see TestGrokAdmittedCommandsTerminalTable).
 	grokAdmittedCommands = map[string]struct{}{}
 	if out := applyGrokAdmission(in); len(out) != 0 {
 		t.Fatalf("empty admission must yield empty panel, got %+v", out)
+	}
+}
+
+// TestGrokAdmittedCommandsTerminalTable pins the shipped D1 admission set to
+// the P6-verified 正文组 family (5 hooks-*). Anything else appearing here is an
+// unreviewed admission and must go through ADMISSION.md + evidence first.
+func TestGrokAdmittedCommandsTerminalTable(t *testing.T) {
+	origAdmitted, origExcluded := grokAdmittedCommands, grokExcludedCommands
+	defer func() { grokAdmittedCommands, grokExcludedCommands = origAdmitted, origExcluded }()
+
+	want := []string{"hooks-add", "hooks-list", "hooks-remove", "hooks-trust", "hooks-untrust"}
+	if len(grokAdmittedCommands) != len(want) {
+		t.Fatalf("admitted set = %v, want exactly %v", grokAdmittedCommands, want)
+	}
+	for _, n := range want {
+		if _, ok := grokAdmittedCommands[n]; !ok {
+			t.Fatalf("admitted set missing %q: %v", n, grokAdmittedCommands)
+		}
+	}
+	for _, n := range []string{"compact", "always-approve", "context", "feedback", "dream", "flush", "goal", "session-info", "plugins"} {
+		if _, ok := grokAdmittedCommands[n]; ok {
+			t.Fatalf("%q admitted without P6 evidence — update ADMISSION.md and this guard together", n)
+		}
+	}
+	// Terminal table must remain a subset of the official 1.0.13 session ACU
+	// (27 names, samples/p3-acu-session-new.json): anything not in the official
+	// catalog is dead weight even if admitted.
+	official := []string{"always-approve", "audit-plan", "code-review", "compact", "context", "deep-research",
+		"exec-plan", "feature-dev", "feedback", "frontend-design", "goal", "handoff-doc", "hooks-add",
+		"hooks-list", "hooks-remove", "hooks-trust", "hooks-untrust", "ios-real-device-doc", "loop",
+		"plugins", "reload-plugins", "session-info", "skill-creator", "source-command-handoff-doc",
+		"supervise", "takeover", "workflow"}
+	officialSet := make(map[string]struct{}, len(official))
+	for _, n := range official {
+		officialSet[n] = struct{}{}
+	}
+	for n := range grokAdmittedCommands {
+		if _, ok := officialSet[n]; !ok {
+			t.Fatalf("admitted %q is not in the official 1.0.13 session ACU", n)
+		}
 	}
 }
 
@@ -274,9 +316,10 @@ func TestListSessionCommandsFakeChildWaves(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List failed: %v", err)
 	}
-	// Pre-P6 admission is empty → D1 display subset is empty (honest state).
-	if len(cmds) != 0 {
-		t.Fatalf("pre-P6 display must be empty, got %+v", cmds)
+	// D1 display = official table ∩ P6 admission: of [compact, hooks-list,
+	// context] only hooks-list is admitted (compact 未取证、context 排除).
+	if len(cmds) != 1 || cmds[0].Name != "hooks-list" {
+		t.Fatalf("display must be exactly [hooks-list], got %+v", cmds)
 	}
 	// Whitelist cache holds the FULL official table (3 cmds, last wave wins).
 	got, ok := a.acu.executeWhitelist("sess-fake", proj)

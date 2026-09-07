@@ -7,6 +7,7 @@
 - P3 commands/list：commands 数组与会话 ACU 子集关系
 - P5 CMU：current_mode_update 形状；plan_mode.json Pending 落盘
 - P7 恢复：load 后无 CMU、plan_mode.json 保持 Pending、system_prompt 无 plan 注入、prompt_context 恒 extend
+- P6 真实 turn（p6-turns.json）：四 turn 终态/usage/hostTurn 反馈/取消形状 + 脱敏完备性
 
 退出码 0 = 全部断言通过。
 """
@@ -105,6 +106,105 @@ sp = open(os.path.join(S, "p7-system-prompt-after-load.txt"), encoding="utf-8").
 check("read-only software architect" not in sp, "restored system prompt has NO plan role injection")
 pc = load("p7-prompt-context-after-load.json")
 check(pc.get("prompt_mode") == "extend", "prompt_context.prompt_mode == extend (not a mode source)")
+
+print("P6 real-turn lifecycle (p6-turns.json)")
+p6 = load("p6-turns.json")
+turns = p6["turns"]
+
+
+def stop_reason(turn_name):
+    r = turns[turn_name]["response"]
+    assert "result" in r and "error" not in r, f"{turn_name}: response must be a result"
+    return r["result"].get("stopReason")
+
+
+def updates(turn_name, kind):
+    for n in turns[turn_name]["stream"]:
+        u = (n.get("params") or {}).get("update") or {}
+        if u.get("sessionUpdate") == kind:
+            yield u
+
+
+def ext_notifs(turn_name, method):
+    return [n for n in turns[turn_name]["stream"] if n.get("method") == method]
+
+
+# A/B: host-turn slash 反馈 —— 零模型、end_turn settle、正文经 agent_message_chunk
+for name, marker in (("A-hooks-list", "Loaded hooks"), ("B-hooks-add-invalid", "Hook path must be absolute.")):
+    check(stop_reason(name) == "end_turn", f"{name}: stopReason == end_turn")
+    meta = turns[name]["response"]["result"].get("_meta", {})
+    check(meta.get("totalTokens") == 0, f"{name}: totalTokens == 0 (zero-model proof)")
+    bodies = [u for u in updates(name, "agent_message_chunk")]
+    check(any(marker in (b.get("content", {}) or {}).get("text", "") for b in bodies),
+          f"{name}: agent_message_chunk carries feedback body containing {marker!r}")
+    check(all(b.get("_meta", {}).get("hostTurn") is True for b in bodies if marker in b.get("content", {}).get("text", "")),
+          f"{name}: feedback chunk _meta.hostTurn == true")
+    check(len(list(updates(name, "turn_completed"))) == 1 and
+          list(updates(name, "turn_completed"))[0].get("stop_reason") == "end_turn",
+          f"{name}: exactly one turn_completed(stop_reason=end_turn)")
+
+# C: 真实模型 turn —— end_turn + modelCalls=1 + usage 三处
+check(stop_reason("C-real-prompt") == "end_turn", "C: stopReason == end_turn")
+cmeta = turns["C-real-prompt"]["response"]["result"]["_meta"]
+check(cmeta.get("usage", {}).get("modelCalls") == 1, "C: _meta.usage.modelCalls == 1")
+check(cmeta.get("modelId", "").startswith("grok-"), "C: _meta.modelId grok-*")
+check(cmeta.get("totalTokens", 0) > 0, "C: _meta.totalTokens > 0")
+c_tc = list(updates("C-real-prompt", "turn_completed"))
+check(len(c_tc) == 1 and c_tc[0].get("stop_reason") == "end_turn", "C: turn_completed stop_reason=end_turn")
+# usage 通知轨：ext TurnCompleted.usage.totals（camelCase）
+c_ext = ext_notifs("C-real-prompt", "_x.ai/session_notification")
+turn_completed_ext = [n for n in c_ext
+                      if (n.get("params", {}).get("update", {}) or {}).get("sessionUpdate") == "turn_completed"
+                      or "turn_completed" in json.dumps(n.get("params", {}))]
+check(any("usage" in json.dumps(n.get("params", {})) and "modelCalls" in json.dumps(n.get("params", {}))
+          for n in c_ext), "C: ext notification carries usage with modelCalls")
+# response_completed：anthropic 风格 snake_case usage
+rc = list(updates("C-real-prompt", "response_completed"))
+check(len(rc) == 1, "C: exactly one response_completed update")
+rc_usage = json.dumps(rc[0])
+check("cache_read_input_tokens" in rc_usage or "input_tokens" in rc_usage,
+      "C: response_completed usage uses snake_case keys")
+check(len(list(updates("C-real-prompt", "user_message_chunk"))) >= 1, "C: user echo present")
+check(len(list(updates("C-real-prompt", "agent_thought_chunk"))) >= 1, "C: thought chunks present")
+pc_notifs = ext_notifs("C-real-prompt", "_x.ai/session/prompt_complete")
+check(len(pc_notifs) == 1 and pc_notifs[0].get("params", {}).get("stopReason") == "end_turn",
+      "C: prompt_complete stopReason == end_turn")
+
+# D: 取消 —— cancelled + MidTurnAbort 三处一致；cancel 是 notification（无 id 响应帧）
+d = turns["D-cancel"]
+check(stop_reason("D-cancel") == "cancelled", "D: stopReason == cancelled")
+check(d["response"]["result"]["_meta"].get("cancellationCategory") == "MidTurnAbort",
+      "D: response _meta.cancellationCategory == MidTurnAbort")
+d_tc = list(updates("D-cancel", "turn_completed"))
+check(len(d_tc) == 1 and d_tc[0].get("stop_reason") == "cancelled" and d_tc[0].get("elapsed_ms") > 0,
+      "D: turn_completed stop_reason=cancelled with elapsed_ms")
+d_tc_meta = None
+for n in d["stream"]:
+    u = (n.get("params") or {}).get("update") or {}
+    if u.get("sessionUpdate") == "turn_completed":
+        d_tc_meta = (n.get("params") or {}).get("_meta", {})
+check(d_tc_meta and d_tc_meta.get("cancellationCategory") == "MidTurnAbort",
+      "D: turn_completed _meta.cancellationCategory == MidTurnAbort")
+d_pc = ext_notifs("D-cancel", "_x.ai/session/prompt_complete")
+check(len(d_pc) == 1 and d_pc[0].get("params", {}).get("stopReason") == "cancelled"
+      and d_pc[0].get("params", {}).get("cancellationCategory") == "MidTurnAbort"
+      and d_pc[0].get("params", {}).get("agentResult") is None,
+      "D: prompt_complete cancelled + MidTurnAbort + agentResult null")
+d_ids = [n.get("id") for n in d["stream"] if n.get("id") is not None]
+check(d_ids == [d["response"].get("id")], "D: no separate cancel response frame (cancel is a notification)")
+
+# ext 三轨存在性
+check(len(ext_notifs("D-cancel", "_x.ai/sessions/changed")) >= 1, "ext _x.ai/sessions/changed present")
+check(len(ext_notifs("A-hooks-list", "_x.ai/queue/changed")) >= 1, "ext _x.ai/queue/changed present")
+
+# 脱敏完备性：归档样本不得含凭证/未脱敏 UUID
+import re
+p6_raw = open(os.path.join(S, "p6-turns.json"), encoding="utf-8").read()
+for secret, label in (("meta4agi", "email"), ("teamId", "teamId"), ("agentInstanceId", "agentInstanceId"),
+                      ("xai-", "token prefix")):
+    check(secret not in p6_raw, f"redaction: no {label} in archived sample")
+leftover_uuids = re.findall(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", p6_raw, re.I)
+check(not leftover_uuids, "redaction: no raw UUIDs left (all REDACT_UUID)")
 
 print()
 if failures:

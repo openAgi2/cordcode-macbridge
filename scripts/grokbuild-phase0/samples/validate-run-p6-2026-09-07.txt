@@ -1,0 +1,62 @@
+P1 initialize
+  ok    protocolVersion == 1
+  ok    agentCapabilities.loadSession true
+  ok    authMethods non-empty
+  ok    _meta.agentVersion == 1.0.13
+  ok    _meta.availableCommands == 7 builtin commands (diagnostic snapshot only)
+  ok    init availableCommands input null-or-object, no commandId
+P2 ACU shape
+  ok    handshake contains available_commands_update
+  ok    every command has name/description/input
+  ok    input is null or object
+  ok    no commandId field (official shape)
+P3 commands/list vs session ACU
+  ok    catalog list count == 34 (got 34)
+  ok    post-load session ACU == 43 (got 43)
+  ok    catalog list is SUBSET of session ACU (not equivalent)
+P5 CMU + persisted Pending
+  ok    CMU currentModeId == plan on stdout
+  ok    plan_mode.json persisted state == Pending
+P7 recovery semantics
+  ok    session/load succeeds
+  ok    NO current_mode_update after load-restore
+  ok    plan_mode.json stays Pending after load (file not rewritten)
+  ok    restored system prompt has NO plan role injection
+  ok    prompt_context.prompt_mode == extend (not a mode source)
+P6 real-turn lifecycle (p6-turns.json)
+  ok    A-hooks-list: stopReason == end_turn
+  ok    A-hooks-list: totalTokens == 0 (zero-model proof)
+  ok    A-hooks-list: agent_message_chunk carries feedback body containing 'Loaded hooks'
+  ok    A-hooks-list: feedback chunk _meta.hostTurn == true
+  ok    A-hooks-list: exactly one turn_completed(stop_reason=end_turn)
+  ok    B-hooks-add-invalid: stopReason == end_turn
+  ok    B-hooks-add-invalid: totalTokens == 0 (zero-model proof)
+  ok    B-hooks-add-invalid: agent_message_chunk carries feedback body containing 'Hook path must be absolute.'
+  ok    B-hooks-add-invalid: feedback chunk _meta.hostTurn == true
+  ok    B-hooks-add-invalid: exactly one turn_completed(stop_reason=end_turn)
+  ok    C: stopReason == end_turn
+  ok    C: _meta.usage.modelCalls == 1
+  ok    C: _meta.modelId grok-*
+  ok    C: _meta.totalTokens > 0
+  ok    C: turn_completed stop_reason=end_turn
+  ok    C: ext notification carries usage with modelCalls
+  ok    C: exactly one response_completed update
+  ok    C: response_completed usage uses snake_case keys
+  ok    C: user echo present
+  ok    C: thought chunks present
+  ok    C: prompt_complete stopReason == end_turn
+  ok    D: stopReason == cancelled
+  ok    D: response _meta.cancellationCategory == MidTurnAbort
+  ok    D: turn_completed stop_reason=cancelled with elapsed_ms
+  ok    D: turn_completed _meta.cancellationCategory == MidTurnAbort
+  ok    D: prompt_complete cancelled + MidTurnAbort + agentResult null
+  ok    D: no separate cancel response frame (cancel is a notification)
+  ok    ext _x.ai/sessions/changed present
+  ok    ext _x.ai/queue/changed present
+  ok    redaction: no email in archived sample
+  ok    redaction: no teamId in archived sample
+  ok    redaction: no agentInstanceId in archived sample
+  ok    redaction: no token prefix in archived sample
+  ok    redaction: no raw UUIDs left (all REDACT_UUID)
+
+ALL SAMPLE-SHAPE ASSERTIONS PASSED
