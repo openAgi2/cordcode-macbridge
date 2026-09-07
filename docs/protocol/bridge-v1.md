@@ -1311,10 +1311,16 @@ backend 两个 RPC 诚实返回 `not_supported`，iOS 不画 `/` 按钮。第一
 - **readiness 门（§5.1）**：capability 不能仅靠类型断言广告。`SessionCommandsReady()`
   为 false 时 go-bridge 不在 backend descriptor 上声明 `session_commands`（iOS 不画
   `/` 按钮）。当前恒 true（目录 1a + P6 准入 + 执行 1b 三门全过）；回滚即关门。
-- **List（1a）**：不透传 catalog `commands/list`（34 条 ⊂ 会话 ACU 43 条，不等价）；
-  每次都是专用短命 child 真实 `session/load` 该会话后读会话 ACU 最后一波（settle
-  静默窗）。返回 D1 准入子集（2026-09-07 owner 裁决：`compact` + `goal` 两条——
-  hooks-* 5 条移出（owner 不用），plan 非 grok 斜杠命令；判据与样本
+- **List（1a，2026-09-07 通道重做）**：进程级单例 catalog 子进程上的官方
+  `_x.ai/commands/list {cwd}` ext RPC——grok-desktop 在 session start 后用的同一
+  通道（session_admin.rs cwd 分支，不需会话加载进本进程），与 dsh-web 的
+  `commands/list` 同构（常驻连接 + 单次 RPC；无会话 ACU 的运行时命令，但准入集
+  `compact`+`goal` 均在官方目录内）。每次 List 仍是一次真实官方拉取（无缓存、
+  无子进程、无 ACU settle 静默窗；隔离探针 43ms，`scripts/grokbuild-phase0/`
+  p9）。旧「专用 child `session/load` + ACU 最后一波 settle」通道生产实测
+  8-10s（owner 报障「点 ➕ 十几秒」）已移除。返回 D1 准入子集
+  （2026-09-07 owner 裁决：`compact` + `goal` 两条——hooks-* 5 条移出
+  （owner 不用），plan 非 grok 斜杠命令；判据与样本
   `scripts/grokbuild-phase0/ADMISSION.md`、`samples/p2-handshake-notifications.jsonl`）；
   `context`/`feedback`/`dream`/`flush`/`always-approve` 明确排除。空目录诚实可见；
   失败标记该身份不可执行。

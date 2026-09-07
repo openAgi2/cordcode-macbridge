@@ -2,8 +2,9 @@ package grokbuild
 
 // session_commands_acu_test.go — 1a 目录方向定向测试（方案 §9 目录组可单测部分）：
 // ACU 解析（真实样本形状）、side-state 语义（整表替换/失败禁用/迟到不覆盖/隔离）、
-// D1 准入交集、readiness 广告门、专用 child List 的 fake 进程 e2e（分波→全表、
-// 零波失败标记不可用、空表成功）。
+// D1 准入交集、readiness 广告门、catalog 单例 List 的 fake 进程 e2e（2026-09-07
+// 通道重做：initialize/authenticate + `_x.ai/commands/list`；全表/空表/ext 错误
+// 失败标记不可用）。
 
 import (
 	"context"
@@ -222,49 +223,43 @@ func TestSessionCommandsAdvertiseGate(t *testing.T) {
 	}
 }
 
-// --- 专用 child List fake e2e（内部故障注入，与产品路径隔离；官方形状由 phase0 真样本守护） ---
+// --- catalog 单例 List fake e2e（内部故障注入，与产品路径隔离；官方形状由 phase0 真样本守护） ---
 
-// writeFakeGrokList writes a minimal ACP stdio peer script responding to
-// initialize/authenticate/session/load. Modes: "waves" emits a partial wave
-// then the full table after a short delay; "silent" never emits ACU; "empty"
-// emits one empty table.
-func writeFakeGrokList(t *testing.T, mode string) string {
+// writeFakeGrokCatalogList writes a minimal ACP stdio peer script for the
+// catalog singleton (initialize → authenticate → `_x.ai/commands/list`).
+// Modes: "table" serves a 3-command table; "empty" serves an empty table;
+// "exterr" answers the ext method with a JSON-RPC error.
+func writeFakeGrokCatalogList(t *testing.T, mode string) string {
 	t.Helper()
 	dir := t.TempDir()
 	script := filepath.Join(dir, "fake-grok")
-	var body string
-	switch mode {
-	case "waves":
-		body = `print '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[{"id":"fake"}]}}' . "\n";`
-	case "silent", "empty":
-		body = `print '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}' . "\n";`
+	table := `[{"name":"compact","description":"d","input":{"hint":"h"}},{"name":"hooks-list","description":"d","input":null},{"name":"context","description":"d","input":null}]`
+	if mode == "empty" {
+		table = `[]`
 	}
-	// mode is baked in as a literal: the session launcher execs the CLI with
+	// mode is baked in as a literal: the catalog launcher execs the CLI with
 	// argv ("agent", "--no-leader", "stdio"), so an @ARGV-based mode would
 	// silently read "agent" and match no branch.
 	prog := `#!/usr/bin/perl
 use strict; use warnings;
 $| = 1; # autoflush — block-buffered stdout would starve the JSON-RPC peer
 my $mode = '` + mode + `';
+my $table = q(` + table + `);
 while (my $line = <STDIN>) {
   last unless defined $line;
   my ($id) = $line =~ /"id":(\d+)/;
   my ($method) = $line =~ /"method":"([^"]+)"/;
   next unless defined $id && defined $method;
   if ($method eq "initialize") {
-    ` + body + `
+    print '{"jsonrpc":"2.0","id":' . $id . ',"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"sessionCapabilities":{"list":{"enabled":true}}},"authMethods":[{"id":"fake"}]}}' . "\n";
   } elsif ($method eq "authenticate") {
     print "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"_meta\":{\"stub\":1}}}\n";
-  } elsif ($method eq "session/load") {
-    print "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"sessionId\":\"sess-fake\",\"models\":{}}}\n";
-    if ($mode eq "waves") {
-      print '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-fake","update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"compact","description":"partial","input":null}]}}}' . "\n";
-      select(undef,undef,undef,0.2);
-      print '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-fake","update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"compact","description":"d","input":{"hint":"h"}},{"name":"hooks-list","description":"d","input":null},{"name":"context","description":"d","input":null}]}}}' . "\n";
-    } elsif ($mode eq "empty") {
-      print '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-fake","update":{"sessionUpdate":"available_commands_update","availableCommands":[]}}}' . "\n";
+  } elsif ($method eq "_x.ai/commands/list") {
+    if ($mode eq "exterr") {
+      print "{\"jsonrpc\":\"2.0\",\"id\":$id,\"error\":{\"code\":-32601,\"message\":\"fake ext failure\"}}\n";
+    } else {
+      print "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"commands\":$table}}\n";
     }
-    # silent: nothing
   }
 }
 exit 0;
@@ -276,6 +271,61 @@ exit 0;
 		_ = os.WriteFile(os.Getenv("FAKE_GROK_DUMP"), []byte(prog), 0o755)
 	}
 	return script
+}
+
+func TestListSessionCommandsCatalogTable(t *testing.T) {
+	cli := writeFakeGrokCatalogList(t, "table")
+	a, proj := newListTestAgent(t, cli)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmds, err := a.ListSessionCommands(ctx, "sess-fake")
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	// D1 display = official table ∩ admission (2026-09-07 owner 裁决表
+	// {compact, goal}): of [compact, hooks-list, context] only compact
+	// is admitted (hooks-* 移出、context 排除).
+	if len(cmds) != 1 || cmds[0].Name != "compact" || cmds[0].Hint != "h" {
+		t.Fatalf("display must be exactly [compact] with hint, got %+v", cmds)
+	}
+	// Whitelist cache holds the FULL official table (3 cmds).
+	got, ok := a.acu.executeWhitelist("sess-fake", proj)
+	if !ok || len(got) != 3 || got[0].Name != "compact" {
+		t.Fatalf("whitelist must hold full catalog table: ok=%v len=%d first=%+v", ok, len(got), got[0])
+	}
+}
+
+func TestListSessionCommandsCatalogEmptyTable(t *testing.T) {
+	cli := writeFakeGrokCatalogList(t, "empty")
+	a, proj := newListTestAgent(t, cli)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmds, err := a.ListSessionCommands(ctx, "sess-fake")
+	if err != nil {
+		t.Fatalf("empty table is success, not error: %v", err)
+	}
+	if len(cmds) != 0 {
+		t.Fatalf("empty table must map to empty list, got %+v", cmds)
+	}
+	if got, ok := a.acu.executeWhitelist("sess-fake", proj); !ok || len(got) != 0 {
+		t.Fatalf("empty whitelist must be stored as a legal table: ok=%v len=%d", ok, len(got))
+	}
+}
+
+func TestListSessionCommandsCatalogExtErrorFails(t *testing.T) {
+	cli := writeFakeGrokCatalogList(t, "exterr")
+	a, proj := newListTestAgent(t, cli)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_, err := a.ListSessionCommands(ctx, "sess-fake")
+	if err == nil {
+		t.Fatal("ext-method error must be a real error")
+	}
+	// Failure marks the identity unavailable — no stale execution.
+	if _, ok := a.acu.executeWhitelist("sess-fake", proj); ok {
+		t.Fatal("failed pull must mark identity unavailable")
+	}
 }
 
 func newListTestAgent(t *testing.T, cli string) (*Agent, string) {
@@ -305,73 +355,6 @@ func newListTestAgent(t *testing.T, cli string) (*Agent, string) {
 func urlEncodePath(p string) string {
 	// grok stores sessions under the url-encoded cwd (path-escaped slashes).
 	return strings.ReplaceAll(p, "/", "%2F")
-}
-
-func TestListSessionCommandsFakeChildWaves(t *testing.T) {
-	origQuiet := acuSettleQuiet
-	acuSettleQuiet = 400 * time.Millisecond
-	defer func() { acuSettleQuiet = origQuiet }()
-
-	cli := writeFakeGrokList(t, "waves")
-	a, proj := newListTestAgent(t, cli)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	cmds, err := a.ListSessionCommands(ctx, "sess-fake")
-	if err != nil {
-		t.Fatalf("List failed: %v", err)
-	}
-	// D1 display = official table ∩ admission (2026-09-07 owner 裁决表
-	// {compact, goal}): of [compact, hooks-list, context] only compact
-	// is admitted (hooks-* 移出、context 排除).
-	if len(cmds) != 1 || cmds[0].Name != "compact" {
-		t.Fatalf("display must be exactly [compact], got %+v", cmds)
-	}
-	// Whitelist cache holds the FULL official table (3 cmds, last wave wins).
-	got, ok := a.acu.executeWhitelist("sess-fake", proj)
-	if !ok || len(got) != 3 || got[0].Name != "compact" || got[0].Hint != "h" {
-		t.Fatalf("whitelist must hold full last wave: ok=%v len=%d first=%+v", ok, len(got), got[0])
-	}
-}
-
-func TestListSessionCommandsFakeChildEmptyTable(t *testing.T) {
-	origQuiet := acuSettleQuiet
-	acuSettleQuiet = 300 * time.Millisecond
-	defer func() { acuSettleQuiet = origQuiet }()
-
-	cli := writeFakeGrokList(t, "empty")
-	a, proj := newListTestAgent(t, cli)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	cmds, err := a.ListSessionCommands(ctx, "sess-fake")
-	if err != nil {
-		t.Fatalf("empty table is success, not error: %v", err)
-	}
-	if len(cmds) != 0 {
-		t.Fatalf("empty table must map to empty list, got %+v", cmds)
-	}
-	if got, ok := a.acu.executeWhitelist("sess-fake", proj); !ok || len(got) != 0 {
-		t.Fatalf("empty whitelist must be stored as a legal table: ok=%v len=%d", ok, len(got))
-	}
-}
-
-func TestListSessionCommandsFakeChildZeroWavesFails(t *testing.T) {
-	origQuiet := acuSettleQuiet
-	acuSettleQuiet = 300 * time.Millisecond
-	defer func() { acuSettleQuiet = origQuiet }()
-
-	cli := writeFakeGrokList(t, "silent")
-	a, proj := newListTestAgent(t, cli)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	_, err := a.ListSessionCommands(ctx, "sess-fake")
-	if err == nil {
-		t.Fatal("zero ACU waves must be a real error")
-	}
-	// Failure marks the identity unavailable — no stale execution.
-	if _, ok := a.acu.executeWhitelist("sess-fake", proj); ok {
-		t.Fatal("failed pull must mark identity unavailable")
-	}
 }
 
 // Execute fail-closed until the shared turn dispatcher lands (1b).

@@ -84,6 +84,51 @@
 - CMU 通知只表示 dirty（且 1.0.13 恢复时不发）；不携带"必须等到"的目标值——与方案 §5.3 一致。
 - **冷 hydrate / 热验证 / 事务共用读取契约**：`readAuthoritativeMode = read(plan_mode.json) + 官方恢复规则映射`；missing/corrupt/readError 分开返回；文件不存在（新会话）→ 无持久化状态（unknown，除非证明官方 default 语义——1.0.13 新会话 set plan 前 `plan_mode.json` 不存在，可视为官方"无模式状态"，映射 default 需按 §5.3 保守为 unknown）。
 
+## P9 — List 通道重做取证（catalog 单例 `_x.ai/commands/list {cwd}`）
+
+背景：owner 报障「grok build 模式点 ➕ 十几秒才出 goal/compact」；owner 指令先读
+grok-build 官方源码与成熟 dsh-web 模式，不再自建轮子。
+
+`[生产日志]`（go-bridge.log，2026-09-07 22:42，旧通道在跑的版本）：
+
+- req_8 `list_session_commands` 22:42:38.525 发起 → 该请求下一个动作（同 id 的
+  `list_projects`）22:42:46.387，全程 ≈7.9s；req_15 同形态。每次打开面板都重复全套。
+- 分解：专用短命 child `initialize` 1206ms（22:42:39.740 handshake step 行）→
+  `session/load` wait_elapsed_ms=3118（22:42:42.859）→ MCP 初始化的 ACU 波等待 +
+  acuSettleQuiet 1500ms 静默窗 ≈ 其余 ~3.5s。
+
+`[源码]`（grok-build @ `72a6125`）：
+
+- `xai-grok-shell/src/extensions/session_admin.rs` `handle_commands_list` **cwd 分支**
+  注释即 "the pull grok-desktop uses after session start"——官方桌面客户端在 session
+  start 后用 `_x.ai/commands/list {cwd}` 拉目录，**不需要把会话 load 进本进程**；
+  sessionId 分支才要求 `session_handle_waiting_for_load`（旧通道慢的根源就是选了
+  sessionId 语义）。
+- `xai-grok-shell/src/session/slash_commands.rs` `ListCommandsRequest`：camelCase
+  `{sessionId?, cwd?, kind?}`，kind 省略 = 完整 Build 目录；响应
+  `{commands:[AvailableCommand{name, description, input?{hint}}]}`。
+- `xai-grok-pager/src/acp/tracker.rs`：官方 pager 把 ACU 波被动存
+  `pending_acp_commands` → `AgentSession.available_commands` + generation 计数，
+  斜杠菜单读会话内状态，每次打开零 RPC/零进程——官方客户端不存在「每次打开都起
+  进程」的形态。
+
+`[样本]` p9-cmdlist-sessionless.json（隔离 GROK_HOME 临时目录、零模型调用；探针
+`p9_cmdlist_sessionless.py`）：
+
+- 无会话（无 session/new、无 session/load、无 prompt）进程上：`initialize` 2976ms
+  （冷启动一次，进程级单例生命周期只付一次）、`authenticate` 1ms、
+  `_x.ai/commands/list {cwd}` **43ms**；18 条目录，`compact`+`goal` 在列且带官方
+  description/hint（样本只归档命令描述符，无凭证）。
+- 成熟模式对照：dsh-web `ListSessionCommands` = 常驻 mux 连接上单次 `commands/list`
+  RPC（agent/dsh-web/commands.go）——无缓存、无 child，与重做后形态同构。
+
+结论：P3 设计期「专用 child load 后读 ACU」的每打开成本（生产 ≈8-10s）不可接受，
+重做为 catalog 进程级单例上的官方同款 RPC（warm 43ms）。P3「catalog 34 条 ⊂ 会话
+ACU 43 条」的不等价结论仍成立，但对 D1 准入集 {compact, goal} 无影响——两条均在
+catalog 目录内；缺的只是 feedback/loop/reload-plugins 等会话运行时命令，它们本来
+就不在准入集。红线保持：每次 List 仍是真实官方拉取（无缓存、无 TTL），失败
+fail-closed 标记该身份不可用，语义不变。
+
 ## 漂移表（1.0.13 实测 vs 方案/1.0.16 源码预期）
 
 | 项 | 方案/1.0.16 预期 | 1.0.13 实测 | 处置 |
@@ -92,13 +137,14 @@
 | set_mode 参数 | 上游 `SessionModeId`（wire `sessionModeId`?） | `{sessionId, modeId}` | Mac 实现按 1.0.13 实测字段 |
 | ext 方法前缀 | `x.ai/…` | stdio 上须 `_x.ai/…`（半包装） | 与既有 session_admin 实测一致 |
 | CMU 进 updates.jsonl | 方案 §5.3 禁止充当确认源 | **零 turn 场景根本不落盘** | 按 §5.3 目录/周期重读为主 |
-| commands/list ≙ 会话 ACU | P3 要求证明等价范围 | **不等价**（34 ⊂ 43，缺运行时命令） | 设计期固定：child load 后读 ACU |
+| commands/list ≙ 会话 ACU | P3 要求证明等价范围 | **不等价**（34 ⊂ 43，缺运行时命令） | P3 设计期固定 child load 读 ACU；**2026-09-07 P9 重做为 catalog 单例 commands/list**（D1 准入集不受影响，见 P9） |
 | Pending 恢复 | 1.0.16 源码 Pending→Inactive | 一致（无 CMU、无 plan 注入、文件不回写） | **短命路径阻断** |
 
 ## 副作用与复位记录
 
 - 隔离 home：`/tmp/grokbuild-probe-home-{p0,p1,p2,p7,p7clean,p3}` 全部为临时目录，未触碰 `~/.grok` 用户会话；可整体删除复位。认证文件为只读复制。
 - P6 追加：`/tmp/grokbuild-probe-home-p6`（四 turn 测试会话）取证完成后整目录删除复位（2026-09-07）；无外发消息（feedback 未执行）；`/tmp/grokbuild-p6-out` 中间产物随归档后清理。
+- P9 追加：`/tmp/grokbuild-cmdlist-probe-*` 临时 GROK_HOME 由脚本自删复位；零模型调用、无 prompt、无外发；输出仅命令描述符（无凭证）。
 - `~/.grok` 唯一 touched：`grok --version`（只读）。未动 leader、真实会话、配置。
 - 探针进程全部正常退出（rc=0）并 reap；无残留 grok 进程（`pgrep -fl "grok agent"` 复核见 regression 归档）。
 - 隔离 home 内观察到的 `session_start` hook 失败（SuperIsland `cc-event-hook.sh` exit 127）来自**用户全局 hooks 配置**，与本任务无关，仅样本记录。

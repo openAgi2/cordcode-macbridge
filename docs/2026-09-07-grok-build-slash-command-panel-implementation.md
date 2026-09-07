@@ -74,7 +74,7 @@ Mac 路径相对 §0 Mac 仓根；iOS 路径相对该仓 `OpenCodeiOS/OpenCodeiO
 ### 4.1 List、缓存与准入
 
 - 每次面板打开/重试发 List，bridge 每次实际官方 pull；失败返回错误，空表就是空表，绝不返回旧表冒充刷新。
-- P3 在设计期固定一种通道。catalog 单例生命周期独立于单次请求；请求 ctx 必须约束等待启动、锁、写 RPC、等回复的全部过程。List bridge 预算 15s 内，iOS 30s；不能被 catalog 既有 60s 等待覆盖，失败必须及时释放 waiter。
+- P3 在设计期固定一种通道。catalog 单例生命周期独立于单次请求；请求 ctx 必须约束等待启动、锁、写 RPC、等回复的全部过程。List bridge 预算 15s 内，iOS 30s；不能被 catalog 既有 60s 等待覆盖，失败必须及时释放 waiter。（2026-09-07 通道重做：固定通道从「专用 child load 后读 ACU」改为 catalog 单例 `_x.ai/commands/list {cwd}`，见 §12 与 EVIDENCE P9。）
 - 身份键至少 `(backend, sessionID, cwd)`，并记录 backend 实例/配置代际；cwd、binary/config 或 session 重建时失效，bridge 重启全清。每轮操作一次性捕获 cwd/model，不读可被其他会话修改的 agent 全局临时值。
 - ACU 在握手 drain 之前更新 side-state，不靠稍后消费 Events 才存目录；stdout/gateway 的 ACU 同一缓存入口、整表替换含空表。用本地请求/actor 代际隔离过时结果；无法排序的 ACU 标记待刷新，不能覆盖较新 List 成功值或污染另一 session。
 - 缓存只作 Execute 白名单和诊断，不作 List 展示返回源；无 TTL，不每次 Execute 二次拉取。失败的 List 将该身份标记不可用，不能随后拿旧成功缓存执行；下一次 Execute 先实拉，失败即拒绝。
@@ -219,3 +219,33 @@ owner 真机走查后裁决：「暂时只做 compact，plan，goal 三个命令
 - §9 owner 矩阵中引用 hooks 命令的步骤（②compact claim/③未知命令）改为以 compact/goal
   为对象；⑤⑥（会话隔离 / Mac 外部切换）不变。iOS 零改动（compact/goal 词典与图标已有，
   Grok 策略吃服务端目录原样）；protocol pack 描述已同步。
+
+## 12. List 通道重做（2026-09-07 夜，owner 报障「点 ➕ 十几秒」）
+
+owner 报障：grok build 会话点 ＋ 要十几秒才出 goal/compact。owner 指令：先读
+grok-build 官方源码（`/Users/jacklee/Projects/grok-build`）与成熟 dsh-web 模式，
+不要又一轮自建轮子。
+
+- **根因（生产日志 req_8/req_15，2026-09-07 22:42）**：旧 List 每次打开都起专用
+  短命 child——initialize 1206ms + session/load 3118ms + MCP 初始化的 ACU 波等待 +
+  1500ms settle 静默窗 ≈ 8-10s，全部在用户点 ➕ 的关键路径上。
+- **官方证据**（grok-build @ 72a6125，EVIDENCE P9）：grok-desktop 在 session start
+  后用 `_x.ai/commands/list {cwd}` 拉目录（session_admin.rs cwd 分支，不需要把会话
+  load 进本进程；sessionId 分支才要求 `session_handle_waiting_for_load`——旧通道
+  慢在选了 sessionId 语义）；官方 pager 斜杠菜单读被动 ACU 状态，每次打开零 RPC；
+  dsh-web `ListSessionCommands` = 常驻连接单次 RPC。
+- **重做**：`ListSessionCommands` 改为进程级 catalog 单例（`catalog_session_list.go`
+  既有基建，生产 `catalog_alive_procs=1` 常驻）上的 `_x.ai/commands/list {cwd}`
+  ext RPC（新文件 `agent/grokbuild/catalog_commands_list.go`；RPC 预算
+  `catalogCommandsListTimeout=12s` < bridge List 15s）。隔离探针 warm **43ms**
+  （冷启动 initialize 2976ms 只在单例首建付一次）。`session.go` 删除 per-session
+  ACU 观察 observer 与 settle 静默窗（目录不再来自会话波）；`acu_state.go` 只保留
+  Execute 白名单/失败禁用语义。
+- **不变量**：无缓存——每次 List 仍是一次真实官方拉取（红线原文不变）；D1 准入
+  {compact, goal} 不变（两条均在 catalog 官方目录内，P3 不等价结论对准入集无影响）；
+  空表诚实可见、失败标记该身份不可用、Execute fail-closed 不变；测试改写为 fake
+  catalog e2e（initialize/authenticate/ext list × table/empty/exterr 三模式）。
+- **证据与文档**：`scripts/grokbuild-phase0/p9_cmdlist_sessionless.py` +
+  `samples/p9-cmdlist-sessionless.json`；EVIDENCE.md P9（含漂移表处置行更新）；
+  protocol pack `docs/protocol/bridge-v1.md` grok-build List 节已更新并字节同步
+  iOS mirror。iOS 零改动。

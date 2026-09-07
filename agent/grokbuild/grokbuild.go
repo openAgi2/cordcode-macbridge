@@ -80,8 +80,9 @@ type Agent struct {
 
 	// acu is the agent-level available-commands side-state (acu_state.go):
 	// per-(sessionID,cwd) ACU tables from both rails + authoritative List pull
-	// results; Execute whitelist & diagnostics only — never the List display
-	// source. Invalidated on cwd/binary-config identity change (§4.1).
+	// results (catalog `_x.ai/commands/list`); Execute whitelist & diagnostics
+	// only — never the List display source (each List is a fresh official RPC).
+	// Invalidated on cwd/binary-config identity change (§4.1).
 	acu *acuSideState
 	// modeSide is the typed mode-state read cache (session_mode.go): the P8
 	// authoritative read + dirty invalidation; switching is blocked (P7).

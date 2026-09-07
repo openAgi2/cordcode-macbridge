@@ -64,12 +64,6 @@ type grokSession struct {
 	// 不读可被其他会话修改的 agent 全局临时值). Written at spawn/load.
 	cwd atomic.Value // string
 
-	// acuObs, when non-nil, receives every ACU table observed on this actor's
-	// stdout rail (dedicated List pull child). Default nil → the agent-level
-	// side-state cache is written instead (handleNotification). Set before
-	// readLoop starts by newGrokSessionACU.
-	acuObs func([]core.SessionCommand)
-
 	// pending permission requests: requestID -> options (for allow/deny lookup)
 	pendingPermsMu sync.Mutex
 	// pendingUserEcho buffers the identityless user prompt echo (codec
@@ -110,13 +104,6 @@ type grokSession struct {
 }
 
 func newGrokSession(ctx context.Context, agent *Agent, sessionID string) (*grokSession, error) {
-	return newGrokSessionACU(ctx, agent, sessionID, nil)
-}
-
-// newGrokSessionACU is newGrokSession with an optional ACU observer installed
-// before readLoop starts (dedicated List pull child; nil = default agent
-// side-state writes in handleNotification).
-func newGrokSessionACU(ctx context.Context, agent *Agent, sessionID string, acuObs func([]core.SessionCommand)) (*grokSession, error) {
 	sessionCtx, cancel := context.WithCancel(ctx)
 
 	args := []string{"agent", "--no-leader", "stdio"}
@@ -167,7 +154,6 @@ func newGrokSessionACU(ctx context.Context, agent *Agent, sessionID string, acuO
 		pendingPerms:     make(map[string][]permissionOption),
 		pendingQuestions: make(map[string]*pendingAskUserQuestion),
 		respChannels:     make(map[int]chan *jsonrpcResponse),
-		acuObs:           acuObs,
 	}
 	// One-shot cwd capture at spawn (loadSession re-captures on load).
 	s.cwd.Store(agent.GetWorkDir())
@@ -268,9 +254,8 @@ drainLoop:
 	s.handshaking.Store(false)
 
 	// Register the conversation actor with the Agent (sessionId 贯通 for
-	// ExecuteSessionCommand). Dedicated List pull children (acuObs set) are
-	// catalog fetchers, never conversation actors.
-	if acuObs == nil && s.agent != nil {
+	// ExecuteSessionCommand).
+	if s.agent != nil {
 		s.agent.registerLiveSession(s.CurrentSessionID(), s)
 	}
 
@@ -1081,12 +1066,10 @@ func (s *grokSession) handleNotification(notif *agentNotification) {
 		}
 		// ACU side-state (§4.1): written BEFORE any event conversion/drain
 		// semantics — handshake replay ACU must land in the cache even while
-		// emit() discards overflow events. Same parse as the leader rail and
-		// the dedicated List puller (one cache entry shape).
+		// emit() discards overflow events. Same parse as the leader rail
+		// (one cache entry shape).
 		if acuSid, acuCmds, ok := parseAvailableCommandsUpdate(notif.Params); ok {
-			if s.acuObs != nil {
-				s.acuObs(acuCmds)
-			} else if s.agent != nil && s.agent.acu != nil {
+			if s.agent != nil && s.agent.acu != nil {
 				s.agent.acu.storeNotification(acuSid, s.cwdSnapshot(), acuCmds)
 			}
 		}

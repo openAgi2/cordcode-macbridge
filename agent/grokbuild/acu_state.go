@@ -12,7 +12,8 @@ package grokbuild
 //   - ACU 无序号，无法与 List 成功值排序：不能覆盖较新的 List 成功值，只标记
 //     pendingRefresh；也不得污染另一 session（按 (sessionID, cwd) 隔离）。
 //   - 缓存只作 Execute 白名单与诊断；List 展示源永远是当次真实官方拉取
-//     （session_commands.go 专用 child load）。失败的 List 将身份标记不可用，
+//     （2026-09-07 起为 catalog 单例 `_x.ai/commands/list {cwd}` ext RPC，
+//     catalog_commands_list.go）。失败的 List 将身份标记不可用，
 //     不得随后拿旧缓存执行。
 //   - cwd / binary·config / session 重建时失效；bridge 重启进程内缓存自然全清。
 

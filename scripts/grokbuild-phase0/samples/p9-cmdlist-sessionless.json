@@ -1,0 +1,37 @@
+{
+ "cwd": "/Users/jacklee/Projects/Chat",
+ "out": {
+  "initialize": {
+   "elapsed_ms": 2976,
+   "authMethods": true,
+   "sessionList": false
+  },
+  "authenticate": {
+   "elapsed_ms": 1,
+   "error": false
+  },
+  "commands_list": {
+   "elapsed_ms": 43,
+   "count": 18,
+   "has_compact": true,
+   "has_goal": true,
+   "error": null
+  }
+ },
+ "admitted_samples": [
+  {
+   "name": "compact",
+   "description": "Compress conversation history to save context window",
+   "input": {
+    "hint": "optional context about what to preserve"
+   }
+  },
+  {
+   "name": "goal",
+   "description": "Set, manage, or check an autonomous goal",
+   "input": {
+    "hint": "<objective> [--budget <tokens>] | status | pause | resume | clear"
+   }
+  }
+ ]
+}
