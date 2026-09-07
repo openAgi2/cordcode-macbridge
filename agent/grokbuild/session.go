@@ -1098,6 +1098,17 @@ func (s *grokSession) handleNotification(notif *agentNotification) {
 				s.agent.acu.storeNotification(acuSid, s.cwdSnapshot(), acuCmds)
 			}
 		}
+		// CMU (§5.3): notification means dirty only — never a value to trust.
+		// Mark the session's mode cache dirty; the next authoritative read
+		// re-reads plan_mode.json (session_mode.go).
+		if cmuSid, ok := parseCurrentModeUpdate(notif.Params); ok {
+			if cmuSid == "" {
+				cmuSid = s.CurrentSessionID()
+			}
+			if s.agent != nil && s.agent.modeSide != nil {
+				s.agent.modeSide.markDirty(cmuSid)
+			}
+		}
 		events := convertSessionUpdate(notif.Params, s.CurrentSessionID())
 		alreadyUsage := false
 		refreshSignals := false

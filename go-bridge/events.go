@@ -342,6 +342,24 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 			"pending": ev.PlanMode.Pending,
 		}, false
 
+	case core.EventSessionMode:
+		// Typed mode state (Grok §5.1). Whole-value snapshot; unknown is a
+		// value, not an absence — only a nil payload is dropped.
+		if ev.SessionMode == nil {
+			return "", nil, false
+		}
+		data := map[string]interface{}{
+			"status": ev.SessionMode.Status,
+			"canSet": ev.SessionMode.CanSet,
+		}
+		if ev.SessionMode.Mode != nil {
+			data["mode"] = *ev.SessionMode.Mode
+		}
+		if ev.SessionMode.Reason != "" {
+			data["reason"] = ev.SessionMode.Reason
+		}
+		return "session_mode", data, false
+
 	case core.EventSessionGoal:
 		// dsh-web goal whole-snapshot (official goal projection wire view).
 		// Stored on SessionProjection.goal; a cleared goal carries phase "none"

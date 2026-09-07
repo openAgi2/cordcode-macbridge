@@ -12,7 +12,6 @@ func TestNew_DefaultConfig(t *testing.T) {
 	a, err := New(map[string]any{
 		"work_dir": "/tmp",
 		"model":    "grok-4.5",
-		"mode":     "plan",
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -23,9 +22,6 @@ func TestNew_DefaultConfig(t *testing.T) {
 	}
 	if agent.model != "grok-4.5" {
 		t.Errorf("model = %q", agent.model)
-	}
-	if agent.mode != "plan" {
-		t.Errorf("mode = %q, want plan", agent.mode)
 	}
 	if agent.Name() != "grokbuild" {
 		t.Errorf("Name = %q", agent.Name())
@@ -57,30 +53,6 @@ func TestNew_WithCLIParse(t *testing.T) {
 	}
 }
 
-func TestNormalizePermissionMode(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"", "default"},
-		{"default", "default"},
-		{"acceptEdits", "acceptEdits"},
-		{"accept_edits", "acceptEdits"},
-		{"auto", "auto"},
-		{"dontAsk", "dontAsk"},
-		{"dont_ask", "dontAsk"},
-		{"bypassPermissions", "bypassPermissions"},
-		{"bypass_permissions", "bypassPermissions"},
-		{"plan", "plan"},
-		{"PLAN", "plan"},
-	}
-	for _, tt := range tests {
-		got := normalizePermissionMode(tt.input)
-		if got != tt.want {
-			t.Errorf("normalizePermissionMode(%q) = %q, want %q", tt.input, got, tt.want)
-		}
-	}
-}
 
 func TestNormalizeReasoningEffort(t *testing.T) {
 	tests := []struct {
@@ -114,21 +86,19 @@ func TestAgent_WorkDirSwitcher(t *testing.T) {
 	}
 }
 
-func TestAgent_ModeSwitcher(t *testing.T) {
+// TestAgent_NoLegacyModeSwitcher（方案 2026-09-07 §5.1：Grok 永不落 legacy
+// ModeSwitcher）：六键空转已拆除——Agent 不再满足 core.ModeSwitcher；typed
+// 读侧走 core.SessionModeReader（session_mode.go），写入面因 P7 阻断禁用。
+func TestAgent_NoLegacyModeSwitcher(t *testing.T) {
 	a, err := New(map[string]any{})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	agent := a.(*Agent)
-
-	modes := agent.PermissionModes()
-	if len(modes) != 6 {
-		t.Errorf("PermissionModes = %d modes, want 6", len(modes))
+	if _, ok := a.(core.ModeSwitcher); ok {
+		t.Fatal("grokbuild must NOT implement legacy ModeSwitcher (six-key dead controls)")
 	}
-
-	agent.SetMode("acceptEdits")
-	if agent.GetMode() != "acceptEdits" {
-		t.Errorf("GetMode = %q", agent.GetMode())
+	if _, ok := a.(core.SessionModeReader); !ok {
+		t.Fatal("grokbuild must implement core.SessionModeReader (typed read-side)")
 	}
 }
 
@@ -237,15 +207,8 @@ func TestAgent_ImplementsModelSwitcher(t *testing.T) {
 	}
 }
 
-func TestAgent_ImplementsModeSwitcher(t *testing.T) {
-	a, err := New(map[string]any{})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if _, ok := a.(core.ModeSwitcher); !ok {
-		t.Error("Agent does not implement core.ModeSwitcher")
-	}
-}
+// TestAgent_ImplementsModeSwitcher 已删除：Grok 永不落 legacy ModeSwitcher
+//（方案 2026-09-07 §5.1；见 TestAgent_NoLegacyModeSwitcher）。
 
 func TestAgent_ImplementsToolAuthorizer(t *testing.T) {
 	a, err := New(map[string]any{})

@@ -211,6 +211,20 @@ type PlanModeView struct {
 	Pending bool `json:"pending"`
 }
 
+// SessionModeView is the typed mode-state projection (Grok Build panel plan
+// 2026-09-07 §5.1): status confirmed|pending|unknown; mode (plan|default) only
+// present when confirmed; canSet=false means switching is blocked (grokbuild
+// 1.0.13: P7 — official restore maps Pending→Inactive, short-lived mode-only
+// path decisively blocked); reason is a stable code for the disabled-chip
+// explanation. Additive; absent on backends without a mode reader. This is a
+// READ-ONLY diagnostic field — a value here never implies switching works.
+type SessionModeView struct {
+	Status string  `json:"status"`
+	Mode   *string `json:"mode,omitempty"`
+	CanSet bool    `json:"canSet"`
+	Reason string  `json:"reason,omitempty"`
+}
+
 // GoalBlockedReasonView mirrors the official blocked explanation ({code, message}).
 type GoalBlockedReasonView struct {
 	Code    string `json:"code"`
@@ -251,6 +265,9 @@ type SessionProjection struct {
 	// PlanMode is the dsh-web plan-mode snapshot (additive; nil = backend has no
 	// plan-mode projection, chip absent).
 	PlanMode *PlanModeView `json:"planMode,omitempty"`
+	// SessionMode is the typed mode state (Grok §5.1; additive; nil = backend
+	// has no mode reader — chip absent for that backend).
+	SessionMode *SessionModeView `json:"sessionMode,omitempty"`
 	// Goal is the dsh-web goal snapshot (additive; nil = backend has no goal
 	// projection, banner absent; non-nil Phase "none" = explicitly no goal).
 	Goal *GoalView `json:"goal,omitempty"`
@@ -278,6 +295,9 @@ type ProjectionPatch struct {
 	// PlanMode carries the dsh-web plan-mode snapshot when it changed in this
 	// delta (additive; absent = unchanged).
 	PlanMode *PlanModeView `json:"planMode,omitempty"`
+	// SessionMode carries the typed mode state when it changed in this delta
+	// (additive; absent = unchanged).
+	SessionMode *SessionModeView `json:"sessionMode,omitempty"`
 	// Goal carries the dsh-web goal snapshot when it changed in this delta
 	// (additive; absent = unchanged; Phase "none" = goal cleared).
 	Goal *GoalView `json:"goal,omitempty"`

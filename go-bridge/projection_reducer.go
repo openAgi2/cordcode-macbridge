@@ -58,6 +58,7 @@ type projectionSession struct {
 	workflows   map[string]workflowPending  // workflow runId -> latest workflow part + owning turn (upsert_workflow)
 	execution   *ExecutionView              // pending execution change
 	planMode    *PlanModeView               // pending dsh-web plan-mode change (patch.planMode)
+	sessionMode *SessionModeView            // pending typed mode-state change (patch.sessionMode, Grok §5.1)
 	goal        *GoalView                   // pending dsh-web goal change (patch.goal)
 }
 
@@ -125,6 +126,10 @@ func cloneProjectionSessionState(source *projectionSession) *projectionSession {
 	if source.planMode != nil {
 		planMode := *source.planMode
 		cloned.planMode = &planMode
+	}
+	if source.sessionMode != nil {
+		sessionMode := cloneSessionModeView(*source.sessionMode)
+		cloned.sessionMode = &sessionMode
 	}
 	if source.goal != nil {
 		cloned.goal = new(GoalView)
@@ -990,6 +995,31 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		commit()
 		ps.projection.PlanMode = &view
 		ps.planMode = &view
+
+	case "session_mode":
+		// Typed mode state (Grok §5.1): whole-value last-wins snapshot. Any
+		// status is stored as-is (unknown is a VALUE — the honest diagnostic);
+		// unknown vocabulary is dropped fail-closed.
+		status := dataString(data, "status")
+		switch status {
+		case "confirmed", "pending", "unknown":
+		default:
+			return
+		}
+		view := SessionModeView{Status: status, CanSet: dataBool(data, "canSet")}
+		if mode, ok := data["mode"].(string); ok && mode != "" {
+			m := mode
+			view.Mode = &m
+		}
+		if reason := dataString(data, "reason"); reason != "" {
+			view.Reason = reason
+		}
+		if ps.projection.SessionMode != nil && sessionModeViewEqual(*ps.projection.SessionMode, view) {
+			return
+		}
+		commit()
+		ps.projection.SessionMode = &view
+		ps.sessionMode = &view
 
 	case "session_goal":
 		// dsh-web goal whole-snapshot (official goal projection: last wins; a
@@ -1878,7 +1908,7 @@ func (r *ProjectionReducer) flushLocked(ps *projectionSession) (ProjectionPatch,
 	headRev := ps.projection.SyncRev
 	if headRev == ps.lastFlushedRev && len(ps.textAppends) == 0 && len(ps.thinking) == 0 &&
 		len(ps.tools) == 0 && len(ps.upsertTurns) == 0 && len(ps.userInputs) == 0 && len(ps.workflows) == 0 &&
-		ps.execution == nil && ps.planMode == nil && ps.goal == nil {
+		ps.execution == nil && ps.planMode == nil && ps.goal == nil && ps.sessionMode == nil {
 		return ProjectionPatch{}, false
 	}
 	patch := ProjectionPatch{BaseRev: ps.lastFlushedRev, SyncRev: headRev}
@@ -1889,6 +1919,10 @@ func (r *ProjectionReducer) flushLocked(ps *projectionSession) (ProjectionPatch,
 	if ps.planMode != nil {
 		pm := *ps.planMode
 		patch.PlanMode = &pm
+	}
+	if ps.sessionMode != nil {
+		sm := *ps.sessionMode
+		patch.SessionMode = &sm
 	}
 	if ps.goal != nil {
 		g := cloneGoalViewGo(*ps.goal)
@@ -1937,6 +1971,7 @@ func (r *ProjectionReducer) flushLocked(ps *projectionSession) (ProjectionPatch,
 	ps.execution = nil
 	ps.planMode = nil
 	ps.goal = nil
+	ps.sessionMode = nil
 	ps.lastFlushedRev = headRev
 	return patch, true
 }
@@ -1961,7 +1996,7 @@ func (r *ProjectionReducer) DropPendingPatch(backendID, sessionID string) bool {
 	headRev := ps.projection.SyncRev
 	if headRev == ps.lastFlushedRev && len(ps.textAppends) == 0 && len(ps.thinking) == 0 &&
 		len(ps.tools) == 0 && len(ps.upsertTurns) == 0 && len(ps.userInputs) == 0 && ps.execution == nil &&
-		ps.planMode == nil && ps.goal == nil {
+		ps.planMode == nil && ps.goal == nil && ps.sessionMode == nil {
 		return false
 	}
 	ps.textAppends = make(map[string][]string)
@@ -1979,6 +2014,7 @@ func (r *ProjectionReducer) DropPendingPatch(backendID, sessionID string) bool {
 	ps.execution = nil
 	ps.planMode = nil
 	ps.goal = nil
+	ps.sessionMode = nil
 	ps.lastFlushedRev = headRev
 	return true
 }
@@ -2256,6 +2292,10 @@ func cloneSessionProjection(s SessionProjection) SessionProjection {
 		pm := *s.PlanMode
 		out.PlanMode = &pm
 	}
+	if s.SessionMode != nil {
+		sm := cloneSessionModeView(*s.SessionMode)
+		out.SessionMode = &sm
+	}
 	if s.Goal != nil {
 		g := cloneGoalViewGo(*s.Goal)
 		out.Goal = &g
@@ -2447,4 +2487,29 @@ func (r *ProjectionReducer) PrependHistoricalTurns(
 	// No patch for this rev — journal gap by design (see doc comment).
 	ps.lastFlushedRev = ps.projection.SyncRev
 	return cloneSessionProjection(ps.projection), nil
+}
+
+// sessionModeViewEqual compares SessionModeView value-insensitively (Mode is
+// a pointer; == on the struct would compare pointer identity and never dedupe).
+func sessionModeViewEqual(a, b SessionModeView) bool {
+	if a.Status != b.Status || a.CanSet != b.CanSet || a.Reason != b.Reason {
+		return false
+	}
+	switch {
+	case a.Mode == nil && b.Mode == nil:
+		return true
+	case a.Mode == nil || b.Mode == nil:
+		return false
+	default:
+		return *a.Mode == *b.Mode
+	}
+}
+
+// cloneSessionModeView deep-copies (Mode pointer included).
+func cloneSessionModeView(v SessionModeView) SessionModeView {
+	if v.Mode != nil {
+		m := *v.Mode
+		v.Mode = &m
+	}
+	return v
 }

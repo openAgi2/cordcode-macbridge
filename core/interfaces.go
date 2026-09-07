@@ -777,6 +777,17 @@ type SessionModelSelectionReader interface {
 	GetSessionModelSelection(ctx context.Context, sessionID string) (SessionModelSelection, bool)
 }
 
+// SessionModeReader is an optional interface for agents exposing a session's
+// AUTHORITATIVE typed mode state (Grok Build panel plan §5.1). The read must
+// come from the single authoritative source + official recovery mapping
+// (grokbuild: plan_mode.json + P8 contract), never from notifications alone.
+// CanSet=false must be reported honestly when the technical gate, ownership or
+// lifecycle blocks switching (grokbuild 1.0.13: P7 decisive — official restore
+// maps Pending→Inactive, short-lived mode-only path blocked).
+type SessionModeReader interface {
+	GetSessionMode(ctx context.Context, sessionID string) (SessionModeEvent, error)
+}
+
 // SessionPinner is an optional interface for agents that support pinning (置顶) sessions.
 // Pin state is MacBridge-owned session metadata (NOT agent-local storage): each driver
 // persists it in its prescribed store (Claude → .cc-connect-session-meta sidecar;

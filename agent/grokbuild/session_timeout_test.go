@@ -29,7 +29,6 @@ func TestCallRPC_ResponseTimeoutOnSilentChild(t *testing.T) {
 	agent := &Agent{
 		cliBin:  "perl",
 		workDir: t.TempDir(),
-		mode:    "default",
 	}
 	agent.cliExtraArgs = []string{"-e", silentChildScript}
 

@@ -517,6 +517,28 @@ func parseAvailableCommandsUpdate(params json.RawMessage) (sessionID string, com
 	return outer.SessionID, cmds, true
 }
 
+// parseCurrentModeUpdate extracts a current_mode_update notification (CMU).
+// 1.0.13 shape: {sessionId, update:{sessionUpdate:"current_mode_update",
+// currentModeId}} (phase0 sample p5; no commandId-style extras). CMU carries
+// NO authoritative value for us — it only marks the session dirty (§5.3) and
+// the next GetSessionMode re-reads plan_mode.json.
+func parseCurrentModeUpdate(params json.RawMessage) (sessionID string, ok bool) {
+	var payload struct {
+		SessionID string `json:"sessionId"`
+		Update    struct {
+			SessionUpdate string `json:"sessionUpdate"`
+			CurrentModeID string `json:"currentModeId"`
+		} `json:"update"`
+	}
+	if err := json.Unmarshal(params, &payload); err != nil {
+		return "", false
+	}
+	if payload.Update.SessionUpdate != "current_mode_update" {
+		return "", false
+	}
+	return payload.SessionID, true
+}
+
 // availableCommandW mirrors the official availableCommands element (grok 1.0.13
 // wire): input is either null or {"hint": "..."}. No commandId on this binary.
 type availableCommandW struct {

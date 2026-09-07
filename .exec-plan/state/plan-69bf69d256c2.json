@@ -34,7 +34,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-09-07T18:27:21",
+ "updated_at": "2026-09-07T19:21:25",
  "todos": [
   {
    "id": "p0a-pairing-binary-impl",
@@ -471,23 +471,34 @@
    "id": "p2-impl",
    "title": "typed 模式状态、读循环、权限全链、模式切换（Mac）",
    "description": "typed 模式状态、读循环、权限全链、模式切换（Mac）",
-   "status": "pending",
+   "status": "done",
    "phase": "phase2",
    "kind": "impl",
    "depends_on": [
     "p0b-regression"
    ],
    "source": "§5.1/§5.2/§5.3",
-   "notes": "",
+   "notes": "范围裁决：方案 §8 行 2 前置「P4/P7/P8 全部通过；失败则只交付明确禁用与诊断」——P7 phase0 决定性失败已触发失败分支，该分支不依赖 P6（P6 属执行方向）。本单元收窄为：typed 读侧 SessionModeState + P8 权威读 + canSet=false 明确禁用 + 原因码 + 快照/patch sessionMode 投影 + 六键 legacy 拆除。模式切换写入面/§5.2 事务/§5.3 完整读循环【未交付，P7 阻断】——本单元不是模式功能完成。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "proven",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null,
+    "summary": "【禁用+诊断交付，非模式功能完成】Mac 侧 @ 本工作树：core.SessionModeEvent/SessionModeReader；grokbuild P8 权威读（plan_mode.json+官方恢复映射：Active→plan、Pending/ExitPending/Inactive→default、未知/缺失→unknown 值）+ canSet 恒 false + 稳定原因码 + CMU dirty（stdout/leader rail）+ 缓存失效；六键 legacy ModeSwitcher 全拆（capability 随断言消失，绝不留空转）；快照/patch additive sessionMode 投影全链（types/reducer/clone/flush/DropPending/events 映射/hydrate 事务注入）。模式切换写入面明确阻断未交付。文件清单 scripts/grokbuild-phase2/TESTS.md。",
+    "artifacts": [
+     "scripts/grokbuild-phase2/TESTS.md",
+     "core/message.go",
+     "core/interfaces.go",
+     "agent/grokbuild/session_mode.go",
+     "agent/grokbuild/acp_codec.go",
+     "agent/grokbuild/grokbuild.go",
+     "go-bridge/projection_types.go",
+     "go-bridge/projection_reducer.go",
+     "go-bridge/events.go",
+     "go-bridge/handlers_projection.go"
+    ],
+    "checked_at": "2026-09-07T19:21:25",
     "upstream_anchor": null
    }
   },
@@ -495,7 +506,7 @@
    "id": "p2-tests",
    "title": "模式测试：恢复语义/唯一读源/CANSet 门控/per-session",
    "description": "模式测试：恢复语义/唯一读源/CANSet 门控/per-session",
-   "status": "pending",
+   "status": "done",
    "phase": "phase2",
    "kind": "tests",
    "depends_on": [
@@ -505,13 +516,17 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "proven",
     "method": "automated",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null,
+    "summary": "12/12 绿：恢复映射表驱动/权威文件读+目录缺失=unknown 值/缓存+CMU dirty 重读/invalidate 语义/六键拆除断言（grokbuild 5）+ 整值快照去重/unknown 是值/垃圾 status fail-closed/patch 变化携带/clone 深拷贝/事件映射（go-bridge 7）。测试抓到两真 bug 并修复：SessionModeView 含 *string 时 == 比指针身份致去重永不命中；clone 浅拷贝共享 Mode 指针。日志 scripts/grokbuild-phase2/test-run.log。",
+    "artifacts": [
+     "scripts/grokbuild-phase2/test-run.log",
+     "agent/grokbuild/session_mode_test.go",
+     "go-bridge/projection_reducer_mode_test.go"
+    ],
+    "checked_at": "2026-09-07T19:21:25",
     "upstream_anchor": null
    }
   },
@@ -519,7 +534,7 @@
    "id": "p2-regression",
    "title": "实际重启/后续 prompt/审批证据（模式门通过才成立）",
    "description": "实际重启/后续 prompt/审批证据（模式门通过才成立）",
-   "status": "pending",
+   "status": "done",
    "phase": "phase2",
    "kind": "regression",
    "depends_on": [
@@ -529,13 +544,16 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "proven",
     "method": "mixed",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null,
+    "summary": "三包全量回归：grokbuild ok 30.2s / core ok / go-bridge ok 78.3s + BUILD_OK + VET_OK（清掉旧六键断言 TestAgent_ImplementsModeSwitcher 与 mode 残留后全绿）。§9 模式恢复关闭条件中读侧项已覆盖（Pending 关闭后不算 plan、官方恢复三态、外部归属未知禁切、无 _meta.mode）；切换面/完整读循环项明确不在本单元声称范围——模式功能未完成。",
+    "artifacts": [
+     "scripts/grokbuild-phase2/TESTS.md",
+     "scripts/grokbuild-phase2/test-run.log"
+    ],
+    "checked_at": "2026-09-07T19:21:25",
     "upstream_anchor": null
    }
   },
@@ -543,23 +561,29 @@
    "id": "p3a-impl",
    "title": "iOS 面板入口/菜单每次打开 List/claim 与发送/异步隔离（目录方向）",
    "description": "iOS 面板入口/菜单每次打开 List/claim 与发送/异步隔离（目录方向）",
-   "status": "pending",
+   "status": "done",
    "phase": "phase3",
    "kind": "impl",
    "depends_on": [
     "p1a-impl"
    ],
    "source": "§6 面板入口/routing/认领/异步",
-   "notes": "",
+   "notes": "1a 已完成（依赖满足），2026-09-07 开始 iOS 侧",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "proven",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null,
+    "summary": "3a 目录方向 iOS 侧完成 @ fd1e3cbb（iOS 工作树 plan/approval-layer-ios，起点 a579ccc，用户未跟踪 message-web/public/ 未动）：capability 门控去 dsh 硬编码（session_commands capability+有会话；Grok readiness 未开面板诚实缺席）；＋菜单两种布局共用 UIDeferredMenuElement.uncached 每次实际打开实拉（loading 系统/empty/failed+retry 三态）；per-backend policy（dsh 白名单/回退三条/预取/default-sink 原规则全保留；Grok 无过滤无回退 fail-closed）；认领失败与手写未知分离（claimedCommandUnavailable：保留草稿弹错绝不普通发送）；SlashCommandScope(backend,sessionId)+generation 异步隔离（菜单拉取 superseded/发送判决静默丢弃不跨会话恢复草稿/执行完成 fence）；执行中按 scope 键控；restoreSlashDraftIfUntouched 不覆盖用户后续输入。文件清单见 scripts/grokbuild-phase3a/TESTS.md。",
+    "artifacts": [
+     "scripts/grokbuild-phase3a/TESTS.md",
+     "iOS:OpenCodeiOS/OpenCodeiOS/Views/Chat/SlashCommandRouting.swift",
+     "iOS:OpenCodeiOS/OpenCodeiOS/App/ChatInputAccessoryView.swift",
+     "iOS:OpenCodeiOS/OpenCodeiOS/App/ChatUIKitContainerView.swift",
+     "iOS commit fd1e3cbb"
+    ],
+    "checked_at": "2026-09-07T18:56:57",
     "upstream_anchor": null
    }
   },
@@ -567,7 +591,7 @@
    "id": "p3a-tests",
    "title": "iOS 目录方向定向非 UI unit test",
    "description": "iOS 目录方向定向非 UI unit test",
-   "status": "pending",
+   "status": "done",
    "phase": "phase3",
    "kind": "tests",
    "depends_on": [
@@ -577,13 +601,16 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "proven",
     "method": "automated",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null,
+    "summary": "定向非 UI 单测 25/25 绿（新 SlashCommandGrokPanelTests 13：policy 四差异/拉取态行映射四情形/附件节单一真值/认领判决五情形/deferred 模式/claim 生命周期+草稿只读口；dsh 原语义 SlashCommandPanelTests 12/12 不破坏）。日志 p3a-test-run2.log（Executed 25 tests, 0 failures；TEST SUCCEEDED）。pbxproj 四段登记新测试文件。",
+    "artifacts": [
+     "scripts/grokbuild-phase3a/p3a-test-run2.log",
+     "iOS:OpenCodeiOS/OpenCodeiOSTests/SlashCommandGrokPanelTests.swift"
+    ],
+    "checked_at": "2026-09-07T18:56:57",
     "upstream_anchor": null
    }
   },
@@ -591,7 +618,7 @@
    "id": "p3a-regression",
    "title": "iOS 定向 build + 真机安装（配对/来源门通过且 iPhone 连接时）",
    "description": "iOS 定向 build + 真机安装（配对/来源门通过且 iPhone 连接时）",
-   "status": "pending",
+   "status": "done",
    "phase": "phase3",
    "kind": "regression",
    "depends_on": [
@@ -601,13 +628,15 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "proven",
     "method": "mixed",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null,
+    "summary": "定向 build（xcodebuild test 编译全 target）+ 真机安装：iPhone 16 Pro 00008140-001E69503453001C 构建成功→devicectl 安装→启动 org.openagi.cordcode（p3a-device-install2.log，含最终隔离修补代码）。run.sh first_real_device 的 xctrace 探测失准→显式 --device（与记忆一致：xctrace Offline 但 devicectl 为准）。owner 真机手工验收（矩阵①②③面板部分）不在 done 范围——安装成功不代替产品行为证据。",
+    "artifacts": [
+     "scripts/grokbuild-phase3a/p3a-device-install2.log"
+    ],
+    "checked_at": "2026-09-07T18:56:57",
     "upstream_anchor": null
    }
   },

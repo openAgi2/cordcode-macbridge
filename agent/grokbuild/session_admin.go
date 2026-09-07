@@ -111,6 +111,7 @@ func (a *Agent) DeleteSession(ctx context.Context, sessionID string) error {
 	// session 重建时失效; a recreated session with the same id starts clean).
 	if a.acu != nil {
 		a.acu.invalidateSession(sessionID)
+		a.modeSide.invalidateSession(sessionID)
 	}
 	a.signalCatalogRefresh()
 	return nil

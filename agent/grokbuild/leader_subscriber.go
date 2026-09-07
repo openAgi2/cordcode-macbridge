@@ -108,6 +108,9 @@ type LeaderSubscriber struct {
 	// fingerprint rescan owns fence/seen/publish. Set once by the constructor's
 	// caller before Run; read-only afterwards.
 	onRosterChanged func()
+	// onModeDirty is called for current_mode_update observed on the leader
+	// rail (§5.3): dirty-only signal; the authoritative read happens on demand.
+	onModeDirty func(sessionID string)
 	// onACU feeds available_commands_update tables observed on the leader rail
 	// into the agent-level ACU side-state (§4.1: stdout/gateway 同一缓存入口).
 	// Receives the update's own sessionId (fallback: this subscriber's session)
@@ -585,6 +588,14 @@ func (s *LeaderSubscriber) handleACP(payload string, pending *leaderPending, ses
 	if update, toolCallID := peekInteractionLifecycle(params); update != "" {
 		s.handleInteractionLifecycle(update, toolCallID, sessionID, onEvent)
 		return
+	}
+	if s.onModeDirty != nil {
+		if cmuSid, ok := parseCurrentModeUpdate(params); ok {
+			if cmuSid == "" {
+				cmuSid = sessionID
+			}
+			s.onModeDirty(cmuSid)
+		}
 	}
 	if s.onACU != nil {
 		if acuSid, acuCmds, ok := parseAvailableCommandsUpdate(params); ok {

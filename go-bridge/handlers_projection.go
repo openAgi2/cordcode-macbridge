@@ -933,6 +933,29 @@ func (h *Handlers) runProjectionHydrateTransaction(
 	}
 	source, _ := h.projectionKernel.HydrateSource(backendID, sessionID)
 	base, _ := h.projectionKernel.HydrateSnapshot(backendID, sessionID)
+	// Typed mode state (Grok §5.1): hydrate the authoritative read ONCE per
+	// transaction so snapshots carry sessionMode even with zero history rows.
+	// Backends without core.SessionModeReader get no field (nil = absent chip).
+	if agent, ok := h.getAgent(backendID); ok {
+		if reader, isReader := agent.(core.SessionModeReader); isReader {
+			if state, err := reader.GetSessionMode(ctx, sessionID); err == nil {
+				data := map[string]interface{}{
+					"status": state.Status,
+					"canSet": state.CanSet,
+				}
+				if state.Mode != nil {
+					data["mode"] = *state.Mode
+				}
+				if state.Reason != "" {
+					data["reason"] = state.Reason
+				}
+				h.projectionKernel.ApplyHydrateEvent(
+					backendID, sessionID, h.eventPublisher.BridgeEpoch(),
+					"session_mode", data,
+				)
+			}
+		}
+	}
 	segmentIdx := 0
 	err := h.produceProjectionHydrateSource(
 		ctx,

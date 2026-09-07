@@ -69,7 +69,6 @@ func TestSessionLoadReplayFloodDoesNotDeadlockHandshake(t *testing.T) {
 	agent := &Agent{
 		cliBin:  cliPath,
 		workDir: t.TempDir(),
-		mode:    "default",
 	}
 
 	start := time.Now()

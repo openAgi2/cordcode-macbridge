@@ -337,6 +337,7 @@ const (
 	EventRetryStatus         EventType = "retry_status"          // transient provider-retry notice (serve keeps the turn alive; wire session_retry_status)
 	EventSessionCommand      EventType = "session_command"       // dsh-web host 斜杠命令生命周期（command/run|done 按 commandId 折叠；权威 payload 在 Event.SessionCommand）
 	EventSessionPlanMode     EventType = "session_plan_mode"     // dsh-web 计划模式投影 {active, pending}（官方 plan projection view；权威 payload 在 Event.PlanMode）
+	EventSessionMode         EventType = "session_mode"          // typed 模式状态投影 {status, mode?, canSet, reason?}（Grok Build 方案 §5.1；权威 payload 在 Event.SessionMode）
 	EventSessionGoal         EventType = "session_goal"         // dsh-web 目标投影整值快照（官方 goal projection view；权威 payload 在 Event.Goal，nil = 已清除）
 	EventContextInjection    EventType = "context_injection"    // dsh-web 上下文注入行（user/message source.kind!="user"，当前仅 subagent-settled；权威 payload 在 Event.ContextInjection）
 	EventWorkflowRun         EventType = "workflow_run"         // dsh-web 并行子代理 workflow 卡整值快照（tool-workflow/* 四事件按 runId 折叠；权威 payload 在 Event.WorkflowRun）
@@ -446,6 +447,17 @@ type SessionCommandEvent struct {
 type PlanModeEvent struct {
 	Active  bool `json:"active"`
 	Pending bool `json:"pending"`
+}
+
+// SessionModeEvent 是 typed 模式状态的权威 payload（Grok Build 面板方案
+// 2026-09-07 §5.1）。status: confirmed|pending|unknown；mode 仅 confirmed 必须
+// 有（plan|default）；canSet=false 表示技术门/归属/状态任一不满足（当前
+// Grok 1.0.13 因官方恢复语义阻断——P7）；reason 为稳定原因码。
+type SessionModeEvent struct {
+	Status string  `json:"status"`
+	Mode   *string `json:"mode,omitempty"`
+	CanSet bool    `json:"canSet"`
+	Reason string  `json:"reason,omitempty"`
 }
 
 // ContextInjectionEvent 是 dsh-web 上下文注入行的权威 payload（官方
@@ -624,6 +636,8 @@ type Event struct {
 	SessionCommand *SessionCommandEvent
 	// dsh-web 计划模式投影快照（EventSessionPlanMode 的权威 payload）。
 	PlanMode *PlanModeEvent
+	// typed 模式状态投影（EventSessionMode 的权威 payload；Grok 方案 §5.1）。
+	SessionMode *SessionModeEvent
 	// dsh-web 目标投影整值快照（EventSessionGoal 的权威 payload；nil = 已清除）。
 	Goal *GoalEvent
 	// dsh-web 上下文注入行（EventContextInjection 的权威 payload；官方

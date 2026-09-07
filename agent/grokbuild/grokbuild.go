@@ -26,7 +26,6 @@ import (
 var _ core.Agent = (*Agent)(nil)
 var _ core.DiagnosticsProvider = (*Agent)(nil)
 var _ core.WorkDirSwitcher = (*Agent)(nil)
-var _ core.ModeSwitcher = (*Agent)(nil)
 var _ core.ModelSwitcher = (*Agent)(nil)
 var _ core.ModelEffortCatalog = (*Agent)(nil)
 var _ core.ProviderSwitcher = (*Agent)(nil)
@@ -45,7 +44,6 @@ type Agent struct {
 	cliExtraArgs    []string
 	model           string
 	reasoningEffort string
-	mode            string
 	allowedTools    []string
 	// providers / activeIdx 背载 iOS 下发的第三方 Grok provider 配置（GLM/DeepSeek 等
 	// 经 grok 网关）。AvailableModels 优先返 active provider 的 Models，使 custom 模型可见；
@@ -85,6 +83,9 @@ type Agent struct {
 	// results; Execute whitelist & diagnostics only — never the List display
 	// source. Invalidated on cwd/binary-config identity change (§4.1).
 	acu *acuSideState
+	// modeSide is the typed mode-state read cache (session_mode.go): the P8
+	// authoritative read + dirty invalidation; switching is blocked (P7).
+	modeSide *modeSideState
 
 	// liveSubs tracks per-session leader subscribers created by
 	// SubscribeSessionEvents so question replies arriving over the bridge RPC
@@ -111,11 +112,11 @@ func init() {
 func New(opts map[string]any) (core.Agent, error) {
 	a := &Agent{
 		workDir:        ".",
-		mode:           "default",
 		activeIdx:      -1,
 		catalogRefresh: make(chan struct{}, 1),
 		liveSubs:       make(map[string]*LeaderSubscriber),
 		acu:            newACUSideState(),
+		modeSide:       newModeSideState(),
 	}
 
 	if v, ok := opts["work_dir"].(string); ok && v != "" {
@@ -137,9 +138,6 @@ func New(opts map[string]any) (core.Agent, error) {
 	}
 	if v, ok := opts["reasoning_effort"].(string); ok && v != "" {
 		a.reasoningEffort = normalizeReasoningEffort(v)
-	}
-	if v, ok := opts["mode"].(string); ok {
-		a.mode = normalizePermissionMode(v)
 	}
 	if raw, ok := opts["allowed_tools"].([]any); ok {
 		for _, t := range raw {
@@ -358,6 +356,12 @@ func (a *Agent) runLeaderSubscription(ctx context.Context, sessionID, cwd, socke
 		acu := a.acu
 		sub.onACU = func(sid string, cmds []core.SessionCommand) {
 			acu.storeNotification(sid, cwd, cmds)
+		}
+	}
+	if a.modeSide != nil {
+		modeSide := a.modeSide
+		sub.onModeDirty = func(sid string) {
+			modeSide.markDirty(sid)
 		}
 	}
 	a.liveSubsMu.Lock()
@@ -589,30 +593,12 @@ func (a *Agent) GetWorkDir() string {
 	return a.workDir
 }
 
-// --- ModeSwitcher ---
-
-func (a *Agent) SetMode(mode string) {
-	a.mu.Lock()
-	a.mode = normalizePermissionMode(mode)
-	a.mu.Unlock()
-}
-
-func (a *Agent) GetMode() string {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return a.mode
-}
-
-func (a *Agent) PermissionModes() []core.PermissionModeInfo {
-	return []core.PermissionModeInfo{
-		{Key: "default", Name: "Default", NameZh: "默认", Desc: "Ask for permission on each tool", DescZh: "每次工具调用都询问"},
-		{Key: "acceptEdits", Name: "Accept Edits", NameZh: "接受编辑", Desc: "Auto-accept file edits", DescZh: "自动接受文件编辑"},
-		{Key: "auto", Name: "Auto", NameZh: "自动", Desc: "Auto-approve most operations", DescZh: "自动批准大多数操作"},
-		{Key: "dontAsk", Name: "Don't Ask", NameZh: "不询问", Desc: "Don't ask for any permission", DescZh: "不询问任何权限"},
-		{Key: "bypassPermissions", Name: "Bypass Permissions", NameZh: "绕过权限", Desc: "Bypass all permission checks", DescZh: "绕过所有权限检查"},
-		{Key: "plan", Name: "Plan", NameZh: "计划", Desc: "Plan mode — no execution", DescZh: "计划模式——不执行"},
-	}
-}
+// --- 模式（方案 2026-09-07 §5.1：Grok 永不落 legacy ModeSwitcher）---
+//
+// 六键 legacy SetMode/GetMode/PermissionModes 已移除：无真实后端语义的空转
+//（方案回滚行「绝不恢复六键 legacy 空转」）。typed 读侧见 session_mode.go
+// （core.SessionModeReader）；写入面因 P7 官方恢复阻断明确禁用
+// （grokModeSwitchBlockedReason），待官方生命周期方案落地再开。
 
 // --- ModelSwitcher ---
 
@@ -855,6 +841,7 @@ func (a *Agent) SetProviders(providers []core.ProviderConfig) {
 	if a.acu != nil {
 		// provider config is a backend identity input (§4.1 配置代际) — invalidate.
 		a.acu.invalidateAll()
+		a.modeSide.invalidateAll()
 	}
 }
 
@@ -910,25 +897,6 @@ func (a *Agent) GetAllowedTools() []string {
 }
 
 // --- normalizers ---
-
-func normalizePermissionMode(mode string) string {
-	switch strings.ToLower(mode) {
-	case "", "default":
-		return "default"
-	case "acceptedits", "accept_edits":
-		return "acceptEdits"
-	case "auto":
-		return "auto"
-	case "dontask", "dont_ask":
-		return "dontAsk"
-	case "bypasspermissions", "bypass_permissions":
-		return "bypassPermissions"
-	case "plan":
-		return "plan"
-	default:
-		return mode
-	}
-}
 
 func normalizeReasoningEffort(effort string) string {
 	switch strings.ToLower(effort) {
