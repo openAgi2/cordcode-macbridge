@@ -80,6 +80,12 @@ type Agent struct {
 	// back to iOS-injected provider models. Guarded by mu.
 	modelCatalog *sessionModelState
 
+	// acu is the agent-level available-commands side-state (acu_state.go):
+	// per-(sessionID,cwd) ACU tables from both rails + authoritative List pull
+	// results; Execute whitelist & diagnostics only — never the List display
+	// source. Invalidated on cwd/binary-config identity change (§4.1).
+	acu *acuSideState
+
 	// liveSubs tracks per-session leader subscribers created by
 	// SubscribeSessionEvents so question replies arriving over the bridge RPC
 	// surface (core.SessionQuestionResponder) can reach the connection that
@@ -109,6 +115,7 @@ func New(opts map[string]any) (core.Agent, error) {
 		activeIdx:      -1,
 		catalogRefresh: make(chan struct{}, 1),
 		liveSubs:       make(map[string]*LeaderSubscriber),
+		acu:            newACUSideState(),
 	}
 
 	if v, ok := opts["work_dir"].(string); ok && v != "" {
@@ -345,6 +352,14 @@ func (a *Agent) runTailerWithLeaderProbe(ctx context.Context, sessionID, socketP
 func (a *Agent) runLeaderSubscription(ctx context.Context, sessionID, cwd, socketPath string, forward func(core.Event)) (forwardedAny bool, err error) {
 	sub := NewLeaderSubscriber(socketPath, sessionID, cwd)
 	sub.onRosterChanged = a.signalCatalogRefresh
+	// Leader-rail ACU → agent side-state, keyed by the update's own sessionId
+	// and the one-shot captured subscription cwd (§4.1).
+	if a.acu != nil {
+		acu := a.acu
+		sub.onACU = func(sid string, cmds []core.SessionCommand) {
+			acu.storeNotification(sid, cwd, cmds)
+		}
+	}
 	a.liveSubsMu.Lock()
 	if a.liveSubs == nil {
 		a.liveSubs = make(map[string]*LeaderSubscriber)
@@ -560,6 +575,12 @@ func (a *Agent) SetWorkDir(dir string) {
 	a.mu.Lock()
 	a.workDir = dir
 	a.mu.Unlock()
+	// NOTE: no ACU invalidation here. SetWorkDir is also the per-turn
+	// loadSession alignment call — alternating sessions in different cwds
+	// would wipe the whitelist every turn. Entries are keyed (sessionID, cwd)
+	// so cross-cwd isolation is structural (§4.1); the config-level cwd switch
+	// inherits the same keying. Binary/config identity changes invalidate via
+	// SetProviders; session rebuild via DeleteSession.
 }
 
 func (a *Agent) GetWorkDir() string {
@@ -829,8 +850,12 @@ func (a *Agent) AvailableReasoningEfforts() []string {
 
 func (a *Agent) SetProviders(providers []core.ProviderConfig) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	a.providers = providers
+	a.mu.Unlock()
+	if a.acu != nil {
+		// provider config is a backend identity input (§4.1 配置代际) — invalidate.
+		a.acu.invalidateAll()
+	}
 }
 
 func (a *Agent) SetActiveProvider(name string) bool {

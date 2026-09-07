@@ -59,6 +59,17 @@ type grokSession struct {
 	// ACP request ID counter
 	idCounter requestIDCounter
 
+	// cwd is the one-shot captured working directory of this actor (spawn or
+	// load), used to key ACU side-state writes (§4.1: 每轮操作一次性捕获 cwd，
+	// 不读可被其他会话修改的 agent 全局临时值). Written at spawn/load.
+	cwd atomic.Value // string
+
+	// acuObs, when non-nil, receives every ACU table observed on this actor's
+	// stdout rail (dedicated List pull child). Default nil → the agent-level
+	// side-state cache is written instead (handleNotification). Set before
+	// readLoop starts by newGrokSessionACU.
+	acuObs func([]core.SessionCommand)
+
 	// pending permission requests: requestID -> options (for allow/deny lookup)
 	pendingPermsMu sync.Mutex
 	// pendingUserEcho buffers the identityless user prompt echo (codec
@@ -94,6 +105,13 @@ type grokSession struct {
 }
 
 func newGrokSession(ctx context.Context, agent *Agent, sessionID string) (*grokSession, error) {
+	return newGrokSessionACU(ctx, agent, sessionID, nil)
+}
+
+// newGrokSessionACU is newGrokSession with an optional ACU observer installed
+// before readLoop starts (dedicated List pull child; nil = default agent
+// side-state writes in handleNotification).
+func newGrokSessionACU(ctx context.Context, agent *Agent, sessionID string, acuObs func([]core.SessionCommand)) (*grokSession, error) {
 	sessionCtx, cancel := context.WithCancel(ctx)
 
 	args := []string{"agent", "--no-leader", "stdio"}
@@ -144,7 +162,10 @@ func newGrokSession(ctx context.Context, agent *Agent, sessionID string) (*grokS
 		pendingPerms:     make(map[string][]permissionOption),
 		pendingQuestions: make(map[string]*pendingAskUserQuestion),
 		respChannels:     make(map[int]chan *jsonrpcResponse),
+		acuObs:           acuObs,
 	}
+	// One-shot cwd capture at spawn (loadSession re-captures on load).
+	s.cwd.Store(agent.GetWorkDir())
 	// Store requested ID early; loadSession keeps it, newSession replaces it.
 	s.sessionID.Store(sessionID)
 	s.alive.Store(true)
@@ -393,6 +414,8 @@ func (s *grokSession) loadSession(sessionID string) error {
 	if s.cmd != nil {
 		s.cmd.Dir = cwd
 	}
+	// Re-capture this actor's cwd for ACU side-state keying (§4.1).
+	s.cwd.Store(cwd)
 	s.sessionID.Store(sessionID)
 	s.recordAppliedModelState(loadResp.Models)
 	// session/load accepts no model params (session_lifecycle.rs consumes
@@ -638,6 +661,15 @@ func (s *grokSession) Events() <-chan core.Event { return s.events }
 
 func (s *grokSession) CurrentSessionID() string {
 	v := s.sessionID.Load()
+	if v == nil {
+		return ""
+	}
+	return v.(string)
+}
+
+// cwdSnapshot returns this actor's one-shot captured cwd ("" before spawn).
+func (s *grokSession) cwdSnapshot() string {
+	v := s.cwd.Load()
 	if v == nil {
 		return ""
 	}
@@ -1055,6 +1087,17 @@ func (s *grokSession) handleRequest(req *agentRequest) {
 func (s *grokSession) handleNotification(notif *agentNotification) {
 	switch notif.Method {
 	case "session/update":
+		// ACU side-state (§4.1): written BEFORE any event conversion/drain
+		// semantics — handshake replay ACU must land in the cache even while
+		// emit() discards overflow events. Same parse as the leader rail and
+		// the dedicated List puller (one cache entry shape).
+		if acuSid, acuCmds, ok := parseAvailableCommandsUpdate(notif.Params); ok {
+			if s.acuObs != nil {
+				s.acuObs(acuCmds)
+			} else if s.agent != nil && s.agent.acu != nil {
+				s.agent.acu.storeNotification(acuSid, s.cwdSnapshot(), acuCmds)
+			}
+		}
 		events := convertSessionUpdate(notif.Params, s.CurrentSessionID())
 		alreadyUsage := false
 		refreshSignals := false

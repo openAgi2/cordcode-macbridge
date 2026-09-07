@@ -1,0 +1,335 @@
+package grokbuild
+
+// session_commands_acu_test.go — 1a 目录方向定向测试（方案 §9 目录组可单测部分）：
+// ACU 解析（真实样本形状）、side-state 语义（整表替换/失败禁用/迟到不覆盖/隔离）、
+// D1 准入交集、readiness 广告门、专用 child List 的 fake 进程 e2e（分波→全表、
+// 零波失败标记不可用、空表成功）。
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
+)
+
+// --- parseAvailableCommandsUpdate（真实样本形状，phase0 p2/p7-14） ---
+
+func TestParseAvailableCommandsUpdate(t *testing.T) {
+	full := `{"sessionId":"01a07b3a-0000","update":{"sessionUpdate":"available_commands_update","availableCommands":[` +
+		`{"name":"compact","description":"Compress","input":{"hint":"optional context"}},` +
+		`{"name":"context","description":"Show context","input":null},` +
+		`{"name":"code-review:code-review","description":"namespaced","input":null}]}}`
+	sid, cmds, ok := parseAvailableCommandsUpdate(json.RawMessage(full))
+	if !ok || sid != "01a07b3a-0000" || len(cmds) != 3 {
+		t.Fatalf("full wave: ok=%v sid=%q len=%d", ok, sid, len(cmds))
+	}
+	if cmds[0].Name != "compact" || cmds[0].Hint != "optional context" || cmds[0].Description != "Compress" {
+		t.Errorf("hint mapping wrong: %+v", cmds[0])
+	}
+	if cmds[1].Hint != "" {
+		t.Errorf("null input must map to empty hint, got %q", cmds[1].Hint)
+	}
+	if cmds[2].Name != "code-review:code-review" {
+		t.Errorf("namespaced name must pass through verbatim, got %q", cmds[2].Name)
+	}
+
+	empty := `{"sessionId":"s2","update":{"sessionUpdate":"available_commands_update","availableCommands":[]}}`
+	sid2, cmds2, ok2 := parseAvailableCommandsUpdate(json.RawMessage(empty))
+	if !ok2 || sid2 != "s2" || len(cmds2) != 0 {
+		t.Fatalf("empty table is a legal table: ok=%v len=%d", ok2, len(cmds2))
+	}
+
+	other := `{"sessionId":"s3","update":{"sessionUpdate":"current_mode_update","currentModeId":"plan"}}`
+	if _, _, ok3 := parseAvailableCommandsUpdate(json.RawMessage(other)); ok3 {
+		t.Error("current_mode_update must not parse as ACU")
+	}
+}
+
+// --- ACU side-state 语义（§9 目录组：空表替换/失败不执行旧表/迟到 ACU 不覆盖新表/跨会话隔离） ---
+
+func TestACUSideStateSemantics(t *testing.T) {
+	s := newACUSideState()
+	c := func(names ...string) []core.SessionCommand {
+		out := make([]core.SessionCommand, 0, len(names))
+		for _, n := range names {
+			out = append(out, core.SessionCommand{Name: n})
+		}
+		return out
+	}
+
+	// 1. notification slot stores, empty table replaces non-empty.
+	s.storeNotification("sA", "/w", c("compact", "hooks-list"))
+	if got, ok := s.executeWhitelist("sA", "/w"); !ok || len(got) != 2 {
+		t.Fatalf("whitelist after notif: ok=%v len=%d", ok, len(got))
+	}
+	s.storeNotification("sA", "/w", c())
+	if got, ok := s.executeWhitelist("sA", "/w"); !ok || len(got) != 0 {
+		t.Fatalf("empty table must replace: ok=%v len=%d", ok, len(got))
+	}
+
+	// 2. list success wins over notification; late differing ACU marks refresh
+	// but must NOT clobber the list value (§4.1 无法排序的 ACU 不覆盖较新 List 值).
+	s.storeListSuccess("sA", "/w", c("compact", "goal", "workflow"))
+	s.storeNotification("sA", "/w", c("stale-wave"))
+	got, ok := s.executeWhitelist("sA", "/w")
+	if !ok || len(got) != 3 || got[0].Name != "compact" {
+		t.Fatalf("late unordered ACU must not clobber list value: ok=%v len=%d", ok, len(got))
+	}
+
+	// 3. failed list → identity unavailable; no stale fallback.
+	s.markListFailed("sA", "/w")
+	if _, ok := s.executeWhitelist("sA", "/w"); ok {
+		t.Fatal("after failed pull the identity must refuse the whitelist")
+	}
+	// recovery: a fresh successful pull restores.
+	s.storeListSuccess("sA", "/w", c("compact"))
+	if got, ok := s.executeWhitelist("sA", "/w"); !ok || len(got) != 1 {
+		t.Fatalf("fresh pull must restore whitelist: ok=%v", ok)
+	}
+
+	// 4. cross-session / cross-cwd isolation (不污染另一 session).
+	s.storeListSuccess("sB", "/w", c("goal"))
+	s.storeNotification("sA", "/other", c("compact"))
+	if got, _ := s.executeWhitelist("sB", "/w"); len(got) != 1 || got[0].Name != "goal" {
+		t.Fatalf("sB polluted: %+v", got)
+	}
+	if _, ok := s.executeWhitelist("sB", "/other"); ok {
+		t.Fatal("different cwd key must not resolve")
+	}
+
+	// 5. session rebuild invalidation drops only that session.
+	s.invalidateSession("sA")
+	if _, ok := s.executeWhitelist("sA", "/w"); ok {
+		t.Fatal("invalidateSession must drop the entry")
+	}
+	if got, ok := s.executeWhitelist("sB", "/w"); !ok || len(got) != 1 {
+		t.Fatal("invalidateSession(sA) must not touch sB")
+	}
+	// 6. invalidateAll clears everything (config generation).
+	s.invalidateAll()
+	if _, ok := s.executeWhitelist("sB", "/w"); ok {
+		t.Fatal("invalidateAll must clear all entries")
+	}
+}
+
+// --- D1 准入交集 ---
+
+func TestApplyGrokAdmission(t *testing.T) {
+	origAdmitted, origExcluded := grokAdmittedCommands, grokExcludedCommands
+	defer func() { grokAdmittedCommands, grokExcludedCommands = origAdmitted, origExcluded }()
+
+	grokAdmittedCommands = map[string]struct{}{"hooks-list": {}, "context": {}, "novel": {}}
+	grokExcludedCommands = map[string]struct{}{"context": {}}
+
+	in := []core.SessionCommand{
+		{Name: "hooks-list"}, {Name: "context"}, {Name: "compact"}, {Name: "novel"},
+	}
+	got := applyGrokAdmission(in)
+	if len(got) != 2 || got[0].Name != "hooks-list" || got[1].Name != "novel" {
+		t.Fatalf("D1 intersection wrong: %+v", got)
+	}
+
+	// Pre-P6 (empty admission): honest empty panel.
+	grokAdmittedCommands = map[string]struct{}{}
+	if out := applyGrokAdmission(in); len(out) != 0 {
+		t.Fatalf("empty admission must yield empty panel, got %+v", out)
+	}
+}
+
+// --- readiness 广告门（§5.1 不能仅靠类型断言） ---
+
+type fakeCatalogAgent struct{ core.Agent; ready bool }
+
+func (f *fakeCatalogAgent) ListSessionCommands(ctx context.Context, id string) ([]core.SessionCommand, error) {
+	return nil, nil
+}
+func (f *fakeCatalogAgent) ExecuteSessionCommand(ctx context.Context, id, line string) (core.SessionCommandResult, error) {
+	return core.SessionCommandResult{}, nil
+}
+func (f *fakeCatalogAgent) SessionCommandsReady() bool { return f.ready }
+
+func TestSessionCommandsAdvertiseGate(t *testing.T) {
+	// pointer receivers: pass &fakeCatalogAgent, the value type asserts false
+	// against SessionCommandCatalog and would pass the first check for the
+	// wrong reason.
+	if core.SessionCommandsAdvertise(&fakeCatalogAgent{ready: false}) {
+		t.Fatal("gated agent not ready must not advertise")
+	}
+	if !core.SessionCommandsAdvertise(&fakeCatalogAgent{ready: true}) {
+		t.Fatal("gated agent ready must advertise")
+	}
+	// grokbuild itself: catalog implemented, readiness currently false (1a).
+	a := &Agent{acu: newACUSideState()}
+	if core.SessionCommandsAdvertise(a) {
+		t.Fatal("grokbuild must not advertise session_commands before 1b+P6 gates pass")
+	}
+	grokCommandsReady.Store(true)
+	defer grokCommandsReady.Store(false)
+	if !core.SessionCommandsAdvertise(a) {
+		t.Fatal("readiness flip must advertise")
+	}
+}
+
+// --- 专用 child List fake e2e（内部故障注入，与产品路径隔离；官方形状由 phase0 真样本守护） ---
+
+// writeFakeGrokList writes a minimal ACP stdio peer script responding to
+// initialize/authenticate/session/load. Modes: "waves" emits a partial wave
+// then the full table after a short delay; "silent" never emits ACU; "empty"
+// emits one empty table.
+func writeFakeGrokList(t *testing.T, mode string) string {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fake-grok")
+	var body string
+	switch mode {
+	case "waves":
+		body = `print '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[{"id":"fake"}]}}' . "\n";`
+	case "silent", "empty":
+		body = `print '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}' . "\n";`
+	}
+	// mode is baked in as a literal: the session launcher execs the CLI with
+	// argv ("agent", "--no-leader", "stdio"), so an @ARGV-based mode would
+	// silently read "agent" and match no branch.
+	prog := `#!/usr/bin/perl
+use strict; use warnings;
+$| = 1; # autoflush — block-buffered stdout would starve the JSON-RPC peer
+my $mode = '` + mode + `';
+while (my $line = <STDIN>) {
+  last unless defined $line;
+  my ($id) = $line =~ /"id":(\d+)/;
+  my ($method) = $line =~ /"method":"([^"]+)"/;
+  next unless defined $id && defined $method;
+  if ($method eq "initialize") {
+    ` + body + `
+  } elsif ($method eq "authenticate") {
+    print "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"_meta\":{\"stub\":1}}}\n";
+  } elsif ($method eq "session/load") {
+    print "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"sessionId\":\"sess-fake\",\"models\":{}}}\n";
+    if ($mode eq "waves") {
+      print '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-fake","update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"compact","description":"partial","input":null}]}}}' . "\n";
+      select(undef,undef,undef,0.2);
+      print '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-fake","update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"compact","description":"d","input":{"hint":"h"}},{"name":"hooks-list","description":"d","input":null},{"name":"context","description":"d","input":null}]}}}' . "\n";
+    } elsif ($mode eq "empty") {
+      print '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-fake","update":{"sessionUpdate":"available_commands_update","availableCommands":[]}}}' . "\n";
+    }
+    # silent: nothing
+  }
+}
+exit 0;
+`
+	if err := os.WriteFile(script, []byte(prog), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if os.Getenv("FAKE_GROK_DUMP") != "" {
+		_ = os.WriteFile(os.Getenv("FAKE_GROK_DUMP"), []byte(prog), 0o755)
+	}
+	return script
+}
+
+func newListTestAgent(t *testing.T, cli string) (*Agent, string) {
+	t.Helper()
+	home := t.TempDir()
+	proj := t.TempDir()
+	sid := "sess-fake"
+	sdir := filepath.Join(home, "sessions", urlEncodePath(proj), sid)
+	if err := os.MkdirAll(sdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	summary := `{"info":{"id":"` + sid + `","cwd":"` + proj + `"},"updated_at":"2026-09-07T00:00:00Z"}`
+	if err := os.WriteFile(filepath.Join(sdir, "summary.json"), []byte(summary), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a, err := New(map[string]any{"grok_home": home, "cli_path": cli, "work_dir": proj})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ga, ok := a.(*Agent)
+	if !ok {
+		t.Fatalf("New returned %T, want *Agent", a)
+	}
+	return ga, proj
+}
+
+func urlEncodePath(p string) string {
+	// grok stores sessions under the url-encoded cwd (path-escaped slashes).
+	return strings.ReplaceAll(p, "/", "%2F")
+}
+
+func TestListSessionCommandsFakeChildWaves(t *testing.T) {
+	origQuiet := acuSettleQuiet
+	acuSettleQuiet = 400 * time.Millisecond
+	defer func() { acuSettleQuiet = origQuiet }()
+
+	cli := writeFakeGrokList(t, "waves")
+	a, proj := newListTestAgent(t, cli)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmds, err := a.ListSessionCommands(ctx, "sess-fake")
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	// Pre-P6 admission is empty → D1 display subset is empty (honest state).
+	if len(cmds) != 0 {
+		t.Fatalf("pre-P6 display must be empty, got %+v", cmds)
+	}
+	// Whitelist cache holds the FULL official table (3 cmds, last wave wins).
+	got, ok := a.acu.executeWhitelist("sess-fake", proj)
+	if !ok || len(got) != 3 || got[0].Name != "compact" || got[0].Hint != "h" {
+		t.Fatalf("whitelist must hold full last wave: ok=%v len=%d first=%+v", ok, len(got), got[0])
+	}
+}
+
+func TestListSessionCommandsFakeChildEmptyTable(t *testing.T) {
+	origQuiet := acuSettleQuiet
+	acuSettleQuiet = 300 * time.Millisecond
+	defer func() { acuSettleQuiet = origQuiet }()
+
+	cli := writeFakeGrokList(t, "empty")
+	a, proj := newListTestAgent(t, cli)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmds, err := a.ListSessionCommands(ctx, "sess-fake")
+	if err != nil {
+		t.Fatalf("empty table is success, not error: %v", err)
+	}
+	if len(cmds) != 0 {
+		t.Fatalf("empty table must map to empty list, got %+v", cmds)
+	}
+	if got, ok := a.acu.executeWhitelist("sess-fake", proj); !ok || len(got) != 0 {
+		t.Fatalf("empty whitelist must be stored as a legal table: ok=%v len=%d", ok, len(got))
+	}
+}
+
+func TestListSessionCommandsFakeChildZeroWavesFails(t *testing.T) {
+	origQuiet := acuSettleQuiet
+	acuSettleQuiet = 300 * time.Millisecond
+	defer func() { acuSettleQuiet = origQuiet }()
+
+	cli := writeFakeGrokList(t, "silent")
+	a, proj := newListTestAgent(t, cli)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err := a.ListSessionCommands(ctx, "sess-fake")
+	if err == nil {
+		t.Fatal("zero ACU waves must be a real error")
+	}
+	// Failure marks the identity unavailable — no stale execution.
+	if _, ok := a.acu.executeWhitelist("sess-fake", proj); ok {
+		t.Fatal("failed pull must mark identity unavailable")
+	}
+}
+
+// Execute fail-closed until the shared turn dispatcher lands (1b).
+func TestExecuteSessionCommandFailsClosed(t *testing.T) {
+	a := &Agent{acu: newACUSideState()}
+	_, err := a.ExecuteSessionCommand(context.Background(), "s", "/hooks-list")
+	if err == nil || !strings.Contains(err.Error(), "not enabled") {
+		t.Fatalf("execute must fail closed pre-1b, got %v", err)
+	}
+}

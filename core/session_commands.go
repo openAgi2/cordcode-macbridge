@@ -38,3 +38,27 @@ type SessionCommandCatalog interface {
 	ListSessionCommands(ctx context.Context, sessionID string) ([]SessionCommand, error)
 	ExecuteSessionCommand(ctx context.Context, sessionID, line string) (SessionCommandResult, error)
 }
+
+// SessionCommandReadiness is an optional gate for backends whose command
+// surface depends on evidence gates beyond mere code presence (grok-build:
+// P6 feedback-type evidence + turn dispatcher). When an agent implements this
+// interface, session_commands is advertised only while SessionCommandsReady
+// reports true — a type assertion alone must never advertise an unproven
+// surface (grok-build 方案 §5.1: 能力不能仅靠 Go 类型断言).
+type SessionCommandReadiness interface {
+	SessionCommandsReady() bool
+}
+
+// SessionCommandsAdvertise reports whether the agent's command surface may be
+// advertised: implements the catalog AND (when it opts into the readiness
+// gate) reports ready. Backends without the readiness interface (dsh-web)
+// keep the pure type-assertion behavior.
+func SessionCommandsAdvertise(agent Agent) bool {
+	if _, ok := agent.(SessionCommandCatalog); !ok {
+		return false
+	}
+	if r, ok := agent.(SessionCommandReadiness); ok {
+		return r.SessionCommandsReady()
+	}
+	return true
+}

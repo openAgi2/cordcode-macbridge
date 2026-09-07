@@ -107,6 +107,11 @@ func (a *Agent) DeleteSession(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("grokbuild: delete session %s: backend did not confirm success", sessionID)
 	}
 
+	// Session identity destroyed → drop its command-catalog side-state (§4.1
+	// session 重建时失效; a recreated session with the same id starts clean).
+	if a.acu != nil {
+		a.acu.invalidateSession(sessionID)
+	}
 	a.signalCatalogRefresh()
 	return nil
 }

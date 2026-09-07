@@ -482,3 +482,55 @@ func grokPermissionKind(toolCallKind string) string {
 		return "grok"
 	}
 }
+
+// parseAvailableCommandsUpdate extracts an official available_commands_update
+// table from a session/update notification params. Shape (grok 1.0.13, phase0
+// samples p2/p7-14): {"sessionId":"...", "update":{"sessionUpdate":
+// "available_commands_update", "availableCommands":[{"name","description",
+// "input":{"hint"}|null}]}} — no commandId field; names may carry "bundled:" or
+// "namespace:" prefixes. Returns ok=false for every other update type. Used by
+// the ACU side-state hook on both rails (stdio session + leader subscriber) and
+// by the dedicated-child List puller (session_commands.go) — the SAME parse
+// guarantees one cache entry shape (§4.1 同一缓存入口).
+func parseAvailableCommandsUpdate(params json.RawMessage) (sessionID string, commands []core.SessionCommand, ok bool) {
+	var outer struct {
+		SessionID string `json:"sessionId"`
+		Update    struct {
+			SessionUpdate     string              `json:"sessionUpdate"`
+			AvailableCommands []availableCommandW `json:"availableCommands"`
+		} `json:"update"`
+	}
+	if err := json.Unmarshal(params, &outer); err != nil {
+		return "", nil, false
+	}
+	if outer.Update.SessionUpdate != "available_commands_update" {
+		return "", nil, false
+	}
+	cmds := make([]core.SessionCommand, 0, len(outer.Update.AvailableCommands))
+	for _, c := range outer.Update.AvailableCommands {
+		cmds = append(cmds, core.SessionCommand{
+			Name:        c.Name,
+			Description: c.Description,
+			Hint:        c.Hint(),
+		})
+	}
+	return outer.SessionID, cmds, true
+}
+
+// availableCommandW mirrors the official availableCommands element (grok 1.0.13
+// wire): input is either null or {"hint": "..."}. No commandId on this binary.
+type availableCommandW struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Input       *struct {
+		Hint string `json:"hint"`
+	} `json:"input"`
+}
+
+// Hint maps the official nested input.hint; absent input → "".
+func (c *availableCommandW) Hint() string {
+	if c.Input == nil {
+		return ""
+	}
+	return c.Input.Hint
+}

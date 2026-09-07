@@ -108,6 +108,11 @@ type LeaderSubscriber struct {
 	// fingerprint rescan owns fence/seen/publish. Set once by the constructor's
 	// caller before Run; read-only afterwards.
 	onRosterChanged func()
+	// onACU feeds available_commands_update tables observed on the leader rail
+	// into the agent-level ACU side-state (§4.1: stdout/gateway 同一缓存入口).
+	// Receives the update's own sessionId (fallback: this subscriber's session)
+	// and the parsed table. Set once by the constructor's caller before Run.
+	onACU func(sessionID string, cmds []core.SessionCommand)
 	// emitFn is the session event callback captured from Run. The answer write
 	// path uses it to emit canonical+legacy resolved at flush time — that is
 	// the authoritative close for the answering client, because the leader's
@@ -580,6 +585,14 @@ func (s *LeaderSubscriber) handleACP(payload string, pending *leaderPending, ses
 	if update, toolCallID := peekInteractionLifecycle(params); update != "" {
 		s.handleInteractionLifecycle(update, toolCallID, sessionID, onEvent)
 		return
+	}
+	if s.onACU != nil {
+		if acuSid, acuCmds, ok := parseAvailableCommandsUpdate(params); ok {
+			if acuSid == "" {
+				acuSid = sessionID
+			}
+			s.onACU(acuSid, acuCmds)
+		}
 	}
 	for _, ev := range convertSessionUpdate(params, sessionID) {
 		if onEvent != nil {

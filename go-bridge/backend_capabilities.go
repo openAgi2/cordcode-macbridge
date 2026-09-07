@@ -48,7 +48,7 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 	// 目录 + 执行（官方 commands/list + commands/execute 透传；list 强依赖
 	// agentId，属 session 域）。现仅 dsh-web 实现 SessionCommandCatalog；其他
 	// backend 不广告 → iOS 不画 / 按钮。与零消费死接口 CommandProvider 无关。
-	if _, ok := agent.(core.SessionCommandCatalog); ok {
+	if core.SessionCommandsAdvertise(agent) {
 		caps = append(caps, "session_commands")
 	}
 	// session_goal（DSH 目标横条）：官方 goals/<verb> 动词透传（pause/resume/
