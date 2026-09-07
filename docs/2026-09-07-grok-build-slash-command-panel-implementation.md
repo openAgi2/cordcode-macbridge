@@ -14,12 +14,17 @@
 | --- | --- | --- | --- | --- |
 | grok-build（上游，只读） | `/Users/jacklee/Projects/grok-build` | detached @ `72a61251` | `72a61251fcffb464bcc687aeb5a998e5a98ec0c9`（1.0.16） | 干净 |
 | **目标运行版本**（本机安装二进制） | `~/.grok/bin/grok` | — | **1.0.13（自报 `5e9a58528b76`，不在 checkout 历史中）** | — |
-| cordcode-macbridge | `/Users/jacklee/Projects/cordcode-macbridge` | `main` | `fbb4940af0c78bca5d3566ff17288d3375408e92` | 干净（本方案文档本身除外） |
+| cordcode-macbridge | `/Users/jacklee/Projects/cordcode-macbridge-plan-approval`（本方案工作树） | `plan/approval-layer` | `de17e6f782ecc1d72a29f7d4e81e6aed2405251d` | 干净 |
 | cordcode-ios | `/Users/jacklee/Projects/cordcode-ios` | `main` | `c3b1d5b0265d427ba30e0e72a371bba7063f63e5` | 干净 |
+
+来源注记：调研期 macbridge 锚点在 `a04095e`（本 worktree）读取、在
+`fbb4940`（main checkout，merge 提交）复核，所引文件零差异；`de17e6f` = 本方案
+文档入库提交，除本文档外与 `fbb4940` 无差异。iOS 锚点在 main checkout
+`c3b1d5b0` 读取；实施若改用 iOS 工作树，按下方门点规则重新登记。
 
 执行本方案前，三个门点（读源码分析前 / 首次改文件前 / 构建前）必须按
 CLAUDE.md P0 重新生成本清单；本文的锚点行号以 grok-build @ `72a61251` 与
-macbridge @ `fbb4940` 为准，换基线须逐条复核。
+macbridge @ `de17e6f` 为准，换基线须逐条复核。
 
 ### 0.1 版本漂移门（本方案特有的 P0 前置）
 
@@ -180,7 +185,7 @@ grok codec 对未知 sessionUpdate 是 fail-open（`acp_codec.go:362-369`：Debu
 grok **结构性不存在**；本方案的 codec 工作是把 `available_commands_update` /
 `current_mode_update` 从 known-drop **升级为消费**（§6.3），fail-open 默认保持。
 
-## 5. CordCode 现状与差距（macbridge `fbb4940` + iOS `c3b1d5b0`）
+## 5. CordCode 现状与差距（macbridge `de17e6f` + iOS `c3b1d5b0`）
 
 ### 5.1 Mac（`agent/grokbuild/`）
 
