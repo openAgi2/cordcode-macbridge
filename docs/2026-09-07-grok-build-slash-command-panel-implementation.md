@@ -1,729 +1,206 @@
-# Grok Build 斜杠命令面板 + 计划模式官方通道 接入方案
+# Grok Build 斜杠命令面板与计划模式接入方案
 
-> 状态：**方案 v1.4（2026-09-07，未实施；四轮评审 R1-R8/S1-S6/T1-T3/U1-U2 已全部响应，D1-D4 已裁决并入）**。v1.0 经[第一轮实施评审](2026-09-07-grok-build-slash-command-panel-implementation-review.md)不通过（6 P1 + 2 P2）修订为 v1.1；v1.1 经[第二轮评审](2026-09-07-grok-build-slash-command-panel-implementation-review-r2.md)仍不通过（4 P1 + 2 P2：S1-S6）修订为 v1.2；v1.2 经[第三轮评审](2026-09-07-grok-build-slash-command-panel-implementation-review-r3.md)仍不通过（2 P1 + 1 P2：T1-T3，第三轮并受权代行 D1-D4 裁决）修订为 v1.3；v1.3 经[第四轮评审](2026-09-07-grok-build-slash-command-panel-implementation-review-r4.md)认定 T3 关闭、T1 事务主路径成立，剩 2 项 P1（U1-U2）修订为本版，四轮响应见下方「评审响应与修订记录」。dsh 方案 §11 的十轮返工教训（尤其 §11.2 ⑤⑧⑨⑩与 §11.3 四拍纪律、§11.4 迁移检查单）仍是本方案的**前置必读**。事实基线：调研
-> [2026-09-04-slash-command-skill-cross-backend-survey.md](2026-09-04-slash-command-skill-cross-backend-survey.md)
-> §7（两轮独立评审通过）。
+> **v1.5 · 2026-09-07 · 开发执行契约，尚未实施。** 第五轮完整评审已直接回填本版；发现与证据见[第五轮报告](2026-09-07-grok-build-slash-command-panel-implementation-review-r5.md)。开发者从 §8 执行，不需要再做一轮产品裁决。Phase 0 可启动；目录、执行与 iOS 可以按各自证据门推进。**短命 mode-only 子进程的 Plan 恢复假设在 1.0.16 源码上不成立，Phase 2 开启仍取决于目标 1.0.13 的 P4/P7/P8 实证，不能以文件写成功代替。**
+>
+> 本文整体替换 v1.4，避免历史响应表与当前契约互相覆盖。R1–R8、S1–S6、T1–T3、U1–U2 的历史响应保存在 Git `7ef00c3` 的本文及[第一轮](2026-09-07-grok-build-slash-command-panel-implementation-review.md)、[第二轮](2026-09-07-grok-build-slash-command-panel-implementation-review-r2.md)、[第三轮](2026-09-07-grok-build-slash-command-panel-implementation-review-r3.md)、[第四轮](2026-09-07-grok-build-slash-command-panel-implementation-review-r4.md)报告。当前行为只按本版正文实施。
 
-> 第四轮：T3 关闭、T1 事务主路径成立；剩余 U1/U2 全部采纳（另采纳 §3 错误分类澄清），修订收敛为 **§6.2.3 统一的权威读取与失效契约**：显示值只来自同一已验证权威读函数（冷热同契约）；通知一律降级为触发且**同值不豁免读取义务**；有界窗口只限 RPC/事务等待、不构成显示收敛保证；独立复查只读、绝不自动重发 set_mode，预算耗尽即 unknown 并禁切换；冷恢复不再借 updates.jsonl CMU 历史补成功。第三轮代行的 D1-D4 裁决（§3.2）无需重议。真实 turn 与外部 TUI 协作取证（P4/P6/P4(b)/P7(e)）仍待 owner 成本报备后启动；产品裁决不等于批准实施。
+## 0. 来源、范围与开工纪律
 
-## 评审响应与修订记录
-
-### 第一轮（v1.0 → v1.1）：R1-R8 响应
-
-8 项全部吸收，无整项不采纳；两处部分采纳理由随行注明。第二轮复核认定
-R2/R3 方案层关闭，R1/R4/R5/R6/R7/R8 **响应但未闭环**——残留缺口即第二轮
-S1-S6，全部在 v1.2 处理。「已响应」不等于「已闭环」。
-
-| 评审项 | 级别 | 响应 | 落点 |
-| --- | --- | --- | --- |
-| R1 `SetMode` 接口无 sessionID/ctx/error | P1 | 新增 `SessionModeSwitcher` 接口 + handler 优先分支；第二轮指出 resident 归属与权限键路由未定义 → v1.2 §6.2.0/§6.2.4 补齐 | §5.1、§6.2.1 |
-| R2 仅放宽门控泄漏 dsh `/plan` 回退 | P1 | 六项 iOS 清单 + 三态呈现 + per-backend 白名单（第二轮认定方案层关闭） | §5.2、§7 |
-| R3 「input 与 dsh 同构」被 pager 源码否定 | P1 | 撤回官方同构结论；改标移动端规则（D4，第二轮认定可裁决） | §4.1.1、§3.2 D4 |
-| R4 CMU 作 ack / 落盘未证 | P1 | settle 改 RPC response；第二轮指出持久化屏障仍不成立 → v1.2 §6.2.2 三态 + durable 读回重写 | §4.3、§6.2.2 |
-| R5 缓存缺失放行 + 静默降级 | P1 | 双 fail-closed + 删 builtins 兜底；第二轮指出 fresh 无失效定义 → v1.2 §6.1 缓存规则补齐 | §4.4、§6.1 |
-| R6 `_meta.mode` 陈旧回写 | P1 | 删除 prompt 携带；第二轮指出冷恢复与排序未完成 → v1.2 §6.2.0/§6.2.3 重写 | §2、§6.2.3 |
-| R7 「Grok 无 /plan」/目录混淆 | P2 | 三集合表述 + 范围统一；第二轮指出反馈覆盖仍阻断 → v1.2 §7.1a 矩阵 | §4.2、§7.1a |
-| R8 探针越界 / 终态映射 | P2 | 证据矩阵 + settle 四分法；第二轮细化业务成功语义 → v1.2 §4.4/§6.1 | §0.1、§6.1 |
-
-### 第二轮（v1.1 → v1.2）：S1-S6 响应
-
-6 项全部采纳，无不采纳项。
-
-| 评审项 | 级别 | 响应 | 落点 |
-| --- | --- | --- | --- |
-| S1 CMU/短延迟不是持久化屏障；软失败留下成功假象（写盘失败后新 actor 本就是 default，不会再发 CMU 纠正 chip，观测不自然收敛） | P1 | **采纳**：删除「CMU/短延迟屏障」「软失败无污染、观测自然收敛」；settle 定义三态（RPC 已接受 / durable 已确认 / 未确认）；durable = 有界等待内权威读回（`plan_mode.json` 或 P7 证明的等价官方路径）；读回超时 = 真实 RPC error「持久化未确认」，chip 不翻、不自动重试、不伪造反向状态；P7 增关闭方式/失败判定/故障注入边界；1.0.13 无法建立可靠读回 → **Phase 2 切换能力整体阻断**；第三轮指出 CMU 仍可先于确认翻转 chip → v1.3 §6.2.2/§6.2.3 事务化 + 通知降级 | §6.2.2、§0.1 P7、§10 |
-| S2 「单写者」缺 resident 所有权与并发规则（`session.go:99` 每 child 都是 `--no-leader` 独立进程；set_mode 改收到请求的 actor；外部 TUI 是另一 actor，仅 spawn 时读文件） | P1 | **采纳**：新增 §6.2.0 resident 路由三态（idle / CordCode 活跃 turn / 外部 resident）；per-session 锁扩展覆盖 Send/Execute/SetSessionMode（活跃 turn 时切换等待，超时报错不并发）；外部 resident 场景明示「两个独立 actor、文件仅 spawn 时同步、TUI 热更新不承诺」，跨进程并发写文件 = 上游行为由 P4(b)/P7(e) 取证，未证明前不作产品承诺；「单写者」改精确表述：CordCode 自身模式声明通道收敛为一个（删 `_meta.mode`），actor/外部一致性另行保证 | §6.2.0、§6.2.3、§0.1 P4/P7、§9 #5 |
-| S3 冷恢复不存在于「既有 tailer 路径」（tailer 从 EOF 起，leader 丢 isReplay）；到达序不保证不回退 | P1 | **采纳**：冷 hydrate 改为**明确新增实现**（入口 = 会话打开/bridge 重启后首个状态请求；来源 = P8 裁决：summary.json mode / plan_mode.json 快照 / updates.jsonl 尾部有界回扫——均为新代码；失败/空 = mode 未知中性态，不伪造）；第三轮指出到达序 last-wins 与「晚到不翻回」验收矛盾 → v1.3 §6.2.3 重写为通知降级 + 权威读唯一写者。第四轮把来源链收敛为 P7/P8 设计期核定的唯一权威读、删除 updates.jsonl CMU 历史兜底（U2）→ v1.4 §6.2.3 | §6.2.3、§6.3、§0.1 P5/P8、§8 |
-| S4 两类输入走查不覆盖全目录反馈；`/context` 已是反例（shell `ok_end_turn(0,None)` 无详情；pager 是 ShowContextInfo 本地面） | P1 | **采纳**：新增 §7.1a **反馈覆盖矩阵**（语义组 → 请求 → 官方输出/副作用 → iPhone 呈现 → 验证样本），按反馈类型分组替代逐命令四拍；本地呈现面组第一期不纳入面板（D1 已裁决排除）；`ResultKind:"success"` 语义重定义 = 仅 turn 正常完成，**不代表业务成功**；正文承载的业务失败原样上屏，禁止 NLP 猜测错误；错误弹窗仅 RPC 层失败，正文错误不承诺弹窗；P6 扩无输出组 + 正文业务失败组样本 | §7.1a、§6.1、§4.4、§0.1 P6 |
-| S5 handler 优先分支只接 plan/default 与「其余五键维持现状」冲突（`PermissionModes()` 仍广告 6 键，iOS 统一走 `setPermissionMode`）；default 双语义 | P2 | **采纳**：§6.2.4 权限键路由表逐键定义；第三轮 D3 裁决定稿：仅保留 plan/default，其余四键移除、不广告、拒绝调用返回不支持（无空转兼容路径）；参数化测试锁分派/错误/广播；另补 `list_permission_modes` 当前值 per-session 读路径（r3） | §6.2.4、§3.2 D3、§8 |
-| S6 fresh 目录只有 fetchedAt 无失效定义（fresh 可以是任意旧快照） | P2 | **采纳**：§6.1 缓存规则定稿——身份键 `(backend, sessionID, cwd)`、整表替换、bridge 重启全清、cwd 换键、无 TTL；第三轮指出「面板每次打开仍可命中旧缓存」= 无界陈旧 → v1.3 §6.1 改每次打开权威拉取（T3） | §6.1、§2、§8 |
-
-两处**部分采纳沿用**（第二轮已裁定接受）：(a) 不逐命令重复四拍，以
-§7.1a 反馈类型分组矩阵替代；(b) RPC 失败沿用现有弹窗（inline 化跨 backend
-另案）——但按 S4 细化：**正文错误不是 RPC 失败**，走 transcript 原样上屏，
-不承诺弹窗。
-
-### 第三轮（v1.2 → v1.3）：T1-T3 响应 + D1-D4 裁决并入
-
-3 项技术项全部采纳，无不采纳项；第三轮代行的 D1-D4 产品裁决（§3.2）与
-六键路由定稿（§6.2.4）一并并入，正文遗留「推荐/备选/待确认」措辞清理为
-已裁决表述。
-
-| 评审项 | 级别 | 响应 | 落点 |
-| --- | --- | --- | --- |
-| T1 CMU 可先于 durable 确认翻转 chip，绕过三态门（上游 actor 更新 → persistence 与 CMU 独立入队，无先写盘后通知保证；同值去重 ≠ 确认） | P1 | **采纳**：一切通知（含自有事务窗口内的 stdout CMU）**不再直接写显示状态**——显示状态 `confirmedMode` 唯一写者 = 权威读（§6.2.3）；切换事务化（§6.2.2）：待确认期间 chip 显示 pending/当前确认值而非请求值，自有 CMU 仅作「actor 已接受」旁证并触发验证读；读回值 ≠ requested = 被外部覆盖（显示文件现值）；超时 = error 不自动重试、不伪造反向状态；四种到达顺序验收（CMU先到+读回超时 / CMU先到+成功读回 / 无CMU幂等 / 待确认期间外部相反切换）全部不得把未确认值显示为成功。第四轮修正「读回值 ≠ requested = 被外部覆盖」的过度归因与「超时后显示停留文件现值」表述（U1/§3）→ v1.4 §6.2.2/§6.2.3 | §6.2.2、§6.2.3、§6.3、§7.2、§8 |
-| T2 到达序 last-wins 不能实现「旧通知/旧 response 晚到不翻回」（无序时旧 plan 迟到必胜；同值去重不处理异值新旧；重基线只在重订阅时运行） | P1 | **采纳**（选第三轮给出的第三种机制：**通知作为权威读回的触发，而非直接写最终状态**——来源选择为实现判断）：通知一律降级为触发，验证读**串行读文件现值**——迟到旧通知读到的也是现值，结构上不可能翻回；per-session 串行处理（触发→读→比较→下发同一互斥内，发射序=读序）；订阅代际丢弃旧代际消息；response patch 只以 durable 确认值下发，迟到事务 response 无显示效应；P5 序号/身份降级为**优化用途**（同值去重节流、事务关联），机制不依赖；测试按机制真实处理路径断言，不得用恰好有序数据冒充乱序安全。第四轮删除同值跳读（U1：值相等不豁免读取义务）并新增独立复查/监听入口 → v1.4 §6.2.3 统一契约 | §6.2.3、§6.3、§0.1 P5、§8、§10 |
-| T3 面板每次打开只重新请求 bridge，无 turn/无 cwd 变化/无重启时通道 2 永不触发 = 无界陈旧（bridge 自造，非官方原子性） | P2 | **采纳**：List RPC = **每次打开实际执行通道 2 权威拉取**，成功整表替换缓存并返回新表；失败即错误，**不回退旧缓存冒充刷新成功**；「命中缓存即回」从展示路径删除；缓存职责收窄 = Execute 白名单 + turn 期新鲜度记录 + 诊断；通道 2 不可行时替代方案同样实拉，仍不可行 → List 展示阻断；无每次 execute 二次拉取；验收「首开 A → 外部变 B → 无 turn/重启/cwd 变化 → 再开必得 B 或真实错误」进 Phase 1。**第四轮复核：T3 关闭，无需 TTL 或 execute 二次拉取** | §6.1、§2、§8 |
-
-### 第四轮（v1.3 → v1.4）：U1-U2 响应
-
-U1/U2 两项 P1 与 §3 错误分类澄清全部采纳，无不采纳项；修订收敛为 §6.2.3
-统一的权威读取与失效契约（评审 §4 建议的五条最小规则逐条落稿）。D1-D4
-无需重议；T3 不再打开。
-
-| 评审项 | 级别 | 响应 | 落点 |
-| --- | --- | --- | --- |
-| U1 同值跳过验证读 + 窗口结束后无复查 → 有限落盘延迟可造成无界显示延迟（CMU(plan) 先到、窗口结束时文件仍 default、W+ε 才落盘且无新通知 → 会话空闲期间永久显示 default）；同值跳读还会丢掉迟到的修正通知；「有界收敛延迟」表述不成立 | P1 | **采纳**：删除同值跳读——通知值不是文件版本，值相等不豁免读取义务（同批触发可合并，但保证至少一次合并后权威读）；区分「最近读到的值」（内部缓存 `lastRead`）与「尚有变化未确认」（`unresolved` 标志）两个概念；新增独立于用户操作的失效/复查入口——会话目录变化监听 + unresolved 有界复查（**只读，绝不自动重发 set_mode**）；复查耗尽 → unknown + 禁切换（D2），不保持无限期陈旧确认值；删除「超时后显示停留文件现值」表述（未再读时那只是上次读取值）；读途中新到触发不清除、读后再来一轮 | §6.2.3、§6.2.2、§6.3、§7.2、§8、§10 |
-| U2 冷 hydrate 来源链末项 `updates.jsonl` 最后一条 CMU 是重放已降级通知——事件已持久化 ≠ 模式快照已持久化（两条独立队列，CMU(plan) 入 jsonl 而 PlanModeState 写盘失败时，hydrate 按回退链显示确认 plan = 重造 T1 假象）；summary.json 不能因字段存在而优先 | P1 | **采纳**：事务确认 / 通知验证 / 冷 hydrate / 重订阅共用**同一已验证权威读契约**——来源由 P7/P8 **设计期核定唯一**（初稿 plan_mode.json 直读；summary mode 仅当 P8 证明与 spawn 恢复语义一致），**运行期不是依次降级三选一**；删除 CMU 历史作为确认来源（仅诊断与触发）；读失败 → unknown 不借历史掩盖；P8 完成标准升为「与 spawn 恢复源更新语义一致的可靠当前状态」；缺失/损坏/读错误分别定义，官方明确「缺失 = default」且核验过才用，否则 unknown | §6.2.3、§0.1 P8、§4.3、§8、§11 |
-| §3 澄清：「读回持续 ≠ requested」≠「被外部覆盖」——仅凭值不同不能区分外部覆盖 / 自有持久化未完成 / 写盘失败 | — | **采纳**：事务 error 文案改为「持久化未确认，最后读到 X」；只有附加证据（外部 CMU/gateway 活动观测）才在诊断信息标「疑似被外部覆盖」；不改变三态设计、不加补偿写 | §6.2.2、§10 |
-
-## 0. 来源清单（P0）与开工门
-
-| 仓库 | 工作树 | 分支 | 提交 | 未提交状态 |
+| 仓库绝对路径 | 分支 | 完整提交 | 首次编辑前状态 | 用途 |
 | --- | --- | --- | --- | --- |
-| grok-build（上游，只读） | `/Users/jacklee/Projects/grok-build` | detached @ `72a61251` | `72a61251fcffb464bcc687aeb5a998e5a98ec0c9`（1.0.16） | 干净 |
-| **目标运行版本**（本机安装二进制） | `~/.grok/bin/grok` | — | **1.0.13（自报 `5e9a58528b76`，不在 checkout 历史中）** | — |
-| cordcode-macbridge | `/Users/jacklee/Projects/cordcode-macbridge-plan-approval`（本方案工作树） | `plan/approval-layer` | `1edde3a` + 本 v1.4 修订提交（产品源码与 `de17e6f` 零差异） | 干净（本文档与四轮评审报告除外） |
-| cordcode-ios | `/Users/jacklee/Projects/cordcode-ios` | `main` | `c3b1d5b0265d427ba30e0e72a371bba7063f63e5` | 干净 |
+| `/Users/jacklee/Projects/cordcode-macbridge-plan-approval` | `plan/approval-layer` | `7ef00c3ebe1f573fd6f6eea6247ff6ee36cfe0e2` + 本 v1.5 修订提交（产品源码与 `de17e6f` 零差异） | 干净（评审者编辑前；本文档与第五轮评审报告除外） | 本任务指定工作树；只修订方案与评审报告 |
+| `/Users/jacklee/Projects/cordcode-ios` | `main` | `c3b1d5b0265d427ba30e0e72a371bba7063f63e5` | 干净 | v1.4 明确指定的只读 iOS 评审基线 |
+| `/Users/jacklee/Projects/grok-build` | `main`（编辑前复核；此前记录为 detached，同一提交） | `72a61251fcffb464bcc687aeb5a998e5a98ec0c9` | 干净 | 1.0.16 上游只读源码 |
 
-来源注记：v1.0 调研期锚点在 `a04095e`（本 worktree）读取、`fbb4940`（main
-checkout）复核零差异。v1.1 修订轮复核了第一轮全部锚点。v1.2 修订轮复核了
-第二轮全部锚点。**v1.3 修订轮（2026-09-07）**：第三轮报告新增锚点已逐条
-复核属实——macbridge `go-bridge/handlers.go:4505`（`handleListPermissionModes`
-当前选中值读 agent 级 `GetMode()`，非 per-session）、
-`agent/grokbuild/session.go:511`（`Send` 写入请求后即返回，不等 turn 终态）。
-**v1.4 修订轮（2026-09-07）**：第四轮报告新增锚点已逐条复核属实——grok
-`acp_session_impl/session_mode.rs:44-49`（`handle_session_mode` 先改 actor 内存
-再分别入队 persistence/CMU）与 `:393-400`（`persist_plan_mode_state` 仅向
-persistence 队列 send 即返回，不等写盘——U1/U2 依据）。
-既有锚点不变：macbridge `session.go:99`、`updates_file_tailer.go:60`、
-`leader_subscriber.go:573`、`grokbuild.go:585`；grok `slash_exec.rs:60-180`、
-pager `context.rs:21`、`acp_session.rs:1365-1405`；iOS
-`ChatUIKitContainerView.swift:6193/6236`。iOS 锚点读自 main checkout，实施若换
-iOS 工作树须按门点规则重新登记。
+Mac 产品源码与 `de17e6f782ecc1d72a29f7d4e81e6aed2405251d` 无差异。预期产品 = Grok Build 命令面板、官方模式通道、既有 plan_review 审批；其他 backend 行为保持其原有契约。目标二进制沿用调研记录 `~/.grok/bin/grok` 1.0.13、自报 `5e9a58528b76`，本轮没有运行它；Phase 0 必须重新核验路径、版本与哈希。
 
-执行本方案前，三个门点（读源码分析前 / 首次改文件前 / 构建前）必须按
-CLAUDE.md P0 重新生成本清单；本文锚点行号以 grok-build @ `72a61251` 与
-macbridge @ `de17e6f` 为准，换基线须逐条复核。
+**配对说明**：本次沿用 v1.4 已指定的 Mac 功能工作树 + iOS main 只读来源组合，不把新发现的 `/Users/jacklee/Projects/cordcode-ios-plan-approval`（`plan/approval-layer-ios`）源码混入结论。产品实施前必须重新登记实际双仓配对并复核差异，不能拿本次 main 评审来源当成该功能 iOS 工作树的构建证明。读源码、首次编辑、构建/安装三个门点遵守双仓 CLAUDE.md P0；不自动合并、切分支或提交到 main。
 
-### 0.1 版本漂移门：Phase 0 证据矩阵（本方案特有的 P0 前置）
+本次仅文档评审与修订，不运行真实 turn、付费 API、UI/snapshot test 或 simulator automation，不修改产品代码、不安装、不提交、不 push。后续真实 turn 的费用、状态修改与复位范围在执行前向 owner 说明并取得确认；零模型协议取证可先行。iOS 产品代码改完后，按用户要求在配对来源门通过且连接 iPhone 时自动构建安装；自动安装不等于获准跑 UI tests。定向检查超 5 分钟异常止损。
 
-think.md 2026-09-02 条目已证明：**checkout ≠ 目标二进制**（安装版 1.0.13 的
-commit 不在 checkout 历史）。本方案锚点在 1.0.16 源码上核验；**编码开始前必须
-先在安装版 1.0.13 上活体取证**。零 API 探针（fake client：`grok agent stdio`
-+ 只发 initialize/session/load 等非 turn 方法）只能覆盖 P1/P2/P3/P5/P7/P8；
-**P4/P6 必须真实 turn**——成本与副作用逐项列出，执行前向 owner 报备。**样本
-不足的依赖项保持阻断，不得移到 §11 开放项后继续编码；本节各探针的拟定机制
-不能保证其承诺时，对应能力同样阻断（第二轮 S1 裁定）。**
+前置阅读：[跨 backend 调研 §7](2026-09-04-slash-command-skill-cross-backend-survey.md)、dsh 面板方案 §11 返工教训、双仓 CLAUDE.md。协议字段必须来自目标原始样本或已标版本的官方 fixture；内部故障注入只证明本地行为。
 
-| # | 取证项 | 前置与方法序列 | 模型调用 | 副作用与复位 | 决定什么 |
-| --- | --- | --- | --- | --- | --- |
-| P1 | initialize `_meta.availableCommands` 真实形状 | fake client → initialize | 无 | 无 | 中间解码类型（R5 后仅诊断用途） |
-| P2 | session/load 后 `available_commands_update` 全形状 | fake client → initialize → session/load | 无 | 无 | 全目录解码与展示字段 |
-| P3 | catalog 单例子进程调 `x.ai/commands/list {cwd}` | 进程级 catalog 子进程 → initialize → ext list | 无 | 无 | **List 展示主通道**（§6.1 T3：每次面板打开实拉）可行性；不可行 → 替代 = 专用子进程 handshake + session/load 捕获 ACU（同样实拉）；仍不可行 → List 展示阻断 |
-| P4 | **（真实 turn）prompt 不带 `_meta.mode` 的继承 + 已有 resident 时切换**：(a) 置 plan → 退子进程 → 新子进程 load → 发不带 mode 的 prompt，验证按 plan 行为；(b) **Mac TUI 打开同会话（外部 resident 在场）时手机切换，随后发送**，观察 TUI 行为、文件写序、gateway CMU | (a) 依赖 P7 先置 plan；(b) 需 Mac 端 TUI 配合（owner 在场） | **有**（一条 turn） | 会话内多一条 turn；可弃会话；(b) 后 TUI 自行复位 | **官方继承链承重事实 + 外部 resident 路由规则**（§6.2.0 case c）：1.0.13 上独立 `--no-leader` 子进程 set_mode 与外部 TUI actor 的文件写序、TUI 是否热更新、后续 turn 从哪个模式恢复 |
-| P5 | `current_mode_update` 三路形状 + 可比较的序号/身份元数据 + 冷重放条目 replay/live 标记 | P7 顺带捕获 stdout 路；leader 路订阅 gateway；直接读 `updates.jsonl` | 无 | 无 | §6.2.3 机制**不依赖**序号（结构安全 = 读文件现值 + 串行 + 代际 + 复查，T2/U1）；取证结果用于**优化**：把通知关联到事务、**已知过期分类**（判定迟到通知对应的转换已被后续转换覆盖 → 丢弃该触发，避免把已确认状态拖进 unknown，第四轮 U1 裁定）；replay 标记形状用于订阅层代际丢弃 |
-| P6 | **（真实 turn）反馈类型矩阵取证**：`/compact`、`/always-approve`（状态变更组）、`/dream` 或 `/flush`（无输出组）、`/hooks-add <非法路径>`（正文业务失败组）、`/context`（shell ACP 分支）；记录终态 stopReason、是否产生 AgentMessageChunk 行（HOST_TURN_META_KEY）、可透传反馈文本 | 真实会话逐条执行 | **有**（compact 压缩可能调模型） | **always-approve 测后必须切回**；compact 压缩不可逆；可弃会话 | §7.1a 矩阵各组的实际输出形状 + settle 四分法映射 + `ResultText` 是否存在；D1 准入集合终表前提（状态变更组须实际权限状态呈现证据） |
-| P7 | mode-only 子进程 set_mode 的 **ack、durable 与失败判定**：(a) response → 有界等待读回 `plan_mode.json`（或等价官方读回）→ 优雅关闭 → 新子进程 load 验证；(b) 重复 plan→plan / default→default（幂等）；(c) **关闭方式对比**（优雅 EOF 关闭 vs 强杀）下持久结果差异；(d) **写盘异常/超时场景判定**（隔离测试注入，仅验证内部行为，不作安装版协议证据）；(e) 已有外部 resident 时切换（与 P4(b) 同场） | mode-only 短命子进程若干轮 | 无（set_mode 不调模型） | `plan_mode.json` 变化；测后切回 default | **权威读机制可行性**（§6.2.2 事务读回 + §6.2.3 通知触发验证读/冷 hydrate 共用同一读路径，冷热同契约）：有界读回是否可靠、写盘延迟是否有界、优雅关闭是否 flush、失败如何呈现；同时校准**读回窗口与复查预算**（初稿：窗口 2s、复查 backoff 合计 ~15s）；不可建立 → **切换能力阻断** + **显示确认降级 unknown 中性（观测仅进诊断日志）**（U2） |
-| P8 | 冷恢复权威来源核定：`summary.json` mode 字段是否与 spawn 恢复源（`plan_mode.json`）**更新语义一致**（当前值权威性，非字段存在性，第四轮 U2 升级）；文件**缺失 / 损坏 / 读取错误**各自的官方语义（尤其「快照缺失 = default」是否官方明确规定） | 直接读会话目录文件 + spawn 恢复源码对照（`spawn.rs:625-648`） | 无 | 无 | §6.2.3 统一契约的**唯一权威来源**核定：summary 一致才可作来源，否则 plan_mode.json 直读；**updates.jsonl CMU 历史不再是确认来源**（U2，仅诊断/触发）；缺失语义未核验前缺失 → unknown，不得按返回顺序挑有值文件 |
+## 1. 已裁决产品行为
 
-任何一项活体形状与 1.0.16 源码冲突时，**以 1.0.13 活体为准**并在实现说明里记录
-漂移（dsh §11.2 ① 教训）。
-
-### 0.2 开工源码优先门
-
-1. 上游只读 checkout `72a61251`；目标二进制 1.0.13。动手改 `agent/grokbuild` /
-   `go-bridge` / iOS **之前**，至少读并在实现说明里写下符号锚点（§4 已给全，逐条
-   对号）。
-2. 官方 UI 层（pager）交互判决必须读：官方 pager 有 pager-local `/plan
-   [description]`（`plan.rs:1-31`）与 `/context`（`context.rs:1-26`，本地呈现面
-   ShowContextInfo）；TUI `/` 补全 = shell 可执行目录 ∪ pager-local 命令。交互
-   语义在 UI 源码不在 RPC schema（dsh §11.2 ⑤ 教训）。
-3. CordCode 只做 bridge 接线：官方 JSON 用中间类型解码再映射；`core.SessionCommandCatalog`
-   的 dsh 实现是**先例不是真值**。实施时把 core 与 handler 里的 dsh 专属注释
-   同步改为分 backend 契约（第一轮评审 §4 裁定，Phase 1 交付物）。
-4. 测试 fixture 必须来自 §0.1 活体样本或官方仓 fixture；手写 fake server / 故障
-   注入只验证内部行为，不能反向证明外部协议形状。
-5. 违反本门 = 本方案未执行，评审按未通过。
-
-## 1. 目标
-
-1. iPhone **Grok Build 会话**的 `＋` 菜单出现「命令」节（与 dsh 同入口形态）：
-   列出该会话官方**可执行目录**（builtins + skills + workflows，availability 已
-   被官方过滤）∩ D1 准入集合，每次打开由 Mac 权威拉取（§6.1），点选按 D4 移动端
-   规则分流执行，反馈按 §7.1a 矩阵呈现。
-2. **Plan 模式 iOS 入口接官方通道**：think.md「Grok iOS Plan 只写 agent 内存」
-   的现状终结——CordCode 侧模式写入通道收敛为官方 `session/set_mode`（经
-   `SessionModeSwitcher` 接口，§6.2）；**prompt 恒不携带 `_meta.mode`**；切换
-   以 RPC response + durable 读回双确认为准（§6.2.2）；**显示值只来自统一的
-   已验证权威读函数（§6.2.3 契约）**——事务读回、通知触发的验证读、冷 hydrate、
-   重订阅共用同一契约；通知一律降级为触发且同值不豁免，独立复查只读。Plan chip
-   只显示已确认值、复查中 pending 或未知中性态（禁切换）。外部 resident（Mac TUI）与
-   CordCode 子进程是各自独立 actor，一致性由 §6.2.0 路由规则约束——本方案
-   **不宣称**「单写者消除外部多写者竞争」，只收敛 CordCode 自身的写入通道。
-3. 已交付的 plan 审批卡（`plan_review`，leader 广播 `x.ai/exit_plan_mode`，
-   think.md §25）继续工作，本项不改审批语义。
-
-## 2. 明确不做（第一期）
-
-| 项 | 理由 |
+| 项 | 最终裁决 |
 | --- | --- |
-| **prompt 携带 `_meta.mode`** | R6：手机缓存陈旧时携带 mode 会经官方 `reconcile_plan_mode_with_prompt`（`session_mode.rs:191-216`，对传入值直接 set）覆盖外部切换。官方已有继承链（`plan_mode.json` + `spawn.rs:625-648` 恢复 + `acp_agent.rs:1113-1129` prompt 无 mode 查本进程 actor），删除该通道即收敛 CordCode 自身写入口（actor/外部一致性另由 §6.2.0 处理） |
-| **initialize `_meta.availableCommands` 作 List 兜底** | R5：builtins-only 冒充全目录是静默降级；List fail-closed（§6.1），该字段仅诊断日志 |
-| **`/context` 等本地呈现面命令的 iOS 呈现面** | S4：shell ACP 分支 `ok_end_turn(0, None)` 不返回详情（`slash_exec.rs:90`），官方详情是 pager-local `ShowContextInfo` 本地面（`context.rs:21`）——「列表全上 + prompt 执行」无法等价替代。第一期不接入本地 surface；D1 已裁决排除该组，接入另案 |
-| 键入 `/` 自动补全弹层 | owner dsh 裁决沿用：只要菜单入口 |
-| prompt-only 命令 `loop` 的 loop_fire_mode 特殊面 | `PROMPT_COMMANDS` 特例重写 blocks + displayText，产品面窄；目录展示但走通用通道，特化另案 |
-| workflow 进度投影（`workflow_projection`） | 命令进目录、可执行；workflow 专属过程投影是独立官方 surface，另案 |
-| skills 的 `kind:"chat"` 产品通道 | Grok Chat 产品 lane，CordCode 不消费 |
-| MCP elicit / `x.ai/queue/*` interjection | think.md：interjection 后置 Phase B |
-| 合成全 backend Plan 按钮 | think.md「iOS 进入计划模式」行 owner 明令禁止 |
-| 客户端自行合并/去重三条目录通道的结果 | 官方顺序（builtins-first）与 availability 过滤都是官方事实；客户端合并=自造目录（§4.1） |
-| **`permission_mode` 其余四键（D3 已裁决移除）** | `acceptEdits`/`auto`/`dontAsk`/`bypassPermissions` 从 `PermissionModes()` 移除、不广告；旧客户端发送已删键返回明确不支持、不改状态、不广播成功（§6.2.4）；各键接真另案 |
-| 目录刷新 UI（下拉重拉等） | 面板**每次打开 = Mac 权威拉取**（§6.1，T3）+ ACU turn 期刷新已覆盖官方语义；手动刷新自造 |
+| D1 目录 | 官方可执行目录 ∩ 已验证反馈类型准入集合；排除 `context` 和未接入的 pager-local surface；待样本项不展示。新命令不得只因出现在目录就自动获准 |
+| D2 Plan | 输入框 chip：confirmed(default) 灰、confirmed(plan) 橙、pending/unknown 中性且禁用；归属或技术能力未知也禁用；点击走官方模式 RPC |
+| D3 权限键 | Grok 只保留 `plan`、`default` 两种会话模式；移除 `acceptEdits/auto/dontAsk/bypassPermissions` 四键，旧调用明确拒绝；default 只退出 Plan，不代证 YOLO 权限 |
+| D4 输入 | 移动端规则：非空 hint 认领输入框 `/name `，空参回车可执行；空 hint 点选即执行。不是对官方 pager 行为的同构声明 |
 
-## 3. Owner 决策
+命令正文业务失败原样进入 transcript；RPC/终态失败沿用弹窗。无输出命令仅展示官方命令行 echo，不合成成功 toast。执行期间按命令名置灰。手写未知 `/foo` 可按普通消息发送；已经从面板认领的命令失败时绝不能转普通消息。
 
-### 3.1 已锁定（既往裁决，直接生效）
+不做：prompt `_meta.mode`、`/plan` 文本代替模式切换、直接写官方模式文件、用假 turn 激活 Plan、旧目录/内置命令运行期兜底、按正文 NLP 猜测业务错误、`ask` 模式、其他四个权限键接真、skills/workflow 深层 UI、`/context` 本地面、跨 backend 错误 inline 化。
 
-| # | 来源 | 裁决 |
-| --- | --- | --- |
-| L1 | think.md「iOS 进入计划模式」行 | 三条 Plan 入口分别接各自官方通道，**禁止合成全 backend 按钮**；Codex 入口挂起、DSH 已交付、Grok 即本方案 |
-| L2 | think.md §25 | plan 审批两键卡程度可接受；完整体验属跨 backend 通用另案，本项不动 |
-| L3 | dsh 方案 §11.1 #3（2026-09-05 owner 裁决） | 面板白名单收窄**是 dsh 专属裁决**；对 grok 不是既成事实——grok 产品白名单是本方案 D1 待裁决项，iOS 白名单机制必须 per-backend（§5.2） |
-| L4 | dsh 方案 §12 | 命令入口 = ＋ 菜单「命令」节（不是独立 `/` 按钮） |
+## 2. Phase 0：证据门与停止条件
 
-### 3.2 D1–D4 已裁决（2026-09-07，用户授权评审者代行）
+每项归档：二进制身份、请求/response/notification 原始脱敏样本、会话/cwd/actor 生命周期、结果与失败、实际副作用、复位记录。证据原文与源码推论分开。活体与 checkout 不同，以目标证据为准并记录漂移。探针是官方协议测试客户端，不是正式运行路径里的 mock。
 
-| # | 确定裁决 | 执行边界 |
-| --- | --- | --- |
-| D1 | **按反馈证据准入，不套 dsh 三条白名单。** 面板 = 当前官方目录 ∩ 已核验反馈类型的产品准入集合；保留官方顺序，排除 `context` 及需要未接入 pager-local surface 的命令。 | 正文反馈、已证实官方无输出仅 echo 的命令可纳入；状态变更命令须证明对应状态确实可在手机观察。skills/workflows/goal 等待样本条目先不显示，通过相应证据门后按此规则纳入，无需再问 owner；不能只因新版本出现在目录里就自动展示未知类型。`plan` 不作为 shell 命令补进目录。 |
-| D2 | **Grok 输入框 Plan chip**，default 灰、plan 橙，点击通过 SessionMode 通道显式设置目标值；不发送 `/plan` 或 `/plan off`。 | 未知、持久化未确认、resident 归属无法安全确定时显示中性/不可切换状态，禁止猜测当前值进行 toggle；切换待确认时禁用重复操作。不接受“旧通知可把状态翻错、等用户重开修复”作为交付标准。Phase 2 证据门失败则只保留观测，明确禁用切换；不能回到旧的内存假成功。 |
-| D3 | **只保留 `plan` / `default` 两键**；移除 `acceptEdits`、`auto`、`dontAsk`、`bypassPermissions` **四键**，不保留空转兼容路径。 | 原来共六键，保留两键应删除四键，无“第 5 键”。允许 Grok 菜单缩为两键。default 仅表示退出计划模式，**不承诺关闭 YOLO 或恢复逐工具权限询问**；Grok 文案须反映这一语义。旧客户端发送已移除键返回明确不支持，不改状态、不广播成功。其他 backend 不变。 |
-| D4 | **hint 非空统一 claim**：点选收菜单、认领 `/name ` + 官方 hint；空参回车照常提交，由官方校验；hint 为空点选执行。 | 不增加 compact 等逐命令快捷执行特判。空参可提交不等于业务必成功；usage 或正文错误原样呈现。RPC 错误沿用现有弹窗。 |
-
-以上产品裁决已完成。Phase 0 负责验证具体目录条目和协议路径，不能放宽准入规则或以假数据替代失败。真实 turn 和外部 TUI 协作取证不由本次评审自动启动。
-
-## 4. 官方不变量（上游核验 @ `72a61251`，实施必须镜像）
-
-### 4.1 命令目录：三条官方通道，各司其职
-
-| 通道 | 时机 | 内容 | 锚点 |
+| 门 | 必须证明的内容 | 模型/副作用 | 放行范围 |
 | --- | --- | --- | --- |
-| `initialize` 响应 `_meta.availableCommands` | 握手后、session 前 | **仅 builtins**（availability 过滤） | `acp_agent.rs:543` + `slash_commands.rs:837-851` |
-| `sessionUpdate.available_commands_update` | session/new 或 session/load 后 | **builtins + skills + workflows**，builtins 在前，cwd-scoped | `session_setup.rs:247`；`slash_commands.rs:445` |
-| ext 方法 `x.ai/commands/list` | pull | `{sessionId?, cwd?, kind?}` → `{commands, tools?}`，camelCase | `slash_commands.rs:852-871` |
+| P1 | initialize availableCommands 形状；仅诊断 | 无模型；启动进程仍记录运行目录和配置 | 中间解码类型 |
+| P2 | initialize → session/load 的 ACU 完整形状，空表、input.hint、skills/workflows；握手阶段不能丢目录 | 无模型；隔离测试会话 | ACU 解码与目录缓存 |
+| P3 | catalog 进程 `x.ai/commands/list {cwd}` 每次实际调用；目标 cwd、项目插件、skills、availability 与会话 ACU 的等价范围 | 无模型；插件发现可能读配置/写信任缓存，不声称零副作用 | List 主通道。与实际会话不等价则设计期改定为专用 child load 后读取会话目录；两者不可行则阻断 List。运行期不得自动互相降级 |
+| P4 | (a) idle set plan → 等持久化 → 关闭并 reap → 新 actor load → **不带 mode 的真实 prompt 按 Plan 工作**；(b) 已有 CordCode idle actor/活跃 turn、外部 TUI 打开同会话时分别验证路由、写序与后续 prompt | (a) 至少一条真实 turn；(b) 另列实际 turn 数与 owner TUI 配合；测试会话可弃 | Phase 2 的恢复与 actor 归属门；不能只看文件或旧 CMU |
+| P5 | stdout/gateway/jsonl 的 CMU 形状、身份及 replay/live 标记；缺序号也必须满足 §5.3 | 无模型，顺带 P7 收集 | 三路触发解码；序号仅优化，不拿通知声称值当待完成目标 |
+| P6 | §7 反馈类型样本、官方 user echo/正文身份、实际 prompt response stopReason、取消/错误、权限请求与 usage 更新 | compact 可调模型且压缩不可逆；always-approve 恢复**原值**；dream/flush 可能修改跨会话记忆，必须先证明隔离 GROK_HOME/配置/记忆存储；feedback 会外发，不得未经明确授权发送 | Execute 终态/反馈、逐类型 D1 准入。可先用无外发的 hooks 样例；危险副作用未隔离则不取该样本、不准入该类型 |
+| P7 | ack 与持久化分离；幂等；EOF 优雅关闭和强杀差异；**Pending/Active/ExitPending 恢复后的 effective mode**；读取成功后 child 关闭能否破坏承诺；外部 actor 写序 | set_mode 本身无模型；隔离会话状态变化；故障注入与真实协议样本分开 | 与 P4/P8 一起决定 Phase 2，文件字节正确不放行；有限样本不证明任意写盘延迟上界 |
+| P8 | 选择唯一权威读源与映射：官方 snapshot 经恢复规则后的有效模式；missing/corrupt/readError 分开；summary 必须证明等价才可选；CMU 历史永不充当确认源 | 只读样本 + 官方恢复源码；隔离异常测试 | 冷 hydrate、热验证、事务共用读取契约 |
 
-不变量：
+**决定性失败条件**：1.0.16 的 idle set plan 进入 Pending，`from_snapshot` 把 Pending 恢复为 Inactive。若 1.0.13 相同，短命 mode-only 方案停止；不得靠加长读盘等待、把 Pending 映射成 plan、补 `_meta.mode`、写文件或隐式 prompt 造成功。Phase 2 必须另有经证明的官方 actor 生命周期方案才能开通；不擅自引入常驻 actor 兼容分支。目录与执行按独立证据门继续。
 
-1. **`input`/hint 的官方语义只是 placeholder**（R3）：pager 对所有 ACP 目录命令
-   恒 `has_args: true`（`acp_command.rs:147-164`）；发送完整性按
-   `takes_args`/`args_required` 判断（`slash/mod.rs:1407-1435`），而
-   `args_required` 不在目录下发。CordCode 的 `hint.isEmpty → execute / 否则
-   claim` 是**自定的移动端规则**（D4）：grok 上 compact（hint「optional
-   context about what to preserve」，`slash_commands.rs:66-76`）、
-   always-approve（「on|off」）等 hint 非空命令一律 claim，空参回车即执行。
-   iOS `SlashCommandSelection.route` 代码零改动，依据标注为移动端规则。
-2. availability 过滤是**官方做的**。CordCode 拿到什么列什么，不得客户端再
-   过滤或合并三条通道（D1 准入交集是 owner 依 §7.1a 矩阵的产品裁决，性质
-   不同且须记录终表）。
-3. CordCode 现状：`initializeMeta` 只解 `modelState`（`acp_types.go:102-115`），
-   ACU 在 codec known-drop 清单（`acp_codec.go:326-330`）——两条通道都已在
-   收包路径上，只是没解。
+## 3. 源码事实与实施锚点
 
-### 4.2 执行 = 命令行作为 prompt 文本（与 dsh 相反的官方语义）
+Mac 路径相对 §0 Mac 仓根；iOS 路径相对该仓 `OpenCodeiOS/OpenCodeiOS/`；上游简写文件位于 `crates/codegen/xai-grok-shell/src/`，其中 `spawn.rs` 指 `session/acp_session_impl/spawn.rs`。行号只属于 §0 对应提交。
 
-grok 官方执行通道就是 `session/prompt` 发 `/cmd args` 文本；shell 侧
-`resolve_human_intent`（`slash_commands.rs:1574-1644`）**确定性**解析（非模型
-中介），四层判决：
+| 路径/符号 | 核验事实与实现含义 |
+| --- | --- |
+| 上游 `crates/codegen/xai-grok-shell/src/session/plan_mode.rs:96`、`:145`；`session/acp_session_impl/session_mode.rs:44`；`spawn.rs:625` | Pending/ExitPending 恢复成 Inactive，只有 Active 的 session_prompt_mode 为 Plan；idle set plan 的持久化不是跨 child Plan 保证 |
+| 上游 `session_mode.rs:393`、`persistence.rs:1945` | persistence 入队返回与写盘独立；CMU/response 不是 durable ack |
+| 上游 `extensions/session_admin.rs:859`、`:885`、`:906` | cwd pull 和 resident sessionId pull 是不同分支，后者要求该 catalog 进程已 load；不得把另一个进程的 sessionId 直接塞入单例就假定可用 |
+| 上游 `session/slash_commands.rs:852`、`session/acp_session_impl/slash_exec.rs:60`、`acp_session.rs:1365` | list 参数/返回、shell 执行、正文反馈；Grok 命令走 prompt；官方 pager-local plan/context 不等于 shell 可执行目录 |
+| Mac `go-bridge/handlers_session_commands.go:52` 对比 `handlers.go:2572` 起的 Send 路径 | Execute 目前只调 catalog 接口，缺会话注册、admission、subscription、relay；“复用 Send”必须实际接完整生命周期 |
+| Mac `agent/grokbuild/session.go:214`、`:511`、`:1018`、`:1073` | 握手会 drain Events；Send 写完即返回；prompt response 非 error 一律成功且丢 stopReason；cancel 通知也走成功形状 |
+| Mac `go-bridge/handlers_relay.go:2795`、`:2945`；Send 的 registry 复用分支 | Events 是消费通道，relay 结束不等于 child 必然退出；后续 Send 可复用 alive session，不能假设每 turn 自动重载磁盘 |
+| Mac `updates_file_tailer.go:60`、`leader_subscriber.go:573` | EOF tail + 丢 isReplay 无法冷 hydrate；必须新增权威读取 |
+| Mac `handlers.go:4505`、`:4532`；`agent/grokbuild/grokbuild.go:573` | 当前权限读写是 agent 级，六键含空转；需 typed session 状态与明确路由，不能只新增一个接口 |
+| iOS `Services/Backend/BackendClient.swift:132`；`Services/Bridge/CCCodeBridgeBackendClient.swift:961`、`:978`；`Services/Backend/BackendModels.swift:449` | fetchPermissionModes 无 sessionId；set 响应缺 appliesTo 会默认 newSessions，能触发另开会话；必须修全链与响应 |
+| iOS `Models/SessionProjection.swift:32`；`App/ChatInputAccessoryView.swift:1126`、`:1641` | 现有 planMode active/pending 是 dsh 切换语义，pending 会反转展示；default chip 还被隐藏，不能直接套 Grok 三态 |
+| iOS `App/ChatUIKitContainerView.swift:1680`、`:6193`、`:6583`；`App/ChatInputAccessoryView.swift:382`、`:1076` | slash List 失败退普通 Send；菜单是静态构建，预取不是每次打开；权限和执行异步需会话 fencing；compact/expanded 两种菜单入口都要接 |
+
+## 4. Mac 命令目录与执行契约
+
+### 4.1 List、缓存与准入
+
+- 每次面板打开/重试发 List，bridge 每次实际官方 pull；失败返回错误，空表就是空表，绝不返回旧表冒充刷新。
+- P3 在设计期固定一种通道。catalog 单例生命周期独立于单次请求；请求 ctx 必须约束等待启动、锁、写 RPC、等回复的全部过程。List bridge 预算 15s 内，iOS 30s；不能被 catalog 既有 60s 等待覆盖，失败必须及时释放 waiter。
+- 身份键至少 `(backend, sessionID, cwd)`，并记录 backend 实例/配置代际；cwd、binary/config 或 session 重建时失效，bridge 重启全清。每轮操作一次性捕获 cwd/model，不读可被其他会话修改的 agent 全局临时值。
+- ACU 在握手 drain 之前更新 side-state，不靠稍后消费 Events 才存目录；stdout/gateway 的 ACU 同一缓存入口、整表替换含空表。用本地请求/actor 代际隔离过时结果；无法排序的 ACU 标记待刷新，不能覆盖较新 List 成功值或污染另一 session。
+- 缓存只作 Execute 白名单和诊断，不作 List 展示返回源；无 TTL，不每次 Execute 二次拉取。失败的 List 将该身份标记不可用，不能随后拿旧成功缓存执行；下一次 Execute 先实拉，失败即拒绝。
+- Name/Description 透传；Hint 从可选 input.hint 映射，缺席为空串。执行白名单也必须取 D1 交集，不能 List 排除了 context 而 Execute 接受它。
+- 保留官方非原子边界：List 后命令被删除，执行时官方 resolver 可能当普通 prompt；不承诺目录与执行原子。但客户端自己遇到网络/目录错误不得主动降级成聊天。
+
+### 4.2 Execute 是一个完整 turn
+
+保留 `SessionCommandCatalog` 与既有两个 wire RPC；Grok 走 prompt，dsh 保持 host action。不要让通用接口抽象掩盖不同生命周期。
+
+1. 校验 sessionId、backend 身份与 line：首字符 `/`、拒绝 CR/LF、多行及空命令；按官方样本定义 token 提取，未命中 D1 白名单 fail closed；缺缓存先走 §4.1。不注入附件、mode 或合成 user echo。
+2. **在 load/spawn 之前取得 per-session operation lease**。Send、Execute、SetSessionMode 都经过同一个协调入口；不能只锁 Execute 的 wrapper。lease 覆盖 admission、registry、订阅建立、load、prompt、实际终态及该操作需完成的取消清理。等待受 ctx 约束。A/B 会话独立。
+3. 抽出 Send/Execute 共用的 turn dispatch，复用 registry/admission/session subscription/relay、权限及 ask 回答路由、投影写入。Grok catalog 实现通过该协作路径执行，不能私下创建不在 registry 的 child。dsh 不被强制改成 prompt。
+4. **Events 只有一个消费方**：现有 relay/dispatcher。Execute 等待该 dispatcher 根据当前 prompt/request ID 结算的独立 terminal future；不能两个 goroutine 分读 Events。审批请求必须在 registry 可找到对应 child，流式正文及 usage 同时正常进入投影。
+5. 在 `handleResponse` 保留真实 `result.stopReason`，并区分 JSON-RPC error；不能只改 `convertSessionUpdate`。P6 核定正常终态允许集合，`cancelled`/`error`/未知或缺失必需 stopReason 均显式失败，未知保留原值。重复终态只结算一次，replay/旧 prompt 的 Done 不结算新 turn；EOF/crash 不能挂起或成功。
+6. Execute bridge 总预算 290s，iOS 300s；取消/超时发送官方 cancel 并进行有界清理，必要时关闭并 reap CordCode 自有 child。取消不等于成功；release 前确保旧 actor 不会继续与下次操作竞争。清理超时则该 session 标 unavailable，保持失败现场与诊断，禁止并发重启造成功。
+7. `ResultKind: success` 只代表官方 turn 正常结束，业务失败正文原样呈现。ResultText 仅在 P6 证明可透传时填写，不从正文猜测。iOS 不把已在 transcript 的相同反馈再造一个气泡。
+
+必须明确 child 策略：Send 的现存 registry 可以复用 alive actor。此次协调器对每个操作记录 actor ownership；Phase 2 若依赖 spawn 恢复，须在 lease 内关闭并 reap 原有 CordCode idle actor后再 load，且在切换事务结束前按已证明的生命周期清理。进程关闭不是 `Done` 的同义词。不能关闭外部 TUI actor。
+
+## 5. 模式状态与切换契约
+
+### 5.1 typed 状态、能力与权限路由
+
+新增 session 专属状态结构（Go/协议/Swift 一致）：
 
 ```text
-HumanIntent 前缀解析 → ① PROMPT_COMMANDS(loop) 特化重写
-                    → ② builtin（name|alias 命中 + gate 允许）→ BuiltinAction
-                    → ③ skill 引用解析 → InvokeSkill 信封
-                    → ④ workflow 目录命中 → WorkflowLaunch
-                    → 都不中 → Ok(prompt_blocks)：作为普通 prompt 交给模型
-```
-
-不变量：
-
-1. **目录内命令的执行是确定性的**。grok 的防线是**只允许目录内命令走 execute
-   通道**（白名单语义），自由文本 `/` 整行仍走普通发送（落入 ④ 是官方预期）。
-2. **命令在官方投影里就是 user message**。CordCode 不合成 user 气泡——transcript
-   由官方历史/polling 自然出现命令行（P6 取证实际行形状）。
-3. **三个命令集合必须分开**（R7）：**A = shell 可执行目录**（三条通道下发，
-   prompt 文本确定性解析）；**B = pager-local 动作**（`/plan [description]` →
-   SetPlanMode/EnterPlanMode（`plan.rs:1-31`）；`/context` → ShowContextInfo
-   （`context.rs:21`）等——不在 A，当文本发落入 ④）；**C = iPhone 产品准入
-   集合**（D1 裁决，作用于 A 的展示过滤，依据 §7.1a 矩阵）。iPhone Plan 入口
-   必须转换为模式动作（§6.2）；模型/effort 走既有 catalog 通道。
-4. BUILTIN_COMMANDS 16 条（`slash_commands.rs:66`）——shell 目录没有 `plan`：
-   plan 在官方是 SessionMode + pager-local 命令。TUI `/` 补全 = A ∪ B，不与 A
-   逐一等同（§9 #1）。
-
-### 4.3 模式（SessionMode）：独立于 permission 的官方体系
-
-| 事实 | 锚点 |
-| --- | --- |
-| SessionMode 枚举 `default`/`plan`/`ask`（snake_case，未知→Default） | `xai-grok-tools/src/types/session_mode.rs` |
-| `session/set_mode` 需要 resident session handle；RPC response 在处理完后必发（与 CMU 无关的独立 ack） | `acp_agent.rs:2229-2250`、`run_loop.rs:737` |
-| **set_mode 改的是收到请求的 resident actor 的内存**；prompt 无 mode 时查询的也是**本进程 actor 内存**（`acp_agent.rs:1113-1129`），不是每次从文件同步；子进程仅在 spawn 时从持久化 tracker 恢复（`spawn.rs:625-648`） | S2 依据 |
-| **CMU 仅真实转换时 enqueue**（`enter_pending()` 幂等返回 false → 无 CMU 不 persist） | `session_mode.rs:44-113` |
-| **持久化与 CMU 是两条独立队列**：`persist_plan_mode_state()` 向 persistence 队列 send；写盘在异步 `PersistenceMsg::PlanModeState` 分支执行，**失败仅记 warning，不向上反馈**——RPC response 与 CMU 均不证明写盘完成或成功；且二者入队相互独立，**CMU 可先于写盘到达观察者**（T1 依据）；persist 仅 send 不等写盘，故落盘延迟只受异步队列调度约束、窗口外迟到落盘是常态可达路径（U1/U2 依据） | `session_mode.rs:44-49/:393-400`、`updates.rs:348`、`persistence.rs:1945`（S1/T1/U1/U2 依据） |
-| `session/prompt._meta.mode` 存在但对传入值**直接 set**（`reconcile_plan_mode_with_prompt`，`session_mode.rs:191-216`）——陈旧值覆盖外部切换。本方案不用（§2） | `session_mode.rs` |
-| PlanModeState 机持久化到会话目录 `plan_mode.json`，resume 恢复，`awaiting_plan_approval` 同样持久化 | `plan_mode.rs` |
-| `CurrentModeUpdate` 真实转换时发出；持久化进 `updates.jsonl` 并转发 gateway | `updates.rs:348`、`notification_bridge.rs:201` |
-| **命令正文反馈通道**：hooks 类命令的成功/失败文本经 `AgentMessageChunk`（带 `HOST_TURN_META_KEY` meta）进入会话 scrollback，随后 flush replay buffer，turn 仍正常 end_turn——**业务失败不改变 turn 终态** | `slash_exec.rs:90-180`、`acp_session.rs:1365-1405`（S4 依据） |
-| **无输出分支**：`ContextInfo => ok_end_turn(0, None)`；Dream 注释「Intentionally no user-visible output」；FlushMemory 有 skip 路径 | `slash_exec.rs:60-90`（S4 依据） |
-| `x.ai/exit_plan_mode` 批准 → notification_bridge 回发 CurrentModeUpdate 恢复 default | `notification_bridge.rs`（§25 已交付消费端 `leader_subscriber.go:680`） |
-
-推论（v1.3 修正后的精确表述）：模式跨进程持久（`plan_mode.json`，
-**仅 spawn 时读取**）+ prompt 无 mode 查**本进程 actor 内存**——文件是跨进程
-同步点但**不是热同步**：CordCode 每个 `--no-leader` 子进程与外部 resident
-（Mac TUI）是**各自独立的 actor**，互相不读对方的内存，也**不**在文件变化时
-热更新。因此：CordCode 可用 mode-only 子进程切换（写文件）与观测（CMU 三路），
-但**不能宣称**「改了文件即所有活跃 actor 可见」；切换的持久生效必须以 durable
-读回确认（§6.2.2），显示状态必须以权威读（文件）为唯一写者、通知只作触发
-（§6.2.3），外部 resident 在场时的行为由路由规则与 P4(b)/P7(e) 取证
-约束（§6.2.0）。
-
-### 4.4 codec：fail-open + 终态三分 + 业务语义分离
-
-grok codec 对未知 sessionUpdate 是 fail-open（`acp_codec.go:362-369`）。本方案
-的 codec 工作是把 `available_commands_update` / `current_mode_update` 从
-known-drop 升级为消费（§6.3），fail-open 默认保持。
-
-终态处理是三分的（`acp_codec.go:331-360`：error → EventError、cancelled →
-EventResult"cancelled"、其他 → EventResult）——命令 settle 映射沿用此区分，
-**cancelled 不算成功**，未知 stopReason 保留原值（§6.1）。
-
-**业务语义分离（S4）**：`end_turn` 正常 ≠ 业务操作成功——hooks 类业务失败的
-文字经 AgentMessageChunk 正文输出后 turn 照常正常结束（§4.3）。因此
-`ResultKind:"success"` 只能表示「turn 正常完成（transport/终态层面）」；
-业务成败的呈现依赖官方正文通道原样上屏，**禁止**按自然语言猜测把正文映射成
-RPC 错误（既会漏（无输出组）也会错（正文措辞多样））。
-
-## 5. CordCode 现状与差距（macbridge `de17e6f` + iOS `c3b1d5b0`）
-
-### 5.1 Mac（`agent/grokbuild/`）
-
-| 现状 | 锚点 | 差距 |
-| --- | --- | --- |
-| `SetMode(mode string)` 只写 agent 级内存，无 sessionID/ctx/error；handler `handleSetPermissionMode` 先 SetMode 后查 SessionID、失败也广播成功；`a.mode` 两会话共享 | `core/interfaces.go:897`、`handlers.go:4532`、`grokbuild.go:573-583` | 三重缺口（R1）+ S5 冲突 → §6.2.4 路由表 + D3 裁决定稿 |
-| `PermissionModes()` 返回 6 条，含 `{Key:"plan"}`；iOS 权限菜单由该 catalog 构建、统一走 `setPermissionMode` | `grokbuild.go:585`；iOS `ChatUIKitContainerView.swift:6193`/`:6236` | D3 裁决移除四键；键集与路由表（§6.2.4）对齐 |
-| `handleListPermissionModes` 的「当前选中值」读 agent 级 `GetMode()`，非 per-session | `handlers.go:4505` | r3：读路径改 per-session（§6.2.4）——否则 chip 为 plan 而菜单显示 default；未知时不选中任何键 |
-| `Send` 写入请求后即返回，不等 turn 终态 | `session.go:511` | r3：§6.2.0 case (b)「活跃 turn 持锁」的锁持有期必须到**实际 turn 终态/取消清理**，不是函数返回 |
-| **每个会话子进程都是独立 `grok agent --no-leader stdio`** | `session.go:99` | S2：mode-only 子进程与外部 resident 天然是两个 actor；路由三态（§6.2.0）必须定义 |
-| `updates_file_tailer.go` **从当前 EOF 起尾随**，不回放 EOF 前的 CMU；`leader_subscriber` 在 codec 前丢弃 isReplay 通知 | `updates_file_tailer.go:60`、`leader_subscriber.go:573` | S3：**冷模式 hydrate 是新增实现**（§6.2.3），不存在「既有 tailer 回放路径」可复用；两处现状都不能提供冷恢复 |
-| wire 层 `execute_session_command` 的 line 校验只查非空 | `handlers_session_commands.go:52` | `/` 前缀+单行校验由 grok 侧自实现（R5） |
-| `sessionPromptParams` 仅 `{sessionId, prompt}` | `acp_types.go:240-243` | **保持无 `_meta`**（§2/R6） |
-| codec 把 CMU/ACU 等归入 known-drop；`initializeMeta` 只解 `modelState` | `acp_codec.go:326-330`、`acp_types.go:102-115` | ACU/CMU 升级为捕获（§6.3）；availableCommands 仅诊断日志 |
-| plan 审批卡已交付 | `leader_subscriber.go:680` | 无差距，复用 |
-| 进程级单例 catalog 子进程现用于 session/list + 模型目录 | `catalog_session_list.go` | P3 取证后复用作 `x.ai/commands/list` 拉取（现为 List 展示主通道，§6.1） |
-| core `SessionCommandCatalog` + wire RPC 两件套已在（dsh 期） | `core/session_commands.go:10-40`、`handlers.go:1642-1644` | grokbuild 实现之；dsh 注释改分 backend 契约；零新增 RPC |
-
-### 5.2 iOS（六项清单 + 权限菜单随 D3 联动）
-
-| # | 现状 | 锚点 | 差距 |
-| --- | --- | --- | --- |
-| 1 | ＋菜单「命令」节门控硬编码 `== .deepSeekWeb` | `ChatUIKitContainerView.swift:4565-4571` | 放宽为 capability 驱动 |
-| 2 | `commandWhitelist`（compact/goal/plan）无条件过滤所有 backend | `SlashCommandRouting.swift:11` | 白名单 per-backend：仅 deepSeekWeb 套用；grok 不套 dsh 白名单——准入由 Mac 侧 D1 交集承担（§6.1） |
-| 3 | `AttachMenuPlanner` 对未加载/失败/空目录回退内置三条（含 `/plan`） | 同文件 | 回退三条仅对 deepSeekWeb；grok 三态真实呈现；绝不显示 dsh `/plan` |
-| 4 | Plan chip 刷新仅 deepSeekWeb；点击发 `/plan off` | `ChatUIKitContainerView.swift:6583`/`:6682` | chip 数据源扩 grok 模式状态（含冷 hydrate §6.2.3）；grok 点击 = `set_permission_mode` 模式通道 |
-| 5 | 通用执行失败走 `presentSlashCommandErrorAlert` 弹窗 | `ChatUIKitContainerView.swift:6670` 邻域 | 沿用（**仅 RPC 层失败**）；正文承载的业务失败走 transcript 原样上屏，不弹窗（S4 细分） |
-| 6 | `route(hint.isEmpty)` 判决 generic | `SlashCommandRouting.swift:32-38` | 代码零改动；依据改标移动端规则（D4） |
-| 7 | 权限菜单由 `PermissionModes()` catalog 构建 | `ChatUIKitContainerView.swift:6193` | D3 已裁决移除四键：grok 菜单随 catalog 自动缩为两键（无 iOS 代码改动，可见变化已裁决）；菜单「当前选中值」读路径为 Mac 侧改动（§5.1 `handlers.go:4505`） |
-
-## 6. Wire 设计
-
-### 6.1 `SessionCommandCatalog` 的 grok 实现（Mac）
-
-**List（fail-closed 权威拉取 + 职责收窄的缓存，S6 + T3）**：
-
-- **iOS 面板每次打开的 List RPC = 每次实际权威拉取**：catalog 单例子进程带会话
-  cwd 调 `x.ai/commands/list {cwd}`（P3），成功即**整表替换**缓存并返回新表
-  （含空表——官方空目录真实呈现为空态，不保留旧表）；失败 → RPC error（iOS
-  呈现错误态），**不回退旧缓存冒充刷新成功**（T3）。「命中缓存即回」从展示
-  路径删除。
-- **通道 2 不可行时的替代（P3 裁决）**：退化方案 = 专用子进程 handshake +
-  session/load 捕获 ACU（同样每次真实拉取，非缓存命中）；仍不可行 → **List
-  展示能力阻断**，不得回退缓存命中或 initialize builtins。
-- **通道 1（turn 期 ACU）继续写缓存**，但不再作为 List 展示来源；缓存职责
-  收窄为：① Execute 白名单校验的就近输入（缺失时先走一次权威拉取，仍失败 →
-  fail closed）；② turn 期新鲜度与诊断元数据（`fetchedAt`、来源 acu/list）。
-- **缓存身份与失效（S6）**：身份键 = `(backend, sessionID, cwd)`；bridge 重启
-  全清；cwd 变更换键；无 TTL——展示路径已不依赖缓存新鲜度（每次打开实拉），
-  T3 指出的「无 turn/无 cwd 变化/无重启时永命中旧缓存」的无界陈旧窗口随之
-  消除。不做每次 execute 二次拉取。
-- **D1 产品准入交集**：List 返回前与「已核验反馈类型准入集合」（§7.1a 矩阵
-  驱动）取交集——排除 `context` 及依赖未接入 pager-local surface 的命令；待
-  样本类型通过证据门后加入集合（无需再问 owner）；不能只因新版本出现在目录
-  里自动展示未知类型。准入终表与排除理由记录进实现说明。
-- 映射：`Name`/`Description` 顶层；`Hint` ← `input.hint`（缺席 → `""`）；中间
-  wire 类型解码（`input` 指针/omitempty）。skills/workflows 额外字段（P2）第一
-  阶段丢弃。
-- **非原子边界（明示）**：目录快照与执行不原子——拉取后 skill 被删/availability
-  变化，execute 白名单仍命中但官方 resolve 落 ④ 普通 prompt。这是官方行为且
-  窗口以「每次打开/每 turn」为界；不做执行时二次拉取。
-
-**Execute（官方 prompt 通道）**：
-
-- `ExecuteSessionCommand(ctx, sessionID, "/compact")` = 复用现有 per-turn
-  `session/prompt` 管道发送该行，不合成 user 气泡、不挂 `_meta.mode`、不带附件。
-- **line 校验**（grok 侧自实现）：`/` 开头、单行；未过 → RPC error。
-- **白名单（fail-closed）**：命令名必须命中该会话目录缓存；缓存缺失 → 先走
-  一次权威拉取；拉不到 → RPC error「catalog unavailable」，不直接发 prompt。
-- **settle 四分法（P6 定稿）**：stopReason = `error` → Go error；`cancelled` →
-  Go error「cancelled」（**不算成功**）；其他已知正常终态 → `ResultKind:"success"`
-  + `ResultText`（P6 证实有可透传文本则映射，否则空串）；未知 stopReason → 保留
-  原值进错误信息，fail visible。
-- **`success` 的语义边界（S4）**：`success` 仅表示 **turn 正常完成**，不代表业务
-  操作成功——hooks 类业务失败的文字经官方正文通道（AgentMessageChunk，
-  HOST_TURN_META_KEY）进入 transcript 原样上屏；无输出组（dream/flush-skip/
-  context-shell）成功后仅有命令行 echo，**诚实接受无副产物反馈**。禁止按正文
-  自然语言猜测错误（不映射 RPC error、不弹窗）；错误弹窗仅用于 RPC 层失败
-  （§5.2-5）。反馈呈现全集见 §7.1a。
-
-### 6.2 模式通道（Phase 2，v1.3 重设计）
-
-#### 6.2.0 resident 路由三态（S2——先于一切切换动作判定）
-
-CordCode 每个会话子进程都是独立 `grok agent --no-leader stdio`
-（`session.go:99`）；`session/set_mode` 修改**收到请求的 actor** 的内存，文件
-仅在 spawn 时被其他进程读取。切换请求按会话当前状态路由：
-
-| 态 | 判定 | 路由 | 效果承诺 |
-| --- | --- | --- | --- |
-| (a) idle，无外部 resident | 该会话无进行中 turn，且无外部 TUI 打开同会话（不可直接探测——按 P4(b) 证据界定可探测性） | mode-only 子进程 = **唯一活跃 actor**；set_mode 权威写文件 | durable 读回确认后可承诺「已持久生效」 |
-| (b) CordCode 活跃 turn（per-turn 子进程在跑） | per-session 锁被 Send/Execute 持有 | 切换**等待**当前 turn 结束（与 Send/Execute/SetSessionMode 共用 per-session 锁串行；**锁持有期 = turn 实际终态/取消清理，不是 `Send` 函数返回**——`session.go:511` Send 写入请求后即返回）；ctx 超时 → RPC error（不并发切换、不插队） | 不与 turn 竞争；长 turn 期间切换可能超时失败，真实上报 |
-| (c) 外部 resident（Mac TUI 打开同会话） | P4(b)/P7(e) 取证界定的探测方式（或无法探测则按未知处理；**归属未知 = 按 D2 禁止发起切换**） | mode-only 子进程与 TUI 是**两个独立 actor**：我们的 set_mode 写文件、改自己 actor；**TUI 的 actor 不热更新**（它仅 spawn 时读文件，prompt 查自身内存）；反向 TUI 切换 → 文件被写 + gateway CMU 触发验证读（§6.2.3）+ 我们下一个子进程 spawn 时恢复 | **不承诺** TUI 即时可见；跨进程对 `plan_mode.json` 的并发写序 = 上游行为，P4(b)/P7(e) 取证前该场景标「行为未证明」，Phase 2 验收不含该场景的产品承诺（§9 #5 已改写） |
-
-「单写者」的精确表述（替代 v1.1 的宽泛宣称）：**CordCode 自身的模式声明通道
-收敛为一个**（删除 prompt `_meta.mode`，写入只剩 set_mode）；外部写者（TUI、
-审批流）与多 actor 一致性**不是**由「一个 RPC 名称」自动解决的，由上表路由 +
-权威读重基线（§6.2.3）+ 观测收敛处理，且 case (c) 的文件写序证据未取得前
-保持未证明。审批动作（approve/quit）走 leader 通知链不经过 CordCode 子进程，
-可能与切换并发：durable 以文件最后写者为准，显示按 §6.2.3 权威读收敛。
-
-#### 6.2.1 core 接口与 handler 分支
-
-```go
-// SessionModeSwitcher is an optional interface for agents whose permission
-// modes are per-session state driven through the backend's official
-// channel. Implementations must fail the call on official rejection
-// (no memory-first mutation + fake success broadcast).
-type SessionModeSwitcher interface {
-    SetSessionMode(ctx context.Context, sessionID, mode string) error
-    GetSessionMode(ctx context.Context, sessionID string) (string, error)
+SessionModeState {
+  status: confirmed | pending | unknown
+  mode?: plan | default       // 仅 confirmed 必须有；其余省略
+  canSet: bool               // 技术门 + 归属 + 状态允许共同决定
+  reason?: string            // 稳定原因码；详细错误单独诊断
 }
 ```
 
-handler `handleSetPermissionMode` 优先分支（type-assert：`SessionModeSwitcher`
-→ legacy `ModeSwitcher`）：先校验 sessionID 非空、mode ∈ {plan, default}（其余
-键按 §6.2.4 返回不支持），再调用；error → RPC error 不广播。成功（= response +
-durable 读回双确认，下节）→ **以 durable 确认值（= 读回值）下发会话模式
-patch**；显示状态只经 §6.2.3 统一读循环变化。`GetSessionMode` 返回显示状态
-（confirmed 值 / pending / unknown；miss → 冷 hydrate，§6.2.3）。grokbuild 实现：per-session
-模式状态 + **per-session 互斥覆盖 Send/Execute/SetSessionMode**（§6.2.0 case b）；
-`a.mode` 不再被新路径读写。**其余四键路由见 §6.2.4**——优先分支不吞掉它们。
+通过现有 session snapshot/patch additive 字段 `sessionMode` 传递，携带既有 session 身份与有序 revision；若既有 envelope 缺少跨重连的 epoch/revision，则一并 additive 增加并测试。不要把 pending/unknown 塞进 string mode，也不要重用 dsh `planMode {active,pending}`。
 
-#### 6.2.2 切换事务、settle 三态与 durable 读回（S1 + T1 + 第四轮 U1/§3 修订）
+core 接口返回 typed 状态和 error：`GetSessionMode(ctx, sessionID)`、`SetSessionMode(ctx, sessionID, mode)`。handler 验证会话归属与输入，Grok 永不落 legacy ModeSwitcher。两键菜单的当前值来自同一状态；unknown/pending 不默认选中任何键。四个删除键、空 sessionId、未知 mode 均拒绝，不改 agent 内存、不广播成功。
 
-- **三态定义**：① RPC 已接受（response OK = 收到请求的 actor 已切换，内存真实
-  生效）；② durable 已确认（权威读读到 requested）；③ 未确认（超时/读回不符）。
-- **切换事务**：`SetSessionMode` = 路由判定（§6.2.0）→ 登记
-  `pendingSwitch{requested, deadline}`（窗口内**拒绝同会话新切换请求**，D2：
-  待确认时禁用重复操作——RPC 报 busy，不排队）→ mode-only 子进程
-  `session/set_mode` → response（= ①，actor 接受证据）→ **有界权威读回窗口**
-  （初稿 2s，P7 校准）：轮询统一权威读（§6.2.3 契约）直至读到 requested 或
-  超时。读到 requested = ② → RPC success → 以确认值下发 patch，显示
-  confirmed(requested)。
-- **自有 CMU 在窗口内到达 ≠ durable（T1 核心）**：上游 actor 更新、persistence
-  与 CMU 独立入队（§4.3，`session_mode.rs:393-400` persist 仅 send 不等写盘），
-  CMU 可先于写盘到达。自有 stdout CMU 一律经 §6.2.3 通知路径降级为**验证读
-  触发**（同值不豁免），不写显示、不提前成功；事务语境下只作「actor 已接受」
-  旁证。
-- **对外呈现与失败语义**：待确认期间 chip 显示 pending，**不显示请求值**；
-  response + 读回双过 → RPC success（chip 翻转）。读回持续 ≠ requested →
-  RPC error「持久化未确认，最后读到 X」——**仅凭值不同不能区分外部覆盖、
-  自有持久化未完成或写盘失败**（第四轮 §3 澄清），只有附加证据（外部 CMU/
-  gateway 活动观测）才在诊断信息标「疑似被外部覆盖」；不伪造反向状态、不加
-  补偿写。读回超时 → RPC error「持久化未确认」（真实未知状态，iOS 按现有
-  弹窗呈现）；**不自动重试 set_mode、不向用户宣告已持久生效**。
-- **事务结束 ≠ 状态收口（U1）**：超时/读回不符后，会话状态保持 unresolved
-  （requested 尚未确认），交 §6.2.3 **独立复查路径**接管（只读）：迟到落盘由
-  目录监听/复查发现 → confirmed(requested)；复查预算耗尽 → unknown + 禁切换。
-  事务本身不再为显示落值——v1.3「超时后显示停留文件现值」表述删除：未再读时
-  那只是上次读取值，可能已非现值。
-- **幂等无 CMU 切换**（plan→plan / default→default）：官方无转换即无 CMU
-  （§4.3）——事务**不依赖 CMU**，读回窗口照常，读到 requested 即成功。
-- **P7 门槛（S1 + T1 + U1 扩展）**：权威读不可建立（写盘延迟无界、优雅关闭不
-  flush、读回形状不可靠）→ **切换能力整体阻断**（不交付带成功假象的切换）；
-  同时**显示确认机制整体降级**：unknown 中性态 + 原始通知仅进诊断日志（D2：
-  技术门失败只保留观测，且不得从未定序通知直接显示）。P7 同时校准读回窗口与
-  复查预算（§6.2.3）。
-- **四种到达顺序验收（T1，§8 Phase 2）**：CMU 先到 + 读回超时 / CMU 先到 +
-  成功读回 / 无 CMU 幂等切换 / 待确认期间外部相反切换——**全部不得把未确认
-  值显示为已成功切换**。
-- 残差（读回通过但磁盘随后损坏/被覆盖）：接受并明示；durable 以文件最后写者
-  为准，§6.2.3 复查/重基线路径收敛。
+复用 `list_permission_modes`/`set_permission_mode`，前者添加可选 sessionId（Grok 必填，其他 backend 保留原合同）并返回 typed 状态。Grok 成功响应显式 `appliesTo: current_session`（沿用 wire 实际枚举拼写），不能让 iOS 缺字段默认 newSessions。响应只确认动作完成，不是 UI 模式值写者；状态由唯一投影路径发出。
 
-#### 6.2.3 统一权威读取与失效契约：显示值的唯一来源（S3 + T2 + 第四轮 U1/U2）
+能力不能仅靠 Go 类型断言：增加明确 readiness 查询/门控，`session_commands` 只在目录+执行门通过时广告；模式按 canSet 和有效权限项的 enabled 状态开放。旧版本/未知归属/门失败不能广告两键可执行，不复活六键。可保留禁用 chip 说明原因；不新增 RPC 名。
 
-**契约总则**（第四轮 §4 建议的五条最小规则落稿，冷热路径共用）：
+### 5.2 actor 与事务
 
-1. 所有最终显示值只来自**同一个已验证的权威读函数** `readAuthoritativeMode
-   (session)`；通知与旧 RPC 结果都不提供最终值。
-2. 通知使状态**需要重新验证**；同批触发可以合并，但**值相等不取消读取义务**
-   （通知值不是文件版本，显示缓存相等不能证明文件未变——U1）。
-3. 权威读成功后才能更新最近确认值；存在未解决变化或读失败时，UI 用
-   pending/unknown，**不把历史缓存当当前确认值**。
-4. 有界窗口只限制 RPC/事务等待时间，**不自动构成显示收敛保证**；窗口结束后
-   的文件变化由独立失效/复查路径捕获；**所有复查只读，绝不自动重发模式切换**。
-5. 冷启动与重新订阅使用同一读取契约；没有已验证权威来源就 unknown，**不使用
-   通知历史补成功**（U2）。
+- idle 且已证明无外部竞争：才可按 P4/P7 选定的官方路径切换。
+- CordCode 活跃 turn：切换等待同一 operation lease，ctx 到期报错。重复切换在登记 pendingSwitch 后立即 busy，不排队重放。
+- 外部 resident 在场或无法确定归属：**canSet=false，拒绝写入**，直到 P4(b)/P7(e) 证明支持方式并更新实施证据。没有探测能力就不能把“未发现”当作“没有”。不承诺 TUI 热更新。
+- operation lease 与状态短 mutex 分开：前者跨 I/O 生命周期，后者仅保护状态/代际与序号。CMU/读循环不等待 operation lease，避免事务等读而读等事务的死锁。
 
-**权威读函数**：
+事务总预算不超过 25s（iOS 30s），含等 lease、启动/load、set_mode、读回与清理；预算不足即真实错误。pendingSwitch 保存 requested、操作 ID、deadline。RPC response 只证明 actor 接受；之后统一权威读必须确认 **恢复后有效模式**等于 requested，且已验证的关闭/恢复承诺成立，才能成功。初始读回窗口 2s 是可失败预算，不是上游写盘延迟保证；P7 可据测量调整总预算以内的分配。
 
-- 来源由 P7/P8 **设计期核定唯一**（初稿：`plan_mode.json` 直读——spawn 恢复
-  源；`summary.json` mode 字段仅当 P8 证明与 spawn 恢复源更新语义一致才可作
-  来源）。**运行期不是依次降级的多选一**（U2），也不按返回顺序挑有值文件。
-- 返回区分 `{value}` / `missing` / `corrupt` / `readError`。`missing` 只有在
-  官方明确规定「缺失 = default」且经 P7/P8 活体核验后才按 default 处理；
-  **否则 missing/corrupt/readError 在显示层一律 unknown**，不借任何历史值
-  掩盖失败。
-- **updates.jsonl 的 CMU 历史不再是确认来源**（U2：事件已持久化 ≠ 模式快照
-  已持久化——两条独立队列，`session_mode.rs:393-400` / `persistence.rs:1945`）；
-  CMU 历史只用于诊断与触发权威读。
+Pending snapshot 不是 confirmed(plan)。任何一项失败返回错误「模式未确认」及最后有效读值（若有），不自动再发 set_mode、不补偿写。超时动作保持已结束，迟到 response 不改结果；后续只读观察即使确认新状态，也不回头把该请求改成成功。
 
-**显示状态机（per-session）**：`display ∈ {confirmed(v) | pending | unknown}`。
+### 5.3 唯一读取、失效与冷恢复
 
-- `lastRead`（最近一次权威读成功值）只是内部缓存与诊断，**只在 resolved 时
-  作为显示值**。
-- `unresolved`（尚有变化未确认）：任何通知到达、事务未收口、或读失败时置位
-  ——与「最近读到什么」是两个概念（U1 第 2 条）。
-- `confirmed(v)`：resolved 且最近一次成功权威读为 v。
-- `pending`：unresolved 且复查预算未耗尽（切换中 / 验证中 / 复查中）。
-- `unknown`：unresolved 且复查预算耗尽，或 missing/corrupt/readError（未核验
-  缺失语义）。unknown 中性态且**禁止切换**（D2）。
+权威读 `readAuthoritativeMode(session)` 在 P7/P8 固定唯一来源和官方恢复语义。返回有效值或 missing/corrupt/readError；未知状态枚举不得强转 default。missing 只有证明官方 default 语义才映射 default；否则 unknown。summary 未证明等价就不使用；updates.jsonl 最后一条 CMU 绝不充当确认来源。
 
-**触发入口（五个，全部汇入同一合并读循环）**：
+**通知只表示 dirty，不携带“必须等到”的目标值。** 非自有切换事务期间，一次成功权威读在其 generation 未被新触发超过时即可 confirmed(读值)，即使与通知声称值不同。旧 plan 通知迟到、文件有效值 default，应读后 confirmed(default)，不能等不存在的 plan 耗尽预算变 unknown。只有仍在期限内的自有 pendingSwitch 才等 requested。
 
-1. 三路 CMU（stdout / leader gateway / 文件 tailer）——一律置 unresolved +
-   触发读，不写显示；
-2. **会话目录变化监听**（目录级而非文件级——`plan_mode.json` 被原子 rename
-   替换时文件句柄监听会丢事件）：捕捉窗口结束后迟到的落盘与外部写（含无后续
-   CMU 的写入）；
-3. 会话打开 / 重订阅（= 冷 hydrate，同一契约）；
-4. 自有事务读回（§6.2.2）；
-5. **unresolved 状态的有界复查**：backoff 重试（初稿 0.5/1/2/4/8s 合计 ~15s，
-   P7 校准预算）——**只读，绝不自动重发 set_mode**。
+统一读循环：在短 mutex 下递增 dirtyGeneration/建立读取任务；锁外 I/O；回锁比较 session/订阅 epoch 与 generation；有新触发则继续一轮，不把期间新增 dirty 清掉。每 session 至多一个读取任务，发射 revision 单调；连接重建与会话切换丢旧 epoch，hydrate 不得回写覆盖更新的 live read。同值 CMU 也触发至少一次合并后读取；不依赖跨源序号。
 
-- **合并规则（U1）**：读在途中新到的触发**不清除**——读完成后若期间又有
-  触发，再执行一轮；保证至少一次合并后的权威读，读过程中产生的新变更不被
-  清掉。**无同值跳读**：`lastRead == 通知声称值` 不豁免——该轮读照做。
-- **串行化与发射序（T2 机制保留）**：per-session 单点串行处理（触发 → 读 →
-  比较 → 下发 patch 同一互斥内）；bridge → iOS 模式事件按发射序到达（同连接
-  有序），发射序 = 串行读序 → 终值 = 最新一次处理的文件现值。**迟到旧通知
-  触发的读读的也是文件现值**——若其声称值已被后续转换覆盖，复查预算耗尽后
-  按 unknown 处理（诚实）；**有 P5 身份元数据时可判「已知过期」直接丢弃该
-  触发、不降级 unknown**（P5）。订阅代际：leader 重连 / bridge 重启 / 会话
-  重开建立新代际，旧代际消息在订阅层直接丢弃（不触发读）；新代际首条前
-  重新 hydrate 重基线。
-- **response patch**：由 §6.2.1 handler 在事务 durable 确认后以确认值下发；
-  迟到的事务 response 无显示效应（显示只经统一读循环，事务已终结的 response
-  不再参与）。
+读入口：stdout/leader/jsonl CMU、**目录级监听**（覆盖原子 rename）、session 打开/重订阅/bridge 重启首读、自有事务验证，以及**有观察者时的周期重验**。默认周期 5s、单次读取最多 2s（P7 校准）；因此监听丢事件也有独立重读。切后台/取消订阅停止监视并失效，重新观察先 hydrate。watcher 失败记录 health 并触发重读；周期读取失败/超出 freshness 预算必须 unknown，不能无限期保留历史 confirmed。
 
-**冷 hydrate（S3，新增实现——不是既有 tailer 路径）**：现有
-`updates_file_tailer` 从 EOF 起尾随（`updates_file_tailer.go:60`）不回放旧
-CMU；`leader_subscriber` 在 codec 前丢弃 isReplay 通知（`leader_subscriber.go:573`）
-——两处都不能提供冷恢复。新增：
+读取在途显示 pending；真实读取失败立即 unknown，可按 0.5/1/2/4/8s 有界只读重试（总约 15.5s）。成功读取有效当前值可恢复 confirmed；失败预算耗尽保持 unknown，周期重验仍可恢复。结束了的自有事务不再拿 requested 控制显示。任何重试都不写模式。UI confirmed 含义是最近成功验证的有效模式，不承诺所有外部活 actor 热同步，也不承诺任意未来写盘成功。
 
-- **入口**：iOS 打开 grok 会话请求会话状态 / bridge 重启后该会话首个状态请求
-  时触发（一次，结果随 resolved/unresolved 状态缓存）。
-- **实现 = 直接调用 `readAuthoritativeMode`**（与事务读回、通知验证读同一
-  契约；来源由 P7/P8 设计期核定，**不是** summary→快照→CMU 历史三选一降级
-  链——U2）。
-- **失败/缺失（未核验语义）/损坏语义**：→ unknown（中性态，不伪造），不阻塞
-  会话打开。
-- **与 live 衔接**：hydrate 完成前触发的验证读先到 → 以验证读为准，hydrate
-  结果退化为初始值校验；重订阅 → 重新 hydrate 重基线。
+## 6. iOS 与协议全链改动
 
-**P5 角色（优化，机制不依赖）**：结构安全来自「读文件现值 + 串行 + 代际 +
-复查」。P5 的跨源序号/身份元数据若取得，用于：① 把通知关联到事务；② **已知
-过期分类**——判定迟到通知对应的转换已被后续转换覆盖 → 丢弃该触发、避免把
-已确认状态拖进 unknown（第四轮 U1 裁定）。P5 无果不阻断显示能力；阻断条件是
-P7/P8 权威读可行性与 P4(b)/P7(e) 外部 resident 归属。
-
-**残差（明示）**：复查预算耗尽仍未见声称值 → **unknown（诚实边界）**——
-有限的落盘延迟若超出预算即触发该边界，**不是** v1.3 所称「有界收敛延迟」
-（U1：有限落盘延迟不得造成无界显示延迟，超出预算时宁可 unknown）；下一触发/
-重开/事务重基线恢复。目录监听丢事件且无任何后续触发的极端情况：显示停留
-上次确认值至下一入口（任何下一 CMU 因无同值跳读必然重读）——窗口以「下一
-触发」为界，不留无界陈旧。U1/U2 关闭验收（§8）即压此边界。
-
-#### 6.2.4 模式键路由表（D3 已裁决）
-
-| mode 键 | 路由 | 行为 |
-| --- | --- | --- |
-| `plan` | SessionModeSwitcher | set_mode plan + durable 确认；对外只声明进入计划模式 |
-| `default` | SessionModeSwitcher | set_mode default + durable 确认；只声明退出计划模式，不改变或代证 YOLO/其他权限状态 |
-| `acceptEdits` | 不广告，拒绝旧客户端调用 | 返回不支持；无本地状态变更、无成功广播 |
-| `auto` | 不广告，拒绝旧客户端调用 | 同上 |
-| `dontAsk` | 不广告，拒绝旧客户端调用 | 同上 |
-| `bypassPermissions` | 不广告，拒绝旧客户端调用 | 同上 |
-
-原六键移除四键，仅保留 plan/default；不走 Grok legacy 空转路径。两键文案和当前选中值必须来自同一会话模式语义，不能继续用 agent 级 `GetMode()` 回答当前会话状态（`handlers.go:4505` 的 `list_permission_modes` 读路径纳入 Phase 2 改动：当前值改 per-session、取自显示状态机 §6.2.3——confirmed 值或 unknown）；iOS 菜单读取路径随之联动。未知时不选中任何键。其他 backend 保持既有行为。
-
-参数化测试锁六键 × 两类 agent 的分派、错误与广播；再测 A/B 会话切换、外部 CMU 后重新打开菜单及未知状态不默认选中。切换能力未通过技术门时，两键不得广告为可执行。
-
-### 6.3 codec 升级（Mac，Phase 1/2 各一半）
-
-| update 类型 | 现状 | 改为 |
-| --- | --- | --- |
-| `available_commands_update` | known-drop | 解码 → **整表替换** per-session 目录缓存（§6.1 规则）；不产 timeline 事件 |
-| `current_mode_update` | known-drop | 解码 SessionModeId → **触发 §6.2.3 统一读循环**（置 unresolved + 合并权威读；同值不豁免，不直接写显示状态）；确认值经既有会话状态通道下发 iOS；不产 timeline 事件 |
-| `config_option_update` | known-drop | 维持 |
-| 未知类型 | fail-open Debug | 维持 fail-open（§4.4） |
-
-外部 turn 可观测性：CMU 经 leader gateway 转发 → leader_subscriber 增
-`current_mode_update` 分支汇入同一触发处理；**注意** leader 路现状丢弃 isReplay
-通知（`leader_subscriber.go:573`）——重放条目本就不进 live 流，冷恢复由 §6.2.3
-hydrate 承担（新代码），二者分工：live 只走 gateway/stdout 新事件（且一律降级
-为统一读循环触发，同值不豁免），冷值只走同一权威读契约的 hydrate。三路汇
-per-session 串行处理 + 订阅代际丢弃（§6.2.3）。
-
-### 6.4 协议同步
-
-零新 RPC、零新 capability。`docs/protocol/` canonical pack 更新：
-`session_commands` 实现者清单加 grokbuild；grok 模式状态快照/patch 字段（若
-新增）按 optional-field 规则 additive。hello_ack capabilities 由类型断言自动
-出现。core/handler 的 dsh 专属注释改分 backend 契约（Phase 1 交付）。
-
-## 7. iOS 设计与四拍走查
-
-**改动清单**（对应 §5.2 七项）：①门控放宽（唯一代码块级改动）；②白名单
-per-backend（grok 准入由 Mac 侧 D1 交集承担）；③回退三条仅 dsh、grok 三态真实
-呈现；④chip 数据源扩 grok（含冷 hydrate 中性态与事务 pending 态）+ 点击走模式
-通道；⑤RPC 失败沿用弹窗（正文错误走 transcript 不弹窗）；⑥routing 判决保留
-改标移动端规则；⑦权限菜单随 D3 缩键（catalog 驱动，无 iOS 代码改动；当前值
-per-session 读路径是 Mac 侧改动，§5.1）。
-
-### 7.1a 反馈覆盖矩阵（S4——按反馈类型分组，替代逐命令四拍）
-
-| 语义组（代表命令） | 请求 | 官方输出/副作用（源码依据 @72a61251） | iPhone 呈现 | 验证样本 |
-| --- | --- | --- | --- | --- |
-| **正文反馈组**（hooks-add/trust/list、feedback 类） | `/name args` prompt 文本 | 成功/失败文本经 `AgentMessageChunk`（HOST_TURN_META_KEY）进 scrollback，随后正常 end_turn（`slash_exec.rs:90-180`、`acp_session.rs:1365-1405`）——**业务失败不改 turn 终态** | 文本经官方 transcript/polling 自然上屏；无需新增组件；**不弹窗**（正文错误≠RPC 失败） | P6：`/hooks-add <非法路径>`（失败文本）+ 一条成功样例 |
-| **无输出组**（dream、flush 的 skip 路径、context 的 shell ACP 分支） | 同上 | `ok_end_turn(0, None)`，无正文、无副产物事件（`slash_exec.rs:60-90`：Dream「Intentionally no user-visible output」；ContextInfo 无详情） | 仅命令行 echo（官方 user message）；**诚实接受成功无副产物反馈**，不造 loading/成功 toast | P6：`/dream`（或 /flush skip 路径） |
-| **本地呈现面组**（context 的 pager 面） | pager 内 `/context` | `Action::ShowContextInfo` 本地 UI（`context.rs:21`）——**shell ACP 执行拿不到详情** | **D1 已裁决排除**：第一期不纳入面板（列出即误导——执行后无详情）；接入 iOS 本地 surface 另案 | 无需样本（不纳入）；若未来改判需先取证该 surface |
-| **状态变更组**（always-approve on/off、compact） | 同上 | 权限状态/上下文窗口变化；可能有简短正文；compact 压缩可调模型 | 正文（若有）上屏 + 既有 usage/permission 投影承接状态变化；命令行 echo | P6：`/always-approve on`（+测后复位）、`/compact`；always-approve 进 D1 准入的前提 = 实际权限状态呈现证据成立（r3） |
-| **目录透传组**（skills、workflows、goal 等其余） | 同上 | 各自官方语义（skill 信封 / workflow 启动 / 参数命令）；输出形态以各自样本为准 | 按样本归类进上述组或标注「待样本」；未取证的命令类型不得承诺呈现形态 | P2/P6 样本 + 实施期增量取证 |
-
-D1 裁决建立在本表之上：按反馈证据准入——排除本地呈现面组；矩阵中「待样本」
-条目在通过证据门前不进 D1 终表，过门后纳入无需再问 owner。
-
-### 7.1 四拍走查：命令面板（统一规则 + 矩阵分组呈现）
-
-1. **打开输入的地方**：Grok Build 会话（有 sessionId + `session_commands`
-   capability）→ 输入框 `＋` → 「命令」节 → 官方可执行目录 ∩ D1 准入集合
-   （name + description；加载中/失败/空目录三态真实呈现，不回退 dsh 三条；
-   每次打开由 Mac 权威拉取，§6.1）。
-2. **输入**（D4 移动端规则）：hint 非空 → 认领输入框 `/name ` + 幽灵提示，空参
-   回车即执行；无 input 命令（若存在）点选即执行；自由文本误触 `/` 未命中目录
-   → 普通发送（官方 ④ 预期）。
-3. **发出去**：`execute_session_command` → Mac line 校验 → 白名单（缺失先权威
-   拉取，fail closed）→ per-turn `session/prompt` → 终态四分法 settle。
-4. **把过程展示出来**：按 §7.1a 矩阵分组呈现——正文组文本上屏；无输出组仅
-   echo；状态变更组正文 + 既有投影；执行中按命令名置灰「执行中…」；RPC 层失败
-   按现有弹窗（正文业务失败不弹窗）。
-
-### 7.2 四拍走查：Plan 切换
-
-1. **打开**：Grok 会话输入框 Plan chip（default 灰、plan 橙、**未知中性**——
-   冷 hydrate 失败时诚实呈现，不猜）。
-2. **输入**：无参数（plan↔default 两态点按）。
-3. **发出去**：`set_permission_mode {mode:"plan"|"default"}` → handler
-   SessionModeSwitcher 分支 → §6.2.0 路由（活跃 turn 等待/超时报错；待确认
-   期间重复点按报 busy）→ mode-only 子进程 `session/set_mode` → **response +
-   durable 读回双确认**（§6.2.2）；待确认期间 chip 显示「切换中」pending，
-   **不显示请求值**；任一失败 → RPC error（iOS 按现有弹窗呈现），chip 不翻转、
-   **不自动重发切换**，状态转入独立复查（pending → confirmed 或 unknown，§6.2.3）。
-4. **过程展示**：chip 只显示三种状态（§6.2.3 契约）——**confirmed**（最近权威
-   读确认值）/ **pending**（切换中·验证中·复查中）/ **unknown**（复查耗尽或
-   读失败——中性态且禁切换）；**CMU 本身不翻转 chip**（T1，同值也不豁免后续
-   验证）；外部（Mac TUI/审批流）切换经其 CMU 触发统一读循环同步；**不承诺
-   TUI 即时可见**（§6.2.0 case c）；plan 态下模型产出计划 → 已交付
-   `plan_review` 审批卡（§25）→ 批准后模式回 default（官方 CMU 触发权威读 →
-   chip 跟随）。不在本地假造状态（dsh §6.3 红线沿用）。
-
-## 8. 分期落地
-
-| Phase | 内容 | 验收 |
-| --- | --- | --- |
-| 0 证据矩阵 | §0.1 P1-P8 样本归档（脱敏）；P4/P6 真实 turn + P4(b)/P7(e) 外部 resident 场景成本与副作用先报 owner | 每项真实样本 + 漂移记录；**P7 权威读不可建立 → Phase 2 切换能力阻断 + 显示确认降级 unknown 中性**；样本不足的依赖项保持阻断 |
-| 1 Mac 目录+执行 | codec ACU 捕获、`SessionCommandCatalog` 实现（List **每次打开权威拉取** + D1 准入交集 + 缓存职责收窄 §6.1、execute 校验+白名单、settle 四分法）、capability 出现、dsh 注释改分 backend 契约 | `go test ./agent/grokbuild ./go-bridge` 定向，须含：**每次打开权威拉取**（T3：首开 A → 外部目录变 B → 无 turn/无重启/无 cwd 变化 → 再开必得 B 或真实错误；拉取失败不回退旧表）、**D1 准入交集**（context 被排除）、目录**空/失败/缺失**三态、`/` 前缀+单行校验、白名单 fail-closed、**cancelled 不算成功**、未知 stopReason 保留原值、compact claim 判决、缓存身份规则（重启全清/空表整表替换/跨 cwd 不复用）；capability 断言 dsh-web 与 grokbuild 有、三家无；fixture 用 Phase 0 样本 |
-| 2 模式通道 | `SessionModeSwitcher` + handler 优先分支 + 六键路由表（§6.2.4，D3 已裁决）、per-session 锁覆盖 Send/Execute/SetSessionMode（**锁持有期至 turn 实际终态/取消清理**）、mode-only set_mode + durable 读回事务（§6.2.2）、**统一权威读 `readAuthoritativeMode` + 会话目录监听 + unresolved 有界复查（只读）+ 显示状态机 confirmed/pending/unknown（§6.2.3）**、CMU 三路消费（降级为统一读循环触发，同值不豁免，§6.2.3）、**冷 hydrate 新增（同契约，无 CMU 历史兜底）**、`list_permission_modes` per-session 读路径、`plan` 键迁移 | 定向单测须含：**六键 × 两类 agent 参数化分派**（S5）、**跨会话隔离**、**幂等无 CMU 切换仍 settle**、**durable 读回超时 → error 不广播成功**、**T1 四顺序**（CMU 先到+读回超时 / CMU 先到+成功读回 / 无 CMU 幂等 / 待确认期间外部相反切换——均不得显示未确认值）、**T2 机制断言**（plan→default 通知逆序：合并读以文件现值落 confirmed，陈旧 plan 触发进入复查、耗尽 → unknown 或 P5 判「已知过期」丢弃；旧代际通知订阅层丢弃不触发；迟到事务 response 无显示效应；hydrate 与验证读交错以验证读为准）——测试按机制真实处理路径断言，**不得注入恰好有序的数据冒充乱序安全**、**外部切换后发送不回写**、**list_permission_modes 当前值 per-session 且未知不选中**、**U1 复查收敛**（固定验证窗口 W、官方写落在 W+ε、此后无通知不重开：监听/复查必须发现新值 → confirmed，或复查耗尽 → unknown——**不得无限期显示旧确认值**；`lastRead == 通知值` 但文件已不同 → 仍执行验证；读途中新到触发不被清除、读后再来一轮）、**U2 冷路径**（updates.jsonl 末尾为 plan 但模式快照缺失/损坏 → 不显示确认 plan（unknown）；summary 与快照不一致 → 按 P8 核定的唯一权威来源处理，不按返回顺序挑有值文件；缺失语义未核验前缺失 → unknown）、重启后静止会话冷恢复（同契约 hydrate）；真机 §9 #5-#7；plan 审批回归 |
-| 3 iOS 面板 | §7 七项清单 | 定向单测：门控、白名单 per-backend、回退仅 dsh、chip action 模式通道 + **未知中性态 + 事务 pending 态**、routing 判决注释；三态验收（List 未返回/报错/空目录）；**权限菜单缩为两键**（D3 已裁决）呈现确认；真机 §9 |
-| 4 收尾 | protocol pack、双仓 CHANGELOG、Release 覆盖安装（killall 两进程）、owner 真机 | §9 全矩阵 |
-
-按仓库纪律：Phase 1/2 不装真机不跑全量；任何定向 build/test 超 5 分钟异常止损。
-
-## 9. Owner 真机矩阵（产品语言）
-
-环境：Mac 安装版 grok 1.0.13；iPhone 连已覆盖安装的 CordCode Link；Grok Build
-会话（含至少一个带 project skills 的目录）。
-
-| # | 步骤 | 期望 |
-| --- | --- | --- |
-| 1 | 打开 Grok 会话 → `＋` | 「命令」节列官方可执行目录 ∩ D1 准入集合（builtins+skills+workflows；**不含 /context**，D1 已裁决排除）；与 Mac TUI `/` 补全清单不必逐一等同（TUI 另含 pager-local 命令）；List 未返回/报错/空目录时三态真实呈现，**不出现 dsh 的 /plan**；其他 backend 不回归 |
-| 2 | 点 compact（hint 非空） | 认领输入框 + hint 幽灵提示；空参回车即执行；命令行 echo 上屏；上下文用量随后更新 |
-| 3 | 点 hooks 类命令（如 `/hooks-add <非法路径>`） | 失败**文本经对话流上屏**（不弹窗——正文错误不是 RPC 失败）；turn 正常结束 |
-| 4 | 输入框手打 `/compact` 普通发送 / 手打 `/foo` / 手打 `/plan` | 分别：确定性执行 / 模型普通回复（官方 ④）/ 模型普通回复且**不进计划模式**（官方 fail closed——chip 必须走模式通道的原因） |
-| 5 | 点 Plan chip 进入计划模式 | chip 变橙（= response + durable 读回双确认后的真实状态；**CMU 先到不提前翻转**）；确认前显示「切换中」不显示橙色；**切换失败/复查耗尽时 chip 显示未知中性态且不可再切**（不显示旧值冒充当前值）；**重启 CordCode Link 后 chip 仍橙**（durable 真实 + 冷 hydrate 同契约生效）；**若 Mac TUI 正开着同会话：不承诺 TUI 即时可见**（两个独立 actor，TUI 重启后按文件恢复——P4(b) 取证前的诚实边界） |
-| 6 | 计划模式下发消息 | 模型按计划模式行为；消息不携带模式信号（官方从持久化继承）；外部（Mac TUI）刚切回 default 后手机立即发消息：仍是 default（无陈旧回写） |
-| 7 | 模型产出计划 → 审批卡批准 | 既有两键卡可批准；批准后 chip 回灰（官方 CMU → 触发权威读 → chip 跟随） |
-| 8 | 在 Mac TUI 切 plan / 跑 `/compact` | iPhone 无操作时 chip/命令行随后同步（leader 广播触发权威读 + polling 兜底） |
-
-真机点击须 owner；agent 只做日志/Management 核验。#4 是官方语义锚点；#5 前半
-是 durable + 冷 hydrate 锚点、后半是 §6.2.0 case c 诚实边界；#6 后半是单写者
-锚点；#8 是三路可观测锚点。
-
-## 10. 风险与回滚
-
-| 风险 | 处理 |
+| 改动面 | 开发要求 |
 | --- | --- |
-| 1.0.13 活体与 1.0.16 源码漂移 | §0.1 门：活体优先，漂移记录；样本不足保持阻断 |
-| **权威读机制不可建立**（P7：写盘延迟无界/优雅关闭不 flush/读回形状不可靠） | **Phase 2 切换能力整体阻断**（S1）+ **显示确认降级 unknown 中性，原始通知仅进诊断日志**（T1/D2/U2——冷热路径同契约）；重新设计需官方关闭路径证据 |
-| **外部 resident 并发写文件序未证明**（P4(b)/P7(e)） | case (c) 标「行为未证明」：不承诺 TUI 即时可见、验收不含该场景；归属未知 = 按 D2 禁止发起切换；取证后再定 |
-| **通知乱序/迟到**（T2/U1） | 结构性消除：通知只触发统一权威读（读文件现值）+ per-session 串行处理 + 订阅代际丢弃 + **无同值跳读**（§6.2.3）；验收按机制真实处理路径断言；残留 = 复查预算耗尽 → **unknown（诚实边界，不显示旧确认值）**，非乱序翻回，也非 v1.3 所称「有界收敛延迟」 |
-| **复查/监听可靠性**（U1） | 复查只读、绝不自动重发 set_mode；目录监听丢事件且无后续触发时，显示停留上次确认值至下一入口（任何下一 CMU 因无同值跳读必然重读）；复查预算由 P7 校准，耗尽 → unknown + 禁切换（D2） |
-| **面板每次打开权威拉取成本**（T3） | catalog 子进程无模型调用、与既有 session/list 同量级；打开面板低频；拉取失败真实报错不回退旧表 |
-| 目录快照与执行非原子 | 官方 resolve 落 ④；§6.1 明示边界 + 窗口以「每次打开/每 turn」为界；不做执行时二次拉取 |
-| mode-only 子进程成本 | 与一次空 turn 同量级；切换低频；durable 读回在同进程生命周期内完成不额外 spawn |
-| `permission_mode` 键集变化（D3 已裁决） | iOS grok 权限菜单缩为两键（可见变化已裁决）；参数化测试锁分派；旧客户端发已删键返回明确不支持、不改状态、不广播成功；菜单当前值 per-session（§6.2.4） |
-| iOS 门控放宽后其他 backend 误显示 | capability 断言三家无；白名单/回退 per-backend |
-| 命令行 user message 与 transcript polling 投影冲突 | P6 取证行形状（含 HOST_TURN_META_KEY meta 是否进历史）；映射层处理，不改投影身份公式 |
+| 面板入口 | `ChatUIKitContainerView` capability 门控扩 Grok；`ChatInputAccessoryView` compact/expanded 菜单的**每次实际打开**异步回调触发 List；不能只使用 session 首次预取。返回后刷新当前菜单；明确 loading/error+retry/empty，Grok 不回退 dsh 三条 |
+| routing | `SlashCommandRouting` 白名单 per-backend；dsh 保留原规则，Grok 用服务端准入目录；保留 hint 移动端判决 |
+| 认领与发送 | 保存 claimed command 身份和原 draft；List/Execute 失败保留输入并弹错，绝不进 normalSend；仅主动手写且未认领的未知命令走普通发送 |
+| 异步隔离 | List、Execute、模式读写都捕获 `(backend, sessionID, cwd, generation)`；A→B→A、关闭重开、重连后旧结果丢弃；只能清空属于本操作且未被用户继续修改的 draft；错误/执行中状态也按身份隔离 |
+| 权限读取 | `BackendClient` 协议、各 conformer、`CCCodeBridgeBackendClient`、解码模型、调用者全链加 sessionId；Grok 强制有会话。避免新增协议参数后只改一个实现导致编译失败 |
+| 模式写响应 | 明确解析 current_session；禁止缺失 appliesTo 的 Grok 响应触发 newSessions；删除 Grok 乐观 chip 翻转及旧 response 本地覆盖。其他 backend 既有行为保留 |
+| 状态投影 | Mac core event/state、projection reducer、snapshot/window/patch 编码 → iOS wire model、SessionProjectionMapping、SessionProjection、SessionProjectionWindow、消费 store 全链新增 sessionMode；snapshot 与 patch 的相同状态保持一致，省略字段按兼容规则处理，不能默认为 default |
+| chip | Grok default 也必须可见；confirmed/pending/unknown 按 §1 呈现；点击 setPermissionMode(sessionId)，禁用时不能执行。不要借 dsh pending 反转 active；dsh `/plan off` 仅留在 dsh |
+| protocol pack | canonical pack 更新两个 permission RPC 的 session 参数/typed state/appliesTo、snapshot/patch optional 字段与 revision、能力 readiness 语义；注释按 dsh host action / Grok prompt 分开 |
 
-回滚：grokbuild 去掉 `SessionCommandCatalog`/`SessionModeSwitcher` 实现 →
-capability 消失 / `handleSetPermissionMode` 落回 legacy 分支（恢复 D3 裁决前的
-六键空转路径）/ iOS 门控与菜单自动退回（dsh 期形态）；codec ACU/CMU 消费与
-冷 hydrate 即使回滚面板也保留（状态捕获无副作用）。
+UI 路径四拍：打开面板 → 真实 List 与三态 → 点命令认领或执行 → 实际 turn 过程及官方反馈。Plan 路径：default chip 可见 → 点按 pending → response+有效恢复证明 → confirmed(plan) → 后续无 mode prompt → 既有 plan_review 审批 → 权威读确认 default。技术门未过时后半链不得写成已支持。
 
-## 11. 与后续案的边界 + 开放项
+## 7. 反馈证据准入表
 
-边界：本项关闭 think.md「Grok iOS Plan 只写 agent 内存」与调研 §7 的 Grok 命令
-面板两个口子。不关闭：skills 深面、workflow 进度投影、`ask` 模式、permission
-其余键接真（D3 已裁决移除四键，接真另案）、MCP elicit、interjection
-（Phase B）、prompt-only `loop` 特化、`/context` 本地呈现面（另案）、错误反馈
-inline 化（跨 backend 另案）。
+| 组 | 请求/官方反馈 | iPhone 承接 | 准入证据 |
+| --- | --- | --- | --- |
+| 正文组：hooks 等 | `/name args` prompt；AgentMessageChunk 成功或失败文字，正常终态 | 原正文，不弹业务错误窗 | P6 一条无外发成功样例 + hooks-add 非法路径失败样例；echo/正文/终态身份贯通 |
+| 无输出组：dream/flush skip | 官方无正文，可能有副作用 | 只官方 echo，执行状态结束 | 隔离全局记忆后的实际样例；没隔离就不准入对应类型 |
+| 本地呈现组：context | pager ShowContextInfo；shell 分支无详情 | 第一批排除 | 不需为排除专门执行真实 turn |
+| 状态组：compact、always-approve | 压缩/权限变化，可能有简短正文 | usage/权限真实投影；不能拿 Plan default 代证权限状态 | 每种状态通道必须证明手机收到；未接通则该类型不准入 |
+| skills/workflows/goal 等 | 由官方目录与样本定义 | 按已证明反馈类型承接 | 未取证不能泛称“目录透传即完成”；新增反馈形态先补矩阵再准入 |
 
-开放项（Phase 0 取证定夺，不猜；**取证完成前对应能力保持阻断**）：
+准入表记录实际名称或明确可验证的类型判据、样本路径、排除原因、二进制版本；测试 fixture 与运行逻辑严格分离。每种新副作用独立说明，不用同一个可弃 session 宣称全局状态可复位。
 
-1. P3 catalog 单例子进程调 `x.ai/commands/list` 可行性（cwd 传递）——现为
-   **List 展示主通道**（每次打开实拉，§6.1）；不可行时替代 = 专用子进程
-   handshake + session/load 捕获 ACU（同样实拉）；仍不可行 → List 展示阻断。
-2. P4(b) 已有外部 resident 时切换 + 随后发送的写序/可见性——决定 §6.2.0
-   case (c) 的效果承诺上限。
-3. P5 三路 CMU 的可比较序号/身份 + replay 标记形状——§6.2.3 机制**不依赖**
-   （结构安全 = 读文件现值 + 串行 + 代际 + 复查）；取证结果用于事务关联与
-   **已知过期分类**（判定迟到通知的转换已被覆盖 → 丢弃触发，避免把已确认
-   状态拖进 unknown），replay 标记用于订阅层代际丢弃。
-4. P6 反馈矩阵各组样本（含无输出组、正文业务失败组）——D1 准入集合终表前提
-   （状态变更组须实际权限状态呈现证据）。
-5. P7 权威读可行性（有界等待/写盘延迟上界/优雅关闭 flush/失败判定）+ 读回
-   窗口与复查预算校准（初稿 2s / ~15s）——**不可建立则切换阻断 + 显示确认
-   降级 unknown 中性（冷热同契约）**。
-6. P8 冷恢复权威来源核定：`summary.json` mode 与 spawn 恢复源（`plan_mode.json`）
-   更新语义一致性 + 缺失/损坏/读错误的官方语义分别定义——**updates.jsonl CMU
-   历史已移出确认来源**（U2，仅诊断/触发）。
-7. D1–D4 已由用户授权评审者裁决，见 §3.2；剩余为技术证据门，不再重复请求
-   产品确认。
+## 8. 开发队列与完成证明
+
+| 顺序 | 工作单元 | 前置/停止点 | 必须交付的证明 |
+| --- | --- | --- | --- |
+| 0a | 刷新双仓配对与目标 binary 身份；零模型 P1/P2/P3/P5/P7/P8 | 对应真实形状取得前只做源码与测试结构准备 | 原始样本、漂移表、P7 Pending 恢复判定 |
+| 0b | 报明 P4/P6 费用/副作用后取得 owner 确认并取证 | 未授权不调真实 turn；P7 已否定短命路径则不浪费 P4 去证明假成功 | 每组样本、准入终表、模式可行/阻断结论 |
+| 1a | ACU side-state、权威 List、身份缓存、D1 交集 | P2/P3；List 可独立开发，能力仍不提前广告 | 真实样本解码、空/失败/缺失、每次打开刷新、并发旧值覆盖测试 |
+| 1b | 共用 turn dispatch、Events 单消费者、terminal future、取消与清理 | P6 终态样本；不依赖 Phase 2 | Go 定向测试证明流/权限/终态/lease；Grok capability 门通过才开启 |
+| 2 | typed 模式状态、读循环、权限全链、模式切换 | **P4/P7/P8 有效恢复与归属全部通过**；失败则只交付明确禁用与诊断，不称模式功能完成 | §9 模式测试 + 实际重启/后续 prompt/审批证据 |
+| 3 | iOS 面板、异步 fencing、typed projection、chip 与菜单 | 可按 1/2 分别接入，不要求模式先过门才开发目录 | 定向非 UI unit test + 定向 build；连接 iPhone 时按用户要求安装 |
+| 4 | protocol pack、双仓 CHANGELOG、交付说明 | 来源/能力/测试一致 | 记录安装来源和二进制身份；owner 真机操作矩阵待实际完成才打勾 |
+
+不再把整个 Phase 0 一概写为所有编码的阻断点；每个依赖按表放行。独立目录/执行开发不是绕过模式门。每个完成项必须给真实证据路径和结果，未执行写未执行；不要以“报告已写”替代协议、build 或产品验收。
+
+## 9. 定向验收与真机边界
+
+默认代码阅读、静态检查、定向 `go test ./agent/grokbuild ./go-bridge` 及实际受改 core 包测试；Swift 选择对应非 UI unit test 与定向 build。内部 mock/故障注入允许且与产品路径隔离；UI/snapshot/simulator 自动化须另获明确授权。
+
+| 组 | 必测关闭条件 |
+| --- | --- |
+| 目录 | 首开 A→外部变 B→无 turn/cwd/重启→再开 B 或真实错；空表替换；失败不能执行旧表；context 不可 List/Execute；握手 ACU drain 前存储；跨 session/cwd/config 隔离，迟到 ACU 不覆盖新表 |
+| 生命周期 | Send/Execute/SetMode 争同会话不并发 load；跨会话不互堵；先装订阅再 prompt；一个 Events 消费者；正文/usage/权限请求可见并可回答；终态只结算本 prompt 一次；旧/replay Done 不结算；EOF/取消/未知 stopReason 不成功；ctx 到期、清理超时不泄漏 waiter/lease 或并发 actor |
+| 模式恢复 | **Pending 文件存在+关闭后默认不算 Plan 成功**；Active/Inactive/ExitPending 按官方恢复；无 `_meta.mode`；idle actor 复用不会绕开恢复门；外部归属未知禁切 |
+| 读状态 | CMU 先到不提前成功；无 CMU 幂等可完成；自有写超时真实错；旧 plan 通知+当前 default → confirmed(default)；同值通知仍读；读中新增 generation 再读；W+ε 写入无通知由目录/周期重读发现；模拟 watcher 丢事件仍周期发现或 unknown；读取失败/快照损坏不借 CMU 历史；旧 hydrate/response/epoch 不覆盖新状态 |
+| 协议/UI model | 六键×Grok/legacy 分派；Grok 两键当前值 per-session；A/B 和 A→B→A 旧请求不串；current_session 不新建会话；snapshot/patch/window 相同结果；Grok default chip 可见，pending 不套 dsh 反转；claimed List 错不 normalSend、不误清新 draft；其他 backend 回归 |
+
+Owner 真机手工（agent 可读日志；不自动点击）：①两种输入布局每次打开目录三态；②compact claim+空参执行、正文失败原样显示；③未知手写 slash 与认领失败分离；④Plan pending→确认→重启→真实计划 prompt→plan_review 审批回 default（模式门通过才做）；⑤A/B 会话切换和权限菜单不串；⑥Mac 外部切换仅在已证明范围观察，未知归属不可写。每项记录实际结果；安装成功不代替这些产品行为证据。
+
+## 10. 风险、回滚与交付口径
+
+- 短命 mode-only 恢复不成立：明确阻断 Phase 2；没有官方方案证据不得自造兼容层。此时产品可交付目录/执行，不能宣称本方案两个目标全部完成。
+- 文件状态与热 actor 内存不等价：来源/归属不确定即 unknown/canSet=false；不宣称手机改变了外部 TUI。
+- 目录与执行非原子：保留官方 resolver 行为与实际错误，客户端不加入隐式重试或旧缓存成功路径。
+- 回滚分别关闭 Grok session_commands readiness 与模式 canSet/权限入口；旧 RPC 明确不支持。**绝不恢复六键 legacy 空转，也不退回 dsh `/plan` 内置菜单。** additive 字段可保留，旧客户端忽略；失去权威源就 unknown，不能留下可写 chip。
+- 交付报告分别列文档完成、Phase 0 取证、各功能实现、测试、安装与 owner 验收；未完成的协议门逐项标明。第五轮文档闭合不等于模式可行性已经证明。
