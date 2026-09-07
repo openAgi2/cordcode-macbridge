@@ -86,6 +86,13 @@ type Agent struct {
 	// modeSide is the typed mode-state read cache (session_mode.go): the P8
 	// authoritative read + dirty invalidation; switching is blocked (P7).
 	modeSide *modeSideState
+	// live is the live-actor registry (live_sessions.go): sessionID → the
+	// conversation grokSession, so Agent-level ExecuteSessionCommand can route
+	// a slash line through the session's own shared turn dispatcher (§4.2).
+	// nil-tolerant for tests that construct Agent literally; lazily created
+	// under liveInitMu.
+	live       *liveSessions
+	liveInitMu sync.Mutex
 
 	// liveSubs tracks per-session leader subscribers created by
 	// SubscribeSessionEvents so question replies arriving over the bridge RPC
@@ -117,6 +124,7 @@ func New(opts map[string]any) (core.Agent, error) {
 		liveSubs:       make(map[string]*LeaderSubscriber),
 		acu:            newACUSideState(),
 		modeSide:       newModeSideState(),
+		live:           newLiveSessions(),
 	}
 
 	if v, ok := opts["work_dir"].(string); ok && v != "" {

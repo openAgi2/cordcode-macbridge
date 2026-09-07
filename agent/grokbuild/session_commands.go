@@ -11,13 +11,14 @@ package grokbuild
 // 关闭并 reap（grokSession.Close 三段回收）。绝不返回缓存冒充刷新；失败返回
 // 错误并把该身份标记不可用（Execute 拒绝旧表）。
 //
-// Execute（§4.2）：Grok 命令是 prompt 语义（slash_exec 走 session/prompt），必须
-// 经共用 turn dispatcher 完整生命周期（1b 交付）。本文件先落 fail-closed 占位：
-// 未启用即明确报错，绝不降级为普通消息发送。
+// Execute（§4.2）：Grok 命令是 prompt 语义（slash_exec 走 session/prompt），
+// 必须经共用 turn dispatcher 完整生命周期（turn_dispatch.go，p1b 交付）——在
+// 会话自己的活 actor 上执行，官方反馈正文经同一 Events 轨流出。绝不降级为
+// 普通消息发送，也绝不为执行另起 child。
 //
-// readiness（§5.1）：session_commands capability 不能只靠类型断言广告；目录 +
-// 执行两门都通过（P6 准入非空 + Execute 落地）前 SessionCommandsReady()==false，
-// go-bridge 不向 iOS 画「/」按钮。
+// readiness（§5.1）：session_commands capability 不能只靠类型断言广告；p1b 后
+// 目录 + 执行两门都已通过（P6 准入非空 + 真实 dispatcher），grokCommandsReady
+// 翻真，go-bridge 开始向 iOS 画「/」按钮。
 
 import (
 	"context"
@@ -153,20 +154,123 @@ func (a *Agent) ListSessionCommands(ctx context.Context, sessionID string) ([]co
 	return applyGrokAdmission(cmds), nil
 }
 
-// ExecuteSessionCommand runs one official slash line for the session. Grok
-// commands are prompt-semantics host actions and must ride the shared turn
-// dispatcher (§4.2, delivered with 1b) — until that lands this fails closed.
-// It must NEVER degrade to sending the line as a plain user message.
+// ExecuteSessionCommand runs one official slash line for the session on the
+// session's OWN live actor via the shared turn dispatcher (§4.2): the slash
+// line is prompt semantics (`session/prompt`), the official feedback body
+// arrives as hostTurn agent_message_chunk on the same Events rail the chat
+// consumes, and the dispatcher's terminal future settles the RPC. It must
+// NEVER degrade to a plain user message send and never rides a fresh child.
+//
+// Admission (D1, ADMISSION.md): the line's command must be in the P6-verified
+// admitted set AND present in the session's cached official catalog (a real
+// List pull must have succeeded for this identity — no stale-table execute).
 func (a *Agent) ExecuteSessionCommand(ctx context.Context, sessionID, line string) (core.SessionCommandResult, error) {
-	return core.SessionCommandResult{}, errors.New("grokbuild: session command execution not enabled (turn dispatcher pending)")
+	sessionID = strings.TrimSpace(sessionID)
+	line = strings.TrimSpace(line)
+	if sessionID == "" {
+		return core.SessionCommandResult{}, errors.New("grokbuild: execute: empty session id")
+	}
+	if !strings.HasPrefix(line, "/") || strings.ContainsAny(line, "\r\n") {
+		return core.SessionCommandResult{}, errors.New("grokbuild: execute: line must be a single official slash line")
+	}
+	name := slashCommandName(line)
+	if name == "" {
+		return core.SessionCommandResult{}, errors.New("grokbuild: execute: line has no command name")
+	}
+	if _, excluded := grokExcludedCommands[name]; excluded {
+		return core.SessionCommandResult{}, fmt.Errorf("grokbuild: command %q is excluded from the panel (side effects not isolated)", name)
+	}
+	if _, admitted := grokAdmittedCommands[name]; !admitted {
+		return core.SessionCommandResult{}, fmt.Errorf("grokbuild: command %q is not admitted (no verified feedback sample)", name)
+	}
+	if a.acu == nil {
+		return core.SessionCommandResult{}, errors.New("grokbuild: execute: command catalog unavailable")
+	}
+	cwd := a.resolveSessionCwd(sessionID)
+	whitelist, ok := a.acu.executeWhitelist(sessionID, cwd)
+	if !ok {
+		return core.SessionCommandResult{}, errors.New("grokbuild: execute: no official catalog for this session (open the command list first)")
+	}
+	inCatalog := false
+	for _, c := range whitelist {
+		if c.Name == name {
+			inCatalog = true
+			break
+		}
+	}
+	if !inCatalog {
+		return core.SessionCommandResult{}, fmt.Errorf("grokbuild: command %q is not in the session's official catalog", name)
+	}
+	s, ok := a.liveSessionForCommand(sessionID)
+	if !ok {
+		return core.SessionCommandResult{}, errors.New("grokbuild: execute: no live session actor — send a message in the session first")
+	}
+	return s.executeHostCommand(ctx, line)
+}
+
+// slashCommandName extracts the command token from "/name args…" (no slash).
+func slashCommandName(line string) string {
+	fields := strings.Fields(strings.TrimPrefix(line, "/"))
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+// executeHostCommand dispatches one admitted slash line through the shared
+// turn dispatcher and waits on the terminal future (ctx-bounded). end_turn →
+// success with the collected hostTurn body as resultText (§7 正文组: 原正文，
+// 不弹业务错误窗)；cancelled/其他终态 → error。ctx 到期即尽力取消并返回
+// (取消与清理)。
+func (s *grokSession) executeHostCommand(ctx context.Context, line string) (core.SessionCommandResult, error) {
+	if !s.alive.Load() {
+		return core.SessionCommandResult{}, errors.New("grokbuild: execute: session actor not alive")
+	}
+	wait, err := s.dispatchTurn([]contentBlock{{Type: "text", Text: line}})
+	if err != nil {
+		return core.SessionCommandResult{}, err
+	}
+	select {
+	case out := <-wait:
+		if out.Err != nil {
+			return core.SessionCommandResult{}, out.Err
+		}
+		switch out.StopReason {
+		case stopReasonEndTurn:
+			return core.SessionCommandResult{
+				ResultKind: "success",
+				ResultText: strings.TrimSpace(out.HostText),
+			}, nil
+		case stopReasonCancelled:
+			cat := out.CancellationCategory
+			if cat == "" {
+				cat = "unknown"
+			}
+			return core.SessionCommandResult{}, fmt.Errorf("grokbuild: command cancelled (%s)", cat)
+		default:
+			// max_tokens / refusal / unforeseen: honest failure, no fake success.
+			return core.SessionCommandResult{}, fmt.Errorf("grokbuild: command turn ended with %q", out.StopReason)
+		}
+	case <-ctx.Done():
+		// Best-effort cancel so the leased slot frees and the turn terminal
+		// still flows through Events (mirrors cancel-then-cleanup).
+		_ = s.CancelTurn(ctx)
+		return core.SessionCommandResult{}, ctx.Err()
+	}
 }
 
 // --- readiness gate (§5.1) ---
 
-// grokCommandsReady gates both the catalog and the execute path. Catalog gate:
-// admission set non-empty (P6 evidence landed). Execute gate: the fail-closed
-// stub above replaced by the real dispatcher. Both flip together with 1b+P6.
+// grokCommandsReady gates both the catalog and the execute path. Flipped true
+// with p1b: List is a real dedicated-child pull (1a) + P6 admission is
+// non-empty (5 hooks-*) + Execute rides the real shared turn dispatcher
+// (turn_dispatch.go). The atomic stays so the gate mechanism (and its test)
+// remain honest — a future regression can still close it.
 var grokCommandsReady atomic.Bool
+
+func init() {
+	grokCommandsReady.Store(true)
+}
 
 // SessionCommandsReady implements core.SessionCommandReadiness: false →
 // go-bridge must NOT advertise session_commands for grokbuild even though the

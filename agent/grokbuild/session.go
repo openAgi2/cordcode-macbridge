@@ -78,7 +78,12 @@ type grokSession struct {
 	// pendingPermsMu: written by readLoop (emitTurnScoped), cleared by Send.
 	pendingUserEcho string
 	pendingPerms    map[string][]permissionOption
-	pendingPromptID int // session/prompt request ID for turn-end detection
+
+	// turn is the shared turn dispatcher (turn_dispatch.go): one in-flight
+	// session/prompt per actor, settle-once terminal future, hostTurn feedback
+	// collector. Send (user prompt) and ExecuteSessionCommand (slash line)
+	// both ride it (§4.2/§8 p1b).
+	turn turnDispatch
 
 	// pendingQuestions registers agent-initiated x.ai/ask_user_question
 	// reverse-requests on OUR OWN driven turns (the driver is the sole ACP
@@ -262,11 +267,21 @@ drainLoop:
 	// StartSession returns, so nothing live can be discarded by this window.
 	s.handshaking.Store(false)
 
+	// Register the conversation actor with the Agent (sessionId 贯通 for
+	// ExecuteSessionCommand). Dedicated List pull children (acuObs set) are
+	// catalog fetchers, never conversation actors.
+	if acuObs == nil && s.agent != nil {
+		s.agent.registerLiveSession(s.CurrentSessionID(), s)
+	}
+
 	// Wait for process exit in background; emit a terminal error if none yet.
 	go func() {
 		waitErr := cmd.Wait()
 		close(s.done)
 		s.alive.Store(false)
+		if s.agent != nil {
+			s.agent.unregisterLiveSession(s.CurrentSessionID(), s)
+		}
 		if waitErr != nil && !s.terminalDone.Load() {
 			s.emit(core.Event{
 				Type:    core.EventError,
@@ -565,42 +580,11 @@ func (s *grokSession) Send(prompt string, images []core.ImageAttachment, files [
 		})
 	}
 
-	id := s.idCounter.next()
-	// Register turn-end ID before write so a fast response cannot be lost (P0-2).
-	// A stale un-stamped echo from a previous turn must not leak into this one.
-	s.pendingPermsMu.Lock()
-	s.pendingPromptID = id
-	s.pendingUserEcho = ""
-	// Stale questions from a finished turn must not leak into the new one
-	// (their wire ids are already dead — upstream drops late responses).
-	staleQuestions := make([]string, 0, len(s.pendingQuestions))
-	for toolCallID := range s.pendingQuestions {
-		staleQuestions = append(staleQuestions, toolCallID)
-	}
-	s.pendingQuestions = make(map[string]*pendingAskUserQuestion)
-	s.pendingPermsMu.Unlock()
-	for _, toolCallID := range staleQuestions {
-		markQuestionConsumed(toolCallID)
-	}
-	// Reset terminal flag for the new turn.
-	s.terminalDone.Store(false)
-
-	// Emit turn_started before sending.
-	s.emit(core.Event{Type: core.EventTurnStarted})
-
-	if err := s.writeRequest(id, "session/prompt", sessionPromptParams{
-		SessionID: s.CurrentSessionID(),
-		Prompt:    content,
-	}); err != nil {
-		s.pendingPermsMu.Lock()
-		if s.pendingPromptID == id {
-			s.pendingPromptID = 0
-		}
-		s.pendingPermsMu.Unlock()
-		return err
-	}
-
-	return nil
+	// Fire-and-forget from the caller's perspective: the terminal event is
+	// emitted by whichever rail settles the dispatcher first (response /
+	// cancel notification / EOF), exactly once (§8 单次结算).
+	_, err := s.dispatchTurn(content)
+	return err
 }
 
 // CancelTurn implements core.TurnCanceler by sending ACP session/cancel.
@@ -930,6 +914,16 @@ func (s *grokSession) ResolveUserInput(ctx context.Context, interactionID, _ str
 }
 
 func (s *grokSession) Close() error {
+	// Synchronously fail any in-flight turn first: an Execute waiter must not
+	// hang on a session the bridge is evicting. Settle WITHOUT emitting — the
+	// consumer loop is going away with this session, and emit()'s blocking
+	// send on a dead consumer would stall Close (the readLoop-exit abandon
+	// that follows is a no-op — the slot is already free).
+	s.turn.settleActive(turnOutcome{Err: errTurnActorDead})
+	if s.agent != nil {
+		s.agent.unregisterLiveSession(s.CurrentSessionID(), s)
+	}
+
 	// Phase 1: close stdin, wait for graceful exit.
 	s.stdinMu.Lock()
 	if s.stdin != nil {
@@ -997,6 +991,15 @@ func (s *grokSession) readLoop() {
 		"alive", s.alive.Load())
 	// Process exited or stdout EOF.
 	s.alive.Store(false)
+	// EOF 不成功（§8）：an in-flight turn settles as an actor-death error —
+	// never silently, never as EndTurn (grok-build app.rs: unresolved turns
+	// surface as errors on shutdown).
+	s.abandonTurn()
+	// The actor is dead: drop it from the live registry so Execute routes to
+	// nothing rather than to a corpse.
+	if s.agent != nil {
+		s.agent.unregisterLiveSession(s.CurrentSessionID(), s)
+	}
 }
 
 func (s *grokSession) handleMessage(line []byte) {
@@ -1045,28 +1048,11 @@ func (s *grokSession) handleResponse(resp *jsonrpcResponse) {
 		return
 	}
 
-	// Check if this is a session/prompt response (turn end).
-	s.pendingPermsMu.Lock()
-	promptID := s.pendingPromptID
-	s.pendingPermsMu.Unlock()
-
-	if idNum == promptID && promptID != 0 {
-		// This is the session/prompt response — turn is done.
-		if resp.Error != nil {
-			// Log only the numeric code; message may contain agent payload.
-			slog.Warn("grokbuild: session/prompt returned error",
-				"error_code", resp.Error.Code)
-			s.emit(core.Event{
-				Type:  core.EventError,
-				Error: fmt.Errorf("session/prompt error %d: %s", resp.Error.Code, resp.Error.Message),
-				Done:  true,
-			})
-		} else {
-			s.emit(core.Event{
-				Type: core.EventResult,
-				Done: true,
-			})
-		}
+	// Check if this is a session/prompt response (turn end). The dispatcher
+	// arbitrates: only the live turn's id settles, exactly once; the preserved
+	// stopReason/_meta ride the terminal event (§8).
+	if out, settled := s.settlePromptResponse(resp); settled {
+		s.emitTurnTerminal(out)
 	}
 }
 
@@ -1087,6 +1073,12 @@ func (s *grokSession) handleRequest(req *agentRequest) {
 func (s *grokSession) handleNotification(notif *agentNotification) {
 	switch notif.Method {
 	case "session/update":
+		// hostTurn 反馈正文（§7 正文组）：先于事件转换收进本 turn 的 collector
+		// ——Execute 的 official settle resultText 来源。正文同时照常走
+		// agent_message_chunk 事件轨（聊天里可见），collector 只是第二读者。
+		if text, host := parseHostTurnChunk(notif.Params); host {
+			s.turn.collectHostText(text)
+		}
 		// ACU side-state (§4.1): written BEFORE any event conversion/drain
 		// semantics — handshake replay ACU must land in the cache even while
 		// emit() discards overflow events. Same parse as the leader rail and
@@ -1127,11 +1119,14 @@ func (s *grokSession) handleNotification(notif *agentNotification) {
 			}
 		}
 	case "session/cancel":
-		// Agent cancelled its own turn — emit a result.
-		s.emit(core.Event{
-			Type: core.EventResult,
-			Done: true,
-		})
+		// Agent cancelled its own turn. Settle the live slot as cancelled and
+		// emit the terminal; a later session/prompt response for the same turn
+		// is dropped by the dispatcher (settle-once). Mirrors cancel.rs: the
+		// cancel rail resolves the front's waiter — it never waits for the
+		// turn task to notice.
+		if s.turn.settleActive(turnOutcome{StopReason: stopReasonCancelled}) {
+			s.emitTurnTerminal(turnOutcome{StopReason: stopReasonCancelled})
+		}
 	default:
 		slog.Debug("grokbuild: unhandled notification", "method", notif.Method)
 	}

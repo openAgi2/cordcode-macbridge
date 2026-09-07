@@ -338,9 +338,9 @@ const (
 	EventSessionCommand      EventType = "session_command"       // dsh-web host 斜杠命令生命周期（command/run|done 按 commandId 折叠；权威 payload 在 Event.SessionCommand）
 	EventSessionPlanMode     EventType = "session_plan_mode"     // dsh-web 计划模式投影 {active, pending}（官方 plan projection view；权威 payload 在 Event.PlanMode）
 	EventSessionMode         EventType = "session_mode"          // typed 模式状态投影 {status, mode?, canSet, reason?}（Grok Build 方案 §5.1；权威 payload 在 Event.SessionMode）
-	EventSessionGoal         EventType = "session_goal"         // dsh-web 目标投影整值快照（官方 goal projection view；权威 payload 在 Event.Goal，nil = 已清除）
-	EventContextInjection    EventType = "context_injection"    // dsh-web 上下文注入行（user/message source.kind!="user"，当前仅 subagent-settled；权威 payload 在 Event.ContextInjection）
-	EventWorkflowRun         EventType = "workflow_run"         // dsh-web 并行子代理 workflow 卡整值快照（tool-workflow/* 四事件按 runId 折叠；权威 payload 在 Event.WorkflowRun）
+	EventSessionGoal         EventType = "session_goal"          // dsh-web 目标投影整值快照（官方 goal projection view；权威 payload 在 Event.Goal，nil = 已清除）
+	EventContextInjection    EventType = "context_injection"     // dsh-web 上下文注入行（user/message source.kind!="user"，当前仅 subagent-settled；权威 payload 在 Event.ContextInjection）
+	EventWorkflowRun         EventType = "workflow_run"          // dsh-web 并行子代理 workflow 卡整值快照（tool-workflow/* 四事件按 runId 折叠；权威 payload 在 Event.WorkflowRun）
 )
 
 // UserQuestion represents a structured question from AskUserQuestion.
@@ -500,7 +500,7 @@ type WorkflowRunMember struct {
 // Phase 三态身份：nil = 未分阶段（官方 phase undefined → null → key "missing"）；
 // 非 nil 空串 = 空阶段名（官方 value:0: 独立身份）；非空 = 阶段名。分组按首现顺序。
 type WorkflowRunPhase struct {
-	Phase   *string            `json:"phase"`
+	Phase   *string             `json:"phase"`
 	Members []WorkflowRunMember `json:"members"`
 }
 
@@ -529,10 +529,10 @@ type GoalBlockedReason struct {
 // objective + 动作（active→pause、paused→resume、恒有 edit/clear）。
 // Event.Goal 为 nil 表示目标已被清除（clear 墓碑）。
 type GoalEvent struct {
-	ID             string             `json:"id"`
-	Revision       int64              `json:"revision"`
-	Objective      string             `json:"objective"`
-	Phase          string             `json:"phase"` // active | paused | blocked | complete
+	ID            string             `json:"id"`
+	Revision      int64              `json:"revision"`
+	Objective     string             `json:"objective"`
+	Phase         string             `json:"phase"` // active | paused | blocked | complete
 	BlockedReason *GoalBlockedReason `json:"blockedReason,omitempty"`
 	MaxGoalRounds int                `json:"maxGoalRounds,omitempty"`
 }
@@ -596,31 +596,40 @@ type Event struct {
 	// PermissionActions is the exact UI action vocabulary supported by this
 	// pending request. Empty preserves the legacy client default; Codex Web sets
 	// approve/reject because its official wire has no persistent "always" reply.
-	PermissionActions []string       // approve | approveAlways | reject | rejectAlways | plan actions (requestChanges | quit)
+	PermissionActions []string // approve | approveAlways | reject | rejectAlways | plan actions (requestChanges | quit)
 	// PlanReview carries the plan document for permission requests whose
 	// PermissionKind == "plan_review" (plan approval layer). nil for every other
 	// permission request. It rides the existing permission_request control-plane
 	// event only — never the messages timeline, never a second projection writer.
-	PlanReview        *PlanPayload
-	TurnID            string // source-proven turn identity (Codex/Claude/OpenCode turn id; projection lifecycle)
-	ItemID            string         // source-proven item identity (assistant text/reasoning/tool part id)
+	PlanReview *PlanPayload
+	TurnID     string // source-proven turn identity (Codex/Claude/OpenCode turn id; projection lifecycle)
+	ItemID     string // source-proven item identity (assistant text/reasoning/tool part id)
 	// DurationMs mirrors the official Turn.durationMs ("Duration between turn start and
 	// completion in milliseconds, if known" — codex app-server-protocol v2/Turn.ts). 0 =
 	// unknown; sources that do not provide it leave 0 and consumers fall back to timestamps.
-	DurationMs        int64
-	Questions         []UserQuestion // populated when ToolName == "AskUserQuestion"
-	Plan              []Todo         `json:",omitempty"`
-	Done              bool
-	Error             error
-	InputTokens       int // token usage from agent result events
-	OutputTokens      int
-	ContextUsage      *ContextUsage
-	FileChanges       []FileChange
-	ToolMatches       *ToolMatches
-	StreamID          string // stable child stream identity; empty means the main stream
-	ParentStreamID    string // optional parent child-stream identity
-	RetryAttempt      int    // populated for EventRetryStatus (1-based serve retry attempt)
-	RetryNext         int64  // populated for EventRetryStatus (serve epoch-ms when the next attempt fires)
+	DurationMs int64
+	// StopReason preserves the agent's own turn terminal (grok-build
+	// session/prompt result.stopReason: end_turn/cancelled/max_tokens/refusal)
+	// on the terminal EventResult. Empty for backends without a stop reason —
+	// Done alone remains the settle signal, never the reason.
+	StopReason string
+	// CancellationCategory is the official _meta.cancellationCategory wire
+	// value (MidTurnAbort/HookDenied/PermissionRejected/PermissionCancelled)
+	// riding the same terminal event; "" when the turn was not cancelled.
+	CancellationCategory string
+	Questions            []UserQuestion // populated when ToolName == "AskUserQuestion"
+	Plan                 []Todo         `json:",omitempty"`
+	Done                 bool
+	Error                error
+	InputTokens          int // token usage from agent result events
+	OutputTokens         int
+	ContextUsage         *ContextUsage
+	FileChanges          []FileChange
+	ToolMatches          *ToolMatches
+	StreamID             string // stable child stream identity; empty means the main stream
+	ParentStreamID       string // optional parent child-stream identity
+	RetryAttempt         int    // populated for EventRetryStatus (1-based serve retry attempt)
+	RetryNext            int64  // populated for EventRetryStatus (serve epoch-ms when the next attempt fires)
 	// question 相关字段
 	QuestionID   string           // question 唯一标识 (Codex ask)
 	QuestionText string           // question prompt 文本

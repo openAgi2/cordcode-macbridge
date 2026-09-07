@@ -403,6 +403,39 @@ func TestMapAgentEventErroredResultMapsToTurnError(t *testing.T) {
 	}
 }
 
+// grok-build 终态保留（方案 §8 p1b）：terminal EventResult 携带官方
+// stopReason/_meta.cancellationCategory 时必须进入 turn_completed payload；
+// 无 stopReason 的后端 payload 保持原样（键缺省，不出现空串）。
+func TestMapAgentEventTurnCompletedPreservesStopReason(t *testing.T) {
+	name, data, done := mapAgentEvent(core.Event{
+		Type:                 core.EventResult,
+		Done:                 true,
+		StopReason:           "cancelled",
+		CancellationCategory: "MidTurnAbort",
+		TurnID:               "msg_c",
+	})
+	if name != "turn_completed" || !done {
+		t.Fatalf("event = %q/%v, want turn_completed done=true", name, done)
+	}
+	payload := data.(map[string]interface{})
+	if payload["stopReason"] != "cancelled" {
+		t.Fatalf("stopReason = %#v", payload["stopReason"])
+	}
+	if payload["cancellationCategory"] != "MidTurnAbort" {
+		t.Fatalf("cancellationCategory = %#v", payload["cancellationCategory"])
+	}
+
+	// Plain result (backends without a stop reason): no empty-string keys.
+	_, data, _ = mapAgentEvent(core.Event{Type: core.EventResult, Done: true})
+	payload = data.(map[string]interface{})
+	if _, ok := payload["stopReason"]; ok {
+		t.Fatalf("stopReason must be absent without a value: %#v", payload)
+	}
+	if _, ok := payload["cancellationCategory"]; ok {
+		t.Fatalf("cancellationCategory must be absent without a value: %#v", payload)
+	}
+}
+
 func TestMapAgentEventToolFinishedIncludesToolInput(t *testing.T) {
 	success := true
 	name, data, done := mapAgentEvent(core.Event{

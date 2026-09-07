@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-07T19:59:36",
+  "updated_at": "2026-09-07T20:46:27",
   "todos": [
     {
       "id": "p0a-pairing-binary-impl",
@@ -306,7 +306,7 @@
       "id": "p0b-regression",
       "title": "反馈类型准入终表 + 模式可行/阻断结论（P4/P7/P8 汇总）",
       "description": "反馈类型准入终表 + 模式可行/阻断结论（P4/P7/P8 汇总）",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase0b",
       "kind": "regression",
       "depends_on": [
@@ -324,6 +324,16 @@
         "artifacts": [],
         "checked_at": null,
         "upstream_anchor": null
+      },
+      "proof": {
+        "summary": "D1 准入终表落地：grokAdmittedCommands=正文组 5 条 hooks-*（A/B 直接取样 + 3 条类型判据，守卫测试钉死）；ADMISSION.md 汇总准入终表 + 1b 生命周期结论 + 模式可行/阻断结论（P7 阻断/P4(a) 免执行/P8 契约/P6 模式侧零观察）；grokbuild+go-bridge 全包测试绿。",
+        "artifacts": [
+          "agent/grokbuild/acu_state.go",
+          "scripts/grokbuild-phase0/ADMISSION.md",
+          "scripts/grokbuild-phase0/samples/validate-run-p6-2026-09-07.txt"
+        ],
+        "commit": "48895c5",
+        "at": "2026-09-07T20:05:37"
       }
     },
     {
@@ -420,7 +430,7 @@
       "id": "p1b-impl",
       "title": "共用 turn dispatch、Events 单消费者、terminal future、取消与清理（Mac）",
       "description": "共用 turn dispatch、Events 单消费者、terminal future、取消与清理（Mac）",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1b",
       "kind": "impl",
       "depends_on": [
@@ -438,13 +448,26 @@
         "artifacts": [],
         "checked_at": null,
         "upstream_anchor": null
+      },
+      "proof": {
+        "summary": "共用 turn dispatcher 落地（镜像 grok-build TurnReportSlot/FinalizationGate/cancel 结算，实施前取源码地图）：settle-once 状态机+epoch 防重、operation lease（单在飞 turn）、stopReason/_meta 保留进终态事件、hostTurn 正文收集（update 级 _meta，p6 实证）、session/cancel 通知结算、EOF 不成功（errTurnActorDead）、Close settle-without-emit；liveSessions 注册表 sessionId 贯通；ExecuteSessionCommand 真实现（D1 双门+活 actor+终态等待）；readiness 翻真。Events 单消费者不变（结算仍走同一 events channel）。",
+        "artifacts": [
+          "agent/grokbuild/turn_dispatch.go",
+          "agent/grokbuild/live_sessions.go",
+          "agent/grokbuild/session.go",
+          "agent/grokbuild/session_commands.go",
+          "core/message.go",
+          "go-bridge/events.go"
+        ],
+        "source_map": "grok-build 1.0.16 acp_session_impl turn_report_slot.rs/turn_task.rs/turn_end.rs/cancel.rs/app.rs（对照表见 scripts/grokbuild-phase1b/TESTS.md）",
+        "at": "2026-09-07T20:46:27"
       }
     },
     {
       "id": "p1b-tests",
       "title": "流式/权限/终态/lease 定向 Go 测试",
       "description": "流式/权限/终态/lease 定向 Go 测试",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1b",
       "kind": "tests",
       "depends_on": [
@@ -462,13 +485,21 @@
         "artifacts": [],
         "checked_at": null,
         "upstream_anchor": null
+      },
+      "proof": {
+        "summary": "定向 15 测试全绿：dispatcher 单元（settle-once/epoch/stale-id/lease/hostText/parseHostTurn 两层 meta）、注册表 CAS、e2e（Execute end_turn 官方正文、Send cancelled+MidTurnAbort、自取消跨轨单次结算、EOF 错误终态不悬挂、lease 拒绝、冷会话失败、准入层文案）；go-bridge stopReason payload 测试。",
+        "artifacts": [
+          "agent/grokbuild/session_commands_execute_test.go",
+          "go-bridge/events_test.go"
+        ],
+        "at": "2026-09-07T20:46:27"
       }
     },
     {
       "id": "p1b-regression",
       "title": "生命周期回归：单消费者/单次结算/EOF 不成功/取消清理",
       "description": "生命周期回归：单消费者/单次结算/EOF 不成功/取消清理",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1b",
       "kind": "regression",
       "depends_on": [
@@ -486,6 +517,13 @@
         "artifacts": [],
         "checked_at": null,
         "upstream_anchor": null
+      },
+      "proof": {
+        "summary": "三包回归绿（grokbuild 29.9s / go-bridge 74.8s / core 0.5s）+ build + vet exit=0；TESTS.md 证据含源码镜像对照表与取舍记录（不镜像 prompt_queue：lease 快速失败）。",
+        "artifacts": [
+          "scripts/grokbuild-phase1b/TESTS.md"
+        ],
+        "at": "2026-09-07T20:46:27"
       }
     },
     {

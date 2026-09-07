@@ -149,6 +149,14 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 				// "用时" header from this instead of recomputing from timestamps.
 				payload["durationMs"] = ev.DurationMs
 			}
+			if ev.StopReason != "" {
+				// grok-build terminal preservation (方案 §8): end_turn/cancelled/
+				// max_tokens/refusal from the agent's own session/prompt settle.
+				payload["stopReason"] = ev.StopReason
+				if ev.CancellationCategory != "" {
+					payload["cancellationCategory"] = ev.CancellationCategory
+				}
+			}
 			return "turn_completed", eventData(ev, payload), true
 		}
 		deltaPayload := map[string]interface{}{
@@ -426,11 +434,11 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		}
 		wr := ev.WorkflowRun
 		return "workflow_run", eventData(ev, map[string]interface{}{
-			"turnId":          ev.TurnID,
-			"workflowId":      wr.RunID,
-			"workflowName":    wr.Name,
-			"workflowStatus":  wr.Status,
-			"workflowPhases":  workflowPhasesToWire(wr.Phases),
+			"turnId":         ev.TurnID,
+			"workflowId":     wr.RunID,
+			"workflowName":   wr.Name,
+			"workflowStatus": wr.Status,
+			"workflowPhases": workflowPhasesToWire(wr.Phases),
 		}), false
 
 	default:

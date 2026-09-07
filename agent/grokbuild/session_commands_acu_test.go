@@ -205,15 +205,18 @@ func TestSessionCommandsAdvertiseGate(t *testing.T) {
 	if !core.SessionCommandsAdvertise(&fakeCatalogAgent{ready: true}) {
 		t.Fatal("gated agent ready must advertise")
 	}
-	// grokbuild itself: catalog implemented, readiness currently false (1a).
+	// grokbuild itself: catalog implemented; readiness flipped true with p1b
+	// (real dispatcher + P6 admission). The gate must still close honestly if
+	// a regression flips the atomic back.
 	a := &Agent{acu: newACUSideState()}
-	if core.SessionCommandsAdvertise(a) {
-		t.Fatal("grokbuild must not advertise session_commands before 1b+P6 gates pass")
-	}
-	grokCommandsReady.Store(true)
-	defer grokCommandsReady.Store(false)
+	orig := grokCommandsReady.Load()
+	defer grokCommandsReady.Store(orig)
 	if !core.SessionCommandsAdvertise(a) {
-		t.Fatal("readiness flip must advertise")
+		t.Fatal("grokbuild must advertise session_commands with the p1b gate open")
+	}
+	grokCommandsReady.Store(false)
+	if core.SessionCommandsAdvertise(a) {
+		t.Fatal("gate closed must not advertise")
 	}
 }
 
@@ -370,9 +373,22 @@ func TestListSessionCommandsFakeChildZeroWavesFails(t *testing.T) {
 
 // Execute fail-closed until the shared turn dispatcher lands (1b).
 func TestExecuteSessionCommandFailsClosed(t *testing.T) {
+	// p1b: Execute is real — the fail-closed layers are now admission and
+	// liveness gates. Deep e2e lives in session_commands_execute_test.go;
+	// this keeps the pre-dispatch rejections pinned.
 	a := &Agent{acu: newACUSideState()}
-	_, err := a.ExecuteSessionCommand(context.Background(), "s", "/hooks-list")
-	if err == nil || !strings.Contains(err.Error(), "not enabled") {
-		t.Fatalf("execute must fail closed pre-1b, got %v", err)
+	cases := []struct {
+		line, wantErr string
+	}{
+		{"/feedback something", "excluded"},
+		{"/compact", "not admitted"},
+		{"/hooks-list", "no official catalog"},
+		{"plain message", "slash line"},
+	}
+	for _, tc := range cases {
+		_, err := a.ExecuteSessionCommand(context.Background(), "s", tc.line)
+		if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+			t.Fatalf("Execute(%q) error = %v, want containing %q", tc.line, err, tc.wantErr)
+		}
 	}
 }
