@@ -311,9 +311,9 @@ func TestExecuteHostCommandEndTurn(t *testing.T) {
 	// resolveSessionCwd falls back to workDir when no on-disk session exists.
 	dir := t.TempDir()
 	a.SetWorkDir(dir)
-	a.acu.storeListSuccess("sess-1", dir, []core.SessionCommand{{Name: "hooks-list"}})
+	a.acu.storeListSuccess("sess-1", dir, []core.SessionCommand{{Name: "compact"}})
 
-	res, err := a.ExecuteSessionCommand(context.Background(), "sess-1", "/hooks-list")
+	res, err := a.ExecuteSessionCommand(context.Background(), "sess-1", "/compact")
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -428,11 +428,11 @@ func TestExecuteEOFReturnsErrorNotHang(t *testing.T) {
 	a.registerLiveSession("sess-1", s)
 	dir := t.TempDir()
 	a.SetWorkDir(dir)
-	a.acu.storeListSuccess("sess-1", dir, []core.SessionCommand{{Name: "hooks-list"}})
+	a.acu.storeListSuccess("sess-1", dir, []core.SessionCommand{{Name: "compact"}})
 
 	resCh := make(chan error, 1)
 	go func() {
-		_, err := a.ExecuteSessionCommand(context.Background(), "sess-1", "/hooks-list")
+		_, err := a.ExecuteSessionCommand(context.Background(), "sess-1", "/compact")
 		resCh <- err
 	}()
 	time.Sleep(100 * time.Millisecond)
@@ -471,8 +471,8 @@ func TestExecuteRequiresLiveActor(t *testing.T) {
 	a := &Agent{acu: newACUSideState()}
 	dir := t.TempDir()
 	a.SetWorkDir(dir)
-	a.acu.storeListSuccess("sess-none", dir, []core.SessionCommand{{Name: "hooks-list"}})
-	_, err := a.ExecuteSessionCommand(context.Background(), "sess-none", "/hooks-list")
+	a.acu.storeListSuccess("sess-none", dir, []core.SessionCommand{{Name: "compact"}})
+	_, err := a.ExecuteSessionCommand(context.Background(), "sess-none", "/compact")
 	if err == nil || !strings.Contains(err.Error(), "no live session actor") {
 		t.Fatalf("cold-session execute must fail closed, got %v", err)
 	}

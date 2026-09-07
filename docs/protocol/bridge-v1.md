@@ -1313,9 +1313,11 @@ backend 两个 RPC 诚实返回 `not_supported`，iOS 不画 `/` 按钮。第一
   `/` 按钮）。当前恒 true（目录 1a + P6 准入 + 执行 1b 三门全过）；回滚即关门。
 - **List（1a）**：不透传 catalog `commands/list`（34 条 ⊂ 会话 ACU 43 条，不等价）；
   每次都是专用短命 child 真实 `session/load` 该会话后读会话 ACU 最后一波（settle
-  静默窗）。返回 D1 准入子集：官方目录 ∩ 已验证反馈类型（当前 5 条 `hooks-*` 正文
-  组，证据 `scripts/grokbuild-phase0/ADMISSION.md`）；`context`/`feedback`/`dream`/
-  `flush`/`always-approve` 明确排除。空目录诚实可见；失败标记该身份不可执行。
+  静默窗）。返回 D1 准入子集（2026-09-07 owner 裁决：`compact` + `goal` 两条——
+  hooks-* 5 条移出（owner 不用），plan 非 grok 斜杠命令；判据与样本
+  `scripts/grokbuild-phase0/ADMISSION.md`、`samples/p2-handshake-notifications.jsonl`）；
+  `context`/`feedback`/`dream`/`flush`/`always-approve` 明确排除。空目录诚实可见；
+  失败标记该身份不可执行。
 - **Execute（1b）**：slash 行是 prompt 语义 host 动作——经**会话自己的活 actor** 上
   的共用 turn dispatcher 执行（绝不另起 child、绝不降级 user message、绝不
   `send_message`）。准入双门：命令 ∈ D1 准入表 ∩ 该会话官方目录缓存（无缓存 =

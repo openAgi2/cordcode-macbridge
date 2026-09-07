@@ -164,26 +164,28 @@ func acuSameSet(a, b []core.SessionCommand) bool {
 
 // --- D1 admission (§1 D1 / §4.1 / §7 正文组) ---
 //
-// Grok 面板目录 = 官方可执行目录 ∩ 已验证反馈类型准入集合。待样本项不展示；
-// context 与未接入的 pager-local surface 第一批排除；新命令不得只因出现在
-// 目录就自动获准。
+// Grok 面板目录 = 官方可执行目录 ∩ 准入集合。待样本项不展示；context 与未接入
+// 的 pager-local surface 第一批排除；新命令不得只因出现在目录就自动获准。
 //
-// P6 后准入的「正文组」类型判据（scripts/grokbuild-phase0/ADMISSION.md 终表）：
+// P6 证据准入的「正文组」判据（scripts/grokbuild-phase0/ADMISSION.md 终表）：
 // host-turn 本地 built-in 命令 —— 零模型（totalTokens=0）、反馈正文经
 // agent_message_chunk(_meta.hostTurn=true)（成功与失败文案同轨）、end_turn settle。
 // 证据：samples/p6-turns.json A(hooks-list 成功)/B(hooks-add 非法路径失败) +
-// [源码] slash_exec.rs builtin 表全部本地执行 ok_end_turn(0)。官方 1.0.13 会话
-// ACU（p3-acu-session-new.json，27 条）中该家族 = 5 条 hooks-*；hooks-remove/
-// hooks-trust/hooks-untrust 按同一类型判据准入（未逐一取样，终表有标注）。
-// 其余各组（无输出组/状态组/skills·workflows·goal）未取证，一律不进。
+// [源码] slash_exec.rs builtin 表全部本地执行 ok_end_turn(0)。
+//
+// 2026-09-07 owner 裁决：面板收敛为 compact + goal（「hooks 那些命令我压根搞不懂，
+// 也从来没用过」）。两条均在官方握手目录真实广播（samples/p2-handshake-
+// notifications.jsonl 零模型样本，含 hint）。plan 不是 grok 斜杠命令（是会话
+// 模式；模式切换已按 P7 取证裁决禁用，见 sessionMode 只读 chip）。compact/goal
+// 的反馈形状未逐一取样，经通用 host-turn settle 路径呈现，owner 走查验收；
+// hooks-* 家族移出面板与执行准入（不是 excluded 语义——无副作用问题，单纯
+// owner 不用）。后续如需重新准入，回 ADMISSION.md 补证据。
 var (
-	// grokAdmittedCommands lists feedback types admitted by P6 evidence.
+	// grokAdmittedCommands is the owner-ruled panel/execute admission set
+	// (2026-09-07: compact + goal, replacing the P6 5×hooks-* wave).
 	grokAdmittedCommands = map[string]struct{}{
-		"hooks-list":    {},
-		"hooks-add":     {},
-		"hooks-remove":  {},
-		"hooks-trust":   {},
-		"hooks-untrust": {},
+		"compact": {},
+		"goal":    {},
 	}
 
 	// grokExcludedCommands are ruled out of the first wave regardless of

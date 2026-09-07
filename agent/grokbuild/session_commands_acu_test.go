@@ -144,13 +144,15 @@ func TestApplyGrokAdmission(t *testing.T) {
 }
 
 // TestGrokAdmittedCommandsTerminalTable pins the shipped D1 admission set to
-// the P6-verified 正文组 family (5 hooks-*). Anything else appearing here is an
-// unreviewed admission and must go through ADMISSION.md + evidence first.
+// the 2026-09-07 owner ruling (compact + goal；hooks-* 5 条移出——owner 不用)。
+// Anything else appearing here is an unreviewed admission and must go through
+// ADMISSION.md + evidence (or an explicit owner ruling recorded in acu_state.go)
+// first.
 func TestGrokAdmittedCommandsTerminalTable(t *testing.T) {
 	origAdmitted, origExcluded := grokAdmittedCommands, grokExcludedCommands
 	defer func() { grokAdmittedCommands, grokExcludedCommands = origAdmitted, origExcluded }()
 
-	want := []string{"hooks-add", "hooks-list", "hooks-remove", "hooks-trust", "hooks-untrust"}
+	want := []string{"compact", "goal"}
 	if len(grokAdmittedCommands) != len(want) {
 		t.Fatalf("admitted set = %v, want exactly %v", grokAdmittedCommands, want)
 	}
@@ -159,9 +161,9 @@ func TestGrokAdmittedCommandsTerminalTable(t *testing.T) {
 			t.Fatalf("admitted set missing %q: %v", n, grokAdmittedCommands)
 		}
 	}
-	for _, n := range []string{"compact", "always-approve", "context", "feedback", "dream", "flush", "goal", "session-info", "plugins"} {
+	for _, n := range []string{"hooks-add", "hooks-list", "hooks-remove", "hooks-trust", "hooks-untrust", "always-approve", "context", "feedback", "dream", "flush", "session-info", "plugins"} {
 		if _, ok := grokAdmittedCommands[n]; ok {
-			t.Fatalf("%q admitted without P6 evidence — update ADMISSION.md and this guard together", n)
+			t.Fatalf("%q admitted without owner ruling / P6 evidence — update ADMISSION.md and this guard together", n)
 		}
 	}
 	// Terminal table must remain a subset of the official 1.0.13 session ACU
@@ -319,10 +321,11 @@ func TestListSessionCommandsFakeChildWaves(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List failed: %v", err)
 	}
-	// D1 display = official table ∩ P6 admission: of [compact, hooks-list,
-	// context] only hooks-list is admitted (compact 未取证、context 排除).
-	if len(cmds) != 1 || cmds[0].Name != "hooks-list" {
-		t.Fatalf("display must be exactly [hooks-list], got %+v", cmds)
+	// D1 display = official table ∩ admission (2026-09-07 owner 裁决表
+	// {compact, goal}): of [compact, hooks-list, context] only compact
+	// is admitted (hooks-* 移出、context 排除).
+	if len(cmds) != 1 || cmds[0].Name != "compact" {
+		t.Fatalf("display must be exactly [compact], got %+v", cmds)
 	}
 	// Whitelist cache holds the FULL official table (3 cmds, last wave wins).
 	got, ok := a.acu.executeWhitelist("sess-fake", proj)
@@ -381,8 +384,8 @@ func TestExecuteSessionCommandFailsClosed(t *testing.T) {
 		line, wantErr string
 	}{
 		{"/feedback something", "excluded"},
-		{"/compact", "not admitted"},
-		{"/hooks-list", "no official catalog"},
+		{"/hooks-list", "not admitted"},
+		{"/goal", "no official catalog"},
 		{"plain message", "slash line"},
 	}
 	for _, tc := range cases {

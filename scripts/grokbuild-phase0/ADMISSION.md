@@ -44,3 +44,12 @@
 
 - 模型调用：C 1 次（modelCalls=1，totalTokens=14691，costUsdTicks=35159400）+ D 已开始生成（部分流，上游未报告计费）；A/B 0 次。在 owner 授权 ≤4 次内。
 - 复位：`/tmp/grokbuild-probe-home-p6`、`/tmp/grokbuild-p6-out` 已删除（2026-09-07）；无外发消息；未触碰 `~/.grok` 真实会话与生产进程。
+
+## 五、2026-09-07 owner 裁决：面板收敛 compact + goal（supersede 上表默认集）
+
+owner 真机走查后裁决：「暂时只做 compact，plan，goal 三个命令……那些命令（hooks）我压根搞不懂是什么，也从来没用过」。落地：
+
+- **准入表改为 `{compact, goal}`**（acu_state.go `grokAdmittedCommands`；守卫测试同步）。两条均在官方握手目录真实广播（`samples/p2-handshake-notifications.jsonl`，零模型样本，含 input.hint）。
+- **plan 不是 grok 斜杠命令**（仅保留名；模式即 sessionMode）——模式切换维持 P7 阻断裁决（只读 chip），面板无 plan 行是官方事实，不是遗漏。
+- hooks-* 5 条移出面板与执行准入：非 excluded 语义（无副作用问题），owner 不用；重新准入需回本文件补证据。
+- compact/goal 反馈形状未逐一取样（compact 是压缩动作、goal 是自治目标入口，均非零模型正文组）；经 1b 通用 host-turn settle 路径呈现，owner 走查验收。P6 正文组判据仍适用于未来零模型扩表。
