@@ -34,7 +34,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-09-07T19:21:25",
+ "updated_at": "2026-09-07T19:30:23",
  "todos": [
   {
    "id": "p0a-pairing-binary-impl",
@@ -716,23 +716,28 @@
    "id": "p3c-impl",
    "title": "typed sessionMode projection/chip 三态/权限 sessionId 全链（模式方向）",
    "description": "typed sessionMode projection/chip 三态/权限 sessionId 全链（模式方向）",
-   "status": "pending",
+   "status": "done",
    "phase": "phase3",
    "kind": "impl",
    "depends_on": [
     "p2-impl"
    ],
    "source": "§5.1/§6",
-   "notes": "",
+   "notes": "口径与 p2 一致（禁用+诊断）：iOS 只读消费 sessionMode 投影 + chip 三态；权限 sessionId/appliesTo 全链因 grok 无权限面（not_supported）如实暂缓，记录于 scripts/grokbuild-phase3c/TESTS.md。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "proven",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null,
+    "summary": "iOS 模式方向只读消费 @ 27e8b879：SessionModeView wire 模型（镜像 Mac）+ 投影/patch additive 字段与合并语义；chip 三态呈现（default 也可见、不借 dsh pending 反转、P7 阻断 canSet=false 恒禁用、planActive 无 × 角标）；容器 grok 投影驱动刷新（三触发点）+ 切会话缺席 + exitPlanModeFromChip grok 早退；dsh 路径零变化。权限 sessionId 全链如实暂缓（无后端可消费）。文件清单 scripts/grokbuild-phase3c/TESTS.md。",
+    "artifacts": [
+     "scripts/grokbuild-phase3c/TESTS.md",
+     "iOS:OpenCodeiOS/OpenCodeiOS/Models/SessionProjection.swift",
+     "iOS:OpenCodeiOS/OpenCodeiOS/Models/ProjectionStore.swift",
+     "iOS commit 27e8b879"
+    ],
+    "checked_at": "2026-09-07T19:30:23",
     "upstream_anchor": null
    }
   },
@@ -740,7 +745,7 @@
    "id": "p3c-tests",
    "title": "iOS 模式方向定向非 UI unit test（A→B→A、current_session、chip）",
    "description": "iOS 模式方向定向非 UI unit test（A→B→A、current_session、chip）",
-   "status": "pending",
+   "status": "done",
    "phase": "phase3",
    "kind": "tests",
    "depends_on": [
@@ -750,13 +755,16 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "proven",
     "method": "automated",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null,
+    "summary": "定向非 UI 单测 30/30 绿（新 SessionModeProjectionTests 5：wire 解码/patch 合并/chip 映射/chip 呈现含 default 可见+dsh 回归；SlashCommandGrokPanel 13 与 SlashCommandPanel 12 回归不破坏）。日志 p3c-test-run.log（TEST SUCCEEDED）。",
+    "artifacts": [
+     "scripts/grokbuild-phase3c/p3c-test-run.log",
+     "iOS:OpenCodeiOS/OpenCodeiOSTests/SessionModeProjectionTests.swift"
+    ],
+    "checked_at": "2026-09-07T19:30:23",
     "upstream_anchor": null
    }
   },
@@ -764,7 +772,7 @@
    "id": "p3c-regression",
    "title": "iOS 模式方向定向 build + 真机安装",
    "description": "iOS 模式方向定向 build + 真机安装",
-   "status": "pending",
+   "status": "done",
    "phase": "phase3",
    "kind": "regression",
    "depends_on": [
@@ -774,13 +782,15 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "proven",
     "method": "mixed",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null,
+    "summary": "定向 build（xcodebuild 全 target 编译）+ 真机安装：iPhone 16 Pro 00008140-001E69503453001C 构建→安装→启动 org.openagi.cordcode（p3c-device-install.log，最终代码）。owner 真机手工验收不在 done 范围。",
+    "artifacts": [
+     "scripts/grokbuild-phase3c/p3c-device-install.log"
+    ],
+    "checked_at": "2026-09-07T19:30:23",
     "upstream_anchor": null
    }
   },
