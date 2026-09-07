@@ -1,0 +1,11 @@
+{
+  "sid": "01a07b3a-68d8-7623-b32a-46376bd350ee",
+  "sdir": "/tmp/grokbuild-probe-home-p7/sessions/%2FUsers%2Fjacklee/01a07b3a-68d8-7623-b32a-46376bd350ee",
+  "plan_mode": {
+    "state": "Pending",
+    "was_previously_active": false,
+    "reminder_count": 0,
+    "pending_exit_reminder": false,
+    "awaiting_plan_approval": false
+  }
+}

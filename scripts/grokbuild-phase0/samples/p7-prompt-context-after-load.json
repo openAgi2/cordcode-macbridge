@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "prompt_mode": "extend",
+  "audience": "primary",
+  "include_browser_verification": true,
+  "agents_md_files": [
+    {
+      "file_name": "CLAUDE.md",
+      "file_path": "/Users/jacklee/.claude/CLAUDE.md",
+      "content": "# 全局说明（所有项目生效）\n\n## 读取本地图片：优先用 glm-vision agent，MCP 备用，别用 Read\n\n在本机环境中，`Read` 工具读取图片会返回 `[Unsupported Image]`（即使文件是完全有效的 JPEG/PNG，连现画的测试图也读不了）——这是环境层面的视觉能力缺失，不是文件问题。\n\n**分析本地图片时的默认路径：委派 `glm-vision` agent**（用户级定义于 `~/.claude/agents/glm-vision.md`，经嵌套 claude 调 GLM-5.3-flash 视觉模型）。遇到读图需求直接用 Agent 工具调它，把图片绝对路径和具体分析要求传给它。\n\n**备用路径**：glm-vision 失败时，改用智谱视觉 MCP Server `zai-mcp-server`（接入 GLM-4.6V，配置在 `~/.claude.json`）。**视频解析没有备用 agent，仍直接用 MCP 的 `analyze_video`**：\n\n| 工具 | 用途 |\n|------|------|\n| `mcp__zai-mcp-server__analyze_image` | 通用图像理解（备用默认选这个） |\n| `mcp__zai-mcp-server__extract_text_from_screenshot` | 截图 OCR 提取文字 |\n| `mcp__zai-mcp-server__diagnose_error_screenshot` | 错误弹窗/堆栈/日志截图诊断 |\n| `mcp__zai-mcp-server__understand_technical_diagram` | 架构图/流程图/UML/ER 图解读 |\n| `mcp__zai-mcp-server__analyze_data_visualization` | 图表/仪表盘分析 |\n| `mcp__zai-mcp-server__ui_to_artifact` | UI 截图转代码/规范/描述 |\n| `mcp__zai-mcp-server__ui_diff_check` | 对比两张 UI 截图找差异 |\n| `mcp__zai-mcp-server__analyze_video` | 视频解析（MP4/MOV/M4V，本地≤8M） |\n\n这些 MCP 工具都支持**本地文件路径**作为 `image_source` / `video_source`，无需把图片变成远程 URL。\n"
+    }
+  ],
+  "persona_summaries": [],
+  "build_timestamp_utc": "2026-09-07T09:40:37.263176+00:00",
+  "memory_enabled": false,
+  "os_name": "macos",
+  "shell_path": "/bin/zsh",
+  "working_directory": "/Users/jacklee",
+  "current_date": "2026-09-07",
+  "is_non_interactive": false,
+  "system_prompt_label": "Grok 4.6"
+}

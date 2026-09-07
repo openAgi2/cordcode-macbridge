@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "authenticate",
+    "params": {
+      "methodId": "cached_token"
+    }
+  },
+  "response": {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "result": {
+      "_meta": {
+        "email": "<redacted>",
+        "auth_mode": "Oidc",
+        "team_id": "<redacted>",
+        "team_name": null,
+        "is_zdr": false,
+        "team_role": null,
+        "coding_data_retention_opt_out": true,
+        "show_resolved_model": false,
+        "gate": null,
+        "subscription_tier": "SuperGrok",
+        "feedback_trace_offer": false
+      }
+    }
+  }
+}

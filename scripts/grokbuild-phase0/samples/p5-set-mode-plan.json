@@ -1,0 +1,13 @@
+{
+  "request": {
+    "method": "session/set_mode",
+    "params": {
+      "modeId": "plan"
+    }
+  },
+  "response": {
+    "jsonrpc": "2.0",
+    "id": 5,
+    "result": {}
+  }
+}
