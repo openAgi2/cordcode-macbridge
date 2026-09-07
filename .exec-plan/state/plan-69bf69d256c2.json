@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-07T20:46:27",
+  "updated_at": "2026-09-07T20:53:37",
   "todos": [
     {
       "id": "p0a-pairing-binary-impl",
@@ -703,7 +703,7 @@
       "id": "p3b-impl",
       "title": "iOS Execute 异步接线/终态与取消展示（执行方向，依赖 1b）",
       "description": "iOS Execute 异步接线/终态与取消展示（执行方向，依赖 1b）",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "impl",
       "depends_on": [
@@ -721,13 +721,20 @@
         "artifacts": [],
         "checked_at": null,
         "upstream_anchor": null
+      },
+      "proof": {
+        "summary": "终态与取消展示落地于 Mac 投影层：turn_completed 携带官方 stopReason=cancelled（1b 终态保留）→ turn status=aborted（非伪成功），流式内容保留、Execution 归 idle；max_tokens/refusal 保持 completed（内容流出、驱动按结果结算）。iOS Execute 异步接线/fencing 已由 3a 交付且依赖的 1b 已解锁（RPC 从 fail-closed 变为真实执行）；iOS 本单元零代码改动——aborted 状态渲染、流式中止生命周期、resultText 传输解码均为既有能力。",
+        "artifacts": [
+          "go-bridge/projection_reducer.go"
+        ],
+        "at": "2026-09-07T20:53:37"
       }
     },
     {
       "id": "p3b-tests",
       "title": "iOS 执行方向定向非 UI unit test",
       "description": "iOS 执行方向定向非 UI unit test",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "tests",
       "depends_on": [
@@ -745,13 +752,20 @@
         "artifacts": [],
         "checked_at": null,
         "upstream_anchor": null
+      },
+      "proof": {
+        "summary": "Go：TestReducerTurnCompletedCancelledSettlesAborted（cancelled→aborted+内容保留+idle；无 stopReason 后端不变；max_tokens/refusal 保持 completed）。iOS 定向非 UI：SlashCommandGrokPanelTests 13/13、SessionProjectionModelsTests+SessionModeProjectionTests 15/15 全绿。",
+        "artifacts": [
+          "go-bridge/projection_reducer_test.go"
+        ],
+        "at": "2026-09-07T20:53:37"
       }
     },
     {
       "id": "p3b-regression",
       "title": "iOS 执行方向定向 build + 真机安装",
       "description": "iOS 执行方向定向 build + 真机安装",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "regression",
       "depends_on": [
@@ -769,6 +783,10 @@
         "artifacts": [],
         "checked_at": null,
         "upstream_anchor": null
+      },
+      "proof": {
+        "summary": "iOS 定向 build SUCCEEDED（iPhone 17 Pro Max 模拟器 destination）。iOS 零代码改动 → 无新二进制，真机不重装（安装基线仍为 3a/3c 的 fd1e3cbb/27e8b879）；行为验证归属 owner 真机矩阵。",
+        "at": "2026-09-07T20:53:37"
       }
     },
     {

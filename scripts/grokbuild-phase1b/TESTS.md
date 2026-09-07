@@ -65,3 +65,11 @@ go-bridge：TestMapAgentEventTurnCompletedPreservesStopReason（turn_completed p
 - 定向：`go test ./agent/grokbuild/ -run 'TestTurnDispatch|TestParseHostTurn|TestLiveSessions|TestExecute|TestSend_Preserves|TestAgentSelfCancel|TestEOF|TestTurnLease|TestSessionCommandsAdvertiseGate|TestExecuteSessionCommandFailsClosed' -count=1` → ok
 - 回归：`go test ./agent/grokbuild/ ./go-bridge/ ./core/ -count=1` → ok（29.9s / 74.8s / 0.5s）
 - go-bridge 定向：TestMapAgentEventTurnCompletedPreservesStopReason → ok
+
+## p3b 增补（终态与取消展示，2026-09-07 同日）
+
+- Mac `go-bridge/projection_reducer.go`：turn_completed 携带 `stopReason:"cancelled"` → turn `status="aborted"`（流式内容保留、Execution 归 idle）；`max_tokens`/`refusal` 保持 `completed`；无 stopReason 后端（Codex/Claude/dsh）零变化。
+- Go 测试：`TestReducerTurnCompletedCancelledSettlesAborted`（cancelled→aborted / 无键不变 / max_tokens+refusal completed）。
+- iOS：**零代码改动**——3a 已交付 Execute 异步接线+代际 fencing（本单元解锁其依赖：RPC 从 fail-closed 变为真实执行）；aborted 渲染、resultText 解码（CCCodeBridgeClient resultKind/resultText，dsh「点了没反应」返工产物）均为既有能力。§7 正文组承接：官方反馈正文经 hostTurn chunk → text_delta → 投影 assistant 消息（成功与失败文案同轨，无业务错误窗）。
+- iOS 验证：SlashCommandGrokPanelTests 13/13、SessionProjectionModelsTests + SessionModeProjectionTests 15/15、定向 build（iPhone 17 Pro Max）SUCCEEDED。
+- 真机：iOS 无新二进制（HEAD 仍 27e8b879），不重装；行为验证归 owner 真机矩阵（§9 ①-⑥）。

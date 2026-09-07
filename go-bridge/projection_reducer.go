@@ -1650,7 +1650,18 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			return
 		}
 		commit()
-		completed := TurnProjection{TurnID: turnID, Status: "completed", CompletedAt: ps.projection.UpdatedAt}
+		// Terminal preservation (grok-build 方案 §8 p3b): a turn_completed carrying
+		// the official stopReason "cancelled" (grok session/prompt settle, MidTurnAbort
+		// et al.) settles as "aborted", not a fake-successful completed turn — the
+		// turn did not finish normally and clients render it with their aborted
+		// treatment. max_tokens/refusal keep "completed": content flowed and the
+		// conversation continues (the driver surfaced them as results, not errors).
+		// stopReason is grok-only today; other backends send no key and are unchanged.
+		status := "completed"
+		if dataString(data, "stopReason") == "cancelled" {
+			status = "aborted"
+		}
+		completed := TurnProjection{TurnID: turnID, Status: status, CompletedAt: ps.projection.UpdatedAt}
 		if durationMs := dataInt64(data, "durationMs"); durationMs > 0 {
 			// Official Turn.durationMs when the source provides it; absent keeps the
 			// timestamp-derived value clients compute as fallback.

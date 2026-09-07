@@ -1074,3 +1074,48 @@ func TestReducerRestoreRebuildsUserInputIndex(t *testing.T) {
 		t.Fatalf("execution phase = %q, want requires_action", proj.Execution.Phase)
 	}
 }
+
+// TestReducerTurnCompletedCancelledSettlesAborted（grok-build 方案 §8 p3b 终态
+// 保留）：turn_completed 带官方 stopReason=cancelled（grok session/prompt settle，
+// MidTurnAbort 等）→ turn status=aborted（非伪成功 completed）；无 stopReason 的
+// 后端保持 completed；max_tokens/refusal 有内容流出，保持 completed。
+func TestReducerTurnCompletedCancelledSettlesAborted(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "grokbuild", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "grokbuild", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "partial"}))
+	r.Apply(ev(3, "grokbuild", "s1", "turn_completed", map[string]interface{}{
+		"turnId": "T1", "stopReason": "cancelled", "cancellationCategory": "MidTurnAbort",
+	}))
+	proj, _ := r.Snapshot("grokbuild", "s1")
+	if len(proj.Turns) != 1 || proj.Turns[0].Status != "aborted" {
+		t.Fatalf("cancelled turn status = %+v, want aborted", proj.Turns)
+	}
+	if proj.Execution.Phase != "idle" {
+		t.Fatalf("execution phase = %q, want idle after cancelled settle", proj.Execution.Phase)
+	}
+	// 内容保留：取消前的流式文本不丢。
+	if len(proj.Turns[0].Assistant.Parts) == 0 {
+		t.Fatal("cancelled turn must keep streamed content")
+	}
+
+	// 无 stopReason（Codex/Claude/dsh）：completed 不变。
+	r2 := newTestReducer()
+	r2.Apply(ev(1, "codex", "s2", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r2.Apply(ev(2, "codex", "s2", "turn_completed", map[string]interface{}{"turnId": "T1"}))
+	proj2, _ := r2.Snapshot("codex", "s2")
+	if proj2.Turns[0].Status != "completed" {
+		t.Fatalf("plain turn status = %q, want completed", proj2.Turns[0].Status)
+	}
+
+	// max_tokens/refusal：内容已流出、驱动按结果结算，保持 completed。
+	for _, sr := range []string{"max_tokens", "refusal"} {
+		r3 := newTestReducer()
+		r3.Apply(ev(1, "grokbuild", "s3", "turn_started", map[string]interface{}{"turnId": "T1"}))
+		r3.Apply(ev(2, "grokbuild", "s3", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "x"}))
+		r3.Apply(ev(3, "grokbuild", "s3", "turn_completed", map[string]interface{}{"turnId": "T1", "stopReason": sr}))
+		proj3, _ := r3.Snapshot("grokbuild", "s3")
+		if proj3.Turns[0].Status != "completed" {
+			t.Fatalf("stopReason=%s status = %q, want completed", sr, proj3.Turns[0].Status)
+		}
+	}
+}
