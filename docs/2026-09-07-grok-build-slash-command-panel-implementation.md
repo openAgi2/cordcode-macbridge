@@ -204,3 +204,18 @@ Owner 真机手工（agent 可读日志；不自动点击）：①两种输入�
 - 目录与执行非原子：保留官方 resolver 行为与实际错误，客户端不加入隐式重试或旧缓存成功路径。
 - 回滚分别关闭 Grok session_commands readiness 与模式 canSet/权限入口；旧 RPC 明确不支持。**绝不恢复六键 legacy 空转，也不退回 dsh `/plan` 内置菜单。** additive 字段可保留，旧客户端忽略；失去权威源就 unknown，不能留下可写 chip。
 - 交付报告分别列文档完成、Phase 0 取证、各功能实现、测试、安装与 owner 验收；未完成的协议门逐项标明。第五轮文档闭合不等于模式可行性已经证明。
+
+## 11. 交付后 owner 裁决（2026-09-07 22:4x，b57b3e5）
+
+owner 真机走查后裁决：「暂时只做 compact，plan，goal 三个命令……hooks 那些命令我压根
+搞不懂是什么，也从来没用过」。落地（细节见 `scripts/grokbuild-phase0/ADMISSION.md` §五）：
+
+- 准入表 `grokAdmittedCommands`：5×hooks-* → **{compact, goal}**（两条均在官方握手目录
+  真实广播，`samples/p2-handshake-notifications.jsonl` 零模型样本含 hint）。
+- **plan 不是 grok 斜杠命令**（仅保留名；会话模式 = sessionMode）——模式切换维持 §10
+  P7 阻断裁决，iPhone 只读 chip 呈现。面板无 plan 行是官方事实，不是本方案遗漏。
+- hooks-* 同步移出执行准入：手写 `/hooks-*` 按「未准入命令」fail-closed（保留输入并
+  提示），不当普通消息发出。
+- §9 owner 矩阵中引用 hooks 命令的步骤（②compact claim/③未知命令）改为以 compact/goal
+  为对象；⑤⑥（会话隔离 / Mac 外部切换）不变。iOS 零改动（compact/goal 词典与图标已有，
+  Grok 策略吃服务端目录原样）；protocol pack 描述已同步。
