@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-07T20:53:37",
+  "updated_at": "2026-09-07T21:00:11",
   "todos": [
     {
       "id": "p0a-pairing-binary-impl",
@@ -875,7 +875,7 @@
       "id": "p4-impl",
       "title": "protocol pack 更新（canonical+mirror）、双仓 CHANGELOG、交付说明",
       "description": "protocol pack 更新（canonical+mirror）、双仓 CHANGELOG、交付说明",
-      "status": "pending",
+      "status": "done",
       "phase": "phase4",
       "kind": "impl",
       "depends_on": [
@@ -895,13 +895,22 @@
         "artifacts": [],
         "checked_at": null,
         "upstream_anchor": null
+      },
+      "proof": {
+        "summary": "protocol pack：bridge-v1.md canonical 增补（session_commands 扩 grokbuild readiness 门语义/turn_completed 增量 stopReason+cancelled→aborted/sessionMode 视图章节/session_mode 事件枚举）并同步 iOS 镜像（byte-identical，含既有 workflow 段漂移一并同步）；双仓 CHANGELOG 条目；交付说明 docs/2026-09-07-grok-build-slash-command-panel-delivery.md（方向总览/取证收口/执行语义差异/测试证据/owner 矩阵待办/未完成阻断清单/回滚）。unified-bridge-protocol.md 镜像既有漂移属并行 codex-remote 工作，未混入（交付说明 §六记录）。",
+        "artifacts": [
+          "docs/protocol/bridge-v1.md",
+          "docs/2026-09-07-grok-build-slash-command-panel-delivery.md",
+          "CHANGELOG.md"
+        ],
+        "at": "2026-09-07T21:00:11"
       }
     },
     {
       "id": "p4-tests",
       "title": "协议一致性校验（canonical vs mirror vs 样本）",
       "description": "协议一致性校验（canonical vs mirror vs 样本）",
-      "status": "pending",
+      "status": "done",
       "phase": "phase4",
       "kind": "tests",
       "depends_on": [
@@ -919,20 +928,24 @@
         "artifacts": [],
         "checked_at": null,
         "upstream_anchor": null
+      },
+      "proof": {
+        "summary": "协议一致性校验：canonical vs mirror diff = 0；文档键（sessionMode status/mode?/canSet/reason?、stopReason/cancellationCategory、cancelled→aborted）与 go-bridge wire 代码（projection_types.go/events.go/projection_reducer.go）逐一核对一致；取消类别四值与 ADMISSION/源码一致。",
+        "at": "2026-09-07T21:00:11"
       }
     },
     {
       "id": "p4-regression",
       "title": "owner 真机操作矩阵逐项验收（①②③④⑤⑥）",
       "description": "owner 真机操作矩阵逐项验收（①②③④⑤⑥）",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "phase4",
       "kind": "regression",
       "depends_on": [
         "p4-tests"
       ],
       "source": "§9 owner 矩阵",
-      "notes": "",
+      "notes": "owner 真机操作矩阵 ①②③⑤⑥ 可验（④ 模式门阻断不做）；矩阵完成归 owner 手工，agent 不打勾。",
       "verification": {
         "required": true,
         "status": "missing",

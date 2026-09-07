@@ -299,6 +299,7 @@ user_input_resolved
 session_command
 session_plan_mode
 session_goal
+session_mode
 turn_diff_ready
 projection_patch
 projection_snapshot
@@ -314,6 +315,16 @@ subscriber (zero-output turns — provider resolution failures that the server o
 closes silently), and the idle-verified cold-hydrate seal for trailing unanswered user
 turns (`reason: rich_history_unanswered`). Before that date the events existed in the
 reducer/mailbox contract only, with no producer.
+
+`turn_completed` may carry additive terminal fields (2026-09-07, producer: grok-build —
+the official `session/prompt` settle preserved end-to-end, 方案 §8 终态保留):
+`stopReason?: "end_turn" | "cancelled" | "max_tokens" | "refusal"` and, when cancelled,
+`cancellationCategory?: "MidTurnAbort" | "HookDenied" | "PermissionRejected" |
+"PermissionCancelled"` (official `_meta` wire values, frozen). The reducer maps
+`stopReason:"cancelled"` to turn status `aborted` — a cancelled turn is never a
+fake-successful `completed` turn; `max_tokens`/`refusal` keep `completed` (content flowed
+and the driver surfaced them as results, not errors). Backends without a stop reason send
+no keys (older clients and other backends unchanged).
 
 `session_retry_status` (2026-08-19, producer: opencode-web) is a **transient** control-plane
 notice: the serve is retrying the provider call with backoff and the turn stays alive. Shape:
@@ -808,7 +819,8 @@ Wire behavior:
   official host-command surface (`commands/list` / `commands/execute` Typert
   remotes; the composer `/` menu's data source). Executing is a host action —
   never a user message. The `session_commands` capability derives from the
-  SessionCommandCatalog interface; only `dsh-web` implements it. See
+  SessionCommandCatalog interface; `dsh-web` implements it unconditionally,
+  `grokbuild` additionally gates on `SessionCommandsReady` (§5.1). See
   「Capability: `session_commands`」 below.
 - `mutate_session_goal` transparently bridges the official goal surface
   (`goals/pause|resume|edit|clear` Typert remotes; the GoalBar action buttons'
@@ -1292,6 +1304,28 @@ backend 两个 RPC 诚实返回 `not_supported`，iOS 不画 `/` 按钮。第一
   继续走现有权限模式菜单（`set_permission_mode`）。
 - `/export` 成功 settle 行文案为官方固定「Session log download requested.」，iPhone 本机
   无产物（仅 Mac web 在线时 ZIP 落到那边浏览器）——不在 iOS 面板的原因。
+
+**grok-build 扩展（2026-09-07，方案 `docs/2026-09-07-grok-build-slash-command-panel-implementation.md`）**：
+`grokbuild` 亦实现该 capability，但语义与 dsh-web 不同——
+
+- **readiness 门（§5.1）**：capability 不能仅靠类型断言广告。`SessionCommandsReady()`
+  为 false 时 go-bridge 不在 backend descriptor 上声明 `session_commands`（iOS 不画
+  `/` 按钮）。当前恒 true（目录 1a + P6 准入 + 执行 1b 三门全过）；回滚即关门。
+- **List（1a）**：不透传 catalog `commands/list`（34 条 ⊂ 会话 ACU 43 条，不等价）；
+  每次都是专用短命 child 真实 `session/load` 该会话后读会话 ACU 最后一波（settle
+  静默窗）。返回 D1 准入子集：官方目录 ∩ 已验证反馈类型（当前 5 条 `hooks-*` 正文
+  组，证据 `scripts/grokbuild-phase0/ADMISSION.md`）；`context`/`feedback`/`dream`/
+  `flush`/`always-approve` 明确排除。空目录诚实可见；失败标记该身份不可执行。
+- **Execute（1b）**：slash 行是 prompt 语义 host 动作——经**会话自己的活 actor** 上
+  的共用 turn dispatcher 执行（绝不另起 child、绝不降级 user message、绝不
+  `send_message`）。准入双门：命令 ∈ D1 准入表 ∩ 该会话官方目录缓存（无缓存 =
+  先 List）。终态以官方 settle 返回：`end_turn` → `{ok:true, resultKind:"success",
+  resultText}`（resultText = hostTurn 反馈正文原文）；`cancelled` → RPC 失败（message
+  带 `cancellationCategory`）；硬错误（RPC reject/EOF）→ `execute_failed`。
+- **反馈可见面与 dsh 不同**：grok host 命令没有 `command/run|done` durable 行——
+  官方反馈正文经 `agent_message_chunk`（`_meta.hostTurn`）流出，折叠为时间线
+  **assistant 消息**（成功与失败文案同轨，无业务错误窗），配 user echo 斜杠行。
+  无命令卡、无 plan 芯片（模式方向见下方 `sessionMode`）。
 
 ### Capability: `session_goal`（DSH 目标横条）
 
@@ -1794,6 +1828,28 @@ plan-mode state, chip absent). The client chip formula mirrors the official `Pla
 `target = pending ? !active : active` — render the `Plan ×` chip only when `target` is true; a
 tap executes `execute_session_command "/plan off"`; the composer placeholder switches in plan
 mode. Plan mode is **not** a timeline row (official parity: chip-only).
+
+#### Session-level mode snapshot (`sessionMode`，grok-build)
+
+`BridgeSessionProjection` / `BridgeProjectionPatch` gain an additive
+`sessionMode?: { status: "confirmed" | "pending" | "unknown", mode?: string, canSet: bool,
+reason?: string }` — the typed mode-state view for grok-build (方案 §5.1；producer:
+`agent/grokbuild session_mode.go` + go-bridge reducer `session_mode` 事件，2026-09-07 p2/p3c)。
+
+- **唯一权威读源**：session 目录 `plan_mode.json` + 官方恢复映射
+  （`Active→plan`；`Pending`/`ExitPending`/`Inactive→default`；未知/缺失/损坏 →
+  `unknown`）。`updates.jsonl`/`events.jsonl`/`prompt_context.json` 均非模式源（P8 实测）。
+- **CMU 只标 dirty**：`current_mode_update` 通知仅使缓存失效（1.0.13 恢复时不发）；
+  下次权威读重读文件——绝不直接采信通知值，也不把 updates.jsonl 最后一条当确认。
+- **`canSet` 恒 false（P7 阻断交付）**：短命 mode-only 路径已被判定失败
+  （`Pending` 恢复后非 Plan，`scripts/grokbuild-phase0/EVIDENCE.md` P7）——切换入口
+  禁用，`reason` 携带 `grok_mode_switch_blocked_official_recovery`；客户端渲染只读
+  诊断 chip（三态：confirmed 橙、pending/unknown 灰阶 + …/?），不提供点击切换。
+  dsh 的 `planMode` 芯片公式不适用于 grok（不反转、无 `/plan off` 执行）。
+- **事务语义**：冷 hydrate（`get_session_projection` 快照构建）注入
+  `confirmed`/`unknown` 初值；live `session_mode` 事件按状态词汇白名单整值替换
+  （未知 `status` 丢弃）；patch 去重为值比较（指针不敏感）。absent = 该会话无
+  grok 模式状态（其他 backend 不发此字段，chip 缺席）。
 
 ## Projection Window (server-owned windowing) — FROZEN SPEC (not advertised)
 
