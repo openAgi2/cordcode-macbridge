@@ -298,6 +298,12 @@ func convertSessionUpdateWithState(params json.RawMessage, sessionID string, sta
 		if text == "" {
 			return nil
 		}
+		// The goal harness injects its implementer bootstrap through the same
+		// channel as a real prompt. It is framework context, not user-authored
+		// transcript content; cold history applies this same discriminator.
+		if _, ok := grokGoalObjectiveFromReminder(text); ok {
+			return nil
+		}
 		return []core.Event{{
 			Type:    core.EventUserMessage,
 			Content: text,

@@ -247,6 +247,13 @@ func TestConvertSessionUpdate_UserMessageChunk(t *testing.T) {
 	}
 }
 
+func TestConvertSessionUpdate_GoalBootstrapReminderIsNotAUserMessage(t *testing.T) {
+	params := json.RawMessage(`{"sessionId":"s1","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"<system-reminder>\nA goal has been set: 创作四篇故事\n并写入 /tmp/demo.txt\n\nYou are working directly on this goal across multiple turns.\nStart now.\n</system-reminder>\n\n"}}}`)
+	if events := convertSessionUpdate(params, "s1"); len(events) != 0 {
+		t.Fatalf("goal bootstrap reminder must stay hidden, got %+v", events)
+	}
+}
+
 func TestConvertSessionUpdate_UnknownType(t *testing.T) {
 	params := json.RawMessage(`{"sessionId":"s1","update":{"sessionUpdate":"future_feature","data":"stuff"}}`)
 	events := convertSessionUpdate(params, "s1")
