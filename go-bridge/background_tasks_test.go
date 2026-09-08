@@ -121,6 +121,9 @@ func TestBackgroundTasksListProviderRouting(t *testing.T) {
 			TaskID: "sub-1", BackendID: "dsh-web", RootSessionID: "root-1",
 			Title: "官方子任务", Status: "running",
 			UpdatedAt: time.UnixMilli(1786942290000), TokenCount: 1234,
+		}, {
+			TaskID: "sub-other", BackendID: "dsh-web", RootSessionID: "root-other",
+			Title: "其他会话任务", Status: "completed", UpdatedAt: time.UnixMilli(1786942291000),
 		}},
 	}
 	handlers := newTestHandlers(t)
@@ -132,7 +135,7 @@ func TestBackgroundTasksListProviderRouting(t *testing.T) {
 		BackendID: "dsh-web",
 		Method:    "background_tasks.list",
 		RequestID: "bt-1",
-		Params:    mustJSONRaw(t, map[string]any{}),
+		Params:    mustJSONRaw(t, map[string]any{"sessionId": "root-1"}),
 	})
 	messages := readJSONMaps(t, clientConn, 1)
 	data, _ := messages[0]["data"].(map[string]any)
@@ -153,6 +156,23 @@ func TestBackgroundTasksListProviderRouting(t *testing.T) {
 	}
 }
 
+func TestBackgroundTasksListRequiresSessionScope(t *testing.T) {
+	agent := &backgroundTaskProviderAgent{fakeAgent: &fakeAgent{name: "dsh-web"}}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("dsh-web", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "dsh-web", Method: "background_tasks.list", RequestID: "bt-scope",
+		Params: mustJSONRaw(t, map[string]any{}),
+	})
+	messages := readJSONMaps(t, clientConn, 1)
+	if code, _ := messages[0]["error"].(map[string]any)["code"].(string); code != "missing_param" {
+		t.Fatalf("error code = %#v, want missing_param", messages[0]["error"])
+	}
+}
+
 func TestBackgroundTasksListNotSupportedForPlainAgents(t *testing.T) {
 	agent := &fakeAgent{name: "codex"} // 无 provider、非 claudecode
 	handlers := newTestHandlers(t)
@@ -164,7 +184,7 @@ func TestBackgroundTasksListNotSupportedForPlainAgents(t *testing.T) {
 		BackendID: "codex",
 		Method:    "background_tasks.list",
 		RequestID: "bt-2",
-		Params:    mustJSONRaw(t, map[string]any{}),
+		Params:    mustJSONRaw(t, map[string]any{"sessionId": "root-1"}),
 	})
 	messages := readJSONMaps(t, clientConn, 1)
 	if code, _ := messages[0]["error"].(map[string]any)["code"].(string); code != "not_supported" {

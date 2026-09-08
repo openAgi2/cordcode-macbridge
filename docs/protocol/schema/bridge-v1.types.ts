@@ -203,8 +203,8 @@ export type BridgeRPCMethod =
   // execute 的 line 是完整官方 slash 行（"/plan"），绝不是 user message。
   | "list_session_commands"
   | "execute_session_command"
-  // DSH 目标横条动作（2026-09-05；capability "session_goal"，仅 dsh-web）。
-  // 官方 goals/pause|resume|edit|clear 透传；目标创建走 /goal host command，
+  // 目标横条动作（capability "session_goal"；dsh-web + grokbuild）。
+  // 后端官方 pause|resume|edit|clear 动词透传；目标创建走 /goal host command，
   // 不是本 RPC 的 action。失败 goal_failed 原文透传座位错误。
   | "mutate_session_goal"
   | "create_session"
@@ -325,7 +325,7 @@ export interface BridgeSessionCommandExecution {
   resultText?: string;
 }
 
-// `mutate_session_goal` params（DSH 目标横条动作，2026-09-05）。action ∈
+// `mutate_session_goal` params（目标横条动作）。action ∈
 // pause|resume|edit|clear；edit 必须携带非空 objective，其余 action 忽略该字段。
 // 每次 action 前后端经 session.list 投影取最新 CAS ref——客户端不得本地乐观改
 // phase，横条状态由 session_goal 投影链路权威承载。

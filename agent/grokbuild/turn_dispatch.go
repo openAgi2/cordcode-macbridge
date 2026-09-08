@@ -76,6 +76,7 @@ type turnDispatch struct {
 	hostText    strings.Builder
 	wait        chan turnOutcome // buffered 1; written exactly once per promote
 	goalCreated chan string      // first durable goal_created observation for this turn
+	goalUpdated chan struct{}    // first durable goal_updated observation for this turn
 }
 
 // promote claims the turn slot for reqID (operation lease). Returns the epoch
@@ -91,7 +92,28 @@ func (d *turnDispatch) promote(reqID int) (uint64, <-chan turnOutcome, error) {
 	d.hostText.Reset()
 	d.wait = make(chan turnOutcome, 1)
 	d.goalCreated = make(chan string, 1)
+	d.goalUpdated = make(chan struct{}, 1)
 	return d.epoch, d.wait, nil
+}
+
+func (d *turnDispatch) goalUpdatedSignal() <-chan struct{} {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.goalUpdated
+}
+
+func (d *turnDispatch) notifyGoalUpdated() {
+	d.mu.Lock()
+	if d.reqID == 0 || d.goalUpdated == nil {
+		d.mu.Unlock()
+		return
+	}
+	ch := d.goalUpdated
+	d.mu.Unlock()
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
 }
 
 func (d *turnDispatch) goalCreatedSignal() <-chan string {

@@ -19,6 +19,7 @@ const grokGoalPlanWriterDescription = "goal plan writer"
 type grokWorkflowMemberState struct {
 	seq     int
 	label   string
+	phase   string
 	childID string
 	status  string
 	turnID  string
@@ -46,7 +47,7 @@ func grokGoalPhase(status string) (string, *core.GoalBlockedReason, bool) {
 		return "paused", nil, true
 	case "completed", "complete", "achieved":
 		return "complete", nil, true
-	case "blocked", "budget_limited", "budget_exceeded", "failed":
+	case "blocked", "budget_limited", "budget_exceeded", "failed", "infra_paused":
 		return "blocked", &core.GoalBlockedReason{Code: strings.ToLower(strings.TrimSpace(status)), Message: strings.TrimSpace(status)}, true
 	default:
 		return "", nil, false
@@ -61,17 +62,21 @@ func grokGoalEvent(p sessionUpdatePayload, revision int64) *core.GoalEvent {
 	if !ok {
 		return nil
 	}
+	if blocked != nil && strings.TrimSpace(p.PauseMessage) != "" {
+		blocked.Message = strings.TrimSpace(p.PauseMessage)
+	}
 	return &core.GoalEvent{ID: p.GoalID, Revision: revision, Objective: p.Objective, Phase: phase, BlockedReason: blocked}
 }
 
-func (s *grokUpdateState) observeGoal(goal core.GoalEvent) {
+func (s *grokUpdateState) observeGoal(goal core.GoalEvent) (core.WorkflowRunEvent, string, bool) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.goal.ID != "" && s.goal.ID != goal.ID {
 		s.members = make(map[string]*grokWorkflowMemberState)
 		s.order = nil
 	}
 	s.goal = goal
-	s.mu.Unlock()
+	return s.workflowSnapshotLocked("")
 }
 
 func grokGoalObjectiveFromReminder(text string) (string, bool) {
@@ -94,10 +99,11 @@ func loadGrokGoalSnapshot(sessionDir string) *core.GoalEvent {
 		return nil
 	}
 	var state struct {
-		GoalID    string `json:"goal_id"`
-		Objective string `json:"objective"`
-		Status    string `json:"status"`
-		History   []struct {
+		GoalID       string `json:"goal_id"`
+		Objective    string `json:"objective"`
+		Status       string `json:"status"`
+		PauseMessage string `json:"pause_message"`
+		History      []struct {
 			Timestamp string `json:"timestamp"`
 			Event     string `json:"event"`
 			Detail    string `json:"detail"`
@@ -110,13 +116,16 @@ func loadGrokGoalSnapshot(sessionDir string) *core.GoalEvent {
 	if !ok {
 		return nil
 	}
+	if blocked != nil && strings.TrimSpace(state.PauseMessage) != "" {
+		blocked.Message = strings.TrimSpace(state.PauseMessage)
+	}
 	revision := int64(0)
 	if n := len(state.History); n > 0 {
 		last := state.History[n-1]
 		if at, err := time.Parse(time.RFC3339Nano, last.Timestamp); err == nil {
 			revision = at.UnixMilli()
 		}
-		if blocked != nil {
+		if blocked != nil && strings.TrimSpace(state.PauseMessage) == "" {
 			blocked.Code = last.Event
 			if strings.TrimSpace(last.Detail) != "" {
 				blocked.Message = last.Detail
@@ -170,11 +179,26 @@ func decorateGrokGoalHistory(sessionDir, sessionID string, entries []core.RichHi
 				if entries[i].Role != "system" || len(entries[i].Parts) == 0 || fmt.Sprint(entries[i].Parts[0]["type"]) != "command" || fmt.Sprint(entries[i].Parts[0]["name"]) != "goal" || strings.TrimSpace(fmt.Sprint(entries[i].Parts[0]["args"])) != strings.TrimSpace(snapshot.Name) {
 					continue
 				}
+				attached := false
 				for j := i + 1; j < len(entries); j++ {
 					if entries[j].Role == "assistant" {
 						entries[j].Parts = append([]map[string]any{workflowPart(snapshot)}, entries[j].Parts...)
+						attached = true
 						break
 					}
+					// Never attach a workflow to a later user/command turn.
+					if entries[j].Role == "user" || entries[j].Role == "system" {
+						break
+					}
+				}
+				if !attached {
+					workflowEntry := core.RichHistoryEntry{
+						ID: sessionID + ":workflow:" + runID, Role: "assistant",
+						Parts: []map[string]any{workflowPart(snapshot)},
+					}
+					entries = append(entries, core.RichHistoryEntry{})
+					copy(entries[i+2:], entries[i+1:])
+					entries[i+1] = workflowEntry
 				}
 				break
 			}
@@ -198,12 +222,19 @@ func isInternalGrokSubagent(description string) bool {
 	return strings.EqualFold(strings.TrimSpace(description), grokGoalPlanWriterDescription)
 }
 
+func grokWorkflowMemberPresentation(description string) (label, phase string) {
+	if isInternalGrokSubagent(description) {
+		return "制定执行计划", "规划"
+	}
+	return strings.TrimSpace(description), "执行"
+}
+
 func (s *grokUpdateState) observeSubagent(p sessionUpdatePayload) (core.WorkflowRunEvent, string, bool) {
 	id := strings.TrimSpace(p.SubagentID)
 	if id == "" {
 		id = strings.TrimSpace(p.ChildSessionID)
 	}
-	if id == "" || isInternalGrokSubagent(p.Description) {
+	if id == "" {
 		return core.WorkflowRunEvent{}, "", false
 	}
 	s.mu.Lock()
@@ -216,7 +247,8 @@ func (s *grokUpdateState) observeSubagent(p sessionUpdatePayload) (core.Workflow
 		if p.SessionUpdate == "subagent_finished" || strings.TrimSpace(p.Description) == "" {
 			return core.WorkflowRunEvent{}, "", false
 		}
-		m = &grokWorkflowMemberState{seq: len(s.order) + 1, label: p.Description, childID: p.ChildSessionID, turnID: p.ParentPromptID}
+		label, phase := grokWorkflowMemberPresentation(p.Description)
+		m = &grokWorkflowMemberState{seq: len(s.order) + 1, label: label, phase: phase, childID: p.ChildSessionID, turnID: p.ParentPromptID}
 		s.members[id] = m
 		s.order = append(s.order, id)
 	}
@@ -234,17 +266,25 @@ func (s *grokUpdateState) observeSubagent(p sessionUpdatePayload) (core.Workflow
 		m.status = "running"
 	}
 
+	return s.workflowSnapshotLocked(m.turnID)
+}
+
+func (s *grokUpdateState) workflowSnapshotLocked(fallbackTurnID string) (core.WorkflowRunEvent, string, bool) {
+	if len(s.order) == 0 {
+		return core.WorkflowRunEvent{}, "", false
+	}
 	runID := s.goal.ID
 	if runID == "" {
-		runID = m.turnID
+		runID = fallbackTurnID
 	}
 	if runID == "" {
 		return core.WorkflowRunEvent{}, "", false
 	}
 	status := core.WorkflowStatusCompleted
 	hasFailed, hasCancelled := false, false
-	members := make([]core.WorkflowRunMember, 0, len(s.order))
-	turnID := m.turnID
+	phaseOrder := make([]string, 0, 2)
+	membersByPhase := make(map[string][]core.WorkflowRunMember)
+	turnID := fallbackTurnID
 	for _, memberID := range s.order {
 		member := s.members[memberID]
 		if member.turnID != "" && turnID == "" {
@@ -259,17 +299,37 @@ func (s *grokUpdateState) observeSubagent(p sessionUpdatePayload) (core.Workflow
 		if member.status == "cancelled" {
 			hasCancelled = true
 		}
-		members = append(members, core.WorkflowRunMember{Seq: member.seq, Label: member.label, ChildSessionID: member.childID, Status: member.status})
+		if _, ok := membersByPhase[member.phase]; !ok {
+			phaseOrder = append(phaseOrder, member.phase)
+		}
+		membersByPhase[member.phase] = append(membersByPhase[member.phase], core.WorkflowRunMember{Seq: member.seq, Label: member.label, ChildSessionID: member.childID, Status: member.status})
 	}
-	if status != core.WorkflowStatusRunning {
-		if hasFailed {
-			status = core.WorkflowStatusFailed
-		} else if hasCancelled {
-			status = core.WorkflowStatusCancelled
+	// A goal can spawn more workers after all currently-known members settle.
+	// The goal phase is therefore the workflow terminal authority; member
+	// completion alone must not flash a false completed card between phases.
+	switch s.goal.Phase {
+	case "active", "paused":
+		status = core.WorkflowStatusRunning
+	case "blocked":
+		status = core.WorkflowStatusFailed
+	case "complete":
+		status = core.WorkflowStatusCompleted
+	default:
+		if status != core.WorkflowStatusRunning {
+			if hasFailed {
+				status = core.WorkflowStatusFailed
+			} else if hasCancelled {
+				status = core.WorkflowStatusCancelled
+			}
 		}
 	}
 	name := s.goal.Objective
-	return core.WorkflowRunEvent{RunID: runID, Name: name, Status: status, Phases: []core.WorkflowRunPhase{{Phase: nil, Members: members}}}, turnID, true
+	phases := make([]core.WorkflowRunPhase, 0, len(phaseOrder))
+	for _, phaseName := range phaseOrder {
+		phase := phaseName
+		phases = append(phases, core.WorkflowRunPhase{Phase: &phase, Members: membersByPhase[phaseName]})
+	}
+	return core.WorkflowRunEvent{RunID: runID, Name: name, Status: status, Phases: phases}, turnID, true
 }
 
 func goalCreatedUpdate(params json.RawMessage) (string, bool) {
@@ -281,4 +341,11 @@ func goalCreatedUpdate(params json.RawMessage) (string, bool) {
 	}
 	objective := strings.TrimSpace(outer.Update.Objective)
 	return objective, objective != ""
+}
+
+func isGoalUpdated(params json.RawMessage) bool {
+	var outer struct {
+		Update sessionUpdatePayload `json:"update"`
+	}
+	return json.Unmarshal(params, &outer) == nil && outer.Update.SessionUpdate == "goal_updated"
 }

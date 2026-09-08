@@ -183,6 +183,20 @@ func convertSessionUpdate(params json.RawMessage, sessionID string) []core.Event
 	return convertSessionUpdateWithState(params, sessionID, nil)
 }
 
+// sessionUpdateOwnerID returns the source session carried by every official
+// session/update frame. Leader connections can multiplex child-subagent traffic,
+// so callers must reject a non-empty owner that differs from the subscribed
+// root session instead of relabelling child output as parent output.
+func sessionUpdateOwnerID(params json.RawMessage) string {
+	var outer struct {
+		SessionID string `json:"sessionId"`
+	}
+	if json.Unmarshal(params, &outer) != nil {
+		return ""
+	}
+	return strings.TrimSpace(outer.SessionID)
+}
+
 func convertSessionUpdateWithState(params json.RawMessage, sessionID string, state *grokUpdateState) []core.Event {
 	// First parse the outer wrapper to get the "update" field and the top-level _meta.
 	var outer struct {
@@ -220,10 +234,13 @@ func convertSessionUpdateWithState(params json.RawMessage, sessionID string, sta
 		if goal == nil {
 			return nil
 		}
+		events := []core.Event{{Type: core.EventSessionGoal, Goal: goal}}
 		if state != nil {
-			state.observeGoal(*goal)
+			if workflow, turnID, ok := state.observeGoal(*goal); ok {
+				events = append(events, core.Event{Type: core.EventWorkflowRun, TurnID: turnID, WorkflowRun: &workflow})
+			}
 		}
-		return []core.Event{{Type: core.EventSessionGoal, Goal: goal}}
+		return events
 
 	case "subagent_spawned", "subagent_finished":
 		if state == nil {

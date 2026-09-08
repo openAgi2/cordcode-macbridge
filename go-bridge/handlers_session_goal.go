@@ -1,6 +1,6 @@
 package gobridge
 
-// handlers_session_goal.go — DSH 目标横条动作（官方 GoalBar 的四个动词）。
+// handlers_session_goal.go — 目标横条动作（共享 GoalBar 的四个动词）。
 // core.SessionGoalController 的薄透传：{ok:true}（快照更新由 goal/change →
 // session_goal 事件/patch 承载，无回显）；失败 message 携官方座位原文
 // （例如 "cannot pause goal … from phase \"complete\"; expected active"）。

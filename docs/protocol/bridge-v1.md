@@ -1239,7 +1239,7 @@ Claude 状态派生：`running/failed/completed` 由 B4 同款 reducer walk 产�
 
 ### RPC: `background_tasks.list`
 
-params: `{}`（跨 session 全量；排序 updatedAt 降序，服务端计算）
+params: `{ sessionId: string }`（严格返回该根 session 的任务；排序 updatedAt 降序，服务端计算）。`sessionId` 缺席返回 `missing_param`，防止新会话意外看到其他会话的任务与徽标计数。
 
 ```ts
 { tasks: BackgroundTaskSummary[] }
@@ -1335,11 +1335,12 @@ backend 两个 RPC 诚实返回 `not_supported`，iOS 不画 `/` 按钮。第一
   **assistant 消息**（成功与失败文案同轨，无业务错误窗），配 user echo 斜杠行。
   无命令卡、无 plan 芯片（模式方向见下方 `sessionMode`）。
 
-### Capability: `session_goal`（DSH 目标横条）
+### Capability: `session_goal`（目标横条）
 
-session 域目标状态 + 动作（现仅 `dsh-web`）。capability 由 backend agent 实现
+session 域目标状态 + 动作（当前 `dsh-web` 与 `grokbuild`）。capability 由 backend agent 实现
 `core.SessionGoalController` 派生（与 `session_commands`←SessionCommandCatalog 同模板，
-两个独立官方 surface：ui-goal GoalBar vs ui-commands 命令面板）；未声明的 backend
+两个独立 surface：GoalBar vs 命令面板）；dsh 透传 `goals/<verb>`，Grok 透传
+官方 `/goal pause|resume|edit|clear`；未声明的 backend
 `mutate_session_goal` 诚实返回 `not_supported`，iOS 不画横条。目标状态本身不经
 capability 门：它由 `session_goal` 投影事件承载（见「Session-level goal snapshot
 (`goal`)」），所有客户端都能看到横条；capability 只门四个动作按钮的 RPC。

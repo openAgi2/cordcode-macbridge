@@ -51,9 +51,9 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 	if core.SessionCommandsAdvertise(agent) {
 		caps = append(caps, "session_commands")
 	}
-	// session_goal（DSH 目标横条）：官方 goals/<verb> 动词透传（pause/resume/
-	// clear/edit）。现仅 dsh-web 实现 SessionGoalController；其他 backend 不广
-	// 告 → iOS 不画横条动作。与 session_commands 分开广告：命令面板与目标横条
+	// session_goal 目标横条：后端官方目标动词透传（dsh goals/<verb>；Grok
+	// /goal pause|resume|clear|edit）。未实现 SessionGoalController 的 backend 不广告
+	// → iOS 不画横条动作。与 session_commands 分开广告：命令面板与目标横条
 	// 是两个独立官方 surface（ui-commands / ui-goal），一个 backend 可只有其一。
 	if _, ok := agent.(core.SessionGoalController); ok {
 		caps = append(caps, "session_goal")

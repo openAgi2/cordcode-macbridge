@@ -1060,6 +1060,12 @@ func (s *grokSession) handleRequest(req *agentRequest) {
 func (s *grokSession) handleNotification(notif *agentNotification) {
 	switch {
 	case isSessionUpdateMethod(notif.Method):
+		if owner := sessionUpdateOwnerID(notif.Params); owner != "" && owner != s.CurrentSessionID() {
+			// A parent stream may carry a child's subagent transcript. It remains
+			// addressable through the child task, but must never be painted into
+			// the parent's conversation.
+			return
+		}
 		// hostTurn 反馈正文（§7 正文组）：先于事件转换收进本 turn 的 collector
 		// ——Execute 的 official settle resultText 来源。正文同时照常走
 		// agent_message_chunk 事件轨（聊天里可见），collector 只是第二读者。
@@ -1087,6 +1093,9 @@ func (s *grokSession) handleNotification(notif *agentNotification) {
 			}
 		}
 		events := convertSessionUpdateWithState(notif.Params, s.CurrentSessionID(), s.updateState)
+		if isGoalUpdated(notif.Params) {
+			s.turn.notifyGoalUpdated()
+		}
 		if objective, ok := goalCreatedUpdate(notif.Params); ok {
 			s.turn.notifyGoalCreated(objective)
 		}

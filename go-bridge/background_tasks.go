@@ -200,9 +200,15 @@ func backgroundTaskToWire(t core.BackgroundTask) map[string]any {
 func (h *Handlers) handleBackgroundTasksList(conn Connection, msg WireMessage, agent core.Agent) {
 	var params struct {
 		Directory string `json:"directory"`
+		SessionID string `json:"sessionId"`
 	}
 	if msg.Params != nil {
 		_ = json.Unmarshal(msg.Params, &params)
+	}
+	params.SessionID = strings.TrimSpace(params.SessionID)
+	if params.SessionID == "" {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "missing_param", Message: "sessionId required"})
+		return
 	}
 	var tasks []core.BackgroundTask
 	switch {
@@ -230,6 +236,9 @@ func (h *Handlers) handleBackgroundTasksList(conn Connection, msg WireMessage, a
 	}
 	wire := make([]map[string]any, 0, len(tasks))
 	for _, t := range tasks {
+		if strings.TrimSpace(t.RootSessionID) != params.SessionID {
+			continue
+		}
 		wire = append(wire, backgroundTaskToWire(t))
 	}
 	conn.SendResult(msg.RequestID, map[string]any{"tasks": wire}, nil)
@@ -277,7 +286,7 @@ func (h *Handlers) handleBackgroundTasksGet(conn Connection, msg WireMessage, ag
 		nested = append(nested, backgroundTaskToWire(n))
 	}
 	conn.SendResult(msg.RequestID, map[string]any{
-		"task":       backgroundTaskToWire(detail.Task),
+		"task":        backgroundTaskToWire(detail.Task),
 		"instruction": detail.Instruction,
 		"nestedTasks": nested,
 		"capabilities": map[string]bool{
@@ -335,9 +344,9 @@ func (h *Handlers) handleBackgroundTasksCancel(conn Connection, msg WireMessage,
 }
 
 // claudeProjectsRootForBackgroundTasks resolves the Claude projects root for the
-// task registry. Claude sidechains live under ~/.claude/projects across ALL
-// projects — the task center is cross-session by design (roadmap §3.1), so the
-// request directory selects nothing here; the default root is authoritative.
+// task registry. Claude sidechains live under ~/.claude/projects across all
+// projects, so discovery starts at that root; handleBackgroundTasksList then
+// applies the required rootSessionId == request.sessionId boundary.
 func (h *Handlers) claudeProjectsRootForBackgroundTasks(_ string) string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {

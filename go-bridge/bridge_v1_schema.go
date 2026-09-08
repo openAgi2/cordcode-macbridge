@@ -57,8 +57,8 @@ const (
 	//
 	// 2026-09-05（同日三次返工）: 目标横条官方化——live event 名 `session_goal`
 	//（官方 goal 投影整值快照；phase "none" = 已清除）、SessionProjection/Patch
-	// 可选字段 `goal`、capability `session_goal`（SessionGoalController 派生，现仅
-	// dsh-web）+ RPC `mutate_session_goal`（scope session.write）。仍是 extensible
+	// 可选字段 `goal`、capability `session_goal`（SessionGoalController 派生，当前
+	// dsh-web + grokbuild）+ RPC `mutate_session_goal`（scope session.write）。仍是 extensible
 	// 非破坏性新增，schemaRevision 维持 2026-09-05（同日 additive 合并）。
 	//
 	// 2026-09-06: 上下文注入行——新 part `context_injection`（dsh subagent-settled

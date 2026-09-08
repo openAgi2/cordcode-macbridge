@@ -165,6 +165,13 @@ func TestLeaderSubscriberReceivesLiveSessionUpdate(t *testing.T) {
 
 		// Live updates (no isReplay) — must be forwarded through convertSessionUpdate.
 		if err := writeACPNotification(c, "session/update", map[string]any{
+			"sessionId": "child-subagent",
+			"update":    map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "CHILD-TRANSCRIPT-DROP"}},
+		}); err != nil {
+			serverErr <- err
+			return
+		}
+		if err := writeACPNotification(c, "session/update", map[string]any{
 			"sessionId": "sess-1",
 			"update":    map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "hello leader"}},
 		}); err != nil {

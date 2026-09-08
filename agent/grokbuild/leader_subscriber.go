@@ -579,6 +579,9 @@ func (s *LeaderSubscriber) handleACP(payload string, pending *leaderPending, ses
 	if len(params) == 0 {
 		return
 	}
+	if owner := sessionUpdateOwnerID(params); owner != "" && owner != sessionID {
+		return
+	}
 	if isReplayUpdate(params) {
 		return // iOS already loaded authoritative history; don't re-emit the transcript.
 	}

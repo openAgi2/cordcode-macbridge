@@ -297,12 +297,15 @@ type sessionUpdatePayload struct {
 
 	// Autonomous-goal / subagent lifecycle extensions observed in Grok Build
 	// updates.jsonl. These are backend-owned facts and are normalized onto the
-	// existing goal/workflow projections; no display text is synthesized.
+	// existing goal/workflow projections. The one harness-internal planner role
+	// receives a stable presentation label; user-authored worker descriptions
+	// remain backend-owned verbatim.
 	GoalID            string `json:"goal_id,omitempty"`
 	Objective         string `json:"objective,omitempty"`
 	Phase             string `json:"phase,omitempty"`
 	LastEvent         string `json:"last_event,omitempty"`
 	LastEventDetail   string `json:"last_event_detail,omitempty"`
+	PauseMessage      string `json:"pause_message,omitempty"`
 	SubagentID        string `json:"subagent_id,omitempty"`
 	ParentSessionID   string `json:"parent_session_id,omitempty"`
 	ParentPromptID    string `json:"parent_prompt_id,omitempty"`
