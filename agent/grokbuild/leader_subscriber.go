@@ -1,12 +1,13 @@
 package grokbuild
 
-// Leader-socket read-only subscriber for external Grok turns.
+// Leader-socket subscriber for external Grok turns.
 //
 // Attaches to a running grok leader (~/.grok/leader.sock) as a passive subscriber
 // for ONE session: leader handshake (register → ACP initialize → ACP session/load),
 // then live session/update notifications are fed through the existing
-// convertSessionUpdate codec → core.Event. It does NOT spawn a leader, does NOT
-// acquire the flock, and does NOT drive the session, so it coexists with the
+// convertSessionUpdate codec → core.Event. The same official connection can
+// carry control requests for a loaded session when no local stdio actor exists.
+// It does NOT spawn a leader or acquire the flock, so it coexists with the
 // production leader, the active TUI pager, and MacBridge's own --no-leader stdio
 // grok subprocess. Protocol verified against /Users/jacklee/Projects/grok-build
 // (leader/protocol.rs framing; leader/client.rs connect; leader/server.rs routing).
@@ -94,6 +95,16 @@ type LeaderSubscriber struct {
 	// goroutine and the answer write path. All writes go through writeMu.
 	conn    net.Conn
 	writeMu sync.Mutex
+	// pending remains attached after session/load so host-side controls can use
+	// this already-authorized ACP connection. ready closes only after load has
+	// succeeded; done closes whenever Run exits.
+	pending   *leaderPending
+	nextACP   int
+	ready     chan struct{}
+	done      chan struct{}
+	readyOnce sync.Once
+	doneOnce  sync.Once
+	controlMu sync.Mutex
 	// interactions registers live ask_user_question reverse-requests awaiting
 	// a follower answer (research §2/§3). Keyed by tool_call_id — the same
 	// identity the official interaction_resolved broadcast carries — so
@@ -140,7 +151,8 @@ func (s *LeaderSubscriber) emitSessionEvent(ev core.Event) {
 // normally resolveLeaderSocket(grokHome).
 func NewLeaderSubscriber(socketPath, sessionID, cwd string) *LeaderSubscriber {
 	return &LeaderSubscriber{socketPath: socketPath, sessionID: sessionID, cwd: cwd,
-		interactions: newLeaderInteractionRegistry(), updateState: newGrokUpdateState()}
+		interactions: newLeaderInteractionRegistry(), updateState: newGrokUpdateState(),
+		ready: make(chan struct{}), done: make(chan struct{}), nextACP: 2}
 }
 
 // leaderInteraction is one registered interaction reverse-request. kind
@@ -363,6 +375,7 @@ func (p *leaderPending) dropAll() {
 // until ctx is cancelled or the connection fails. Replay notifications
 // (_meta.isReplay == true) are dropped — iOS already loaded authoritative history.
 func (s *LeaderSubscriber) Run(ctx context.Context, onEvent func(core.Event)) error {
+	defer s.doneOnce.Do(func() { close(s.done) })
 	if strings.TrimSpace(s.sessionID) == "" {
 		return fmt.Errorf("grokbuild: leader subscriber requires a sessionId")
 	}
@@ -387,6 +400,16 @@ func (s *LeaderSubscriber) Run(ctx context.Context, onEvent func(core.Event)) er
 
 	registerCh := make(chan leaderServerMsg, 4)
 	pending := newLeaderPending()
+	s.writeMu.Lock()
+	s.pending = pending
+	s.writeMu.Unlock()
+	defer func() {
+		s.writeMu.Lock()
+		if s.pending == pending {
+			s.pending = nil
+		}
+		s.writeMu.Unlock()
+	}()
 	readerDone := make(chan error, 1)
 	go func() { readerDone <- s.readLoop(conn, registerCh, pending, s.sessionID, onEvent) }()
 
@@ -398,7 +421,10 @@ func (s *LeaderSubscriber) Run(ctx context.Context, onEvent func(core.Event)) er
 		for {
 			select {
 			case <-t.C:
-				if err := writeLeaderMsg(conn, leaderClientMsg{Type: "ping"}); err != nil {
+				s.writeMu.Lock()
+				err := writeLeaderMsg(conn, leaderClientMsg{Type: "ping"})
+				s.writeMu.Unlock()
+				if err != nil {
 					return
 				}
 			case <-pingStop:
@@ -435,6 +461,7 @@ func (s *LeaderSubscriber) Run(ctx context.Context, onEvent func(core.Event)) er
 	}); err != nil {
 		return fmt.Errorf("grokbuild: leader session/load: %w", err)
 	}
+	s.readyOnce.Do(func() { close(s.ready) })
 	slog.Info("grokbuild: leader subscriber live", "session", s.sessionID)
 
 	// 4. Stay attached until ctx cancel or reader exit.
@@ -479,7 +506,10 @@ func (s *LeaderSubscriber) awaitReady(ctx context.Context, registerCh <-chan lea
 // and waits for its response.
 func (s *LeaderSubscriber) acpCall(ctx context.Context, conn io.Writer, pending *leaderPending, id int, method string, params any) (json.RawMessage, error) {
 	ch := pending.register(id)
-	if err := writeACPRequest(conn, id, method, params); err != nil {
+	s.writeMu.Lock()
+	err := writeACPRequest(conn, id, method, params)
+	s.writeMu.Unlock()
+	if err != nil {
 		pending.deliver(id, jsonrpcResponse{}) // free the slot
 		return nil, err
 	}
@@ -493,6 +523,78 @@ func (s *LeaderSubscriber) acpCall(ctx context.Context, conn io.Writer, pending 
 		return nil, fmt.Errorf("%s timeout", method)
 	case <-ctx.Done():
 		return nil, ctx.Err()
+	}
+}
+
+// executeGoalMutation sends one official /goal command through this loaded
+// leader connection. It is intentionally used only for cold-session clear:
+// unlike edit/resume/pause, clearing a persisted paused goal cannot require a
+// long-running local turn actor. Success is gated on the authoritative cleared
+// goal update, never merely on a successful prompt response.
+func (s *LeaderSubscriber) executeGoalMutation(ctx context.Context, action, line string) error {
+	if action != core.SessionGoalActionClear {
+		return fmt.Errorf("grokbuild: goal action %q requires a live session actor", action)
+	}
+	s.controlMu.Lock()
+	defer s.controlMu.Unlock()
+
+	select {
+	case <-s.ready:
+	case <-s.done:
+		return fmt.Errorf("grokbuild: leader connection closed")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	updated := s.updateState.goalUpdateSignal()
+	s.writeMu.Lock()
+	conn, pending := s.conn, s.pending
+	if conn == nil || pending == nil {
+		s.writeMu.Unlock()
+		return fmt.Errorf("grokbuild: leader connection closed")
+	}
+	s.nextACP++
+	id := s.nextACP
+	ch := pending.register(id)
+	err := writeACPRequest(conn, id, "session/prompt", sessionPromptParams{
+		SessionID: s.sessionID,
+		Prompt:    []contentBlock{{Type: "text", Text: line}},
+	})
+	s.writeMu.Unlock()
+	if err != nil {
+		pending.deliver(id, jsonrpcResponse{})
+		return err
+	}
+
+	terminalSeen := false
+	for {
+		if s.updateState.goalPhase() == "none" {
+			return nil
+		}
+		select {
+		case <-updated:
+			updated = s.updateState.goalUpdateSignal()
+		case resp := <-ch:
+			ch = nil
+			if resp.Error != nil {
+				return fmt.Errorf("session/prompt: %s", resp.Error.Message)
+			}
+			var result promptResult
+			if err := json.Unmarshal(resp.Result, &result); err != nil {
+				return fmt.Errorf("session/prompt: decode response: %w", err)
+			}
+			if result.StopReason != stopReasonEndTurn {
+				return fmt.Errorf("grokbuild: goal action ended with %q", result.StopReason)
+			}
+			terminalSeen = true
+		case <-s.done:
+			return fmt.Errorf("grokbuild: leader connection closed")
+		case <-ctx.Done():
+			if terminalSeen {
+				return fmt.Errorf("grokbuild: goal clear ended without an authoritative cleared update")
+			}
+			return ctx.Err()
+		}
 	}
 }
 

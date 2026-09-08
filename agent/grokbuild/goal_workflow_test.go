@@ -58,6 +58,26 @@ func TestGrokGoalAndSubagentsNormalizeToExistingProjections(t *testing.T) {
 	}
 }
 
+func TestGrokGoalClearedPublishesCanonicalEmptySnapshot(t *testing.T) {
+	state := newGrokUpdateState()
+	state.observeGoal(core.GoalEvent{ID: "goal-1", Objective: "ship it", Phase: "paused"})
+	signal := state.goalUpdateSignal()
+	events := convertSessionUpdateWithState(goalUpdateParams(t, map[string]any{
+		"sessionUpdate": "goal_updated", "last_event": "goal_cleared",
+	}, 4321), "parent", state)
+	if len(events) != 1 || events[0].Type != core.EventSessionGoal || events[0].Goal != nil {
+		t.Fatalf("cleared goal events = %+v", events)
+	}
+	if phase := state.goalPhase(); phase != "none" {
+		t.Fatalf("cleared goal phase = %q, want none", phase)
+	}
+	select {
+	case <-signal:
+	default:
+		t.Fatal("goal clear did not rotate the authoritative update signal")
+	}
+}
+
 func TestGrokInfraPauseSurfacesRealFailure(t *testing.T) {
 	const failure = "Turn failed: Unauthorized (401): no auth context"
 	events := convertSessionUpdateWithState(goalUpdateParams(t, map[string]any{

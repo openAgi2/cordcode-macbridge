@@ -41,10 +41,13 @@ func (a *Agent) MutateSessionGoal(ctx context.Context, sessionID, action, object
 		return err
 	}
 	s, ok := a.liveSessionForCommand(sessionID)
-	if !ok {
-		return fmt.Errorf("grokbuild: goal action: no live session actor")
+	if ok {
+		return s.executeGoalMutation(ctx, strings.ToLower(strings.TrimSpace(action)), line)
 	}
-	return s.executeGoalMutation(ctx, strings.ToLower(strings.TrimSpace(action)), line)
+	if sub := a.liveSubscriber(sessionID); sub != nil {
+		return sub.executeGoalMutation(ctx, strings.ToLower(strings.TrimSpace(action)), line)
+	}
+	return fmt.Errorf("grokbuild: goal action: no live session actor or leader connection")
 }
 
 // cancelGoalTurnAndWait uses Grok's native session/cancel control rail, then
@@ -107,26 +110,40 @@ func (s *grokSession) executeGoalMutation(ctx context.Context, action, line stri
 	if err != nil {
 		return err
 	}
-	select {
-	case <-updated:
-		// Resume can re-enter a long-running goal loop. The durable goal update
-		// acknowledges the mutation; keep the dispatcher lease so the actor
-		// continues owning the eventual turn terminal.
-		return nil
-	case out := <-wait:
-		if out.Err != nil {
-			return out.Err
-		}
-		switch out.StopReason {
-		case stopReasonEndTurn:
+	terminalSeen := false
+	for {
+		if action == core.SessionGoalActionClear && s.updateState.goalPhase() == "none" {
 			return nil
-		case stopReasonCancelled:
-			return fmt.Errorf("grokbuild: goal action cancelled")
-		default:
-			return fmt.Errorf("grokbuild: goal action ended with %q", out.StopReason)
 		}
-	case <-ctx.Done():
-		_ = s.CancelTurn(ctx)
-		return ctx.Err()
+		select {
+		case <-updated:
+			// Resume can re-enter a long-running goal loop. The durable goal update
+			// acknowledges the mutation; keep the dispatcher lease so the actor
+			// continues owning the eventual turn terminal. Clear is stricter: only
+			// the explicit none snapshot acknowledges removal.
+			if action != core.SessionGoalActionClear || s.updateState.goalPhase() == "none" {
+				return nil
+			}
+			updated = s.updateState.goalUpdateSignal()
+		case out := <-wait:
+			wait = nil
+			if out.Err != nil {
+				return out.Err
+			}
+			switch out.StopReason {
+			case stopReasonEndTurn:
+				terminalSeen = true
+			case stopReasonCancelled:
+				return fmt.Errorf("grokbuild: goal action cancelled")
+			default:
+				return fmt.Errorf("grokbuild: goal action ended with %q", out.StopReason)
+			}
+		case <-ctx.Done():
+			_ = s.CancelTurn(ctx)
+			if terminalSeen && action == core.SessionGoalActionClear {
+				return fmt.Errorf("grokbuild: goal clear ended without an authoritative cleared update")
+			}
+			return ctx.Err()
+		}
 	}
 }

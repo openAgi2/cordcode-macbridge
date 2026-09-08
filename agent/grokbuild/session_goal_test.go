@@ -3,7 +3,12 @@ package grokbuild
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -168,5 +173,130 @@ func TestGrokClearStopsActiveGoalThenDispatchesOfficialClear(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("clear did not acknowledge the authoritative cleared state")
+	}
+}
+
+func runColdLeaderGoalClear(t *testing.T, publishClear bool) (error, []core.Event, map[string]any) {
+	t.Helper()
+	sock := filepath.Join("/tmp", fmt.Sprintf("cc-grok-goal-%d.sock", time.Now().UnixNano()))
+	defer os.Remove(sock)
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	release := make(chan struct{})
+	serverErr := make(chan error, 1)
+	prompt := make(chan map[string]any, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			serverErr <- err
+			return
+		}
+		defer c.Close()
+		if err := leaderHandshake(c); err != nil {
+			serverErr <- err
+			return
+		}
+		msg, err := readClientMsg(c)
+		if err != nil {
+			serverErr <- err
+			return
+		}
+		var request map[string]any
+		if msg.Type != "acp" || json.Unmarshal([]byte(msg.Payload), &request) != nil {
+			serverErr <- fmt.Errorf("goal clear frame = %+v", msg)
+			return
+		}
+		prompt <- request
+		if publishClear {
+			if err := writeACPNotification(c, "session/update", map[string]any{
+				"sessionId": "sess-1",
+				"update": map[string]any{
+					"sessionUpdate": "goal_updated",
+					"last_event":    "goal_cleared",
+				},
+			}); err != nil {
+				serverErr <- err
+				return
+			}
+		}
+		if err := writeACPResponse(c, acpPayloadID(msg.Payload), promptResult{StopReason: stopReasonEndTurn}); err != nil {
+			serverErr <- err
+			return
+		}
+		<-release
+		serverErr <- nil
+	}()
+
+	var events []core.Event
+	var eventsMu sync.Mutex
+	sub := NewLeaderSubscriber(sock, "sess-1", "/tmp")
+	runCtx, cancelRun := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancelRun()
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- sub.Run(runCtx, func(ev core.Event) {
+			eventsMu.Lock()
+			events = append(events, ev)
+			eventsMu.Unlock()
+		})
+	}()
+	select {
+	case <-sub.ready:
+	case <-time.After(time.Second):
+		t.Fatal("leader subscriber did not become ready")
+	}
+
+	a := &Agent{liveSubs: map[string]*LeaderSubscriber{"sess-1": sub}}
+	mutationTimeout := time.Second
+	if !publishClear {
+		mutationTimeout = 100 * time.Millisecond
+	}
+	mutationCtx, cancelMutation := context.WithTimeout(context.Background(), mutationTimeout)
+	mutationErr := a.MutateSessionGoal(mutationCtx, "sess-1", "clear", "")
+	cancelMutation()
+	request := <-prompt
+	close(release)
+	select {
+	case <-runDone:
+	case <-time.After(time.Second):
+		t.Fatal("leader subscriber did not stop")
+	}
+	if err := <-serverErr; err != nil {
+		t.Fatal(err)
+	}
+	eventsMu.Lock()
+	defer eventsMu.Unlock()
+	return mutationErr, append([]core.Event(nil), events...), request
+}
+
+func TestGrokColdClearUsesLoadedLeaderConnection(t *testing.T) {
+	err, events, request := runColdLeaderGoalClear(t, true)
+	if err != nil {
+		t.Fatalf("cold clear: %v", err)
+	}
+	if request["method"] != "session/prompt" || int(request["id"].(float64)) <= 2 {
+		t.Fatalf("cold clear request = %+v", request)
+	}
+	params, ok := request["params"].(map[string]any)
+	if !ok || params["sessionId"] != "sess-1" {
+		t.Fatalf("cold clear params = %+v", params)
+	}
+	prompt, ok := params["prompt"].([]any)
+	if !ok || len(prompt) != 1 || prompt[0].(map[string]any)["text"] != "/goal clear" {
+		t.Fatalf("cold clear prompt = %+v", params["prompt"])
+	}
+	if len(events) != 1 || events[0].Type != core.EventSessionGoal || events[0].Goal != nil {
+		t.Fatalf("cold clear events = %+v", events)
+	}
+}
+
+func TestGrokColdClearRejectsPromptTerminalWithoutGoalClear(t *testing.T) {
+	err, _, _ := runColdLeaderGoalClear(t, false)
+	if err == nil || !strings.Contains(err.Error(), "without an authoritative cleared update") {
+		t.Fatalf("cold clear error = %v", err)
 	}
 }
