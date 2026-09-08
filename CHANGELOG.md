@@ -7,6 +7,7 @@
 版本号对齐 MacBridge Release 构建的 `MARKETING_VERSION`（见 `MacBridge/project.yml`）。日期为协调世界时（UTC）。
 
 ## [Unreleased]
+- **修复：Grok `/goal` 实现完成后不再被隐藏 evaluator 长时间拖住「执行中」**：Grok 在主实现回合结束后会同步运行隐藏的完成度评估，期间官方 ACP turn 仍保持 running，可能持续数十秒至数分钟；此前 MacBridge 丢弃了上游专门发出的 `verifying_completion` 实时边界，导致 iPhone 输入框与 Goal 横条一直不收口。现将该权威信号贯通 goal 投影；iPhone 在验证开始时立即恢复输入并收起横条，若 evaluator 判定目标尚需继续，后续官方快照会自动重新进入执行态。未伪造 turn 完成，也未取消后台 evaluator。Mac 与 iPhone 均需更新。
 - **修复：Grok `/goal` 的内部执行指令不再冒充用户消息**：目标创建后，官方 harness 会通过 `user_message_chunk` 注入一整段 `<system-reminder>` 供实现回合使用；直播 codec 此前把它和真实 prompt 一样投影，导致 iPhone 出现巨大的右侧用户气泡。现直播与冷历史共用同一目标提醒识别规则，只隐藏可确认的 goal bootstrap，真实用户消息仍原样显示。纯 Mac 侧修复，Mac 更新后重开会话即可清掉旧气泡。
 - **改进：Grok 主任务已结束但隐藏 evaluator 格式失败时，iPhone 自动收起 Goal 横条**：Grok 的实现回合与任务产物已经正常结束后，隐藏 Goal Evaluator 偶尔会因当前模型未返回合法 JSON 而把目标标成 `infra_paused`；此前 iPhone 将其长期显示为红色「受阻的目标」，用户只能手动清除。MacBridge 现把这一种有界重试耗尽、且不需要用户处理的评估器终态规范化为稳定原因码，配套 iOS 自动收起横条；认证、预算、用户暂停及真实阻塞仍原样保留并可恢复，不被误隐藏。Mac 与 iPhone 均需更新。
 - **修复：Grok 命令面板打开要等十几秒（List 通道重做为官方桌面同款）**：Grok 会话点 ＋ 后 goal/compact 目录要 8-10 秒才出来。根因是旧实现每次打开面板都起一个专用子进程、真实加载整个会话再等命令波静默（握手 1.2s + 会话加载 3.1s + 静默窗），全套都算在点按的关键路径上。现改用官方 grok-desktop 拉目录的同一条通道：在常驻 catalog 进程上发一次 `_x.ai/commands/list {cwd}`（隔离探针实测热调用 43ms），不新建子进程、不加载会话、无缓存——每次打开仍是一次真实官方拉取，空目录诚实可见、失败仍禁止执行，准入集 compact + goal 不变（证据 `scripts/grokbuild-phase0/` P9）。纯 Mac 侧修复，Mac 更新后 iPhone 重开面板即生效。

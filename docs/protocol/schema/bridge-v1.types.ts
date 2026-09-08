@@ -921,6 +921,8 @@ export interface BridgeGoalView {
   phase: "active" | "paused" | "blocked" | "complete" | "none";
   blockedReason?: { code: string; message: string };
   maxGoalRounds?: number;
+  /** Grok live-only boundary while its hidden completion evaluator runs. */
+  verifyingCompletion?: boolean;
 }
 
 /** Incremental part operation (main streaming path). Applies to a specific (turnId, messageId). */

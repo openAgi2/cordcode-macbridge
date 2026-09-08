@@ -200,8 +200,18 @@ func TestReducerGoalSnapshotStaging(t *testing.T) {
 	if patch, ok := r.FlushPatch("dsh-web", "s1"); ok {
 		t.Fatalf("unchanged goal view must not re-patch: %+v", patch)
 	}
-	// blocked 迁移（带 blockedReason）：值比较不受指针影响，patch 携带新视图。
+	// Grok's live evaluator boundary is a first-class goal value change even
+	// when phase/revision/objective remain unchanged.
 	r.Apply(ev(3, "dsh-web", "s1", "session_goal", map[string]interface{}{
+		"id": "goal-r-1", "revision": 1, "objective": "写个封神榜故事", "phase": "active",
+		"maxGoalRounds": 256, "verifyingCompletion": true,
+	}))
+	patch, ok = r.FlushPatch("dsh-web", "s1")
+	if !ok || patch.Goal == nil || !patch.Goal.VerifyingCompletion {
+		t.Fatalf("verifying goal patch = %+v ok=%v", patch.Goal, ok)
+	}
+	// blocked 迁移（带 blockedReason）：值比较不受指针影响，patch 携带新视图。
+	r.Apply(ev(4, "dsh-web", "s1", "session_goal", map[string]interface{}{
 		"id": "goal-r-1", "revision": 2, "objective": "写个封神榜故事", "phase": "blocked",
 		"blockedReason": map[string]interface{}{"code": "rounds-exhausted", "message": "goal rounds exhausted"},
 	}))
@@ -211,13 +221,13 @@ func TestReducerGoalSnapshotStaging(t *testing.T) {
 		t.Fatalf("blocked goal patch = %+v ok=%v", patch.Goal, ok)
 	}
 	// 清除：phase "none" 必须能 patch 出去（远端横条移除）。
-	r.Apply(ev(4, "dsh-web", "s1", "session_goal", map[string]interface{}{"phase": "none"}))
+	r.Apply(ev(5, "dsh-web", "s1", "session_goal", map[string]interface{}{"phase": "none"}))
 	patch, ok = r.FlushPatch("dsh-web", "s1")
 	if !ok || patch.Goal == nil || patch.Goal.Phase != "none" {
 		t.Fatalf("cleared goal patch = %+v ok=%v", patch.Goal, ok)
 	}
 	// 未知 phase：fail-closed 丢弃（不 commit、不猜状态）。
-	r.Apply(ev(5, "dsh-web", "s1", "session_goal", map[string]interface{}{"phase": "dreaming", "id": "g", "objective": "x"}))
+	r.Apply(ev(6, "dsh-web", "s1", "session_goal", map[string]interface{}{"phase": "dreaming", "id": "g", "objective": "x"}))
 	if patch, ok := r.FlushPatch("dsh-web", "s1"); ok {
 		t.Fatalf("unknown phase must be dropped fail-closed: %+v", patch)
 	}

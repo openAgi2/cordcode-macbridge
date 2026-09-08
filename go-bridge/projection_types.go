@@ -244,12 +244,13 @@ type GoalBlockedReasonView struct {
 // whole snapshot client-side). Older runtimes omitted zero-valued keys;
 // clients MUST tolerate absence (defaults) as well.
 type GoalView struct {
-	ID             string                  `json:"id"`
-	Revision       int64                   `json:"revision"`
-	Objective      string                  `json:"objective"`
-	Phase          string                  `json:"phase"` // active | paused | blocked | complete | none
-	BlockedReason  *GoalBlockedReasonView  `json:"blockedReason,omitempty"`
-	MaxGoalRounds  int                     `json:"maxGoalRounds,omitempty"`
+	ID                  string                 `json:"id"`
+	Revision            int64                  `json:"revision"`
+	Objective           string                 `json:"objective"`
+	Phase               string                 `json:"phase"` // active | paused | blocked | complete | none
+	BlockedReason       *GoalBlockedReasonView `json:"blockedReason,omitempty"`
+	MaxGoalRounds       int                    `json:"maxGoalRounds,omitempty"`
+	VerifyingCompletion bool                   `json:"verifyingCompletion,omitempty"`
 }
 
 // SessionProjection is the authoritative per-(backendId,sessionId) projection. SyncRev belongs

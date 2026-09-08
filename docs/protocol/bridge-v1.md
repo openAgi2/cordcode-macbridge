@@ -1806,6 +1806,7 @@ goal?: {
   phase: "active" | "paused" | "blocked" | "complete" | "none",
   blockedReason?: { code: string, message: string },  // blocked phase only
   maxGoalRounds?: number,
+  verifyingCompletion?: boolean, // Grok live-only hidden-evaluator boundary
 }
 ```
 
@@ -1814,6 +1815,13 @@ event for a `clear` carries `phase: "none"` (id/revision/objective serialize as 
 2026-09-06+ runtimes; older runtimes omitted the keys), letting a patch clear a
 stale far-side banner without a `goal: null` key on every subsequent patch. Clients MUST treat
 `none` identically to an absent goal field (render nothing).
+
+For Grok, `verifyingCompletion: true` is the upstream-owned realtime boundary emitted after
+the user-visible implementation round and before its hidden completion evaluator. While true,
+clients hide the goal banner and treat the composer as non-executing even though the ACP turn
+is still running. A subsequent authoritative snapshot with false/absent reactivates the UI if
+the evaluator chooses to continue. The bridge does not synthesize turn completion or cancel
+the evaluator. This transient field is not guaranteed to survive cold history hydration.
 
 The client banner formula mirrors the official GoalBar (packages/client/ui-goal GoalBar.tsx):
 render NOTHING for undefined / absent / `phase == "none"` / `phase == "complete"` / a goal id

@@ -535,6 +535,9 @@ type GoalEvent struct {
 	Phase         string             `json:"phase"` // active | paused | blocked | complete
 	BlockedReason *GoalBlockedReason `json:"blockedReason,omitempty"`
 	MaxGoalRounds int                `json:"maxGoalRounds,omitempty"`
+	// VerifyingCompletion is Grok's authoritative live boundary between the
+	// user-visible implementation round and its hidden completion evaluator.
+	VerifyingCompletion bool `json:"verifyingCompletion,omitempty"`
 }
 
 // FileChange describes one structured file mutation emitted by an agent.

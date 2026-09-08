@@ -300,21 +300,25 @@ type sessionUpdatePayload struct {
 	// existing goal/workflow projections. The one harness-internal planner role
 	// receives a stable presentation label; user-authored worker descriptions
 	// remain backend-owned verbatim.
-	GoalID            string `json:"goal_id,omitempty"`
-	Objective         string `json:"objective,omitempty"`
-	Phase             string `json:"phase,omitempty"`
-	LastEvent         string `json:"last_event,omitempty"`
-	LastEventDetail   string `json:"last_event_detail,omitempty"`
-	PauseMessage      string `json:"pause_message,omitempty"`
-	SubagentID        string `json:"subagent_id,omitempty"`
-	ParentSessionID   string `json:"parent_session_id,omitempty"`
-	ParentPromptID    string `json:"parent_prompt_id,omitempty"`
-	ChildSessionID    string `json:"child_session_id,omitempty"`
-	SubagentType      string `json:"subagent_type,omitempty"`
-	Description       string `json:"description,omitempty"`
-	ErrorMessage      string `json:"error,omitempty"`
-	DurationMillis    int64  `json:"duration_ms,omitempty"`
-	SubagentToolCalls int64  `json:"tool_calls,omitempty"`
+	GoalID          string `json:"goal_id,omitempty"`
+	Objective       string `json:"objective,omitempty"`
+	Phase           string `json:"phase,omitempty"`
+	LastEvent       string `json:"last_event,omitempty"`
+	LastEventDetail string `json:"last_event_detail,omitempty"`
+	PauseMessage    string `json:"pause_message,omitempty"`
+	// Grok emits this live immediately before its hidden goal evaluator starts.
+	// It is intentionally transient (not present in updates.jsonl), so preserve
+	// it on the realtime goal snapshot instead of inferring completion from todos.
+	VerifyingCompletion bool   `json:"verifying_completion,omitempty"`
+	SubagentID          string `json:"subagent_id,omitempty"`
+	ParentSessionID     string `json:"parent_session_id,omitempty"`
+	ParentPromptID      string `json:"parent_prompt_id,omitempty"`
+	ChildSessionID      string `json:"child_session_id,omitempty"`
+	SubagentType        string `json:"subagent_type,omitempty"`
+	Description         string `json:"description,omitempty"`
+	ErrorMessage        string `json:"error,omitempty"`
+	DurationMillis      int64  `json:"duration_ms,omitempty"`
+	SubagentToolCalls   int64  `json:"tool_calls,omitempty"`
 }
 
 // resolvedPromptID returns the durable turn correlation key from a turn_completed

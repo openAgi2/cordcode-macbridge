@@ -1006,6 +1006,26 @@ func TestMapAgentEventContextCompressed(t *testing.T) {
 	}
 }
 
+func TestMapAgentEventGoalCarriesGrokVerificationBoundary(t *testing.T) {
+	name, data, done := mapAgentEvent(core.Event{
+		Type: core.EventSessionGoal,
+		Goal: &core.GoalEvent{
+			ID:                  "goal-1",
+			Revision:            7,
+			Objective:           "ship it",
+			Phase:               "active",
+			VerifyingCompletion: true,
+		},
+	})
+	if name != "session_goal" || done {
+		t.Fatalf("event = %q done=%v, want session_goal non-terminal", name, done)
+	}
+	payload, ok := data.(map[string]interface{})
+	if !ok || payload["verifyingCompletion"] != true {
+		t.Fatalf("goal payload = %#v, want verifyingCompletion=true", data)
+	}
+}
+
 // ── Task 0: 事实基线回归测试 ─────────────────────────────────────────────────
 
 func TestConnSendJSONSerializesConcurrentWrites(t *testing.T) {

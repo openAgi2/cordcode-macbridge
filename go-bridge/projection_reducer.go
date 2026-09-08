@@ -1035,11 +1035,12 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		var view GoalView
 		if phase != "none" {
 			view = GoalView{
-				ID:            dataString(data, "id"),
-				Revision:      dataInt64(data, "revision"),
-				Objective:     dataString(data, "objective"),
-				Phase:         phase,
-				MaxGoalRounds: int(dataInt64(data, "maxGoalRounds")),
+				ID:                  dataString(data, "id"),
+				Revision:            dataInt64(data, "revision"),
+				Objective:           dataString(data, "objective"),
+				Phase:               phase,
+				MaxGoalRounds:       int(dataInt64(data, "maxGoalRounds")),
+				VerifyingCompletion: dataBool(data, "verifyingCompletion"),
 			}
 			if br, ok := data["blockedReason"].(map[string]interface{}); ok {
 				view.BlockedReason = &GoalBlockedReasonView{
@@ -2317,7 +2318,8 @@ func cloneSessionProjection(s SessionProjection) SessionProjection {
 // goalViewEqualGo compares two goal views by value (BlockedReason by content).
 func goalViewEqualGo(a, b GoalView) bool {
 	if a.ID != b.ID || a.Revision != b.Revision || a.Objective != b.Objective ||
-		a.Phase != b.Phase || a.MaxGoalRounds != b.MaxGoalRounds {
+		a.Phase != b.Phase || a.MaxGoalRounds != b.MaxGoalRounds ||
+		a.VerifyingCompletion != b.VerifyingCompletion {
 		return false
 	}
 	if (a.BlockedReason == nil) != (b.BlockedReason == nil) {

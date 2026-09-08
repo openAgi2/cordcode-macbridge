@@ -24,8 +24,10 @@ func TestGrokGoalAndSubagentsNormalizeToExistingProjections(t *testing.T) {
 	state := newGrokUpdateState()
 	goalEvents := convertSessionUpdateWithState(goalUpdateParams(t, map[string]any{
 		"sessionUpdate": "goal_updated", "goal_id": "goal-1", "objective": "ship it", "status": "active", "last_event": "goal_created",
+		"verifying_completion": true,
 	}, 1234), "parent", state)
-	if len(goalEvents) != 1 || goalEvents[0].Goal == nil || goalEvents[0].Goal.Phase != "active" || goalEvents[0].Goal.Revision != 1234 {
+	if len(goalEvents) != 1 || goalEvents[0].Goal == nil || goalEvents[0].Goal.Phase != "active" ||
+		goalEvents[0].Goal.Revision != 1234 || !goalEvents[0].Goal.VerifyingCompletion {
 		t.Fatalf("goal events = %+v", goalEvents)
 	}
 

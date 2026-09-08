@@ -126,7 +126,14 @@ func grokGoalEvent(p sessionUpdatePayload, revision int64) *core.GoalEvent {
 	}
 	phase, blocked = promoteGrokPausedFailure(phase, blocked, p.PauseMessage, p.LastEvent)
 	normalizeGrokBlockedReason(blocked, p.PauseMessage)
-	return &core.GoalEvent{ID: p.GoalID, Revision: revision, Objective: p.Objective, Phase: phase, BlockedReason: blocked}
+	return &core.GoalEvent{
+		ID:                  p.GoalID,
+		Revision:            revision,
+		Objective:           p.Objective,
+		Phase:               phase,
+		BlockedReason:       blocked,
+		VerifyingCompletion: p.VerifyingCompletion,
+	}
 }
 
 func (s *grokUpdateState) observeGoal(goal core.GoalEvent) (core.WorkflowRunEvent, string, bool) {

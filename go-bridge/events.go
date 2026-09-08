@@ -391,6 +391,9 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 			if ev.Goal.MaxGoalRounds > 0 {
 				data["maxGoalRounds"] = ev.Goal.MaxGoalRounds
 			}
+			if ev.Goal.VerifyingCompletion {
+				data["verifyingCompletion"] = true
+			}
 		}
 		return "session_goal", data, false
 
