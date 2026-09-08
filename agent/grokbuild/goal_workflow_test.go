@@ -63,7 +63,8 @@ func TestGrokGoalClearedPublishesCanonicalEmptySnapshot(t *testing.T) {
 	state.observeGoal(core.GoalEvent{ID: "goal-1", Objective: "ship it", Phase: "paused"})
 	signal := state.goalUpdateSignal()
 	events := convertSessionUpdateWithState(goalUpdateParams(t, map[string]any{
-		"sessionUpdate": "goal_updated", "last_event": "goal_cleared",
+		"sessionUpdate": "goal_updated", "goal_id": "", "objective": "",
+		"status": "cleared", "phase": "idle",
 	}, 4321), "parent", state)
 	if len(events) != 1 || events[0].Type != core.EventSessionGoal || events[0].Goal != nil {
 		t.Fatalf("cleared goal events = %+v", events)

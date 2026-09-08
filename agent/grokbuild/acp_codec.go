@@ -230,10 +230,12 @@ func convertSessionUpdateWithState(params json.RawMessage, sessionID string, sta
 
 	switch p.SessionUpdate {
 	case "goal_updated":
-		// Grok represents deletion as the goal lifecycle's goal_cleared event.
-		// Its payload may omit the goal id/objective, so handle it before the
+		// Observed Grok 1.0.13 clear wire (2026-09-08) carries status:"cleared",
+		// empty goal_id/objective, and no last_event. Older lifecycle snapshots
+		// may instead retain last_event:"goal_cleared". Handle both before the
 		// ordinary non-empty goal decoder and publish the canonical nil snapshot.
-		if strings.EqualFold(strings.TrimSpace(p.LastEvent), "goal_cleared") {
+		if strings.EqualFold(strings.TrimSpace(p.Status), "cleared") ||
+			strings.EqualFold(strings.TrimSpace(p.LastEvent), "goal_cleared") {
 			if state != nil {
 				state.observeGoal(core.GoalEvent{Phase: "none"})
 			}

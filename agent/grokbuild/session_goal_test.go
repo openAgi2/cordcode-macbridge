@@ -216,7 +216,10 @@ func runColdLeaderGoalClear(t *testing.T, publishClear bool) (error, []core.Even
 				"sessionId": "sess-1",
 				"update": map[string]any{
 					"sessionUpdate": "goal_updated",
-					"last_event":    "goal_cleared",
+					"goal_id":       "",
+					"objective":     "",
+					"status":        "cleared",
+					"phase":         "idle",
 				},
 			}); err != nil {
 				serverErr <- err
