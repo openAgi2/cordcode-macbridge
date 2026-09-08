@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-07T21:00:11",
+  "updated_at": "2026-09-08T04:14:00+08:00",
   "todos": [
     {
       "id": "p0a-pairing-binary-impl",
@@ -223,7 +223,7 @@
       "notes": "等待 owner 确认 P4P6-CONFIRM.md 范围；等待期间推进 1a/阻断下禁用交付",
       "verification": {
         "required": true,
-        "status": "proven",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
@@ -239,7 +239,7 @@
       "id": "p0b-exec-impl",
       "title": "P4(a) 恢复/归属证明 + P6 真实 turn 取证（无外发→外发分组）",
       "description": "P4(a) 恢复/归属证明 + P6 真实 turn 取证（无外发→外发分组）",
-      "status": "done",
+      "status": "pending",
       "phase": "phase0b",
       "kind": "impl",
       "depends_on": [
@@ -274,7 +274,7 @@
       "id": "p0b-tests",
       "title": "P6 样本解码与准入矩阵校验",
       "description": "P6 样本解码与准入矩阵校验",
-      "status": "done",
+      "status": "pending",
       "phase": "phase0b",
       "kind": "tests",
       "depends_on": [
@@ -306,7 +306,7 @@
       "id": "p0b-regression",
       "title": "反馈类型准入终表 + 模式可行/阻断结论（P4/P7/P8 汇总）",
       "description": "反馈类型准入终表 + 模式可行/阻断结论（P4/P7/P8 汇总）",
-      "status": "done",
+      "status": "pending",
       "phase": "phase0b",
       "kind": "regression",
       "depends_on": [
@@ -350,7 +350,7 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "proven",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
@@ -385,7 +385,7 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "proven",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
@@ -412,7 +412,7 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "proven",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
@@ -430,7 +430,7 @@
       "id": "p1b-impl",
       "title": "共用 turn dispatch、Events 单消费者、terminal future、取消与清理（Mac）",
       "description": "共用 turn dispatch、Events 单消费者、terminal future、取消与清理（Mac）",
-      "status": "done",
+      "status": "pending",
       "phase": "phase1b",
       "kind": "impl",
       "depends_on": [
@@ -467,7 +467,7 @@
       "id": "p1b-tests",
       "title": "流式/权限/终态/lease 定向 Go 测试",
       "description": "流式/权限/终态/lease 定向 Go 测试",
-      "status": "done",
+      "status": "pending",
       "phase": "phase1b",
       "kind": "tests",
       "depends_on": [
@@ -499,7 +499,7 @@
       "id": "p1b-regression",
       "title": "生命周期回归：单消费者/单次结算/EOF 不成功/取消清理",
       "description": "生命周期回归：单消费者/单次结算/EOF 不成功/取消清理",
-      "status": "done",
+      "status": "pending",
       "phase": "phase1b",
       "kind": "regression",
       "depends_on": [
@@ -540,7 +540,7 @@
       "notes": "范围裁决：方案 §8 行 2 前置「P4/P7/P8 全部通过；失败则只交付明确禁用与诊断」——P7 phase0 决定性失败已触发失败分支，该分支不依赖 P6（P6 属执行方向）。本单元收窄为：typed 读侧 SessionModeState + P8 权威读 + canSet=false 明确禁用 + 原因码 + 快照/patch sessionMode 投影 + 六键 legacy 拆除。模式切换写入面/§5.2 事务/§5.3 完整读循环【未交付，P7 阻断】——本单元不是模式功能完成。",
       "verification": {
         "required": true,
-        "status": "proven",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
@@ -575,7 +575,7 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "proven",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
@@ -603,7 +603,7 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "proven",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
@@ -630,7 +630,7 @@
       "notes": "1a 已完成（依赖满足），2026-09-07 开始 iOS 侧",
       "verification": {
         "required": true,
-        "status": "proven",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
@@ -660,7 +660,7 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "proven",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
@@ -687,7 +687,7 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "proven",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
@@ -703,7 +703,7 @@
       "id": "p3b-impl",
       "title": "iOS Execute 异步接线/终态与取消展示（执行方向，依赖 1b）",
       "description": "iOS Execute 异步接线/终态与取消展示（执行方向，依赖 1b）",
-      "status": "done",
+      "status": "pending",
       "phase": "phase3",
       "kind": "impl",
       "depends_on": [
@@ -734,7 +734,7 @@
       "id": "p3b-tests",
       "title": "iOS 执行方向定向非 UI unit test",
       "description": "iOS 执行方向定向非 UI unit test",
-      "status": "done",
+      "status": "pending",
       "phase": "phase3",
       "kind": "tests",
       "depends_on": [
@@ -765,7 +765,7 @@
       "id": "p3b-regression",
       "title": "iOS 执行方向定向 build + 真机安装",
       "description": "iOS 执行方向定向 build + 真机安装",
-      "status": "done",
+      "status": "pending",
       "phase": "phase3",
       "kind": "regression",
       "depends_on": [
@@ -803,7 +803,7 @@
       "notes": "口径与 p2 一致（禁用+诊断）：iOS 只读消费 sessionMode 投影 + chip 三态；权限 sessionId/appliesTo 全链因 grok 无权限面（not_supported）如实暂缓，记录于 scripts/grokbuild-phase3c/TESTS.md。",
       "verification": {
         "required": true,
-        "status": "proven",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
@@ -832,7 +832,7 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "proven",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
@@ -859,7 +859,7 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "proven",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
@@ -875,7 +875,7 @@
       "id": "p4-impl",
       "title": "protocol pack 更新（canonical+mirror）、双仓 CHANGELOG、交付说明",
       "description": "protocol pack 更新（canonical+mirror）、双仓 CHANGELOG、交付说明",
-      "status": "done",
+      "status": "pending",
       "phase": "phase4",
       "kind": "impl",
       "depends_on": [
@@ -910,7 +910,7 @@
       "id": "p4-tests",
       "title": "协议一致性校验（canonical vs mirror vs 样本）",
       "description": "协议一致性校验（canonical vs mirror vs 样本）",
-      "status": "done",
+      "status": "pending",
       "phase": "phase4",
       "kind": "tests",
       "depends_on": [
@@ -938,18 +938,111 @@
       "id": "p4-regression",
       "title": "owner 真机操作矩阵逐项验收（①②③④⑤⑥）",
       "description": "owner 真机操作矩阵逐项验收（①②③④⑤⑥）",
-      "status": "in_progress",
+      "status": "blocked",
       "phase": "phase4",
       "kind": "regression",
       "depends_on": [
         "p4-tests"
       ],
       "source": "§9 owner 矩阵",
-      "notes": "owner 真机操作矩阵 ①②③⑤⑥ 可验（④ 模式门阻断不做）；矩阵完成归 owner 手工，agent 不打勾。",
+      "notes": "owner 2026-09-07 真机验收失败：齿轮打开模型列表；compact 需二次发送且报 no live session actor；goal 二次发送、延迟报 single official slash line 且草稿未清。repairable-heavy，等待 review-fix triplet 修复后重验。",
+      "verification": {
+        "required": true,
+        "status": "failed",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "owner 真机矩阵已给出三条明确失败现象，当前实现不满足完整交互与真实执行语义。",
+        "artifacts": [
+          "/Users/jacklee/Downloads/picture/2026-09-07 23.23.13.jpg",
+          "/Users/jacklee/Downloads/picture/2026-09-07 23.26.44.jpg"
+        ],
+        "checked_at": "2026-09-07T23:45:00+08:00",
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "owner-failures-review-fix-impl",
+      "title": "修复 Grok 权限入口与 compact/goal 完整交互和真实执行路径",
+      "description": "review-fix-for:p4-regression。按 Grok Build 官方源码与 dsh-web 成熟实现，对齐齿轮权限入口、空 hint 命令直接执行、有 hint 命令认领输入、发送后真实创建/恢复 actor 并执行，以及成功清草稿/失败保留草稿的完整交互。",
+      "status": "done",
+      "phase": "review-fix",
+      "kind": "impl",
+      "depends_on": [
+        "p0b-confirm",
+        "p1a-impl",
+        "p2-impl",
+        "p3a-impl",
+        "p3c-impl"
+      ],
+      "source": "owner 2026-09-07 真机失败；§4.2/§6/§9",
+      "notes": "review-fix-for:p4-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Grok 齿轮已接入 CLI 真实六档 permission-mode，并明确仅对新 actor 生效；compact 即使携可选 hint 也立即 execute；execute RPC 在冷会话先恢复 actor 并启动 relay；/goal 在 goal_created 后立即确认且 actor 继续后台运行；goal/subagent/background-task 事件复用既有 DSH 投影并过滤内部 goal plan writer；iOS composer 按 backend/session 隔离，投影 callback 可真实 detach。",
+        "artifacts": [
+          "go-bridge/handlers_session_commands.go",
+          "agent/grokbuild/session_commands.go",
+          "agent/grokbuild/goal_workflow.go",
+          "agent/grokbuild/background_tasks.go",
+          "/Users/jacklee/Projects/cordcode-ios-plan-approval/OpenCodeiOS/OpenCodeiOS/App/ChatUIKitContainerView.swift",
+          "/Users/jacklee/Projects/cordcode-ios-plan-approval/OpenCodeiOS/OpenCodeiOS/Views/Chat/SlashCommandRouting.swift"
+        ],
+        "checked_at": "2026-09-08T04:14:00+08:00",
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "owner-failures-review-fix-tests",
+      "title": "定向验证 Grok 权限入口、命令路由、actor 生命周期和草稿语义",
+      "description": "review-fix-for:p4-regression。运行 Mac Go 与 iOS 非 UI 定向单测，覆盖 compact 直接执行、goal 单行构造、冷/已结束 session actor、成功与失败草稿处理、齿轮菜单内容。",
+      "status": "done",
+      "phase": "review-fix",
+      "kind": "tests",
+      "depends_on": [
+        "owner-failures-review-fix-impl"
+      ],
+      "source": "owner 2026-09-07 真机失败；§9",
+      "notes": "review-fix-for:p4-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "go test ./agent/grokbuild ./go-bridge 通过；Go runtime build 通过；iOS generic-device 签名 App build 与无签名 test build 均通过，新增目标/后台任务、goal_created 提前确认、草稿隔离、callback detach 与 Grok goal banner guardrail 均已编译。未运行 UI/snapshot/simulator automation。",
+        "artifacts": [
+          "agent/grokbuild/session_commands_execute_test.go",
+          "go-bridge/handlers_session_commands_test.go",
+          "agent/grokbuild/goal_workflow_test.go",
+          "/Users/jacklee/Projects/cordcode-ios-plan-approval/OpenCodeiOS/OpenCodeiOSTests/SlashCommandPanelTests.swift",
+          "/Users/jacklee/Projects/cordcode-ios-plan-approval/OpenCodeiOS/OpenCodeiOSTests/BridgeTransportTests.swift",
+          "/Users/jacklee/Library/Developer/Xcode/DerivedData/CordCode-fbzbkoelsqwcmghfuibgjywmwjop/Logs/Test/Test-CordCode-2026.09.07_23-56-20-+0800.xcresult"
+        ],
+        "checked_at": "2026-09-08T04:14:00+08:00",
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "owner-failures-review-fix-regression",
+      "title": "双仓定向构建、部署、真机安装与 owner 复验门",
+      "description": "review-fix-for:p4-regression。完成 Mac Release 覆盖部署、iOS 真机构建安装和运行态身份核验；UI 行为只由 owner 手工复验，不代打勾。",
+      "status": "in_progress",
+      "phase": "review-fix",
+      "kind": "regression",
+      "depends_on": [
+        "owner-failures-review-fix-tests"
+      ],
+      "source": "owner 2026-09-07 真机失败；§9",
+      "notes": "review-fix-for:p4-regression。Mac Release 已覆盖安装并验证 /Applications runtime PID 29351、8777 LISTEN、内嵌 runtime SHA 与 Release 产物一致、grokbuild=available 且广告 permission_mode/session_commands/background_tasks。iOS 最新 Debug 已签名构建，但 2026-09-08 04:14 两台 iPhone 均 offline，无法安装最新版；剩余真机安装与 owner 手工 UI 复验，不代打勾。",
       "verification": {
         "required": true,
         "status": "missing",
-        "method": "manual",
+        "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
         "summary": "",

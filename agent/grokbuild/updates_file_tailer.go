@@ -50,12 +50,13 @@ var (
 // fallback for LeaderSubscriber. It does NOT spawn grok or drive the session — it
 // only parses appended session/update lines through the shared codec.
 type updatesFileTailSubscriber struct {
-	grokHome  string
-	sessionID string
+	grokHome    string
+	sessionID   string
+	updateState *grokUpdateState
 }
 
 func newUpdatesFileTailSubscriber(grokHome, sessionID string) *updatesFileTailSubscriber {
-	return &updatesFileTailSubscriber{grokHome: grokHome, sessionID: sessionID}
+	return &updatesFileTailSubscriber{grokHome: grokHome, sessionID: sessionID, updateState: newGrokUpdateState()}
 }
 
 // Run tails updates.jsonl from the current EOF and forwards each new
@@ -313,7 +314,7 @@ func (s *updatesFileTailSubscriber) drainNew(path string, start int64, onEvent f
 		if isReplayUpdate(params) {
 			continue
 		}
-		events := convertSessionUpdate(params, s.sessionID)
+		events := convertSessionUpdateWithState(params, s.sessionID, s.updateState)
 		emittedUsage := false
 		for _, ev := range events {
 			if ev.Done && (ev.Type == core.EventResult || ev.Type == core.EventError) {

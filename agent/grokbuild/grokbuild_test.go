@@ -53,7 +53,6 @@ func TestNew_WithCLIParse(t *testing.T) {
 	}
 }
 
-
 func TestNormalizeReasoningEffort(t *testing.T) {
 	tests := []struct {
 		input string
@@ -86,16 +85,28 @@ func TestAgent_WorkDirSwitcher(t *testing.T) {
 	}
 }
 
-// TestAgent_NoLegacyModeSwitcher（方案 2026-09-07 §5.1：Grok 永不落 legacy
-// ModeSwitcher）：六键空转已拆除——Agent 不再满足 core.ModeSwitcher；typed
-// 读侧走 core.SessionModeReader（session_mode.go），写入面因 P7 阻断禁用。
-func TestAgent_NoLegacyModeSwitcher(t *testing.T) {
+func TestAgent_GrokPermissionModesMatchCLI(t *testing.T) {
 	a, err := New(map[string]any{})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, ok := a.(core.ModeSwitcher); ok {
-		t.Fatal("grokbuild must NOT implement legacy ModeSwitcher (six-key dead controls)")
+	switcher, ok := a.(core.ModeSwitcher)
+	if !ok {
+		t.Fatal("grokbuild must expose the CLI permission-mode catalog")
+	}
+	want := []string{"default", "acceptEdits", "auto", "dontAsk", "bypassPermissions", "plan"}
+	modes := switcher.PermissionModes()
+	if len(modes) != len(want) {
+		t.Fatalf("permission modes = %+v, want %v", modes, want)
+	}
+	for i, key := range want {
+		if modes[i].Key != key {
+			t.Fatalf("permission mode[%d] = %q, want %q", i, modes[i].Key, key)
+		}
+	}
+	switcher.SetMode("auto")
+	if got := switcher.GetMode(); got != "auto" {
+		t.Fatalf("mode = %q, want auto", got)
 	}
 	if _, ok := a.(core.SessionModeReader); !ok {
 		t.Fatal("grokbuild must implement core.SessionModeReader (typed read-side)")

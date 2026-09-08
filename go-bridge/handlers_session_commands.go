@@ -1,7 +1,7 @@
 package gobridge
 
-// handlers_session_commands.go — DSH「/」命令面板（docs/2026-09-04 §5.2）。
-// 两个 RPC 都是 core.SessionCommandCatalog 的薄透传：list 回 bridge 自有
+// handlers_session_commands.go — session-domain「/」命令面板。
+// 两个 RPC 都以 core.SessionCommandCatalog 为官方命令边界：list 回 bridge 自有
 // {commands:[…]} 包装（官方裸数组由 dsh-web 解码映射）；execute 回
 // {ok:true, commandId?, resultKind?, resultText?}（官方 settle 透传——成功
 // 反馈的可见面，2026-09-05 owner 报障「点了没反应」后补），失败 message 携
@@ -74,6 +74,41 @@ func (h *Handlers) handleExecuteSessionCommand(conn Connection, msg WireMessage,
 	// execute_session_command 挂同预算（CCCodeBridgeTransport 超时表）。
 	ctx, cancel := context.WithTimeout(h.ctx, 300*time.Second)
 	defer cancel()
+	// Grok 的 execute 必须驱动该会话自己的 ACP actor。用户可以在刚打开
+	// 历史会话、尚未发过普通消息时直接点 /compact；此时 bridge registry
+	// 没有 actor。在命令派发前按 send_message 的同一恢复语义挂载它，并先
+	// 订阅/启动 relay，确保 hostTurn 正文与 terminal 进入原会话投影。DSH
+	// 等 backend 保持原来的 catalog 薄透传，不额外 StartSession。
+	if agent.Name() == "grokbuild" {
+		h.mu.Lock()
+		sess, live := h.getSession(params.SessionID)
+		h.mu.Unlock()
+		if !live || sess == nil {
+			started, startErr := agent.StartSession(h.ctx, params.SessionID)
+			if startErr != nil {
+				conn.SendResult(msg.RequestID, nil, &WireError{Code: "execute_failed", Message: startErr.Error()})
+				return
+			}
+			h.mu.Lock()
+			existing, existingOK := h.getSession(params.SessionID)
+			if existingOK && existing != nil {
+				h.mu.Unlock()
+				_ = started.Close()
+				sess = existing
+			} else {
+				h.putSessionWithMeta(params.SessionID, msg.BackendID, params.Directory, started)
+				h.mu.Unlock()
+				sess = started
+			}
+		}
+		h.broadcaster.Subscribe(conn, SubscriptionKey{
+			BackendID: msg.BackendID,
+			SessionID: params.SessionID,
+			Directory: params.Directory,
+		})
+		h.startRelayIfNotRunning(params.SessionID, sess, conn, msg.BackendID)
+	}
+
 	result, err := catalog.ExecuteSessionCommand(ctx, params.SessionID, params.Line)
 	if err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "execute_failed", Message: err.Error()})

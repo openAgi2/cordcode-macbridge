@@ -294,6 +294,24 @@ type sessionUpdatePayload struct {
 	PromptID    string `json:"promptId,omitempty"`
 	PromptIDRaw string `json:"prompt_id,omitempty"` // snake_case 兜底 (旧上游版本)
 	StopReason  string `json:"stop_reason,omitempty"`
+
+	// Autonomous-goal / subagent lifecycle extensions observed in Grok Build
+	// updates.jsonl. These are backend-owned facts and are normalized onto the
+	// existing goal/workflow projections; no display text is synthesized.
+	GoalID            string `json:"goal_id,omitempty"`
+	Objective         string `json:"objective,omitempty"`
+	Phase             string `json:"phase,omitempty"`
+	LastEvent         string `json:"last_event,omitempty"`
+	LastEventDetail   string `json:"last_event_detail,omitempty"`
+	SubagentID        string `json:"subagent_id,omitempty"`
+	ParentSessionID   string `json:"parent_session_id,omitempty"`
+	ParentPromptID    string `json:"parent_prompt_id,omitempty"`
+	ChildSessionID    string `json:"child_session_id,omitempty"`
+	SubagentType      string `json:"subagent_type,omitempty"`
+	Description       string `json:"description,omitempty"`
+	ErrorMessage      string `json:"error,omitempty"`
+	DurationMillis    int64  `json:"duration_ms,omitempty"`
+	SubagentToolCalls int64  `json:"tool_calls,omitempty"`
 }
 
 // resolvedPromptID returns the durable turn correlation key from a turn_completed

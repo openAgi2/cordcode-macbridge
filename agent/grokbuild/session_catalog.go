@@ -572,6 +572,11 @@ func readSessionHistory(grokHome, sessionID string, limit int) ([]core.HistoryEn
 		if role == "" || content == "" {
 			continue
 		}
+		if role == "user" {
+			if objective, ok := grokGoalObjectiveFromReminder(content); ok {
+				content = "/goal " + objective
+			}
+		}
 		entries = append(entries, core.HistoryEntry{
 			Role:    role,
 			Content: content,
@@ -665,6 +670,14 @@ func readRichSessionHistory(grokHome, sessionID string, limit int, pendingQuesti
 				continue
 			}
 			text := strings.TrimSpace(unwrapUserQuery(extractTextContent(row.Content)))
+			if objective, ok := grokGoalObjectiveFromReminder(text); ok {
+				commandID := deriveStableMessageID(sessionID, lineNum, rawLine)
+				entries = append(entries, core.RichHistoryEntry{ID: commandID, Role: "system", Parts: []map[string]any{{
+					"type": "command", "commandId": commandID, "name": "goal", "args": objective,
+					"kind": "success", "line": "/goal " + objective,
+				}}})
+				continue
+			}
 			if text == "" || looksLikeFrameworkBootstrap(text) {
 				continue
 			}
@@ -687,7 +700,7 @@ func readRichSessionHistory(grokHome, sessionID string, limit int, pendingQuesti
 	if limit > 0 && len(entries) > limit {
 		entries = entries[len(entries)-limit:]
 	}
-	return entries, nil
+	return decorateGrokGoalHistory(dir, sessionID, entries), nil
 }
 
 // turnAccumulator collects consecutive non-user rows into one assistant turn.
@@ -847,10 +860,10 @@ type chatHistoryAskArgs struct {
 }
 
 type chatHistoryAskQuestion struct {
-	Question         string                `json:"question"`
+	Question         string                 `json:"question"`
 	Options          []chatHistoryAskOption `json:"options"`
-	MultiSelectSnake *bool                 `json:"multi_select"`
-	MultiSelectCamel *bool                 `json:"multiSelect"`
+	MultiSelectSnake *bool                  `json:"multi_select"`
+	MultiSelectCamel *bool                  `json:"multiSelect"`
 }
 
 type chatHistoryAskOption struct {
@@ -1050,6 +1063,9 @@ func mapHistoryLine(row grokHistoryLine) (role, content string) {
 			return "", ""
 		}
 		text := strings.TrimSpace(unwrapUserQuery(extractTextContent(row.Content)))
+		if objective, ok := grokGoalObjectiveFromReminder(text); ok {
+			return "user", "/goal " + objective
+		}
 		if text == "" || looksLikeFrameworkBootstrap(text) {
 			return "", ""
 		}

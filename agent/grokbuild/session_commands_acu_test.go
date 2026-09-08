@@ -369,7 +369,7 @@ func TestExecuteSessionCommandFailsClosed(t *testing.T) {
 		{"/feedback something", "excluded"},
 		{"/hooks-list", "not admitted"},
 		{"/goal", "no official catalog"},
-		{"plain message", "slash line"},
+		{"plain message", "slash command"},
 	}
 	for _, tc := range cases {
 		_, err := a.ExecuteSessionCommand(context.Background(), "s", tc.line)

@@ -177,6 +177,7 @@ type turnScriptPeer struct {
 	cancelCategory string // response _meta.cancellationCategory
 	selfCancel     bool   // emit session/cancel notification before responding
 	holdResponse   bool   // never respond (EOF test closes the pipe instead)
+	goalObjective  string // emit a durable goal_created update before any response
 }
 
 // startTurnScriptPeer spawns the peer; stop closes both ends and waits.
@@ -216,6 +217,16 @@ func startTurnScriptPeer(t *testing.T, script turnScriptPeer) (stdinW io.WriteCl
 					},
 				})
 				_, _ = outW.Write(append(chunk, '\n'))
+			}
+			if script.goalObjective != "" {
+				goal, _ := json.Marshal(map[string]any{
+					"jsonrpc": "2.0", "method": "_x.ai/session/update",
+					"params": map[string]any{"sessionId": "sess-1", "update": map[string]any{
+						"sessionUpdate": "goal_updated", "goal_id": "goal-1", "objective": script.goalObjective,
+						"status": "active", "last_event": "goal_created",
+					}, "_meta": map[string]any{"agentTimestampMs": int64(1234)}},
+				})
+				_, _ = outW.Write(append(goal, '\n'))
 			}
 			if script.selfCancel {
 				cancel, _ := json.Marshal(map[string]any{
@@ -339,6 +350,62 @@ func TestExecuteHostCommandEndTurn(t *testing.T) {
 			t.Fatalf("double terminal: %+v", ev)
 		}
 	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestExecuteGoalAcceptsMultilineObjective(t *testing.T) {
+	s, _, shut := newTurnTestSession(t, turnScriptPeer{
+		hostText:   "Goal updated.",
+		promptID:   "p-uuid-goal",
+		stopReason: "end_turn",
+	})
+	defer shut()
+
+	a := &Agent{acu: newACUSideState()}
+	a.registerLiveSession("sess-1", s)
+	dir := t.TempDir()
+	a.SetWorkDir(dir)
+	a.acu.storeListSuccess("sess-1", dir, []core.SessionCommand{{Name: "goal"}})
+
+	res, err := a.ExecuteSessionCommand(context.Background(), "sess-1", "/goal ship the fix\n/tmp/demo-plan121.txt")
+	if err != nil {
+		t.Fatalf("multiline /goal Execute: %v", err)
+	}
+	if res.ResultKind != "success" || res.ResultText != "Goal updated." {
+		t.Fatalf("result = %+v, want official success", res)
+	}
+}
+
+func TestExecuteGoalReturnsAtCreationAndLeavesGoalTurnRunning(t *testing.T) {
+	s, _, shut := newTurnTestSession(t, turnScriptPeer{goalObjective: "ship it", promptID: "p-goal", holdResponse: true})
+	defer shut()
+	s.updateState = newGrokUpdateState()
+	a := &Agent{acu: newACUSideState()}
+	a.registerLiveSession("sess-1", s)
+	dir := t.TempDir()
+	a.SetWorkDir(dir)
+	a.acu.storeListSuccess("sess-1", dir, []core.SessionCommand{{Name: "goal"}})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	res, err := a.ExecuteSessionCommand(ctx, "sess-1", "/goal ship it")
+	if err != nil || res.ResultKind != "success" || res.ResultText != "ship it" {
+		t.Fatalf("result=%+v err=%v", res, err)
+	}
+	if s.turn.activeReqID() == 0 {
+		t.Fatal("goal turn lease was released at acknowledgement; background execution would be orphaned")
+	}
+	foundCommand := false
+	deadline := time.After(time.Second)
+	for !foundCommand {
+		select {
+		case ev := <-s.events:
+			if ev.Type == core.EventSessionCommand && ev.SessionCommand != nil && ev.SessionCommand.InputLine == "/goal ship it" {
+				foundCommand = true
+			}
+		case <-deadline:
+			t.Fatal("goal acknowledgement did not emit the reusable command projection")
+		}
 	}
 }
 

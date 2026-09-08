@@ -181,6 +181,40 @@ func TestExecuteSessionCommandHandler(t *testing.T) {
 	}
 }
 
+func TestExecuteSessionCommandHandlerStartsColdGrokActor(t *testing.T) {
+	agent := &sessionCommandCatalogAgent{fakeAgent: &fakeAgent{name: "grokbuild"}}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("grokbuild", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "grokbuild",
+		Method:    "execute_session_command",
+		RequestID: "sc-grok-cold",
+		Params: mustJSONRaw(t, map[string]any{
+			"sessionId": "grok-session-1",
+			"directory": "/tmp/grok-project",
+			"line":      "/compact",
+		}),
+	})
+	messages := readJSONMaps(t, clientConn, 1)
+	data, _ := messages[0]["data"].(map[string]any)
+	if ok, _ := data["ok"].(bool); !ok {
+		t.Fatalf("result = %#v, want {ok:true}", messages[0])
+	}
+	if len(agent.startCalls) != 1 || agent.startCalls[0] != "grok-session-1" {
+		t.Fatalf("StartSession calls = %v, want [grok-session-1]", agent.startCalls)
+	}
+	tracked, found := handlers.sessions.getForBackend("grok-session-1", "grokbuild")
+	if !found || tracked == nil || tracked.session == nil || tracked.directory != "/tmp/grok-project" {
+		t.Fatalf("cold Grok actor not registered with metadata: found=%v tracked=%+v", found, tracked)
+	}
+	if len(agent.executeCalls) != 1 || agent.executeCalls[0] != "grok-session-1|/compact" {
+		t.Fatalf("executeCalls = %v, want cold actor followed by execute", agent.executeCalls)
+	}
+}
+
 // 官方 settle 透传（2026-09-05「点了没反应」返工）：成功响应必须携带
 // commandId/resultKind/resultText 供 iPhone 显示官方反馈；零值字段省键不发。
 func TestExecuteSessionCommandHandlerSettlePassthrough(t *testing.T) {

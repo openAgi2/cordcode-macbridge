@@ -70,11 +70,12 @@ func (e *turnBusyError) Error() string {
 // safe; the single settle guarantee holds across the readLoop (response /
 // notification / EOF) and any abandoning closer.
 type turnDispatch struct {
-	mu       sync.Mutex
-	epoch    uint64 // bumped on promote; a settle carrying an older epoch is dropped
-	reqID    int    // ACP request id of the in-flight session/prompt (0 = none)
-	hostText strings.Builder
-	wait     chan turnOutcome // buffered 1; written exactly once per promote
+	mu          sync.Mutex
+	epoch       uint64 // bumped on promote; a settle carrying an older epoch is dropped
+	reqID       int    // ACP request id of the in-flight session/prompt (0 = none)
+	hostText    strings.Builder
+	wait        chan turnOutcome // buffered 1; written exactly once per promote
+	goalCreated chan string      // first durable goal_created observation for this turn
 }
 
 // promote claims the turn slot for reqID (operation lease). Returns the epoch
@@ -89,7 +90,28 @@ func (d *turnDispatch) promote(reqID int) (uint64, <-chan turnOutcome, error) {
 	d.reqID = reqID
 	d.hostText.Reset()
 	d.wait = make(chan turnOutcome, 1)
+	d.goalCreated = make(chan string, 1)
 	return d.epoch, d.wait, nil
+}
+
+func (d *turnDispatch) goalCreatedSignal() <-chan string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.goalCreated
+}
+
+func (d *turnDispatch) notifyGoalCreated(objective string) {
+	d.mu.Lock()
+	if d.reqID == 0 || d.goalCreated == nil {
+		d.mu.Unlock()
+		return
+	}
+	ch := d.goalCreated
+	d.mu.Unlock()
+	select {
+	case ch <- objective:
+	default:
+	}
 }
 
 // settle delivers the outcome iff epoch is the live turn's. Exactly one

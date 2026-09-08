@@ -121,8 +121,9 @@ type LeaderSubscriber struct {
 	// the authoritative close for the answering client, because the leader's
 	// interaction_resolved broadcast already evicted the registry entry by
 	// then (take() makes the broadcast side silent).
-	emitFn func(core.Event)
-	emitMu sync.Mutex
+	emitFn      func(core.Event)
+	emitMu      sync.Mutex
+	updateState *grokUpdateState
 }
 
 // emitSessionEvent delivers an event through the Run callback if still live.
@@ -139,15 +140,15 @@ func (s *LeaderSubscriber) emitSessionEvent(ev core.Event) {
 // normally resolveLeaderSocket(grokHome).
 func NewLeaderSubscriber(socketPath, sessionID, cwd string) *LeaderSubscriber {
 	return &LeaderSubscriber{socketPath: socketPath, sessionID: sessionID, cwd: cwd,
-		interactions: newLeaderInteractionRegistry()}
+		interactions: newLeaderInteractionRegistry(), updateState: newGrokUpdateState()}
 }
 
 // leaderInteraction is one registered interaction reverse-request. kind
 // distinguishes the two surfaced shapes; both share the tool_call_id identity
 // the official interaction_resolved broadcast evicts on.
 type leaderInteraction struct {
-	wireID     int                   // original numeric JSON-RPC id to answer with
-	toolCallID string                // identity shared with interaction_resolved
+	wireID     int    // original numeric JSON-RPC id to answer with
+	toolCallID string // identity shared with interaction_resolved
 	kind       leaderInteractionKind
 	params     askUserQuestionParams // question-kind payload (questions, mode)
 	// perm carries the permission-kind payload (options, title). The iOS
@@ -605,7 +606,7 @@ func (s *LeaderSubscriber) handleACP(payload string, pending *leaderPending, ses
 			s.onACU(acuSid, acuCmds)
 		}
 	}
-	for _, ev := range convertSessionUpdate(params, sessionID) {
+	for _, ev := range convertSessionUpdateWithState(params, sessionID, s.updateState) {
 		if onEvent != nil {
 			onEvent(ev)
 		}
@@ -824,9 +825,9 @@ func parseQuestionID(questionID string) (toolCallID string, index int, err error
 // as notes (freeform-only selects are the single label "Other"); Cancelled is
 // a bare tag (not an error upstream).
 type askUserQuestionExtResponse struct {
-	Outcome     string                     `json:"outcome"` // "accepted" | "cancelled"
-	Answers     map[string][]string        `json:"answers,omitempty"`
-	Annotations map[string]askAnnotation   `json:"annotations,omitempty"`
+	Outcome     string                   `json:"outcome"` // "accepted" | "cancelled"
+	Answers     map[string][]string      `json:"answers,omitempty"`
+	Annotations map[string]askAnnotation `json:"annotations,omitempty"`
 }
 
 // askAnnotation mirrors upstream QuestionAnnotation{preview, notes} — only

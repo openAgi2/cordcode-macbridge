@@ -90,7 +90,7 @@ func (a *Agent) ListSessionCommands(ctx context.Context, sessionID string) ([]co
 	return applyGrokAdmission(cmds), nil
 }
 
-// ExecuteSessionCommand runs one official slash line for the session on the
+// ExecuteSessionCommand runs one official slash command payload for the session on the
 // session's OWN live actor via the shared turn dispatcher (§4.2): the slash
 // line is prompt semantics (`session/prompt`), the official feedback body
 // arrives as hostTurn agent_message_chunk on the same Events rail the chat
@@ -106,8 +106,8 @@ func (a *Agent) ExecuteSessionCommand(ctx context.Context, sessionID, line strin
 	if sessionID == "" {
 		return core.SessionCommandResult{}, errors.New("grokbuild: execute: empty session id")
 	}
-	if !strings.HasPrefix(line, "/") || strings.ContainsAny(line, "\r\n") {
-		return core.SessionCommandResult{}, errors.New("grokbuild: execute: line must be a single official slash line")
+	if !strings.HasPrefix(line, "/") {
+		return core.SessionCommandResult{}, errors.New("grokbuild: execute: payload must start with an official slash command")
 	}
 	name := slashCommandName(line)
 	if name == "" {
@@ -166,7 +166,32 @@ func (s *grokSession) executeHostCommand(ctx context.Context, line string) (core
 	if err != nil {
 		return core.SessionCommandResult{}, err
 	}
+	name := slashCommandName(line)
+	var goalCreated <-chan string
+	if name == "goal" && grokGoalCreationCommand(line) {
+		goalCreated = s.turn.goalCreatedSignal()
+	}
 	select {
+	case objective := <-goalCreated:
+		// Goal execution is detached by Grok after durable creation. Return the
+		// command RPC immediately, but deliberately keep the dispatcher lease:
+		// the same actor continues streaming goal rounds and owns the eventual
+		// session/prompt response. This is the key difference from a timeout,
+		// which explicitly cancels the turn below.
+		goalID := ""
+		if s.updateState != nil {
+			s.updateState.mu.Lock()
+			goalID = s.updateState.goal.ID
+			s.updateState.mu.Unlock()
+		}
+		if goalID != "" {
+			args := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "/goal"))
+			s.emit(core.Event{Type: core.EventSessionCommand, SessionCommand: &core.SessionCommandEvent{
+				CommandID: "grok-goal:" + goalID,
+				Name:      "goal", Args: args, Kind: "success", InputLine: strings.TrimSpace(line),
+			}})
+		}
+		return core.SessionCommandResult{ResultKind: "success", ResultText: objective}, nil
 	case out := <-wait:
 		if out.Err != nil {
 			return core.SessionCommandResult{}, out.Err
@@ -192,6 +217,20 @@ func (s *grokSession) executeHostCommand(ctx context.Context, line string) (core
 		// still flows through Events (mirrors cancel-then-cleanup).
 		_ = s.CancelTurn(ctx)
 		return core.SessionCommandResult{}, ctx.Err()
+	}
+}
+
+func grokGoalCreationCommand(line string) bool {
+	args := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "/goal"))
+	if args == "" {
+		return false
+	}
+	first := strings.ToLower(strings.Fields(args)[0])
+	switch first {
+	case "status", "pause", "resume", "clear":
+		return false
+	default:
+		return true
 	}
 }
 

@@ -36,6 +36,8 @@ var _ core.RichHistoryProvider = (*Agent)(nil)
 var _ core.SessionEventSubscriber = (*Agent)(nil)
 var _ core.SessionQuestionResponder = (*Agent)(nil)
 var _ core.SessionModelSelectionReader = (*Agent)(nil)
+var _ core.BackgroundTaskProvider = (*Agent)(nil)
+var _ core.BackgroundTaskDetailReader = (*Agent)(nil)
 
 // Agent implements core.Agent for the Grok Build CLI.
 type Agent struct {
@@ -44,6 +46,7 @@ type Agent struct {
 	cliExtraArgs    []string
 	model           string
 	reasoningEffort string
+	permissionMode  string
 	allowedTools    []string
 	// providers / activeIdx 背载 iOS 下发的第三方 Grok provider 配置（GLM/DeepSeek 等
 	// 经 grok 网关）。AvailableModels 优先返 active provider 的 Models，使 custom 模型可见；
@@ -147,6 +150,9 @@ func New(opts map[string]any) (core.Agent, error) {
 	}
 	if v, ok := opts["reasoning_effort"].(string); ok && v != "" {
 		a.reasoningEffort = normalizeReasoningEffort(v)
+	}
+	if v, ok := opts["permission_mode"].(string); ok {
+		a.SetMode(v)
 	}
 	if raw, ok := opts["allowed_tools"].([]any); ok {
 		for _, t := range raw {
@@ -602,12 +608,48 @@ func (a *Agent) GetWorkDir() string {
 	return a.workDir
 }
 
-// --- 模式（方案 2026-09-07 §5.1：Grok 永不落 legacy ModeSwitcher）---
-//
-// 六键 legacy SetMode/GetMode/PermissionModes 已移除：无真实后端语义的空转
-//（方案回滚行「绝不恢复六键 legacy 空转」）。typed 读侧见 session_mode.go
-// （core.SessionModeReader）；写入面因 P7 官方恢复阻断明确禁用
-// （grokModeSwitchBlockedReason），待官方生命周期方案落地再开。
+// --- Permission mode -------------------------------------------------------
+
+var grokPermissionModes = []core.PermissionModeInfo{
+	{Key: "default", Name: "Default", NameZh: "默认", Desc: "Ask before operations that require approval", DescZh: "需要授权的操作会先询问"},
+	{Key: "acceptEdits", Name: "Accept edits", NameZh: "接受编辑", Desc: "Automatically accept file edits", DescZh: "自动接受文件编辑"},
+	{Key: "auto", Name: "Auto", NameZh: "自动", Desc: "Let Grok choose when approval is required", DescZh: "由 Grok 判断何时需要授权"},
+	{Key: "dontAsk", Name: "Don't ask", NameZh: "不询问", Desc: "Do not open interactive approval prompts", DescZh: "不弹出交互式授权请求"},
+	{Key: "bypassPermissions", Name: "Bypass permissions", NameZh: "跳过权限检查", Desc: "Approve all tool executions", DescZh: "自动批准所有工具执行"},
+	{Key: "plan", Name: "Plan", NameZh: "计划", Desc: "Work in plan mode before implementation", DescZh: "实施前先在计划模式中工作"},
+}
+
+func validGrokPermissionMode(mode string) bool {
+	for _, candidate := range grokPermissionModes {
+		if candidate.Key == mode {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Agent) SetMode(mode string) {
+	mode = strings.TrimSpace(mode)
+	if !validGrokPermissionMode(mode) {
+		return
+	}
+	a.mu.Lock()
+	a.permissionMode = mode
+	a.mu.Unlock()
+}
+
+func (a *Agent) GetMode() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.permissionMode == "" {
+		return "default"
+	}
+	return a.permissionMode
+}
+
+func (a *Agent) PermissionModes() []core.PermissionModeInfo {
+	return append([]core.PermissionModeInfo(nil), grokPermissionModes...)
+}
 
 // --- ModelSwitcher ---
 

@@ -180,12 +180,17 @@ func extractParams(line []byte) json.RawMessage {
 // params is the raw "params" field of the session/update notification:
 // {"sessionId":"...", "update": {"sessionUpdate":"agent_message_chunk", "content":{...}}, "_meta":{...}}
 func convertSessionUpdate(params json.RawMessage, sessionID string) []core.Event {
+	return convertSessionUpdateWithState(params, sessionID, nil)
+}
+
+func convertSessionUpdateWithState(params json.RawMessage, sessionID string, state *grokUpdateState) []core.Event {
 	// First parse the outer wrapper to get the "update" field and the top-level _meta.
 	var outer struct {
 		Update sessionUpdatePayload `json:"update"`
 		Meta   struct {
-			PromptID    string `json:"promptId,omitempty"`
-			PromptIDRaw string `json:"prompt_id,omitempty"`
+			PromptID         string `json:"promptId,omitempty"`
+			PromptIDRaw      string `json:"prompt_id,omitempty"`
+			AgentTimestampMs int64  `json:"agentTimestampMs,omitempty"`
 		} `json:"_meta,omitempty"`
 	}
 	if err := json.Unmarshal(params, &outer); err != nil {
@@ -210,6 +215,26 @@ func convertSessionUpdate(params json.RawMessage, sessionID string) []core.Event
 	}
 
 	switch p.SessionUpdate {
+	case "goal_updated":
+		goal := grokGoalEvent(p, outer.Meta.AgentTimestampMs)
+		if goal == nil {
+			return nil
+		}
+		if state != nil {
+			state.observeGoal(*goal)
+		}
+		return []core.Event{{Type: core.EventSessionGoal, Goal: goal}}
+
+	case "subagent_spawned", "subagent_finished":
+		if state == nil {
+			return nil
+		}
+		workflow, turnID, ok := state.observeSubagent(p)
+		if !ok {
+			return nil
+		}
+		return []core.Event{{Type: core.EventWorkflowRun, TurnID: turnID, WorkflowRun: &workflow}}
+
 	case "agent_message_chunk":
 		if !p.hasContent() {
 			return nil

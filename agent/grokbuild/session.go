@@ -101,12 +101,13 @@ type grokSession struct {
 	// drift check runs on the turn path; readLoop does not touch these).
 	appliedModel  string
 	appliedEffort string
+	updateState   *grokUpdateState
 }
 
 func newGrokSession(ctx context.Context, agent *Agent, sessionID string) (*grokSession, error) {
 	sessionCtx, cancel := context.WithCancel(ctx)
 
-	args := []string{"agent", "--no-leader", "stdio"}
+	args := []string{"--permission-mode", agent.GetMode(), "agent", "--no-leader", "stdio"}
 	args = append(args, agent.cliExtraArgs...)
 
 	cmd := exec.CommandContext(sessionCtx, agent.cliBin, args...)
@@ -154,6 +155,7 @@ func newGrokSession(ctx context.Context, agent *Agent, sessionID string) (*grokS
 		pendingPerms:     make(map[string][]permissionOption),
 		pendingQuestions: make(map[string]*pendingAskUserQuestion),
 		respChannels:     make(map[int]chan *jsonrpcResponse),
+		updateState:      newGrokUpdateState(),
 	}
 	// One-shot cwd capture at spawn (loadSession re-captures on load).
 	s.cwd.Store(agent.GetWorkDir())
@@ -1056,8 +1058,8 @@ func (s *grokSession) handleRequest(req *agentRequest) {
 }
 
 func (s *grokSession) handleNotification(notif *agentNotification) {
-	switch notif.Method {
-	case "session/update":
+	switch {
+	case isSessionUpdateMethod(notif.Method):
 		// hostTurn 反馈正文（§7 正文组）：先于事件转换收进本 turn 的 collector
 		// ——Execute 的 official settle resultText 来源。正文同时照常走
 		// agent_message_chunk 事件轨（聊天里可见），collector 只是第二读者。
@@ -1084,7 +1086,10 @@ func (s *grokSession) handleNotification(notif *agentNotification) {
 				s.agent.modeSide.markDirty(cmuSid)
 			}
 		}
-		events := convertSessionUpdate(notif.Params, s.CurrentSessionID())
+		events := convertSessionUpdateWithState(notif.Params, s.CurrentSessionID(), s.updateState)
+		if objective, ok := goalCreatedUpdate(notif.Params); ok {
+			s.turn.notifyGoalCreated(objective)
+		}
 		alreadyUsage := false
 		refreshSignals := false
 		for _, ev := range events {
@@ -1101,7 +1106,7 @@ func (s *grokSession) handleNotification(notif *agentNotification) {
 				s.emit(core.Event{Type: core.EventContextUsageUpdated, ContextUsage: usage})
 			}
 		}
-	case "session/cancel":
+	case notif.Method == "session/cancel":
 		// Agent cancelled its own turn. Settle the live slot as cancelled and
 		// emit the terminal; a later session/prompt response for the same turn
 		// is dropped by the dispatcher (settle-once). Mirrors cancel.rs: the
