@@ -77,6 +77,7 @@ type turnDispatch struct {
 	wait        chan turnOutcome // buffered 1; written exactly once per promote
 	goalCreated chan string      // first durable goal_created observation for this turn
 	goalUpdated chan struct{}    // first durable goal_updated observation for this turn
+	settled     chan struct{}    // closed when this operation lease becomes free
 }
 
 // promote claims the turn slot for reqID (operation lease). Returns the epoch
@@ -93,6 +94,7 @@ func (d *turnDispatch) promote(reqID int) (uint64, <-chan turnOutcome, error) {
 	d.wait = make(chan turnOutcome, 1)
 	d.goalCreated = make(chan string, 1)
 	d.goalUpdated = make(chan struct{}, 1)
+	d.settled = make(chan struct{})
 	return d.epoch, d.wait, nil
 }
 
@@ -149,8 +151,10 @@ func (d *turnDispatch) settle(epoch uint64, out turnOutcome) bool {
 	out.HostText = d.hostText.String()
 	d.reqID = 0
 	ch := d.wait
+	settled := d.settled
 	d.mu.Unlock()
 
+	close(settled)
 	// The slot is free again; a new promote may replace d.wait, but this send
 	// targets the channel captured under the lock. Buffered 1 + single winner
 	// means it never blocks and never double-settles.
@@ -203,6 +207,18 @@ func (d *turnDispatch) activeReqID() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.reqID
+}
+
+// activeSettledSignal returns a non-consuming completion signal for the
+// current operation lease. Goal controls use it to wait for cancellation
+// without racing the original Send/Execute owner for the turnOutcome value.
+func (d *turnDispatch) activeSettledSignal() (<-chan struct{}, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.reqID == 0 || d.settled == nil {
+		return nil, false
+	}
+	return d.settled, true
 }
 
 // promptResponseMeta is the subset of session/prompt response result we act on

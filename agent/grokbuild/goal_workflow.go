@@ -33,10 +33,29 @@ type grokUpdateState struct {
 	goal    core.GoalEvent
 	members map[string]*grokWorkflowMemberState
 	order   []string
+	// goalChanged is rotated after every authoritative goal update. Unlike the
+	// per-turn dispatcher signal, it survives a prompt terminal arriving before
+	// the subsequent goal_paused/goal_cleared notification.
+	goalChanged chan struct{}
 }
 
 func newGrokUpdateState() *grokUpdateState {
-	return &grokUpdateState{members: make(map[string]*grokWorkflowMemberState)}
+	return &grokUpdateState{members: make(map[string]*grokWorkflowMemberState), goalChanged: make(chan struct{})}
+}
+
+func (s *grokUpdateState) goalUpdateSignal() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.goalChanged == nil {
+		s.goalChanged = make(chan struct{})
+	}
+	return s.goalChanged
+}
+
+func (s *grokUpdateState) goalPhase() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.goal.Phase
 }
 
 func grokGoalPhase(status string) (string, *core.GoalBlockedReason, bool) {
@@ -101,6 +120,12 @@ func (s *grokUpdateState) observeGoal(goal core.GoalEvent) (core.WorkflowRunEven
 		s.order = nil
 	}
 	s.goal = goal
+	if s.goalChanged == nil {
+		s.goalChanged = make(chan struct{})
+	} else {
+		close(s.goalChanged)
+		s.goalChanged = make(chan struct{})
+	}
 	return s.workflowSnapshotLocked("")
 }
 
