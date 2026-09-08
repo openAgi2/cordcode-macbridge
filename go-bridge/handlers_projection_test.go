@@ -1837,9 +1837,9 @@ func TestRichHistorySystemEntryToProjectionEvent(t *testing.T) {
 func TestRichHistoryCommandAndPlanModeEntriesRouteToReducerEvents(t *testing.T) {
 	current := "user-before"
 	cmd := core.RichHistoryEntry{
-		ID:      "s-hist:cmd:c1",
-		Role:    "system",
-		Parts:   []map[string]any{{"type": "command", "commandId": "c1", "name": "compact", "kind": "success", "text": "Compacted 20 history items (~11695 tokens)."}},
+		ID:    "s-hist:cmd:c1",
+		Role:  "system",
+		Parts: []map[string]any{{"type": "command", "commandId": "c1", "name": "compact", "kind": "success", "text": "Compacted 20 history items (~11695 tokens)."}},
 	}
 	events := openCodeRichHistoryEntryToProjectionEvents(cmd, &current, true)
 	if len(events) != 1 || events[0].Event != "session_command" {
@@ -2244,7 +2244,7 @@ func TestGrokBuildProjectionHydratePendingQuestionGate(t *testing.T) {
 		"status": "pending", "canRespond": true, "canReject": true,
 		"questions": []map[string]any{{
 			"id": "call_open", "prompt": "选一个？", "answerMode": "single",
-			"options":       []map[string]any{{"id": "A", "label": "A", "description": "da"}},
+			"options":            []map[string]any{{"id": "A", "label": "A", "description": "da"}},
 			"allowsCustomAnswer": true, "required": true,
 		}},
 	}}
@@ -2273,6 +2273,60 @@ func TestGrokBuildProjectionHydratePendingQuestionGate(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "requires_action") {
 		t.Fatalf("pending question must keep execution in requires_action: %s", string(raw))
+	}
+}
+
+// A Ready kernel may be stale when the direct Grok relay died during a long
+// silent goal wait. A non-zero reconnect pull must reconcile the pathless rich
+// history instead of returning an empty at-head delta from that stale kernel.
+func TestGrokBuildProjectionReconnectRecoversReadyKernelWithoutRelay(t *testing.T) {
+	h := NewHandlers()
+	agent := &fakeAgent{
+		name: "grokbuild",
+		richHistory: []core.RichHistoryEntry{
+			{ID: "u1", Role: "user", Content: "build the stories"},
+			{ID: "a1", Role: "assistant", Content: "planning"},
+		},
+	}
+	h.mu.Lock()
+	h.agents = map[string]core.Agent{"grokbuild": agent}
+	h.mu.Unlock()
+
+	first := &readFileCaptureConn{}
+	h.handleGetSessionProjection(first, WireMessage{
+		RequestID: "r-grok-first", BackendID: "grokbuild", Method: "get_session_projection",
+		Params: mustJSONRaw(t, map[string]any{"sessionId": "ses-grok-recover", "sinceRev": 0}),
+	}, nil)
+	if first.err != nil {
+		t.Fatalf("initial Grok projection pull failed: %+v", first.err)
+	}
+	firstData, ok := first.data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("initial data type = %T", first.data)
+	}
+	initial, ok := firstData["projection"].(SessionProjection)
+	if !ok || initial.SyncRev == 0 {
+		t.Fatalf("initial projection missing: %+v", firstData)
+	}
+
+	// Model the failure state: ownership still says running, the agent relay is
+	// absent, and updates.jsonl/rich history advanced behind the Ready kernel.
+	h.sessions.claimRunning("ses-grok-recover")
+	agent.richHistory = append(agent.richHistory,
+		core.RichHistoryEntry{ID: "a2", Role: "assistant", Content: "王熙凤 story completed"},
+	)
+
+	reconnect := &readFileCaptureConn{}
+	h.handleGetSessionProjection(reconnect, WireMessage{
+		RequestID: "r-grok-reconnect", BackendID: "grokbuild", Method: "get_session_projection",
+		Params: mustJSONRaw(t, map[string]any{"sessionId": "ses-grok-recover", "sinceRev": initial.SyncRev}),
+	}, nil)
+	if reconnect.err != nil {
+		t.Fatalf("reconnect Grok projection pull failed: %+v", reconnect.err)
+	}
+	raw, _ := json.Marshal(reconnect.data)
+	if !strings.Contains(string(raw), "王熙凤 story completed") {
+		t.Fatalf("reconnect returned stale Ready kernel: %s", raw)
 	}
 }
 

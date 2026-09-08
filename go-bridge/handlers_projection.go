@@ -87,6 +87,14 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	}
 	params.SessionID = h.resolveSessionIDForActiveSession(params.SessionID)
 	logProjectionRPCTrace("mac_receive", msg, params.SessionID, params.SinceRev, -1, "", nil)
+	// A non-zero pull normally trusts the committed kernel and asks only for a
+	// journal delta. Grok has an additional recovery case: an owned/running
+	// session whose direct agent relay disappeared after a long silent model
+	// wait. In that state the kernel can be Ready but behind updates.jsonl. Take
+	// the recovery decision before startProjectionLiveRelay reattaches, then
+	// force one pathless rich-history reconciliation below.
+	grokRelayRecovery := msg.BackendID == "grokbuild" && params.SinceRev > 0 &&
+		h.sessions.isKnownActive(params.SessionID) && !h.agentRelayRunningFor(params.SessionID)
 
 	// Subscribe so the conn receives subsequent projection_patch push frames (WP5 emission).
 	h.subscribeConnToSession(conn, msg, params.SessionID, "")
@@ -117,6 +125,7 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 			msg.BackendID == "claude" || msg.BackendID == "claudecode" ||
 			msg.BackendID == "deepseek" || msg.BackendID == "dsh-web" ||
 			msg.BackendID == "codex-web" || msg.BackendID == "codex-remote")
+	forceColdInspection = forceColdInspection || grokRelayRecovery
 	// Claude cold open starts the live file relay BEFORE the hydrate wait (aligned with
 	// codex/opencode above) so in-flight terminal events can feed the commit gate, and passes
 	// the hydrate admission cut so the relay's initial scan range is disjoint from the
@@ -1400,11 +1409,11 @@ func hydrateWorkflowEventsFromPart(part map[string]any, turnID string) []project
 	return []projectionHydrateEvent{{
 		Event: "workflow_run",
 		Data: map[string]interface{}{
-			"turnId":          turnID,
-			"workflowId":      workflowID,
-			"workflowName":    dataString(part, "workflowName"),
-			"workflowStatus":  status,
-			"workflowPhases":  phases,
+			"turnId":         turnID,
+			"workflowId":     workflowID,
+			"workflowName":   dataString(part, "workflowName"),
+			"workflowStatus": status,
+			"workflowPhases": phases,
 		},
 	}}
 }

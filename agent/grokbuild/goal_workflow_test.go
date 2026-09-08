@@ -92,6 +92,47 @@ func TestLoadGrokGoalSnapshotPreservesInfraPauseMessage(t *testing.T) {
 	}
 }
 
+func TestGrokPlannerFailureReportedAsUserPauseIsBlocked(t *testing.T) {
+	const failure = "Planning failed: serialization error: missing field action"
+	events := convertSessionUpdateWithState(goalUpdateParams(t, map[string]any{
+		"sessionUpdate": "goal_updated", "goal_id": "goal-1", "objective": "ship it",
+		"status": "user_paused", "pause_message": failure, "last_event": "goal_paused",
+	}, 1234), "parent", newGrokUpdateState())
+	if len(events) != 1 || events[0].Goal == nil || events[0].Goal.Phase != "blocked" ||
+		events[0].Goal.BlockedReason == nil || events[0].Goal.BlockedReason.Code != "planning_failed" ||
+		events[0].Goal.BlockedReason.Message != failure {
+		t.Fatalf("planner failure projection = %+v", events)
+	}
+
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "goal"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	state := map[string]any{
+		"goal_id": "goal-1", "objective": "ship it", "status": "user_paused", "pause_message": failure,
+		"history": []map[string]any{{"timestamp": "2026-09-08T08:14:27Z", "event": "goal_paused", "detail": failure}},
+	}
+	raw, _ := json.Marshal(state)
+	if err := os.WriteFile(filepath.Join(dir, "goal", "state.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	goal := loadGrokGoalSnapshot(dir)
+	if goal == nil || goal.Phase != "blocked" || goal.BlockedReason == nil ||
+		goal.BlockedReason.Code != "planning_failed" || goal.BlockedReason.Message != failure {
+		t.Fatalf("cold planner failure projection = %+v", goal)
+	}
+}
+
+func TestGrokExplicitUserPauseRemainsPaused(t *testing.T) {
+	events := convertSessionUpdateWithState(goalUpdateParams(t, map[string]any{
+		"sessionUpdate": "goal_updated", "goal_id": "goal-1", "objective": "ship it",
+		"status": "user_paused", "pause_message": "Paused by user",
+	}, 1234), "parent", newGrokUpdateState())
+	if len(events) != 1 || events[0].Goal == nil || events[0].Goal.Phase != "paused" || events[0].Goal.BlockedReason != nil {
+		t.Fatalf("explicit user pause projection = %+v", events)
+	}
+}
+
 func TestDecorateGrokGoalHistoryKeepsFailedWorkflowVisibleWithoutAssistantText(t *testing.T) {
 	sessionDir := t.TempDir()
 	updates := []map[string]any{

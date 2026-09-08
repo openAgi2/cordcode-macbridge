@@ -54,6 +54,30 @@ func grokGoalPhase(status string) (string, *core.GoalBlockedReason, bool) {
 	}
 }
 
+// Grok currently reports planner/model failures as user_paused in some goal
+// paths, with the actual failure preserved only in pause_message. Do not turn
+// every user pause into a failure: promote only messages that explicitly carry
+// a failed/error fact, and retain the backend text verbatim for diagnosis.
+func promoteGrokPausedFailure(phase string, blocked *core.GoalBlockedReason, pauseMessage, lastEvent string) (string, *core.GoalBlockedReason) {
+	if phase != "paused" {
+		return phase, blocked
+	}
+	message := strings.TrimSpace(pauseMessage)
+	lowerMessage := strings.ToLower(message)
+	if message == "" || (!strings.Contains(lowerMessage, "failed") && !strings.Contains(lowerMessage, "error")) {
+		return phase, blocked
+	}
+	code := strings.ToLower(strings.TrimSpace(lastEvent))
+	if !strings.Contains(code, "fail") && !strings.Contains(code, "error") {
+		if strings.HasPrefix(lowerMessage, "planning failed") {
+			code = "planning_failed"
+		} else {
+			code = "goal_failed"
+		}
+	}
+	return "blocked", &core.GoalBlockedReason{Code: code, Message: message}
+}
+
 func grokGoalEvent(p sessionUpdatePayload, revision int64) *core.GoalEvent {
 	if strings.TrimSpace(p.GoalID) == "" || strings.TrimSpace(p.Objective) == "" {
 		return nil
@@ -62,6 +86,7 @@ func grokGoalEvent(p sessionUpdatePayload, revision int64) *core.GoalEvent {
 	if !ok {
 		return nil
 	}
+	phase, blocked = promoteGrokPausedFailure(phase, blocked, p.PauseMessage, p.LastEvent)
 	if blocked != nil && strings.TrimSpace(p.PauseMessage) != "" {
 		blocked.Message = strings.TrimSpace(p.PauseMessage)
 	}
@@ -116,6 +141,11 @@ func loadGrokGoalSnapshot(sessionDir string) *core.GoalEvent {
 	if !ok {
 		return nil
 	}
+	lastEvent := ""
+	if n := len(state.History); n > 0 {
+		lastEvent = state.History[n-1].Event
+	}
+	phase, blocked = promoteGrokPausedFailure(phase, blocked, state.PauseMessage, lastEvent)
 	if blocked != nil && strings.TrimSpace(state.PauseMessage) != "" {
 		blocked.Message = strings.TrimSpace(state.PauseMessage)
 	}

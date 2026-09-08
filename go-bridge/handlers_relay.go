@@ -2983,6 +2983,16 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 			if disablesRelayIdleTimeout(backendID) {
 				continue
 			}
+			// A Grok goal may legitimately stay silent while its planner or a child
+			// agent is waiting on the upstream model. The registry is the ownership
+			// signal here: while this exact session is still known running, silence is
+			// not a terminal event. Keep the direct agent relay attached so the next
+			// workflow/subagent update is not lost. Unknown/idle Grok sessions retain
+			// the bounded timeout and exit, avoiding a permanent passive-attach leak.
+			if backendID == "grokbuild" && h.sessions.isKnownActive(sessionID) {
+				idleTimer.Reset(relayActiveTimeout)
+				continue
+			}
 			slog.Warn("go-bridge: relayEvents idle timeout, auto-completing", "backendID", backendID, "sessionID", sessionID, "eventsSeen", eventCount)
 			if h.sessions.isKnownActive(sessionID) {
 				h.mu.Lock()

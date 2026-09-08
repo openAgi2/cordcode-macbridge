@@ -888,6 +888,73 @@ func TestGrokDG2_G8_UnknownNoAutoTerminalOnIdleTimer(t *testing.T) {
 	}
 }
 
+// A known-running Grok goal can remain silent across both the initial attach
+// timeout and the active-event timeout while its planner/subagent waits on the
+// upstream model. The direct relay must survive both gaps and deliver the real
+// terminal event instead of fabricating an early completion.
+func TestGrokRelayKnownActiveSurvivesSilentGoalWait(t *testing.T) {
+	oldInitialTimeout := relayInitialTimeout
+	oldActiveTimeout := relayActiveTimeout
+	relayInitialTimeout = 25 * time.Millisecond
+	relayActiveTimeout = 25 * time.Millisecond
+	defer func() {
+		relayInitialTimeout = oldInitialTimeout
+		relayActiveTimeout = oldActiveTimeout
+	}()
+
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers := NewHandlers()
+	defer handlers.observation.Stop()
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{
+		BackendID: "grokbuild",
+		SessionID: "ses_grok_silent_goal",
+	})
+	session := &fakeAgentSession{id: "ses_grok_silent_goal", events: make(chan core.Event, 2)}
+	handlers.putSessionWithMeta("ses_grok_silent_goal", "grokbuild", "", session)
+	handlers.sessions.markRunning("ses_grok_silent_goal")
+
+	done := make(chan struct{})
+	go func() {
+		handlers.relayEvents(serverConn, session, "ses_grok_silent_goal", "grokbuild")
+		close(done)
+	}()
+
+	// No first event for several initial timeout periods.
+	time.Sleep(90 * time.Millisecond)
+	select {
+	case <-done:
+		t.Fatal("known-active Grok relay exited during initial silent wait")
+	default:
+	}
+
+	session.events <- core.Event{Type: core.EventText, Content: "planner resumed"}
+	events := readEventNames(t, clientConn, 1)
+	if events[0] != "text_delta" {
+		t.Fatalf("events = %v, want text_delta", events)
+	}
+
+	// Silence again after activity, beyond the active timeout.
+	time.Sleep(90 * time.Millisecond)
+	select {
+	case <-done:
+		t.Fatal("known-active Grok relay exited during active silent wait")
+	default:
+	}
+
+	session.events <- core.Event{Type: core.EventResult, Done: true, Content: "done"}
+	events = readEventNames(t, clientConn, 1)
+	if events[0] != "turn_completed" {
+		t.Fatalf("events = %v, want real turn_completed", events)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("relay did not exit after the real terminal event")
+	}
+}
+
 // TestGrokDG2_G8_UnknownNoAbortOnCodexHardCap：registry 置 unknown 后 codex
 // file relay hardCap（进程死亡判定）不合成 turn_aborted、不广播 idle。
 func TestGrokDG2_G8_UnknownNoAbortOnCodexHardCap(t *testing.T) {
