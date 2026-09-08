@@ -127,6 +127,24 @@ func TestSubmitCodeWhileAuthorizingDoesNotMarkFailed(t *testing.T) {
 	}
 }
 
+func TestInProgressEnrollmentIsNotPersistedIdentity(t *testing.T) {
+	agent := New(map[string]any{"data_dir": t.TempDir(), "skip_restore": true})
+	key, err := agent.pairing.keys.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.pairing.mu.Lock()
+	agent.pairing.state.phase = PairPhaseAwaitingCode
+	agent.pairing.state.clientID = "client_probe"
+	agent.pairing.state.key = key
+	agent.pairing.state.ctrlToken = "ctrl"
+	agent.pairing.mu.Unlock()
+
+	if agent.pairing.hasPersistedIdentity() {
+		t.Fatal("in-progress enrollment must not be treated as restorable before the pairing store exists")
+	}
+}
+
 func TestInstanceStatusUnpaired(t *testing.T) {
 	ok, detail := New(nil).InstanceStatus()
 	if ok {

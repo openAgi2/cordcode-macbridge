@@ -43,6 +43,18 @@ final class ManagementAPIClientTimeoutTests: XCTestCase {
         XCTAssertEqual(status.status, "ready")
         XCTAssertLessThan(elapsed, 3.0, "status against healthy server took \(elapsed)s")
     }
+
+    func testPairingSubmitReconcilesLostResponseFromReadyStatus() async throws {
+        let server = LostPairingResponseHTTPServer()
+        try server.start()
+        defer { server.stop() }
+
+        let client = try ManagementAPIClient(baseURL: "http://127.0.0.1:\(server.port)", token: "t")
+        let status = try await client.submitCodexRemotePairingCode("ABCD-EFGH")
+
+        XCTAssertEqual(status.phase, "ready")
+        XCTAssertEqual(status.online, true)
+    }
 }
 
 // MARK: - 测试 HTTP server helpers（基于 Network.framework，无 raw socket）
@@ -94,6 +106,41 @@ private final class StubHTTPServer {
                 let resp = "HTTP/1.1 200 OK\r\nContent-Length: \(body.count)\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n\(body)"
                 conn.send(content: resp.data(using: .utf8), completion: .contentProcessed { _ in conn.cancel() })
                 _ = data
+            }
+        }
+        listener.stateUpdateHandler = { [weak self] state in
+            if case .ready = state, let p = listener.port?.rawValue {
+                self?.port = Int(p)
+            }
+        }
+        listener.start(queue: .global())
+        self.listener = listener
+        let deadline = Date().addingTimeInterval(2)
+        while port == 0 && Date() < deadline { usleep(10_000) }
+        if port == 0 { throw NSError(domain: "server", code: 1) }
+    }
+
+    func stop() { listener?.cancel() }
+}
+
+/// 模拟配对 POST 已提交成功但响应连接丢失，随后权威 status 返回 ready。
+private final class LostPairingResponseHTTPServer {
+    private var listener: NWListener?
+    private(set) var port = 0
+
+    func start() throws {
+        let listener = try NWListener(using: .tcp, on: .any)
+        listener.newConnectionHandler = { conn in
+            conn.start(queue: .global())
+            conn.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { data, _, _, _ in
+                let request = String(decoding: data ?? Data(), as: UTF8.self)
+                guard request.hasPrefix("GET /internal/agents/codex-remote/remote-control/status ") else {
+                    conn.cancel()
+                    return
+                }
+                let body = #"{"phase":"ready","message":"connected","online":true,"clientType":"CODEX_DESKTOP_APP"}"#
+                let response = "HTTP/1.1 200 OK\r\nContent-Length: \(body.utf8.count)\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n\(body)"
+                conn.send(content: response.data(using: .utf8), completion: .contentProcessed { _ in conn.cancel() })
             }
         }
         listener.stateUpdateHandler = { [weak self] state in

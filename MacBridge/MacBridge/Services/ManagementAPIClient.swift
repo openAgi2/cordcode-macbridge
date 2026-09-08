@@ -286,13 +286,21 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
 
     func submitCodexRemotePairingCode(_ code: String) async throws -> CodexRemotePairingStatus {
         let body = try JSONEncoder().encode(CodexRemotePairingCode(manualPairingCode: code))
-        let data = try await performRequest(
-            "/internal/agents/codex-remote/remote-control/pair",
-            method: "POST",
-            body: body,
-            using: remoteControlSession
-        )
-        return try JSONDecoder().decode(CodexRemotePairingStatus.self, from: data)
+        do {
+            let data = try await performRequest(
+                "/internal/agents/codex-remote/remote-control/pair",
+                method: "POST",
+                body: body,
+                using: remoteControlSession
+            )
+            return try JSONDecoder().decode(CodexRemotePairingStatus.self, from: data)
+        } catch {
+            let submissionError = error
+            if let status = try? await codexRemotePairingStatus(), status.phase == "ready" {
+                return status
+            }
+            throw submissionError
+        }
     }
 
     func codexRemotePairingStatus() async throws -> CodexRemotePairingStatus {

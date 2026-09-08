@@ -133,12 +133,8 @@ func (p *PairingController) hasPersistedIdentity() bool {
 		return false
 	}
 	p.mu.Lock()
-	ok := p.state.clientID != "" && p.state.key != nil
 	path := p.storePath
 	p.mu.Unlock()
-	if ok {
-		return true
-	}
 	if path == "" {
 		return false
 	}
