@@ -97,6 +97,25 @@ func promoteGrokPausedFailure(phase string, blocked *core.GoalBlockedReason, pau
 	return "blocked", &core.GoalBlockedReason{Code: code, Message: message}
 }
 
+// The goal harness pauses instead of completing when its hidden evaluator
+// cannot produce the required JSON after both attempts. Give that terminal,
+// non-user-actionable failure a stable code so clients can collapse the goal
+// chrome without also hiding auth, planning, budget, or genuine blockers.
+func normalizeGrokBlockedReason(blocked *core.GoalBlockedReason, pauseMessage string) {
+	if blocked == nil {
+		return
+	}
+	if message := strings.TrimSpace(pauseMessage); message != "" {
+		blocked.Message = message
+	}
+	if blocked.Code == "infra_paused" && strings.HasPrefix(
+		strings.ToLower(blocked.Message),
+		"goal evaluation failed after a bounded retry:",
+	) {
+		blocked.Code = "goal_evaluation_failed"
+	}
+}
+
 func grokGoalEvent(p sessionUpdatePayload, revision int64) *core.GoalEvent {
 	if strings.TrimSpace(p.GoalID) == "" || strings.TrimSpace(p.Objective) == "" {
 		return nil
@@ -106,9 +125,7 @@ func grokGoalEvent(p sessionUpdatePayload, revision int64) *core.GoalEvent {
 		return nil
 	}
 	phase, blocked = promoteGrokPausedFailure(phase, blocked, p.PauseMessage, p.LastEvent)
-	if blocked != nil && strings.TrimSpace(p.PauseMessage) != "" {
-		blocked.Message = strings.TrimSpace(p.PauseMessage)
-	}
+	normalizeGrokBlockedReason(blocked, p.PauseMessage)
 	return &core.GoalEvent{ID: p.GoalID, Revision: revision, Objective: p.Objective, Phase: phase, BlockedReason: blocked}
 }
 
@@ -171,9 +188,7 @@ func loadGrokGoalSnapshot(sessionDir string) *core.GoalEvent {
 		lastEvent = state.History[n-1].Event
 	}
 	phase, blocked = promoteGrokPausedFailure(phase, blocked, state.PauseMessage, lastEvent)
-	if blocked != nil && strings.TrimSpace(state.PauseMessage) != "" {
-		blocked.Message = strings.TrimSpace(state.PauseMessage)
-	}
+	normalizeGrokBlockedReason(blocked, state.PauseMessage)
 	revision := int64(0)
 	if n := len(state.History); n > 0 {
 		last := state.History[n-1]

@@ -92,6 +92,39 @@ func TestGrokInfraPauseSurfacesRealFailure(t *testing.T) {
 	}
 }
 
+func TestGrokEvaluatorFailureGetsStableTerminalCode(t *testing.T) {
+	const failure = "Goal evaluation failed after a bounded retry: goal evaluator output is not valid JSON: expected value at line 1 column 1. The goal was paused rather than treated as complete. Use /goal resume to retry."
+	events := convertSessionUpdateWithState(goalUpdateParams(t, map[string]any{
+		"sessionUpdate": "goal_updated", "goal_id": "goal-1", "objective": "ship it",
+		"status": "infra_paused", "pause_message": failure,
+	}, 1234), "parent", newGrokUpdateState())
+	if len(events) != 1 || events[0].Goal == nil || events[0].Goal.Phase != "blocked" ||
+		events[0].Goal.BlockedReason == nil || events[0].Goal.BlockedReason.Code != "goal_evaluation_failed" ||
+		events[0].Goal.BlockedReason.Message != failure {
+		t.Fatalf("evaluator failure projection = %+v", events)
+	}
+}
+
+func TestLoadGrokEvaluatorFailureSnapshotGetsStableTerminalCode(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "goal"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const failure = "Goal evaluation failed after a bounded retry: invalid JSON"
+	raw, _ := json.Marshal(map[string]any{
+		"goal_id": "goal-1", "objective": "ship it", "status": "infra_paused",
+		"pause_message": failure,
+	})
+	if err := os.WriteFile(filepath.Join(dir, "goal", "state.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	goal := loadGrokGoalSnapshot(dir)
+	if goal == nil || goal.Phase != "blocked" || goal.BlockedReason == nil ||
+		goal.BlockedReason.Code != "goal_evaluation_failed" || goal.BlockedReason.Message != failure {
+		t.Fatalf("goal snapshot = %+v", goal)
+	}
+}
+
 func TestLoadGrokGoalSnapshotPreservesInfraPauseMessage(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "goal"), 0o755); err != nil {
