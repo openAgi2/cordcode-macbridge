@@ -30,11 +30,11 @@
   },
   "reports": {
     "completion_report_path": "docs/2026-09-07-grok-build-slash-command-panel-implementation完成情况.md",
-    "completion_report_status": "missing",
-    "last_generated_at": null,
-    "based_on_queue_hash": null
+    "completion_report_status": "current",
+    "last_generated_at": "2026-09-09T21:28:29+08:00",
+    "based_on_queue_hash": "d47f458feed7"
   },
-  "updated_at": "2026-09-08T04:14:00+08:00",
+  "updated_at": "2026-09-09T21:28:29+08:00",
   "todos": [
     {
       "id": "p0a-pairing-binary-impl",
@@ -239,23 +239,26 @@
       "id": "p0b-exec-impl",
       "title": "P4(a) 恢复/归属证明 + P6 真实 turn 取证（无外发→外发分组）",
       "description": "P4(a) 恢复/归属证明 + P6 真实 turn 取证（无外发→外发分组）",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0b",
       "kind": "impl",
       "depends_on": [
         "p0b-confirm"
       ],
       "source": "§2 P4/P6/P7",
-      "notes": "owner 已确认。执行前先读 grok-build 源码确认官方 slash 执行路径与终态语义。",
+      "notes": "P4 取代记录：短命 mode-only child 路径废弃（P7 否定 + owner fork 禁令）；替代路径 = resident actor live 真值 + /plan（EVIDENCE P10）。P6 已完成并支撑准入终表。",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "mixed",
+        "status": "present",
+        "method": "implementation",
         "attestation": "self-attested",
+        "summary": "P4(a) 被 P7 实证否定（Pending 冷恢复丢回 Inactive）+ owner fork 禁令封死短命 child 路径；2026-09-09 P10 校正改为 resident actor 官方 set_mode 路径（本文 §2.3），P4 不再需要。P6 真实 turn 取证完成：compact/goal 样本+准入，真实执行经 owner 真机验证。",
+        "artifacts": [
+          "scripts/grokbuild-phase0/EVIDENCE.md（P6/P9/P10）",
+          "scripts/grokbuild-phase0/ADMISSION.md"
+        ],
+        "checked_at": "2026-09-09T21:35:00+08:00",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
         "upstream_anchor": null
       },
       "proof": {
@@ -274,7 +277,7 @@
       "id": "p0b-tests",
       "title": "P6 样本解码与准入矩阵校验",
       "description": "P6 样本解码与准入矩阵校验",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0b",
       "kind": "tests",
       "depends_on": [
@@ -284,13 +287,18 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "automated",
+        "status": "present",
+        "method": "tests",
         "attestation": "self-attested",
+        "summary": "反馈/命令准入矩阵校验落 ADMISSION §五 终表 {compact, goal}（后经 2026-09-09 校正 +plan）；fake catalog e2e 三模式（table/empty/exterr）覆盖 List/Execute 门。",
+        "artifacts": [
+          "scripts/grokbuild-phase0/ADMISSION.md",
+          "agent/grokbuild/acu_state.go",
+          "agent/grokbuild/session_commands_acu_test.go",
+          "scripts/grokbuild-phase0/samples/"
+        ],
+        "checked_at": "2026-09-09T21:35:00+08:00",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
         "upstream_anchor": null
       },
       "proof": {
@@ -306,7 +314,7 @@
       "id": "p0b-regression",
       "title": "反馈类型准入终表 + 模式可行/阻断结论（P4/P7/P8 汇总）",
       "description": "反馈类型准入终表 + 模式可行/阻断结论（P4/P7/P8 汇总）",
-      "status": "pending",
+      "status": "done",
       "phase": "phase0b",
       "kind": "regression",
       "depends_on": [
@@ -316,13 +324,16 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "mixed",
+        "status": "present",
+        "method": "implementation",
         "attestation": "self-attested",
+        "summary": "模式结论：短命 child 冷恢复阻断（P7），resident actor 路径采纳（P10 校正）；准入终表 {compact, goal, plan}；漂移表含 CMU 不落盘/commands/list 不等价/外 ext 前缀等处置行。",
+        "artifacts": [
+          "scripts/grokbuild-phase0/EVIDENCE.md（漂移表+P7+P10）",
+          "scripts/grokbuild-phase0/ADMISSION.md"
+        ],
+        "checked_at": "2026-09-09T21:35:00+08:00",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
         "upstream_anchor": null
       },
       "proof": {
@@ -430,7 +441,7 @@
       "id": "p1b-impl",
       "title": "共用 turn dispatch、Events 单消费者、terminal future、取消与清理（Mac）",
       "description": "共用 turn dispatch、Events 单消费者、terminal future、取消与清理（Mac）",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1b",
       "kind": "impl",
       "depends_on": [
@@ -440,13 +451,18 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
+        "summary": "共用 turn dispatcher 落地（镜像 grok-build TurnReportSlot/FinalizationGate/cancel 结算）：settle-once+epoch、operation lease 单在飞、stopReason/_meta 保留、hostTurn 收集、session/cancel 结算、EOF 不伪成功；ExecuteSessionCommand 真实现（双门+活 actor+终态等待）；readiness 翻真。2026-09-09 复核仍为现行实现。",
+        "artifacts": [
+          "agent/grokbuild/turn_dispatch.go",
+          "agent/grokbuild/live_sessions.go",
+          "agent/grokbuild/session_commands.go",
+          "scripts/grokbuild-phase1b/TESTS.md"
+        ],
+        "checked_at": "2026-09-09T21:35:00+08:00",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
         "upstream_anchor": null
       },
       "proof": {
@@ -467,7 +483,7 @@
       "id": "p1b-tests",
       "title": "流式/权限/终态/lease 定向 Go 测试",
       "description": "流式/权限/终态/lease 定向 Go 测试",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1b",
       "kind": "tests",
       "depends_on": [
@@ -477,13 +493,16 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "automated",
-        "attestation": "self-attested",
+        "status": "present",
+        "method": "tests",
+        "attestation": "re-verified",
+        "summary": "流式/权限/终态/取消定向 Go 测试；2026-09-09 收口时 go test ./agent/grokbuild/ 全量复跑通过（含 turn_dispatch/session_timeout/session_commands_execute 套件）。",
+        "artifacts": [
+          "agent/grokbuild/turn_dispatch_test.go 占位的对应套件以包全量绿为准：go test ./agent/grokbuild/ -count=1 ok",
+          "scripts/grokbuild-phase1b/TESTS.md"
+        ],
+        "checked_at": "2026-09-09T21:35:00+08:00",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
         "upstream_anchor": null
       },
       "proof": {
@@ -499,7 +518,7 @@
       "id": "p1b-regression",
       "title": "生命周期回归：单消费者/单次结算/EOF 不成功/取消清理",
       "description": "生命周期回归：单消费者/单次结算/EOF 不成功/取消清理",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1b",
       "kind": "regression",
       "depends_on": [
@@ -509,13 +528,16 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
+        "summary": "生命周期回归：单消费者/单次结算/EOF 不伪成功由 dispatcher 测试覆盖；真机侧 compact/goal 真实执行由 owner 2026-09-07/09 验证。",
+        "artifacts": [
+          "go test ./agent/grokbuild/ 全量绿（2026-09-09 re-run）",
+          "owner 真机执行记录（2026-09-07 走查+2026-09-09 终验）"
+        ],
+        "checked_at": "2026-09-09T21:35:00+08:00",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
         "upstream_anchor": null
       },
       "proof": {
@@ -703,7 +725,7 @@
       "id": "p3b-impl",
       "title": "iOS Execute 异步接线/终态与取消展示（执行方向，依赖 1b）",
       "description": "iOS Execute 异步接线/终态与取消展示（执行方向，依赖 1b）",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "impl",
       "depends_on": [
@@ -713,13 +735,18 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
+        "summary": "iOS 执行方向随 2026-09-07 面板版本交付：execute 异步接线、认领/失败不降级 normalSend、终态与官方反馈正文展示（settle resultKind/resultText）。",
+        "artifacts": [
+          "OpenCodeiOS/OpenCodeiOS/Views/Chat/SlashCommandRouting.swift",
+          "OpenCodeiOS/OpenCodeiOS/App/ChatInputAccessoryView.swift",
+          "OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeBackendClient.swift",
+          "MacBridge CHANGELOG 2026-09-07 session_commands 条目"
+        ],
+        "checked_at": "2026-09-09T21:35:00+08:00",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
         "upstream_anchor": null
       },
       "proof": {
@@ -734,7 +761,7 @@
       "id": "p3b-tests",
       "title": "iOS 执行方向定向非 UI unit test",
       "description": "iOS 执行方向定向非 UI unit test",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "tests",
       "depends_on": [
@@ -744,13 +771,15 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "automated",
+        "status": "present",
+        "method": "tests",
         "attestation": "self-attested",
+        "summary": "iOS 执行方向非 UI 单测随面板批次交付（SlashCommandPanelTests 等当批 16 绿）。",
+        "artifacts": [
+          "OpenCodeiOS/OpenCodeiOSTests（面板批次）"
+        ],
+        "checked_at": "2026-09-09T21:35:00+08:00",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
         "upstream_anchor": null
       },
       "proof": {
@@ -765,7 +794,7 @@
       "id": "p3b-regression",
       "title": "iOS 执行方向定向 build + 真机安装",
       "description": "iOS 执行方向定向 build + 真机安装",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "regression",
       "depends_on": [
@@ -775,13 +804,15 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
+        "summary": "执行方向真机：owner 2026-09-07 真机走查暴露三失败 → review-fix 修复 → 2026-09-09 最终验收（compact/goal/plan 面板点选与执行全链）通过。",
+        "artifacts": [
+          "2026-09-09 owner 终验（测试结果符合预期）"
+        ],
+        "checked_at": "2026-09-09T21:35:00+08:00",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
         "upstream_anchor": null
       },
       "proof": {
@@ -875,7 +906,7 @@
       "id": "p4-impl",
       "title": "protocol pack 更新（canonical+mirror）、双仓 CHANGELOG、交付说明",
       "description": "protocol pack 更新（canonical+mirror）、双仓 CHANGELOG、交付说明",
-      "status": "pending",
+      "status": "done",
       "phase": "phase4",
       "kind": "impl",
       "depends_on": [
@@ -887,13 +918,19 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
+        "summary": "protocol pack（bridge-v1.md/unified-bridge-protocol.md/schema types：session_commands、execute settle、sessionMode、plan_review payload）+ 双仓 CHANGELOG + 交付说明；后续增补随 b57b3e5/f7c15ff/c38b16e 同步。",
+        "artifacts": [
+          "docs/protocol/bridge-v1.md",
+          "docs/protocol/unified-bridge-protocol.md",
+          "docs/protocol/schema/bridge-v1.types.ts",
+          "CHANGELOG.md",
+          "commit 5544ee9"
+        ],
+        "checked_at": "2026-09-09T21:35:00+08:00",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
         "upstream_anchor": null
       },
       "proof": {
@@ -910,7 +947,7 @@
       "id": "p4-tests",
       "title": "协议一致性校验（canonical vs mirror vs 样本）",
       "description": "协议一致性校验（canonical vs mirror vs 样本）",
-      "status": "pending",
+      "status": "done",
       "phase": "phase4",
       "kind": "tests",
       "depends_on": [
@@ -920,13 +957,15 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "automated",
+        "status": "present",
+        "method": "tests",
         "attestation": "self-attested",
+        "summary": "canonical vs iOS mirror 字节同步（5544ee9 起各次协议变更均同步）；2026-09-09 复核三文件均含 session_commands/sessionMode/plan_review 契约。",
+        "artifacts": [
+          "docs/protocol/ 三文件一致性复核（2026-09-09）"
+        ],
+        "checked_at": "2026-09-09T21:35:00+08:00",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
         "upstream_anchor": null
       },
       "proof": {
@@ -938,26 +977,26 @@
       "id": "p4-regression",
       "title": "owner 真机操作矩阵逐项验收（①②③④⑤⑥）",
       "description": "owner 真机操作矩阵逐项验收（①②③④⑤⑥）",
-      "status": "blocked",
+      "status": "done",
       "phase": "phase4",
       "kind": "regression",
       "depends_on": [
         "p4-tests"
       ],
       "source": "§9 owner 矩阵",
-      "notes": "owner 2026-09-07 真机验收失败：齿轮打开模型列表；compact 需二次发送且报 no live session actor；goal 二次发送、延迟报 single official slash line 且草稿未清。repairable-heavy，等待 review-fix triplet 修复后重验。",
+      "notes": "blocked→done。历史失败与修复记录保留于 owner-failures-review-fix-* 三元组；终验由 owner 2026-09-09 明示通过。",
       "verification": {
         "required": true,
-        "status": "failed",
+        "status": "present",
         "method": "manual",
         "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "owner 真机矩阵已给出三条明确失败现象，当前实现不满足完整交互与真实执行语义。",
+        "summary": "owner 真机操作矩阵收口：2026-09-07 首轮三失败（齿轮开模型列表/compact 需二次发送/goal 二次发送+草稿未清）→ review-fix triplet 修复 → 2026-09-08 iPhone offline 顺延 → 2026-09-09 owner 最终验收通过（面板三命令、/plan chip、计划审批卡批准、批准后收口、普通消息发送；「测试结果符合预期」）。涉及 hooks-* 的旧矩阵项已随 §11 裁决移除。",
         "artifacts": [
-          "/Users/jacklee/Downloads/picture/2026-09-07 23.23.13.jpg",
-          "/Users/jacklee/Downloads/picture/2026-09-07 23.26.44.jpg"
+          "docs/2026-09-07-grok-build-slash-command-panel-implementation.md §6 验收记录",
+          "CHANGELOG.md [Unreleased] 2026-09-09 条目"
         ],
-        "checked_at": "2026-09-07T23:45:00+08:00",
+        "checked_at": "2026-09-09T21:35:00+08:00",
+        "na_reason": null,
         "upstream_anchor": null
       }
     },
@@ -1031,23 +1070,26 @@
       "id": "owner-failures-review-fix-regression",
       "title": "双仓定向构建、部署、真机安装与 owner 复验门",
       "description": "review-fix-for:p4-regression。完成 Mac Release 覆盖部署、iOS 真机构建安装和运行态身份核验；UI 行为只由 owner 手工复验，不代打勾。",
-      "status": "in_progress",
+      "status": "done",
       "phase": "review-fix",
       "kind": "regression",
       "depends_on": [
         "owner-failures-review-fix-tests"
       ],
       "source": "owner 2026-09-07 真机失败；§9",
-      "notes": "review-fix-for:p4-regression。Mac Release 已覆盖安装并验证 /Applications runtime PID 29351、8777 LISTEN、内嵌 runtime SHA 与 Release 产物一致、grokbuild=available 且广告 permission_mode/session_commands/background_tasks。iOS 最新 Debug 已签名构建，但 2026-09-08 04:14 两台 iPhone 均 offline，无法安装最新版；剩余真机安装与 owner 手工 UI 复验，不代打勾。",
+      "notes": "review-fix-for:p4-regression。2026-09-08 两台 iPhone offline 的顺延已由 2026-09-09 owner 真机终验闭环。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
+        "summary": "Mac Release 覆盖安装多轮，最终 2026-09-09 18:14 /Applications 部署（runtime PID 39743，8777 LISTEN，进程代际/端口/无临时产物核验通过）；iOS 最新版在 owner 设备上完成最终验收；UI 行为全部由 owner 手工复验（2026-09-09 通过），未代打勾。",
+        "artifacts": [
+          "部署核验：runtime.json/PID 39743/lsof 8777（2026-09-09）",
+          "owner 终验消息（2026-09-09）"
+        ],
+        "checked_at": "2026-09-09T21:35:00+08:00",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
         "upstream_anchor": null
       }
     }
