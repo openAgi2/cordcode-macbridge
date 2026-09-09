@@ -678,6 +678,20 @@ func readRichSessionHistory(grokHome, sessionID string, limit int, pendingQuesti
 	if dir == "" {
 		return nil, fmt.Errorf("grokbuild: session not found: %s", sessionID)
 	}
+	// Grok Build owns updates.jsonl as the durable conversation truth;
+	// chat_history.jsonl is only its derived model-context cache and is
+	// deliberately replaced by /compact. Read the display transcript from the
+	// durable stream when present so compaction cannot erase user-visible turns.
+	// Legacy sessions without a usable update stream continue through the cache
+	// reader below.
+	if entries, authoritative, err := readRichDisplayHistoryFromUpdates(dir, sessionID); err != nil {
+		return nil, err
+	} else if authoritative {
+		if limit > 0 && len(entries) > limit {
+			entries = entries[len(entries)-limit:]
+		}
+		return decorateGrokGoalHistory(dir, sessionID, entries), nil
+	}
 	path := filepath.Join(dir, "chat_history.jsonl")
 
 	// Pass 1: collect tool_result content by tool_call_id.

@@ -7,6 +7,7 @@
 版本号对齐 MacBridge Release 构建的 `MARKETING_VERSION`（见 `MacBridge/project.yml`）。日期为协调世界时（UTC）。
 
 ## [Unreleased]
+- **修复：Grok 会话 `/compact` 后 iPhone 上聊天正文与任务历史整段丢失（显示历史改从官方持久真值还原）**：Grok 官方源码明确 `updates.jsonl` 是持久会话真值、`chat_history.jsonl` 只是给 LLM API 用的上下文缓存且会在 `/compact` 时被整体重写；桥接层此前把后者当完整聊天历史消费，compact 后真实回复全部消失，只能靠额外逻辑捡回部分 Goal 卡片。现显示历史改从完整 update stream 还原（含被 compact 掉的正文、推理与工具卡），并按官方回放规则过滤 hostTurn 片段；未 compact 会话维持原读取路径，旧 979bc04 的 Goal 卡片恢复逻辑收编为真值源之上的装饰。对账（受影响会话）：官方 journal 10 条回复 / 10 条用户输入（含 8 条 goal 激活）/ 9 个 goal / 47 个任务 run → 修复后投影 10/10、8 张 goal 命令卡 + 1 张活跃 goal 卡、任务卡按目标归组，全量恢复（修复前为 0 条正文 + 8 组卡片）。纯 Mac 侧修复，Mac 更新后 iPhone 重开会话即恢复。
 - **修复：Grok `/goal` 实现完成后不再被隐藏 evaluator 长时间拖住「执行中」**：Grok 在主实现回合结束后会同步运行隐藏的完成度评估，期间官方 ACP turn 仍保持 running，可能持续数十秒至数分钟；此前 MacBridge 丢弃了上游专门发出的 `verifying_completion` 实时边界，导致 iPhone 输入框与 Goal 横条一直不收口。现将该权威信号贯通 goal 投影；iPhone 在验证开始时立即恢复输入并收起横条，若 evaluator 判定目标尚需继续，后续官方快照会自动重新进入执行态。未伪造 turn 完成，也未取消后台 evaluator。Mac 与 iPhone 均需更新。
 - **修复：Grok `/goal` 的内部执行指令不再冒充用户消息**：目标创建后，官方 harness 会通过 `user_message_chunk` 注入一整段 `<system-reminder>` 供实现回合使用；直播 codec 此前把它和真实 prompt 一样投影，导致 iPhone 出现巨大的右侧用户气泡。现直播与冷历史共用同一目标提醒识别规则，只隐藏可确认的 goal bootstrap，真实用户消息仍原样显示。纯 Mac 侧修复，Mac 更新后重开会话即可清掉旧气泡。
 - **改进：Grok 主任务已结束但隐藏 evaluator 格式失败时，iPhone 自动收起 Goal 横条**：Grok 的实现回合与任务产物已经正常结束后，隐藏 Goal Evaluator 偶尔会因当前模型未返回合法 JSON 而把目标标成 `infra_paused`；此前 iPhone 将其长期显示为红色「受阻的目标」，用户只能手动清除。MacBridge 现把这一种有界重试耗尽、且不需要用户处理的评估器终态规范化为稳定原因码，配套 iOS 自动收起横条；认证、预算、用户暂停及真实阻塞仍原样保留并可恢复，不被误隐藏。Mac 与 iPhone 均需更新。
