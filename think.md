@@ -11,6 +11,77 @@
 | Grok goal 完成态延迟（A 上游 PR / B 桥接投影提前入验证态） | goal 可见回复结束后几十秒才完成、bar 才消失：第一阶段隐藏 evaluator 在官方 1.0.24 对所有可观测信道结构性静默。方案清单+源码证据+遗留分支名见 `docs/2026-09-09-grokbuild-goal-verification-delay-options.md`；fork-runtime 路线已被 owner 2026-09-09 否决，禁止重走 | A：无（补丁分支 `codex/upstream-proposal-do-not-deploy-early-goal-verifying` 已备好，待提 issue/PR）；B：仅 MacBridge（iOS verifyingCompletion 收口与回退语义已随 `7ee42df`/`88f89fcf` 就绪） | 未开工（2026-09-09）；现状 = 接受官方语义（方案 D） |
 | Backend 语义锚点表补全 | GO_BRIDGE_ARCHITECTURE.md「Backend 语义锚点表」＝source-first 的低成本入口（配套 CLAUDE.md「行为修复的产物门」：无锚点不动代码、恢复类修复交对账数字）。grok（会话真值/重建 + goal 状态机，@75810042）与 claude（无源码，锚=docs/SDK/证据包）两行已验证；codex-remote / dsh-web / opencode-web 待补 | 无（随各 backend 首次触碰逐行补齐） | grok/claude 行已落（2026-09-09）；其余 backend 待补 |
 
+## 2026-09-09 grok goal 延迟：fork 官方 runtime 事故 → 行为修复产物门立法
+
+现象：goal 可见回复结束后几十秒才完成态、bar 才消失。官方源码定性（锚点见
+GO_BRIDGE_ARCHITECTURE「Backend 语义锚点表」）：第一阶段 `evaluate_goal_round()`
+（goal.rs:73）是完整隐藏模型推理，**所有可观测信道静默**；`verifying_completion`
+只在第二阶段开始时发（goal.rs:188），且通知同时双写 ACP 扩展通知与 updates.jsonl
+（goal_orchestrator.rs:79）——换信道轮询拿不到更早点。此缺口官方 1.0.24 无解。
+
+事故经过：修复 agent 选择 patch 官方 grok 源码 + 整机替换 `~/.grok/bin/grok` 为
+自制 runtime——违反初衷（cordcode 不拥有 agent 进程，官方 CLI 是真相源；该 bin 是
+机器全局入口，影响面超出 CordCode）。当天 08:08 官方自升级把符号链接重指官方
+1.0.24，补丁 runtime 无声回退、复测必然失败——fork 路线不可维护的实证；且其汇报
+版本（1.0.13/1.0.16）与磁盘实际（0.2.101/1.0.17/1.0.24）完全对不上账。收尾：
+grok-build `main` 恢复 `origin/main@75810042`；补丁保存在
+`codex/upstream-proposal-do-not-deploy-early-goal-verifying`（分支描述明标 DO NOT
+DEPLOY，仅作上游提案）；后续路线见
+`docs/2026-09-09-grokbuild-goal-verification-delay-options.md`（A 上游 PR 为正解）。
+
+教训与立法：
+
+- 「上游 checkout 是只读真值参考」不只是纪律：往 grok-build main 上 commit 会让后续
+  source-first 审计把补丁当官方行为读，污染整条审计链。
+- 纸面「必须先读官方源码」在任务压力下必被低成本路径（grep 本仓、jq 样本、凭 chunk
+  类型猜协议）绕过；能守住的是**产物门**——缺产物即未完成，与 agent 是否读过无关。
+  本日落地 CLAUDE.md「行为修复的产物门」（源码锚点先行 / 对账数字交付 / 数据源修正
+  优先）+ GO_BRIDGE_ARCHITECTURE「Backend 语义锚点表」（把读官方源码从啃陌生大仓
+  降为读指定文件）。配套 owner 常备验收两连问：官方源码哪一行？用什么数字证明恢复
+  完整？
+
+## 2026-09-09 grok /compact 显示历史恢复 + workflow 卡三连环（冷热同形要验到位置级）
+
+同一天在同一会话上连修四案（commits：bbe94ad / 979bc04 / d822caa / d7d1df9 /
+c9d9cd6 / 0a3bba6），每案的根因层不同，串起来是一堂完整课：
+
+1. **派生缓存当真值**（正文全丢）：`chat_history.jsonl` 是官方 LLM 上下文缓存，
+   compaction 时被 `ReplaceChatHistory` 整体重写（persistence.rs:2031）；
+   `updates.jsonl` 才是展示真值（export.rs:3，官方 replay.rs 即流式消费它重建）。
+   桥接层消费缓存 → `/compact` 后正文必然丢失。修复 = 切真值源并镜像官方回放
+   （hostTurn 抑制同 replay.rs:483/549 的 flush_host_turn_boundary；展示历史不应用
+   compaction 截断，同 export 语义；未 compact 会话保留原路径降回归面）。
+2. **部分修复 overclaim**：979bc04 在错误源之上重建 goal 卡片即宣称「已修复」，
+   实际 0 条正文、goal 卡 8/9。对账数字（官方 journal 真值计数 vs 投影计数）才是
+   「恢复完成」的可验证定义——本案直接催生产物门第 2 条。
+3. **compact 无提示**（bbe94ad，本日做得对的 source-first 样板）：官方 compact 是
+   两轨显示（pager 本地插「Compacting…」行 + 真实 `auto_compact_completed` 事件），
+   桥接曾把后者降级为 context-usage 更新且命令无 running/settled 行 → iOS 全程无感。
+   修复按官方语义收口 session_command 生命周期，零状态猜测。
+4. **workflow 卡三连环**（位置 bug 三轮返工）：
+   a. **丢失**：冷拉把卡 part 前置 → `workflow_run` 事件先于 turn 创建 → reducer
+      fail-closed（owning turn must already exist）静默丢弃。冷热分叉根因：live 天然
+      「先内容后 subagent 事件」，冷顺序被恢复代码打破。
+   b. **跑尾**：修 a 时把卡事件延迟到内容之后 → reducer 首插按到达顺序 append →
+      卡落到 parts 末尾。
+   c. **跑头**：带 partIndex 按位插入，但把 decorate 的前置当成了「原位置」→ 卡到
+      parts[0]，同样不是直播位置。
+   d. **正解**：journal 时序 = 介绍正文 → spawn_subagent 工具批次 →
+      subagent_spawned 通知（live 卡在此 upsert）→ 后续正文/轮询工具；decorate 锚定
+      entry 内第一段连续 spawn 批次之后（0a3bba6），9/9 卡布局与直播逐位一致。
+
+教训：
+
+- **parts 渲染顺序 ≠ hydrate 事件顺序**。fail-closed 丢弃无声无息；冷链 bug 用体外
+  全链探针（真实 journal → readRichSessionHistory → streamRichHistory → reducer）
+  + 事件级 turnId 对账定位，不要在渲染层猜。
+- **「原位置」必须从官方 live 时间线推导**。恢复代码自身的惯例（decorate 前置是
+  「没有正文时代」的权宜）不是真值；问「直播长什么样」比问「代码里写在哪儿」可靠。
+- **每轮验收对直播 parity 到布局级**：三轮返工都栽在「卡存在」即通过，没验位置。
+  对账输出应包含 parts 布局序列，不只计数。
+
+
+
 ## 2026-09-06（下午）dsh-web 重启落在 turn 进行中：live-only 播种被提交成权威基线，冷拉只剩最后一轮
 
 上午刚修完 countMappableEntries 幻影预算截断，下午 owner 复测同一会话又只剩最后一轮
