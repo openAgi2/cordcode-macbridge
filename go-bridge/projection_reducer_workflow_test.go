@@ -1,6 +1,10 @@
 package gobridge
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
+)
 
 // dsh-web parallel-subagent workflow card reducer tests (official
 // WorkflowRunPanel parity; see bridge-v1.md 「Part vocabulary: workflow」).
@@ -334,4 +338,76 @@ func TestHydrateWorkflowEventsFromPart(t *testing.T) {
 	if hydrateWorkflowEventsFromPart(part, "") != nil {
 		t.Fatal("empty turnId must yield no events")
 	}
+}
+
+// TestColdHydrateDefersWorkflowUntilTurnExists：冷拉 rich history 里 workflow
+// part 被 decorate 前置（grok goal 历史，渲染顺序需要卡在正文前）时，
+// hydrate 必须把 workflow_run 事件延迟到本 entry 内容事件之后——reducer 对
+// workflow_run fail-closed（owning turn must already exist），事件先于 turn
+// 创建会被静默丢弃（2026-09-09 实测：9 卡全灭，iPhone 上老 goal 只剩工具行
+// 「任务已完成」）。延迟后卡与正文共存于同一 turn。
+func TestColdHydrateDefersWorkflowUntilTurnExists(t *testing.T) {
+	entries := []core.RichHistoryEntry{
+		{
+			ID:   "cmd-1",
+			Role: "system",
+			Parts: []map[string]any{{
+				"type": "command", "commandId": "cmd-1", "name": "goal",
+				"kind": "success", "args": "写四个故事", "line": "/goal 写四个故事",
+			}},
+		},
+		{
+			ID:   "a-1",
+			Role: "assistant",
+			Parts: []map[string]any{
+				// 卡 part 前置 = decorateGrokGoalHistory 的真实产物形状。
+				{
+					"type": "workflow", "workflowId": "run-1", "workflowName": "写四个故事",
+					"workflowStatus": "completed",
+					"workflowPhases": []any{
+						map[string]any{"phase": nil, "members": []any{
+							map[string]any{"seq": 1, "label": "写唐僧篇", "childSessionId": "c1", "status": "completed"},
+						}},
+					},
+				},
+				{"type": "text", "content": "四个故事已完成"},
+			},
+		},
+	}
+	r := newTestReducer()
+	seq := 0
+	if err := streamRichHistoryProjectionEntries(t.Context(), entries, true, func(ev projectionHydrateEvent) bool {
+		seq++
+		r.Apply(projectionReducerEvent("grokbuild", "s1", ev.Event, ev.Data, seq, ""))
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	proj, ok := r.Snapshot("grokbuild", "s1")
+	if !ok {
+		t.Fatal("no projection")
+	}
+	for i := range proj.Turns {
+		turn := &proj.Turns[i]
+		if turn.Assistant == nil {
+			continue
+		}
+		var wf *ProjectionPart
+		for pi := range turn.Assistant.Parts {
+			if turn.Assistant.Parts[pi].Type == "workflow" {
+				wf = &turn.Assistant.Parts[pi]
+				break
+			}
+		}
+		if wf == nil {
+			continue
+		}
+		if wf.WorkflowID != "run-1" || wf.WorkflowStatus != "completed" ||
+			len(wf.WorkflowPhases) != 1 || len(wf.WorkflowPhases[0].Members) != 1 ||
+			wf.WorkflowPhases[0].Members[0].Label != "写唐僧篇" {
+			t.Fatalf("hydrated workflow part = %+v", wf)
+		}
+		return
+	}
+	t.Fatalf("workflow part missing from cold hydration: turns=%+v", proj.Turns)
 }

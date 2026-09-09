@@ -1764,6 +1764,13 @@ func openCodeRichHistoryEntryToProjectionEvents(
 		}
 		emittedContent := false
 		hasPendingUserInput := false
+		// Workflow cards upsert onto an already-existing owning turn (the
+		// reducer is fail-closed there: no phantom turns). Part order is render
+		// order, not event order — grok goal history prepends the card part, so
+		// the workflow_run hydrate event must be deferred until this entry's
+		// content deltas have created the turn. Live streaming produces the same
+		// order naturally (chunks first, subagent runs later).
+		var deferredWorkflow []projectionHydrateEvent
 		// Prefer structured parts when present.
 		if len(entry.Parts) > 0 {
 			for _, part := range entry.Parts {
@@ -1815,12 +1822,13 @@ func openCodeRichHistoryEntryToProjectionEvents(
 				case "workflow":
 					// dsh-web 并行子代理 workflow 卡（history.go 冷拉折叠的整值
 					// part → 一次 workflow_run hydrate 事件；reducer 按 workflowId
-					// 原地 upsert，与 live 路径同形）。
+					// 原地 upsert，与 live 路径同形）。事件收集进 deferredWorkflow，
+					// 在本 entry 内容事件之后发出（见上方注释）；parts 渲染顺序不变。
 					events := hydrateWorkflowEventsFromPart(part, turnID)
 					if len(events) == 0 {
 						continue
 					}
-					out = append(out, events...)
+					deferredWorkflow = append(deferredWorkflow, events...)
 					emittedContent = true
 				}
 			}
@@ -1849,7 +1857,7 @@ func openCodeRichHistoryEntryToProjectionEvents(
 		// it open lets the reducer preserve execution.phase=requires_action so every composer
 		// stays in the waiting state while the owning Claude Desktop session awaits an answer.
 		if hasPendingUserInput {
-			return out
+			return append(out, deferredWorkflow...)
 		}
 		// Dead/idle sessions treat every assistant row as a complete snapshot.
 		// Live sessions still seal assistant rows that produced content (prior
@@ -1864,7 +1872,7 @@ func openCodeRichHistoryEntryToProjectionEvents(
 				TurnDone: true,
 			})
 		}
-		return out
+		return append(out, deferredWorkflow...)
 	case "system":
 		// dsh-web folded host-command rows / plan-mode snapshot ride as structured
 		// system parts (agent/dsh-web history.go): each folds to its reducer event
