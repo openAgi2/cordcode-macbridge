@@ -212,8 +212,46 @@ func loadGrokGoalSnapshot(sessionDir string) *core.GoalEvent {
 	return &core.GoalEvent{ID: state.GoalID, Revision: revision, Objective: state.Objective, Phase: phase, BlockedReason: blocked}
 }
 
-func workflowPart(snapshot core.WorkflowRunEvent) map[string]any {
-	phases := make([]map[string]any, 0, len(snapshot.Phases))
+// insertWorkflowPartAtSpawnAnchor mirrors the live card position: the first
+// subagent_spawned notifications arrive right after the contiguous
+// spawn_subagent tool batch (journal: intro text → spawn tool_calls ×N →
+// subagent_spawned ×N → follow-up text), so live projection upserts the card
+// between the spawn batch and the follow-up text. Anchor the cold card at the
+// same spot — after the entry's first contiguous spawn_subagent batch. Entries
+// without a spawn batch (recovered bodies without tools) keep the historic
+// front prepend.
+func insertWorkflowPartAtSpawnAnchor(parts []map[string]any, card map[string]any) []map[string]any {
+	anchor := -1
+	for k, part := range parts {
+		if isSpawnSubagentToolPart(part) {
+			anchor = k
+		} else if anchor >= 0 {
+			break
+		}
+	}
+	if anchor < 0 {
+		return append([]map[string]any{card}, parts...)
+	}
+	out := make([]map[string]any, 0, len(parts)+1)
+	out = append(out, parts[:anchor+1]...)
+	out = append(out, card)
+	out = append(out, parts[anchor+1:]...)
+	return out
+}
+
+func isSpawnSubagentToolPart(part map[string]any) bool {
+	if strings.TrimSpace(fmt.Sprint(part["type"])) != "tool" {
+		return false
+	}
+	step, _ := part["step"].(map[string]any)
+	if step == nil {
+		return false
+	}
+	name := strings.ToLower(strings.TrimSpace(fmt.Sprint(step["toolName"])))
+	return strings.Contains(name, "spawn") && strings.Contains(name, "subagent")
+}
+
+func workflowPart(snapshot core.WorkflowRunEvent) map[string]any {	phases := make([]map[string]any, 0, len(snapshot.Phases))
 	for _, phase := range snapshot.Phases {
 		members := make([]map[string]any, 0, len(phase.Members))
 		for _, member := range phase.Members {
@@ -262,7 +300,7 @@ func decorateGrokGoalHistory(sessionDir, sessionID string, entries []core.RichHi
 				attached := false
 				for j := i + 1; j < len(entries); j++ {
 					if entries[j].Role == "assistant" {
-						entries[j].Parts = append([]map[string]any{workflowPart(snapshot)}, entries[j].Parts...)
+						entries[j].Parts = insertWorkflowPartAtSpawnAnchor(entries[j].Parts, workflowPart(snapshot))
 						attached = true
 						break
 					}

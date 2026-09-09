@@ -360,7 +360,13 @@ func TestColdHydrateDefersWorkflowUntilTurnExists(t *testing.T) {
 			ID:   "a-1",
 			Role: "assistant",
 			Parts: []map[string]any{
-				// 卡 part 前置 = decorateGrokGoalHistory 的真实产物形状。
+				{"type": "text", "content": "我来处理这个目标，并行启动子代理"},
+				{"type": "tool", "step": map[string]any{
+					"id": "t-spawn-1", "toolName": "spawn_subagent", "status": "completed",
+					"output": map[string]any{"kind": "inline", "text": ""},
+				}},
+				// 卡 part 位于 spawn 批次之后 = decorate 的 spawn 锚点产物形状
+				// （live：subagent_spawned 紧随 spawn 工具批次到达，卡 upsert 在此）。
 				{
 					"type": "workflow", "workflowId": "run-1", "workflowName": "写四个故事",
 					"workflowStatus": "completed",
@@ -370,7 +376,7 @@ func TestColdHydrateDefersWorkflowUntilTurnExists(t *testing.T) {
 						}},
 					},
 				},
-				{"type": "text", "content": "四个故事已完成"},
+				{"type": "text", "content": "子代理已启动，等待结果"},
 			},
 		},
 	}
@@ -393,17 +399,19 @@ func TestColdHydrateDefersWorkflowUntilTurnExists(t *testing.T) {
 			continue
 		}
 		var wf *ProjectionPart
+		wfIdx := -1
 		for pi := range turn.Assistant.Parts {
 			if turn.Assistant.Parts[pi].Type == "workflow" {
 				wf = &turn.Assistant.Parts[pi]
+				wfIdx = pi
 				break
 			}
 		}
 		if wf == nil {
 			continue
 		}
-		if turn.Assistant.Parts[0].Type != "workflow" {
-			t.Fatalf("workflow card must render at its original entry position (parts[0])")
+		if wfIdx != 2 {
+			t.Fatalf("workflow card must render at its entry position (after the spawn batch, parts[2]); got parts[%d]", wfIdx)
 		}
 		if wf.WorkflowID != "run-1" || wf.WorkflowStatus != "completed" ||
 			len(wf.WorkflowPhases) != 1 || len(wf.WorkflowPhases[0].Members) != 1 ||
