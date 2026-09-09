@@ -22,7 +22,7 @@ type SessionCommand struct {
 // happened" (owner 2026-09-05 18:2x report: taps executed fine, phone showed
 // no reaction).
 type SessionCommandResult struct {
-	CommandID  string // official commandId, e.g. "cmd-x-9"
+	CommandID  string // lifecycle identity: official commandId when exposed, otherwise bridge projection identity
 	ResultKind string // official "success" (errors return as Go error instead)
 	ResultText string // official result.text; "" when the command settles silently
 }

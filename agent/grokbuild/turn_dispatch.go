@@ -269,6 +269,15 @@ func parseHostTurnChunk(params []byte) (text string, ok bool) {
 // former pendingPromptID registration). Callers: Send (user prompt, async —
 // ignores the channel) and executeHostCommand (waits on it, ctx-bounded).
 func (s *grokSession) dispatchTurn(content []contentBlock) (<-chan turnOutcome, error) {
+	return s.dispatchTurnWithStart(content, nil)
+}
+
+// dispatchTurnWithStart is dispatchTurn with one synchronous lifecycle hook.
+// The hook runs only after the turn lease is acquired, and before the request
+// can produce updates or a terminal. It lets host-owned UI lifecycle (currently
+// the official pager's manual-compaction row) preserve causal event order
+// without weakening the shared dispatcher's single-active-turn gate.
+func (s *grokSession) dispatchTurnWithStart(content []contentBlock, onStart func()) (<-chan turnOutcome, error) {
 	id := s.idCounter.next()
 	epoch, wait, err := s.turn.promote(id)
 	if err != nil {
@@ -292,6 +301,9 @@ func (s *grokSession) dispatchTurn(content []contentBlock) (<-chan turnOutcome, 
 	s.terminalDone.Store(false)
 
 	s.emit(core.Event{Type: core.EventTurnStarted})
+	if onStart != nil {
+		onStart()
+	}
 
 	if err := s.writeRequest(id, "session/prompt", sessionPromptParams{
 		SessionID: s.CurrentSessionID(),

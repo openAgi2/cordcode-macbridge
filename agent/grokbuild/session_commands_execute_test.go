@@ -331,11 +331,38 @@ func TestExecuteHostCommandEndTurn(t *testing.T) {
 	if res.ResultKind != "success" {
 		t.Fatalf("kind = %q", res.ResultKind)
 	}
-	if !strings.Contains(res.ResultText, "Loaded hooks (9)") {
-		t.Fatalf("resultText = %q, want the official hostTurn body", res.ResultText)
+	if res.CommandID == "" || !strings.HasPrefix(res.CommandID, "grok-compact:") {
+		t.Fatalf("commandId = %q, want Grok compact projection identity", res.CommandID)
+	}
+	if !strings.HasPrefix(res.ResultText, "Compaction completed in ") || !strings.HasSuffix(res.ResultText, ".") {
+		t.Fatalf("resultText = %q, want official pager completion presentation", res.ResultText)
+	}
+	// The official pager-local lifecycle is projected as one command identity:
+	// running is causally before the real prompt terminal, then success settles
+	// the same row. The unrelated hostTurn body is deliberately not presented.
+	var commandEvents []core.SessionCommandEvent
+	var term core.Event
+	deadline := time.After(3 * time.Second)
+	for len(commandEvents) < 2 || !term.Done {
+		select {
+		case ev := <-s.events:
+			if ev.Type == core.EventSessionCommand && ev.SessionCommand != nil {
+				commandEvents = append(commandEvents, *ev.SessionCommand)
+			}
+			if ev.Done {
+				term = ev
+			}
+		case <-deadline:
+			t.Fatalf("events timed out: commands=%+v terminal=%+v", commandEvents, term)
+		}
+	}
+	if got := commandEvents[0]; got.CommandID != res.CommandID || got.Name != "compact" || got.Kind != "running" || got.Text != "" {
+		t.Fatalf("running command = %+v", got)
+	}
+	if got := commandEvents[1]; got.CommandID != res.CommandID || got.Name != "compact" || got.Kind != "success" || got.Text != res.ResultText {
+		t.Fatalf("settled command = %+v; result=%+v", got, res)
 	}
 	// Terminal event preserved the stop reason and the tokens from _meta.
-	term := nextTerminal(t, s.events)
 	if term.Type != core.EventResult || term.StopReason != "end_turn" {
 		t.Fatalf("terminal = %+v", term)
 	}
@@ -350,6 +377,64 @@ func TestExecuteHostCommandEndTurn(t *testing.T) {
 			t.Fatalf("double terminal: %+v", ev)
 		}
 	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestFormatGrokDurationMatchesOfficialPagerBuckets(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{500 * time.Millisecond, "0.5s"},
+		{5230 * time.Millisecond, "5.2s"},
+		{10 * time.Second, "10s"},
+		{12300 * time.Millisecond, "12s"},
+		{125 * time.Second, "2m5s"},
+		{3725 * time.Second, "1h2m"},
+	}
+	for _, tc := range cases {
+		if got := formatGrokDuration(tc.d); got != tc.want {
+			t.Errorf("formatGrokDuration(%v) = %q, want %q", tc.d, got, tc.want)
+		}
+	}
+}
+
+func TestExecuteCompactCancellationSettlesRunningRowAsError(t *testing.T) {
+	s, _, shut := newTurnTestSession(t, turnScriptPeer{
+		promptID:       "p-compact-cancelled",
+		stopReason:     "cancelled",
+		cancelCategory: "MidTurnAbort",
+	})
+	defer shut()
+
+	a := &Agent{acu: newACUSideState()}
+	a.registerLiveSession("sess-1", s)
+	dir := t.TempDir()
+	a.SetWorkDir(dir)
+	a.acu.storeListSuccess("sess-1", dir, []core.SessionCommand{{Name: "compact"}})
+
+	_, err := a.ExecuteSessionCommand(context.Background(), "sess-1", "/compact")
+	if err == nil || !strings.Contains(err.Error(), "MidTurnAbort") {
+		t.Fatalf("Execute error = %v, want preserved cancellation category", err)
+	}
+
+	var commands []core.SessionCommandEvent
+	deadline := time.After(3 * time.Second)
+	for len(commands) < 2 {
+		select {
+		case ev := <-s.events:
+			if ev.Type == core.EventSessionCommand && ev.SessionCommand != nil {
+				commands = append(commands, *ev.SessionCommand)
+			}
+		case <-deadline:
+			t.Fatalf("command lifecycle timed out: %+v", commands)
+		}
+	}
+	if commands[0].Kind != "running" || commands[1].Kind != "error" || commands[1].Text != "Compaction cancelled." {
+		t.Fatalf("command lifecycle = %+v", commands)
+	}
+	if commands[0].CommandID == "" || commands[1].CommandID != commands[0].CommandID {
+		t.Fatalf("command identity changed across cancellation: %+v", commands)
 	}
 }
 

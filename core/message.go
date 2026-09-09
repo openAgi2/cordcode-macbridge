@@ -335,7 +335,7 @@ const (
 	EventUserInputRequested  EventType = "user_input_requested"  // 结构化用户输入交互产生（pending/failed），权威 payload 在 Event.UserInput（设计 §10.1）
 	EventUserInputResolved   EventType = "user_input_resolved"   // 结构化用户输入交互被解决（answered/rejected/auto_resolved/unavailable）
 	EventRetryStatus         EventType = "retry_status"          // transient provider-retry notice (serve keeps the turn alive; wire session_retry_status)
-	EventSessionCommand      EventType = "session_command"       // dsh-web host 斜杠命令生命周期（command/run|done 按 commandId 折叠；权威 payload 在 Event.SessionCommand）
+	EventSessionCommand      EventType = "session_command"       // host 斜杠命令生命周期（各 backend 按 commandId 折叠；权威 payload 在 Event.SessionCommand）
 	EventSessionPlanMode     EventType = "session_plan_mode"     // dsh-web 计划模式投影 {active, pending}（官方 plan projection view；权威 payload 在 Event.PlanMode）
 	EventSessionMode         EventType = "session_mode"          // typed 模式状态投影 {status, mode?, canSet, reason?}（Grok Build 方案 §5.1；权威 payload 在 Event.SessionMode）
 	EventSessionGoal         EventType = "session_goal"          // dsh-web 目标投影整值快照（官方 goal projection view；权威 payload 在 Event.Goal，nil = 已清除）
@@ -423,11 +423,13 @@ type UserInputInteraction struct {
 }
 
 // SessionCommandEvent 是一次 host 斜杠命令生命周期的权威 payload（dsh-web
-// command/run + command/done 按 commandId 折叠；镜像官方 CommandNode）。Kind:
+// 映射官方 command/run + command/done；Grok Build 映射官方 pager 的本地
+// manual-compact lifecycle）。各 backend 均按 commandId 折叠。Kind:
 // running（run 已见、done 未到）| success | error。Name/Args 来自 run 帧；仅见
 // done 时 Name 为空（官方 CommandNode.name 可空，客户端按官方 locale 回退）。
-// Text 是官方 settle 文案逐字（done 无文案时为空，客户端按官方 locale 回退
-// 「已完成/指令失败」；绝不由桥自造状态文案）。
+// Text 是官方 settle 文案逐字，或对官方 pager 本地 lifecycle 文案的等值镜像
+// （done 无文案时为空，客户端按官方 locale 回退「已完成/指令失败」；绝不从
+// 静默时长或消息正文推测命令状态）。
 // InputLine 是官方 goal 命令输入行回显（ui-goal goal-command-input.ts
 // goalCommandText："/goal" + args.TrimRight；只有 goal 注册 command-input 节点，
 // plan/compact 官方无用户气泡）。空 = 非 goal 命令或无 run 帧。
@@ -643,7 +645,7 @@ type Event struct {
 	// 旧单题 QuestionID/QuestionText/QuestionOpts 字段只服务 legacy `.off` 路径；
 	// v2 adapter 只填充 UserInput（设计 §10.1）。projection 不保存答案正文。
 	UserInput *UserInputInteraction
-	// dsh-web host 斜杠命令生命周期（EventSessionCommand 的权威 payload）。
+	// host 斜杠命令生命周期（EventSessionCommand 的权威 payload）。
 	// 折叠语义镜像官方 conversation-nodes/command.ts（run→running 行，done→settle）。
 	SessionCommand *SessionCommandEvent
 	// dsh-web 计划模式投影快照（EventSessionPlanMode 的权威 payload）。

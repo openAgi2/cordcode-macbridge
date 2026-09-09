@@ -42,14 +42,15 @@ const (
 	// when attach is required and failed. Failure code observation_attach_failed.
 	//
 	// 2026-09-05: DSH「/」命令面板（docs/2026-09-04 §5.2）。新增 capability
-	// `session_commands`（SessionCommandCatalog 派生，现仅 dsh-web）+ RPC
+	// `session_commands`（SessionCommandCatalog 派生，现为 dsh-web + grokbuild）+ RPC
 	// `list_session_commands` / `execute_session_command`（scope session.read/
 	// session.write）。extensible 非破坏性新增；旧客户端未知方法走既有
 	// method_not_found，无 cap 行为不变。
 	//
 	// 2026-09-05（同日二次返工）: 命令反馈官方真值化——新增 part variant `command`
-	// （dsh-web host 斜杠命令时间线行，command/run|done 按 commandId 折叠为单个
-	// completed system turn）、live event 名 `session_command` / `session_plan_mode`
+	// （host 斜杠命令时间线行：dsh-web 折叠 command/run|done，Grok Build
+	// 折叠官方 pager-local manual-compact lifecycle）、live event 名
+	// `session_command` / `session_plan_mode`
 	// （syncV2 raw deny-list 封条，projection 为 SoT）、SessionProjection/Patch 可选
 	// 字段 `planMode`（官方 plan 投影视图 {active, pending}）。仍是 extensible
 	// 非破坏性新增（新 part type、新 event 名、可选字段），schemaRevision 维持

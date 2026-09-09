@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
@@ -162,11 +163,43 @@ func (s *grokSession) executeHostCommand(ctx context.Context, line string) (core
 	if !s.alive.Load() {
 		return core.SessionCommandResult{}, errors.New("grokbuild: execute: session actor not alive")
 	}
-	wait, err := s.dispatchTurn([]contentBlock{{Type: "text", Text: line}})
+	name := slashCommandName(line)
+	commandID := ""
+	var commandStartedAt time.Time
+	settleCompact := func(kind, text string) {
+		if commandID == "" {
+			return
+		}
+		s.emit(core.Event{Type: core.EventSessionCommand, SessionCommand: &core.SessionCommandEvent{
+			CommandID: commandID,
+			Name:      "compact",
+			Kind:      kind,
+			Text:      text,
+		}})
+	}
+	wait, err := s.dispatchTurnWithStart([]contentBlock{{Type: "text", Text: line}}, func() {
+		if name != "compact" {
+			return
+		}
+		// The official pager owns manual-compaction presentation locally rather
+		// than putting it on the ACP wire: queue dispatch inserts
+		// `Compacting conversation…`, and CompactComplete inserts
+		// `Compaction completed in {duration}.` Mirror those official
+		// lifecycle boundaries onto CordCode's existing command projection.
+		// The ID is bridge projection identity only; compaction truth and the
+		// terminal outcome still come from the official session/prompt turn.
+		commandStartedAt = time.Now()
+		commandID = fmt.Sprintf("grok-compact:%d-%d", commandStartedAt.UnixNano(), grokCommandSequence.Add(1))
+		s.emit(core.Event{Type: core.EventSessionCommand, SessionCommand: &core.SessionCommandEvent{
+			CommandID: commandID,
+			Name:      "compact",
+			Kind:      "running",
+		}})
+	})
 	if err != nil {
+		settleCompact("error", "Compaction failed.")
 		return core.SessionCommandResult{}, err
 	}
-	name := slashCommandName(line)
 	var goalCreated <-chan string
 	if name == "goal" && grokGoalCreationCommand(line) {
 		goalCreated = s.turn.goalCreatedSignal()
@@ -194,15 +227,26 @@ func (s *grokSession) executeHostCommand(ctx context.Context, line string) (core
 		return core.SessionCommandResult{ResultKind: "success", ResultText: objective}, nil
 	case out := <-wait:
 		if out.Err != nil {
+			settleCompact("error", "Compaction failed.")
 			return core.SessionCommandResult{}, out.Err
 		}
 		switch out.StopReason {
 		case stopReasonEndTurn:
+			if commandID != "" {
+				text := fmt.Sprintf("Compaction completed in %s.", formatGrokDuration(time.Since(commandStartedAt)))
+				settleCompact("success", text)
+				return core.SessionCommandResult{
+					CommandID:  commandID,
+					ResultKind: "success",
+					ResultText: text,
+				}, nil
+			}
 			return core.SessionCommandResult{
 				ResultKind: "success",
 				ResultText: strings.TrimSpace(out.HostText),
 			}, nil
 		case stopReasonCancelled:
+			settleCompact("error", "Compaction cancelled.")
 			cat := out.CancellationCategory
 			if cat == "" {
 				cat = "unknown"
@@ -210,14 +254,36 @@ func (s *grokSession) executeHostCommand(ctx context.Context, line string) (core
 			return core.SessionCommandResult{}, fmt.Errorf("grokbuild: command cancelled (%s)", cat)
 		default:
 			// max_tokens / refusal / unforeseen: honest failure, no fake success.
+			settleCompact("error", "Compaction failed.")
 			return core.SessionCommandResult{}, fmt.Errorf("grokbuild: command turn ended with %q", out.StopReason)
 		}
 	case <-ctx.Done():
 		// Best-effort cancel so the leased slot frees and the turn terminal
 		// still flows through Events (mirrors cancel-then-cleanup).
 		_ = s.CancelTurn(ctx)
+		settleCompact("error", "Compaction cancelled.")
 		return core.SessionCommandResult{}, ctx.Err()
 	}
+}
+
+var grokCommandSequence atomic.Uint64
+
+// formatGrokDuration mirrors xai-grok-pager-render::util::format_duration,
+// which is the official manual `/compact` completion presentation.
+func formatGrokDuration(d time.Duration) string {
+	totalSeconds := uint64(d / time.Second)
+	if totalSeconds < 10 {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	if totalSeconds < 60 {
+		return fmt.Sprintf("%ds", totalSeconds)
+	}
+	minutes := totalSeconds / 60
+	seconds := totalSeconds % 60
+	if minutes < 60 {
+		return fmt.Sprintf("%dm%ds", minutes, seconds)
+	}
+	return fmt.Sprintf("%dh%dm", minutes/60, minutes%60)
 }
 
 func grokGoalCreationCommand(line string) bool {

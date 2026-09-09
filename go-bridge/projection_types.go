@@ -97,11 +97,12 @@ type ProjectionPart struct {
 	UserInputResolutionSource string      `json:"resolutionSource,omitempty"` // ios|mac|other_client|backend
 	UserInputDiagnosticCode   string      `json:"diagnosticCode,omitempty"`
 
-	// command (Type=="command") — dsh-web host slash-command lifecycle part. The
-	// official GenericCommandCard truth: run→done folded by commandId into one
-	// persistent system turn. CommandKind carries running|success|error (row
-	// state); CommandText is the official settle text verbatim (empty → client
-	// falls back to the official locale labels, never bridge-synthesized copy).
+	// command (Type=="command") — host slash-command lifecycle part. DSH maps
+	// official run→done; Grok maps the official pager-local manual-compact
+	// lifecycle. Both fold by commandId into one persistent system turn.
+	// CommandKind carries running|success|error (row state); CommandText is the
+	// official settle text or its equivalent pager-local projection (empty →
+	// client falls back to the official locale labels).
 	// CommandLine is the official goal command-input echo (ui-goal
 	// goalCommandText "/goal" + args.TrimRight; goal only — plan/compact have no
 	// user bubble officially). Empty → no bubble.
@@ -135,10 +136,10 @@ type ProjectionPart struct {
 	// nil = 未分阶段（官方 missing），非 nil 空串 = 空阶段名（独立身份）；分组
 	// 按首现顺序。Additive；其他 backend 恒缺。See bridge-v1.md「Part
 	// vocabulary: workflow」。
-	WorkflowID     string                     `json:"workflowId,omitempty"`
-	WorkflowName   string                     `json:"workflowName,omitempty"`
-	WorkflowStatus string                     `json:"workflowStatus,omitempty"`
-	WorkflowPhases []WorkflowPhaseProjection  `json:"workflowPhases,omitempty"`
+	WorkflowID     string                    `json:"workflowId,omitempty"`
+	WorkflowName   string                    `json:"workflowName,omitempty"`
+	WorkflowStatus string                    `json:"workflowStatus,omitempty"`
+	WorkflowPhases []WorkflowPhaseProjection `json:"workflowPhases,omitempty"`
 }
 
 // WorkflowMemberProjection 是 workflow 卡一个成员（官方 WorkflowRunMemberData

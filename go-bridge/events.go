@@ -312,7 +312,9 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		}), false
 
 	case core.EventSessionCommand:
-		// dsh-web host slash-command lifecycle (command/run|done folded by commandId).
+		// Host slash-command lifecycle (folded by commandId): dsh-web maps the
+		// official command/run|done rail; Grok mirrors the official pager's local
+		// manual-compaction lifecycle around the real session/prompt turn.
 		// Projects through the Kernel as a `command` part on a completed system turn —
 		// the timeline row is the official GenericCommandCard truth (name + settle text).
 		// Raw frame is deny-listed for syncV2 clients (projection is the SoT).
