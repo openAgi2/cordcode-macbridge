@@ -250,12 +250,15 @@ func decorateGrokGoalHistory(sessionDir, sessionID string, entries []core.RichHi
 				}
 			}
 		}
+		var recovered []core.RichHistoryEntry
 		for _, runID := range runOrder {
 			snapshot := latest[runID]
+			matched := false
 			for i := range entries {
 				if entries[i].Role != "system" || len(entries[i].Parts) == 0 || fmt.Sprint(entries[i].Parts[0]["type"]) != "command" || fmt.Sprint(entries[i].Parts[0]["name"]) != "goal" || strings.TrimSpace(fmt.Sprint(entries[i].Parts[0]["args"])) != strings.TrimSpace(snapshot.Name) {
 					continue
 				}
+				matched = true
 				attached := false
 				for j := i + 1; j < len(entries); j++ {
 					if entries[j].Role == "assistant" {
@@ -279,7 +282,22 @@ func decorateGrokGoalHistory(sessionDir, sessionID string, entries []core.RichHi
 				}
 				break
 			}
+			if !matched {
+				// Manual compaction rewrites chat_history.jsonl to the surviving
+				// context, but the official updates journal retains every goal and
+				// subagent lifecycle. Rebuild the missing timeline pair from that
+				// durable source so reconnecting does not erase prior goal cards.
+				commandID := sessionID + ":goal-command:" + runID
+				recovered = append(recovered,
+					core.RichHistoryEntry{ID: commandID, Role: "system", Parts: []map[string]any{{
+						"type": "command", "commandId": commandID, "name": "goal", "args": snapshot.Name,
+						"kind": "success", "line": "/goal " + snapshot.Name,
+					}}},
+					core.RichHistoryEntry{ID: sessionID + ":workflow:" + runID, Role: "assistant", Parts: []map[string]any{workflowPart(snapshot)}},
+				)
+			}
 		}
+		entries = append(recovered, entries...)
 	}
 	goalPart := map[string]any{"type": "goal", "phase": "none"}
 	if goal := loadGrokGoalSnapshot(sessionDir); goal != nil {

@@ -220,6 +220,51 @@ func TestDecorateGrokGoalHistoryKeepsFailedWorkflowVisibleWithoutAssistantText(t
 	}
 }
 
+func TestDecorateGrokGoalHistoryRecoversCompactedAwayGoalCommands(t *testing.T) {
+	sessionDir := t.TempDir()
+	updates := []map[string]any{
+		{"sessionUpdate": "goal_updated", "goal_id": "goal-old", "objective": "write old", "status": "active"},
+		{"sessionUpdate": "subagent_spawned", "subagent_id": "worker-old", "child_session_id": "worker-old", "description": "old worker", "parent_prompt_id": "turn-old"},
+		{"sessionUpdate": "subagent_finished", "subagent_id": "worker-old", "child_session_id": "worker-old", "status": "completed"},
+		{"sessionUpdate": "goal_updated", "goal_id": "goal-old", "objective": "write old", "status": "completed"},
+		{"sessionUpdate": "goal_updated", "goal_id": "goal-new", "objective": "write new", "status": "active"},
+		{"sessionUpdate": "subagent_spawned", "subagent_id": "worker-new", "child_session_id": "worker-new", "description": "new worker", "parent_prompt_id": "turn-new"},
+		{"sessionUpdate": "subagent_finished", "subagent_id": "worker-new", "child_session_id": "worker-new", "status": "failed"},
+		{"sessionUpdate": "goal_updated", "goal_id": "goal-new", "objective": "write new", "status": "infra_paused", "pause_message": "worker failed"},
+	}
+	var journal strings.Builder
+	for _, update := range updates {
+		params := goalUpdateParams(t, update, 1)
+		line, err := json.Marshal(map[string]any{"method": "_x.ai/session/update", "params": json.RawMessage(params)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		journal.Write(line)
+		journal.WriteByte('\n')
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, "updates.jsonl"), []byte(journal.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := decorateGrokGoalHistory(sessionDir, "parent", []core.RichHistoryEntry{{ID: "after-compact", Role: "user", Content: "continue"}})
+	if len(got) != 5 {
+		t.Fatalf("recovered entries = %+v", got)
+	}
+	wantRuns := []string{"goal-old", "goal-new"}
+	for i, runID := range wantRuns {
+		command, workflow := got[i*2], got[i*2+1]
+		if command.Role != "system" || command.Parts[0]["commandId"] != "parent:goal-command:"+runID {
+			t.Fatalf("goal %s command = %+v", runID, command)
+		}
+		if workflow.Role != "assistant" || workflow.Parts[0]["workflowId"] != runID {
+			t.Fatalf("goal %s workflow = %+v", runID, workflow)
+		}
+	}
+	if got[4].ID != "after-compact" {
+		t.Fatalf("surviving compacted history moved incorrectly: %+v", got)
+	}
+}
+
 func TestSessionUpdateOwnerIDRejectsChildTranscript(t *testing.T) {
 	params := json.RawMessage(`{"sessionId":"child-1","update":{"sessionUpdate":"agent_message_chunk"}}`)
 	if got := sessionUpdateOwnerID(params); got != "child-1" {

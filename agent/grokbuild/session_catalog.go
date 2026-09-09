@@ -198,6 +198,67 @@ func (a *Agent) GetRichSessionHistory(ctx context.Context, sessionID string, lim
 	return readRichSessionHistory(home, sessionID, limit, questionsLive)
 }
 
+// IsSessionActive implements core.SessionActivityProbing from Grok's durable
+// update journal. A user_message_chunk opens a turn and the subsequent
+// turn_completed closes it. Unknown or unreadable state stays conservatively
+// active so hydration never fabricates a terminal while real work may exist.
+func (a *Agent) IsSessionActive(ctx context.Context, sessionID string) bool {
+	if err := ctx.Err(); err != nil {
+		return true
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return true
+	}
+	a.mu.RLock()
+	home := a.grokHomeLocked()
+	a.mu.RUnlock()
+	dir := findSessionDir(home, sessionID)
+	if dir == "" {
+		return true
+	}
+	f, err := os.Open(filepath.Join(dir, "updates.jsonl"))
+	if err != nil {
+		return true
+	}
+	defer f.Close()
+
+	known := false
+	active := false
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		if err := ctx.Err(); err != nil {
+			return true
+		}
+		var row struct {
+			Method string `json:"method"`
+			Params struct {
+				SessionID string `json:"sessionId"`
+				Update    struct {
+					SessionUpdate string `json:"sessionUpdate"`
+				} `json:"update"`
+			} `json:"params"`
+		}
+		if json.Unmarshal(sc.Bytes(), &row) != nil || !isSessionUpdateMethod(row.Method) ||
+			(strings.TrimSpace(row.Params.SessionID) != "" && row.Params.SessionID != sessionID) {
+			continue
+		}
+		switch row.Params.Update.SessionUpdate {
+		case "user_message_chunk":
+			known = true
+			active = true
+		case "turn_completed":
+			known = true
+			active = false
+		}
+	}
+	if sc.Err() != nil || !known {
+		return true
+	}
+	return active
+}
+
 func listLocalSessions(ctx context.Context, grokHome string) ([]core.AgentSessionInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
