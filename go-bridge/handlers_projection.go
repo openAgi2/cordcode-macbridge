@@ -1393,7 +1393,7 @@ func hydrateUserInputEventsFromPart(part map[string]any, turnID string) []projec
 // to the live path (events.go EventWorkflowRun) so the reducer upserts cold and
 // live through one case. Fail-closed: a part without workflowId or phases yields
 // nothing.
-func hydrateWorkflowEventsFromPart(part map[string]any, turnID string) []projectionHydrateEvent {
+func hydrateWorkflowEventsFromPart(part map[string]any, turnID string, partIndex int) []projectionHydrateEvent {
 	workflowID := dataString(part, "workflowId")
 	if workflowID == "" || turnID == "" {
 		return nil
@@ -1406,15 +1406,21 @@ func hydrateWorkflowEventsFromPart(part map[string]any, turnID string) []project
 	if status == "" {
 		status = "running"
 	}
+	data := map[string]interface{}{
+		"turnId":         turnID,
+		"workflowId":     workflowID,
+		"workflowName":   dataString(part, "workflowName"),
+		"workflowStatus": status,
+		"workflowPhases": phases,
+	}
+	// partIndex = part 在 entry Parts 里的原始渲染位置（事件因 turn 创建顺序
+	// 被延迟，位置提示让首插仍回到原位；live 事件不带此字段）。
+	if partIndex >= 0 {
+		data["partIndex"] = partIndex
+	}
 	return []projectionHydrateEvent{{
 		Event: "workflow_run",
-		Data: map[string]interface{}{
-			"turnId":         turnID,
-			"workflowId":     workflowID,
-			"workflowName":   dataString(part, "workflowName"),
-			"workflowStatus": status,
-			"workflowPhases": phases,
-		},
+		Data:  data,
 	}}
 }
 
@@ -1773,7 +1779,7 @@ func openCodeRichHistoryEntryToProjectionEvents(
 		var deferredWorkflow []projectionHydrateEvent
 		// Prefer structured parts when present.
 		if len(entry.Parts) > 0 {
-			for _, part := range entry.Parts {
+			for pi, part := range entry.Parts {
 				ptype := strings.TrimSpace(fmt.Sprint(part["type"]))
 				switch ptype {
 				case "text":
@@ -1823,8 +1829,10 @@ func openCodeRichHistoryEntryToProjectionEvents(
 					// dsh-web 并行子代理 workflow 卡（history.go 冷拉折叠的整值
 					// part → 一次 workflow_run hydrate 事件；reducer 按 workflowId
 					// 原地 upsert，与 live 路径同形）。事件收集进 deferredWorkflow，
-					// 在本 entry 内容事件之后发出（见上方注释）；parts 渲染顺序不变。
-					events := hydrateWorkflowEventsFromPart(part, turnID)
+					// 在本 entry 内容事件之后发出（见上方注释）；partIndex 携带
+					// part 在 entry 里的原始渲染位置，reducer 首插按位插入，
+					// parts 渲染顺序不变。
+					events := hydrateWorkflowEventsFromPart(part, turnID, pi)
 					if len(events) == 0 {
 						continue
 					}

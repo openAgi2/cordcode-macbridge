@@ -298,7 +298,7 @@ func TestHydrateWorkflowEventsFromPart(t *testing.T) {
 			},
 		},
 	}
-	events := hydrateWorkflowEventsFromPart(part, "dshw-s1-t12")
+	events := hydrateWorkflowEventsFromPart(part, "dshw-s1-t12", 0)
 	if len(events) != 1 {
 		t.Fatalf("events = %d, want 1", len(events))
 	}
@@ -328,14 +328,14 @@ func TestHydrateWorkflowEventsFromPart(t *testing.T) {
 	}
 
 	// fail-closed：缺 workflowId / 缺 phases → nil。
-	if hydrateWorkflowEventsFromPart(map[string]interface{}{"type": "workflow", "workflowStatus": "running"}, "t") != nil {
+	if hydrateWorkflowEventsFromPart(map[string]interface{}{"type": "workflow", "workflowStatus": "running"}, "t", 0) != nil {
 		t.Fatal("missing workflowId must yield no events")
 	}
-	if hydrateWorkflowEventsFromPart(map[string]interface{}{"type": "workflow", "workflowId": "x"}, "t") != nil {
+	if hydrateWorkflowEventsFromPart(map[string]interface{}{"type": "workflow", "workflowId": "x"}, "t", 0) != nil {
 		t.Fatal("missing phases must yield no events")
 	}
 	// 空 turnId 同样拒绝（无锚定）。
-	if hydrateWorkflowEventsFromPart(part, "") != nil {
+	if hydrateWorkflowEventsFromPart(part, "", 0) != nil {
 		t.Fatal("empty turnId must yield no events")
 	}
 }
@@ -401,6 +401,9 @@ func TestColdHydrateDefersWorkflowUntilTurnExists(t *testing.T) {
 		}
 		if wf == nil {
 			continue
+		}
+		if turn.Assistant.Parts[0].Type != "workflow" {
+			t.Fatalf("workflow card must render at its original entry position (parts[0])")
 		}
 		if wf.WorkflowID != "run-1" || wf.WorkflowStatus != "completed" ||
 			len(wf.WorkflowPhases) != 1 || len(wf.WorkflowPhases[0].Members) != 1 ||

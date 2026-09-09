@@ -469,11 +469,23 @@ func findUserInputPart(msg *MessageProjection, interactionID string) int {
 
 // upsertWorkflowPart inserts or replaces (in place, by workflowId) a workflow part
 // in the assistant message (official workflow-run keyed chat node parity: one card
-// per run, updated in place — never a second card). Returns the index of the part.
-func upsertWorkflowPart(msg *MessageProjection, part ProjectionPart) int {
+// per run, updated in place — never a second card). insertAt >= 0 (cold hydrate
+// carries the part's position from the rich-history entry; live passes -1 to
+// append at arrival position) inserts a first-seen card at that index, clamped.
+// Returns the index of the part.
+func upsertWorkflowPart(msg *MessageProjection, part ProjectionPart, insertAt int) int {
 	if idx := findWorkflowPart(msg, part.WorkflowID); idx >= 0 {
 		msg.Parts[idx] = part
 		return idx
+	}
+	if insertAt >= 0 {
+		if insertAt > len(msg.Parts) {
+			insertAt = len(msg.Parts)
+		}
+		msg.Parts = append(msg.Parts, ProjectionPart{})
+		copy(msg.Parts[insertAt+1:], msg.Parts[insertAt:])
+		msg.Parts[insertAt] = part
+		return insertAt
 	}
 	msg.Parts = append(msg.Parts, part)
 	return len(msg.Parts) - 1
@@ -979,7 +991,13 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if part.WorkflowStatus == "" {
 			part.WorkflowStatus = "running"
 		}
-		upsertWorkflowPart(t.Assistant, part)
+		// partIndex 只由冷拉 hydrate 携带（entry 里 part 的原始渲染位置）；
+		// live 事件不带 → -1 → 按到达顺序 append（原语义）。
+		insertAt := -1
+		if raw, ok := data["partIndex"]; ok && raw != nil {
+			insertAt = int(dataInt64(data, "partIndex"))
+		}
+		upsertWorkflowPart(t.Assistant, part, insertAt)
 		ps.workflows[runID] = workflowPending{turnID: turnID, part: part}
 		ps.stageTurnForFlush(turnID)
 
