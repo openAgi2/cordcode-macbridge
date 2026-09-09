@@ -107,7 +107,7 @@ func TestReducerPermissionRequestKeepsReasonAsTitle(t *testing.T) {
 
 // 官方载荷（opencode-web v1.18，live-pinned permission.asked）：permissionKind/
 // patterns 必须落到投影 part（SSV2 权限卡的 SoT），且同 id 薄事件后到不得抹掉
-//（双 backend 订阅同一 serve 的竞态：老 opencode 与 opencode-web 各发一条）。
+// （双 backend 订阅同一 serve 的竞态：老 opencode 与 opencode-web 各发一条）。
 func TestReducerPermissionRequestCarriesOfficialPayloadAndThinMergeKeepsIt(t *testing.T) {
 	r := newTestReducer()
 	r.Apply(ev(1, "opencode-web", "ses_1", "turn_started", map[string]interface{}{"turnId": "T1"}))
@@ -186,6 +186,71 @@ func TestReducerPermissionResolvedClearsPendingAndLeavesRunning(t *testing.T) {
 	if proj.Execution.Phase != "running" {
 		t.Fatalf("second resolve phase = %q", proj.Execution.Phase)
 	}
+}
+
+// TestReducerTurnCompletedSettlesApprovedPermissionCard: the control-plane
+// permission-card part is NOT the real tool part (different ItemID); nothing
+// else ever completes it, so the client kept showing "权限已批准，等待执行"
+// after the turn ended (grok plan_review, 2026-09-09 real-device).
+func TestReducerTurnCompletedSettlesApprovedPermissionCard(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "grokbuild", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "grokbuild", "s1", "permission_request", map[string]interface{}{
+		"requestId":      "4",
+		"toolName":       "计划审批: 重构方案",
+		"permissionKind": "plan_review",
+	}))
+	r.Apply(ev(3, "grokbuild", "s1", "permission_resolved", map[string]interface{}{
+		"requestId": "4",
+		"behavior":  "allow",
+	}))
+	r.Apply(ev(4, "grokbuild", "s1", "turn_completed", map[string]interface{}{}))
+
+	proj, ok := r.Snapshot("grokbuild", "s1")
+	if !ok {
+		t.Fatal("no projection")
+	}
+	if proj.Execution.Phase != "idle" {
+		t.Fatalf("execution phase = %q, want idle", proj.Execution.Phase)
+	}
+	var card *ProjectionPart
+	for i := range proj.Turns[0].Assistant.Parts {
+		p := &proj.Turns[0].Assistant.Parts[i]
+		if p.Type == "tool" && p.ItemID == "4" {
+			card = p
+			break
+		}
+	}
+	if card == nil {
+		t.Fatalf("missing permission card part: %+v", proj.Turns[0].Assistant.Parts)
+	}
+	if card.ToolStatus != "completed" || card.RequiresPermissionConfirmation {
+		t.Fatalf("card after turn_completed = %+v, want completed without confirmation", card)
+	}
+}
+
+// The pending (never-resolved) card must NOT be force-completed by
+// turn_completed — it keeps waiting for the user.
+func TestReducerTurnCompletedKeepsPendingPermissionCardPending(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "grokbuild", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "grokbuild", "s1", "permission_request", map[string]interface{}{
+		"requestId": "5",
+		"toolName":  "计划审批: 另一个方案",
+	}))
+	r.Apply(ev(3, "grokbuild", "s1", "turn_completed", map[string]interface{}{}))
+
+	proj, _ := r.Snapshot("grokbuild", "s1")
+	for i := range proj.Turns[0].Assistant.Parts {
+		p := &proj.Turns[0].Assistant.Parts[i]
+		if p.Type == "tool" && p.ItemID == "5" {
+			if !p.RequiresPermissionConfirmation || p.ToolStatus != "pending" {
+				t.Fatalf("pending card mutated by turn_completed: %+v", p)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing pending card part: %+v", proj.Turns[0].Assistant.Parts)
 }
 
 // persist-only turn_started must not publish a skeleton, but the following

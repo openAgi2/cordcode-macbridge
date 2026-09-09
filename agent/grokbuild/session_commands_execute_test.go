@@ -167,6 +167,41 @@ func TestLiveSessionsRegistry(t *testing.T) {
 	}
 }
 
+func TestLiveSessionReplacementDoesNotReusePreviousActorMode(t *testing.T) {
+	a := &Agent{modeSide: newModeSideState()}
+	s1 := &grokSession{}
+	s1.alive.Store(true)
+	a.registerLiveSession("sid", s1)
+	a.modeSide.observeLive("sid", "plan")
+
+	// A live owner cannot be displaced, and its acknowledged mode survives.
+	s2 := &grokSession{}
+	s2.alive.Store(true)
+	a.registerLiveSession("sid", s2)
+	if got, ok := a.modeSide.live["sid"]; !ok || got != "plan" {
+		t.Fatalf("rejected replacement changed live mode: %q, %v", got, ok)
+	}
+
+	// Once the old owner is dead, a replacement succeeds and starts without
+	// inheriting the old actor's in-memory mode.
+	s1.alive.Store(false)
+	a.registerLiveSession("sid", s2)
+	if _, ok := a.modeSide.live["sid"]; ok {
+		t.Fatal("replacement actor must not inherit the previous actor's mode")
+	}
+
+	// A stale teardown cannot clear mode subsequently acknowledged by s2.
+	a.modeSide.observeLive("sid", "default")
+	a.unregisterLiveSession("sid", s1)
+	if got, ok := a.modeSide.live["sid"]; !ok || got != "default" {
+		t.Fatalf("stale unregister changed replacement mode: %q, %v", got, ok)
+	}
+	a.unregisterLiveSession("sid", s2)
+	if _, ok := a.modeSide.live["sid"]; ok {
+		t.Fatal("current owner unregister must clear its live mode")
+	}
+}
+
 // --- grokSession e2e：脚本化 ACP peer ---
 
 // turnScriptPeer answers session/prompt with the P6-evidenced frame sequence.
@@ -178,6 +213,7 @@ type turnScriptPeer struct {
 	selfCancel     bool   // emit session/cancel notification before responding
 	holdResponse   bool   // never respond (EOF test closes the pipe instead)
 	goalObjective  string // emit a durable goal_created update before any response
+	promptTexts    chan string
 }
 
 // startTurnScriptPeer spawns the peer; stop closes both ends and waits.
@@ -198,9 +234,37 @@ func startTurnScriptPeer(t *testing.T, script turnScriptPeer) (stdinW io.WriteCl
 			var req struct {
 				ID     json.RawMessage `json:"id"`
 				Method string          `json:"method"`
+				Params struct {
+					ModeID string `json:"modeId"`
+					Prompt []struct {
+						Text string `json:"text"`
+					} `json:"prompt"`
+				} `json:"params"`
 			}
-			if err := json.Unmarshal(sc.Bytes(), &req); err != nil || req.Method != "session/prompt" {
+			if err := json.Unmarshal(sc.Bytes(), &req); err != nil {
 				continue
+			}
+			if req.Method == "session/set_mode" {
+				update, _ := json.Marshal(map[string]any{
+					"jsonrpc": "2.0", "method": "session/update",
+					"params": map[string]any{"sessionId": "sess-1", "update": map[string]any{
+						"sessionUpdate": "current_mode_update", "currentModeId": req.Params.ModeID,
+					}},
+				})
+				_, _ = outW.Write(append(update, '\n'))
+				resp, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(req.ID), "result": map[string]any{}})
+				_, _ = outW.Write(append(resp, '\n'))
+				continue
+			}
+			if req.Method != "session/prompt" {
+				continue
+			}
+			if script.promptTexts != nil {
+				text := ""
+				if len(req.Params.Prompt) > 0 {
+					text = req.Params.Prompt[0].Text
+				}
+				script.promptTexts <- text
 			}
 			if script.hostText != "" {
 				chunk, _ := json.Marshal(map[string]any{
@@ -377,6 +441,76 @@ func TestExecuteHostCommandEndTurn(t *testing.T) {
 			t.Fatalf("double terminal: %+v", ev)
 		}
 	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestExecutePlanSetsModeWithoutSendingSlashPrompt(t *testing.T) {
+	s, _, shut := newTurnTestSession(t, turnScriptPeer{})
+	defer shut()
+	a := &Agent{acu: newACUSideState(), modeSide: newModeSideState()}
+	a.registerLiveSession("sess-1", s)
+	s.agent = a
+	dir := t.TempDir()
+	a.SetWorkDir(dir)
+	a.acu.storeListSuccess("sess-1", dir, []core.SessionCommand{{Name: "plan"}})
+
+	res, err := a.ExecuteSessionCommand(context.Background(), "sess-1", "/plan")
+	if err != nil || res.ResultKind != "success" || res.ResultText != "Plan mode on." {
+		t.Fatalf("result=%+v err=%v", res, err)
+	}
+	if s.turn.activeReqID() != 0 {
+		t.Fatal("bare /plan must not dispatch a model prompt")
+	}
+	mode, err := a.GetSessionMode(context.Background(), "sess-1")
+	if err != nil || mode.Mode == nil || *mode.Mode != "plan" || !mode.CanSet {
+		t.Fatalf("live mode=%+v err=%v", mode, err)
+	}
+}
+
+func TestExecutePlanDescriptionSetsModeThenSendsDescriptionOnly(t *testing.T) {
+	prompts := make(chan string, 1)
+	s, _, shut := newTurnTestSession(t, turnScriptPeer{promptID: "p-plan", stopReason: "end_turn", promptTexts: prompts})
+	defer shut()
+	a := &Agent{acu: newACUSideState(), modeSide: newModeSideState()}
+	a.registerLiveSession("sess-1", s)
+	s.agent = a
+	dir := t.TempDir()
+	a.SetWorkDir(dir)
+	a.acu.storeListSuccess("sess-1", dir, []core.SessionCommand{{Name: "plan"}})
+
+	res, err := a.ExecuteSessionCommand(context.Background(), "sess-1", "/plan refactor auth")
+	if err != nil || res.ResultKind != "success" {
+		t.Fatalf("result=%+v err=%v", res, err)
+	}
+	if got := <-prompts; got != "refactor auth" {
+		t.Fatalf("prompt=%q, want description only (never the /plan command line)", got)
+	}
+	term := nextTerminal(t, s.events)
+	if term.StopReason != "end_turn" {
+		t.Fatalf("terminal=%+v", term)
+	}
+}
+
+func TestExecutePlanOffSetsDefault(t *testing.T) {
+	s, _, shut := newTurnTestSession(t, turnScriptPeer{})
+	defer shut()
+	a := &Agent{acu: newACUSideState(), modeSide: newModeSideState()}
+	a.registerLiveSession("sess-1", s)
+	s.agent = a
+	dir := t.TempDir()
+	a.SetWorkDir(dir)
+	a.acu.storeListSuccess("sess-1", dir, []core.SessionCommand{{Name: "plan"}})
+
+	if _, err := a.ExecuteSessionCommand(context.Background(), "sess-1", "/plan"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := a.ExecuteSessionCommand(context.Background(), "sess-1", "/plan off")
+	if err != nil || res.ResultText != "Plan mode off." {
+		t.Fatalf("result=%+v err=%v", res, err)
+	}
+	mode, _ := a.GetSessionMode(context.Background(), "sess-1")
+	if mode.Mode == nil || *mode.Mode != "default" {
+		t.Fatalf("mode=%+v", mode)
 	}
 }
 

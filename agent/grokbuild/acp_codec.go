@@ -579,9 +579,10 @@ func parseAvailableCommandsUpdate(params json.RawMessage) (sessionID string, com
 // parseCurrentModeUpdate extracts a current_mode_update notification (CMU).
 // 1.0.13 shape: {sessionId, update:{sessionUpdate:"current_mode_update",
 // currentModeId}} (phase0 sample p5; no commandId-style extras). CMU carries
-// NO authoritative value for us — it only marks the session dirty (§5.3) and
-// the next GetSessionMode re-reads plan_mode.json.
-func parseCurrentModeUpdate(params json.RawMessage) (sessionID string, ok bool) {
+// On a leader-observation rail it remains a dirty signal only. On the driver
+// rail the notification comes from the resident actor CordCode controls, so
+// its currentModeId is also the live actor's authoritative effective mode.
+func parseCurrentModeUpdate(params json.RawMessage) (sessionID, modeID string, ok bool) {
 	var payload struct {
 		SessionID string `json:"sessionId"`
 		Update    struct {
@@ -590,12 +591,15 @@ func parseCurrentModeUpdate(params json.RawMessage) (sessionID string, ok bool) 
 		} `json:"update"`
 	}
 	if err := json.Unmarshal(params, &payload); err != nil {
-		return "", false
+		return "", "", false
 	}
 	if payload.Update.SessionUpdate != "current_mode_update" {
-		return "", false
+		return "", "", false
 	}
-	return payload.SessionID, true
+	if payload.Update.CurrentModeID == "" {
+		return "", "", false
+	}
+	return payload.SessionID, payload.Update.CurrentModeID, true
 }
 
 // availableCommandW mirrors the official availableCommands element (grok 1.0.13

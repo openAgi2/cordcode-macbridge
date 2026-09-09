@@ -56,10 +56,16 @@ type projectionSession struct {
 	upsertTurns map[string]TurnProjection   // turnId -> latest whole-turn snapshot (upsertTurns)
 	userInputs  map[string]userInputPending // interactionId -> latest user_input part + owning turn (upsert_user_input)
 	workflows   map[string]workflowPending  // workflow runId -> latest workflow part + owning turn (upsert_workflow)
-	execution   *ExecutionView              // pending execution change
-	planMode    *PlanModeView               // pending dsh-web plan-mode change (patch.planMode)
-	sessionMode *SessionModeView            // pending typed mode-state change (patch.sessionMode, Grok §5.1)
-	goal        *GoalView                   // pending dsh-web goal change (patch.goal)
+	// permissionCards tracks control-plane permission-card part itemIDs (the
+	// reducer synthesizes these from permission_request; the real tool part has
+	// a different ItemID and completes separately). turn_completed settles the
+	// approved ones still status running — otherwise the card shows
+	// "approved, waiting" forever after the turn ends (grok plan_review, 2026-09-09).
+	permissionCards map[string]struct{}
+	execution       *ExecutionView   // pending execution change
+	planMode        *PlanModeView    // pending dsh-web plan-mode change (patch.planMode)
+	sessionMode     *SessionModeView // pending typed mode-state change (patch.sessionMode, Grok §5.1)
+	goal            *GoalView        // pending dsh-web goal change (patch.goal)
 }
 
 // userInputPending captures a pending upsert_user_input PartOp: the owning assistant turn/message
@@ -95,9 +101,13 @@ func cloneProjectionSessionState(source *projectionSession) *projectionSession {
 		upsertTurns:         make(map[string]TurnProjection, len(source.upsertTurns)),
 		userInputs:          make(map[string]userInputPending, len(source.userInputs)),
 		workflows:           make(map[string]workflowPending, len(source.workflows)),
+		permissionCards:     make(map[string]struct{}, len(source.permissionCards)),
 	}
 	for turnID := range source.publishedTurnShells {
 		cloned.publishedTurnShells[turnID] = struct{}{}
+	}
+	for itemID := range source.permissionCards {
+		cloned.permissionCards[itemID] = struct{}{}
 	}
 	for key, chunks := range source.textAppends {
 		cloned.textAppends[key] = append([]string(nil), chunks...)
@@ -601,6 +611,36 @@ func (ps *projectionSession) interruptRunningWorkflowParts(turn *TurnProjection)
 	}
 }
 
+// settleResolvedPermissionCards marks control-plane permission-card parts that
+// were already approved (resolve closed the confirmation; the real tool part
+// completes separately) as completed when their turn settles. Without this the
+// card part stays status running forever and the client keeps showing
+// "approved, waiting to run" after the turn has ended (grok plan_review,
+// 2026-09-09 real-device). Denied cards (status rejected) are left alone.
+func (ps *projectionSession) settleResolvedPermissionCards(turn *TurnProjection) {
+	if ps == nil || turn == nil || turn.Assistant == nil || len(ps.permissionCards) == 0 {
+		return
+	}
+	for i := range turn.Assistant.Parts {
+		part := &turn.Assistant.Parts[i]
+		if part.Type != "tool" {
+			continue
+		}
+		if _, isCard := ps.permissionCards[part.ItemID]; !isCard {
+			continue
+		}
+		if part.RequiresPermissionConfirmation {
+			continue // never resolved — not ours to settle
+		}
+		if part.ToolStatus == "running" || part.ToolStatus == "pending" || part.ToolStatus == "" {
+			part.ToolStatus = "completed"
+			if ps.tools != nil {
+				ps.tools[part.ItemID] = *part
+			}
+		}
+	}
+}
+
 func questionOptionsToUserInputOptions(raw interface{}) []map[string]interface{} {
 	list, ok := raw.([]interface{})
 	if !ok {
@@ -906,13 +946,13 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 				ID:   turnID,
 				Role: "system",
 				Parts: []ProjectionPart{{
-					Type:         "command",
-					ItemID:       commandID,
-					CommandID:    commandID,
-					CommandName:  dataString(data, "name"),
-					CommandKind:  kind,
-					CommandText:  dataString(data, "text"),
-					CommandLine:  dataString(data, "inputLine"),
+					Type:        "command",
+					ItemID:      commandID,
+					CommandID:   commandID,
+					CommandName: dataString(data, "name"),
+					CommandKind: kind,
+					CommandText: dataString(data, "text"),
+					CommandLine: dataString(data, "inputLine"),
 				}},
 			},
 		})
@@ -982,11 +1022,11 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			t.Assistant = &MessageProjection{ID: turnID, Role: "assistant"}
 		}
 		part := ProjectionPart{
-			Type:            "workflow",
-			WorkflowID:      runID,
-			WorkflowName:    dataString(data, "workflowName"),
-			WorkflowStatus:  dataString(data, "workflowStatus"),
-			WorkflowPhases:  workflowPhasesFromWire(data["workflowPhases"]),
+			Type:           "workflow",
+			WorkflowID:     runID,
+			WorkflowName:   dataString(data, "workflowName"),
+			WorkflowStatus: dataString(data, "workflowStatus"),
+			WorkflowPhases: workflowPhasesFromWire(data["workflowPhases"]),
 		}
 		if part.WorkflowStatus == "" {
 			part.WorkflowStatus = "running"
@@ -1347,6 +1387,10 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			return
 		}
 		commit()
+		if ps.permissionCards == nil {
+			ps.permissionCards = make(map[string]struct{})
+		}
+		ps.permissionCards[callID] = struct{}{}
 		t := ps.turnByID(activeTurnID)
 		if t == nil {
 			ps.upsertTurn(TurnProjection{TurnID: activeTurnID, Status: "running"})
@@ -1695,6 +1739,7 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			}
 			classifyProjectionTextPresentation(turn.Assistant, true)
 			ps.interruptRunningWorkflowParts(turn)
+			ps.settleResolvedPermissionCards(turn)
 			ps.upsertTurns[turnID] = *turn
 		}
 		// Completing the active turn also settles any older zombie running/pending turns

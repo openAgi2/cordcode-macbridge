@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -72,6 +73,10 @@ type grokSession struct {
 	// pendingPermsMu: written by readLoop (emitTurnScoped), cleared by Send.
 	pendingUserEcho string
 	pendingPerms    map[string][]permissionOption
+	// pendingPlans registers driver-rail x.ai/exit_plan_mode reverse-requests
+	// (iOS-originated turns on the --no-leader actor). Leader-rail plans are
+	// owned by LeaderSubscriber; this map is the same card, different wire.
+	pendingPlans map[string]pendingDriverPlan
 
 	// turn is the shared turn dispatcher (turn_dispatch.go): one in-flight
 	// session/prompt per actor, settle-once terminal future, hostTurn feedback
@@ -153,6 +158,7 @@ func newGrokSession(ctx context.Context, agent *Agent, sessionID string) (*grokS
 		cancel:           cancel,
 		done:             make(chan struct{}),
 		pendingPerms:     make(map[string][]permissionOption),
+		pendingPlans:     make(map[string]pendingDriverPlan),
 		pendingQuestions: make(map[string]*pendingAskUserQuestion),
 		respChannels:     make(map[int]chan *jsonrpcResponse),
 		updateState:      newGrokUpdateState(),
@@ -319,9 +325,18 @@ func (s *grokSession) initialize() error {
 				s.supportsListSession = true
 			}
 		}
-		// Authenticate if methods are advertised.
-		if len(initResp.AuthMethods) > 0 {
-			if err := s.authenticate(initResp.AuthMethods[0].ID); err != nil {
+		// Authenticate if methods are advertised. Method selection mirrors
+		// the official pager (select_eager_auth_method): defaultAuthMethodId
+		// → cached_token → first advertised. Never blindly use
+		// authMethods[0]; that is xai.api_key when any BYOK model exists.
+		if method := initResp.eagerAuthMethodID(); method != "" {
+			first := ""
+			if len(initResp.AuthMethods) > 0 {
+				first = initResp.AuthMethods[0].ID
+			}
+			slog.Info("grokbuild: authenticating",
+				"method", method, "advertised_first", first)
+			if err := s.authenticate(method); err != nil {
 				return fmt.Errorf("authenticate: %w", err)
 			}
 		}
@@ -594,30 +609,45 @@ func (s *grokSession) CancelTurn(ctx context.Context) error {
 	return err
 }
 
+type pendingDriverPlan struct {
+	rawID json.RawMessage
+}
+
 func (s *grokSession) RespondPermission(requestID string, result core.PermissionResult) error {
 	if !s.alive.Load() {
 		return fmt.Errorf("grokbuild: session not alive")
 	}
 
 	s.pendingPermsMu.Lock()
-	options, ok := s.pendingPerms[requestID]
-	if ok {
+	options, isPerm := s.pendingPerms[requestID]
+	if isPerm {
 		delete(s.pendingPerms, requestID)
+	}
+	plan, isPlan := s.pendingPlans[requestID]
+	if isPlan {
+		delete(s.pendingPlans, requestID)
 	}
 	s.pendingPermsMu.Unlock()
 
-	if !ok {
+	var payload any
+	rawID := json.RawMessage(requestID)
+	switch {
+	case isPlan:
+		payload = exitPlanModeResponse(result)
+		if len(plan.rawID) > 0 {
+			rawID = plan.rawID
+		}
+	case isPerm:
+		outcome, err := permissionOutcome(options, result.Behavior)
+		if err != nil {
+			return err
+		}
+		payload = requestPermissionResult{Outcome: outcome}
+	default:
 		return fmt.Errorf("grokbuild: no pending permission for request %s", requestID)
 	}
 
-	outcome, err := permissionOutcome(options, result.Behavior)
-	if err != nil {
-		return err
-	}
-
-	// Parse the request ID as a JSON-RPC id (it was the numeric id from the agent's request).
-	rawID := json.RawMessage(requestID)
-	resp, err := encodeResponse(rawID, requestPermissionResult{Outcome: outcome})
+	resp, err := encodeResponse(rawID, payload)
 	if err != nil {
 		return err
 	}
@@ -1050,6 +1080,8 @@ func (s *grokSession) handleRequest(req *agentRequest) {
 	switch normalizeLeaderMethod(req.Method, req.Params) {
 	case "session/request_permission":
 		s.handlePermissionRequest(req)
+	case "x.ai/exit_plan_mode":
+		s.handleExitPlanModeRequest(req)
 	case "x.ai/ask_user_question":
 		s.handleAskUserQuestionRequest(req)
 	default:
@@ -1081,16 +1113,21 @@ func (s *grokSession) handleNotification(notif *agentNotification) {
 				s.agent.acu.storeNotification(acuSid, s.cwdSnapshot(), acuCmds)
 			}
 		}
-		// CMU (§5.3): notification means dirty only — never a value to trust.
-		// Mark the session's mode cache dirty; the next authoritative read
-		// re-reads plan_mode.json (session_mode.go).
-		if cmuSid, ok := parseCurrentModeUpdate(notif.Params); ok {
+		// Driver-rail CMU belongs to this resident conversation actor. Unlike a
+		// leader observation, its value is the actor's effective mode and may be
+		// projected immediately (this is the same acknowledgement the pager uses
+		// to settle its optimistic mode flag).
+		if cmuSid, modeID, ok := parseCurrentModeUpdate(notif.Params); ok {
 			if cmuSid == "" {
 				cmuSid = s.CurrentSessionID()
 			}
 			if s.agent != nil && s.agent.modeSide != nil {
-				s.agent.modeSide.markDirty(cmuSid)
+				s.agent.modeSide.observeLive(cmuSid, modeID)
 			}
+			mode := modeID
+			s.emit(core.Event{Type: core.EventSessionMode, SessionID: cmuSid, SessionMode: &core.SessionModeEvent{
+				Status: "confirmed", Mode: &mode, CanSet: true,
+			}})
 		}
 		events := convertSessionUpdateWithState(notif.Params, s.CurrentSessionID(), s.updateState)
 		if isGoalUpdated(notif.Params) {
@@ -1192,6 +1229,61 @@ func (s *grokSession) handlePermissionRequest(req *agentRequest) {
 	})
 }
 
+// handleExitPlanModeRequest is the driver-rail twin of
+// LeaderSubscriber.handlePlanBroadcast. iOS-originated /plan turns run on
+// this --no-leader actor; the agent addresses x.ai/exit_plan_mode to us as
+// the sole ACP client. Dropping it (the previous default branch) leaves
+// grok awaiting_plan_approval with no iPhone card — the 2026-09-09 hang.
+func (s *grokSession) handleExitPlanModeRequest(req *agentRequest) {
+	var params exitPlanModeParams
+	if err := json.Unmarshal(interactionInnerParams(req.Params), &params); err != nil || params.ToolCallID == "" {
+		slog.Warn("grokbuild: driver exit_plan_mode unparseable", "toolCallId", params.ToolCallID, "error", err)
+		return
+	}
+	if strings.TrimSpace(params.PlanContent) == "" {
+		params.PlanContent = s.loadSessionPlanFile()
+	}
+	reqIDStr := string(req.ID)
+	s.pendingPermsMu.Lock()
+	if s.pendingPlans == nil {
+		s.pendingPlans = make(map[string]pendingDriverPlan)
+	}
+	s.pendingPlans[reqIDStr] = pendingDriverPlan{rawID: append(json.RawMessage(nil), req.ID...)}
+	s.pendingPermsMu.Unlock()
+
+	s.emit(core.Event{
+		Type:              core.EventPermissionRequest,
+		RequestID:         reqIDStr,
+		ToolName:          planApprovalTitle(params.PlanContent),
+		PermissionKind:    "plan_review",
+		PermissionActions: []string{"approve", "requestChanges", "quit"},
+		PlanReview:        &core.PlanPayload{Content: params.PlanContent, Title: planApprovalTitle(params.PlanContent)},
+	})
+	slog.Info("grokbuild: driver exit_plan_mode registered",
+		"session_id_prefix", shortID(s.CurrentSessionID()),
+		"toolCallId", params.ToolCallID,
+		"requestId", reqIDStr,
+		"planBytes", len(params.PlanContent))
+}
+
+func (s *grokSession) loadSessionPlanFile() string {
+	if s.agent == nil {
+		return ""
+	}
+	s.agent.mu.RLock()
+	home := s.agent.grokHomeLocked()
+	s.agent.mu.RUnlock()
+	dir := findSessionDir(home, s.CurrentSessionID())
+	if dir == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "plan.md"))
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
 func (s *grokSession) readStderr() {
 	scanner := bufio.NewScanner(s.stderr)
 	scanner.Buffer(make([]byte, 0, 4*1024), 256*1024)
@@ -1247,10 +1339,7 @@ func (s *grokSession) callRPC(id int, method string, params any, timeout time.Du
 			"write_elapsed_ms", writeElapsed.Milliseconds(),
 			"wait_elapsed_ms", time.Since(writeStart).Milliseconds())
 		if resp.Error != nil {
-			if len(resp.Error.Data) > 0 {
-				return nil, fmt.Errorf("rpc error %d: %s (%s)", resp.Error.Code, resp.Error.Message, string(resp.Error.Data))
-			}
-			return nil, fmt.Errorf("rpc error %d: %s", resp.Error.Code, resp.Error.Message)
+			return nil, formatJSONRPCError(resp.Error)
 		}
 		return resp.Result, nil
 	case <-timeoutCh:
@@ -1413,6 +1502,16 @@ func logErrorClass(err error) string {
 	return msg
 }
 
+func formatJSONRPCError(e *jsonrpcError) error {
+	if e == nil {
+		return fmt.Errorf("rpc error")
+	}
+	if len(e.Data) > 0 {
+		return fmt.Errorf("rpc error %d: %s (%s)", e.Code, e.Message, string(e.Data))
+	}
+	return fmt.Errorf("rpc error %d: %s", e.Code, e.Message)
+}
+
 // rpcErrorClass returns a fixed safe category for RPC errors.
 // The classification is based on our own wrapper text (e.g. "timeout waiting
 // for response"), not on agent payload; only the fixed category constant is
@@ -1428,7 +1527,9 @@ func rpcErrorClass(err error) string {
 	switch {
 	case strings.Contains(msg, "timeout waiting for response"):
 		return "rpc_timeout"
-	case strings.HasPrefix(msg, "rpc error"):
+	case strings.HasPrefix(msg, "rpc error") || strings.Contains(msg, "rpc error"):
+		return "rpc_error"
+	case strings.HasPrefix(msg, "session/prompt error"):
 		return "rpc_error"
 	case strings.Contains(msg, "stdin") || strings.Contains(msg, "write"):
 		return "write_failed"

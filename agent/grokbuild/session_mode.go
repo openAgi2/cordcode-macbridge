@@ -1,7 +1,6 @@
 package grokbuild
 
-// session_mode.go — typed 模式状态读侧（Grok Build 面板方案 2026-09-07 §5.1/
-// §5.3；P7 阻断下的「明确禁用与诊断」交付）。
+// session_mode.go — Grok Build typed 模式状态。
 //
 // 权威读 = plan_mode.json + 官方恢复规则映射（phase0 P8 契约）：
 //   Active → plan(confirmed)；Pending/ExitPending/Inactive → default(confirmed)
@@ -9,12 +8,10 @@ package grokbuild
 //   未知 state / 文件缺失 / 损坏 → unknown（缺失→default 未被官方证明，
 //   保守 unknown——1.0.13 新会话 set plan 前该文件不存在）。
 //
-// CanSet 恒 false：P7 决定性判定——1.0.13 官方恢复把 Pending→Inactive 且无
-// CMU、无 plan 注入、文件不回写，短命 mode-only 切换路径不成立。模式切换在
-// 官方生命周期方案落地前明确禁用；本接口只提供读侧诊断真值，绝不补偿写。
-//
-// CMU（current_mode_update）通知只置 dirty（§5.3：通知不携带"必须等到"的
-// 目标值），下次 GetSessionMode 重读权威文件。
+// 冷读仍遵守 P7：短命 mode-only actor 的 Pending 恢复成 Inactive，因此无
+// resident actor 时 CanSet=false。2026-09-09 接通官方 pager 路径后，CordCode
+// 持有的 resident actor 通过 session/set_mode 切换；它的 CMU 是该 actor 的
+// live 真值，CanSet=true，直到 actor 注销后再回到冷恢复语义。
 
 import (
 	"context"
@@ -36,13 +33,37 @@ type modeSideState struct {
 	cached map[string]core.SessionModeEvent
 	// dirty: sessionID 收到过 CMU（或会话重建），下次读取必须重读文件。
 	dirty map[string]struct{}
+	// live is the effective mode acknowledged by a resident CordCode-owned
+	// actor. Pending on disk means "plan on the next prompt" only for that same
+	// actor; it must not be interpreted with cold-recovery rules until the actor
+	// goes away.
+	live map[string]string
 }
 
 func newModeSideState() *modeSideState {
 	return &modeSideState{
 		cached: make(map[string]core.SessionModeEvent),
 		dirty:  make(map[string]struct{}),
+		live:   make(map[string]string),
 	}
+}
+
+func (m *modeSideState) observeLive(sessionID, mode string) {
+	if sessionID == "" || (mode != "plan" && mode != "default") {
+		return
+	}
+	m.mu.Lock()
+	m.live[sessionID] = mode
+	delete(m.dirty, sessionID)
+	m.mu.Unlock()
+}
+
+func (m *modeSideState) clearLive(sessionID string) {
+	m.mu.Lock()
+	delete(m.live, sessionID)
+	delete(m.cached, sessionID)
+	m.dirty[sessionID] = struct{}{}
+	m.mu.Unlock()
 }
 
 func (m *modeSideState) markDirty(sessionID string) {
@@ -55,6 +76,7 @@ func (m *modeSideState) invalidateSession(sessionID string) {
 	m.mu.Lock()
 	delete(m.cached, sessionID)
 	delete(m.dirty, sessionID)
+	delete(m.live, sessionID)
 	m.mu.Unlock()
 }
 
@@ -62,6 +84,7 @@ func (m *modeSideState) invalidateAll() {
 	m.mu.Lock()
 	m.cached = make(map[string]core.SessionModeEvent)
 	m.dirty = make(map[string]struct{})
+	m.live = make(map[string]string)
 	m.mu.Unlock()
 }
 
@@ -69,6 +92,14 @@ func (m *modeSideState) invalidateAll() {
 // (core.SessionModeReader). "unknown" is a VALUE (missing/corrupt/unresolvable
 // session — the honest answer), not an error.
 func (a *Agent) GetSessionMode(ctx context.Context, sessionID string) (core.SessionModeEvent, error) {
+	if a.modeSide != nil {
+		a.modeSide.mu.Lock()
+		liveMode, hasLiveMode := a.modeSide.live[sessionID]
+		a.modeSide.mu.Unlock()
+		if hasLiveMode {
+			return liveConfirmedModeState(liveMode), nil
+		}
+	}
 	a.mu.RLock()
 	home := a.grokHomeLocked()
 	a.mu.RUnlock()
@@ -86,11 +117,19 @@ func (a *Agent) GetSessionMode(ctx context.Context, sessionID string) (core.Sess
 	}
 
 	result := modeStateFromPersistent(readPlanModeState(dir))
+	if _, live := a.liveSessionForCommand(sessionID); live && result.Status == "confirmed" {
+		result.CanSet = true
+		result.Reason = ""
+	}
 	a.modeSide.mu.Lock()
 	a.modeSide.cached[sessionID] = result
 	delete(a.modeSide.dirty, sessionID)
 	a.modeSide.mu.Unlock()
 	return result, nil
+}
+
+func liveConfirmedModeState(mode string) core.SessionModeEvent {
+	return core.SessionModeEvent{Status: "confirmed", Mode: &mode, CanSet: true}
 }
 
 // planModeFile is the single authoritative persistent mode record (P8: the
@@ -116,7 +155,8 @@ func readPlanModeState(dir string) string {
 
 // modeStateFromPersistent applies the official recovery mapping (P8):
 // Pending/ExitPending/Inactive → default（官方恢复丢弃 plan）；Active → plan；
-// 其余（含缺失 ""）→ unknown。写入面恒禁用（P7），reason 带稳定原因码。
+// 其余（含缺失 ""）→ unknown。此函数只描述冷恢复，所以 CanSet=false；
+// resident actor 的 GetSessionMode 会把确认态提升为可切换。
 func modeStateFromPersistent(state string) core.SessionModeEvent {
 	switch state {
 	case "Active":
@@ -132,8 +172,7 @@ func confirmedModeState(mode string) core.SessionModeEvent {
 	return core.SessionModeEvent{
 		Status: "confirmed",
 		Mode:   &mode,
-		// P7 阻断：官方恢复不支持跨 child 的短命 mode-only 切换——写入面
-		// 明确禁用，本读侧只做诊断真值。
+		// 冷恢复不拥有 resident actor，不能承诺 set_mode 后的生命周期。
 		CanSet: false,
 		Reason: grokModeSwitchBlockedReason,
 	}

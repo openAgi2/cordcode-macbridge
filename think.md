@@ -1,5 +1,75 @@
 # 后续计划索引（待办另案总账）
 
+## 2026-09-09 Grok `/plan` 缺席与常驻 chip：agent 目录不是产品命令全集
+
+Grok 官方有两层命令注册：agent `_x.ai/commands/list` 提供 compact/goal 等 host
+命令，pager 自己还注册 `/plan`，并把它翻译为当前 conversation actor 的 ACP
+`session/set_mode`；带描述时先切 plan，再把描述作为普通 prompt。只检查 agent
+目录会得到一个真实但不完整的产品结论。这与 DeepSeek 在服务端直接注册
+`/plan [off|message]` 的结构不同，不能拿单一 backend 的目录边界套另一个 backend。
+
+实现纪律：产品面板可在真实 agent 拉取成功后合并经上游源码确认的 pager 描述符，拉取
+失败仍整体失败，不能把本地描述符当 fallback。模式 live 真值只属于 resident actor：
+CMU 可确认该 actor 的 effective mode，但 actor 注销/替换必须清空；冷恢复仍按
+`plan_mode.json` 的既有规则且 `canSet=false`。iOS mode chip 是激活态标记，只有
+confirmed(plan) 显示，不能把 confirmed(default) 画成常驻“Plan”造成反向暗示。
+
+## 2026-09-09 iPhone 发 Grok 消息报 `session/prompt error -32603`：握手误选 API Key
+
+现象：iOS 打开 Mac 端 Grok TUI 建的 session（或 iOS 自己新建）发消息 / 执行 `/plan`，
+约 1 秒后弹 `session/prompt error -32603`。Mac TUI 同一账号同一模型发消息成功。
+
+根因不在 prompt 形状，而在 ACP `authenticate` 选错方法。官方 pager
+（`xai-grok-pager/src/acp/mod.rs:717-731` `select_eager_auth_method`，checkout
+`75810042`；安装版 grok 1.0.24）顺序是：`_meta.defaultAuthMethodId`（在列表内）→
+`cached_token` → `authMethods[0]`。未 pin 时只要有任意模型带自己的 `api_key`
+（`auth_method.rs:48-49` `has_byok`），`xai.api_key` 就会排在第一位，即使用户实际
+走 OIDC。官方 pager 仍认证 `cached_token`。CordCode 此前无条件 `authMethods[0]`，
+sampler 按 API-key 路径发出空 bearer（`sent_key_prefix:""`，`auth_kind=none`），
+`cli-chat-proxy` 401，再被映射成 JSON-RPC `-32603`。AuthManager 里其实有活 OIDC
+token（`current_key_prefix` 非空），recovery 却因「api-key auth」拒绝刷新。
+
+证据（本机 `~/.grok/logs/unified.jsonl`）：CordCode 子进程 PID 81166/87463/10146
+全部 401；Mac pager PID 99275 + shell 50397 同会话推理成功。
+
+排障入口：看到 grokbuild `-32603` 先读 unified.jsonl 的 `auth 401 attribution` /
+`shell.turn.inference_failed`，不要先猜 session/load 或 prompt 内容。
+
+## 2026-09-09 iPhone `/plan` 写完计划后卡住：driver 轨丢了 `exit_plan_mode`
+
+现象：`/plan <描述>` 能进 Plan、能写出 `plan.md`、对话里出现「我先写计划」，然后停在
+「正在执行工具 / 正在处理任务」，计划审批卡不出现。
+
+官方四拍（pager `plan.rs` + `exit_plan_mode/mod.rs`）：set_mode(plan) → 描述当
+普通 prompt → 写 `plan.md` → `_x.ai/exit_plan_mode` 等用户批。Mac TUI / leader
+订阅（`leader_subscriber.go handlePlanBroadcast`）已接这条共享交互。iPhone 自己
+发的 turn 走 `--no-leader` stdio actor，`session.go handleRequest` 只处理
+`request_permission` 和 `ask_user_question`，`exit_plan_mode` 进 default 被丢。
+证据：本机会话 `plan_mode.json` `awaiting_plan_approval=true`，events.jsonl
+`exit_plan_mode` permission_requested 后进程一直活着；bridge 无 plan_review 事件。
+
+修复：driver 轨按 leader 同形发卡并回官方 outcome。卡住的旧进程不会自己醒，必须
+停回合 / 重启 runtime 后再发。
+
+## 2026-09-09 计划批准后的两个连环：relay 按回合退出 + 审批卡无终态
+
+现象：批准计划、实现回合正常结束（turn_completed 已转发），iPhone 仍显示
+「权限已批准，等待执行」；随后任何普通消息报
+`grokbuild: apply model selection: timeout waiting for response to request`。
+
+同一根因两条症状。grokbuild 不在 `relaySurvivesTurnBoundary`，relayEvents 收到
+EventResult 即退出；而 grok 的 agent 进程跨回合存活，turn 后仍发 usage/goal 残余
+事件，把 64 槽 events 通道填满（日志 `emit blocked >100ms (no consumer)` 实证），
+readLoop 阻塞在 emit → 下一条 send 的 `session/set_model` 响应永远不被读取 →
+15s 超时。审批卡本身是控制面部件（ItemID=requestId），真实工具部件
+（ItemID=toolCallId）的完成补丁永远落不到卡上，turn 结束后卡停在 running。
+
+修复：①grokbuild 加入 relaySurvivesTurnBoundary + disablesRelayIdleTimeout
+（同 dsh-web 审批静默先例；退出路径 = session Close 关闭通道）；②reducer 在
+turn_completed 时把「已批准、无确认标记、仍 running」的审批卡部件落 completed
+（未处理卡保持 pending、拒绝卡保持 rejected）。教训：`emit blocked` 探针日志是
+通道饥饿的一手证据，排障先查它再怀疑 RPC。
+
 > 防丢：所有「已裁决另案 / 挂起待做」的计划在此各占一行。新裁决一项后续案时登记一行；
 > 每轮收口/交接时核对「状态」列并更新。做完了就把整行删掉。
 

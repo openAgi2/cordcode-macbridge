@@ -1,8 +1,7 @@
 package grokbuild
 
-// session_mode_test.go — typed 模式读侧定向测试（方案 2026-09-07 §5.1/§5.3，
-// P7 阻断下的禁用+诊断交付）：P8 权威读映射、CanSet 恒 false + 稳定原因码、
-// 缓存与 CMU dirty 重读、会话隔离失效、目录缺失→unknown。
+// session_mode_test.go — typed 模式定向测试：P8 冷恢复映射、resident actor
+// live 真值、缓存与 CMU dirty 重读、会话隔离失效、目录缺失→unknown。
 
 import (
 	"context"
@@ -30,9 +29,9 @@ func writeModeFixture(t *testing.T, home, cwd, sessionID, state string) {
 
 func TestModeStateFromPersistentOfficialRecoveryMapping(t *testing.T) {
 	cases := []struct {
-		state   string
-		status  string
-		mode    string // "" = Mode must be nil
+		state  string
+		status string
+		mode   string // "" = Mode must be nil
 	}{
 		{"Active", "confirmed", "plan"},
 		// 官方恢复语义（P8）：Pending/ExitPending/Inactive 恢复后都不是 plan。
@@ -54,7 +53,7 @@ func TestModeStateFromPersistentOfficialRecoveryMapping(t *testing.T) {
 		if c.mode != "" && (got.Mode == nil || *got.Mode != c.mode) {
 			t.Errorf("state %q: mode = %v, want %q", c.state, got.Mode, c.mode)
 		}
-		// P7 阻断：任何状态下写入面禁用 + 稳定原因码。
+		// 纯持久化映射没有 resident actor：写入面禁用 + 稳定原因码。
 		if got.CanSet {
 			t.Errorf("state %q: CanSet must be false (P7 blocked)", c.state)
 		}

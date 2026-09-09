@@ -87,6 +87,12 @@ func (a *Agent) ListSessionCommands(ctx context.Context, sessionID string) ([]co
 		a.acu.markListFailed(sessionID, cwd)
 		return nil, fmt.Errorf("grokbuild: list pull: %w", err)
 	}
+	// `/plan` is an official Grok product command owned by the pager rather
+	// than the agent slash executor. Merge that registry entry after the real
+	// agent pull; this is not a fallback (a failed pull still fails above).
+	cmds = append(cmds, core.SessionCommand{
+		Name: "plan", Description: "Enter plan mode", Hint: "[description]",
+	})
 	a.acu.storeListSuccess(sessionID, cwd, cmds)
 	return applyGrokAdmission(cmds), nil
 }
@@ -142,6 +148,9 @@ func (a *Agent) ExecuteSessionCommand(ctx context.Context, sessionID, line strin
 	if !ok {
 		return core.SessionCommandResult{}, errors.New("grokbuild: execute: no live session actor — send a message in the session first")
 	}
+	if name == "plan" {
+		return s.executePlanCommand(ctx, line)
+	}
 	return s.executeHostCommand(ctx, line)
 }
 
@@ -152,6 +161,59 @@ func slashCommandName(line string) string {
 		return ""
 	}
 	return fields[0]
+}
+
+// executePlanCommand mirrors the official pager-local `/plan` dispatch:
+// `/plan` sets the resident actor to plan mode; `/plan <description>` performs
+// that control call first, then sends only the description as the ordinary
+// prompt; `/plan off` is the iOS chip's explicit rendering of the pager's
+// session/set_mode(default) exit control.
+func (s *grokSession) executePlanCommand(ctx context.Context, line string) (core.SessionCommandResult, error) {
+	args := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "/plan"))
+	targetMode := "plan"
+	if args == "off" {
+		targetMode = "default"
+		args = ""
+	}
+	id := s.idCounter.next()
+	if _, err := s.callRPC(id, "session/set_mode", sessionSetModeParams{
+		SessionID: s.CurrentSessionID(), ModeID: targetMode,
+	}, 15*time.Second); err != nil {
+		return core.SessionCommandResult{}, fmt.Errorf("grokbuild: set plan mode: %w", err)
+	}
+	if s.agent != nil && s.agent.modeSide != nil {
+		s.agent.modeSide.observeLive(s.CurrentSessionID(), targetMode)
+	}
+	mode := targetMode
+	s.emit(core.Event{Type: core.EventSessionMode, SessionID: s.CurrentSessionID(), SessionMode: &core.SessionModeEvent{
+		Status: "confirmed", Mode: &mode, CanSet: true,
+	}})
+
+	if args == "" {
+		text := "Plan mode on."
+		if targetMode == "default" {
+			text = "Plan mode off."
+		}
+		return core.SessionCommandResult{ResultKind: "success", ResultText: text}, nil
+	}
+
+	wait, err := s.dispatchTurn([]contentBlock{{Type: "text", Text: args}})
+	if err != nil {
+		return core.SessionCommandResult{}, err
+	}
+	select {
+	case out := <-wait:
+		if out.Err != nil {
+			return core.SessionCommandResult{}, out.Err
+		}
+		if out.StopReason != stopReasonEndTurn {
+			return core.SessionCommandResult{}, fmt.Errorf("grokbuild: plan prompt ended with %q", out.StopReason)
+		}
+		return core.SessionCommandResult{ResultKind: "success", ResultText: strings.TrimSpace(out.HostText)}, nil
+	case <-ctx.Done():
+		_ = s.CancelTurn(ctx)
+		return core.SessionCommandResult{}, ctx.Err()
+	}
 }
 
 // executeHostCommand dispatches one admitted slash line through the shared

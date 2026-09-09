@@ -70,9 +70,10 @@ session/历史/事件/状态问题前，先读本表对应行的官方锚点，�
 | --- | --- | --- |
 | grokbuild | 会话真值与重建 | `session/helpers/replay.rs:4,79` — updates.jsonl 流式重建 + `CompactionCheckpoint`/`RewindMarker` 边界（checkpoint 前后加载/忽略规则）；`session/export.rs:3` — **updates.jsonl 是展示真值，chat_history.jsonl 仅为 LLM API 派生缓存**；`session/persistence.rs:2031` — compaction 经 `ReplaceChatHistory` 整体重写该缓存（"Replacing chat history (compaction)"）。（验证于 checkout `75810042`，2026-09-09；镜像 main 与安装版 release 提交可能有小幅漂移） |
 | grokbuild | goal 状态机 | `session/acp_session_impl/goal.rs:73-143`（第一阶段隐藏评估，全信道静默）、`:188/360-375`（第二阶段 verifying latch）、`session/goal_orchestrator.rs:79-103`（goal 通知同时双写 ACP 扩展通知与 updates.jsonl 持久化）。（验证于 `75810042`，2026-09-09） |
+| grokbuild | Plan 模式入口 / 生命周期 | `crates/codegen/xai-grok-pager/src/slash/commands/plan.rs:1-24` — `/plan [description]` 是 **pager-local** 命令，不属于 agent `_x.ai/commands/list`；`crates/codegen/xai-grok-pager/src/app/dispatch/modes.rs:20-91` — 无参数走 ACP `session/set_mode(plan)`，带描述时严格先 set mode 再发普通 prompt；`crates/codegen/xai-grok-shell/src/session/acp_session_impl/session_mode.rs:43-129` — actor 内 `plan` 进入 Pending、首个真实 turn 激活，退出走 `session/set_mode(default)`。（验证于 checkout `75810042`；目标安装版 `grok 1.0.24 (68e414c661e3)`，2026-09-09） |
 | claude | （无开源源码） | 锚 = 官方文档 + Agent SDK 类型契约 + 本仓证据包 `scripts/claudecode-phase0/`、`scripts/claudecode-rc-probe/`（见 CLAUDE.md「上游源码优先门」表） |
 | codex-remote | app-server 语义 / Remote Control | **待补**（本机 `/Users/jacklee/Projects/codex`） |
-| dsh-web | 官方 web API / journal | **待补**（本机 `/Users/jacklee/Projects/deepseek-harness`） |
+| dsh-web | Plan 命令 / 持久状态 | `packages/plan/plan-mode/src/index.ts:124-163` — `plan` projection 折叠 `command/run|done` 与 durable `plan/mode`；`:223-268` — `/plan [off|message]` 是官方 host command，消息通过 `agent.steer()` 进入下一 step；`:271-320` — `exit_plan_mode` 走用户 review seam。（验证于 checkout `d347e703908d0406b7a7ef80e3a0e594d86b2215`，2026-09-09） |
 | opencode-web | 官方 serve Web API / SSE | **待补**（本机 `/Users/jacklee/Projects/opencode`） |
 
 ## 为什么不再使用旧 Node Unified Bridge

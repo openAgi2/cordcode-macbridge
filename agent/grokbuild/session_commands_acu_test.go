@@ -144,8 +144,9 @@ func TestApplyGrokAdmission(t *testing.T) {
 	}
 }
 
-// TestGrokAdmittedCommandsTerminalTable pins the shipped D1 admission set to
-// the 2026-09-07 owner ruling (compact + goal；hooks-* 5 条移出——owner 不用)。
+// TestGrokAdmittedCommandsTerminalTable pins the shipped product command set:
+// compact + goal are agent commands; plan is the official pager-local command
+// translated to ACP session/set_mode.
 // Anything else appearing here is an unreviewed admission and must go through
 // ADMISSION.md + evidence (or an explicit owner ruling recorded in acu_state.go)
 // first.
@@ -153,7 +154,7 @@ func TestGrokAdmittedCommandsTerminalTable(t *testing.T) {
 	origAdmitted, origExcluded := grokAdmittedCommands, grokExcludedCommands
 	defer func() { grokAdmittedCommands, grokExcludedCommands = origAdmitted, origExcluded }()
 
-	want := []string{"compact", "goal"}
+	want := []string{"compact", "goal", "plan"}
 	if len(grokAdmittedCommands) != len(want) {
 		t.Fatalf("admitted set = %v, want exactly %v", grokAdmittedCommands, want)
 	}
@@ -167,9 +168,8 @@ func TestGrokAdmittedCommandsTerminalTable(t *testing.T) {
 			t.Fatalf("%q admitted without owner ruling / P6 evidence — update ADMISSION.md and this guard together", n)
 		}
 	}
-	// Terminal table must remain a subset of the official 1.0.13 session ACU
-	// (27 names, samples/p3-acu-session-new.json): anything not in the official
-	// catalog is dead weight even if admitted.
+	// Agent commands remain a subset of the official 1.0.13 session ACU. Plan
+	// is deliberately sourced from the pager registry, not this ACU.
 	official := []string{"always-approve", "audit-plan", "code-review", "compact", "context", "deep-research",
 		"exec-plan", "feature-dev", "feedback", "frontend-design", "goal", "handoff-doc", "hooks-add",
 		"hooks-list", "hooks-remove", "hooks-trust", "hooks-untrust", "ios-real-device-doc", "loop",
@@ -180,6 +180,9 @@ func TestGrokAdmittedCommandsTerminalTable(t *testing.T) {
 		officialSet[n] = struct{}{}
 	}
 	for n := range grokAdmittedCommands {
+		if n == "plan" {
+			continue
+		}
 		if _, ok := officialSet[n]; !ok {
 			t.Fatalf("admitted %q is not in the official 1.0.13 session ACU", n)
 		}
@@ -188,7 +191,10 @@ func TestGrokAdmittedCommandsTerminalTable(t *testing.T) {
 
 // --- readiness 广告门（§5.1 不能仅靠类型断言） ---
 
-type fakeCatalogAgent struct{ core.Agent; ready bool }
+type fakeCatalogAgent struct {
+	core.Agent
+	ready bool
+}
 
 func (f *fakeCatalogAgent) ListSessionCommands(ctx context.Context, id string) ([]core.SessionCommand, error) {
 	return nil, nil
@@ -283,15 +289,13 @@ func TestListSessionCommandsCatalogTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List failed: %v", err)
 	}
-	// D1 display = official table ∩ admission (2026-09-07 owner 裁决表
-	// {compact, goal}): of [compact, hooks-list, context] only compact
-	// is admitted (hooks-* 移出、context 排除).
-	if len(cmds) != 1 || cmds[0].Name != "compact" || cmds[0].Hint != "h" {
-		t.Fatalf("display must be exactly [compact] with hint, got %+v", cmds)
+	// Agent table contributes compact; official pager registry contributes plan.
+	if len(cmds) != 2 || cmds[0].Name != "compact" || cmds[0].Hint != "h" || cmds[1].Name != "plan" || cmds[1].Hint != "[description]" {
+		t.Fatalf("display must be [compact, plan], got %+v", cmds)
 	}
-	// Whitelist cache holds the FULL official table (3 cmds).
+	// Whitelist cache holds the full agent table plus the pager command.
 	got, ok := a.acu.executeWhitelist("sess-fake", proj)
-	if !ok || len(got) != 3 || got[0].Name != "compact" {
+	if !ok || len(got) != 4 || got[0].Name != "compact" || got[3].Name != "plan" {
 		t.Fatalf("whitelist must hold full catalog table: ok=%v len=%d first=%+v", ok, len(got), got[0])
 	}
 }
@@ -305,11 +309,11 @@ func TestListSessionCommandsCatalogEmptyTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("empty table is success, not error: %v", err)
 	}
-	if len(cmds) != 0 {
-		t.Fatalf("empty table must map to empty list, got %+v", cmds)
+	if len(cmds) != 1 || cmds[0].Name != "plan" {
+		t.Fatalf("empty agent table must retain the official pager command, got %+v", cmds)
 	}
-	if got, ok := a.acu.executeWhitelist("sess-fake", proj); !ok || len(got) != 0 {
-		t.Fatalf("empty whitelist must be stored as a legal table: ok=%v len=%d", ok, len(got))
+	if got, ok := a.acu.executeWhitelist("sess-fake", proj); !ok || len(got) != 1 || got[0].Name != "plan" {
+		t.Fatalf("pager command must be stored in execute whitelist: ok=%v got=%+v", ok, got)
 	}
 }
 

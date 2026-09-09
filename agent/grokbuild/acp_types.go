@@ -112,6 +112,11 @@ type initializeResult struct {
 
 type initializeMeta struct {
 	ModelState *sessionModelState `json:"modelState,omitempty"`
+	// DefaultAuthMethodId is the agent's preferred authenticate method
+	// (official pager: xai-grok-pager/src/acp/mod.rs parse_default_auth_method_id).
+	// When BYOK/custom models advertise xai.api_key first, this is still
+	// cached_token if ~/.grok/auth.json holds a live OIDC session.
+	DefaultAuthMethodID string `json:"defaultAuthMethodId,omitempty"`
 }
 
 // sessionModelState mirrors acp::SessionModelState (camelCase serde): the
@@ -217,6 +222,17 @@ type sessionSetModelParams struct {
 	SessionID string        `json:"sessionId"`
 	ModelID   string        `json:"modelId"`
 	Meta      *setModelMeta `json:"_meta,omitempty"`
+}
+
+// --- session/set_mode ---
+
+// Grok's pager-local `/plan` command is not part of `_x.ai/commands/list`.
+// It translates to the standard ACP session mode control on the resident
+// conversation actor. The target 1.0.24 binary (and the earlier 1.0.13 wire
+// probe) names the mode field `modeId`.
+type sessionSetModeParams struct {
+	SessionID string `json:"sessionId"`
+	ModeID    string `json:"modeId"`
 }
 
 type setModelMeta struct {

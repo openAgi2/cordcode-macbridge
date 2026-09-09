@@ -129,6 +129,13 @@ catalog 目录内；缺的只是 feedback/loop/reload-plugins 等会话运行时
 就不在准入集。红线保持：每次 List 仍是真实官方拉取（无缓存、无 TTL），失败
 fail-closed 标记该身份不可用，语义不变。
 
+## 2026-09-09 P10 — pager-local `/plan` 与 resident actor 校正
+
+- `[源码]` 目标上游的 pager 在 `slash/commands/plan.rs` 注册 `/plan [description]`；它不由 agent `_x.ai/commands/list` 广播。
+- `[源码]` pager dispatch 对 bare `/plan` 调当前会话 ACP `session/set_mode(plan)`；带 description 时先 set mode，再只发送 description prompt。
+- P7 样本仍有效：另起短命 child 做 mode-only 切换后，冷恢复会把 Pending 丢回 Inactive。该证据阻断短命 child，不阻断 CordCode 已持有的 resident conversation actor。
+- 实施结论：目录在真实 agent pull 成功后合并 pager descriptor（不作失败 fallback）；resident actor 的 CMU 是其 live effective mode，actor 注销或替换即失效；无 actor 时继续采用 P7/P8 冷恢复映射与 `canSet=false`。
+
 ## 漂移表（1.0.13 实测 vs 方案/1.0.16 源码预期）
 
 | 项 | 方案/1.0.16 预期 | 1.0.13 实测 | 处置 |

@@ -236,8 +236,8 @@ func (c *grokCatalogClient) initializeContext(ctx context.Context) error {
 		return fmt.Errorf("grok catalog: backend does not advertise session/list (requires Grok 1.0.0+ with session catalog)")
 	}
 
-	if len(initResp.AuthMethods) > 0 {
-		if err := c.authenticateContext(ctx, initResp.AuthMethods[0].ID); err != nil {
+	if method := initResp.eagerAuthMethodID(); method != "" {
+		if err := c.authenticateContext(ctx, method); err != nil {
 			return fmt.Errorf("authenticate: %w", err)
 		}
 	}

@@ -1,6 +1,8 @@
 # Grok Build 斜杠命令面板与计划模式接入方案
 
 > **v1.5 · 2026-09-07 · 开发执行契约，尚未实施。** 第五轮完整评审已直接回填本版；发现与证据见[第五轮报告](2026-09-07-grok-build-slash-command-panel-implementation-review-r5.md)。开发者从 §8 执行，不需要再做一轮产品裁决。Phase 0 可启动；目录、执行与 iOS 可以按各自证据门推进。**短命 mode-only 子进程的 Plan 恢复假设在 1.0.16 源码上不成立，Phase 2 开启仍取决于目标 1.0.13 的 P4/P7/P8 实证，不能以文件写成功代替。**
+
+> **2026-09-09 实施校正（取代本文“Plan 无面板入口 / 只读 chip”的产品结论，不改写历史证据）：** 后续 source-first 复核确认 `/plan` 是 Grok 官方 pager-local 命令，不属于 agent `_x.ai/commands/list`；pager 对其 dispatch 使用当前 resident actor 的 ACP `session/set_mode`，带描述时再发送描述 prompt。P7 否定的只是“另起短命 mode-only child 后冷恢复”路径，不否定 CordCode 已持有 resident actor 时的官方控制路径。当前实现因此在真实 agent 目录拉取成功后合并 Plan 描述符，resident actor 存活期 `canSet=true`，注销后回到本文既有冷读规则。iOS 仅为 confirmed(plan) 显示可退出 chip；default/pending/unknown 不显示。
 >
 > 本文整体替换 v1.4，避免历史响应表与当前契约互相覆盖。R1–R8、S1–S6、T1–T3、U1–U2 的历史响应保存在 Git `7ef00c3` 的本文及[第一轮](2026-09-07-grok-build-slash-command-panel-implementation-review.md)、[第二轮](2026-09-07-grok-build-slash-command-panel-implementation-review-r2.md)、[第三轮](2026-09-07-grok-build-slash-command-panel-implementation-review-r3.md)、[第四轮](2026-09-07-grok-build-slash-command-panel-implementation-review-r4.md)报告。当前行为只按本版正文实施。
 

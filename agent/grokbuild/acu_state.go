@@ -174,19 +174,21 @@ func acuSameSet(a, b []core.SessionCommand) bool {
 // 证据：samples/p6-turns.json A(hooks-list 成功)/B(hooks-add 非法路径失败) +
 // [源码] slash_exec.rs builtin 表全部本地执行 ok_end_turn(0)。
 //
-// 2026-09-07 owner 裁决：面板收敛为 compact + goal（「hooks 那些命令我压根搞不懂，
-// 也从来没用过」）。两条均在官方握手目录真实广播（samples/p2-handshake-
-// notifications.jsonl 零模型样本，含 hint）。plan 不是 grok 斜杠命令（是会话
-// 模式；模式切换已按 P7 取证裁决禁用，见 sessionMode 只读 chip）。compact/goal
+// 2026-09-09 校正：面板收敛为 compact + goal + plan。前两条来自 agent 的
+// `_x.ai/commands/list`；plan 来自官方 pager-local registry（上游
+// slash/commands/plan.rs），由 CordCode 在产品目录层合并，并按官方实现翻译为
+// ACP session/set_mode（带 description 时再发普通 prompt）。它不是 agent
+// slash_exec 命令，不能把 `/plan` 文本送给 session/prompt。
 // 的反馈形状未逐一取样，经通用 host-turn settle 路径呈现，owner 走查验收；
 // hooks-* 家族移出面板与执行准入（不是 excluded 语义——无副作用问题，单纯
 // owner 不用）。后续如需重新准入，回 ADMISSION.md 补证据。
 var (
 	// grokAdmittedCommands is the owner-ruled panel/execute admission set
-	// (2026-09-07: compact + goal, replacing the P6 5×hooks-* wave).
+	// (2026-09-09: compact + goal + pager-local plan).
 	grokAdmittedCommands = map[string]struct{}{
 		"compact": {},
 		"goal":    {},
+		"plan":    {},
 	}
 
 	// grokExcludedCommands are ruled out of the first wave regardless of

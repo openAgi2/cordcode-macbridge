@@ -2721,7 +2721,7 @@ var (
 
 func disablesRelayIdleTimeout(backendID string) bool {
 	switch backendID {
-	case "claude", "claudecode", "codex", "codex-web", "codex-remote", "opencode", "dsh-web", "opencode-web":
+	case "claude", "claudecode", "codex", "codex-web", "codex-remote", "opencode", "dsh-web", "opencode-web", "grokbuild":
 		// dsh-web mux 在审批等待期间不再吐 text_delta。60s 空闲超时会
 		// auto-complete 并退出 relayEvents（真机 18:10:41，审批已 surface
 		// 仍被收口），iOS 权限卡来不及停留。opencode-web 同理：审批等待期
@@ -2729,6 +2729,10 @@ func disablesRelayIdleTimeout(backendID string) bool {
 		// codex-web：官方 turn 事件只发给仍订阅的 connection。iOS 自己的
 		// AgentSession 在 turn_completed 后若被 idle timeout 拆掉，Mac Desktop
 		// 的后续 delta 会在观察连接补订阅完成前被丢弃（owner 2026-08-22 阶段 A）。
+		// grokbuild：plan/权限审批等待期静默，与 dsh-web 同理；且 turn 结束后
+		// 仍有 usage/goal 残余事件——relay 退出后 64 槽 events 通道被填满，
+		// readLoop 阻塞在 emit，下一条 send 的 session/set_model 响应永远读不到
+		// （2026-09-09 真机：15s 超时 send 失败）。
 		return true
 	default:
 		return false
@@ -2752,7 +2756,7 @@ func (h *Handlers) agentRelayRunningFor(sessionID string) bool {
 // object while startRelayIfNotRunning no-ops, and iOS misses later approvals.
 func relaySurvivesTurnBoundary(backendID string) bool {
 	switch backendID {
-	case "claude", "claudecode", "dsh-web", "codex-web", "codex-remote":
+	case "claude", "claudecode", "dsh-web", "codex-web", "codex-remote", "grokbuild":
 		return true
 	default:
 		return false
@@ -2981,16 +2985,6 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 
 		case <-idleTimer.C:
 			if disablesRelayIdleTimeout(backendID) {
-				continue
-			}
-			// A Grok goal may legitimately stay silent while its planner or a child
-			// agent is waiting on the upstream model. The registry is the ownership
-			// signal here: while this exact session is still known running, silence is
-			// not a terminal event. Keep the direct agent relay attached so the next
-			// workflow/subagent update is not lost. Unknown/idle Grok sessions retain
-			// the bounded timeout and exit, avoiding a permanent passive-attach leak.
-			if backendID == "grokbuild" && h.sessions.isKnownActive(sessionID) {
-				idleTimer.Reset(relayActiveTimeout)
 				continue
 			}
 			slog.Warn("go-bridge: relayEvents idle timeout, auto-completing", "backendID", backendID, "sessionID", sessionID, "eventsSeen", eventCount)

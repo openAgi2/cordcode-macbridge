@@ -329,7 +329,10 @@ func (s *grokSession) settlePromptResponse(resp *jsonrpcResponse) (turnOutcome, 
 	out := turnOutcome{}
 	if resp.Error != nil {
 		// Hard error = RPC reject, no stopReason (ADMISSION.md §二.1).
-		out.Err = fmt.Errorf("session/prompt error %d", resp.Error.Code)
+		// Keep the code in the wrapper so iOS still matches
+		// "session/prompt error -32603", but include the official
+		// message/data (e.g. 401 no auth context) instead of a bare code.
+		out.Err = fmt.Errorf("session/prompt error %d: %s", resp.Error.Code, formatJSONRPCError(resp.Error).Error())
 	} else if len(resp.Result) > 0 {
 		var meta promptResponseMeta
 		if err := json.Unmarshal(resp.Result, &meta); err != nil {

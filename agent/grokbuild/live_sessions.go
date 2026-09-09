@@ -43,15 +43,17 @@ func (l *liveSessions) register(sessionID string, sess *grokSession) bool {
 }
 
 // unregister drops the entry only when it still maps to exactly sess.
-func (l *liveSessions) unregister(sessionID string, sess *grokSession) {
+func (l *liveSessions) unregister(sessionID string, sess *grokSession) bool {
 	if sessionID == "" || sess == nil {
-		return
+		return false
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.byID[sessionID] == sess {
 		delete(l.byID, sessionID)
+		return true
 	}
+	return false
 }
 
 // get returns the live actor for sessionID (nil when absent or dead).
@@ -80,14 +82,21 @@ func (a *Agent) liveRegistry() *liveSessions {
 }
 
 func (a *Agent) registerLiveSession(sessionID string, s *grokSession) {
-	a.liveRegistry().register(sessionID, s)
+	if a.liveRegistry().register(sessionID, s) && a.modeSide != nil {
+		// A replacement actor has its own in-memory mode. Never carry the
+		// previous actor's acknowledged mode across that ownership boundary.
+		a.modeSide.clearLive(sessionID)
+	}
 }
 
 func (a *Agent) unregisterLiveSession(sessionID string, s *grokSession) {
 	if a.live == nil {
 		return
 	}
-	a.live.unregister(sessionID, s)
+	removed := a.live.unregister(sessionID, s)
+	if removed && a.modeSide != nil {
+		a.modeSide.clearLive(sessionID)
+	}
 }
 
 // liveSessionForCommand resolves the conversation actor a slash line must be

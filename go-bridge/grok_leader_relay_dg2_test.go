@@ -837,8 +837,10 @@ func TestGrokDG2_G8_UnknownNoAutoTerminalOnChannelClose(t *testing.T) {
 	expectNoWebsocketEvent(t, clientConn, 200*time.Millisecond)
 }
 
-// TestGrokDG2_G8_UnknownNoAutoTerminalOnIdleTimer：registry 置 unknown 后
-// relayEvents idleTimer 到期不合成 turn_completed；后续正常终态仍可收口。
+// TestGrokDG2_G8_UnknownNoAutoTerminalOnIdleTimer：idle 超时对 grokbuild 已整体
+// 禁用（审批等待期静默；turn 后残余事件必须持续排空 events 通道，否则下一条
+// send 的 set_model 响应永远读不到）。unknown 会话同样不合成 turn_completed、
+// 不因 idle 退出；relay 的退出路径 = session Close 关闭 Events 通道。
 func TestGrokDG2_G8_UnknownNoAutoTerminalOnIdleTimer(t *testing.T) {
 	oldInitialTimeout := relayInitialTimeout
 	oldActiveTimeout := relayActiveTimeout
@@ -874,24 +876,31 @@ func TestGrokDG2_G8_UnknownNoAutoTerminalOnIdleTimer(t *testing.T) {
 		t.Fatalf("events = %v, want text_delta only", events)
 	}
 
-	// 远超 idleTimer（25ms）：unknown → 不合成 turn_completed、不广播 idle
-	// （对照 running 时的既有自动收口行为）。
+	// 远超 idleTimer（25ms）：不合成 turn_completed、不广播 idle，relay 保持附着。
 	time.Sleep(100 * time.Millisecond)
 	expectNoWebsocketEvent(t, clientConn, 150*time.Millisecond)
+	select {
+	case <-done:
+		t.Fatal("grokbuild relay must not exit on the idle timer (idle timeout disabled)")
+	default:
+	}
 
-	// idleTimer 到期后 relay 照常退出（D-G2 只改谓词不改生命周期；
-	// 真实终态经重开冷拉/新 relay 收口，由 G7 synthetic 重开用例覆盖）。
+	// 退出路径 = session 关闭（Events 通道关闭）。
+	close(session.events)
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("relayEvents should exit after idle timer fires")
+		t.Fatal("relayEvents should exit after the session events channel closes")
 	}
 }
 
 // A known-running Grok goal can remain silent across both the initial attach
 // timeout and the active-event timeout while its planner/subagent waits on the
 // upstream model. The direct relay must survive both gaps and deliver the real
-// terminal event instead of fabricating an early completion.
+// terminal event — and since grokbuild survives the turn boundary (approvals
+// and plan cards arrive between turns; the events channel must stay drained or
+// the next send's set_model response is never read), the relay also stays
+// attached after the terminal. Exit = session Close closing Events.
 func TestGrokRelayKnownActiveSurvivesSilentGoalWait(t *testing.T) {
 	oldInitialTimeout := relayInitialTimeout
 	oldActiveTimeout := relayActiveTimeout
@@ -948,10 +957,19 @@ func TestGrokRelayKnownActiveSurvivesSilentGoalWait(t *testing.T) {
 	if events[0] != "turn_completed" {
 		t.Fatalf("events = %v, want real turn_completed", events)
 	}
+	// Turn boundary survived: the relay stays attached for the next approval.
+	select {
+	case <-done:
+		t.Fatal("grokbuild relay must stay attached after the terminal event (survives turn boundary)")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// Exit = session Close closing Events.
+	close(session.events)
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("relay did not exit after the real terminal event")
+		t.Fatal("relayEvents should exit after the session events channel closes")
 	}
 }
 

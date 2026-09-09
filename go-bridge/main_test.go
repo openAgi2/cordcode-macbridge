@@ -163,6 +163,9 @@ func TestDisablesRelayIdleTimeoutIncludesOpenCode(t *testing.T) {
 	if !disablesRelayIdleTimeout("codex-remote") {
 		t.Fatal("codex-remote relay idle timeout should be disabled so Desktop turns stay live after an iOS turn")
 	}
+	if !disablesRelayIdleTimeout("grokbuild") {
+		t.Fatal("grokbuild relay idle timeout should be disabled: plan/permission approval waits are silent, and post-turn residual events must keep the events channel drained or the next send's set_model response is never read")
+	}
 }
 
 func TestRelaySurvivesTurnBoundaryForDSHWeb(t *testing.T) {
@@ -174,6 +177,9 @@ func TestRelaySurvivesTurnBoundaryForDSHWeb(t *testing.T) {
 	}
 	if !relaySurvivesTurnBoundary("codex-remote") {
 		t.Fatal("codex-remote relay must stay up after turn_completed so later Desktop turns reach iOS")
+	}
+	if !relaySurvivesTurnBoundary("grokbuild") {
+		t.Fatal("grokbuild relay must stay up after turn_completed: approvals/cards arrive between turns and the session events channel must stay drained")
 	}
 	if relaySurvivesTurnBoundary("codex") {
 		t.Fatal("codex relay still exits on EventResult (historical contract)")

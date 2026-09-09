@@ -696,7 +696,7 @@ func (s *LeaderSubscriber) handleACP(payload string, pending *leaderPending, ses
 		return
 	}
 	if s.onModeDirty != nil {
-		if cmuSid, ok := parseCurrentModeUpdate(params); ok {
+		if cmuSid, _, ok := parseCurrentModeUpdate(params); ok {
 			if cmuSid == "" {
 				cmuSid = sessionID
 			}
@@ -837,6 +837,29 @@ func (s *LeaderSubscriber) handlePlanBroadcast(wireID int, params json.RawMessag
 // planApprovalTitle derives the iOS card title from the plan markdown: the
 // first non-empty line with its heading marker stripped, truncated, prefixed
 // so the card reads as a plan approval rather than a tool permission.
+// exitPlanModeResponse maps an iOS plan-card / legacy two-button reply onto
+// the official x.ai/exit_plan_mode result (types.rs @72a61251):
+// approve→approved, requestChanges→cancelled+feedback, quit→abandoned.
+// Legacy two-button replies (no planAction) keep the pre-plan-layer binary
+// mapping: allow/always→approved, else cancelled. Shared by the leader
+// follower rail and the --no-leader driver rail.
+func exitPlanModeResponse(result core.PermissionResult) exitPlanModeExtResponse {
+	switch result.PlanAction {
+	case "approve":
+		return exitPlanModeExtResponse{Outcome: "approved"}
+	case "requestChanges":
+		return exitPlanModeExtResponse{Outcome: "cancelled", Feedback: result.Message}
+	case "quit":
+		return exitPlanModeExtResponse{Outcome: "abandoned"}
+	default:
+		outcome := "cancelled"
+		if result.Behavior == "allow" || result.Behavior == "always" {
+			outcome = "approved"
+		}
+		return exitPlanModeExtResponse{Outcome: outcome}
+	}
+}
+
 func planApprovalTitle(planContent string) string {
 	for _, line := range strings.Split(planContent, "\n") {
 		t := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#"))
@@ -1062,25 +1085,7 @@ func (s *LeaderSubscriber) AnswerPermission(requestID string, result core.Permis
 	var response any
 	switch {
 	case entry.kind == leaderKindPlan:
-		// exit_plan_mode outcomes (official types.rs @72a61251): the plan-card
-		// vocabulary maps approve→approved, requestChanges→cancelled with
-		// typed feedback (empty feedback omits the field), quit→abandoned.
-		// Legacy two-button replies (no planAction) keep the pre-plan-layer
-		// binary mapping: allow/always→approved, else cancelled.
-		switch result.PlanAction {
-		case "approve":
-			response = exitPlanModeExtResponse{Outcome: "approved"}
-		case "requestChanges":
-			response = exitPlanModeExtResponse{Outcome: "cancelled", Feedback: result.Message}
-		case "quit":
-			response = exitPlanModeExtResponse{Outcome: "abandoned"}
-		default:
-			outcome := "cancelled"
-			if result.Behavior == "allow" || result.Behavior == "always" {
-				outcome = "approved"
-			}
-			response = exitPlanModeExtResponse{Outcome: outcome}
-		}
+		response = exitPlanModeResponse(result)
 	case entry.perm != nil:
 		outcome, err := permissionOutcome(entry.perm.Options, result.Behavior)
 		if err != nil {
