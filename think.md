@@ -9,6 +9,7 @@
 | remote-web 集中测试轮 | 12 门浏览器端验收矩阵 + 4 web-push 取证门（owner 2026-09-02 裁决：先 iOS 任务 → 整体迁移 remote-web → 集中测试）。入口 iOS 仓 `.exec-plan/state/plan-4fe9645c3a36.json` 注记 | iOS App 端任务完成 + remote-web 整体迁移完成 | pending 非阻断；功能路径已真机验证过，16 门属迁移后回归确认（2026-09-02） |
 | iOS 进入 Codex / DSH / Grok 计划模式 | 三条都是「Mac 进入计划 → iPhone 能批；iPhone 自己切不进」。Codex 入口文档 `docs/2026-09-04-codex-ios-plan-mode-entry.md`（owner 2026-09-04：先不做 iOS 开启 Codex Plan，后续再调研）。DSH = Mac 标准套餐 + `/plan`（`commands/execute`）；Grok iOS Plan 只写 agent 内存。禁止合成一个全 backend Plan 按钮 | Codex 批准路径已交付（Mac App Plan → iPhone 卡 → 批准实施，owner 真机 2026-09-04） | **挂起**（2026-09-04）；Codex 批准面已绿，入口未开工 |
 | Grok goal 完成态延迟（A 上游 PR / B 桥接投影提前入验证态） | goal 可见回复结束后几十秒才完成、bar 才消失：第一阶段隐藏 evaluator 在官方 1.0.24 对所有可观测信道结构性静默。方案清单+源码证据+遗留分支名见 `docs/2026-09-09-grokbuild-goal-verification-delay-options.md`；fork-runtime 路线已被 owner 2026-09-09 否决，禁止重走 | A：无（补丁分支 `codex/upstream-proposal-do-not-deploy-early-goal-verifying` 已备好，待提 issue/PR）；B：仅 MacBridge（iOS verifyingCompletion 收口与回退语义已随 `7ee42df`/`88f89fcf` 就绪） | 未开工（2026-09-09）；现状 = 接受官方语义（方案 D） |
+| Backend 语义锚点表补全 | GO_BRIDGE_ARCHITECTURE.md「Backend 语义锚点表」＝source-first 的低成本入口（配套 CLAUDE.md「行为修复的产物门」：无锚点不动代码、恢复类修复交对账数字）。grok（会话真值/重建 + goal 状态机，@75810042）与 claude（无源码，锚=docs/SDK/证据包）两行已验证；codex-remote / dsh-web / opencode-web 待补 | 无（随各 backend 首次触碰逐行补齐） | grok/claude 行已落（2026-09-09）；其余 backend 待补 |
 
 ## 2026-09-06（下午）dsh-web 重启落在 turn 进行中：live-only 播种被提交成权威基线，冷拉只剩最后一轮
 

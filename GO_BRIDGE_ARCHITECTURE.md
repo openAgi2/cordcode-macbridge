@@ -58,6 +58,23 @@ flag 里的 id 与 Go 包名/注册名不完全相同：`claude` → 注册名 `
 `dsh-web` 包名是 `dshweb`、wire kind 是 `deepseek-web`。旧 `deepseek` → `agent/dsh`
 源码保留、仍可显式挂上，但产品 lineup 已退役（2026-08-17）。
 
+## Backend 语义锚点表（source-first 入口，2026-09-09 立）
+
+把「读官方源码」从「啃陌生大仓」降为「读指定文件」：修改某 backend 的行为、或排查其
+session/历史/事件/状态问题前，先读本表对应行的官方锚点，并在首个响应中引用
+`文件:行号`（CLAUDE.md「行为修复的产物门」第 1 条）。**表内标「待补」的行，先补锚点
+（带行号证据 + 验证时的上游 commit）再动手修，不得跳过。** 行号随上游升级漂移，引用时
+须以当时 checkout 的 commit 为准复核。
+
+| Backend | 语义域 | 官方锚点（本机 checkout，相对 crate 根 `crates/codegen/xai-grok-shell/src/`） |
+| --- | --- | --- |
+| grokbuild | 会话真值与重建 | `session/helpers/replay.rs:4,79` — updates.jsonl 流式重建 + `CompactionCheckpoint`/`RewindMarker` 边界（checkpoint 前后加载/忽略规则）；`session/export.rs:3` — **updates.jsonl 是展示真值，chat_history.jsonl 仅为 LLM API 派生缓存**；`session/persistence.rs:2031` — compaction 经 `ReplaceChatHistory` 整体重写该缓存（"Replacing chat history (compaction)"）。（验证于 checkout `75810042`，2026-09-09；镜像 main 与安装版 release 提交可能有小幅漂移） |
+| grokbuild | goal 状态机 | `session/acp_session_impl/goal.rs:73-143`（第一阶段隐藏评估，全信道静默）、`:188/360-375`（第二阶段 verifying latch）、`session/goal_orchestrator.rs:79-103`（goal 通知同时双写 ACP 扩展通知与 updates.jsonl 持久化）。（验证于 `75810042`，2026-09-09） |
+| claude | （无开源源码） | 锚 = 官方文档 + Agent SDK 类型契约 + 本仓证据包 `scripts/claudecode-phase0/`、`scripts/claudecode-rc-probe/`（见 CLAUDE.md「上游源码优先门」表） |
+| codex-remote | app-server 语义 / Remote Control | **待补**（本机 `/Users/jacklee/Projects/codex`） |
+| dsh-web | 官方 web API / journal | **待补**（本机 `/Users/jacklee/Projects/deepseek-harness`） |
+| opencode-web | 官方 serve Web API / SSE | **待补**（本机 `/Users/jacklee/Projects/opencode`） |
+
 ## 为什么不再使用旧 Node Unified Bridge
 
 go-bridge 的边界来自旧实现暴露出的四类问题：
