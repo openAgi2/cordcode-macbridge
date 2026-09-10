@@ -61,11 +61,13 @@ type projectionSession struct {
 	// a different ItemID and completes separately). turn_completed settles the
 	// approved ones still status running — otherwise the card shows
 	// "approved, waiting" forever after the turn ends (grok plan_review, 2026-09-09).
-	permissionCards map[string]struct{}
-	execution       *ExecutionView   // pending execution change
-	planMode        *PlanModeView    // pending dsh-web plan-mode change (patch.planMode)
-	sessionMode     *SessionModeView // pending typed mode-state change (patch.sessionMode, Grok §5.1)
-	goal            *GoalView        // pending dsh-web goal change (patch.goal)
+	permissionCards   map[string]struct{}
+	execution         *ExecutionView         // pending execution change
+	planMode          *PlanModeView          // pending dsh-web plan-mode change (patch.planMode)
+	sessionMode       *SessionModeView       // pending typed mode-state change (patch.sessionMode, Grok §5.1)
+	collaborationMode *CollaborationModeView // pending Codex thread settings change
+	codexGoal         *CodexGoalView         // pending Codex thread goal snapshot
+	goal              *GoalView              // pending dsh-web goal change (patch.goal)
 }
 
 // userInputPending captures a pending upsert_user_input PartOp: the owning assistant turn/message
@@ -140,6 +142,14 @@ func cloneProjectionSessionState(source *projectionSession) *projectionSession {
 	if source.sessionMode != nil {
 		sessionMode := cloneSessionModeView(*source.sessionMode)
 		cloned.sessionMode = &sessionMode
+	}
+	if source.collaborationMode != nil {
+		mode := cloneCollaborationModeView(*source.collaborationMode)
+		cloned.collaborationMode = &mode
+	}
+	if source.codexGoal != nil {
+		goal := cloneCodexGoalView(*source.codexGoal)
+		cloned.codexGoal = &goal
 	}
 	if source.goal != nil {
 		cloned.goal = new(GoalView)
@@ -924,6 +934,62 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			},
 		})
 
+	case "context_compressing", "context_compressed":
+		turnID := dataString(data, "turnId")
+		itemID := dataString(data, "itemId")
+		if turnID == "" || itemID == "" {
+			return
+		}
+		t := ps.turnByID(turnID)
+		terminal := t != nil && (t.Status == "completed" || t.Status == "aborted" || t.Status == "error")
+		targetStatus := "running"
+		if msg.Event == "context_compressed" {
+			targetStatus = "completed"
+		}
+		if t != nil && t.System != nil {
+			for _, part := range t.System.Parts {
+				if part.Type != "context_compaction" || part.ItemID != itemID {
+					continue
+				}
+				// A duplicate is a no-op, and a delayed started frame can never
+				// regress the official completed item.
+				if part.ContextCompactionStatus == targetStatus || part.ContextCompactionStatus == "completed" {
+					return
+				}
+			}
+		}
+		if msg.Event == "context_compressing" && terminal {
+			return
+		}
+		commit()
+		if t == nil {
+			ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "running", StartedAt: ps.projection.UpdatedAt})
+			t = ps.turnByID(turnID)
+		}
+		if t == nil {
+			return
+		}
+		if t.System == nil {
+			t.System = &MessageProjection{ID: turnID + ":context-compaction", Role: "system"}
+		}
+		updated := false
+		for i := range t.System.Parts {
+			if t.System.Parts[i].Type == "context_compaction" && t.System.Parts[i].ItemID == itemID {
+				t.System.Parts[i].ContextCompactionStatus = targetStatus
+				updated = true
+				break
+			}
+		}
+		if !updated {
+			t.System.Parts = append(t.System.Parts, ProjectionPart{
+				Type: "context_compaction", ItemID: itemID, ContextCompactionStatus: targetStatus,
+			})
+		}
+		ps.upsertTurns[turnID] = *t
+		if !terminal {
+			ps.markRunning(turnID)
+		}
+
 	case "session_command":
 		// dsh-web host slash-command lifecycle (official GenericCommandCard truth).
 		// One completed system turn per commandId — running→settle replaces the
@@ -1078,6 +1144,43 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		commit()
 		ps.projection.SessionMode = &view
 		ps.sessionMode = &view
+
+	case "session_collaboration_mode":
+		mode := strings.ToLower(dataString(data, "mode"))
+		model := strings.TrimSpace(dataString(data, "model"))
+		if model == "" || (mode != "plan" && mode != "default") {
+			return
+		}
+		view := CollaborationModeView{Mode: mode, Model: model}
+		if effort, ok := data["reasoningEffort"].(string); ok {
+			view.ReasoningEffort = &effort
+		}
+		if ps.projection.CollaborationMode != nil && collaborationModeViewEqual(*ps.projection.CollaborationMode, view) {
+			return
+		}
+		commit()
+		ps.projection.CollaborationMode = &view
+		ps.collaborationMode = &view
+
+	case "session_goal_record":
+		view := CodexGoalView{}
+		if rawGoal := data["goal"]; rawGoal != nil {
+			goalData, ok := rawGoal.(map[string]interface{})
+			if !ok {
+				return
+			}
+			goal, ok := decodeCodexGoalRecordView(goalData)
+			if !ok || goal.ThreadID != msg.SessionID {
+				return
+			}
+			view.Goal = goal
+		}
+		if ps.projection.CodexGoal != nil && codexGoalViewEqual(*ps.projection.CodexGoal, view) {
+			return
+		}
+		commit()
+		ps.projection.CodexGoal = &view
+		ps.codexGoal = &view
 
 	case "session_goal":
 		// dsh-web goal whole-snapshot (official goal projection: last wins; a
@@ -1983,7 +2086,7 @@ func (r *ProjectionReducer) flushLocked(ps *projectionSession) (ProjectionPatch,
 	headRev := ps.projection.SyncRev
 	if headRev == ps.lastFlushedRev && len(ps.textAppends) == 0 && len(ps.thinking) == 0 &&
 		len(ps.tools) == 0 && len(ps.upsertTurns) == 0 && len(ps.userInputs) == 0 && len(ps.workflows) == 0 &&
-		ps.execution == nil && ps.planMode == nil && ps.goal == nil && ps.sessionMode == nil {
+		ps.execution == nil && ps.planMode == nil && ps.goal == nil && ps.sessionMode == nil && ps.collaborationMode == nil && ps.codexGoal == nil {
 		return ProjectionPatch{}, false
 	}
 	patch := ProjectionPatch{BaseRev: ps.lastFlushedRev, SyncRev: headRev}
@@ -1998,6 +2101,14 @@ func (r *ProjectionReducer) flushLocked(ps *projectionSession) (ProjectionPatch,
 	if ps.sessionMode != nil {
 		sm := *ps.sessionMode
 		patch.SessionMode = &sm
+	}
+	if ps.collaborationMode != nil {
+		mode := cloneCollaborationModeView(*ps.collaborationMode)
+		patch.CollaborationMode = &mode
+	}
+	if ps.codexGoal != nil {
+		goal := cloneCodexGoalView(*ps.codexGoal)
+		patch.CodexGoal = &goal
 	}
 	if ps.goal != nil {
 		g := cloneGoalViewGo(*ps.goal)
@@ -2047,6 +2158,8 @@ func (r *ProjectionReducer) flushLocked(ps *projectionSession) (ProjectionPatch,
 	ps.planMode = nil
 	ps.goal = nil
 	ps.sessionMode = nil
+	ps.collaborationMode = nil
+	ps.codexGoal = nil
 	ps.lastFlushedRev = headRev
 	return patch, true
 }
@@ -2071,7 +2184,7 @@ func (r *ProjectionReducer) DropPendingPatch(backendID, sessionID string) bool {
 	headRev := ps.projection.SyncRev
 	if headRev == ps.lastFlushedRev && len(ps.textAppends) == 0 && len(ps.thinking) == 0 &&
 		len(ps.tools) == 0 && len(ps.upsertTurns) == 0 && len(ps.userInputs) == 0 && ps.execution == nil &&
-		ps.planMode == nil && ps.goal == nil && ps.sessionMode == nil {
+		ps.planMode == nil && ps.goal == nil && ps.sessionMode == nil && ps.collaborationMode == nil && ps.codexGoal == nil {
 		return false
 	}
 	ps.textAppends = make(map[string][]string)
@@ -2090,6 +2203,8 @@ func (r *ProjectionReducer) DropPendingPatch(backendID, sessionID string) bool {
 	ps.planMode = nil
 	ps.goal = nil
 	ps.sessionMode = nil
+	ps.collaborationMode = nil
+	ps.codexGoal = nil
 	ps.lastFlushedRev = headRev
 	return true
 }
@@ -2371,11 +2486,129 @@ func cloneSessionProjection(s SessionProjection) SessionProjection {
 		sm := cloneSessionModeView(*s.SessionMode)
 		out.SessionMode = &sm
 	}
+	if s.CollaborationMode != nil {
+		mode := cloneCollaborationModeView(*s.CollaborationMode)
+		out.CollaborationMode = &mode
+	}
+	if s.CodexGoal != nil {
+		goal := cloneCodexGoalView(*s.CodexGoal)
+		out.CodexGoal = &goal
+	}
 	if s.Goal != nil {
 		g := cloneGoalViewGo(*s.Goal)
 		out.Goal = &g
 	}
 	return out
+}
+
+func cloneCollaborationModeView(value CollaborationModeView) CollaborationModeView {
+	out := value
+	if value.ReasoningEffort != nil {
+		effort := *value.ReasoningEffort
+		out.ReasoningEffort = &effort
+	}
+	return out
+}
+
+func collaborationModeViewEqual(a, b CollaborationModeView) bool {
+	if a.Mode != b.Mode || a.Model != b.Model {
+		return false
+	}
+	if a.ReasoningEffort == nil || b.ReasoningEffort == nil {
+		return a.ReasoningEffort == nil && b.ReasoningEffort == nil
+	}
+	return *a.ReasoningEffort == *b.ReasoningEffort
+}
+
+func validCodexGoalStatus(status string) bool {
+	switch status {
+	case "active", "paused", "blocked", "usageLimited", "budgetLimited", "complete":
+		return true
+	default:
+		return false
+	}
+}
+
+func decodeCodexGoalRecordView(data map[string]interface{}) (*CodexGoalRecordView, bool) {
+	threadID, threadOK := data["threadId"].(string)
+	objective, objectiveOK := data["objective"].(string)
+	status, statusOK := data["status"].(string)
+	if !threadOK || strings.TrimSpace(threadID) == "" || !objectiveOK || strings.TrimSpace(objective) == "" || !statusOK || !validCodexGoalStatus(status) {
+		return nil, false
+	}
+	tokensUsed, tokensOK := exactInt64Field(data, "tokensUsed")
+	timeUsed, timeOK := exactInt64Field(data, "timeUsedSeconds")
+	createdAt, createdOK := exactInt64Field(data, "createdAt")
+	updatedAt, updatedOK := exactInt64Field(data, "updatedAt")
+	budgetRaw, budgetOK := data["tokenBudget"]
+	if !tokensOK || !timeOK || !createdOK || !updatedOK || !budgetOK {
+		return nil, false
+	}
+	goal := &CodexGoalRecordView{
+		ThreadID: threadID, Objective: objective, Status: status,
+		TokensUsed: tokensUsed, TimeUsedSeconds: timeUsed, CreatedAt: createdAt, UpdatedAt: updatedAt,
+	}
+	if budgetRaw != nil {
+		budget, ok := exactInt64Value(budgetRaw)
+		if !ok {
+			return nil, false
+		}
+		goal.TokenBudget = &budget
+	}
+	return goal, true
+}
+
+func exactInt64Field(data map[string]interface{}, key string) (int64, bool) {
+	value, ok := data[key]
+	if !ok {
+		return 0, false
+	}
+	return exactInt64Value(value)
+}
+
+func exactInt64Value(value interface{}) (int64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed), true
+	case int64:
+		return typed, true
+	case float64:
+		integer := int64(typed)
+		return integer, float64(integer) == typed
+	case json.Number:
+		integer, err := typed.Int64()
+		return integer, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func cloneCodexGoalView(value CodexGoalView) CodexGoalView {
+	out := value
+	if value.Goal != nil {
+		goal := *value.Goal
+		if value.Goal.TokenBudget != nil {
+			budget := *value.Goal.TokenBudget
+			goal.TokenBudget = &budget
+		}
+		out.Goal = &goal
+	}
+	return out
+}
+
+func codexGoalViewEqual(a, b CodexGoalView) bool {
+	if a.Goal == nil || b.Goal == nil {
+		return a.Goal == nil && b.Goal == nil
+	}
+	left, right := a.Goal, b.Goal
+	if left.ThreadID != right.ThreadID || left.Objective != right.Objective || left.Status != right.Status ||
+		left.TokensUsed != right.TokensUsed || left.TimeUsedSeconds != right.TimeUsedSeconds || left.CreatedAt != right.CreatedAt || left.UpdatedAt != right.UpdatedAt {
+		return false
+	}
+	if left.TokenBudget == nil || right.TokenBudget == nil {
+		return left.TokenBudget == nil && right.TokenBudget == nil
+	}
+	return *left.TokenBudget == *right.TokenBudget
 }
 
 // goalViewEqualGo compares two goal views by value (BlockedReason by content).

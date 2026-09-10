@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -193,13 +194,80 @@ func TestProjectionAttachReceivesDesktopTurnBeforeAnySend(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case event := <-sess.Events():
-		if event.Type != core.EventTurnStarted || event.ThreadID != "thread_projection" || event.TurnID != "turn_external" {
-			t.Fatalf("external event = %+v", event)
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case event := <-sess.Events():
+			if event.Type == core.EventSessionGoalRecord {
+				continue
+			}
+			if event.Type != core.EventTurnStarted || event.ThreadID != "thread_projection" || event.TurnID != "turn_external" {
+				t.Fatalf("external event = %+v", event)
+			}
+			return
+		case <-deadline:
+			t.Fatal("projection attachment did not deliver Desktop turn before an iOS send")
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("projection attachment did not deliver Desktop turn before an iOS send")
+	}
+}
+
+func TestAttachRejectsMismatchedResumeThreadIdentity(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	stream := NewStream(clientConn, "client_projection", "env_desktop", "stream_projection")
+	defer stream.Close()
+	startEnvelopePeer(t, hostConn, func(_ int64, method string, _ json.RawMessage) (any, *RPCError) {
+		if method == "thread/resume" {
+			return map[string]any{"thread": map[string]any{"id": "another-thread"}}, nil
+		}
+		return nil, &RPCError{Code: -32601, Message: method}
+	})
+	cl := NewClient(stream, 1)
+	defer cl.Close()
+	agent := New(nil)
+	agent.BindClient(cl)
+
+	if _, err := agent.AttachProjectionLiveSession(context.Background(), "wanted-thread"); err == nil || !strings.Contains(err.Error(), "identity mismatch") {
+		t.Fatalf("error = %v, want identity mismatch", err)
+	}
+	agent.mu.Lock()
+	_, attached := agent.attached["wanted-thread"]
+	agent.mu.Unlock()
+	if attached {
+		t.Fatal("mismatched resume response must not mark the requested thread attached")
+	}
+}
+
+func TestAttachResumeDoesNotOverrideThreadSettings(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	stream := NewStream(clientConn, "client_projection", "env_desktop", "stream_projection")
+	defer stream.Close()
+	var got map[string]any
+	startEnvelopePeer(t, hostConn, func(_ int64, method string, params json.RawMessage) (any, *RPCError) {
+		if method != "thread/resume" {
+			return nil, &RPCError{Code: -32601, Message: method}
+		}
+		if err := json.Unmarshal(params, &got); err != nil {
+			t.Fatalf("resume params: %v", err)
+		}
+		return map[string]any{"thread": map[string]any{"id": "thread-settings"}}, nil
+	})
+	cl := NewClient(stream, 1)
+	defer cl.Close()
+	agent := New(map[string]any{"work_dir": "/bridge-local-must-not-leak"})
+	agent.BindClient(cl)
+	sess, err := agent.AttachProjectionLiveSession(context.Background(), "thread-settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	if len(got) != 2 || got["threadId"] != "thread-settings" || got["excludeTurns"] != true {
+		t.Fatalf("resume params = %#v, want only threadId + excludeTurns", got)
+	}
+	for _, forbidden := range []string{"cwd", "model", "effort", "collaborationMode"} {
+		if _, exists := got[forbidden]; exists {
+			t.Fatalf("resume unexpectedly overrides %s: %#v", forbidden, got)
+		}
 	}
 }
 
@@ -492,6 +560,104 @@ func TestRemoteSessionRejectsUnsampledAttachments(t *testing.T) {
 	defer sess.Close()
 	if err := sess.Send("prompt", []core.ImageAttachment{{}}, nil); err == nil {
 		t.Fatal("image input must fail closed until a real Remote sample is frozen")
+	}
+}
+
+func TestRemoteSessionCompactUsesTypedMethodAndEmptyAck(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_compact")
+	defer stream.Close()
+	var methodSeen string
+	var paramsSeen map[string]any
+	startEnvelopePeer(t, hostConn, func(_ int64, method string, params json.RawMessage) (any, *RPCError) {
+		switch method {
+		case "thread/resume":
+			return map[string]any{"thread": map[string]any{"id": "thread_probe"}}, nil
+		case "thread/compact/start":
+			methodSeen = method
+			_ = json.Unmarshal(params, &paramsSeen)
+			return map[string]any{}, nil
+		default:
+			return nil, &RPCError{Code: -32601, Message: method}
+		}
+	})
+	cl := NewClient(stream, 1)
+	defer cl.Close()
+	agent := New(nil)
+	agent.BindClient(cl)
+	sess, err := agent.StartSession(context.Background(), "thread_probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if err := sess.(core.ContextCompactingSession).CompactContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if methodSeen != "thread/compact/start" || len(paramsSeen) != 1 || paramsSeen["threadId"] != "thread_probe" {
+		t.Fatalf("compact call = %q %#v", methodSeen, paramsSeen)
+	}
+}
+
+func TestRemoteSessionCompactRejectsNonEmptyAck(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_compact_bad_ack")
+	defer stream.Close()
+	startEnvelopePeer(t, hostConn, func(_ int64, method string, _ json.RawMessage) (any, *RPCError) {
+		switch method {
+		case "thread/resume":
+			return map[string]any{"thread": map[string]any{"id": "thread_probe"}}, nil
+		case "thread/compact/start":
+			return map[string]any{"turnId": "fabricated"}, nil
+		default:
+			return nil, &RPCError{Code: -32601, Message: method}
+		}
+	})
+	cl := NewClient(stream, 1)
+	defer cl.Close()
+	agent := New(nil)
+	agent.BindClient(cl)
+	sess, err := agent.StartSession(context.Background(), "thread_probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if err := sess.(core.ContextCompactingSession).CompactContext(context.Background()); err == nil || !strings.Contains(err.Error(), "unexpected fields") {
+		t.Fatalf("error = %v, want strict empty ACK failure", err)
+	}
+}
+
+func TestRemoteSessionCompactDisconnectAfterSendDoesNotReplay(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_compact_disconnect")
+	defer stream.Close()
+	var compactCalls int
+	startEnvelopePeer(t, hostConn, func(_ int64, method string, _ json.RawMessage) (any, *RPCError) {
+		switch method {
+		case "thread/resume":
+			return map[string]any{"thread": map[string]any{"id": "thread_probe"}}, nil
+		case "thread/compact/start":
+			compactCalls++
+			_ = hostConn.Close()
+			return nil, nil
+		default:
+			return nil, &RPCError{Code: -32601, Message: method}
+		}
+	})
+	cl := NewClient(stream, 1)
+	defer cl.Close()
+	agent := New(nil)
+	agent.BindClient(cl)
+	sess, err := agent.StartSession(context.Background(), "thread_probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	if err := sess.(core.ContextCompactingSession).CompactContext(context.Background()); err == nil {
+		t.Fatal("disconnect after send must remain an unknown/error result")
+	}
+	if compactCalls != 1 {
+		t.Fatalf("compact calls = %d, want exactly one with no automatic replay", compactCalls)
 	}
 }
 

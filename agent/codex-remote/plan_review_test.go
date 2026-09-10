@@ -27,9 +27,11 @@ func awaitingPlanPresent(agent *Agent, itemID string) bool {
 }
 
 type recordedRPC struct {
-	mu     sync.Mutex
-	calls  []recordedCall
-	errors map[string]*RPCError
+	mu      sync.Mutex
+	calls   []recordedCall
+	errors  map[string]*RPCError
+	results map[string]any
+	hooks   map[string]func()
 }
 
 type recordedCall struct {
@@ -43,12 +45,29 @@ func (r *recordedRPC) handle(_ int64, method string, params json.RawMessage) (an
 	r.mu.Lock()
 	r.calls = append(r.calls, recordedCall{Method: method, Params: parsed})
 	err := r.errors[method]
+	hook := r.hooks[method]
+	result, resultOK := r.results[method]
 	r.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	if err != nil {
 		return nil, err
 	}
+	if resultOK {
+		return result, nil
+	}
 	if method == "turn/start" {
 		return map[string]any{"turn": map[string]any{"id": "turn-impl", "status": "inProgress"}}, nil
+	}
+	if method == "collaborationMode/list" {
+		return map[string]any{"data": []any{
+			map[string]any{"name": "Plan", "mode": "plan", "model": nil, "reasoning_effort": "medium"},
+			map[string]any{"name": "Default", "mode": "default", "model": nil, "reasoning_effort": nil},
+		}}, nil
+	}
+	if method == "thread/settings/get" {
+		return threadSettingsResult("plan", "thread-model", "high"), nil
 	}
 	return map[string]any{}, nil
 }
@@ -74,7 +93,9 @@ func newPlanReviewAgent(t *testing.T, rec *recordedRPC) *Agent {
 	t.Cleanup(func() { _ = cl.Close() })
 	agent := New(nil)
 	agent.BindClient(cl)
-	agent.defaultModel = "gpt-5"
+	agent.defaultModel = "global-model-must-not-leak"
+	effort := "high"
+	agent.codec.applyCollaborationMode("thread_probe", core.SessionCollaborationMode{Mode: "plan", Model: "thread-model", ReasoningEffort: &effort}, nil)
 	return agent
 }
 
@@ -119,8 +140,11 @@ func TestRespondSessionPermissionApproveStartsDefaultTurn(t *testing.T) {
 		t.Fatalf("collaborationMode.mode = %v, want default", mode["mode"])
 	}
 	settings, _ := mode["settings"].(map[string]any)
-	if settings["model"] != "gpt-5" {
+	if settings["model"] != "thread-model" {
 		t.Fatalf("settings.model = %v", settings["model"])
+	}
+	if settings["reasoning_effort"] != "high" {
+		t.Fatalf("settings.reasoning_effort = %v, want preserved thread effort", settings["reasoning_effort"])
 	}
 	if settings["developer_instructions"] != nil {
 		t.Fatalf("developer_instructions = %v, want JSON null (built-in)", settings["developer_instructions"])
@@ -154,6 +178,10 @@ func TestRespondSessionPermissionRequestChangesKeepsPlanMode(t *testing.T) {
 	mode, _ := call.Params["collaborationMode"].(map[string]any)
 	if mode["mode"] != "plan" {
 		t.Fatalf("mode = %v, want plan", mode["mode"])
+	}
+	settings, _ := mode["settings"].(map[string]any)
+	if settings["model"] != "thread-model" || settings["reasoning_effort"] != "medium" {
+		t.Fatalf("plan settings = %#v, want thread model + official preset effort", settings)
 	}
 }
 

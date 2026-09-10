@@ -11,6 +11,7 @@
 # Xcode and local build products
 /MacBridge/build/
 /build/
+/.build/
 /dist/
 DerivedData/
 *.xcuserstate

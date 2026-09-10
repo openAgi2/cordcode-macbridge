@@ -976,6 +976,8 @@ func TestMapAgentEventContextCompressing(t *testing.T) {
 	name, data, done := mapAgentEvent(core.Event{
 		Type:      core.EventContextCompressing,
 		SessionID: "ses_1",
+		TurnID:    "turn_1",
+		ItemID:    "item_1",
 	})
 	if name != "context_compressing" {
 		t.Fatalf("event name = %q, want context_compressing", name)
@@ -987,12 +989,17 @@ func TestMapAgentEventContextCompressing(t *testing.T) {
 	if got := payload["sessionId"]; got != "ses_1" {
 		t.Fatalf("sessionId = %#v, want ses_1", got)
 	}
+	if payload["turnId"] != "turn_1" || payload["itemId"] != "item_1" {
+		t.Fatalf("compaction identity = %#v", payload)
+	}
 }
 
 func TestMapAgentEventContextCompressed(t *testing.T) {
 	name, data, done := mapAgentEvent(core.Event{
 		Type:      core.EventContextCompressed,
 		SessionID: "ses_1",
+		TurnID:    "turn_1",
+		ItemID:    "item_1",
 	})
 	if name != "context_compressed" {
 		t.Fatalf("event name = %q, want context_compressed", name)
@@ -1003,6 +1010,9 @@ func TestMapAgentEventContextCompressed(t *testing.T) {
 	payload := data.(map[string]interface{})
 	if got := payload["sessionId"]; got != "ses_1" {
 		t.Fatalf("sessionId = %#v, want ses_1", got)
+	}
+	if payload["turnId"] != "turn_1" || payload["itemId"] != "item_1" {
+		t.Fatalf("compaction identity = %#v", payload)
 	}
 }
 

@@ -52,30 +52,35 @@ var rpcScopeTable = map[string]string{
 	"get_turn_diff":                 ScopeSessionRead,
 	"get_full_thread_diff":          ScopeSessionRead,
 	"list_session_commands":         ScopeSessionRead, // DSH 命令面板：per-session 命令目录（强依赖 sessionId）
+	"list_collaboration_modes":      ScopeSessionRead,
+	"get_session_goal":              ScopeSessionRead,
 
 	// session.write
-	"create_session":        ScopeSessionWrite,
-	"send_message":          ScopeSessionWrite,
-	"abort_generation":      ScopeSessionWrite,
-	"resume_session":        ScopeSessionWrite,
-	"delete_session":        ScopeSessionWrite,
-	"rename_session":        ScopeSessionWrite,
-	"archive_session":       ScopeSessionWrite,
-	"set_session_pinned":    ScopeSessionWrite,
-	"compress_context":      ScopeSessionWrite,
-	"resolve_permission":    ScopeSessionWrite,
-	"question_reply":        ScopeSessionWrite,
-	"question_reject":       ScopeSessionWrite,
-	"resolve_user_input":    ScopeSessionWrite,
-	"cancel_request_v1":     ScopeSessionWrite, // R1.5：read_file_v2 bulk cancel control RPC（control-plane）
+	"create_session":     ScopeSessionWrite,
+	"send_message":       ScopeSessionWrite,
+	"abort_generation":   ScopeSessionWrite,
+	"resume_session":     ScopeSessionWrite,
+	"delete_session":     ScopeSessionWrite,
+	"rename_session":     ScopeSessionWrite,
+	"archive_session":    ScopeSessionWrite,
+	"set_session_pinned": ScopeSessionWrite,
+	"compress_context":   ScopeSessionWrite,
+	"resolve_permission": ScopeSessionWrite,
+	"question_reply":     ScopeSessionWrite,
+	"question_reject":    ScopeSessionWrite,
+	"resolve_user_input": ScopeSessionWrite,
+	"cancel_request_v1":  ScopeSessionWrite, // R1.5：read_file_v2 bulk cancel control RPC（control-plane）
 	// DSH 命令面板：对具体会话执行 host 命令（/plan /compact …），与
 	// resolve_permission 同级——改变会话协作状态/历史的 host 动作。
 	"execute_session_command": ScopeSessionWrite,
 	// DSH 目标横条动作（pause/resume/clear/edit，官方 goals/<verb> 透传）：
 	// 改变会话目标相位的 host 动作，与 execute_session_command 同级。
-	"mutate_session_goal": ScopeSessionWrite,
-	"share_session":         ScopeSessionWrite, // dispatchRPC 内 not_supported 占位 case
-	"set_observation_scope": ScopeSessionWrite, // switch 外方法（handlers.go:837）
+	"mutate_session_goal":       ScopeSessionWrite,
+	"update_collaboration_mode": ScopeSessionWrite,
+	"set_session_goal":          ScopeSessionWrite,
+	"clear_session_goal":        ScopeSessionWrite,
+	"share_session":             ScopeSessionWrite, // dispatchRPC 内 not_supported 占位 case
+	"set_observation_scope":     ScopeSessionWrite, // switch 外方法（handlers.go:837）
 
 	// config.read
 	"list_providers":        ScopeConfigRead,

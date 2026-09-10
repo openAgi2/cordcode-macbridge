@@ -28,6 +28,58 @@ func TestRemoteCodecDecodesTurnItemsAndTerminalStates(t *testing.T) {
 	}
 }
 
+func TestRemoteCodecProjectsAuthoritativeCollaborationSettings(t *testing.T) {
+	codec := NewLiveCodec()
+	events := codec.Decode(Notification{Method: "thread/settings/updated", Params: json.RawMessage(`{
+		"threadId":"th-settings",
+		"threadSettings":{"model":"outer-model","effort":"high","collaborationMode":{
+			"mode":"plan","settings":{"model":"thread-model","reasoning_effort":"medium","developer_instructions":null}
+		}}
+	}`)})
+	if len(events) != 1 || events[0].Type != core.EventSessionCollaborationMode || events[0].CollaborationMode == nil {
+		t.Fatalf("settings events = %+v", events)
+	}
+	state := events[0].CollaborationMode
+	if state.Mode != "plan" || state.Model != "thread-model" || state.ReasoningEffort == nil || *state.ReasoningEffort != "medium" {
+		t.Fatalf("settings state = %+v", state)
+	}
+	cached, ok := codec.CurrentCollaborationMode("th-settings")
+	if !ok || cached.Model != "thread-model" {
+		t.Fatalf("cached settings = %+v ok=%v", cached, ok)
+	}
+	codec.ResetNativeSessionState()
+	if _, ok := codec.CurrentCollaborationMode("th-settings"); ok {
+		t.Fatal("client-epoch reset must discard collaboration settings")
+	}
+	if events := codec.Decode(Notification{Method: "thread/settings/updated", Params: json.RawMessage(`{"threadId":"th","threadSettings":{"collaborationMode":{"mode":"future","settings":{"model":"m"}}}}`)}); len(events) != 0 {
+		t.Fatalf("unsupported mode must fail closed: %+v", events)
+	}
+}
+
+func TestRemoteCodecPreservesCompactionIdentityAndNonSuccessTerminal(t *testing.T) {
+	codec := NewLiveCodec()
+	started := codec.Decode(Notification{Method: "item/started", Params: json.RawMessage(
+		`{"threadId":"th","turnId":"compact-turn","item":{"type":"contextCompaction","id":"compact-item"}}`)})
+	completed := codec.Decode(Notification{Method: "item/completed", Params: json.RawMessage(
+		`{"threadId":"th","turnId":"compact-turn","item":{"type":"contextCompaction","id":"compact-item"}}`)})
+	for name, events := range map[string][]core.Event{"started": started, "completed": completed} {
+		if len(events) != 1 || events[0].ThreadID != "th" || events[0].TurnID != "compact-turn" || events[0].ItemID != "compact-item" {
+			t.Fatalf("%s compaction identity = %+v", name, events)
+		}
+	}
+	if started[0].Type != core.EventContextCompressing || completed[0].Type != core.EventContextCompressed {
+		t.Fatalf("compaction lifecycle = %+v / %+v", started, completed)
+	}
+
+	for _, status := range []string{"interrupted", "futureStatus"} {
+		events := codec.Decode(Notification{Method: "turn/completed", Params: json.RawMessage(
+			`{"threadId":"th","turn":{"id":"compact-turn","status":"` + status + `"}}`)})
+		if len(events) != 1 || events[0].Type != core.EventError || !events[0].Done {
+			t.Fatalf("status %s must not become success: %+v", status, events)
+		}
+	}
+}
+
 func TestRemoteCodecMapsReasoningPlanUsageAndRetry(t *testing.T) {
 	codec := NewLiveCodec()
 	retry := codec.Decode(Notification{Method: "error", Params: json.RawMessage(`{"threadId":"th","turnId":"turn","willRetry":true,"error":{"message":"temporary"}}`)})

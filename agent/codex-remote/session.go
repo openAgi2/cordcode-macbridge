@@ -118,6 +118,28 @@ func (s *remoteSession) CancelTurn(ctx context.Context) error {
 	return s.agent.CancelTurnForThread(ctx, s.threadID)
 }
 
+// CompactContext submits the official native compaction operation. The empty
+// response acknowledges submission only; item/turn notifications own progress
+// and terminal truth.
+func (s *remoteSession) CompactContext(ctx context.Context) error {
+	s.agent.mu.Lock()
+	cl := s.agent.client
+	s.agent.mu.Unlock()
+	if cl == nil {
+		return ErrNotConfigured
+	}
+	raw, rpcErr, err := cl.RequestContext(ctx, "thread/compact/start", map[string]any{
+		"threadId": s.threadID,
+	})
+	if err != nil {
+		return err
+	}
+	if rpcErr != nil {
+		return rpcErr
+	}
+	return decodeStrictEmptyObject(raw, "thread/compact/start")
+}
+
 func (s *remoteSession) Events() <-chan core.Event { return s.events }
 func (s *remoteSession) CurrentSessionID() string  { return s.threadID }
 func (s *remoteSession) Alive() bool {
@@ -141,6 +163,8 @@ func (a *Agent) BindClient(cl *Client) {
 	a.client = cl
 	if a.codec == nil {
 		a.codec = NewLiveCodec()
+	} else {
+		a.codec.ResetNativeSessionState()
 	}
 	if a.listeners == nil {
 		a.listeners = map[string]map[chan core.Event]struct{}{}
@@ -173,6 +197,13 @@ func (a *Agent) BindClient(cl *Client) {
 			defer cancel()
 			if err := a.attachLiveThreadOn(ctx, cl, threadID); err != nil {
 				slog.Warn("codex-remote failed to restore thread subscription", "thread", threadID, "error", err)
+				return
+			}
+			if err := a.refreshSessionCollaborationAfterAttach(ctx, cl, threadID); err != nil {
+				slog.Warn("codex-remote failed to restore thread collaboration baseline", "thread", threadID, "error", err)
+			}
+			if err := a.refreshSessionGoalAfterAttach(ctx, cl, threadID); err != nil {
+				slog.Warn("codex-remote failed to restore thread goal baseline", "thread", threadID, "error", err)
 			}
 		}()
 	}
@@ -199,11 +230,18 @@ func (a *Agent) startPump(cl *Client) {
 					notifications = nil
 					continue
 				}
+				a.mu.Lock()
+				if a.client != cl || a.codec != codec {
+					a.mu.Unlock()
+					continue
+				}
+				events := codec.Decode(n)
+				a.mu.Unlock()
 				if isCatalogRefreshNotification(n.Method) {
 					a.signalCatalogRefresh()
 				}
-				for _, ev := range codec.Decode(n) {
-					a.dispatch(ev)
+				for _, ev := range events {
+					a.dispatchForClient(cl, ev)
 				}
 			case request, ok := <-serverRequests:
 				if !ok {
@@ -235,6 +273,26 @@ func isCatalogRefreshNotification(method string) bool {
 
 func (a *Agent) dispatch(ev core.Event) {
 	a.mu.Lock()
+	set := a.listeners[ev.ThreadID]
+	var chans []chan core.Event
+	for ch := range set {
+		chans = append(chans, ch)
+	}
+	a.mu.Unlock()
+	for _, ch := range chans {
+		select {
+		case ch <- ev:
+		default:
+		}
+	}
+}
+
+func (a *Agent) dispatchForClient(cl *Client, ev core.Event) {
+	a.mu.Lock()
+	if a.client != cl {
+		a.mu.Unlock()
+		return
+	}
 	set := a.listeners[ev.ThreadID]
 	var chans []chan core.Event
 	for ch := range set {
@@ -336,6 +394,10 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 		sessionID = res.Thread.ID
 		a.rememberSessionSelection(sessionID, res.ModelProvider, res.Model, res.ReasoningEffort)
 		a.addListener(sessionID, ch)
+		if err := a.refreshSessionCollaborationAfterAttach(ctx, cl, sessionID); err != nil {
+			a.dropListener(sessionID, ch)
+			return nil, err
+		}
 	} else {
 		// Register before thread/resume. The app-server subscribes atomically
 		// during resume and may deliver the first external notification as soon
@@ -345,6 +407,31 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 		if err := a.attachLiveThreadOn(ctx, cl, sessionID); err != nil {
 			a.dropListener(sessionID, ch)
 			return nil, err
+		}
+		if err := a.refreshSessionCollaborationAfterAttach(ctx, cl, sessionID); err != nil {
+			a.dropListener(sessionID, ch)
+			return nil, err
+		}
+		if err := a.refreshSessionGoalAfterAttach(ctx, cl, sessionID); err != nil {
+			a.dropListener(sessionID, ch)
+			return nil, err
+		}
+	}
+	a.mu.Lock()
+	codec := a.codec
+	a.mu.Unlock()
+	if codec != nil {
+		if state, ok := codec.CurrentCollaborationMode(sessionID); ok {
+			select {
+			case ch <- core.Event{Type: core.EventSessionCollaborationMode, SessionID: sessionID, ThreadID: sessionID, CollaborationMode: &state}:
+			default:
+			}
+		}
+		if snapshot, ok := codec.CurrentGoal(sessionID); ok {
+			select {
+			case ch <- core.Event{Type: core.EventSessionGoalRecord, SessionID: sessionID, ThreadID: sessionID, GoalRecord: &snapshot}:
+			default:
+			}
 		}
 	}
 	return &remoteSession{agent: a, threadID: sessionID, events: ch, alive: true}, nil
@@ -417,6 +504,13 @@ func (a *Agent) attachLiveThreadOn(ctx context.Context, cl *Client, threadID str
 	if err := json.Unmarshal(raw, &response); err != nil {
 		return fmt.Errorf("codex-remote: thread/resume decode: %w", err)
 	}
+	if response.Thread == nil || strings.TrimSpace(response.Thread.ID) != threadID {
+		actual := ""
+		if response.Thread != nil {
+			actual = strings.TrimSpace(response.Thread.ID)
+		}
+		return fmt.Errorf("codex-remote: thread/resume identity mismatch: requested %q, received %q", threadID, actual)
+	}
 	if carryInitialPage {
 		if response.Thread == nil || len(response.Thread.Turns) != 0 {
 			// Probe contract: excludeTurns must keep thread.turns empty; a
@@ -487,6 +581,7 @@ func (a *Agent) UsesPromptOptions() bool { return true }
 
 var (
 	_ core.TurnCanceler                  = (*remoteSession)(nil)
+	_ core.ContextCompactingSession      = (*remoteSession)(nil)
 	_ core.PromptOptionsSender           = (*remoteSession)(nil)
 	_ core.ThreadTurnCanceler            = (*Agent)(nil)
 	_ core.ThreadLiveAttacher            = (*Agent)(nil)

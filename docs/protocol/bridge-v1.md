@@ -97,6 +97,11 @@ set_permission_mode
 list_session_commands
 execute_session_command
 mutate_session_goal
+list_collaboration_modes
+update_collaboration_mode
+get_session_goal
+set_session_goal
+clear_session_goal
 create_session
 send_message
 abort_generation
@@ -182,9 +187,8 @@ scope only to keep the CI guard satisfied.
 
 | scope | RPCs | default for a paired device |
 |---|---|---|
-| `session.read` | `get_session`, `get_session_messages`, `get_session_projection`, `list_sessions`, `list_pinned_sessions`, `fetch_todos`, `check_pending_notifications`, `get_turn_diff`, `get_full_thread_diff`, `list_session_commands` | ✅ |
-| `session.write` | `create_session`, `send_message`, `abort_generation`, `resume_session`, `delete_session`, `rename_session`, `archive_session`, `set_session_pinned`, `compress_context`, `resolve_permission`, `question_reply`, `question_reject`, `resolve_user_input`, `share_session`, `set_observation_scope`, `execute_session_command`,
-`mutate_session_goal` | ✅ |
+| `session.read` | `get_session`, `get_session_messages`, `get_session_projection`, `list_sessions`, `list_pinned_sessions`, `fetch_todos`, `check_pending_notifications`, `get_turn_diff`, `get_full_thread_diff`, `list_session_commands`, `list_collaboration_modes`, `get_session_goal` | ✅ |
+| `session.write` | `create_session`, `send_message`, `abort_generation`, `resume_session`, `delete_session`, `rename_session`, `archive_session`, `set_session_pinned`, `compress_context`, `update_collaboration_mode`, `set_session_goal`, `clear_session_goal`, `resolve_permission`, `question_reply`, `question_reject`, `resolve_user_input`, `share_session`, `set_observation_scope`, `execute_session_command`, `mutate_session_goal` | ✅ |
 | `config.read` | `list_providers`, `list_models`, `list_agents`, `list_permission_modes`, `get_usage`, `list_memory_files`, `read_memory_file`, `run_diagnostics` | ✅ |
 | `config.write` | `set_provider`, `switch_model`, `set_permission_mode` | ✅ |
 | `workspace.read` | `get_workspace_diff`, `read_file_v2`, `list_directory`, `get_git_context`, `fetch_content_chunk`, `check_pull_request_support` | ✅ |
@@ -1637,6 +1641,84 @@ Producers (live `tool_started`/`tool_finished` and cold hydrate) must pass these
 Projection Kernel reducer so snapshot/patch parts retain them. Clients map them read-only; when
 absent they fall back to `toolInput` / tool output presentation parsing — never invent paths or
 `+0 −0`. Older clients ignore unknown optional fields.
+
+#### Part vocabulary: `context_compaction` (native Codex lifecycle)
+
+`BridgeProjectionPart` gains an additive `type: "context_compaction"` variant with required
+official `itemId` and `contextCompactionStatus: "running" | "completed"`. The live
+`context_compressing` and `context_compressed` event data objects carry the owning official
+`turnId` and `itemId`; producers must not infer either identity from the current active turn.
+
+The Projection Kernel creates a visible system part even when the compaction turn has no user
+message, folds duplicate notifications by `(turnId, itemId)`, and never lets a late started
+notification regress a completed item. The owning turn's official completed/error/interrupted
+state is the terminal truth; an empty `compress_context` ACK confirms submission only. Full,
+paginated, lazy-detail, snapshot, and patch paths preserve the same part and identities. Clients
+must not infer success from idle state, missing events, or token-count changes.
+
+#### Codex collaboration mode (native Plan / Default)
+
+Capability `session_collaboration_mode` exposes Codex's per-thread collaboration setting; it is
+not `permission_mode`, dsh `planMode`, or a slash-command execution surface. The capability is
+advertised only when the backend implements the typed controller and its independent live
+readiness gate is open.
+
+- `list_collaboration_modes` (`session.read`) takes `{sessionId}` and returns the exact official
+  preset identities plus the current authoritative `{mode, model, reasoningEffort?}`. If the
+  current thread settings have not been proven by an official source, the RPC fails; neither
+  global model defaults nor client caches fill the gap.
+- `update_collaboration_mode` (`session.write`) takes `{sessionId, preset}` where `preset` is the
+  exact name returned by the list RPC. The adapter applies that official mask to the current
+  thread settings, preserves fields omitted by the mask, and explicitly sends
+  `settings.developer_instructions: null` to select the server's built-in instructions. The
+  successful result `{accepted:true}` is a submission ACK only.
+- Official `thread/settings/updated` notifications map to the legacy raw event
+  `session_collaboration_mode` and to `SessionProjection.collaborationMode` /
+  `ProjectionPatch.collaborationMode`. The projection stores the full effective mode, model,
+  and optional effort as a whole-value last-wins snapshot. Sync-v2 clients consume only the
+  projection path; the raw event is sealed for them.
+
+Writes share the per-`(backendId, sessionId)` non-queuing native-session admission guard with
+Codex Remote sends, compaction, and plan-review resolution. A concurrent submission fails with
+`session_action_in_progress`; it is never queued against a potentially stale settings snapshot.
+Reconnect clears the in-memory notification cache and then calls the experimental
+`thread/settings/get {threadId}` read. Its complete `threadSettings` result seeds the same
+version-fenced reducer as notifications. This cold source was live-proven for both Plan and
+Default after independent process restarts, so the readiness gate is open. The older signed
+Codex 0.153.4 runtime reports the missing experimental read either as JSON-RPC `-32601` or as
+its observed enum-specific `-32600 unknown variant \`thread/settings/get\`` error; attach tolerates
+only those missing-method shapes without fabricating state, and list/update remain fail-closed
+until a complete settings notification arrives.
+
+#### Codex native thread goal
+
+Codex's goal record is deliberately separate from the existing dsh `goal` projection. The dsh
+shape keeps its `id/revision/phase` contract unchanged; Codex uses
+`codexGoal: {goal: ThreadGoal | null}` and raw legacy event `session_goal_record`. The explicit
+`goal:null` value is an authoritative clear, while an absent `codexGoal` field means unknown or
+unchanged.
+
+- `get_session_goal` (`session.read`) takes `{sessionId}` and returns the exact
+  `thread/goal/get` snapshot. It also seeds the projection through the same reducer event as a
+  live notification.
+- `set_session_goal` (`session.write`) accepts `{sessionId, objective?, status?,
+  tokenBudget?}`. At least one update field is required. For `tokenBudget`, omission preserves
+  the server value, `null` clears it, and an integer sets it. For objective/status, omission or
+  `null` preserves the server value. The six target statuses are
+  `active`, `paused`, `blocked`, `usageLimited`, `budgetLimited`, and `complete`. The response
+  carries the full official goal record.
+- `clear_session_goal` (`session.write`) takes `{sessionId}` and returns the official
+  `{cleared:boolean}`. Only `true` removes the projected record; `false` leaves a locally known
+  record unchanged and the client may use a subsequent get to reconcile. A cleared notification
+  also authoritatively projects `{goal:null}`.
+
+`thread/goal/updated` and `thread/goal/cleared` use the same whole-value projection path. A local
+per-thread generation fence prevents a delayed get/set/clear response from overwriting a newer
+notification; matching response/notification pairs deduplicate. The record preserves
+`threadId`, objective, status, nullable token budget, tokens/time used, and created/updated
+timestamps. The three RPCs use the 25-second native-action budget, live attach and identity
+checks, independent readiness, and the shared non-queuing write guard for set/clear. No goal is
+constructed from transcript text, dsh fields, or local persistence.
 
 #### Part vocabulary: `subagent` (B4 child-stream, sync-only)
 

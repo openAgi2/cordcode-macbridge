@@ -298,6 +298,25 @@ func TestReadTurnItemsAcceptsAllTenOfficialTypes(t *testing.T) {
 	}
 }
 
+func TestReadTurnDetailPreservesContextCompactionIdentity(t *testing.T) {
+	agent, _ := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
+		return map[string]any{"data": []any{
+			itemEntry("compact-turn", map[string]any{"type": "contextCompaction", "id": "compact-item"}),
+		}}, nil
+	})
+	turn, err := agent.ReadTurnDetail(context.Background(), "thread_probe", "compact-turn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turn.Parts) != 1 {
+		t.Fatalf("parts = %+v", turn.Parts)
+	}
+	part := turn.Parts[0]
+	if part["type"] != "context_compaction" || part["itemId"] != "compact-item" || part["status"] != "completed" {
+		t.Fatalf("compaction detail part = %+v", part)
+	}
+}
+
 func TestTurnItemsForeignTurnEntryFails(t *testing.T) {
 	agent, _ := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
 		return map[string]any{"data": []any{itemEntry("turn_other", map[string]any{"type": "agentMessage", "id": "a1", "text": "x"})}}, nil

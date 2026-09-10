@@ -60,6 +60,19 @@ func TestWireDescriptorDoesNotAdvertiseUnprovenCapabilities(t *testing.T) {
 	}
 }
 
+func TestNativeActionReadinessMatchesIndependentLiveGates(t *testing.T) {
+	agent := New(nil)
+	if !agent.ContextCompactionReady() {
+		t.Fatal("context compaction readiness must open after the matching live/cold gate")
+	}
+	if !agent.SessionGoalReady() {
+		t.Fatal("session goal readiness must open after the matching live/cold gate")
+	}
+	if !agent.CollaborationModeReady() {
+		t.Fatal("Plan readiness must open after authoritative restart/readback proof")
+	}
+}
+
 func TestInstanceStatusNotConfigured(t *testing.T) {
 	ok, detail := New(nil).InstanceStatus()
 	if ok {

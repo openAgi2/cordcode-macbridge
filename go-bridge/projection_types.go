@@ -113,6 +113,10 @@ type ProjectionPart struct {
 	CommandText string `json:"commandText,omitempty"`
 	CommandLine string `json:"commandLine,omitempty"`
 
+	// context_compaction is the native Codex item lifecycle. Status is running
+	// or completed; the owning turn status/error remains the terminal truth.
+	ContextCompactionStatus string `json:"contextCompactionStatus,omitempty"`
+
 	// context_injection (Type=="context_injection") — dsh-web 上下文注入行
 	// （官方 ContextInjectionRow 对位：user/message source.kind!="user" 的注入
 	// 上下文，当前唯一生产者是 subagent-settled settle 通知）。ContextKind 是
@@ -226,6 +230,31 @@ type SessionModeView struct {
 	Reason string  `json:"reason,omitempty"`
 }
 
+// CollaborationModeView is Codex's official effective per-thread
+// collaboration settings. It is populated only from thread/settings/updated.
+type CollaborationModeView struct {
+	Mode            string  `json:"mode"`
+	Model           string  `json:"model"`
+	ReasoningEffort *string `json:"reasoningEffort,omitempty"`
+}
+
+type CodexGoalRecordView struct {
+	ThreadID        string `json:"threadId"`
+	Objective       string `json:"objective"`
+	Status          string `json:"status"`
+	TokenBudget     *int64 `json:"tokenBudget"`
+	TokensUsed      int64  `json:"tokensUsed"`
+	TimeUsedSeconds int64  `json:"timeUsedSeconds"`
+	CreatedAt       int64  `json:"createdAt"`
+	UpdatedAt       int64  `json:"updatedAt"`
+}
+
+// CodexGoalView is a discriminated authoritative snapshot. Goal nil means a
+// proven clear and is distinct from the entire codexGoal field being absent.
+type CodexGoalView struct {
+	Goal *CodexGoalRecordView `json:"goal"`
+}
+
 // GoalBlockedReasonView mirrors the official blocked explanation ({code, message}).
 type GoalBlockedReasonView struct {
 	Code    string `json:"code"`
@@ -269,7 +298,9 @@ type SessionProjection struct {
 	PlanMode *PlanModeView `json:"planMode,omitempty"`
 	// SessionMode is the typed mode state (Grok §5.1; additive; nil = backend
 	// has no mode reader — chip absent for that backend).
-	SessionMode *SessionModeView `json:"sessionMode,omitempty"`
+	SessionMode       *SessionModeView       `json:"sessionMode,omitempty"`
+	CollaborationMode *CollaborationModeView `json:"collaborationMode,omitempty"`
+	CodexGoal         *CodexGoalView         `json:"codexGoal,omitempty"`
 	// Goal is the dsh-web goal snapshot (additive; nil = backend has no goal
 	// projection, banner absent; non-nil Phase "none" = explicitly no goal).
 	Goal *GoalView `json:"goal,omitempty"`
@@ -299,7 +330,9 @@ type ProjectionPatch struct {
 	PlanMode *PlanModeView `json:"planMode,omitempty"`
 	// SessionMode carries the typed mode state when it changed in this delta
 	// (additive; absent = unchanged).
-	SessionMode *SessionModeView `json:"sessionMode,omitempty"`
+	SessionMode       *SessionModeView       `json:"sessionMode,omitempty"`
+	CollaborationMode *CollaborationModeView `json:"collaborationMode,omitempty"`
+	CodexGoal         *CodexGoalView         `json:"codexGoal,omitempty"`
 	// Goal carries the dsh-web goal snapshot when it changed in this delta
 	// (additive; absent = unchanged; Phase "none" = goal cleared).
 	Goal *GoalView `json:"goal,omitempty"`

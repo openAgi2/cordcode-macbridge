@@ -2,6 +2,7 @@ package gobridge
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -43,6 +44,7 @@ type projectionAttachAgent struct {
 	mu       sync.Mutex
 	attaches int
 	session  *projectionAttachSession
+	attachFn func(context.Context, string) (core.AgentSession, error)
 }
 
 func (a *projectionAttachAgent) Name() string { return "codex-remote" }
@@ -53,14 +55,83 @@ func (a *projectionAttachAgent) ListSessions(context.Context) ([]core.AgentSessi
 	return nil, nil
 }
 func (a *projectionAttachAgent) Stop() error { return nil }
-func (a *projectionAttachAgent) AttachProjectionLiveSession(_ context.Context, threadID string) (core.AgentSession, error) {
+func (a *projectionAttachAgent) AttachProjectionLiveSession(ctx context.Context, threadID string) (core.AgentSession, error) {
+	a.mu.Lock()
+	a.attaches++
+	fn := a.attachFn
+	a.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, threadID)
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.attaches++
 	if a.session == nil {
 		a.session = &projectionAttachSession{id: threadID, events: make(chan core.Event), alive: true}
 	}
 	return a.session, nil
+}
+
+func TestPrepareProjectionLiveSessionRejectsCrossBackendRegistryEntry(t *testing.T) {
+	h := NewHandlers()
+	agent := &projectionAttachAgent{}
+	foreign := &projectionAttachSession{id: "same-thread", events: make(chan core.Event), alive: true}
+	h.putSessionWithMeta("same-thread", "codex-web", "", foreign)
+
+	_, err := h.prepareProjectionLiveSession(context.Background(), "same-thread", newCaptureConn(), "codex-remote", agent, "")
+	if !errors.Is(err, errProjectionLiveSessionBackendMismatch) {
+		t.Fatalf("error = %v, want backend mismatch", err)
+	}
+	agent.mu.Lock()
+	attaches := agent.attaches
+	agent.mu.Unlock()
+	if attaches != 0 {
+		t.Fatalf("attaches = %d, want 0", attaches)
+	}
+}
+
+func TestPrepareProjectionLiveSessionRejectsReturnedThreadMismatch(t *testing.T) {
+	h := NewHandlers()
+	wrong := &projectionAttachSession{id: "other-thread", events: make(chan core.Event), alive: true}
+	agent := &projectionAttachAgent{session: wrong}
+
+	_, err := h.prepareProjectionLiveSession(context.Background(), "wanted-thread", newCaptureConn(), "codex-remote", agent, "")
+	if !errors.Is(err, errProjectionLiveSessionIdentityMismatch) {
+		t.Fatalf("error = %v, want identity mismatch", err)
+	}
+	if wrong.Alive() {
+		t.Fatal("mismatched attached session must be closed")
+	}
+}
+
+func TestPrepareProjectionLiveSessionPropagatesCallerContext(t *testing.T) {
+	h := NewHandlers()
+	agent := &projectionAttachAgent{attachFn: func(ctx context.Context, _ string) (core.AgentSession, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := h.prepareProjectionLiveSession(ctx, "thread", newCaptureConn(), "codex-remote", agent, "")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context canceled", err)
+	}
+}
+
+func TestPrepareProjectionLiveSessionReturnsAttachFailureWithoutRegistryEntry(t *testing.T) {
+	h := NewHandlers()
+	wantErr := errors.New("resume rejected")
+	agent := &projectionAttachAgent{attachFn: func(context.Context, string) (core.AgentSession, error) {
+		return nil, wantErr
+	}}
+
+	_, err := h.prepareProjectionLiveSession(context.Background(), "thread", newCaptureConn(), "codex-remote", agent, "")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want attach failure", err)
+	}
+	if _, exists := h.sessions.get("thread"); exists {
+		t.Fatal("failed attach must not create a registry entry")
+	}
 }
 
 func TestProjectionOpenAttachesLiveSessionBeforeFirstSend(t *testing.T) {

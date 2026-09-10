@@ -55,8 +55,20 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 	// /goal pause|resume|clear|edit）。未实现 SessionGoalController 的 backend 不广告
 	// → iOS 不画横条动作。与 session_commands 分开广告：命令面板与目标横条
 	// 是两个独立官方 surface（ui-commands / ui-goal），一个 backend 可只有其一。
-	if _, ok := agent.(core.SessionGoalController); ok {
-		caps = append(caps, "session_goal")
+	_, legacyGoal := agent.(core.SessionGoalController)
+	_, recordGoal := agent.(core.SessionGoalRecordController)
+	if legacyGoal || recordGoal {
+		if readiness, gated := agent.(core.SessionGoalReadinessProvider); !gated || readiness.SessionGoalReady() {
+			caps = append(caps, "session_goal")
+		}
+	}
+	if readiness, ok := agent.(core.ContextCompactionReadinessProvider); ok && readiness.ContextCompactionReady() {
+		caps = append(caps, "context_compaction")
+	}
+	if _, ok := agent.(core.SessionCollaborationModeController); ok {
+		if readiness, gated := agent.(core.CollaborationModeReadinessProvider); !gated || readiness.CollaborationModeReady() {
+			caps = append(caps, "session_collaboration_mode")
+		}
 	}
 	if _, ok := agent.(core.SessionRenamer); ok {
 		if _, ok := agent.(core.SessionArchiver); ok {

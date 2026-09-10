@@ -207,6 +207,11 @@ export type BridgeRPCMethod =
   // 后端官方 pause|resume|edit|clear 动词透传；目标创建走 /goal host command，
   // 不是本 RPC 的 action。失败 goal_failed 原文透传座位错误。
   | "mutate_session_goal"
+  | "list_collaboration_modes"
+  | "update_collaboration_mode"
+  | "get_session_goal"
+  | "set_session_goal"
+  | "clear_session_goal"
   | "create_session"
   | "send_message"
   | "abort_generation"
@@ -340,6 +345,69 @@ export interface BridgeSessionGoalMutation {
   ok: boolean;
 }
 
+export interface BridgeCollaborationModeState {
+  mode: "plan" | "default";
+  model: string;
+  reasoningEffort?: string;
+}
+
+export interface BridgeCollaborationModePreset {
+  /** Stable official collaborationMode/list preset identity. */
+  name: string;
+  mode?: "plan" | "default";
+  model?: string;
+  reasoningEffort?: string;
+}
+
+export interface BridgeCollaborationModeCatalog {
+  presets: BridgeCollaborationModePreset[];
+  current: BridgeCollaborationModeState;
+}
+
+export interface BridgeUpdateCollaborationModeParams {
+  sessionId: string;
+  preset: string;
+}
+
+export interface BridgeCollaborationModeUpdateAccepted {
+  /** Submission ACK only; projection notification is authoritative. */
+  accepted: true;
+}
+
+export type BridgeCodexGoalStatus =
+  | "active"
+  | "paused"
+  | "blocked"
+  | "usageLimited"
+  | "budgetLimited"
+  | "complete";
+
+export interface BridgeCodexGoalRecord {
+  threadId: string;
+  objective: string;
+  status: BridgeCodexGoalStatus;
+  tokenBudget: number | null;
+  tokensUsed: number;
+  timeUsedSeconds: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface BridgeCodexGoalSnapshot {
+  /** null is an authoritative cleared/absent goal, not an unknown value. */
+  goal: BridgeCodexGoalRecord | null;
+}
+
+export interface BridgeSetSessionGoalParams {
+  sessionId: string;
+  /** omitted or null preserves the current objective. */
+  objective?: string | null;
+  /** omitted or null preserves the current status. */
+  status?: BridgeCodexGoalStatus | null;
+  /** omitted preserves, null clears, number sets. */
+  tokenBudget?: number | null;
+}
+
 export interface BridgeResult<TData = unknown> {
   type?: "result";
   requestId?: string;
@@ -449,6 +517,8 @@ export type BridgeEventName =
   | "session_command"
   | "session_plan_mode"
   | "session_goal"
+  | "session_collaboration_mode"
+  | "session_goal_record"
   | "sync_invalidate";
 
 export interface BridgeEvent<TData = unknown> {
@@ -652,6 +722,12 @@ export type BridgeProjectionPart =
       permissionPlan?: BridgePlanReviewPayload;
     }
   | { type: "file"; path?: string; kind?: string; diff?: string; movePath?: string }
+  | {
+      /** Native Codex contextCompaction item; owning turn carries terminal success/error. */
+      type: "context_compaction";
+      itemId: string;
+      contextCompactionStatus: "running" | "completed";
+    }
   | {
       // B4 child-stream (sync-only): a Claude Agent/Task tool nested subagent group. Built
       // entirely by the MacBridge projection kernel as the single source of truth; clients map
@@ -891,6 +967,10 @@ export interface BridgeSessionProjection {
    * is not a timeline row (official parity: banner-only).
    */
   goal?: BridgeGoalView;
+  /** Codex thread/settings/updated full effective collaboration settings. */
+  collaborationMode?: BridgeCollaborationModeState;
+  /** Codex-native goal snapshot; goal:null is a proven clear. */
+  codexGoal?: BridgeCodexGoalSnapshot;
 }
 
 /**
@@ -951,6 +1031,10 @@ export interface BridgeProjectionPatch {
   planMode?: BridgePlanModeView;
   /** dsh-web goal snapshot when it changed in this delta (additive; absent = unchanged). */
   goal?: BridgeGoalView;
+  /** Codex collaboration settings when changed; absent = unchanged. */
+  collaborationMode?: BridgeCollaborationModeState;
+  /** Codex-native goal snapshot when changed; absent = unchanged. */
+  codexGoal?: BridgeCodexGoalSnapshot;
 }
 
 /** Push frame `projection_snapshot`: full projection at syncRev (epoch mismatch / recovery). */

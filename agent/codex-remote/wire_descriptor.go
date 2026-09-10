@@ -34,4 +34,21 @@ func (a *Agent) WireDescriptor() *core.WireDescriptor {
 	}
 }
 
-var _ core.WireDescriptorProvider = (*Agent)(nil)
+func (a *Agent) ContextCompactionReady() bool {
+	return core.CodexRemoteContextCompactionProductionEnabled
+}
+
+func (a *Agent) CollaborationModeReady() bool {
+	return core.CodexRemoteCollaborationModeProductionEnabled
+}
+
+func (a *Agent) SessionGoalReady() bool {
+	return core.CodexRemoteSessionGoalProductionEnabled
+}
+
+var (
+	_ core.WireDescriptorProvider             = (*Agent)(nil)
+	_ core.ContextCompactionReadinessProvider = (*Agent)(nil)
+	_ core.CollaborationModeReadinessProvider = (*Agent)(nil)
+	_ core.SessionGoalReadinessProvider       = (*Agent)(nil)
+)

@@ -130,8 +130,8 @@ func TestRemoteHistoryMapsOfficialItemVariants(t *testing.T) {
 	if turn.UserItemID != "u1" || turn.UserText != "hello" {
 		t.Fatalf("user message = %+v", turn)
 	}
-	if len(turn.Parts) != 7 {
-		t.Fatalf("parts=%d, want 7: %+v", len(turn.Parts), turn.Parts)
+	if len(turn.Parts) != 8 {
+		t.Fatalf("parts=%d, want 8: %+v", len(turn.Parts), turn.Parts)
 	}
 	if got := turn.Parts[0]["type"]; got != "reasoning" {
 		t.Fatalf("reasoning ordering = %v", got)
@@ -159,8 +159,11 @@ func TestRemoteHistoryMapsOfficialItemVariants(t *testing.T) {
 	if step := turn.Parts[6]["step"].(map[string]any); step["toolName"] != "WebSearch" {
 		t.Fatalf("search step = %+v", step)
 	}
-	if len(turn.SystemNotes) != 1 || turn.SystemNotes[0] != "contextCompaction" {
-		t.Fatalf("system notes = %+v", turn.SystemNotes)
+	if part := turn.Parts[7]; part["type"] != "context_compaction" || part["itemId"] != "c1" || part["status"] != "completed" {
+		t.Fatalf("context compaction part = %+v", part)
+	}
+	if len(turn.SystemNotes) != 0 {
+		t.Fatalf("context compaction must not degrade to system notes: %+v", turn.SystemNotes)
 	}
 	if len(turn.SkippedTypes) != 1 || turn.SkippedTypes[0] != "futureItem" {
 		t.Fatalf("unknown types = %+v", turn.SkippedTypes)

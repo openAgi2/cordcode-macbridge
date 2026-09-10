@@ -4051,12 +4051,23 @@ type compactableFakeSession struct {
 	*fakeAgentSession
 	compactCalls int
 	compactErr   error
+	compactHook  func(context.Context)
 }
 
 func (c *compactableFakeSession) CompactContext(ctx context.Context) error {
 	c.compactCalls++
+	if c.compactHook != nil {
+		c.compactHook(ctx)
+	}
 	return c.compactErr
 }
+
+type compactionActivityAgent struct {
+	*fakeAgent
+	active bool
+}
+
+func (a *compactionActivityAgent) IsSessionActive(context.Context, string) bool { return a.active }
 
 func TestBackendListCompressionCapabilityOnlyForCodexAppServer(t *testing.T) {
 	tests := []struct {
@@ -4103,7 +4114,7 @@ func TestHandleCompressContextNotSupported(t *testing.T) {
 	handlers.RegisterAgent("codex", &fakeAgent{name: "codex"})
 	session := &fakeAgentSession{id: "ses_1", events: make(chan core.Event, 1)}
 	handlers.mu.Lock()
-	handlers.putSession("ses_1", session)
+	handlers.putSessionWithMeta("ses_1", "codex", "", session)
 	handlers.mu.Unlock()
 
 	handlers.HandleRPC(serverConn, WireMessage{
@@ -4153,7 +4164,7 @@ func TestHandleCompressContextAccepted(t *testing.T) {
 		fakeAgentSession: &fakeAgentSession{id: "ses_1", events: make(chan core.Event, 1)},
 	}
 	handlers.mu.Lock()
-	handlers.putSession("ses_1", compactSession)
+	handlers.putSessionWithMeta("ses_1", "codex", "", compactSession)
 	handlers.mu.Unlock()
 
 	handlers.HandleRPC(serverConn, WireMessage{
@@ -4173,6 +4184,125 @@ func TestHandleCompressContextAccepted(t *testing.T) {
 	}
 }
 
+func TestHandleCompressContextUsesEndToEndDeadline(t *testing.T) {
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex", &fakeAgent{name: "codex"})
+	compactSession := &compactableFakeSession{
+		fakeAgentSession: &fakeAgentSession{id: "ses-deadline", events: make(chan core.Event, 1)},
+		compactHook: func(ctx context.Context) {
+			deadline, ok := ctx.Deadline()
+			if !ok {
+				t.Fatal("compact context has no deadline")
+			}
+			remaining := time.Until(deadline)
+			if remaining <= 24*time.Second || remaining > nativeSessionActionTimeout {
+				t.Fatalf("compact deadline remaining = %s, want (24s, 25s]", remaining)
+			}
+		},
+	}
+	handlers.mu.Lock()
+	handlers.putSessionWithMeta("ses-deadline", "codex", "", compactSession)
+	handlers.mu.Unlock()
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex", Method: "compress_context", RequestID: "req-deadline",
+		Params: mustJSONRaw(t, map[string]any{"sessionId": "ses-deadline"}),
+	})
+	msgs := readJSONMaps(t, clientConn, 1)
+	if msgs[0]["error"] != nil {
+		t.Fatalf("unexpected error: %#v", msgs[0]["error"])
+	}
+}
+
+func TestHandleCompressContextRejectsAuthoritativelyActiveThread(t *testing.T) {
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers := newTestHandlers(t)
+	agent := &compactionActivityAgent{fakeAgent: &fakeAgent{name: "codex-remote"}, active: true}
+	handlers.RegisterAgent("codex-remote", agent)
+	compactSession := &compactableFakeSession{
+		fakeAgentSession: &fakeAgentSession{id: "active-thread", events: make(chan core.Event, 1)},
+	}
+	handlers.mu.Lock()
+	handlers.putSessionWithMeta("active-thread", "codex-remote", "", compactSession)
+	handlers.mu.Unlock()
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex-remote", Method: "compress_context", RequestID: "req-active",
+		Params: mustJSONRaw(t, map[string]any{"sessionId": "active-thread"}),
+	})
+	msgs := readJSONMaps(t, clientConn, 1)
+	errObj := msgs[0]["error"].(map[string]any)
+	if errObj["code"] != "session_not_idle" || compactSession.compactCalls != 0 {
+		t.Fatalf("error=%#v compactCalls=%d, want session_not_idle and no call", errObj, compactSession.compactCalls)
+	}
+}
+
+func TestCodexRemoteSendAndCompactShareNonQueuingWriteGuard(t *testing.T) {
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex-remote", &fakeAgent{name: "codex-remote"})
+	compactSession := &compactableFakeSession{
+		fakeAgentSession: &fakeAgentSession{id: "guarded-thread", events: make(chan core.Event, 1)},
+	}
+	handlers.mu.Lock()
+	handlers.putSessionWithMeta("guarded-thread", "codex-remote", "", compactSession)
+	handlers.mu.Unlock()
+	release, ok := handlers.tryBeginNativeSessionWrite("codex-remote", "guarded-thread")
+	if !ok {
+		t.Fatal("failed to acquire initial write guard")
+	}
+	defer release()
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex-remote", Method: "send_message", RequestID: "req-send-busy",
+		Params: mustJSONRaw(t, map[string]any{"sessionId": "guarded-thread", "content": "must not send"}),
+	})
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex-remote", Method: "compress_context", RequestID: "req-compact-busy",
+		Params: mustJSONRaw(t, map[string]any{"sessionId": "guarded-thread"}),
+	})
+	msgs := readJSONMaps(t, clientConn, 2)
+	for _, msg := range msgs {
+		errObj := msg["error"].(map[string]any)
+		if errObj["code"] != "session_action_in_progress" {
+			t.Fatalf("error = %#v, want session_action_in_progress", errObj)
+		}
+	}
+	if len(compactSession.sentPrompts) != 0 || compactSession.compactCalls != 0 {
+		t.Fatalf("blocked writes escaped: prompts=%v compactCalls=%d", compactSession.sentPrompts, compactSession.compactCalls)
+	}
+}
+
+func TestNativeSessionWriteGuardScopesByBackendAndSession(t *testing.T) {
+	handlers := newTestHandlers(t)
+	releaseA, ok := handlers.tryBeginNativeSessionWrite("codex-remote", "thread-a")
+	if !ok {
+		t.Fatal("first action must acquire its flight")
+	}
+	defer releaseA()
+	if release, ok := handlers.tryBeginNativeSessionWrite("codex-remote", "thread-a"); ok {
+		release()
+		t.Fatal("same backend/session must not queue or run concurrently")
+	}
+	releaseSessionB, ok := handlers.tryBeginNativeSessionWrite("codex-remote", "thread-b")
+	if !ok {
+		t.Fatal("different sessions must remain independent")
+	}
+	releaseSessionB()
+	releaseBackendB, ok := handlers.tryBeginNativeSessionWrite("other-backend", "thread-a")
+	if !ok {
+		t.Fatal("different backends must remain independent")
+	}
+	releaseBackendB()
+}
+
 func TestHandleCompressContextCompactError(t *testing.T) {
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
@@ -4184,7 +4314,7 @@ func TestHandleCompressContextCompactError(t *testing.T) {
 		compactErr:       fmt.Errorf("compact failed"),
 	}
 	handlers.mu.Lock()
-	handlers.putSession("ses_1", compactSession)
+	handlers.putSessionWithMeta("ses_1", "codex", "", compactSession)
 	handlers.mu.Unlock()
 
 	handlers.HandleRPC(serverConn, WireMessage{
@@ -4198,6 +4328,54 @@ func TestHandleCompressContextCompactError(t *testing.T) {
 	errObj := msgs[0]["error"].(map[string]any)
 	if errObj["code"] != "compress_failed" {
 		t.Fatalf("error code = %q, want compress_failed", errObj["code"])
+	}
+}
+
+type closedCompactionAgent struct {
+	*projectionAttachAgent
+}
+
+func (*closedCompactionAgent) ContextCompactionReady() bool { return false }
+
+func TestHandleCompressContextRefusesClosedReadinessBeforeAttach(t *testing.T) {
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	base := &projectionAttachAgent{}
+	agent := &closedCompactionAgent{projectionAttachAgent: base}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex-remote", agent)
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex-remote",
+		Method:    "compress_context",
+		RequestID: "req-closed",
+		Params:    mustJSONRaw(t, map[string]any{"sessionId": "remote-thread"}),
+	})
+
+	msgs := readJSONMaps(t, clientConn, 1)
+	errObj := msgs[0]["error"].(map[string]any)
+	if errObj["code"] != "unsupported_capability" {
+		t.Fatalf("error code = %q, want unsupported_capability", errObj["code"])
+	}
+	base.mu.Lock()
+	attaches := base.attaches
+	base.mu.Unlock()
+	if attaches != 0 {
+		t.Fatalf("closed readiness attempted %d attaches, want 0", attaches)
+	}
+}
+
+func TestBackendListOmitsClosedNativeActionReadiness(t *testing.T) {
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex-remote", &closedCompactionAgent{projectionAttachAgent: &projectionAttachAgent{}})
+	backends := handlers.BackendList()
+	if len(backends) != 1 {
+		t.Fatalf("backends = %d, want 1", len(backends))
+	}
+	for _, capability := range backends[0].Capabilities {
+		if capability == "context_compaction" || capability == "session_collaboration_mode" || capability == "session_goal" {
+			t.Fatalf("closed capability advertised: %s in %v", capability, backends[0].Capabilities)
+		}
 	}
 }
 

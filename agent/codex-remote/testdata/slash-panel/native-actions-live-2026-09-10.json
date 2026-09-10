@@ -1,0 +1,313 @@
+{
+  "schemaVersion": 1,
+  "classification": "LIVE-REDACTED-OBSERVATION",
+  "target": {
+    "desktopVersion": "26.903.61454",
+    "bundleVersion": "8378",
+    "embeddedCodexVersion": "codex-cli 0.153.4",
+    "expectedSourceTag": "rust-v0.153.4"
+  },
+  "authorization": "owner-authorized-2026-09-10",
+  "source": "official Remote Control controller protocol v3",
+  "c0c1": {
+    "environment": {
+      "selectedIndex": 1,
+      "online": true,
+      "clientType": "CODEX_DESKTOP_APP",
+      "environmentFields": [
+        "app_server_version", "arch", "busy", "client_name", "client_type",
+        "client_version", "display_name", "env_id", "host_name", "installation_id",
+        "kind", "last_seen_at", "name", "online", "originator", "os",
+        "os_version", "terminal"
+      ]
+    },
+    "readOnlyAttach": {
+      "thread": "id-4b2953d2c64d",
+      "initialStatus": "notLoaded",
+      "readBefore": {
+        "method": "thread/read", "requestKeys": ["threadId"], "durationMs": 503,
+        "error": null, "resultKeys": ["thread"]
+      },
+      "resume": {
+        "method": "thread/resume", "requestKeys": ["excludeTurns", "threadId"],
+        "durationMs": 912, "error": null,
+        "resultKeys": [
+          "activePermissionProfile", "approvalPolicy", "approvalsReviewer", "cwd",
+          "initialTurnsPage", "instructionSources", "itemsBackwardsCursor", "model",
+          "modelProvider", "multiAgentMode", "reasoningEffort", "runtimeWorkspaceRoots",
+          "sandbox", "serviceTier", "thread", "turnsBackwardsCursor"
+        ]
+      },
+      "readAfter": {
+        "method": "thread/read", "requestKeys": ["threadId"], "durationMs": 571,
+        "error": null, "resultKeys": ["thread"]
+      },
+      "identityStable": true,
+      "cwdPresent": true,
+      "modelStable": true,
+      "effortStable": true,
+      "turnsExcluded": true
+    },
+    "coldReopen": {
+      "response": {
+        "method": "thread/resume", "requestKeys": ["excludeTurns", "threadId"],
+        "durationMs": 449, "error": null,
+        "resultKeys": [
+          "activePermissionProfile", "approvalPolicy", "approvalsReviewer", "cwd",
+          "initialTurnsPage", "instructionSources", "itemsBackwardsCursor", "model",
+          "modelProvider", "multiAgentMode", "reasoningEffort", "runtimeWorkspaceRoots",
+          "sandbox", "serviceTier", "thread", "turnsBackwardsCursor"
+        ]
+      },
+      "sameThread": true
+    }
+  },
+  "actions": {
+    "collaborationCatalog": {
+      "response": {
+        "method": "collaborationMode/list", "requestKeys": [], "durationMs": 473,
+        "error": null, "resultKeys": ["data"]
+      },
+      "count": 2,
+      "entries": [
+        {
+          "name": "Plan", "mode": "plan", "hasModel": true, "hasEffort": true,
+          "keys": ["mode", "model", "name", "reasoning_effort"]
+        },
+        {
+          "name": "Default", "mode": "default", "hasModel": true, "hasEffort": true,
+          "keys": ["mode", "model", "name", "reasoning_effort"]
+        }
+      ]
+    },
+    "thread": {
+      "id": "id-7c48ccc4ad1f",
+      "response": {
+        "method": "thread/start",
+        "requestKeys": ["approvalPolicy", "cwd", "ephemeral", "sandbox"],
+        "durationMs": 652, "error": null,
+        "resultKeys": [
+          "activePermissionProfile", "approvalPolicy", "approvalsReviewer", "cwd",
+          "instructionSources", "model", "modelProvider", "multiAgentMode",
+          "reasoningEffort", "runtimeWorkspaceRoots", "sandbox", "serviceTier", "thread"
+        ]
+      },
+      "cwdIsTmp": true,
+      "model": "gpt-5.6-sol",
+      "reasoningEffort": "medium"
+    },
+    "goalGetEmpty": {
+      "response": {
+        "method": "thread/goal/get", "requestKeys": ["threadId"], "durationMs": 518,
+        "error": null, "resultKeys": ["goal"]
+      },
+      "isNull": true
+    },
+    "goalSet": {
+      "response": {
+        "method": "thread/goal/set",
+        "requestKeys": ["objective", "status", "threadId", "tokenBudget"],
+        "durationMs": 640, "error": null, "resultKeys": ["goal"]
+      },
+      "recordFields": [
+        "createdAt", "objective", "status", "threadId", "timeUsedSeconds",
+        "tokenBudget", "tokensUsed", "updatedAt"
+      ],
+      "status": "paused",
+      "tokenBudget": 256,
+      "threadMatches": true
+    },
+    "goalClear": {
+      "response": {
+        "method": "thread/goal/clear", "requestKeys": ["threadId"], "durationMs": 498,
+        "error": null, "resultKeys": ["cleared"]
+      },
+      "cleared": true
+    },
+    "goalGetCleared": {
+      "response": {
+        "method": "thread/goal/get", "requestKeys": ["threadId"], "durationMs": 429,
+        "error": null, "resultKeys": ["goal"]
+      },
+      "isNull": true
+    },
+    "planUpdate": {
+      "response": {
+        "method": "thread/settings/update",
+        "requestKeys": ["collaborationMode", "threadId"], "durationMs": 467,
+        "error": null, "resultKeys": []
+      },
+      "emptyAck": true,
+      "sent": {
+        "presetName": "Plan", "mode": "plan", "model": "gpt-5.6-sol",
+        "reasoningEffort": "medium", "developerInstructionsIsNull": true
+      }
+    },
+    "defaultUpdate": {
+      "response": {
+        "method": "thread/settings/update",
+        "requestKeys": ["collaborationMode", "threadId"], "durationMs": 498,
+        "error": null, "resultKeys": []
+      },
+      "emptyAck": true,
+      "sent": {
+        "presetName": "Default", "mode": "default", "model": "gpt-5.6-sol",
+        "reasoningEffort": null, "developerInstructionsIsNull": true
+      }
+    },
+    "seedTurn": {
+      "response": {
+        "method": "turn/start", "requestKeys": ["input", "threadId"],
+        "durationMs": 693, "error": null, "resultKeys": ["turn"]
+      },
+      "turn": "id-9f20d33ea0c9",
+      "completed": true
+    },
+    "compact": {
+      "response": {
+        "method": "thread/compact/start", "requestKeys": ["threadId"],
+        "durationMs": 435, "error": null, "resultKeys": []
+      },
+      "emptyAck": true,
+      "lifecycle": {
+        "turn": "id-36d7764b7184",
+        "item": "id-492d6d675dae",
+        "terminalStatus": "completed",
+        "userNotificationObserved": false
+      },
+      "cold": {
+        "response": {
+          "method": "thread/turns/list",
+          "requestKeys": ["limit", "sortDirection", "threadId"],
+          "durationMs": 696, "error": null,
+          "resultKeys": ["backwardsCursor", "data", "nextCursor"]
+        },
+        "sameTurn": true,
+        "status": "completed",
+        "itemTypes": []
+      }
+    }
+  },
+  "cleanup": {
+    "threadDelete": {
+      "response": {
+        "method": "thread/delete", "requestKeys": ["threadId"], "durationMs": 1092,
+        "error": null, "resultKeys": []
+      },
+      "emptyAck": true
+    },
+    "probeControllerRevoked": true
+  },
+  "supplementalColdCapture": {
+    "classification": "LIVE-REDACTED-OBSERVATION",
+    "thread": "id-28f15dd81de7",
+    "planNotifications": {
+      "plan": {
+        "threadSettingsKeys": [
+          "activePermissionProfile", "approvalPolicy", "approvalsReviewer",
+          "collaborationMode", "cwd", "effort", "model", "modelProvider",
+          "multiAgentMode", "personality", "sandboxPolicy", "serviceTier", "summary"
+        ],
+        "collaborationKeys": ["mode", "settings"],
+        "mode": "plan",
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "medium",
+        "developerInstructionsIsNull": false,
+        "updateResponseObservedAtMs": 75468,
+        "observedAtMs": 75469
+      },
+      "default": {
+        "threadSettingsKeys": [
+          "activePermissionProfile", "approvalPolicy", "approvalsReviewer",
+          "collaborationMode", "cwd", "effort", "model", "modelProvider",
+          "multiAgentMode", "personality", "sandboxPolicy", "serviceTier", "summary"
+        ],
+        "collaborationKeys": ["mode", "settings"],
+        "mode": "default",
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": null,
+        "developerInstructionsIsNull": false,
+        "updateResponseObservedAtMs": 76083,
+        "observedAtMs": 76088
+      }
+    },
+    "planColdReadback": {
+      "response": {
+        "method": "thread/resume",
+        "requestKeys": ["excludeTurns", "threadId"],
+        "durationMs": 459,
+        "observedAtMs": 86575,
+        "error": null,
+        "resultKeys": [
+          "activePermissionProfile", "approvalPolicy", "approvalsReviewer", "cwd",
+          "initialTurnsPage", "instructionSources", "itemsBackwardsCursor", "model",
+          "modelProvider", "multiAgentMode", "reasoningEffort", "runtimeWorkspaceRoots",
+          "sandbox", "serviceTier", "thread", "turnsBackwardsCursor"
+        ]
+      },
+      "threadKeys": [
+        "agentNickname", "agentRole", "canAcceptDirectInput", "cliVersion", "createdAt",
+        "cwd", "ephemeral", "extra", "forkedFromId", "gitInfo", "historyMode", "id",
+        "model", "modelProvider", "name", "parentThreadId", "path", "preview", "projectId",
+        "reasoningEffort", "recencyAt", "section", "sectionEnteredAt", "sessionId", "source",
+        "status", "threadSource", "turns", "updatedAt"
+      ],
+      "topLevelThreadSettingsPresent": false,
+      "threadCollaborationModePresent": false,
+      "newSettingsNotifications": 0
+    },
+    "goalColdReadback": {
+      "response": {
+        "method": "thread/goal/get", "requestKeys": ["threadId"], "durationMs": 564,
+        "observedAtMs": 88141, "error": null, "resultKeys": ["goal"]
+      },
+      "isNull": true
+    },
+    "compactColdItems": {
+      "response": {
+        "method": "thread/items/list",
+        "requestKeys": ["limit", "sortDirection", "threadId", "turnId"],
+        "durationMs": 471,
+        "observedAtMs": 89140,
+        "error": null,
+        "resultKeys": ["backwardsCursor", "data", "nextCursor"]
+      },
+      "entryCount": 1,
+      "sameTurnAndItem": true,
+      "itemType": "contextCompaction"
+    },
+    "goalNotification": {
+      "recordFields": [
+        "createdAt", "objective", "status", "threadId", "timeUsedSeconds",
+        "tokenBudget", "tokensUsed", "updatedAt"
+      ],
+      "status": "paused"
+    },
+    "cleanup": {
+      "threadDeleteEmptyAck": true,
+      "probeControllerRevoked": true,
+      "revokedIdentityRefreshStatus": 403,
+      "deviceKeyDeleted": true
+    }
+  },
+  "observationSummary": {
+    "count": 111,
+    "kinds": {
+      "auth_loaded": 1, "device_key_challenge": 3, "device_key_cleanup": 1,
+      "device_key_created": 1, "device_key_proof": 3, "enroll_finish": 1,
+      "enroll_start": 1, "initialize_result": 3, "notification": 72,
+      "refresh_finish": 1, "refresh_start": 1, "revoke": 1,
+      "revoked_identity_rejected": 1, "rpc": 17, "step_up_validated": 1,
+      "websocket_handshake": 3
+    },
+    "notificationMethods": {
+      "deprecationNotice": 1, "hook/completed": 3, "hook/started": 3,
+      "item/agentMessage/delta": 1, "item/completed": 3, "item/started": 3,
+      "mcpServer/startupStatus/updated": 17, "remoteControl/status/changed": 2,
+      "thread/deleted": 3, "thread/goal/cleared": 10, "thread/goal/updated": 2,
+      "thread/settings/updated": 2, "thread/started": 2,
+      "thread/status/changed": 12, "thread/tokenUsage/updated": 2,
+      "turn/completed": 2, "turn/started": 2, "warning": 2
+    }
+  }
+}

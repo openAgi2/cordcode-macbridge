@@ -436,7 +436,9 @@ func mapRemoteHistoryItem(turn *core.TurnScopedHistoryTurn, item remoteThreadIte
 		step := map[string]any{"id": item.ID, "toolName": "WebSearch", "status": remoteTurnStatusCompleted, "title": item.Query}
 		turn.Parts = append(turn.Parts, map[string]any{"type": "tool", "step": step, "itemId": item.ID})
 	case "contextCompaction":
-		turn.SystemNotes = append(turn.SystemNotes, "contextCompaction")
+		turn.Parts = append(turn.Parts, map[string]any{
+			"type": "context_compaction", "itemId": item.ID, "status": "completed",
+		})
 	default:
 		if item.Type != "" {
 			turn.SkippedTypes = append(turn.SkippedTypes, item.Type)

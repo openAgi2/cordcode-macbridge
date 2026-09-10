@@ -271,6 +271,86 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	}
 }
 
+var (
+	errProjectionLiveSessionMissing          = errors.New("projection live session is unavailable")
+	errProjectionLiveSessionBackendMismatch  = errors.New("projection live session belongs to another backend")
+	errProjectionLiveSessionIdentityMismatch = errors.New("projection live session returned a different thread identity")
+)
+
+// prepareProjectionLiveSession is the single attach/register/relay transaction
+// used by read-only projection opens and native session actions. The caller's
+// context reaches the official resume request; no Background context extends a
+// timed-out action. Registry reuse is backend-qualified, and a racing attach is
+// closed rather than replacing the listener already serving the thread.
+func (h *Handlers) prepareProjectionLiveSession(
+	ctx context.Context,
+	sessionID string,
+	conn Connection,
+	backendID string,
+	agent core.Agent,
+	directory string,
+) (core.AgentSession, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	backendID = strings.TrimSpace(backendID)
+	if sessionID == "" || backendID == "" || agent == nil {
+		return nil, errProjectionLiveSessionMissing
+	}
+	if !sameBackendIdentity(agent.Name(), backendID) {
+		return nil, fmt.Errorf("%w: request=%s agent=%s", errProjectionLiveSessionBackendMismatch, backendID, agent.Name())
+	}
+
+	if tracked, exists := h.sessions.get(sessionID); exists && tracked != nil {
+		if !sameBackendIdentity(tracked.backendID, backendID) {
+			return nil, fmt.Errorf("%w: request=%s registry=%s", errProjectionLiveSessionBackendMismatch, backendID, tracked.backendID)
+		}
+		if tracked.session != nil {
+			if actual := strings.TrimSpace(tracked.session.CurrentSessionID()); actual != "" && actual != sessionID {
+				return nil, fmt.Errorf("%w: request=%s session=%s", errProjectionLiveSessionIdentityMismatch, sessionID, actual)
+			}
+			h.startRelayIfNotRunning(sessionID, tracked.session, conn, backendID)
+			return tracked.session, nil
+		}
+	}
+
+	attacher, ok := agent.(core.ProjectionLiveSessionAttacher)
+	if !ok {
+		return nil, errProjectionLiveSessionMissing
+	}
+	newSession, err := attacher.AttachProjectionLiveSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if newSession == nil {
+		return nil, errProjectionLiveSessionMissing
+	}
+	if actual := strings.TrimSpace(newSession.CurrentSessionID()); actual != sessionID {
+		_ = newSession.Close()
+		return nil, fmt.Errorf("%w: request=%s session=%s", errProjectionLiveSessionIdentityMismatch, sessionID, actual)
+	}
+
+	// Double-check under the same outer mutex used by existing registry/relay
+	// callers. sessionRegistry remains internally synchronized.
+	h.mu.Lock()
+	tracked, exists := h.sessions.get(sessionID)
+	switch {
+	case exists && tracked != nil && !sameBackendIdentity(tracked.backendID, backendID):
+		h.mu.Unlock()
+		_ = newSession.Close()
+		return nil, fmt.Errorf("%w: request=%s registry=%s", errProjectionLiveSessionBackendMismatch, backendID, tracked.backendID)
+	case exists && tracked != nil && tracked.session != nil:
+		sess := tracked.session
+		h.mu.Unlock()
+		_ = newSession.Close()
+		h.startRelayIfNotRunning(sessionID, sess, conn, backendID)
+		return sess, nil
+	default:
+		h.putSessionWithMeta(sessionID, backendID, directory, newSession)
+		h.mu.Unlock()
+		h.startRelayIfNotRunning(sessionID, newSession, conn, backendID)
+		return newSession, nil
+	}
+}
+
 // startProjectionLiveRelay attaches the live producer required after a projection-only open.
 // It deliberately mirrors handleGetSessionMessages without reading or merging legacy history:
 // the resulting logical events reduce into SessionProjection, and v2 clients consume only
@@ -282,35 +362,9 @@ func (h *Handlers) startProjectionLiveRelay(
 	agent core.Agent,
 	directory string,
 ) {
-	h.mu.Lock()
-	sess, hasSess := h.getSession(sessionID)
-	h.mu.Unlock()
-	if (!hasSess || sess == nil) && sessionID != "" {
-		if attacher, ok := agent.(core.ProjectionLiveSessionAttacher); ok {
-			newSession, err := attacher.AttachProjectionLiveSession(h.ctx, sessionID)
-			if err != nil {
-				slog.Warn("go-bridge: projection live session attach failed",
-					"backendID", backendID, "sessionID", sessionID, "error", err)
-			} else if newSession != nil {
-				// Double-checked ownership: concurrent projection opens must share
-				// one upstream listener and one relay.
-				h.mu.Lock()
-				existing, exists := h.getSession(sessionID)
-				if exists && existing != nil {
-					sess, hasSess = existing, true
-					h.mu.Unlock()
-					_ = newSession.Close()
-				} else {
-					h.putSessionWithMeta(sessionID, backendID, directory, newSession)
-					sess, hasSess = newSession, true
-					h.mu.Unlock()
-				}
-			}
-		}
-	}
-	if hasSess && sess != nil {
-		h.startRelayIfNotRunning(sessionID, sess, conn, backendID)
-	} else {
+	if _, err := h.prepareProjectionLiveSession(h.ctx, sessionID, conn, backendID, agent, directory); err != nil {
+		slog.Warn("go-bridge: projection live session prepare failed",
+			"backendID", backendID, "sessionID", sessionID, "error", err)
 		if cursor, ok := h.projectionKernel.CommittedSourceCursor(backendID, sessionID); ok {
 			h.startClaudeSessionFileRelayAt(sessionID, conn, backendID, &cursor)
 		} else {
@@ -1542,6 +1596,11 @@ func turnScopedHistoryTurnToProjectionEvents(turns []core.TurnScopedHistoryTurn)
 					continue
 				}
 				out = append(out, hydrateToolEventsFromStep(step)...)
+			case "context_compaction":
+				out = append(out, projectionHydrateEvent{
+					Event: "context_compressed",
+					Data:  map[string]interface{}{"itemId": itemID, "turnId": t.TurnID},
+				})
 			}
 		}
 		for _, note := range t.SystemNotes {

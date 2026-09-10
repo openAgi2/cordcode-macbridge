@@ -26,7 +26,16 @@ func startEnvelopePeer(t *testing.T, host FrameConn, handle func(id int64, metho
 			if json.Unmarshal(env.Message, &req) != nil || req.Method == "" {
 				continue
 			}
+			// Production attach performs authoritative native-state hydration after
+			// each matching live gate opens. The shared fake may emulate the older
+			// goal endpoint, but collaboration state must never be fabricated:
+			// callers either provide thread/settings/get or exercise the real
+			// -32601 compatibility path.
 			result, rpcErr := handle(req.ID, req.Method, req.Params)
+			if req.Method == "thread/goal/get" && rpcErr != nil && rpcErr.Code == -32601 {
+				result = map[string]any{"goal": nil}
+				rpcErr = nil
+			}
 			seq++
 			s := seq
 			out := map[string]any{"jsonrpc": "2.0", "id": req.ID}

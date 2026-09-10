@@ -162,10 +162,6 @@ var _ core.SessionPermissionResponder = (*Agent)(nil)
 func (a *Agent) startTurnWithCollaborationMode(ctx context.Context, threadID, text, modeKind string) error {
 	a.mu.Lock()
 	cl := a.client
-	model := a.selectedModel
-	if model == "" {
-		model = a.defaultModel
-	}
 	a.mu.Unlock()
 	if cl == nil {
 		return ErrNotConfigured
@@ -173,13 +169,14 @@ func (a *Agent) startTurnWithCollaborationMode(ctx context.Context, threadID, te
 	if strings.TrimSpace(text) == "" {
 		return fmt.Errorf("codex-remote: empty turn input")
 	}
-	if model == "" {
-		return fmt.Errorf("codex-remote: no official model for collaborationMode settings")
+	mode, err := a.collaborationModePayloadForKind(ctx, threadID, modeKind)
+	if err != nil {
+		return err
 	}
 	params := map[string]any{
 		"threadId":          threadID,
 		"input":             []map[string]any{{"type": "text", "text": text}},
-		"collaborationMode": officialCollaborationMode(modeKind, model),
+		"collaborationMode": mode,
 	}
 	_, rpcErr, err := cl.RequestContext(ctx, "turn/start", params)
 	if err != nil {
@@ -192,44 +189,9 @@ func (a *Agent) startTurnWithCollaborationMode(ctx context.Context, threadID, te
 }
 
 func (a *Agent) updateThreadCollaborationMode(ctx context.Context, threadID, modeKind string) error {
-	a.mu.Lock()
-	cl := a.client
-	model := a.selectedModel
-	if model == "" {
-		model = a.defaultModel
-	}
-	a.mu.Unlock()
-	if cl == nil {
-		return ErrNotConfigured
-	}
-	if model == "" {
-		return fmt.Errorf("codex-remote: no official model for collaborationMode settings")
-	}
-	params := map[string]any{
-		"threadId":          threadID,
-		"collaborationMode": officialCollaborationMode(modeKind, model),
-	}
-	_, rpcErr, err := cl.RequestContext(ctx, "thread/settings/update", params)
+	mode, err := a.collaborationModePayloadForKind(ctx, threadID, modeKind)
 	if err != nil {
 		return err
 	}
-	if rpcErr != nil {
-		return rpcErr
-	}
-	return nil
-}
-
-// officialCollaborationMode is the experimental turn/start and
-// thread/settings/update payload (app-server-protocol v2 CollaborationMode).
-// ModeKind serializes as "plan" / "default". Settings.model is required;
-// developer_instructions null means "use built-in instructions for the mode"
-// (app-server README collaborationMode/list).
-func officialCollaborationMode(modeKind, model string) map[string]any {
-	return map[string]any{
-		"mode": modeKind,
-		"settings": map[string]any{
-			"model":                  model,
-			"developer_instructions": nil,
-		},
-	}
+	return a.submitThreadCollaborationMode(ctx, threadID, mode)
 }

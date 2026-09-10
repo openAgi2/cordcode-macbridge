@@ -73,17 +73,23 @@ type Handlers struct {
 	// registry (§11.8): same key discipline as turnDetailFlights; the leader
 	// also fans its turn_detail_chunk frames out to follower connections.
 	turnDetailChunksFlights sync.Map
+	// nativeSessionWriteFlights serializes mutation submission for one official
+	// Remote thread. Compact, ordinary sends, and plan-review permission
+	// responses share this gate so a compact ACK cannot race another Bridge
+	// write on the same (backend, thread). The gate covers submission only; the
+	// official turn/item lifecycle remains authoritative after ACK.
+	nativeSessionWriteFlights sync.Map
 	// turnDetailStore is the process-wide §11.8 detail store (lazy init,
 	// rooted at <dataDir>/detail with a one-shot startup sweep).
-	turnDetailStore        *TurnDetailStore
-	turnDetailStoreOnce    sync.Once
-	agents                 map[string]core.Agent
-	sessions               *sessionRegistry
-	runningMap             *runningMapCache
+	turnDetailStore     *TurnDetailStore
+	turnDetailStoreOnce sync.Once
+	agents              map[string]core.Agent
+	sessions            *sessionRegistry
+	runningMap          *runningMapCache
 	// claudeRelayNudges：sessionID → file-relay 立即轮询通道（Phase 3 Stop hook
 	// 事件驱动定向刷新；hooks_sink.go）。
-	nudgeMu           sync.Mutex
-	claudeRelayNudges map[string]chan struct{}
+	nudgeMu                sync.Mutex
+	claudeRelayNudges      map[string]chan struct{}
 	opencodeSessionOptions map[string]opencodeSessionOptions
 	contentRefs            map[string]string
 	contentRefOrder        []string
@@ -341,6 +347,33 @@ func (h *Handlers) completeBridgeTurn(sessionID string) {
 	if machine != nil {
 		machine.EndBridgeTurn()
 	}
+}
+
+func nativeSessionWriteKey(backendID, sessionID string) string {
+	return strings.TrimSpace(backendID) + "\x00" + strings.TrimSpace(sessionID)
+}
+
+// tryBeginNativeSessionWrite is deliberately non-queuing. A concurrent write
+// is rejected so callers never submit a stale action after a preceding
+// mutation happens to finish.
+func (h *Handlers) tryBeginNativeSessionWrite(backendID, sessionID string) (func(), bool) {
+	key := nativeSessionWriteKey(backendID, sessionID)
+	if key == "\x00" {
+		return func() {}, true
+	}
+	if _, loaded := h.nativeSessionWriteFlights.LoadOrStore(key, struct{}{}); loaded {
+		return nil, false
+	}
+	return func() { h.nativeSessionWriteFlights.Delete(key) }, true
+}
+
+func sendNativeSessionWriteBusy(conn Connection, requestID string) {
+	retryable := true
+	conn.SendResult(requestID, nil, &WireError{
+		Code:      "session_action_in_progress",
+		Message:   "another action is already being submitted for this session",
+		Retryable: &retryable,
+	})
 }
 
 // bridgeOwnedActiveTurnsByBackend 返回 bridge-owned 活跃 turn 的 per-backend 计数。
@@ -1076,7 +1109,7 @@ func (h *Handlers) ensureOpenCodeSession(agent core.Agent, sessionID, modelID, d
 		_ = newSession.Close()
 		return existing, nil
 	}
-	h.putSession(sessionID, newSession)
+	h.putSessionWithMeta(sessionID, agent.Name(), dir, newSession)
 	h.opencodeSessionOptions[sessionID] = desired
 	h.mu.Unlock()
 
@@ -1645,6 +1678,16 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleExecuteSessionCommand(conn, msg, agent)
 	case "mutate_session_goal":
 		h.handleMutateSessionGoal(conn, msg, agent)
+	case "list_collaboration_modes":
+		h.handleListCollaborationModes(conn, msg, agent)
+	case "update_collaboration_mode":
+		h.handleUpdateCollaborationMode(conn, msg, agent)
+	case "get_session_goal":
+		h.handleGetSessionGoal(conn, msg, agent)
+	case "set_session_goal":
+		h.handleSetSessionGoal(conn, msg, agent)
+	case "clear_session_goal":
+		h.handleClearSessionGoal(conn, msg, agent)
 	case "set_agent_preset":
 		h.handleSetAgentPreset(conn, msg, agent)
 	case "create_session":
@@ -1735,7 +1778,7 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 	case "list_pinned_sessions":
 		h.handleListPinnedSessions(conn, msg, agent)
 	case "compress_context":
-		h.handleCompressContext(conn, msg)
+		h.handleCompressContext(conn, msg, agent)
 	case "check_pending_notifications":
 		h.handleCheckPendingNotifications(conn, msg)
 	case "question_reply":
@@ -2527,7 +2570,7 @@ func (h *Handlers) handleCreateSession(conn Connection, msg WireMessage, agent c
 	}
 
 	h.mu.Lock()
-	h.putSession(sessionID, sess)
+	h.putSessionWithMeta(sessionID, msg.BackendID, params.Directory, sess)
 	h.mu.Unlock()
 
 	var result map[string]interface{}
@@ -2580,6 +2623,14 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 	if wireErr := validateSendMessageAttachments(agent, params.Attachments); wireErr != nil {
 		conn.SendResult(msg.RequestID, nil, wireErr)
 		return
+	}
+	if msg.BackendID == "codex-remote" {
+		release, ok := h.tryBeginNativeSessionWrite(msg.BackendID, params.SessionID)
+		if !ok {
+			sendNativeSessionWriteBusy(conn, msg.RequestID)
+			return
+		}
+		defer release()
 	}
 	if !h.admitBridgeTurn(params.SessionID) {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "runtime.quiescing", Message: "Bridge runtime is quiescing"})
@@ -2865,7 +2916,8 @@ func (h *Handlers) startClaudeSessionOnOpen(agent core.Agent, sessionID string, 
 	}()
 }
 
-func preflightClaudeResume(rootCtx context.Context, agent core.Agent, sessionID string) *WireError {	if err := rootCtx.Err(); err != nil {
+func preflightClaudeResume(rootCtx context.Context, agent core.Agent, sessionID string) *WireError {
+	if err := rootCtx.Err(); err != nil {
 		return &WireError{Code: "request.cancelled", Message: err.Error()}
 	}
 	lister, ok := agent.(core.LiveSessionLister)
@@ -3394,7 +3446,9 @@ func (h *Handlers) abortObservedThread(conn Connection, msg WireMessage, params 
 		"sessionID", params.SessionID, "backendID", msg.BackendID, "agent", agent.Name())
 }
 
-func (h *Handlers) handleCompressContext(conn Connection, msg WireMessage) {
+const nativeSessionActionTimeout = 25 * time.Second
+
+func (h *Handlers) handleCompressContext(conn Connection, msg WireMessage, agent core.Agent) {
 	var params struct {
 		SessionID string `json:"sessionId"`
 	}
@@ -3405,12 +3459,40 @@ func (h *Handlers) handleCompressContext(conn Connection, msg WireMessage) {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "missing_param", Message: "sessionId required"})
 		return
 	}
-
-	h.mu.Lock()
-	sess, ok := h.getSession(params.SessionID)
-	h.mu.Unlock()
+	if readiness, gated := agent.(core.ContextCompactionReadinessProvider); gated && !readiness.ContextCompactionReady() {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "unsupported_capability", Message: "context_compaction is not ready for this backend"})
+		return
+	}
+	release, ok := h.tryBeginNativeSessionWrite(msg.BackendID, params.SessionID)
 	if !ok {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: "no active session for compression"})
+		sendNativeSessionWriteBusy(conn, msg.RequestID)
+		return
+	}
+	defer release()
+	ctx, cancel := context.WithTimeout(h.ctx, nativeSessionActionTimeout)
+	defer cancel()
+	sess, err := h.prepareProjectionLiveSession(ctx, params.SessionID, conn, msg.BackendID, agent, extractDir(msg))
+	if err != nil {
+		code := "session_attach_failed"
+		if errors.Is(err, errProjectionLiveSessionMissing) {
+			code = "session_not_found"
+		} else if errors.Is(err, errProjectionLiveSessionBackendMismatch) || errors.Is(err, errProjectionLiveSessionIdentityMismatch) {
+			code = "session_identity_mismatch"
+		}
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: code, Message: err.Error()})
+		return
+	}
+	if h.projectionKernel != nil && h.projectionKernel.ActiveTurnID(msg.BackendID, params.SessionID) != "" {
+		retryable := true
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_idle", Message: "context compression requires an authoritatively idle session", Retryable: &retryable})
+		return
+	}
+	if activity, supported := agent.(core.SessionActivityProbing); supported && activity.IsSessionActive(ctx, params.SessionID) {
+		retryable := true
+		// SessionActivityProbing is intentionally conservative (read error or
+		// unknown status => active), so this code states only what is proven:
+		// the thread was not authoritatively confirmed idle.
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_idle", Message: "context compression requires an authoritatively idle session", Retryable: &retryable})
 		return
 	}
 	cc, ok := sess.(core.ContextCompactingSession)
@@ -3418,7 +3500,7 @@ func (h *Handlers) handleCompressContext(conn Connection, msg WireMessage) {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "not_supported", Message: "backend session does not support compression"})
 		return
 	}
-	if err := cc.CompactContext(context.Background()); err != nil {
+	if err := cc.CompactContext(ctx); err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "compress_failed", Message: err.Error()})
 		return
 	}
@@ -4596,6 +4678,14 @@ func (h *Handlers) handleResolvePermission(conn Connection, msg WireMessage) {
 	var params ResolvePermissionParams
 	if msg.Params != nil {
 		json.Unmarshal(msg.Params, &params)
+	}
+	if msg.BackendID == "codex-remote" {
+		release, ok := h.tryBeginNativeSessionWrite(msg.BackendID, params.SessionID)
+		if !ok {
+			sendNativeSessionWriteBusy(conn, msg.RequestID)
+			return
+		}
+		defer release()
 	}
 
 	h.mu.Lock()

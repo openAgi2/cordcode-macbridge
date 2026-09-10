@@ -325,18 +325,22 @@ export function threadStatusType(status) {
 // refresh/start -> refresh/finish. Returns controller session credentials.
 export async function enrollController({ helperSource, observe = () => {}, pairingForm }) {
   const helper = compileKeyHelper(helperSource);
+  let token = null;
+  let accountID = null;
+  let clientID = null;
+  let key = null;
   try {
-    const token = await loadAuthToken();
+    token = await loadAuthToken();
     const identity = authIdentity(token);
     if (identity.accountID == null && identity.accountId == null) fail("account id claim missing");
-    const accountID = identity.accountId ?? identity.accountID;
+    accountID = identity.accountId ?? identity.accountID;
     observe("auth_loaded", { method: "embedded_app_server_memory_only" });
     const start = await jsonRequest(token, accountID, "POST", "/codex/remote/control/client/enroll/start", {});
-    const clientID = start.body?.client_id;
+    clientID = start.body?.client_id;
     const challenge = start.body?.device_key_challenge;
     if (typeof clientID !== "string" || challenge == null) fail("enroll/start schema mismatch");
     observe("enroll_start", { status: start.status, response_fields: Object.keys(start.body).sort(), challenge_fields: Object.keys(challenge).sort() });
-    const key = keyCall(helper.binary, { op: "create" });
+    key = keyCall(helper.binary, { op: "create" });
     observe("device_key_created", { algorithm: key.algorithm, protection_class: key.protectionClass, spki_bytes: Buffer.from(key.publicKeySpkiDerBase64, "base64").length });
     let stepUpToken = await stepUp(accountID);
     const stepClaims = jwtClaims(stepUpToken);
@@ -360,6 +364,22 @@ export async function enrollController({ helperSource, observe = () => {}, pairi
     observe("refresh_finish", { status: refreshFinish.status, response_fields: Object.keys(refreshFinish.body).sort(), scopes: refreshFinish.body.scopes, expires_at_present: true });
     return { helper, token, accountID, clientID, key, controllerToken, expiresAt };
   } catch (error) {
+    if (clientID != null && token != null && accountID != null) {
+      try {
+        const response = await revokeProbeController(token, accountID, clientID);
+        observe("failed_enrollment_revoke", { status: response.status, ok: response.ok });
+      } catch (cleanupError) {
+        observe("failed_enrollment_revoke_failed", { message: redactErrorMessage(cleanupError.message) });
+      }
+    }
+    if (key != null) {
+      try {
+        const deleted = keyCall(helper.binary, { op: "delete", keyId: key.keyId });
+        observe("failed_enrollment_key_cleanup", { deleted: deleted.deleted });
+      } catch (cleanupError) {
+        observe("failed_enrollment_key_cleanup_failed", { message: redactErrorMessage(cleanupError.message) });
+      }
+    }
     if (helper.directory.startsWith(path.join(os.tmpdir(), "codex-remote-key-helper."))) rmSync(helper.directory, { recursive: true, force: true });
     throw error;
   }

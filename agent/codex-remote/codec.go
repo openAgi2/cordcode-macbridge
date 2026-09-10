@@ -29,6 +29,21 @@ type LiveCodec struct {
 	// "Implement this plan?" action (TUI plan_implementation.rs — not a wire
 	// approval request). Keyed by the official plan item id.
 	awaitingPlanReview map[string]codexProposedPlan
+	// Only official full settings notifications or thread/settings/get responses
+	// populate this current-epoch map. Versions keep an older read response from
+	// overwriting a newer Desktop notification.
+	collaborationByThread map[string]versionedCollaborationSnapshot
+	goalByThread          map[string]versionedGoalSnapshot
+}
+
+type versionedCollaborationSnapshot struct {
+	version uint64
+	state   core.SessionCollaborationMode
+}
+
+type versionedGoalSnapshot struct {
+	version  uint64
+	snapshot core.SessionGoalSnapshot
 }
 
 type codexProposedPlan struct {
@@ -40,12 +55,83 @@ type codexProposedPlan struct {
 
 func NewLiveCodec() *LiveCodec {
 	return &LiveCodec{
-		turnByThread:       map[string]string{},
-		retryByThread:      map[string]int{},
-		unknown:            map[string]int{},
-		inFlightPlan:       map[string]codexProposedPlan{},
-		awaitingPlanReview: map[string]codexProposedPlan{},
+		turnByThread:          map[string]string{},
+		retryByThread:         map[string]int{},
+		unknown:               map[string]int{},
+		inFlightPlan:          map[string]codexProposedPlan{},
+		awaitingPlanReview:    map[string]codexProposedPlan{},
+		collaborationByThread: map[string]versionedCollaborationSnapshot{},
+		goalByThread:          map[string]versionedGoalSnapshot{},
 	}
+}
+
+func (c *LiveCodec) CurrentCollaborationMode(threadID string) (core.SessionCollaborationMode, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	snapshot, ok := c.collaborationByThread[threadID]
+	state := snapshot.state
+	state.ReasoningEffort = cloneStringPointer(state.ReasoningEffort)
+	return state, ok
+}
+
+func (c *LiveCodec) CollaborationVersion(threadID string) uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.collaborationByThread[threadID].version
+}
+
+func (c *LiveCodec) applyCollaborationMode(threadID string, state core.SessionCollaborationMode, expectedVersion *uint64) (core.Event, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	current, exists := c.collaborationByThread[threadID]
+	if expectedVersion != nil && current.version != *expectedVersion {
+		return core.Event{}, false
+	}
+	if exists && collaborationModesEqual(current.state, state) {
+		return core.Event{}, false
+	}
+	current.version++
+	current.state = cloneCollaborationMode(state)
+	c.collaborationByThread[threadID] = current
+	eventState := cloneCollaborationMode(state)
+	return core.Event{Type: core.EventSessionCollaborationMode, SessionID: threadID, ThreadID: threadID, CollaborationMode: &eventState}, true
+}
+
+func (c *LiveCodec) ResetNativeSessionState() {
+	c.mu.Lock()
+	c.collaborationByThread = map[string]versionedCollaborationSnapshot{}
+	c.goalByThread = map[string]versionedGoalSnapshot{}
+	c.mu.Unlock()
+}
+
+func (c *LiveCodec) GoalVersion(threadID string) uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.goalByThread[threadID].version
+}
+
+func (c *LiveCodec) CurrentGoal(threadID string) (core.SessionGoalSnapshot, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	state, ok := c.goalByThread[threadID]
+	return cloneGoalSnapshot(state.snapshot), ok
+}
+
+func (c *LiveCodec) applyGoalSnapshot(threadID string, snapshot core.SessionGoalSnapshot, expectedVersion *uint64) (core.Event, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	current, exists := c.goalByThread[threadID]
+	if expectedVersion != nil && current.version != *expectedVersion {
+		return core.Event{}, false
+	}
+	if exists && goalSnapshotsEqual(current.snapshot, snapshot) {
+		return core.Event{}, false
+	}
+	current.version++
+	current.snapshot = cloneGoalSnapshot(snapshot)
+	c.goalByThread[threadID] = current
+	eventSnapshot := cloneGoalSnapshot(snapshot)
+	return core.Event{Type: core.EventSessionGoalRecord, SessionID: threadID, ThreadID: threadID, GoalRecord: &eventSnapshot}, true
 }
 
 func (c *LiveCodec) ActiveTurn(threadID string) string {
@@ -101,11 +187,17 @@ func (c *LiveCodec) Decode(n Notification) []core.Event {
 		return decodeRemoteTokenUsage(n)
 	case "turn/plan/updated":
 		return decodeRemotePlanUpdated(n)
+	case "thread/settings/updated":
+		return c.decodeThreadSettingsUpdated(n)
+	case "thread/goal/updated":
+		return c.decodeThreadGoalUpdated(n)
+	case "thread/goal/cleared":
+		return c.decodeThreadGoalCleared(n)
 	case "error":
 		return c.decodeErrorNotification(n)
 	case "warning", "thread/status/changed", "thread/started", "thread/name/updated",
 		"thread/archived", "thread/unarchived", "thread/deleted", "account/rateLimits/updated",
-		"remoteControl/status/changed", "serverRequest/resolved", "thread/goal/cleared",
+		"remoteControl/status/changed", "serverRequest/resolved",
 		"turn/diff/updated":
 		// These are official notifications whose state is either fetched through
 		// catalog/history or has no core.Event representation yet.
@@ -116,6 +208,70 @@ func (c *LiveCodec) Decode(n Notification) []core.Event {
 		c.mu.Unlock()
 		return nil
 	}
+}
+
+func cloneGoalSnapshot(snapshot core.SessionGoalSnapshot) core.SessionGoalSnapshot {
+	out := snapshot
+	if snapshot.Goal != nil {
+		goal := *snapshot.Goal
+		if snapshot.Goal.TokenBudget != nil {
+			budget := *snapshot.Goal.TokenBudget
+			goal.TokenBudget = &budget
+		}
+		out.Goal = &goal
+	}
+	return out
+}
+
+func goalSnapshotsEqual(a, b core.SessionGoalSnapshot) bool {
+	if a.Goal == nil || b.Goal == nil {
+		return a.Goal == nil && b.Goal == nil
+	}
+	left, right := a.Goal, b.Goal
+	if left.ThreadID != right.ThreadID || left.Objective != right.Objective || left.Status != right.Status ||
+		left.TokensUsed != right.TokensUsed || left.TimeUsedSeconds != right.TimeUsedSeconds ||
+		left.CreatedAt != right.CreatedAt || left.UpdatedAt != right.UpdatedAt {
+		return false
+	}
+	if left.TokenBudget == nil || right.TokenBudget == nil {
+		return left.TokenBudget == nil && right.TokenBudget == nil
+	}
+	return *left.TokenBudget == *right.TokenBudget
+}
+
+func cloneCollaborationMode(state core.SessionCollaborationMode) core.SessionCollaborationMode {
+	state.ReasoningEffort = cloneStringPointer(state.ReasoningEffort)
+	return state
+}
+
+func collaborationModesEqual(a, b core.SessionCollaborationMode) bool {
+	if a.Mode != b.Mode || a.Model != b.Model {
+		return false
+	}
+	if a.ReasoningEffort == nil || b.ReasoningEffort == nil {
+		return a.ReasoningEffort == nil && b.ReasoningEffort == nil
+	}
+	return *a.ReasoningEffort == *b.ReasoningEffort
+}
+
+func (c *LiveCodec) decodeThreadSettingsUpdated(n Notification) []core.Event {
+	var params struct {
+		ThreadID       string          `json:"threadId"`
+		ThreadSettings json.RawMessage `json:"threadSettings"`
+	}
+	if json.Unmarshal(n.Params, &params) != nil || len(params.ThreadSettings) == 0 {
+		return nil
+	}
+	params.ThreadID = strings.TrimSpace(params.ThreadID)
+	state, err := decodeCollaborationModeFromThreadSettings(params.ThreadSettings)
+	if err != nil || params.ThreadID == "" {
+		return nil
+	}
+	event, applied := c.applyCollaborationMode(params.ThreadID, state, nil)
+	if !applied {
+		return nil
+	}
+	return []core.Event{event}
 }
 
 func (c *LiveCodec) resetRetry(n Notification) {
@@ -179,7 +335,7 @@ func (c *LiveCodec) decodeTurnCompleted(n Notification) []core.Event {
 	delete(c.retryByThread, params.ThreadID)
 	plan := c.inFlightPlan[params.ThreadID]
 	delete(c.inFlightPlan, params.ThreadID)
-	emitReview := params.Turn.Status != remoteTurnStatusFailed &&
+	emitReview := params.Turn.Status == remoteTurnStatusCompleted &&
 		plan.turnID == params.Turn.ID && strings.TrimSpace(plan.text) != ""
 	if emitReview {
 		c.awaitingPlanReview[plan.itemID] = plan
@@ -189,8 +345,8 @@ func (c *LiveCodec) decodeTurnCompleted(n Notification) []core.Event {
 	if params.Turn.DurationMs != nil {
 		event.DurationMs = *params.Turn.DurationMs
 	}
-	if params.Turn.Status == remoteTurnStatusFailed {
-		message := "turn failed"
+	if params.Turn.Status != remoteTurnStatusCompleted {
+		message := "turn ended with status " + params.Turn.Status
 		if params.Turn.Error != nil && params.Turn.Error.Message != "" {
 			message = params.Turn.Error.Message
 		}

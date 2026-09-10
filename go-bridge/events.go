@@ -236,11 +236,15 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 	case core.EventContextCompressing:
 		return "context_compressing", map[string]interface{}{
 			"sessionId": ev.SessionID,
+			"turnId":    ev.TurnID,
+			"itemId":    ev.ItemID,
 		}, false
 
 	case core.EventContextCompressed:
 		return "context_compressed", map[string]interface{}{
 			"sessionId": ev.SessionID,
+			"turnId":    ev.TurnID,
+			"itemId":    ev.ItemID,
 		}, false
 
 	case core.EventContextUsageUpdated:
@@ -369,6 +373,37 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 			data["reason"] = ev.SessionMode.Reason
 		}
 		return "session_mode", data, false
+
+	case core.EventSessionCollaborationMode:
+		if ev.CollaborationMode == nil {
+			return "", nil, false
+		}
+		data := map[string]interface{}{
+			"mode":  ev.CollaborationMode.Mode,
+			"model": ev.CollaborationMode.Model,
+		}
+		if ev.CollaborationMode.ReasoningEffort != nil {
+			data["reasoningEffort"] = *ev.CollaborationMode.ReasoningEffort
+		}
+		return "session_collaboration_mode", data, false
+
+	case core.EventSessionGoalRecord:
+		if ev.GoalRecord == nil {
+			return "", nil, false
+		}
+		data := map[string]interface{}{"goal": nil}
+		if goal := ev.GoalRecord.Goal; goal != nil {
+			var tokenBudget any
+			if goal.TokenBudget != nil {
+				tokenBudget = *goal.TokenBudget
+			}
+			data["goal"] = map[string]interface{}{
+				"threadId": goal.ThreadID, "objective": goal.Objective, "status": goal.Status,
+				"tokenBudget": tokenBudget, "tokensUsed": goal.TokensUsed,
+				"timeUsedSeconds": goal.TimeUsedSeconds, "createdAt": goal.CreatedAt, "updatedAt": goal.UpdatedAt,
+			}
+		}
+		return "session_goal_record", data, false
 
 	case core.EventSessionGoal:
 		// dsh-web goal whole-snapshot (official goal projection wire view).

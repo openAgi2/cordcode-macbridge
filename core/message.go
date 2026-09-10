@@ -315,32 +315,34 @@ type Message struct {
 type EventType string
 
 const (
-	EventText                EventType = "text"                  // intermediate or final text
-	EventTextReplace         EventType = "text_replace"          // full text replacement (non-incremental update)
-	EventToolUse             EventType = "tool_use"              // tool invocation info
-	EventToolResult          EventType = "tool_result"           // tool execution result
-	EventPlan                EventType = "plan"                  // todo/plan update
-	EventResult              EventType = "result"                // final aggregated result
-	EventError               EventType = "error"                 // error occurred
-	EventPermissionRequest   EventType = "permission_request"    // agent requests permission via stdio protocol
-	EventPermissionResolved  EventType = "permission_resolved"   // permission was allowed or denied (projection SoT close)
-	EventThinking            EventType = "thinking"              // thinking/processing status
-	EventTurnStarted         EventType = "turn_started"          // new turn started (for passive broadcast)
-	EventUserMessage         EventType = "user_message"          // user prompt attributed to a turn (projection SoT)
-	EventContextCompressing  EventType = "context_compressing"   // context compression started
-	EventContextCompressed   EventType = "context_compressed"    // context compression completed
-	EventContextUsageUpdated EventType = "context_usage_updated" // runtime context usage changed
-	EventQuestionAsked       EventType = "question_asked"        // agent asks user a question (Codex)
-	EventQuestionResolved    EventType = "question_resolved"     // question was answered or cancelled
-	EventUserInputRequested  EventType = "user_input_requested"  // 结构化用户输入交互产生（pending/failed），权威 payload 在 Event.UserInput（设计 §10.1）
-	EventUserInputResolved   EventType = "user_input_resolved"   // 结构化用户输入交互被解决（answered/rejected/auto_resolved/unavailable）
-	EventRetryStatus         EventType = "retry_status"          // transient provider-retry notice (serve keeps the turn alive; wire session_retry_status)
-	EventSessionCommand      EventType = "session_command"       // host 斜杠命令生命周期（各 backend 按 commandId 折叠；权威 payload 在 Event.SessionCommand）
-	EventSessionPlanMode     EventType = "session_plan_mode"     // dsh-web 计划模式投影 {active, pending}（官方 plan projection view；权威 payload 在 Event.PlanMode）
-	EventSessionMode         EventType = "session_mode"          // typed 模式状态投影 {status, mode?, canSet, reason?}（Grok Build 方案 §5.1；权威 payload 在 Event.SessionMode）
-	EventSessionGoal         EventType = "session_goal"          // dsh-web 目标投影整值快照（官方 goal projection view；权威 payload 在 Event.Goal，nil = 已清除）
-	EventContextInjection    EventType = "context_injection"     // dsh-web 上下文注入行（user/message source.kind!="user"，当前仅 subagent-settled；权威 payload 在 Event.ContextInjection）
-	EventWorkflowRun         EventType = "workflow_run"          // dsh-web 并行子代理 workflow 卡整值快照（tool-workflow/* 四事件按 runId 折叠；权威 payload 在 Event.WorkflowRun）
+	EventText                     EventType = "text"                       // intermediate or final text
+	EventTextReplace              EventType = "text_replace"               // full text replacement (non-incremental update)
+	EventToolUse                  EventType = "tool_use"                   // tool invocation info
+	EventToolResult               EventType = "tool_result"                // tool execution result
+	EventPlan                     EventType = "plan"                       // todo/plan update
+	EventResult                   EventType = "result"                     // final aggregated result
+	EventError                    EventType = "error"                      // error occurred
+	EventPermissionRequest        EventType = "permission_request"         // agent requests permission via stdio protocol
+	EventPermissionResolved       EventType = "permission_resolved"        // permission was allowed or denied (projection SoT close)
+	EventThinking                 EventType = "thinking"                   // thinking/processing status
+	EventTurnStarted              EventType = "turn_started"               // new turn started (for passive broadcast)
+	EventUserMessage              EventType = "user_message"               // user prompt attributed to a turn (projection SoT)
+	EventContextCompressing       EventType = "context_compressing"        // context compression started
+	EventContextCompressed        EventType = "context_compressed"         // context compression completed
+	EventContextUsageUpdated      EventType = "context_usage_updated"      // runtime context usage changed
+	EventQuestionAsked            EventType = "question_asked"             // agent asks user a question (Codex)
+	EventQuestionResolved         EventType = "question_resolved"          // question was answered or cancelled
+	EventUserInputRequested       EventType = "user_input_requested"       // 结构化用户输入交互产生（pending/failed），权威 payload 在 Event.UserInput（设计 §10.1）
+	EventUserInputResolved        EventType = "user_input_resolved"        // 结构化用户输入交互被解决（answered/rejected/auto_resolved/unavailable）
+	EventRetryStatus              EventType = "retry_status"               // transient provider-retry notice (serve keeps the turn alive; wire session_retry_status)
+	EventSessionCommand           EventType = "session_command"            // host 斜杠命令生命周期（各 backend 按 commandId 折叠；权威 payload 在 Event.SessionCommand）
+	EventSessionPlanMode          EventType = "session_plan_mode"          // dsh-web 计划模式投影 {active, pending}（官方 plan projection view；权威 payload 在 Event.PlanMode）
+	EventSessionMode              EventType = "session_mode"               // typed 模式状态投影 {status, mode?, canSet, reason?}（Grok Build 方案 §5.1；权威 payload 在 Event.SessionMode）
+	EventSessionCollaborationMode EventType = "session_collaboration_mode" // Codex per-thread collaboration settings（官方 thread/settings/updated；权威 payload 在 Event.CollaborationMode）
+	EventSessionGoal              EventType = "session_goal"               // dsh-web 目标投影整值快照（官方 goal projection view；权威 payload 在 Event.Goal，nil = 已清除）
+	EventSessionGoalRecord        EventType = "session_goal_record"        // Codex thread/goal 官方记录（权威 payload 在 Event.GoalRecord；Goal nil = cleared）
+	EventContextInjection         EventType = "context_injection"          // dsh-web 上下文注入行（user/message source.kind!="user"，当前仅 subagent-settled；权威 payload 在 Event.ContextInjection）
+	EventWorkflowRun              EventType = "workflow_run"               // dsh-web 并行子代理 workflow 卡整值快照（tool-workflow/* 四事件按 runId 折叠；权威 payload 在 Event.WorkflowRun）
 )
 
 // UserQuestion represents a structured question from AskUserQuestion.
@@ -652,8 +654,14 @@ type Event struct {
 	PlanMode *PlanModeEvent
 	// typed 模式状态投影（EventSessionMode 的权威 payload；Grok 方案 §5.1）。
 	SessionMode *SessionModeEvent
+	// Codex collaboration mode is an official per-thread settings snapshot.
+	// It never aliases permission mode or the Grok/dsh mode projections.
+	CollaborationMode *SessionCollaborationMode
 	// dsh-web 目标投影整值快照（EventSessionGoal 的权威 payload；nil = 已清除）。
 	Goal *GoalEvent
+	// Codex goal record uses the official thread-goal shape and remains
+	// separate from dsh GoalEvent's id/revision/phase contract.
+	GoalRecord *SessionGoalSnapshot
 	// dsh-web 上下文注入行（EventContextInjection 的权威 payload；官方
 	// ContextMessageNode 对位——user/message source.kind!="user" 的注入上下文，
 	// 当前只 subagent-settled settle 通知）。

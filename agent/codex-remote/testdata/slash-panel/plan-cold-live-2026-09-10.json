@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 2,
+  "classification": "LIVE-REDACTED-OBSERVATION",
+  "target": {
+    "runtime": "isolated-patched-foreground",
+    "cliVersion": "codex-cli 0.0.0",
+    "sourceCommit": "9e868bd9dc007c05e84a98e0b1f4e31dc98c5e6a",
+    "binarySha256": "c41400b00d320b102093d126cb7fb706bb105ec5ec35c94012b34ab40cb34976",
+    "signedDesktopBundleModified": false
+  },
+  "authorization": "owner-authorized-2026-09-10",
+  "purpose": "Plan authoritative cold-read regression",
+  "observations": {
+    "livePlanUpdate": {
+      "response": {
+        "method": "thread/settings/update",
+        "requestKeys": ["collaborationMode", "threadId"],
+        "resultKeys": [],
+        "durationMs": 536,
+        "observedAtMs": 51410
+      },
+      "notification": {
+        "threadSettingsKeys": ["activePermissionProfile", "approvalPolicy", "approvalsReviewer", "collaborationMode", "cwd", "effort", "model", "modelProvider", "multiAgentMode", "personality", "sandboxPolicy", "serviceTier", "summary"],
+        "mode": "plan",
+        "model": "gpt-6-astra",
+        "reasoningEffort": "medium",
+        "developerInstructionsKind": "string"
+      }
+    },
+    "coldPlanRead": {
+      "restartEnvironmentStable": true,
+      "resume": {
+        "method": "thread/resume",
+        "requestKeys": ["excludeTurns", "threadId"],
+        "resultKeys": ["activePermissionProfile", "approvalPolicy", "approvalsReviewer", "cwd", "initialTurnsPage", "instructionSources", "itemsBackwardsCursor", "model", "modelProvider", "multiAgentMode", "reasoningEffort", "runtimeWorkspaceRoots", "sandbox", "serviceTier", "thread", "turnsBackwardsCursor"],
+        "durationMs": 911,
+        "observedAtMs": 58316
+      },
+      "response": {
+        "method": "thread/settings/get",
+        "requestKeys": ["threadId"],
+        "resultKeys": ["threadSettings"],
+        "durationMs": 539,
+        "observedAtMs": 58856
+      },
+      "settings": {
+        "threadSettingsKeys": ["activePermissionProfile", "approvalPolicy", "approvalsReviewer", "collaborationMode", "cwd", "effort", "model", "modelProvider", "multiAgentMode", "personality", "sandboxPolicy", "serviceTier", "summary"],
+        "mode": "plan",
+        "model": "gpt-6-astra",
+        "reasoningEffort": "medium",
+        "developerInstructionsKind": "string"
+      }
+    },
+    "liveDefaultUpdate": {
+      "response": {
+        "method": "thread/settings/update",
+        "requestKeys": ["collaborationMode", "threadId"],
+        "resultKeys": [],
+        "durationMs": 611,
+        "observedAtMs": 59467
+      },
+      "notification": {
+        "threadSettingsKeys": ["activePermissionProfile", "approvalPolicy", "approvalsReviewer", "collaborationMode", "cwd", "effort", "model", "modelProvider", "multiAgentMode", "personality", "sandboxPolicy", "serviceTier", "summary"],
+        "mode": "default",
+        "model": "gpt-6-astra",
+        "reasoningEffort": null,
+        "developerInstructionsKind": "string"
+      }
+    },
+    "coldDefaultRead": {
+      "restartEnvironmentStable": true,
+      "resume": {
+        "method": "thread/resume",
+        "requestKeys": ["excludeTurns", "threadId"],
+        "resultKeys": ["activePermissionProfile", "approvalPolicy", "approvalsReviewer", "cwd", "initialTurnsPage", "instructionSources", "itemsBackwardsCursor", "model", "modelProvider", "multiAgentMode", "reasoningEffort", "runtimeWorkspaceRoots", "sandbox", "serviceTier", "thread", "turnsBackwardsCursor"],
+        "durationMs": 729,
+        "observedAtMs": 65397
+      },
+      "response": {
+        "method": "thread/settings/get",
+        "requestKeys": ["threadId"],
+        "resultKeys": ["threadSettings"],
+        "durationMs": 644,
+        "observedAtMs": 66041
+      },
+      "settings": {
+        "threadSettingsKeys": ["activePermissionProfile", "approvalPolicy", "approvalsReviewer", "collaborationMode", "cwd", "effort", "model", "modelProvider", "multiAgentMode", "personality", "sandboxPolicy", "serviceTier", "summary"],
+        "mode": "default",
+        "model": "gpt-6-astra",
+        "reasoningEffort": null,
+        "developerInstructionsKind": "string"
+      }
+    }
+  },
+  "cleanup": {
+    "threadDeleteEmptyAck": true,
+    "probeControllerRevoked": true,
+    "isolatedHomeDeleted": true
+  },
+  "environment": {
+    "online": true,
+    "clientType": "CODEX_DESKTOP_APP"
+  }
+}

@@ -21,6 +21,19 @@ A probe must stop before a network mutation unless all automatic preflight check
 
 ## Current probes
 
+`native_actions_probe.mjs` is the owner-authorized signed-runtime C0–C4 probe for Compact,
+collaboration-mode updates, and Goal get/set/clear. It creates one disposable isolated thread,
+emits only the redacted schema consumed by `validate/native-actions-fixture.mjs`, deletes that
+thread, and revokes only its own controller.
+
+`plan_cold_probe.mjs` is the owner-authorized C3/C5 restart probe for the identity-verified
+patched development runtime. It creates a short isolated `/tmp/cc-plan-*` `CODEX_HOME`, starts
+the supplied foreground binary, performs Plan update → kill/restart → resume/settings get →
+Default update → kill/restart → resume/settings get, then deletes the disposable thread,
+revokes the probe controller, verifies rejection, deletes its key, and removes the isolated
+home. It refuses to select or overwrite the signed Desktop bundle. Output is restricted to the
+schema consumed by `validate/plan-cold-fixture.mjs`.
+
 `lib/controller_session.mjs` is the shared enrollment/WSS machinery extracted from the proven `live_controller.mjs` flow (that file keeps its own inline copy and stays untouched). It performs the same enroll/start → step-up → enroll/finish → refresh round trip, opens the controller WSS with the device-key challenge flow, exposes a promise-based `rpc()` session, and provides deterministic `cleanupController` (revoke only client_probe → verify rejection → delete probe key → remove the temp helper). New probes import it instead of duplicating the flow.
 
 `preflight.mjs` is the non-mutating entry point. It verifies the exact ASAR contract, embedded helper binaries, device-key addon ABI, ChatGPT login-status availability and the two frozen OAuth callback ports. It does not request a bearer token, create a key, open a browser, contact controller endpoints or change pairing state:

@@ -14,3 +14,8 @@ Each validator must:
 `source-baseline.mjs` currently verifies only the static/source baseline and prints `gateEffect=does-not-pass-phase0` on success.
 
 `controller-fixtures.mjs` verifies the exact target ASAR call sites and the live-capture redaction contract. Its default mode is a static preflight only. `--require-live` deliberately fails while the repository lacks a real redacted observation set; that failure is the expected Phase 0 blocker, not a test defect.
+
+`native-actions-fixture.mjs` validates the signed-runtime Compact/Plan-update/Goal evidence and
+cleanup contract. `plan-cold-fixture.mjs` accepts only schema v2 restart evidence whose Plan and
+Default cold sources are both `thread/settings/get`, whose runtime/source/binary identities are
+present, and whose isolated controller/thread/home cleanup is complete.

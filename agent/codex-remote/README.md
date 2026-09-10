@@ -1,10 +1,20 @@
-# codex-remote Phase 0 evidence probe
+# codex-remote Remote Control backend and evidence probes
 
-Status: **Phase 1 in progress.** Envelope Transport + JSON-RPC + list/resume/turn/text-delta tests pass on a fake host. **product backend registered** as `codex-remote` and listed in Mac AI tools as Codex Desktop, with a ChatGPT computer-code pairing sheet. Cursor reconnect, official iOS coexistence remain known gaps. Original cursor-only **Gate P0 not passed**; rewritten first-connect live gate unlocked Phase 1.
+Status: the independent `codex-remote` product backend is registered and its typed Compact,
+collaboration-mode, and thread-goal surfaces are implemented behind independent production
+readiness gates. Live redacted evidence for the signed Desktop runtime and the isolated patched
+Plan cold-read runtime is under `testdata/slash-panel/`. Controller envelopes still have no
+replay cursor; recovery uses official attach/readback and projection epoch replacement rather
+than claiming cursor support.
 
 Stop / resume document: `docs/2026-08-28-codex-remote-phase0-fail-blocked.md`.
 
-This directory is the sole implementation location for the codex-remote plan. It currently contains only bounded evidence probes, redacted fixtures, metadata and validators. Official Remote Control accepts an independent controller. After `thread/resume` on in-memory Desktop threads, a real Desktop turn delivered `turn/started` / item deltas / `turn/completed`. It still does not deliver a controller reconnect cursor. Future agents must not expose a bridge backend, copy `agent/codex-web`, modify ChatGPT Desktop, or connect the iOS product surface unless the owner explicitly starts Phase 1.
+This directory owns the Remote adapter plus bounded evidence probes, redacted fixtures, metadata,
+and validators. Official Remote Control accepts an independent controller. After `thread/resume`
+on in-memory Desktop threads, a real Desktop turn delivered `turn/started`, item deltas, and
+`turn/completed`. The adapter remains separate from `agent/codex` and `agent/codex-web`; probes
+must never modify the signed ChatGPT Desktop bundle or substitute a standalone/file-backed path
+for Remote Control evidence.
 
 ## Required real chain
 

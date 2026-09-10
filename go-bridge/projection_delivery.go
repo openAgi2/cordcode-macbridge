@@ -76,7 +76,7 @@ func isSessionSyncV2RawTimelineEvent(event string) bool {
 		"delivery_reconcile_required",
 		// dsh-web host slash-command lifecycle + plan-mode/goal snapshots: reduced
 		// into the command system turn / SessionProjection.planMode/.goal (K4 seal).
-		"session_command", "session_plan_mode", "session_goal",
+		"session_command", "session_plan_mode", "session_goal", "session_collaboration_mode", "session_goal_record",
 		// dsh-web context-injection settle rows: reduced into the ctx:<itemId>
 		// system turn (§13.3 seal, same rule as session_command).
 		"context_injection",
