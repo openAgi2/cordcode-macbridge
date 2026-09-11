@@ -48,7 +48,9 @@ iOS 未提交状态=本轮退役修改（见下表）
    （RuntimeManager.swift）以 `drivers.contains("codex-web")` 为门，移除后每次
    launch 自动 `.skipped`——不再代启动官方 daemon、不再写 launchd
    `CODEX_APP_SERVER_USE_LOCAL_DAEMON`。该 seat 本是让 codex-web 旁观 Desktop
-   turn 用的，无 codex-web 即无消费者。
+   turn 用的，无 codex-web 即无消费者。（2026-09-12 注：launchd 层另有一具
+   codex-web 时代残留 LaunchAgent 持续重写该 env 变量，使本条结论当时在
+   launchd 层不成立；已清除，见文末后续节。）
 3. **codex-remote 不受影响的证据**：`agent/codex-remote/codexremote.go` 文件头
    明确声明 "does not import ... the shared-daemon Codex Web backend"；Remote
    Control 链路独立于共享 daemon。运行态复核：退役后 `/internal/agents` 中
@@ -95,3 +97,25 @@ iOS 侧未做真机安装（改动为入口移除 + deprecated 标记，单测 +
 3. **go-bridge standalone fallback**：`go-bridge/main.go` `defaultDrivers` 仍含
    `codex-web`——仅无 Swift 传参的手工调试场景生效，产品态永远由
    RuntimeManager 显式传 `-drivers` 覆盖（先例如此）。
+
+## 2026-09-12 部署残留清理：LaunchAgent `org.openagi.cordcode.codex-app-server-daemon`
+
+Owner 2026-09-12 指令清除。排查 CPU 占用时发现 codex-web 时代的部署残留：launchd
+LaunchAgent（RunAtLoad+KeepAlive）常驻运行
+`~/Library/Application Support/CordCode Link/bin/ensure-codex-shared-daemon.sh`，
+0.25s 周期 exec `codex app-server daemon start` 保活共享 daemon，并循环
+`launchctl setenv CODEX_APP_SERVER_USE_LOCAL_DAEMON 1`（每秒 4 次）。该机制**独立于
+上表 RuntimeManager daemon seat**——退役后 seat 已 `.skipped`，但此残留使
+设计要点 #2「不再写 launchd env」的结论在 launchd 层不成立，直至本次清理。
+
+与现役链路无耦合的证据：脚本与 plist 均不在仓库（git 全历史无记录，仅
+`docs/2026-08-24-codex-web-topology-split-and-sync-monitor-analysis-v2-review.md`
+提及）；`agent/codex-remote` 对 `app-server-control.sock` 零引用；被保活的
+standalone codex daemon 34.5h 累计 CPU 仅 6:30、当前 0%，socketpair 对端无活进程。
+
+处置与验证：`launchctl bootout` → 脚本进程即亡 → `launchctl unsetenv`（getenv
+复核为空）→ 删 plist 与脚本 → kill daemon → 复查无复活。**回滚语义不受影响**：
+codex-web 回滚仍为「drivers 加回 id」，daemon seat 随之自动恢复，LaunchAgent 本就
+不在回滚链路上。遗留说明：清理时存活的 bridge 进程环境内继承的旧 env 变量待下次
+重启自然消失；`~/.codex/app-server-control/` 目录与 socket 文件属 codex CLI
+自管，未动。

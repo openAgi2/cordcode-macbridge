@@ -1,5 +1,35 @@
 # 后续计划索引（待办另案总账）
 
+## 2026-09-12 codex-web 退役残留 LaunchAgent 清除：退役只拆了 seat，没拆 launchd 层
+
+Owner 报「ChatGPT App CPU 高」，排查发现全机第 6 忙进程是 cordcode-bridge-runtime
+（实时 ~22%，热点全在 encoding/json——镜像活跃 codex 会话的投影负载，属正常工作量），
+顺藤摸到一具 codex-web 时代活化石：LaunchAgent
+`org.openagi.cordcode.codex-app-server-daemon`（RunAtLoad+KeepAlive，launchd 永生，
+9-10 登录起跑 34h+）常驻运行 `~/Library/Application Support/CordCode Link/bin/
+ensure-codex-shared-daemon.sh`——0.25s 死循环，每秒 4 次 exec `codex app-server
+daemon start` 保活共享 daemon，并循环 `launchctl setenv
+CODEX_APP_SERVER_USE_LOCAL_DAEMON 1`。34.5h 烧 ~11 分钟 CPU，纯白耗。
+
+关键认知：**2026-09-04 退役文档「不再写 launchd CODEX_APP_SERVER_USE_LOCAL_DAEMON」
+只对 Swift daemon seat 成立**；这个更早的部署残留一直在重写该变量，退役结论与
+launchd 层现实存在缺口。残留与现役链路无耦合的三重证据：脚本/plist 不在仓库（git
+全历史无记录，仅 2026-08-24 codex-web 拓扑文档提及）；`agent/codex-remote` 对
+`app-server-control.sock` 零引用；被保活 daemon（standalone codex）34.5h 累计 CPU
+仅 6:30、当前 0%、socketpair 对端无活进程。
+
+处置（owner 指令，2026-09-12）：`launchctl bootout` → 脚本进程即亡 → `unsetenv`
+（getenv 复核为空）→ 删 plist 与脚本 → kill daemon → 复查无复活。遗留：清理时
+存活的 bridge 进程环境内继承的旧 env 变量待下次重启自然消失（实测 inert）；
+`~/.codex/app-server-control/` socket 文件属 codex CLI 自管，未动。回滚语义不变：
+codex-web 回滚仍 = drivers 加回 id，Swift seat 自动恢复，LaunchAgent 本就不在
+回滚链路上。
+
+另案待办（与本次无关，排查中顺带发现）：go-bridge web-push 对三个已被 410 的
+死订阅（wps_8f2b69d2 / wps_0f550fc9 / wps_864da9c5）每秒重试且永不清理——代码
+注释自认「expiry semantics not sample-proven (no deletion)」，410 语义即永久失效，
+应删订阅；同为常驻 CPU/网络/日志白烧源。
+
 ## 2026-09-09 Grok `/plan` 缺席与常驻 chip：agent 目录不是产品命令全集
 
 Grok 官方有两层命令注册：agent `_x.ai/commands/list` 提供 compact/goal 等 host
