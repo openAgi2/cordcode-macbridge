@@ -62,6 +62,7 @@ handoffs/handoff-20260824-2257.md
 
 # Local task/evidence artifacts (kept on disk, never product inputs).
 .zcode/
+.workbuddy-ai/
 /dumps/
 /default.profraw
 .exec-plan/state/plan-4112d14c1d2b.json
