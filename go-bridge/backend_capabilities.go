@@ -190,6 +190,8 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 	// 完全无任务面，iOS 不显示入口。
 	if _, ok := agent.(core.BackgroundTaskProvider); ok {
 		caps = append(caps, "background_tasks")
+	} else if _, ok := agent.(core.SessionBackgroundTaskProvider); ok {
+		caps = append(caps, "background_tasks")
 	}
 	if id == "claudecode" {
 		caps = append(caps, "background_tasks")

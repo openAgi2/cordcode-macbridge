@@ -1601,6 +1601,12 @@ func turnScopedHistoryTurnToProjectionEvents(turns []core.TurnScopedHistoryTurn)
 					Event: "context_compressed",
 					Data:  map[string]interface{}{"itemId": itemID, "turnId": t.TurnID},
 				})
+			case "workflow":
+				// P5.7 Codex collab cards cold parity: same workflow_run hydrate
+				// event the dsh cold path emits (reducer upserts by workflowId on
+				// the owning turn; turns not yet anchored stay dropped fail-closed
+				// — identical to the dsh no-start-no-node rule).
+				out = append(out, hydrateWorkflowEventsFromPart(part, t.TurnID, -1)...)
 			}
 		}
 		for _, note := range t.SystemNotes {

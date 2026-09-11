@@ -310,10 +310,11 @@ type SessionProjection struct {
 type PartOp struct {
 	TurnID    string           `json:"turnId"`
 	MessageID string           `json:"messageId"`
-	Op        string           `json:"op"`              // append_text | set_thinking | upsert_tool | upsert_user_input | upsert_workflow | replace_parts
-	Text      string           `json:"text,omitempty"`  // append_text / set_thinking
-	Part      *ProjectionPart  `json:"part,omitempty"`  // upsert_tool / upsert_user_input / upsert_workflow
-	Parts     []ProjectionPart `json:"parts,omitempty"` // replace_parts
+	Op        string           `json:"op"`               // append_text | set_thinking | upsert_tool | upsert_user_input | upsert_workflow | replace_parts
+	ItemID    string           `json:"itemId,omitempty"` // canonical source identity for item-scoped ops
+	Text      string           `json:"text,omitempty"`   // append_text / set_thinking
+	Part      *ProjectionPart  `json:"part,omitempty"`   // upsert_tool / upsert_user_input / upsert_workflow
+	Parts     []ProjectionPart `json:"parts,omitempty"`  // replace_parts
 }
 
 // ProjectionPatch is the projection_patch push frame: a baseRev→syncRev delta.

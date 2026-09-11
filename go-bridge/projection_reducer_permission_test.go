@@ -188,6 +188,59 @@ func TestReducerPermissionResolvedClearsPendingAndLeavesRunning(t *testing.T) {
 	}
 }
 
+// Codex Remote emits [permission_request, turn_completed] for a proposed plan.
+// Approval then starts a separate implementation turn, so the planning card's
+// owner is already terminal when permission_resolved arrives.
+func TestReducerPermissionResolvedCompletesCardCreatedAtTerminalBoundary(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex-remote", "th_1", "turn_started", map[string]interface{}{"turnId": "plan-turn"}))
+	r.Apply(ev(2, "codex-remote", "th_1", "permission_request", map[string]interface{}{
+		"requestId":      "plan-item",
+		"toolName":       "Approve plan",
+		"permissionKind": "plan_review",
+	}))
+	r.Apply(ev(3, "codex-remote", "th_1", "turn_completed", map[string]interface{}{"turnId": "plan-turn"}))
+	// Real client boundary: iOS has received the pending card before approval.
+	if _, ok := r.FlushPatch("codex-remote", "th_1"); !ok {
+		t.Fatal("missing pending-card patch")
+	}
+	r.Apply(ev(4, "codex-remote", "th_1", "permission_resolved", map[string]interface{}{
+		"requestId": "plan-item",
+		"behavior":  "allow",
+	}))
+	resolvedPatch, ok := r.FlushPatch("codex-remote", "th_1")
+	if !ok {
+		t.Fatal("missing resolved-card patch")
+	}
+	if len(resolvedPatch.PartOps) != 1 {
+		t.Fatalf("resolved partOps = %+v", resolvedPatch.PartOps)
+	}
+	op := resolvedPatch.PartOps[0]
+	if op.Op != "upsert_tool" || op.TurnID != "plan-turn" || op.MessageID != "plan-turn" || op.Part == nil {
+		t.Fatalf("resolved op = %+v, want owning planning turn", op)
+	}
+	if op.Part.RequiresPermissionConfirmation || op.Part.ToolStatus != "completed" {
+		t.Fatalf("resolved patch part = %+v", op.Part)
+	}
+
+	proj, ok := r.Snapshot("codex-remote", "th_1")
+	if !ok || len(proj.Turns) != 1 || proj.Turns[0].Assistant == nil {
+		t.Fatalf("projection = %+v ok=%v", proj, ok)
+	}
+	for _, part := range proj.Turns[0].Assistant.Parts {
+		if part.Type == "tool" && part.ItemID == "plan-item" {
+			if part.RequiresPermissionConfirmation || part.ToolStatus != "completed" {
+				t.Fatalf("terminal plan card after approval = %+v", part)
+			}
+			if proj.Execution.Phase != "idle" {
+				t.Fatalf("execution = %+v, want idle until implementation turn_started", proj.Execution)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing plan card: %+v", proj.Turns[0].Assistant.Parts)
+}
+
 // TestReducerTurnCompletedSettlesApprovedPermissionCard: the control-plane
 // permission-card part is NOT the real tool part (different ItemID); nothing
 // else ever completes it, so the client kept showing "权限已批准，等待执行"

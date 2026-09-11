@@ -182,6 +182,27 @@ contextCompaction 官方 item started → SSV2 的压缩步骤/运行提示；it
 
 Goal 的 `complete`、`blocked`、usage/budget limited 是服务端状态，不由客户端根据文字、token 或时间自行推断。parent-owned/ephemeral 等目标拒绝写入时原文报错；读取若官方允许仍可显示。断线后先 get 校准，未知写结果不自动重放。Codex 与 dsh 可以共享 banner 组件和 projection 槽位，但 wire 必须带 `source/backendKind` 或等价 discriminant，使 Codex 官方 status/用量与 dsh phase/revision 不互相伪装。
 
+### 5.7 Codex 智能体可见性与 /goal 命令对齐（P5.7，2026-09-11 owner 批准追加）
+
+owner 官方 iOS 取证（2026-09-11 截图，同一 `Respond to greeting` 线程）证明 Codex Remote 本身携带子代理结构化状态；此前"Codex 协议无智能体条目"的结论系 C0–C4 取样未触发 subagent 场景所致，已更正。目标不是复刻官方样式，而是把 dsh/Grok Build 已有的三件套带给 Codex desktop 模式：goal 命令的 `/goal` 输入交互、后台任务指示、workflow 卡。
+
+**源码事实（上游 tag rust-v0.153.4，只读核对）**：
+
+- `app-server-protocol/src/protocol/v2/item.rs:362` `ThreadItem::CollabAgentToolCall`：`{id, tool: spawnAgent|sendInput|closeAgent, status: inProgress|completed|failed, senderThreadId, receiverThreadIds[], prompt?, model?, reasoningEffort?, agentsStates: Map<threadId,{status: pendingInit|running|interrupted|completed|errored|shutdown, message?}>}`；serde tag=`type`，camelCase。`:385` `SubAgentActivity`：`{id, kind: started|interacted|interrupted|completed, agentThreadId, agentPath}`。
+- live 路径：`item/started` / `item/completed` 通知携带上述条目（同 turn 归属，upsert 按 `id`）；冷水路径 `thread/items/list` 同型。核心事件集 `protocol.rs:4199-4260`：SpawnBegin/End、InteractionBegin/End（end 带新线程 id、`agentNickname`/`agentRole`）。
+- 官方 UI 归因：时间线"已创建/已关闭 N 个智能体"折叠段 = CollabAgentToolCall 条目；"N 个智能体"chip = agentsStates 中 running 计数；"正在推进目标 X分X秒" = goal 记录 `timeUsedSeconds`（P4 已解码）。agent 昵称在 core 事件有 `agentNickname`，但 **v2 条目序列化不含昵称**——官方端名（Anscombe 等）来自子线程元数据解析；一期以序号标签 + prompt 作说明，昵称缺口如实记录。
+- 本仓现状：`agent/codex-remote/codec.go` decodeItemStarted/decodeItemCompleted 的条目分派无 `collabAgentToolCall`/`subAgentActivity` case，落入 default 静默丢弃；history.go 冷拉同样未映射。
+
+**三件套设计**：
+
+1. **/goal 命令对齐（对齐 dsh/Grok Build claim 式输入，SlashCommandRouting.swift:119-126 模式）**：attach 菜单点 Goal 不再直接开表单，改为 claim 输入框（token `/goal ` 带尾随空格 + hint）；发送时客户端拦截：`/goal <objective>` → `thread/goal/set {objective}`（status/tokenBudget 省略走服务端默认，不伪造 0 值）；`/goal clear` → `thread/goal/clear`；`/goal pause` / `/goal resume` → set status `paused`/`active`。拦截后不发送普通消息，不落 user 气泡；无子命令且空 objective 时行内提示，不裸发。goal bar 现有查看/编辑/暂停/清除入口保留。
+2. **workflow 卡（复用 dsh 槽位）**：桥 codec item/started+item/completed 解码 `collabAgentToolCall`，按 `id` upsert 到所属 turn 的 assistant workflow part（`upsert_workflow`，与 dsh 同一 K4 seal 通道）；映射：workflowName=首个 prompt 截断（或 "Subagents"），members=receiverThreadIds × agentsStates → `{seq, label:"Agent-N", childSessionId:threadId, status}`，状态映射 pendingInit→pending、running→running、completed→completed、errored→failed、interrupted/shutdown→interrupted（dsh 状态词汇，iOS 渲染器已支持）；cold history `thread/items/list` 同映射。`subAgentActivity` 一期只消费 kind 作成员状态刷新佐证，不单独成卡。wire 保留 Codex 判别（part 来源标记），dsh 卡渲染不回归。
+3. **后台任务指示（复用现有 goal bar 槽位）**：Codex 模式 execution.phase==running 期间，在 goal bar 追加由最新 running workflow 卡 `agentsStates` 派生的「N 个智能体运行中」徽标；计数只来自官方已投影的 running 成员，跟随 execution/会话切换的现有隐藏规则，不在无活跃 turn 时常驻。`TaskDockView` 当前是权限请求面，不能承载这类会话级智能体状态，因此本期采用 goal bar 扩展并记录该设计偏差。
+
+**失败语义**：/goal 拦截发送失败按现有 Codex native 错误通道显示（requiresReadback 语义不变）；未知 collab 条目字段走 additive 解码，未知 tool/status 原文保留可显示；不伪造运行中状态——agentsStates 缺席时成员显示未知态而非推断。
+
+**验收（owner 矩阵追加第 ⑦ 行）**：goal 任务运行期间，iPhone 上可见 subagent workflow 卡（成员逐个出现、状态随官方更新）、后台任务指示随 turn 起止出现/消失、goal bar 显示进行中目标；`/goal <任务>` 输入交互与 dsh/Grok Build 一致；任务完成后卡片终态与官方一致，无假运行中。
+
 ## 6. Mac 接线与失败语义
 
 ### 6.1 能力与 session 准备
@@ -279,6 +300,7 @@ TUI 的“Implement this plan?”是客户端编排，不是一个上游 wire ap
 | P3 Plan adapter/投影 | C3/C5；抽现有 settings update，增加 list/current/update 与 typed projection | 官方 preset、Plan/Default、per-thread model/effort 保留、冷启动与 Desktop 竞争收敛；plan_review 不回归 |
 | P4 Goal adapter/投影 | C4/C5；扩展或并列现有 goal controller，增加 get/set/clear 与 Codex view | 空/创建/更新/清除、double-optional budget、全状态/用量、冷热/并发；dsh 不回归 |
 | P5 iOS 菜单与三项 action | 接 P2–P4；先重新核对 iOS HEAD/dirty set | 两种布局、三项 typed RPC、表单/banner、草稿保留、A/B scope、各 capability 隐藏与禁用 |
+| P5.7 智能体可见性与 /goal 对齐（2026-09-11 追加） | P5；codec 解码 collabAgentToolCall/subAgentActivity → 复用 dsh workflow part 槽位；iOS /goal claim 式输入拦截；goal bar 承载 Codex execution 期间 running-agents 徽标（TaskDock 当前为权限面） | goal 任务运行期卡片/成员状态/后台指示可见，/goal 交互与 dsh 一致，dsh/Grok 卡与 plan_review 不回归，owner 矩阵第 ⑦ 行 |
 | P6 协议/文档/交付 | P1–P5 required 验证均完成，C6 实际产品验收 | canonical/mirror、CHANGELOG、双仓构建、安装身份、owner 真机结果 |
 
 Review/Skills 不加入一期 required 队列；Compact/Plan/Goal 全部 required。不能用其中一项的 UI 占位、slash 文本或 capability 假广告代替完整闭环，也不能删除错误/恢复/过程状态来制造完成。源码/结构准备与真实运行取证可按依赖分开，不因等待真实写入授权停止所有独立工作。
@@ -298,7 +320,7 @@ Review/Skills 不加入一期 required 队列；Compact/Plan/Goal 全部 require
 | Goal | get null/完整；set 三态 budget；六种 status/未知未来值；clear false/true；response 与通知乱序；断线 get 校准；parent-owned 拒写；dsh Goal JSON 与 banner 不回归 |
 | iOS | Codex native policy 不落 dsh；两布局三项齐全；文本/附件不丢；Compact 无参别名和非法参数；Plan/Goal 表单；A→B→A 旧响应/错误/执行标记不串；Grok/dsh 菜单与 plan_review 不回归 |
 
-Owner 手工矩阵：①Desktop 先打开的任务，手机只读打开后三项均可见；②带草稿/附件点 Compact，过程可见，完成后重开仍有官方记录且草稿不丢；③切 Plan 后下一 turn 产生计划，审批后 Default 状态回到手机，原审批路径可用；④创建目标、看到 banner/用量，Desktop 更新后手机同步，清除后重开仍为空；⑤三项在切会话、断线、失败时不出现假成功；⑥Mac 与手机同时修改 Plan/Goal 后以官方读回一致。实际操作、日志和来源逐项记录；本文件的列表不是测试已通过声明。
+Owner 手工矩阵：①Desktop 先打开的任务，手机只读打开后三项均可见；②带草稿/附件点 Compact，过程可见，完成后重开仍有官方记录且草稿不丢；③切 Plan 后下一 turn 产生计划，审批后 Default 状态回到手机，原审批路径可用；④创建目标、看到 banner/用量，Desktop 更新后手机同步，清除后重开仍为空；⑤三项在切会话、断线、失败时不出现假成功；⑥Mac 与手机同时修改 Plan/Goal 后以官方读回一致；⑦（P5.7）goal 任务运行期间，iPhone 可见 subagent workflow 卡（成员随官方创建出现、状态随官方更新）、后台任务指示随 turn 起止出现/消失，`/goal <任务>` 输入交互与 dsh/Grok Build 一致。实际操作、日志和来源逐项记录；本文件的列表不是测试已通过声明。
 
 ## 12. 回滚与交付口径
 

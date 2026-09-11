@@ -69,6 +69,38 @@ func TestCodexGoalRecordLastWinsDedupAndIdentityGuard(t *testing.T) {
 	}
 }
 
+func TestCodexGoalRecordReusesSessionCommandTimelineCard(t *testing.T) {
+	r := NewProjectionReducer()
+	goal := map[string]interface{}{
+		"threadId": "thread", "objective": "写四个故事", "status": "active", "tokenBudget": nil,
+		"tokensUsed": int64(0), "timeUsedSeconds": int64(0), "createdAt": int64(123), "updatedAt": int64(123),
+	}
+	r.Apply(ev(1, "codex-remote", "thread", "session_goal_record", map[string]interface{}{"goal": goal}))
+	projection, _ := r.Snapshot("codex-remote", "thread")
+	if len(projection.Turns) != 1 || projection.Turns[0].System == nil {
+		t.Fatalf("goal command turn = %+v", projection.Turns)
+	}
+	part := projection.Turns[0].System.Parts[0]
+	if projection.Turns[0].TurnID != "cmd:codex-goal:123" || part.Type != "command" ||
+		part.CommandName != "goal" || part.CommandKind != "running" || part.CommandLine != "/goal 写四个故事" {
+		t.Fatalf("goal command part = %+v turn=%+v", part, projection.Turns[0])
+	}
+
+	r.FlushPatch("codex-remote", "thread")
+	goal["status"] = "complete"
+	goal["tokensUsed"] = int64(99)
+	goal["updatedAt"] = int64(130)
+	r.Apply(ev(2, "codex-remote", "thread", "session_goal_record", map[string]interface{}{"goal": goal}))
+	projection, _ = r.Snapshot("codex-remote", "thread")
+	if len(projection.Turns) != 1 || projection.Turns[0].System.Parts[0].CommandKind != "success" {
+		t.Fatalf("goal settle must update in place: %+v", projection.Turns)
+	}
+	patch, ok := r.FlushPatch("codex-remote", "thread")
+	if !ok || len(patch.UpsertTurns) != 1 || patch.UpsertTurns[0].TurnID != "cmd:codex-goal:123" {
+		t.Fatalf("goal settle patch = %+v ok=%v", patch, ok)
+	}
+}
+
 func TestCodexGoalRecordRejectsIncompleteOrFractionalOfficialShape(t *testing.T) {
 	r := NewProjectionReducer()
 	base := map[string]interface{}{

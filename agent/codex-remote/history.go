@@ -174,6 +174,23 @@ type remoteThreadItem struct {
 	ToolError  json.RawMessage
 
 	Query string
+
+	// P5.7 collabAgentToolCall (upstream item.rs:362): structured subagent
+	// spawn/interact call folded into the shared workflow-card channel. v2
+	// item serialization carries no agent nickname; members are labeled
+	// Agent-N with the spawn prompt as the card name.
+	CollabTool        string
+	CollabStatus      string
+	CollabReceivers   []string
+	CollabPrompt      string
+	CollabAgentStates map[string]remoteCollabAgentState
+}
+
+// remoteCollabAgentState mirrors the official per-agent entry of
+// CollabAgentToolCall.agentsStates (upstream item.rs:1279).
+type remoteCollabAgentState struct {
+	Status  string `json:"status"`
+	Message string `json:"message"`
 }
 
 func decodeRemoteThreadItem(raw json.RawMessage) remoteThreadItem {
@@ -253,6 +270,23 @@ func decodeRemoteThreadItem(raw json.RawMessage) remoteThreadItem {
 		}
 		_ = json.Unmarshal(raw, &value)
 		it.Query = value.Query
+	case "collabAgentToolCall":
+		var value struct {
+			Tool              string                            `json:"tool"`
+			Status            string                            `json:"status"`
+			ReceiverThreadIDs []string                          `json:"receiverThreadIds"`
+			Prompt            string                            `json:"prompt"`
+			AgentStates       map[string]remoteCollabAgentState `json:"agentsStates"`
+		}
+		_ = json.Unmarshal(raw, &value)
+		it.CollabTool, it.CollabStatus = value.Tool, value.Status
+		it.CollabReceivers, it.CollabPrompt = value.ReceiverThreadIDs, value.Prompt
+		it.CollabAgentStates = value.AgentStates
+	case "subAgentActivity":
+		// P5.7 v1: deliberate no-card. Member state refreshes arrive through
+		// collabAgentToolCall agentsStates re-upserts; activity rows add no
+		// field the card needs beyond agentThreadId. Revisit only if owner
+		// matrix row 7 shows live member states lagging.
 	}
 	return it
 }
@@ -416,6 +450,13 @@ func mapRemoteHistoryItem(turn *core.TurnScopedHistoryTurn, item remoteThreadIte
 			step["output"] = json.RawMessage(item.ToolError)
 		}
 		turn.Parts = append(turn.Parts, map[string]any{"type": "tool", "step": step, "itemId": item.ID})
+		for _, event := range remoteCodexAppWorkflowEvent(
+			remoteItemNotification{ThreadID: turn.TurnID, TurnID: turn.TurnID}, item,
+		) {
+			if part := remoteWorkflowPart(event.WorkflowRun, item.ID); part != nil {
+				turn.Parts = append(turn.Parts, part)
+			}
+		}
 	case "dynamicToolCall":
 		step := map[string]any{"id": item.ID, "toolName": item.Tool, "status": remoteCommandStepStatus(item.ToolStatus)}
 		if len(item.Arguments) > 0 {
@@ -439,10 +480,89 @@ func mapRemoteHistoryItem(turn *core.TurnScopedHistoryTurn, item remoteThreadIte
 		turn.Parts = append(turn.Parts, map[string]any{
 			"type": "context_compaction", "itemId": item.ID, "status": "completed",
 		})
+	case "collabAgentToolCall":
+		// Cold parity with the live fold: operation item ids (spawn/wait/close)
+		// update one turn-scoped keyed card instead of each becoming a new card.
+		foldRemoteCollabHistoryPart(turn, item)
+	case "subAgentActivity":
+		// P5.7 v1: deliberate no-card; see decodeRemoteThreadItem note.
 	default:
 		if item.Type != "" {
 			turn.SkippedTypes = append(turn.SkippedTypes, item.Type)
 		}
+	}
+}
+
+func foldRemoteCollabHistoryPart(turn *core.TurnScopedHistoryTurn, item remoteThreadItem) {
+	if turn == nil || strings.TrimSpace(turn.TurnID) == "" {
+		return
+	}
+	runID := codexCollabRunPrefix + turn.TurnID
+	fold := newCodexCollabWorkflowFold(turn.TurnID)
+	partIndex := -1
+	for i, part := range turn.Parts {
+		if stringValue(part["type"]) != "workflow" || stringValue(part["workflowId"]) != runID {
+			continue
+		}
+		partIndex = i
+		for _, phase := range workflowPhaseMaps(part["workflowPhases"]) {
+			for _, member := range workflowMemberMaps(phase["members"]) {
+				childID := strings.TrimSpace(stringValue(member["childSessionId"]))
+				if childID == "" {
+					continue
+				}
+				seq, _ := member["seq"].(int)
+				if seq <= 0 {
+					if number, ok := member["seq"].(float64); ok {
+						seq = int(number)
+					}
+				}
+				if seq <= 0 {
+					seq = len(fold.members) + 1
+				}
+				fold.byChild[childID] = len(fold.members)
+				fold.members = append(fold.members, codexCollabMemberState{
+					seq: seq, label: stringValue(member["label"]), childID: childID,
+					status: stringValue(member["status"]),
+				})
+			}
+		}
+		break
+	}
+	if !fold.observe(item) {
+		return
+	}
+	snapshot, ok := fold.snapshot()
+	if !ok {
+		return
+	}
+	part := remoteWorkflowPart(&snapshot, runID)
+	if partIndex >= 0 {
+		turn.Parts[partIndex] = part
+	} else {
+		turn.Parts = append(turn.Parts, part)
+	}
+}
+
+func remoteWorkflowPart(wr *core.WorkflowRunEvent, itemID string) map[string]any {
+	if wr == nil || wr.RunID == "" {
+		return nil
+	}
+	phases := make([]map[string]any, 0, len(wr.Phases))
+	for _, phase := range wr.Phases {
+		members := make([]map[string]any, 0, len(phase.Members))
+		for _, member := range phase.Members {
+			members = append(members, map[string]any{
+				"seq": member.Seq, "label": member.Label,
+				"childSessionId": member.ChildSessionID, "status": member.Status,
+			})
+		}
+		phases = append(phases, map[string]any{"phase": phase.Phase, "members": members})
+	}
+	return map[string]any{
+		"type": "workflow", "itemId": itemID,
+		"workflowId": wr.RunID, "workflowName": wr.Name, "workflowStatus": wr.Status,
+		"workflowPhases": phases,
 	}
 }
 

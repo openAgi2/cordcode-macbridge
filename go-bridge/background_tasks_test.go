@@ -87,6 +87,37 @@ func TestClaudeBackgroundTasksFromSidechainFixture(t *testing.T) {
 	}
 }
 
+func TestProjectionBackgroundTasksUsesCommittedWorkflowTruth(t *testing.T) {
+	projection := SessionProjection{Turns: []TurnProjection{
+		{
+			TurnID: "turn", StartedAt: 1_789_111_976_000,
+			Assistant: &MessageProjection{
+				ID: "turn", Role: "assistant",
+				Parts: []ProjectionPart{
+					{
+						Type: "workflow", WorkflowID: "codex-collab:turn", WorkflowName: "Subagents",
+						WorkflowPhases: []WorkflowPhaseProjection{
+							{Members: []WorkflowMemberProjection{
+								{Seq: 1, Label: "写科比故事", ChildSessionID: "child-a", Status: "completed"},
+								{Seq: 2, Label: "写乔丹故事", ChildSessionID: "child-b", Status: "running"},
+							}},
+						},
+					},
+				},
+			},
+		},
+	}}
+	tasks, hasWorkflow := projectionBackgroundTasks("codex-remote", "root", projection)
+	if !hasWorkflow || len(tasks) != 2 {
+		t.Fatalf("projection tasks = %+v hasWorkflow=%v", tasks, hasWorkflow)
+	}
+	byID := map[string]core.BackgroundTask{tasks[0].TaskID: tasks[0], tasks[1].TaskID: tasks[1]}
+	if byID["child-a"].Title != "写科比故事" || byID["child-a"].Status != "completed" ||
+		byID["child-b"].Title != "写乔丹故事" || byID["child-b"].Status != "running" {
+		t.Fatalf("projection tasks = %+v", tasks)
+	}
+}
+
 func TestClaudeBackgroundTaskDetailNested(t *testing.T) {
 	root := writeBackgroundTaskSidechainFixture(t)
 	detail, err := claudeBackgroundTaskDetail(root, "agentA")
@@ -111,6 +142,17 @@ type backgroundTaskProviderAgent struct {
 }
 
 func (b *backgroundTaskProviderAgent) ListBackgroundTasks(context.Context) ([]core.BackgroundTask, error) {
+	return b.tasks, nil
+}
+
+type sessionBackgroundTaskProviderAgent struct {
+	*fakeAgent
+	tasks              []core.BackgroundTask
+	requestedSessionID string
+}
+
+func (b *sessionBackgroundTaskProviderAgent) ListSessionBackgroundTasks(_ context.Context, sessionID string) ([]core.BackgroundTask, error) {
+	b.requestedSessionID = sessionID
 	return b.tasks, nil
 }
 
@@ -153,6 +195,81 @@ func TestBackgroundTasksListProviderRouting(t *testing.T) {
 	// 未知统计 OMIT：没有 toolUseCount 键，客户端不得渲染 0。
 	if _, present := task["toolUseCount"]; present {
 		t.Fatal("unknown toolUseCount must be omitted, not 0")
+	}
+}
+
+func TestBackgroundTasksListSessionProviderRoutingAndCapability(t *testing.T) {
+	agent := &sessionBackgroundTaskProviderAgent{
+		fakeAgent: &fakeAgent{name: "codex-remote"},
+		tasks: []core.BackgroundTask{{
+			TaskID: "child-1", BackendID: "codex-remote", RootSessionID: "root-1",
+			Title: "真实 Codex 子任务", Status: "completed", UpdatedAt: time.Unix(200, 0),
+		}},
+	}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex-remote", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex-remote", Method: "background_tasks.list", RequestID: "bt-session",
+		Params: mustJSONRaw(t, map[string]any{"sessionId": "root-1"}),
+	})
+	messages := readJSONMaps(t, clientConn, 1)
+	data, _ := messages[0]["data"].(map[string]any)
+	tasks, _ := data["tasks"].([]any)
+	if agent.requestedSessionID != "root-1" || len(tasks) != 1 {
+		t.Fatalf("requestedSessionID=%q tasks=%#v", agent.requestedSessionID, tasks)
+	}
+
+	caps := deriveBackendCapabilities("codex-remote", agent, "")
+	for _, capability := range caps {
+		if capability == "background_tasks" {
+			return
+		}
+	}
+	t.Fatal("session-scoped provider must advertise background_tasks")
+}
+
+func TestBackgroundTasksListCodexUsesProjectionFastPath(t *testing.T) {
+	agent := &sessionBackgroundTaskProviderAgent{
+		fakeAgent: &fakeAgent{name: "codex-remote"},
+		tasks: []core.BackgroundTask{{
+			TaskID: "slow-history-child", BackendID: "codex-remote", RootSessionID: "root-1",
+			Title: "must not be read", Status: "completed",
+		}},
+	}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex-remote", agent)
+	handlers.projectionKernel.mu.Lock()
+	handlers.projectionKernel.sessionLocked("codex-remote", "root-1").status.Phase = ProjectionHydrateReady
+	handlers.projectionKernel.mu.Unlock()
+	handlers.projectionKernel.IngestLive(ev(1, "codex-remote", "root-1", "turn_started", map[string]interface{}{"turnId": "turn"}))
+	handlers.projectionKernel.IngestLive(ev(2, "codex-remote", "root-1", "workflow_run", map[string]interface{}{
+		"turnId": "turn", "workflowId": "codex-collab:turn", "workflowName": "Subagents", "workflowStatus": "running",
+		"workflowPhases": []interface{}{map[string]interface{}{"phase": nil, "members": []interface{}{
+			map[string]interface{}{"seq": 1, "label": "写科比故事", "childSessionId": "child-a", "status": "running"},
+		}}},
+	}))
+	if projection, ok := handlers.projectionKernel.Snapshot("codex-remote", "root-1"); !ok || len(projection.Turns) != 1 ||
+		projection.Turns[0].Assistant == nil || len(projection.Turns[0].Assistant.Parts) != 1 {
+		t.Fatalf("workflow fixture did not reach kernel: ok=%v projection=%+v", ok, projection)
+	}
+
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex-remote", Method: "background_tasks.list", RequestID: "bt-fast",
+		Params: mustJSONRaw(t, map[string]any{"sessionId": "root-1"}),
+	})
+	messages := readJSONMaps(t, clientConn, 1)
+	data, _ := messages[0]["data"].(map[string]any)
+	tasks, _ := data["tasks"].([]any)
+	if agent.requestedSessionID != "" {
+		t.Fatalf("slow history provider was called for %q", agent.requestedSessionID)
+	}
+	if len(tasks) != 1 || tasks[0].(map[string]any)["taskId"] != "child-a" {
+		t.Fatalf("fast-path tasks = %#v", tasks)
 	}
 }
 

@@ -1,6 +1,7 @@
 package gobridge
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -103,10 +104,45 @@ func TestReducerWorkflowRunUpsertsInPlace(t *testing.T) {
 	}
 }
 
+// A collab item/start can precede receiver allocation, producing one phase
+// with zero members. The projection wire must preserve [] rather than marshal
+// the reducer's empty slice as null: SessionWorkflowPhase.members is required
+// and a null value makes iOS reject the full patch chain.
+func TestReducerWorkflowRunEmptyMembersMarshalsAsArray(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex-remote", "s1", "turn_started", map[string]interface{}{"turnId": "turn"}))
+	r.Apply(ev(2, "codex-remote", "s1", "workflow_run", workflowWireEvent(
+		"turn", "call-1", "Subagents", "running",
+		[]interface{}{workflowPhaseWire(nil)},
+	)))
+	patch, ok := r.FlushPatch("codex-remote", "s1")
+	if !ok {
+		t.Fatal("expected workflow patch")
+	}
+	raw, err := json.Marshal(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	ops := wire["partOps"].([]any)
+	part := ops[len(ops)-1].(map[string]any)["part"].(map[string]any)
+	phases := part["workflowPhases"].([]any)
+	members, exists := phases[0].(map[string]any)["members"]
+	if !exists || members == nil {
+		t.Fatalf("members must encode as [], got %s", raw)
+	}
+	if got := len(members.([]any)); got != 0 {
+		t.Fatalf("members length = %d, want 0", got)
+	}
+}
+
 // TestReducerWorkflowTurnTerminalFixup：turn 终态（turn_completed / turn_aborted
 // / turn_error）时仍 running 的 workflow part → interrupted（官方
 // locationClosed；成员 running → interrupted）；已完成 part 不受影响；幂等
-//（重复终态帧不再 churn）。
+// （重复终态帧不再 churn）。
 func TestReducerWorkflowTurnTerminalFixup(t *testing.T) {
 	build := func() *ProjectionReducer {
 		r := newTestReducer()

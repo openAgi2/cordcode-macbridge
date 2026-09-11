@@ -749,6 +749,14 @@ type BackgroundTaskProvider interface {
 	ListBackgroundTasks(ctx context.Context) ([]BackgroundTask, error)
 }
 
+// SessionBackgroundTaskProvider is the session-scoped variant for runtimes
+// whose orchestration records live inside the parent transcript (Codex Remote
+// create_thread/wait_threads). It avoids a global scan and preserves the
+// authoritative parent-child relation supplied by the caller's session.
+type SessionBackgroundTaskProvider interface {
+	ListSessionBackgroundTasks(ctx context.Context, sessionID string) ([]BackgroundTask, error)
+}
+
 // BackgroundTaskCanceller is the Phase 5 capability-gated cancel surface. Only
 // backends with a REAL cancellation path implement it (dsh-web: official
 // session.cancel on the sub-session). Claude sidechains have no bridge-owned

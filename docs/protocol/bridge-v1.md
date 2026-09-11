@@ -1855,6 +1855,22 @@ source of truth.
 | `workflowStatus: string` | `running \| completed \| failed \| cancelled \| interrupted`. From official `statusFromStopReason` (`error→failed`); `running` while stopReason is unset. `interrupted` is **reducer-injected** when the owning turn reaches a terminal state while the run is still open (official `locationClosed`; recorded difference: CordCode marks per-turn, official per enclosing step/turn). |
 | `workflowPhases: BridgeWorkflowPhase[]` | Members grouped by phase identity, first-appearance order. `phase: null` = 未分阶段 (official missing); `phase: ""` = 空阶段名 — two distinct identities, never merged. Member: `{seq, label, childSessionId?, status}`; member status mirrors run-status derivation (unsettled → `running`). |
 
+P5.7 (2026-09-11): the same workflow part is also the Codex Remote sink — `codex-remote`
+codec folds official v2 `collabAgentToolCall` items (`item/started` + `item/completed`, and
+cold `thread/items/list`; upstream `app-server-protocol/src/protocol/v2/item.rs:362`) into
+this part via `core.EventWorkflowRun`, keyed by the collab call id. Codex mapping:
+`workflowName` = spawn prompt (rune-truncated 80, fallback `Subagents`); member =
+`receiverThreadIds` entry → `{seq: n, label: "Agent-n", childSessionId: threadId, status}`
+with official `agentsStates[].status` mapped `pendingInit→running, running→running,
+completed→completed, errored→failed, interrupted→interrupted, shutdown→cancelled`;
+a receiver absent from `agentsStates` falls back to the call status; unknown official
+statuses pass through verbatim (clients fall back at their display boundary — web shows
+`running`, iOS mapping coerces unknown → `running`). The shared wire has no pending-member
+state, so official `pendingInit` remains truthfully unsettled as `running`. `subAgentActivity` items are a
+deliberate v1 no-card (member states refresh via collab re-upserts). Client-side note: the
+goal bar appends 「N 个智能体运行中」 while execution runs (host-derived running-member
+count; no local inference).
+
 Client rendering mirrors the official panel: run header (`workflowName` + 「{count} 个成员」
 + status), one section per phase (null → 未分阶段, "" → 空阶段名, plus per-section status
 summary 运行中 N/已完成 N/失败 N/已取消 N/已中断 N), one row per member (dot + label +

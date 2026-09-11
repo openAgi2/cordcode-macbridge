@@ -1155,6 +1155,45 @@ func TestReadTurnItemsPageAtomicFailures(t *testing.T) {
 	}
 }
 
+// Codex Desktop 0.153.4 emits these two official variants when multi-agent v1
+// is used. They must pass the paginated detail gate; otherwise the parent
+// session's background_tasks.list fails before the workflow mapper can derive
+// child tasks and the iOS badge remains empty.
+func TestReadTurnItemsPageAcceptsSampledCollabVariants(t *testing.T) {
+	agent, _ := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
+		return itemsListPage([]map[string]any{
+			itemEntry("turn_items", map[string]any{
+				"type": "collabAgentToolCall", "id": "call-1", "tool": "spawnAgent",
+				"status": "completed", "senderThreadId": "thread_probe",
+				"receiverThreadIds": []string{"agent-a"}, "prompt": "write story",
+				"agentsStates": map[string]any{"agent-a": map[string]any{"status": "pendingInit", "message": nil}},
+			}),
+			itemEntry("turn_items", map[string]any{
+				"type": "subAgentActivity", "id": "activity-1",
+				"agentThreadId": "agent-a", "kind": "started",
+			}),
+		}, nil), nil
+	})
+	page, err := agent.ReadTurnItemsPage(context.Background(), "thread_probe", "turn_items", "")
+	if err != nil {
+		t.Fatalf("sampled collab variants rejected: %v", err)
+	}
+	if len(page.Entries) != 2 || !page.EOF {
+		t.Fatalf("page = %+v", page)
+	}
+	turn := core.TurnScopedHistoryTurn{TurnID: "turn_items", Status: "completed"}
+	if err := agent.MapTurnItemsPage(&turn, page); err != nil {
+		t.Fatal(err)
+	}
+	if len(turn.Parts) != 1 || stringValue(turn.Parts[0]["type"]) != "workflow" {
+		t.Fatalf("mapped parts = %+v", turn.Parts)
+	}
+	tasks := backgroundTasksFromTurns("thread_probe", []core.TurnScopedHistoryTurn{turn})
+	if len(tasks) != 1 || tasks[0].TaskID != "agent-a" || tasks[0].Status != "running" {
+		t.Fatalf("background tasks = %+v", tasks)
+	}
+}
+
 // TestMapTurnItemsPageFirstUserAbsorptionAcrossPages pins the scratch-turn
 // contract: the FIRST userMessage of the batch lands in the turn's user slot
 // (the Summary owns it), a LATER userMessage becomes a text part, and the

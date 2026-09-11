@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-10T15:16:35Z",
+  "updated_at": "2026-09-11T02:27:16Z",
   "todos": [
     {
       "id": "p0-source-chain-impl",
@@ -1039,7 +1039,7 @@
       "id": "p5-ios-actions-regression",
       "title": "P5 iOS product-chain regression",
       "description": "Validate real C6 state through journal/snapshot/patch into Swift for all three actions, both layouts, session switches, reconnect/error/unknown states, and capability withdrawal; require owner manual matrix for UI behavior without running unauthorized automation.",
-      "status": "in_progress",
+      "status": "blocked",
       "phase": "P5",
       "kind": "regression",
       "depends_on": [
@@ -1051,14 +1051,14 @@
         "p5-device-review-fix-regression"
       ],
       "source": "§3 C6, §11 owner matrix",
-      "notes": "repair complete; owner manual matrix is now the only P5 requirement. iPhone 16 Pro is connected, signed Debug build installed and launched, and post-fix attach/projection logs are clean.",
+      "notes": "repair complete; owner manual matrix is now the only P5 requirement. iPhone 16 Pro is connected, signed Debug build installed and launched, and post-fix attach/projection logs are clean. | 2026-09-10 round 1: owner ran row 4 Desktop-goal path — content synced but goal banner never rendered (FAIL recorded in matrix with forensics). Banner repair triplet p5-goal-banner-{review,fix,regression} added. | Takeover 2026-09-11: blocked on owner-provided PASS/FAIL for the six-row matrix (including row 4 re-verification); no UI automation is authorized.",
       "verification": {
         "required": true,
         "status": "missing",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "Device build/install/launch and live adapter compatibility are proven. The plan-required six-row owner manual matrix remains to be completed by the user; no UI automation is authorized and no row is marked passed in advance.",
+        "summary": "Device build/install/launch and live adapter compatibility are proven. External blocker: the plan-required six-row owner manual matrix, including row 4 re-verification, still requires the user's PASS/FAIL observation; no UI automation is authorized and no row is marked passed in advance.",
         "artifacts": [
           "/Users/jacklee/Projects/cordcode-ios-plan-approval/.build/P5-CodexNative-20260910-1023.xcresult",
           "/Users/jacklee/Projects/cordcode-ios-plan-approval/OpenCodeiOS/OpenCodeiOSTests/SlashCommandPanelTests.swift",
@@ -1068,7 +1068,7 @@
           ".build/P5-device-review-fix/post-fix-go-bridge.log",
           ".build/P5-device-review-fix/ios-relaunch.json"
         ],
-        "checked_at": "2026-09-10T13:32:15Z",
+        "checked_at": "2026-09-11T02:27:16Z",
         "upstream_anchor": "codex-rs/tui/src/chatwidget/slash_dispatch.rs:263,285,304"
       }
     },
@@ -1358,6 +1358,223 @@
         ],
         "checked_at": "2026-09-10T15:16:35Z",
         "upstream_anchor": "agent/codex-remote/collaboration_mode.go"
+      }
+    },
+    {
+      "id": "p5-goal-banner-review",
+      "title": "P5 goal banner iPhone-side defect review",
+      "description": "Localize why the phone never rendered codexGoal even though the bridge committed it into the projection rev stream: review the iOS projection_patch decode path for codexGoal, the projection store keying (session id), the refreshGoalBanner backend-kind gate, and capture the owner discriminating repro (relaunch → fresh snapshot; or fresh Mac goal/set watched live) with iPhone console logs.",
+      "status": "done",
+      "phase": "P5",
+      "kind": "impl",
+      "depends_on": [
+        "p5-ios-actions-tests",
+        "p4-goal-regression"
+      ],
+      "source": "owner matrix round 1 row-4 FAIL (2026-09-10), handoff §4.4 repair triplet",
+      "notes": "Bridge side exonerated by forensics: rollout goal item 15:33:46.574Z matches session id exactly; relay forwarded 15:33:47.065Z; headRev=315 no-advance at 15:43:43Z proves bridge-side commit. Evidence: .build/P5-owner-matrix-20260910/ (ignored, local-only). | Round 2 (2026-09-11): device fg-trace proves round-1 goal patch was delivered+applied+mirrored+notified on the phone ([Apply] patch OK 9->10, [Replica] commit rev=10); instrumented rebuild renders live goal patches end-to-end ([GoalBanner] render visible=1 at 16:49:19Z). No reproducible defect remains; temporary [GoalBanner] traces + CodexGoalPatchDeliveryTests (3 passing) added. Awaiting owner visual re-verification of row 4 on the instrumented build before closing review and deciding fix scope. | 2026-09-11 scope correction: upstream v2 protocol HAS collabAgentToolCall/subAgentActivity items (owner provided official-iOS screenshots as proof); our codec drops both silently (default case in decodeItemStarted/Completed). Codex-mode subagent visibility is a feature gap to scope separately — see owner proposal; goal bar row-4 issue remains separate.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Review closed 2026-09-11: no reproducible iPhone-side defect. Device fg-trace proved the round-1 goal patch was delivered/decoded/applied/mirrored/notified ([Apply] patch OK 9->10, [Replica] commit rev=10); instrumented rebuild renders live goal patches end-to-end ([GoalBanner] render visible=1 16:49:19Z); owner relaunch test confirmed goal bar renders. Temporary [GoalBanner] traces remain on the instrumented build for any recurrence.",
+        "artifacts": [
+          ".build/P5-owner-matrix-20260910/device-trace/",
+          "OpenCodeiOS/OpenCodeiOS/App/GoalBannerView.swift (temp diag)"
+        ],
+        "checked_at": "2026-09-10T18:09:39Z",
+        "upstream_anchor": "codex-rs/app-server-protocol/src/protocol/v2/thread.rs:ThreadGoal"
+      }
+    },
+    {
+      "id": "p5-goal-banner-fix",
+      "title": "P5 goal banner render defect fix",
+      "description": "Fix the iPhone-side defect found by p5-goal-banner-review so a committed Codex goal record (live patch and fresh snapshot alike) renders the goal banner; keep fail-closed semantics, no optimistic banner state, capability gating unchanged for actions.",
+      "status": "done",
+      "phase": "P5",
+      "kind": "impl",
+      "depends_on": [
+        "p5-goal-banner-review"
+      ],
+      "source": "owner matrix round 1 row-4 FAIL (2026-09-10), handoff §4.4 repair triplet",
+      "notes": "Do not relax fail-closed behavior or add fallback/mock paths while fixing.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Closed 2026-09-11 as no-code-defect: the delivery chain had no bug to fix (trace-proven). Substitute hardening shipped instead: temporary [GoalBanner] last-mile traces + CodexGoalPatchDeliveryTests (3 tests: production wire shape without tokenBudget, goal-only patch apply+notify, cleared-view replacement).",
+        "artifacts": [
+          "OpenCodeiOS/OpenCodeiOSTests/CodexGoalPatchDeliveryTests.swift"
+        ],
+        "checked_at": "2026-09-10T18:09:39Z",
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "p5-goal-banner-regression",
+      "title": "P5 goal banner focused tests and owner re-verification",
+      "description": "Add/extend non-UI Swift tests covering goal-only patch decode and snapshot decode feeding the banner, run the SlashCommandPanel suite, then ask the owner to re-verify matrix row 4 (banner appears for live set and after relaunch) and record the result.",
+      "status": "done",
+      "phase": "P5",
+      "kind": "regression",
+      "depends_on": [
+        "p5-goal-banner-fix"
+      ],
+      "source": "owner matrix round 1 row-4 FAIL (2026-09-10), handoff §4.4 repair triplet",
+      "notes": "Owner manual re-verification of row 4 is the acceptance gate; no UI automation.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Closed 2026-09-11: owner relaunch verification PASS (goal bar renders from fresh snapshot); CodexGoalPatchDeliveryTests 3/3 + SlashCommandPanelTests 18/18 green on the instrumented build; matrix round-2 recorded. Row 4 full re-verification continues inside p5-ios-actions-regression.",
+        "artifacts": [
+          "agent/codex-remote/testdata/slash-panel/owner-manual-matrix-2026-09-10.md (Round 2)"
+        ],
+        "checked_at": "2026-09-10T18:09:39Z",
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "p57-codex-agents-impl",
+      "title": "P5.7 bridge collab item decode to shared workflow part",
+      "description": "Decode collabAgentToolCall (and subAgentActivity kind) from item/started, item/completed and cold thread/items/list in agent/codex-remote codec+history; upsert by item id into the owning turn assistant workflow part (upsert_workflow K4 channel) with members mapped from receiverThreadIds x agentsStates (label Agent-N, childSessionId, status mapping pendingInit->pending, running->running, completed->completed, errored->failed, interrupted|shutdown->interrupted), Codex source discriminant preserved; additive decoding of unknown fields.",
+      "status": "done",
+      "phase": "P5.7",
+      "kind": "impl",
+      "depends_on": [
+        "p4-goal-regression"
+      ],
+      "source": "docs §5.7 (2026-09-11 owner approved); upstream item.rs:362-392,1279; owner official-iOS screenshots 2026-09-11",
+      "notes": "Current codec drops both item types at the default case (codec.go decodeItemStarted/Completed); history.go unmapped. v2 items carry no agent nickname - label Agent-N + prompt, nickname gap documented.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "codec.go decodeItemStarted/decodeItemCompleted add collabAgentToolCall case folding via remoteCollabWorkflowEvent into core.EventWorkflowRun (shared dsh workflow-card channel; mapAgentEvent already maps it to workflow_run); subAgentActivity deliberate no-card comment. history.go: remoteThreadItem collab fields + decode + mapRemoteHistoryItem cold workflow part ({workflowId,workflowName,workflowStatus,workflowPhases}); handlers_projection turnScopedHistoryTurnToProjectionEvents adds workflow case routing through hydrateWorkflowEventsFromPart. Status vocabulary: pendingInit->pending running->running completed->completed errored->failed interrupted->interrupted shutdown->cancelled, receiver missing -> call status, unknown verbatim.",
+        "artifacts": [
+          "agent/codex-remote/codec.go",
+          "agent/codex-remote/history.go",
+          "go-bridge/handlers_projection.go"
+        ],
+        "checked_at": "2026-09-10T18:09:39Z",
+        "upstream_anchor": "codex-rs/app-server-protocol/src/protocol/v2/item.rs:362"
+      }
+    },
+    {
+      "id": "p57-codex-agents-tests",
+      "title": "P5.7 bridge collab item focused Go tests",
+      "description": "Go tests with the real v2 wire shapes: item/started+completed collabAgentToolCall fold into one workflow part per turn (id upsert, member state transitions across agentsStates updates), unknown tool/status preserved verbatim, cold history parity, dsh workflow parts untouched, no fabrication when agentsStates absent.",
+      "status": "done",
+      "phase": "P5.7",
+      "kind": "tests",
+      "depends_on": [
+        "p57-codex-agents-impl"
+      ],
+      "source": "docs §5.7",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "agent/codex-remote collab_workflow_test.go: 7 tests covering started fold, completed state refresh, full status vocabulary incl. unknown verbatim, missing-states fallback, prompt truncation/empty fallback, cold part shape, subAgentActivity no-card. go-bridge collab_workflow_cold_test.go: cold part -> workflow_run hydrate -> reducer part on owning turn; live EventWorkflowRun -> workflow_run wire. Full suites: agent/codex-remote ok 2.9s; go-bridge ok 73.6s (dsh workflow non-regression included). Takeover audit re-ran the full Go suite and the focused collab workflow set (5 repetitions); both passed.",
+        "artifacts": [
+          "agent/codex-remote/collab_workflow_test.go",
+          "go-bridge/collab_workflow_cold_test.go",
+          "cmd:go test ./agent/codex-remote ./go-bridge -count=1 => PASS (2026-09-11)",
+          "cmd:go test ./agent/codex-remote ./go-bridge -run Test(Collab|SubAgentActivity) -count=5 => PASS (2026-09-11T02:22Z)",
+          "cmd:go test ./... -count=1 => PASS (2026-09-11T02:22Z)"
+        ],
+        "checked_at": "2026-09-11T02:23:24Z",
+        "upstream_anchor": "codex-rs/app-server-protocol/src/protocol/v2/item.rs:362-392"
+      }
+    },
+    {
+      "id": "p57-goal-command-impl",
+      "title": "P5.7 iOS /goal claim input and send interception",
+      "description": "Codex desktop mode attach-menu Goal action claims the input box with '/goal ' token + hint (dsh/Grok Build pattern); on send intercept /goal <objective> -> setSessionGoal(objective) omitting status/tokenBudget, /goal clear -> clear, /goal pause|resume -> status set; intercepted sends produce no user bubble; failures via the existing Codex native error channel; goal bar view/edit/pause/clear entries unchanged.",
+      "status": "done",
+      "phase": "P5.7",
+      "kind": "impl",
+      "depends_on": [
+        "p57-codex-agents-impl"
+      ],
+      "source": "docs §5.7; SlashCommandRouting.swift claim pattern",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "SlashCommandRouting adds CodexGoalCommandRouting/Decision (pure router: set/clear/pause/resume, prefix-collision -> normalSend, bare/attachments -> rejectPreservingDraft). ChatUIKitContainerView handleSend intercepts at the /compact layer before the host-command adjudicator; runCodexGoalCommand executes via typed client (set objective-only omitting status/tokenBudget; clear with false-ACK rejection; pause/resume status set), generation fencing, success clears draft + notice, failure restores draft + native error channel, no user bubble. Attach-menu Goal action now claims the composer ('/goal ' + hint) per dsh/Grok pattern; goal bar view/edit/pause/clear entries unchanged.",
+        "artifacts": [
+          "OpenCodeiOS/OpenCodeiOS/Views/Chat/SlashCommandRouting.swift",
+          "OpenCodeiOS/OpenCodeiOS/App/ChatUIKitContainerView.swift"
+        ],
+        "checked_at": "2026-09-10T18:09:39Z",
+        "upstream_anchor": "codex-rs/app-server-protocol/src/protocol/v2/thread.rs:771-865; codex-rs/app-server/src/request_processors/thread_goal_processor.rs:123-276"
+      }
+    },
+    {
+      "id": "p57-ios-ui-impl",
+      "title": "P5.7 iOS workflow card reuse and running-agent indicator for Codex",
+      "description": "Render Codex-source workflow parts through the existing dsh workflow card renderer (AssistantTimelineRenderSpec .workflow) after decoding the shared part vocabulary; show the goal-bar running-agent badge for Codex execution.phase==running from projected workflow members; hide it on turn terminal/switch per existing rules; Swift non-UI tests cover part decode and indicator gating.",
+      "status": "done",
+      "phase": "P5.7",
+      "kind": "impl",
+      "depends_on": [
+        "p57-codex-agents-tests",
+        "p57-goal-command-impl"
+      ],
+      "source": "docs §5.7",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Workflow card: no new renderer needed — Codex parts flow through the existing dsh workflow part vocabulary (SessionProjectionMapping workflow case -> MessageWorkflow blocks -> message-web WorkflowRunBlock). The running-agent indicator is the official-style goal-bar badge: GoalBannerView.setAgentsRunning appends 'N 个智能体运行中' from host-computed running-member count of the latest running workflow card while execution.phase.isExecuting (ChatUIKitContainerView codexRunningAgents). TaskDock remains the permission-request surface and is not used for this session-level status; the plan now records this accepted design.",
+        "artifacts": [
+          "OpenCodeiOS/OpenCodeiOS/App/GoalBannerView.swift",
+          "OpenCodeiOS/OpenCodeiOS/App/ChatUIKitContainerView.swift"
+        ],
+        "checked_at": "2026-09-10T18:09:39Z",
+        "upstream_anchor": "codex-rs/app-server-protocol/src/protocol/v2/item.rs:362-392; codex-rs/core/src/protocol.rs:4199-4260"
+      }
+    },
+    {
+      "id": "p57-regression",
+      "title": "P5.7 regression and owner matrix row 7",
+      "description": "Focused Go + Swift suites green (codex-remote, go-bridge dsh workflow non-regression, SlashCommandPanel); build+install on paired devices; owner verifies matrix row 7 (workflow card appears per official creation during goal task, member states update, goal-bar running-agent badge follows execution lifecycle, /goal interaction matches dsh) and records PASS/FAIL.",
+      "status": "blocked",
+      "phase": "P5.7",
+      "kind": "regression",
+      "depends_on": [
+        "p57-ios-ui-impl"
+      ],
+      "source": "docs §5.7; §11 row 7",
+      "notes": "No UI automation; owner observation only. Audit 2026-09-11 normalized the invalid `ready` status to the canonical `pending` state, then started this ready item; automated checks are green. Blocked on owner observation of row 7: workflow-card appearance, member state updates, goal-bar running-agents badge, turn lifecycle, and /goal interaction.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "External blocker: owner observation is required for row 7 on the connected physical iPhone; automated Go/protocol checks are green, but workflow-card appearance, member updates, goal-bar running-agents badge, turn lifecycle, and /goal interaction cannot be claimed from automation or logs.",
+        "artifacts": [],
+        "checked_at": "2026-09-11T02:27:16Z",
+        "upstream_anchor": "codex-rs/app-server-protocol/src/protocol/v2/item.rs:362-392; codex-rs/app-server-protocol/src/protocol/v2/thread.rs:771-865"
       }
     }
   ]

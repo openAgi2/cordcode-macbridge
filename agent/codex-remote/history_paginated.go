@@ -137,21 +137,25 @@ var (
 	ErrUnknownHistoryMode = errors.New("codex-remote: unknown historyMode")
 )
 
-// remoteKnownItemTypes is the official ten-variant ThreadItem union at the
-// frozen tag. Anything else (including the 0.151-alpha additive
-// functionCallOutput variant) fails the detail path atomically until the
-// decoder is extended with re-sampled evidence.
+// remoteKnownItemTypes is the sampled official ThreadItem union accepted by
+// the detail path. Anything else (including the 0.151-alpha additive
+// functionCallOutput variant) fails atomically until the decoder is extended
+// with re-sampled evidence. collabAgentToolCall and subAgentActivity are from
+// the 0.153.4 real thread/read + thread/items/list shape: the former maps to a
+// workflow card and the latter is a deliberate no-card lifecycle detail.
 var remoteKnownItemTypes = map[string]bool{
-	"userMessage":       true,
-	"agentMessage":      true,
-	"reasoning":         true,
-	"commandExecution":  true,
-	"fileChange":        true,
-	"mcpToolCall":       true,
-	"dynamicToolCall":   true,
-	"plan":              true,
-	"webSearch":         true,
-	"contextCompaction": true,
+	"userMessage":         true,
+	"agentMessage":        true,
+	"reasoning":           true,
+	"commandExecution":    true,
+	"fileChange":          true,
+	"mcpToolCall":         true,
+	"dynamicToolCall":     true,
+	"plan":                true,
+	"webSearch":           true,
+	"contextCompaction":   true,
+	"collabAgentToolCall": true,
+	"subAgentActivity":    true,
 }
 
 // RemoteTurnsPage is one thread/turns/list page with the wire metadata the

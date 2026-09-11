@@ -197,6 +197,83 @@ func backgroundTaskToWire(t core.BackgroundTask) map[string]any {
 	return wire
 }
 
+// projectionBackgroundTasks reuses workflow truth already committed for the
+// open session. Codex's prior list path re-read every historical turn and every
+// item page, which made opening the task center take 10+ seconds even while the
+// same child ids/statuses were already visible in the message projection.
+func projectionBackgroundTasks(backendID, sessionID string, projection SessionProjection) ([]core.BackgroundTask, bool) {
+	byID := make(map[string]core.BackgroundTask)
+	var order []string
+	hasWorkflow := false
+	for _, turn := range projection.Turns {
+		if turn.Assistant == nil {
+			continue
+		}
+		observedAt := time.Time{}
+		if turn.CompletedAt > 0 {
+			observedAt = time.UnixMilli(turn.CompletedAt).UTC()
+		} else if turn.StartedAt > 0 {
+			observedAt = time.UnixMilli(turn.StartedAt).UTC()
+		}
+		for _, part := range turn.Assistant.Parts {
+			if part.Type != "workflow" {
+				continue
+			}
+			for _, phase := range part.WorkflowPhases {
+				for _, member := range phase.Members {
+					childID := strings.TrimSpace(member.ChildSessionID)
+					if childID == "" {
+						continue
+					}
+					hasWorkflow = true
+					status := backgroundTaskStatusFromProjection(member.Status)
+					current, exists := byID[childID]
+					if !exists {
+						title := strings.TrimSpace(member.Label)
+						if title == "" || strings.HasPrefix(title, "Agent-") {
+							title = strings.TrimSpace(part.WorkflowName)
+						}
+						current = core.BackgroundTask{
+							TaskID: childID, BackendID: backendID, RootSessionID: sessionID,
+							AgentID: childID, Title: title, Status: status,
+							StartedAt: observedAt, UpdatedAt: observedAt, TranscriptAvailable: true,
+						}
+						order = append(order, childID)
+					} else {
+						current.Status = status
+						if !observedAt.IsZero() {
+							current.UpdatedAt = observedAt
+						}
+					}
+					if status != "running" && status != "queued" && !observedAt.IsZero() {
+						current.FinishedAt = observedAt
+					}
+					byID[childID] = current
+				}
+			}
+		}
+	}
+	tasks := make([]core.BackgroundTask, 0, len(order))
+	for _, childID := range order {
+		tasks = append(tasks, byID[childID])
+	}
+	sort.SliceStable(tasks, func(i, j int) bool { return tasks[i].UpdatedAt.After(tasks[j].UpdatedAt) })
+	return tasks, hasWorkflow
+}
+
+func backgroundTaskStatusFromProjection(status string) string {
+	switch status {
+	case "completed":
+		return "completed"
+	case "failed":
+		return "failed"
+	case "cancelled", "interrupted":
+		return "cancelled"
+	default:
+		return "running"
+	}
+}
+
 func (h *Handlers) handleBackgroundTasksList(conn Connection, msg WireMessage, agent core.Agent) {
 	var params struct {
 		Directory string `json:"directory"`
@@ -222,15 +299,32 @@ func (h *Handlers) handleBackgroundTasksList(conn Connection, msg WireMessage, a
 			return
 		}
 	default:
-		provider, ok := agent.(core.BackgroundTaskProvider)
-		if !ok {
-			conn.SendResult(msg.RequestID, nil, &WireError{Code: "not_supported", Message: "backend does not expose background tasks"})
-			return
+		// Codex workflow cards and the task center share one committed truth.
+		// When that truth is present, avoid a second full-history/items walk.
+		if msg.BackendID == "codex-remote" && h.projectionKernel != nil {
+			if projection, ok := h.projectionKernel.Snapshot(msg.BackendID, params.SessionID); ok {
+				if projected, hasWorkflow := projectionBackgroundTasks(msg.BackendID, params.SessionID, projection); hasWorkflow {
+					tasks = projected
+					break
+				}
+			}
 		}
-		var err error
-		tasks, err = provider.ListBackgroundTasks(context.Background())
-		if err != nil {
-			conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
+		if provider, ok := agent.(core.SessionBackgroundTaskProvider); ok {
+			var err error
+			tasks, err = provider.ListSessionBackgroundTasks(context.Background(), params.SessionID)
+			if err != nil {
+				conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
+				return
+			}
+		} else if provider, ok := agent.(core.BackgroundTaskProvider); ok {
+			var err error
+			tasks, err = provider.ListBackgroundTasks(context.Background())
+			if err != nil {
+				conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
+				return
+			}
+		} else {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "not_supported", Message: "backend does not expose background tasks"})
 			return
 		}
 	}

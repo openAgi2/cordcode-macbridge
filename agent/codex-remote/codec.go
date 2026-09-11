@@ -9,6 +9,7 @@ package codexremote
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -34,6 +35,9 @@ type LiveCodec struct {
 	// overwriting a newer Desktop notification.
 	collaborationByThread map[string]versionedCollaborationSnapshot
 	goalByThread          map[string]versionedGoalSnapshot
+	// collabByTurn folds operation-scoped collabAgentToolCall items into the
+	// same keyed workflow-card model used by DeepSeek Harness.
+	collabByTurn map[string]*codexCollabWorkflowFold
 }
 
 type versionedCollaborationSnapshot struct {
@@ -62,6 +66,7 @@ func NewLiveCodec() *LiveCodec {
 		awaitingPlanReview:    map[string]codexProposedPlan{},
 		collaborationByThread: map[string]versionedCollaborationSnapshot{},
 		goalByThread:          map[string]versionedGoalSnapshot{},
+		collabByTurn:          map[string]*codexCollabWorkflowFold{},
 	}
 }
 
@@ -101,6 +106,7 @@ func (c *LiveCodec) ResetNativeSessionState() {
 	c.mu.Lock()
 	c.collaborationByThread = map[string]versionedCollaborationSnapshot{}
 	c.goalByThread = map[string]versionedGoalSnapshot{}
+	c.collabByTurn = map[string]*codexCollabWorkflowFold{}
 	c.mu.Unlock()
 }
 
@@ -333,6 +339,7 @@ func (c *LiveCodec) decodeTurnCompleted(n Notification) []core.Event {
 	c.mu.Lock()
 	delete(c.turnByThread, params.ThreadID)
 	delete(c.retryByThread, params.ThreadID)
+	delete(c.collabByTurn, params.ThreadID+"\x00"+params.Turn.ID)
 	plan := c.inFlightPlan[params.ThreadID]
 	delete(c.inFlightPlan, params.ThreadID)
 	emitReview := params.Turn.Status == remoteTurnStatusCompleted &&
@@ -419,7 +426,8 @@ func (c *LiveCodec) decodeItemStarted(n Notification) []core.Event {
 		return []core.Event{event}
 	case "mcpToolCall":
 		title := strings.TrimSpace(item.Server + ":" + item.Tool)
-		return []core.Event{remoteToolUseEvent(params, item, "MCP", title+"\n"+string(remoteOrEmpty(item.Arguments)))}
+		events := []core.Event{remoteToolUseEvent(params, item, "MCP", title+"\n"+string(remoteOrEmpty(item.Arguments)))}
+		return append(events, remoteCodexAppWorkflowEvent(params, item)...)
 	case "webSearch":
 		return []core.Event{remoteToolUseEvent(params, item, "WebSearch", item.Query)}
 	case "dynamicToolCall":
@@ -427,8 +435,40 @@ func (c *LiveCodec) decodeItemStarted(n Notification) []core.Event {
 	case "plan":
 		// Proposed-plan item start: wait for item/completed (authoritative text).
 		return nil
+	case "collabAgentToolCall":
+		return c.foldCollabWorkflow(params, item)
+	case "subAgentActivity":
+		// P5.7 v1: deliberate no-card; see history.go decode note.
+		return nil
 	default:
 		return nil
+	}
+}
+
+// remoteCollabMemberStatus maps the official CollabAgentStatus vocabulary to
+// the shared workflow-member status vocabulary (running | completed | failed |
+// cancelled | interrupted | pending). Empty maps to the call-level fallback;
+// unknown future values pass through verbatim.
+func remoteCollabMemberStatus(official string, fallback string) string {
+	switch official {
+	case "pendingInit":
+		// Shared workflow wire has no pending member state. The child exists and
+		// has not settled, so it is truthfully part of the running run.
+		return "running"
+	case "running":
+		return "running"
+	case "completed":
+		return "completed"
+	case "errored":
+		return "failed"
+	case "interrupted":
+		return "interrupted"
+	case "shutdown":
+		return "cancelled"
+	case "":
+		return fallback
+	default:
+		return official
 	}
 }
 
@@ -463,7 +503,7 @@ func (c *LiveCodec) decodeItemCompleted(n Notification) []core.Event {
 		} else if len(item.ToolError) > 0 {
 			event.ToolResult = string(item.ToolError)
 		}
-		return []core.Event{event}
+		return append([]core.Event{event}, remoteCodexAppWorkflowEvent(params, item)...)
 	case "contextCompaction":
 		return []core.Event{{Type: core.EventContextCompressed, SessionID: params.ThreadID, ThreadID: params.ThreadID, TurnID: params.TurnID, ItemID: item.ID}}
 	case "dynamicToolCall":
@@ -473,10 +513,190 @@ func (c *LiveCodec) decodeItemCompleted(n Notification) []core.Event {
 	case "plan":
 		c.rememberInFlightPlan(params.ThreadID, params.TurnID, item.ID, item.Text)
 		return nil
+	case "collabAgentToolCall":
+		return c.foldCollabWorkflow(params, item)
+	case "subAgentActivity":
+		// P5.7 v1: deliberate no-card; see history.go decode note.
+		return nil
 	default:
 		// userMessage, agentMessage and reasoning are represented by item/started
 		// or their delta notifications; completed snapshots must not duplicate.
 		return nil
+	}
+}
+
+// remoteCodexAppWorkflowEvent maps the exact Codex desktop orchestration tools
+// observed in real transcripts. create_thread proves a child task identity;
+// wait_threads proves the target set and the statuses returned in polls. Other
+// MCP tools remain ordinary tool rows.
+func remoteCodexAppWorkflowEvent(params remoteItemNotification, item remoteThreadItem) []core.Event {
+	if params.ThreadID == "" || params.TurnID == "" || item.ID == "" || item.Server != "codex_app" {
+		return nil
+	}
+	switch item.Tool {
+	case "create_thread":
+		var args struct {
+			Title  string `json:"title"`
+			Prompt string `json:"prompt"`
+		}
+		_ = json.Unmarshal(item.Arguments, &args)
+		name := strings.TrimSpace(args.Title)
+		if name == "" {
+			name = strings.TrimSpace(args.Prompt)
+		}
+		name = truncateRemoteWorkflowName(name, "创建后台任务")
+		status := remoteToolWorkflowStatus(item.ToolStatus)
+		members := []core.WorkflowRunMember{}
+		if childID := remoteCreateThreadID(item.Result); childID != "" {
+			memberStatus := "running"
+			if status == core.WorkflowStatusFailed || status == core.WorkflowStatusCancelled {
+				memberStatus = status
+			}
+			members = append(members, core.WorkflowRunMember{Seq: 1, Label: name, ChildSessionID: childID, Status: memberStatus})
+		}
+		return remoteWorkflowEvents(params, item.ID, name, status, members)
+	case "wait_threads":
+		var args struct {
+			Targets []struct {
+				ThreadID string `json:"threadId"`
+			} `json:"targets"`
+		}
+		_ = json.Unmarshal(item.Arguments, &args)
+		statuses := remoteWaitThreadStatuses(item.Result)
+		members := make([]core.WorkflowRunMember, 0, len(args.Targets))
+		for index, target := range args.Targets {
+			if target.ThreadID == "" {
+				continue
+			}
+			status := statuses[target.ThreadID]
+			if status == "" {
+				status = "running"
+			}
+			members = append(members, core.WorkflowRunMember{
+				Seq: index + 1, Label: fmt.Sprintf("Agent-%d", index+1),
+				ChildSessionID: target.ThreadID, Status: status,
+			})
+		}
+		return remoteWorkflowEvents(params, item.ID, "等待后台任务", remoteToolWorkflowStatus(item.ToolStatus), members)
+	default:
+		return nil
+	}
+}
+
+func remoteWorkflowEvents(params remoteItemNotification, runID, name, status string, members []core.WorkflowRunMember) []core.Event {
+	return []core.Event{{
+		Type: core.EventWorkflowRun, SessionID: params.ThreadID, ThreadID: params.ThreadID, TurnID: params.TurnID,
+		WorkflowRun: &core.WorkflowRunEvent{RunID: runID, Name: name, Status: status,
+			Phases: []core.WorkflowRunPhase{{Phase: nil, Members: members}}},
+	}}
+}
+
+func truncateRemoteWorkflowName(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	runes := []rune(value)
+	if len(runes) > 80 {
+		return string(runes[:80])
+	}
+	return value
+}
+
+func remoteToolWorkflowStatus(status string) string {
+	switch status {
+	case "completed":
+		return core.WorkflowStatusCompleted
+	case "failed", "error":
+		return core.WorkflowStatusFailed
+	case "cancelled", "canceled":
+		return core.WorkflowStatusCancelled
+	default:
+		return core.WorkflowStatusRunning
+	}
+}
+
+func remoteCreateThreadID(raw json.RawMessage) string {
+	for _, text := range remoteMCPResultTexts(raw) {
+		var result struct {
+			ThreadID string `json:"threadId"`
+		}
+		if json.Unmarshal([]byte(text), &result) == nil && result.ThreadID != "" {
+			return result.ThreadID
+		}
+	}
+	return ""
+}
+
+func remoteWaitThreadStatuses(raw json.RawMessage) map[string]string {
+	out := map[string]string{}
+	for _, text := range remoteMCPResultTexts(raw) {
+		var result struct {
+			Polls []struct {
+				Thread struct {
+					ID     string `json:"id"`
+					Status struct {
+						Type string `json:"type"`
+					} `json:"status"`
+				} `json:"thread"`
+				LatestTurn *struct {
+					Status string `json:"status"`
+				} `json:"latestTurn"`
+			} `json:"polls"`
+		}
+		if json.Unmarshal([]byte(text), &result) != nil {
+			continue
+		}
+		for _, poll := range result.Polls {
+			status := ""
+			if poll.LatestTurn != nil {
+				status = remoteChildTaskStatus(poll.LatestTurn.Status)
+			}
+			if status == "" {
+				status = remoteChildTaskStatus(poll.Thread.Status.Type)
+			}
+			if poll.Thread.ID != "" && status != "" {
+				out[poll.Thread.ID] = status
+			}
+		}
+	}
+	return out
+}
+
+func remoteMCPResultTexts(raw json.RawMessage) []string {
+	var result struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		IsError bool `json:"isError"`
+	}
+	if json.Unmarshal(raw, &result) != nil || result.IsError {
+		return nil
+	}
+	texts := make([]string, 0, len(result.Content))
+	for _, content := range result.Content {
+		if content.Type == "text" && strings.TrimSpace(content.Text) != "" {
+			texts = append(texts, content.Text)
+		}
+	}
+	return texts
+}
+
+func remoteChildTaskStatus(status string) string {
+	switch status {
+	case "completed", "idle":
+		return core.WorkflowStatusCompleted
+	case "failed", "error", "systemError":
+		return core.WorkflowStatusFailed
+	case "interrupted":
+		return core.WorkflowStatusInterrupted
+	case "cancelled", "canceled":
+		return core.WorkflowStatusCancelled
+	case "running", "inProgress", "active":
+		return core.WorkflowStatusRunning
+	default:
+		return ""
 	}
 }
 
