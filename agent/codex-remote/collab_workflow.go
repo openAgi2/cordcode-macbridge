@@ -8,6 +8,7 @@ package codexremote
 // the same members in place.
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 
@@ -25,6 +26,7 @@ type codexCollabMemberState struct {
 
 type codexCollabWorkflowFold struct {
 	runID   string
+	name    string
 	members []codexCollabMemberState
 	byChild map[string]int
 }
@@ -32,6 +34,7 @@ type codexCollabWorkflowFold struct {
 func newCodexCollabWorkflowFold(turnID string) *codexCollabWorkflowFold {
 	return &codexCollabWorkflowFold{
 		runID:   codexCollabRunPrefix + turnID,
+		name:    "Subagents",
 		byChild: map[string]int{},
 	}
 }
@@ -56,6 +59,9 @@ func collabMemberLabel(prompt string, seq int) string {
 func (f *codexCollabWorkflowFold) observe(item remoteThreadItem) bool {
 	if f == nil || f.runID == "" {
 		return false
+	}
+	if item.Type == "mcpToolCall" {
+		return f.observeAppTool(item)
 	}
 	tool := normalizeCollabTool(item.CollabTool)
 	spawn := tool == "spawnagent"
@@ -99,6 +105,112 @@ func (f *codexCollabWorkflowFold) observe(item remoteThreadItem) bool {
 	return changed
 }
 
+func (f *codexCollabWorkflowFold) upsertChild(childID, label, status string) bool {
+	childID = strings.TrimSpace(childID)
+	if childID == "" {
+		return false
+	}
+	if idx, exists := f.byChild[childID]; exists {
+		changed := false
+		if status != "" && status != f.members[idx].status {
+			f.members[idx].status = status
+			changed = true
+		}
+		if label != "" && strings.HasPrefix(f.members[idx].label, "Agent-") {
+			f.members[idx].label = label
+			changed = true
+		}
+		return changed
+	}
+	seq := len(f.members) + 1
+	if strings.TrimSpace(label) == "" {
+		label = collabMemberLabel("", seq)
+	}
+	if status == "" {
+		status = core.WorkflowStatusRunning
+	}
+	f.byChild[childID] = len(f.members)
+	f.members = append(f.members, codexCollabMemberState{
+		seq: seq, label: label, childID: childID, status: status,
+	})
+	return true
+}
+
+func (f *codexCollabWorkflowFold) observeAppTool(item remoteThreadItem) bool {
+	if item.Server != "codex_app" {
+		return false
+	}
+	switch item.Tool {
+	case "create_thread":
+		var args struct {
+			Title  string `json:"title"`
+			Prompt string `json:"prompt"`
+		}
+		_ = json.Unmarshal(item.Arguments, &args)
+		label := strings.TrimSpace(args.Title)
+		if label == "" {
+			label = strings.TrimSpace(args.Prompt)
+		}
+		label = truncateRemoteWorkflowName(label, "")
+		if label != "" && (f.name == "" || f.name == "Subagents") {
+			f.name = label
+		}
+		status := core.WorkflowStatusRunning
+		if item.ToolStatus == "failed" || item.ToolStatus == "error" {
+			status = core.WorkflowStatusFailed
+		}
+		return f.upsertChild(remoteCreateThreadID(item.Result), label, status)
+	case "wait_threads":
+		var args struct {
+			Targets []struct {
+				ThreadID string `json:"threadId"`
+			} `json:"targets"`
+		}
+		_ = json.Unmarshal(item.Arguments, &args)
+		statuses := remoteWaitThreadStatuses(item.Result)
+		changed := false
+		for _, target := range args.Targets {
+			status := statuses[strings.TrimSpace(target.ThreadID)]
+			if status == "" {
+				status = core.WorkflowStatusRunning
+			}
+			if f.upsertChild(target.ThreadID, "", status) {
+				changed = true
+			}
+		}
+		return changed
+	default:
+		return false
+	}
+}
+
+func (f *codexCollabWorkflowFold) observeActivity(item remoteThreadItem) bool {
+	if f == nil || f.runID == "" {
+		return false
+	}
+	childID := strings.TrimSpace(item.CollabAgentThreadID)
+	idx, exists := f.byChild[childID]
+	if !exists || childID == "" {
+		return false
+	}
+	var status string
+	switch strings.ToLower(strings.TrimSpace(item.CollabActivityKind)) {
+	case "started", "interacted":
+		status = core.WorkflowStatusRunning
+	case "completed":
+		status = core.WorkflowStatusCompleted
+	case "interrupted":
+		status = core.WorkflowStatusInterrupted
+	default:
+		return false
+	}
+	if status == f.members[idx].status {
+		return false
+	}
+	f.members[idx].status = status
+	return true
+}
+
 func (f *codexCollabWorkflowFold) snapshot() (core.WorkflowRunEvent, bool) {
 	if f == nil || len(f.members) == 0 {
 		return core.WorkflowRunEvent{}, false
@@ -136,8 +248,12 @@ func (f *codexCollabWorkflowFold) snapshot() (core.WorkflowRunEvent, bool) {
 			status = core.WorkflowStatusInterrupted
 		}
 	}
+	name := strings.TrimSpace(f.name)
+	if name == "" {
+		name = "Subagents"
+	}
 	return core.WorkflowRunEvent{
-		RunID: f.runID, Name: "Subagents", Status: status,
+		RunID: f.runID, Name: name, Status: status,
 		Phases: []core.WorkflowRunPhase{{Phase: nil, Members: members}},
 	}, true
 }
@@ -153,7 +269,12 @@ func (c *LiveCodec) foldCollabWorkflow(params remoteItemNotification, item remot
 		fold = newCodexCollabWorkflowFold(params.TurnID)
 		c.collabByTurn[key] = fold
 	}
-	changed := fold.observe(item)
+	changed := false
+	if item.Type == "subAgentActivity" {
+		changed = fold.observeActivity(item)
+	} else {
+		changed = fold.observe(item)
+	}
 	snapshot, ok := fold.snapshot()
 	c.mu.Unlock()
 	if !changed || !ok {
@@ -161,6 +282,7 @@ func (c *LiveCodec) foldCollabWorkflow(params remoteItemNotification, item remot
 	}
 	return []core.Event{{
 		Type: core.EventWorkflowRun, SessionID: params.ThreadID,
-		ThreadID: params.ThreadID, TurnID: params.TurnID, WorkflowRun: &snapshot,
+		ThreadID: params.ThreadID, TurnID: params.TurnID,
+		ItemID: snapshot.RunID, WorkflowRun: &snapshot,
 	}}
 }

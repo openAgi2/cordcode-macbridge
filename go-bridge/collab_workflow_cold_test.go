@@ -56,7 +56,7 @@ func TestCollabColdPartHydratesInBridge(t *testing.T) {
 	if card == nil {
 		t.Fatal("workflow part missing from owning assistant turn")
 	}
-	if card.WorkflowID != "call-1" || card.WorkflowName != "写故事" || card.WorkflowStatus != "completed" {
+	if card.WorkflowID != "call-1" || card.ItemID != "call-1" || card.WorkflowName != "写故事" || card.WorkflowStatus != "completed" {
 		t.Fatalf("card header = %+v", card)
 	}
 	if len(card.WorkflowPhases) != 1 || card.WorkflowPhases[0].Phase != nil || len(card.WorkflowPhases[0].Members) != 1 {
@@ -89,7 +89,33 @@ func TestCollabLiveEventMapsToWorkflowRunWire(t *testing.T) {
 	if !dataOk {
 		t.Fatalf("wire data type = %T", rawData)
 	}
-	if data["workflowId"] != "call-1" || data["turnId"] != "turn" {
+	if data["workflowId"] != "call-1" || data["turnId"] != "turn" || data["itemId"] != "call-1" {
 		t.Fatalf("wire data = %+v", data)
+	}
+}
+
+func TestWorkflowCardItemIDAllowsDetailClassify(t *testing.T) {
+	reducer := NewProjectionReducer()
+	reducer.Apply(projectionReducerEvent("codex-remote", "th", "user_message", map[string]any{
+		"itemId": "u1", "turnId": "turn", "text": "goal",
+	}, 1, ""))
+	reducer.Apply(projectionReducerEvent("codex-remote", "th", "workflow_run", map[string]any{
+		"turnId": "turn", "workflowId": "codex-collab:turn", "workflowName": "Subagents",
+		"workflowStatus": "running", "workflowPhases": []map[string]any{
+			{"phase": nil, "members": []map[string]any{
+				{"seq": 1, "label": "Agent-1", "childSessionId": "a", "status": "running"},
+			}},
+		},
+	}, 2, ""))
+	proj, ok := reducer.Snapshot("codex-remote", "th")
+	if !ok || len(proj.Turns) == 0 || proj.Turns[0].Assistant == nil {
+		t.Fatalf("snapshot = %+v", proj)
+	}
+	entries, err := classifyDetailParts(proj.Turns[0].Assistant.Parts)
+	if err != nil {
+		t.Fatalf("classifyDetailParts: %v", err)
+	}
+	if len(entries) == 0 || entries[0].ItemID != "codex-collab:turn" {
+		t.Fatalf("entries = %+v", entries)
 	}
 }

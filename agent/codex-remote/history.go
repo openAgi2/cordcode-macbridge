@@ -7,6 +7,7 @@ package codexremote
 // visible in SkippedTypes; this adapter never invents an id or terminal state.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -179,18 +180,62 @@ type remoteThreadItem struct {
 	// spawn/interact call folded into the shared workflow-card channel. v2
 	// item serialization carries no agent nickname; members are labeled
 	// Agent-N with the spawn prompt as the card name.
-	CollabTool        string
-	CollabStatus      string
-	CollabReceivers   []string
-	CollabPrompt      string
-	CollabAgentStates map[string]remoteCollabAgentState
+	CollabTool          string
+	CollabStatus        string
+	CollabReceivers     []string
+	CollabPrompt        string
+	CollabAgentStates   map[string]remoteCollabAgentState
+	CollabActivityKind  string
+	CollabAgentThreadID string
 }
 
-// remoteCollabAgentState mirrors the official per-agent entry of
-// CollabAgentToolCall.agentsStates (upstream item.rs:1279).
+// remoteCollabAgentState accepts both official wire shapes:
+//   - v2 CollabAgentState {status, message} (app-server-protocol item.rs:1279)
+//   - core AgentStatus tagged union (protocol.rs:1824): "pending_init",
+//     "running", {"completed": "msg"}, {"errored": "msg"}, "shutdown"
 type remoteCollabAgentState struct {
 	Status  string `json:"status"`
 	Message string `json:"message"`
+}
+
+func (s *remoteCollabAgentState) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+	if data[0] == '"' {
+		var official string
+		if err := json.Unmarshal(data, &official); err != nil {
+			return err
+		}
+		s.Status = official
+		return nil
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return err
+	}
+	if raw, ok := obj["status"]; ok {
+		_ = json.Unmarshal(raw, &s.Status)
+	}
+	if raw, ok := obj["message"]; ok && string(raw) != "null" {
+		_ = json.Unmarshal(raw, &s.Message)
+	}
+	if s.Status != "" {
+		return nil
+	}
+	for _, key := range []string{"completed", "errored"} {
+		raw, ok := obj[key]
+		if !ok {
+			continue
+		}
+		s.Status = key
+		if string(raw) != "null" {
+			_ = json.Unmarshal(raw, &s.Message)
+		}
+		return nil
+	}
+	return nil
 }
 
 func decodeRemoteThreadItem(raw json.RawMessage) remoteThreadItem {
@@ -270,23 +315,40 @@ func decodeRemoteThreadItem(raw json.RawMessage) remoteThreadItem {
 		}
 		_ = json.Unmarshal(raw, &value)
 		it.Query = value.Query
-	case "collabAgentToolCall":
+	case "collabAgentToolCall", "CollabAgentToolCall":
+		it.Type = "collabAgentToolCall"
 		var value struct {
-			Tool              string                            `json:"tool"`
-			Status            string                            `json:"status"`
-			ReceiverThreadIDs []string                          `json:"receiverThreadIds"`
-			Prompt            string                            `json:"prompt"`
-			AgentStates       map[string]remoteCollabAgentState `json:"agentsStates"`
+			Tool                   string                            `json:"tool"`
+			Status                 string                            `json:"status"`
+			ReceiverThreadIDs      []string                          `json:"receiverThreadIds"`
+			ReceiverThreadIDsSnake []string                          `json:"receiver_thread_ids"`
+			Prompt                 string                            `json:"prompt"`
+			AgentStates            map[string]remoteCollabAgentState `json:"agentsStates"`
+			AgentStatesSnake       map[string]remoteCollabAgentState `json:"agents_states"`
 		}
 		_ = json.Unmarshal(raw, &value)
 		it.CollabTool, it.CollabStatus = value.Tool, value.Status
 		it.CollabReceivers, it.CollabPrompt = value.ReceiverThreadIDs, value.Prompt
+		if len(it.CollabReceivers) == 0 {
+			it.CollabReceivers = value.ReceiverThreadIDsSnake
+		}
 		it.CollabAgentStates = value.AgentStates
-	case "subAgentActivity":
-		// P5.7 v1: deliberate no-card. Member state refreshes arrive through
-		// collabAgentToolCall agentsStates re-upserts; activity rows add no
-		// field the card needs beyond agentThreadId. Revisit only if owner
-		// matrix row 7 shows live member states lagging.
+		if len(it.CollabAgentStates) == 0 {
+			it.CollabAgentStates = value.AgentStatesSnake
+		}
+	case "subAgentActivity", "SubAgentActivity":
+		it.Type = "subAgentActivity"
+		var value struct {
+			Kind               string `json:"kind"`
+			AgentThreadID      string `json:"agentThreadId"`
+			AgentThreadIDSnake string `json:"agent_thread_id"`
+		}
+		_ = json.Unmarshal(raw, &value)
+		it.CollabActivityKind = value.Kind
+		it.CollabAgentThreadID = value.AgentThreadID
+		if it.CollabAgentThreadID == "" {
+			it.CollabAgentThreadID = value.AgentThreadIDSnake
+		}
 	}
 	return it
 }
@@ -450,13 +512,7 @@ func mapRemoteHistoryItem(turn *core.TurnScopedHistoryTurn, item remoteThreadIte
 			step["output"] = json.RawMessage(item.ToolError)
 		}
 		turn.Parts = append(turn.Parts, map[string]any{"type": "tool", "step": step, "itemId": item.ID})
-		for _, event := range remoteCodexAppWorkflowEvent(
-			remoteItemNotification{ThreadID: turn.TurnID, TurnID: turn.TurnID}, item,
-		) {
-			if part := remoteWorkflowPart(event.WorkflowRun, item.ID); part != nil {
-				turn.Parts = append(turn.Parts, part)
-			}
-		}
+		foldRemoteCollabHistoryPart(turn, item)
 	case "dynamicToolCall":
 		step := map[string]any{"id": item.ID, "toolName": item.Tool, "status": remoteCommandStepStatus(item.ToolStatus)}
 		if len(item.Arguments) > 0 {
@@ -485,7 +541,7 @@ func mapRemoteHistoryItem(turn *core.TurnScopedHistoryTurn, item remoteThreadIte
 		// update one turn-scoped keyed card instead of each becoming a new card.
 		foldRemoteCollabHistoryPart(turn, item)
 	case "subAgentActivity":
-		// P5.7 v1: deliberate no-card; see decodeRemoteThreadItem note.
+		foldRemoteCollabHistoryPart(turn, item)
 	default:
 		if item.Type != "" {
 			turn.SkippedTypes = append(turn.SkippedTypes, item.Type)
@@ -505,6 +561,9 @@ func foldRemoteCollabHistoryPart(turn *core.TurnScopedHistoryTurn, item remoteTh
 			continue
 		}
 		partIndex = i
+		if name := strings.TrimSpace(stringValue(part["workflowName"])); name != "" {
+			fold.name = name
+		}
 		for _, phase := range workflowPhaseMaps(part["workflowPhases"]) {
 			for _, member := range workflowMemberMaps(phase["members"]) {
 				childID := strings.TrimSpace(stringValue(member["childSessionId"]))
@@ -529,7 +588,13 @@ func foldRemoteCollabHistoryPart(turn *core.TurnScopedHistoryTurn, item remoteTh
 		}
 		break
 	}
-	if !fold.observe(item) {
+	changed := false
+	if item.Type == "subAgentActivity" {
+		changed = fold.observeActivity(item)
+	} else {
+		changed = fold.observe(item)
+	}
+	if !changed {
 		return
 	}
 	snapshot, ok := fold.snapshot()

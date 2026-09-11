@@ -412,9 +412,10 @@ func TestReducerFlushPatchCoalescesAndDeltas(t *testing.T) {
 	if p1.BaseRev != 0 || p1.SyncRev != 2 {
 		t.Fatalf("patch1 base/sync = %d/%d, want 0/2", p1.BaseRev, p1.SyncRev)
 	}
-	// The two text deltas are coalesced into a single append_text op.
-	if len(p1.PartOps) != 1 || p1.PartOps[0].Op != "append_text" || p1.PartOps[0].Text != "ab" {
-		t.Fatalf("patch1 partOps = %+v", p1.PartOps)
+	// The first content-bearing upsert already contains the coalesced bytes;
+	// they must not also ride append_text or clients apply "ab" twice.
+	if len(p1.PartOps) != 0 || deliveredAssistantText(p1, "T1") != "ab" || patchDuplicatesAssistantText(p1, "T1") {
+		t.Fatalf("patch1 delivered duplicate/incorrect text: upserts=%+v partOps=%+v", p1.UpsertTurns, p1.PartOps)
 	}
 	// The turn upsert lands with the first content event (markRunning carries the
 	// content-bearing turn). A bare skeleton turn must never publish (owner 2026-08-04
@@ -461,14 +462,14 @@ func TestReducerSteadyTextDeltaPatchSizeDoesNotGrowWithAccumulatedBody(t *testin
 		if !ok {
 			t.Fatalf("seq %d: missing patch", seq)
 		}
-		if len(patch.PartOps) != 1 || patch.PartOps[0].Text != "0123456789" {
-			t.Fatalf("seq %d: partOps = %+v", seq, patch.PartOps)
-		}
 		if seq == 2 {
-			if len(patch.UpsertTurns) != 1 {
+			if len(patch.UpsertTurns) != 1 || len(patch.PartOps) != 0 || deliveredAssistantText(patch, "T1") != "0123456789" {
 				t.Fatalf("first content patch must mount one turn shell: %+v", patch.UpsertTurns)
 			}
 			continue
+		}
+		if len(patch.PartOps) != 1 || patch.PartOps[0].Text != "0123456789" {
+			t.Fatalf("seq %d: partOps = %+v", seq, patch.PartOps)
 		}
 		if len(patch.UpsertTurns) != 0 {
 			t.Fatalf("seq %d: repeated accumulated turn in steady patch", seq)
@@ -1022,8 +1023,8 @@ func TestReducerRestoreRebuildsUserInputIndex(t *testing.T) {
 		SyncRev:   250,
 		Execution: ExecutionView{Phase: "requires_action", ActiveTurnID: turn},
 		Turns: []TurnProjection{{
-			TurnID:     turn,
-			Status:     "running",
+			TurnID: turn,
+			Status: "running",
 			Assistant: &MessageProjection{ID: turn, Role: "assistant", Parts: []ProjectionPart{{
 				Type:                   "user_input",
 				UserInputInteractionID: interaction,

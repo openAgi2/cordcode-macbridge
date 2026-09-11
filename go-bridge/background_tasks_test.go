@@ -90,7 +90,7 @@ func TestClaudeBackgroundTasksFromSidechainFixture(t *testing.T) {
 func TestProjectionBackgroundTasksUsesCommittedWorkflowTruth(t *testing.T) {
 	projection := SessionProjection{Turns: []TurnProjection{
 		{
-			TurnID: "turn", StartedAt: 1_789_111_976_000,
+			TurnID: "turn", StartedAt: 1_789_111_976_000, CompletedAt: 1_789_112_065_000,
 			Assistant: &MessageProjection{
 				ID: "turn", Role: "assistant",
 				Parts: []ProjectionPart{
@@ -115,6 +115,12 @@ func TestProjectionBackgroundTasksUsesCommittedWorkflowTruth(t *testing.T) {
 	if byID["child-a"].Title != "写科比故事" || byID["child-a"].Status != "completed" ||
 		byID["child-b"].Title != "写乔丹故事" || byID["child-b"].Status != "running" {
 		t.Fatalf("projection tasks = %+v", tasks)
+	}
+	if byID["child-a"].FinishedAt.Sub(byID["child-a"].StartedAt) != 89*time.Second {
+		t.Fatalf("completed duration = %s, want 89s from turn start/end", byID["child-a"].FinishedAt.Sub(byID["child-a"].StartedAt))
+	}
+	if !byID["child-b"].FinishedAt.IsZero() {
+		t.Fatalf("running task must not carry finishedAt: %+v", byID["child-b"])
 	}
 }
 

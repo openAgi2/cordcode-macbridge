@@ -81,6 +81,32 @@ func (a *turnDetailAgent) MapTurnItemsPage(turn *core.TurnScopedHistoryTurn, pag
 				step["output"] = output
 			}
 			turn.Parts = append(turn.Parts, map[string]any{"type": "tool", "step": step, "itemId": id})
+		case "workflowMember":
+			childID, _ := entry.Item["childSessionId"].(string)
+			runID := "codex-collab:" + turn.TurnID
+			member := map[string]any{
+				"seq": len(turn.Parts) + 1, "label": childID,
+				"childSessionId": childID, "status": "completed",
+			}
+			updated := false
+			for i, part := range turn.Parts {
+				if part["type"] != "workflow" || part["workflowId"] != runID {
+					continue
+				}
+				phases, _ := part["workflowPhases"].([]map[string]any)
+				members, _ := phases[0]["members"].([]map[string]any)
+				phases[0]["members"] = append(members, member)
+				turn.Parts[i] = part
+				updated = true
+				break
+			}
+			if !updated {
+				turn.Parts = append(turn.Parts, map[string]any{
+					"type": "workflow", "itemId": runID,
+					"workflowId": runID, "workflowName": "Delegated agents", "workflowStatus": "completed",
+					"workflowPhases": []map[string]any{{"phase": nil, "members": []map[string]any{member}}},
+				})
+			}
 		default:
 			return fmt.Errorf("%w: %v", codexremote.ErrUnknownThreadItem, entry.Item["type"])
 		}
@@ -287,6 +313,46 @@ func TestSessionTurnItemsV2HappyMultiPageEOF(t *testing.T) {
 	// Page-3 chunk is the final one and carries EOF progress.
 	if !frames[2].Progress.EOF || frames[2].Items[0].ItemID != "a3" {
 		t.Fatalf("final chunk = %+v", frames[2])
+	}
+}
+
+// A Codex collaboration workflow is one synthetic whole-value part assembled
+// from operation items that can span multiple upstream pages. The batch engine
+// must not persist page 1's partial image under the stable workflow item id:
+// later images would be rejected as duplicates and a reconnect would replay the
+// incomplete card forever.
+func TestSessionTurnItemsV2DefersMutableWorkflowUntilEOF(t *testing.T) {
+	h, conn, sessionID, agent := turnDetailV2Harness(t)
+	agent.itemPages[""] = itemsPage([]map[string]any{
+		{"type": "userMessage", "id": "u1", "text": "delegate"},
+		{"type": "workflowMember", "id": "spawn-a", "childSessionId": "child-a"},
+	}, "page-2")
+	agent.itemPages["page-2"] = itemsPage([]map[string]any{
+		{"type": "workflowMember", "id": "spawn-b", "childSessionId": "child-b"},
+	}, "")
+	olderWalkDispatch(h, conn, map[string]any{
+		"direction": "window_0", "backendId": "codex-remote", "sessionId": sessionID, "limit": 10,
+	})
+	quiesceProjectionWrites(t, h)
+
+	wireErr, ack := turnItemsDispatchV2(t, h, conn, sessionID, "T1", nil)
+	if wireErr != nil {
+		t.Fatalf("ack err = %+v", wireErr)
+	}
+	if ack.FirstChunkSeq != 1 || ack.LastChunkSeq != 1 || ack.Progress.Pages != 2 || ack.Progress.Items != 1 {
+		t.Fatalf("ack = %+v", ack)
+	}
+	frames := chunkFramesOf(conn)
+	if len(frames) != 1 || len(frames[0].Items) != 1 {
+		t.Fatalf("workflow chunks = %+v", frames)
+	}
+	part := frames[0].Items[0]
+	if part.Type != "workflow" || part.ItemID != "codex-collab:T1" || len(part.WorkflowPhases) != 1 {
+		t.Fatalf("workflow part = %+v", part)
+	}
+	members := part.WorkflowPhases[0].Members
+	if len(members) != 2 || members[0].ChildSessionID != "child-a" || members[1].ChildSessionID != "child-b" {
+		t.Fatalf("workflow members = %+v", members)
 	}
 }
 

@@ -863,6 +863,32 @@ func coldTurnIDs(cold *core.ColdHistoryResult) []string {
 	return ids
 }
 
+func TestReadColdHistoryCarriesEpochGoalSnapshot(t *testing.T) {
+	agent, _ := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
+		switch call.Method {
+		case "thread/read":
+			return threadMetaResult("paginated"), nil
+		case "thread/turns/list":
+			return map[string]any{"data": []any{summaryTurn("turn_goal", "completed")}}, nil
+		default:
+			return nil, &RPCError{Code: -32601, Message: call.Method}
+		}
+	})
+	goal := core.SessionGoalRecord{
+		ThreadID: "thread_probe", Objective: "preserve me", Status: "complete",
+		TokensUsed: 25, TimeUsedSeconds: 5, CreatedAt: 200, UpdatedAt: 205,
+	}
+	agent.codec.applyGoalSnapshot("thread_probe", core.SessionGoalSnapshot{Goal: &goal}, nil)
+
+	cold, err := agent.ReadColdHistory(context.Background(), "thread_probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cold.GoalRecord == nil || cold.GoalRecord.Goal == nil || cold.GoalRecord.Goal.Objective != "preserve me" {
+		t.Fatalf("cold goal snapshot = %+v", cold.GoalRecord)
+	}
+}
+
 // A legacy thread's attach page is NEVER trusted (candidate verified on
 // paginated only): the cold open pre-selects metadata + compat full read.
 func TestResumeInitialTurnsPageLegacyPreSelectsBaseline(t *testing.T) {

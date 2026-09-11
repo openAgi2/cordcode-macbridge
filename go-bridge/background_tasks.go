@@ -209,11 +209,17 @@ func projectionBackgroundTasks(backendID, sessionID string, projection SessionPr
 		if turn.Assistant == nil {
 			continue
 		}
-		observedAt := time.Time{}
+		startedAt := time.Time{}
+		if turn.StartedAt > 0 {
+			startedAt = time.UnixMilli(turn.StartedAt).UTC()
+		} else if turn.CompletedAt > 0 {
+			startedAt = time.UnixMilli(turn.CompletedAt).UTC()
+		}
+		finishedAt := time.Time{}
 		if turn.CompletedAt > 0 {
-			observedAt = time.UnixMilli(turn.CompletedAt).UTC()
-		} else if turn.StartedAt > 0 {
-			observedAt = time.UnixMilli(turn.StartedAt).UTC()
+			finishedAt = time.UnixMilli(turn.CompletedAt).UTC()
+		} else {
+			finishedAt = startedAt
 		}
 		for _, part := range turn.Assistant.Parts {
 			if part.Type != "workflow" {
@@ -236,17 +242,17 @@ func projectionBackgroundTasks(backendID, sessionID string, projection SessionPr
 						current = core.BackgroundTask{
 							TaskID: childID, BackendID: backendID, RootSessionID: sessionID,
 							AgentID: childID, Title: title, Status: status,
-							StartedAt: observedAt, UpdatedAt: observedAt, TranscriptAvailable: true,
+							StartedAt: startedAt, UpdatedAt: startedAt, TranscriptAvailable: true,
 						}
 						order = append(order, childID)
 					} else {
 						current.Status = status
-						if !observedAt.IsZero() {
-							current.UpdatedAt = observedAt
+						if !finishedAt.IsZero() {
+							current.UpdatedAt = finishedAt
 						}
 					}
-					if status != "running" && status != "queued" && !observedAt.IsZero() {
-						current.FinishedAt = observedAt
+					if status != "running" && status != "queued" && !finishedAt.IsZero() {
+						current.FinishedAt = finishedAt
 					}
 					byID[childID] = current
 				}

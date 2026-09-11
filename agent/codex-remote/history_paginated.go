@@ -833,6 +833,26 @@ func (a *Agent) mapColdPage(ctx context.Context, threadID string, rawTurns []rem
 // candidate breaker tripped) PRE-SELECTS the official baseline below:
 // thread/read metadata + thread/turns/list — never a try-then-silent-full-read.
 func (a *Agent) ReadColdHistory(ctx context.Context, threadID string) (*core.ColdHistoryResult, error) {
+	withGoalSnapshot := func(result *core.ColdHistoryResult) *core.ColdHistoryResult {
+		if result == nil || !a.SessionGoalReady() {
+			return result
+		}
+		// StartSession synchronously refreshes thread/goal/get before the bridge
+		// admits cold hydration; reconnect restoration does the same for observed
+		// threads. Read the codec's epoch-fenced
+		// whole-value snapshot here so the cold baseline and its goal commit in
+		// one projection transaction. A missing entry is deliberately unknown,
+		// not an invented authoritative clear.
+		a.mu.Lock()
+		codec := a.codec
+		a.mu.Unlock()
+		if codec != nil {
+			if snapshot, ok := codec.CurrentGoal(threadID); ok {
+				result.GoalRecord = &snapshot
+			}
+		}
+		return result
+	}
 	if cached := a.takeResumeInitialPage(threadID); cached != nil && cached.mode == "paginated" {
 		turns, err := a.mapColdPage(ctx, threadID, cached.page.Turns)
 		if err != nil {
@@ -841,9 +861,9 @@ func (a *Agent) ReadColdHistory(ctx context.Context, threadID string) (*core.Col
 		for i, j := 0, len(turns)-1; i < j; i, j = i+1, j-1 {
 			turns[i], turns[j] = turns[j], turns[i]
 		}
-		return &core.ColdHistoryResult{HistoryMode: "paginated", Page: &core.UpstreamHistoryPage{
+		return withGoalSnapshot(&core.ColdHistoryResult{HistoryMode: "paginated", Page: &core.UpstreamHistoryPage{
 			Turns: turns, NextCursor: cached.page.NextCursor,
-		}}, nil
+		}}), nil
 	}
 	meta, err := a.readThreadMeta(ctx, threadID)
 	if err != nil {
@@ -862,9 +882,9 @@ func (a *Agent) ReadColdHistory(ctx context.Context, threadID string) (*core.Col
 		for i, j := 0, len(turns)-1; i < j; i, j = i+1, j-1 {
 			turns[i], turns[j] = turns[j], turns[i]
 		}
-		return &core.ColdHistoryResult{HistoryMode: "paginated", Page: &core.UpstreamHistoryPage{
+		return withGoalSnapshot(&core.ColdHistoryResult{HistoryMode: "paginated", Page: &core.UpstreamHistoryPage{
 			Turns: turns, NextCursor: page.NextCursor,
-		}}, nil
+		}}), nil
 	case "legacy":
 		turns, err := a.readThreadFullCompat(ctx, threadID)
 		if err != nil {
@@ -876,9 +896,9 @@ func (a *Agent) ReadColdHistory(ctx context.Context, threadID string) (*core.Col
 				mapped[i].DetailPreloaded = true
 			}
 		}
-		return &core.ColdHistoryResult{HistoryMode: "legacy", Page: &core.UpstreamHistoryPage{
+		return withGoalSnapshot(&core.ColdHistoryResult{HistoryMode: "legacy", Page: &core.UpstreamHistoryPage{
 			Turns: mapped, NextCursor: "",
-		}}, nil
+		}}), nil
 	default:
 		return nil, ErrUnknownHistoryMode
 	}

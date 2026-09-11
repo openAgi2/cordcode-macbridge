@@ -112,6 +112,9 @@ func TestTurnItemsDetailCommitFlushesPendingLiveText(t *testing.T) {
 				detailSeen = true
 			}
 		}
+		if deliveredAssistantText(patch, "T3") == "live text A" {
+			liveSeen = true
+		}
 	}
 	if !liveSeen {
 		t.Fatalf("staged live text never reached the client: %+v", patches)

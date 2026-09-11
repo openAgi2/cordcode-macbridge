@@ -338,22 +338,23 @@ func TestProjectionPatchCarriesContent(t *testing.T) {
 	patches := waitForProjectionPatches(t, v2, 2)
 
 	// First patch carries content directly: turn_started no longer publishes a skeleton
-	// patch (owner 2026-08-04 fence fix), so the first frame is the text_delta append.
+	// patch (owner 2026-08-04 fence fix). The first frame mounts the shell; the same
+	// bytes must not also ride append_text (Goal intro duplication).
 	first := patches[0].Data.(ProjectionPatch)
-	foundHello := false
-	for _, op := range first.PartOps {
-		if op.Op == "append_text" && op.Text == "Hello" {
-			foundHello = true
-		}
+	if patchDuplicatesAssistantText(first, "T1") {
+		t.Fatalf("first patch duplicated Hello in upsertTurns and append_text: %+v", first)
 	}
-	if !foundHello {
-		t.Fatalf("first patch missing append_text Hello: %+v", first.PartOps)
+	if deliveredAssistantText(first, "T1") != "Hello" {
+		t.Fatalf("first patch missing Hello: upserts=%+v partOps=%+v", first.UpsertTurns, first.PartOps)
 	}
 
-	// Concatenate all append_text payloads across the content patches — must equal the deltas.
 	var combined string
-	for _, p := range patches {
+	for i, p := range patches {
 		pp := p.Data.(ProjectionPatch)
+		if i == 0 {
+			combined += deliveredAssistantText(pp, "T1")
+			continue
+		}
 		for _, op := range pp.PartOps {
 			if op.Op == "append_text" {
 				combined += op.Text
@@ -361,7 +362,7 @@ func TestProjectionPatchCarriesContent(t *testing.T) {
 		}
 	}
 	if combined != "Hello world" {
-		t.Fatalf("delivered append_text = %q, want %q", combined, "Hello world")
+		t.Fatalf("delivered text = %q, want %q", combined, "Hello world")
 	}
 }
 

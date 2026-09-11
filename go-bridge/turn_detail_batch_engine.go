@@ -620,7 +620,6 @@ func (h *Handlers) runTurnDetailBatch(
 			continue
 		}
 
-		partsBefore := len(scratch.Parts)
 		if err := pager.MapTurnItemsPage(&scratch, page); err != nil {
 			return failTerminal(turnDetailPageReasonCode(err), deliveredFirst, deliveredLast)
 		}
@@ -634,7 +633,7 @@ func (h *Handlers) runTurnDetailBatch(
 			acceptedIDs[scratch.UserItemID] = true
 		}
 		var pageEntries []DetailPageEntry
-		if newParts := scratch.Parts[partsBefore:]; len(newParts) > 0 {
+		if len(scratch.Parts) > 0 {
 			// Map the WHOLE accumulated scratch (not the page slice): tool
 			// hydrate events carry no turnId — they attribute to the turn the
 			// stream established earlier — so a tool-only page mapped in
@@ -648,13 +647,33 @@ func (h *Handlers) runTurnDetailBatch(
 				pageTurn.UserItemID, pageTurn.UserText = turn.User.Parts[0].ItemID, turn.User.Parts[0].Text
 			}
 			mapped := upstreamSummaryTurnsToProjection([]core.TurnScopedHistoryTurn{pageTurn})
-			if len(mapped) == 1 && mapped[0].Assistant != nil && len(mapped[0].Assistant.Parts) > mappedCount {
-				// Deterministic mapper + reducer: the prefix reproduces
-				// byte-identically, the suffix is exactly this page's parts.
-				if pageEntries, err = classifyDetailParts(mapped[0].Assistant.Parts[mappedCount:]); err != nil {
+			if len(mapped) == 1 && mapped[0].Assistant != nil {
+				mappedParts := mapped[0].Assistant.Parts
+				// Collaboration history folds many official operation items into
+				// one synthetic workflow part and updates it IN PLACE on later
+				// pages. It is therefore not an immutable prefix member: emitting
+				// it on page 1 permanently stores that incomplete snapshot because
+				// the detail store correctly rejects duplicate item ids. Defer the
+				// synthetic card until EOF, then take its final whole-value image.
+				// Ordinary parts retain page-by-page streaming and prefix slicing.
+				newParts := mappedParts[mappedCount:]
+				stableParts := make([]ProjectionPart, 0, len(newParts))
+				for _, part := range newParts {
+					if part.Type != "workflow" {
+						stableParts = append(stableParts, part)
+					}
+				}
+				if page.EOF {
+					for _, part := range mappedParts {
+						if part.Type == "workflow" {
+							stableParts = append(stableParts, part)
+						}
+					}
+				}
+				if pageEntries, err = classifyDetailParts(stableParts); err != nil {
 					return failTerminal("unsupported_item_type", deliveredFirst, deliveredLast)
 				}
-				mappedCount = len(mapped[0].Assistant.Parts)
+				mappedCount = len(mappedParts)
 			}
 		}
 		// Re-walk skip: only entries past the accepted boundary are new.

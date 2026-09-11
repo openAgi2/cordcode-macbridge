@@ -276,10 +276,28 @@ func (h *Handlers) streamCodexRemoteColdHistoryFromResult(
 	emit func(projectionHydrateEvent) bool,
 ) error {
 	page := result.Page
-	for _, ev := range turnScopedHistoryTurnToProjectionEvents(page.Turns) {
-		if !emit(ev) {
-			return nil
+	goalEvent, haveGoalEvent := coldGoalRecordProjectionEvent(sessionID, result.GoalRecord)
+	goalEmitted := false
+	for _, turn := range page.Turns {
+		// The native /goal command is a timeline row. Insert it before the first
+		// official turn that started at or after goal creation, preserving the
+		// same command→continuation order as the live projection. Turns without
+		// official time remain in their authoritative upstream order.
+		if haveGoalEvent && !goalEmitted && result.GoalRecord.Goal != nil &&
+			turn.HasTime && turn.StartedAt.Unix() >= result.GoalRecord.Goal.CreatedAt {
+			if !emit(goalEvent) {
+				return nil
+			}
+			goalEmitted = true
 		}
+		for _, ev := range turnScopedHistoryTurnToProjectionEvents([]core.TurnScopedHistoryTurn{turn}) {
+			if !emit(ev) {
+				return nil
+			}
+		}
+	}
+	if haveGoalEvent && !goalEmitted && !emit(goalEvent) {
+		return nil
 	}
 	seed := CodexProducerState{
 		HasOlderUpstream:   page.NextCursor != "",
@@ -303,6 +321,23 @@ func (h *Handlers) streamCodexRemoteColdHistoryFromResult(
 	}
 	h.hydrateProducerSeeds.Store(projectionDeliveryKey(backendID, sessionID), &seed)
 	return nil
+}
+
+func coldGoalRecordProjectionEvent(sessionID string, snapshot *core.SessionGoalSnapshot) (projectionHydrateEvent, bool) {
+	if snapshot == nil {
+		return projectionHydrateEvent{}, false
+	}
+	event, data, _ := mapAgentEvent(core.Event{
+		Type: core.EventSessionGoalRecord, SessionID: sessionID, ThreadID: sessionID, GoalRecord: snapshot,
+	})
+	if event == "" || data == nil {
+		return projectionHydrateEvent{}, false
+	}
+	mapped, ok := data.(map[string]interface{})
+	if !ok {
+		return projectionHydrateEvent{}, false
+	}
+	return projectionHydrateEvent{Event: event, Data: mapped}, true
 }
 
 // persistCodexProducerSeed runs AFTER a successful codex-remote hydrate commit:

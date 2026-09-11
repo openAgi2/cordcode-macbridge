@@ -1460,8 +1460,13 @@ func hydrateWorkflowEventsFromPart(part map[string]any, turnID string, partIndex
 	if status == "" {
 		status = "running"
 	}
+	itemID := dataString(part, "itemId")
+	if itemID == "" {
+		itemID = workflowID
+	}
 	data := map[string]interface{}{
 		"turnId":         turnID,
+		"itemId":         itemID,
 		"workflowId":     workflowID,
 		"workflowName":   dataString(part, "workflowName"),
 		"workflowStatus": status,

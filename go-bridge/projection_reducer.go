@@ -1122,8 +1122,13 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if t.Assistant == nil {
 			t.Assistant = &MessageProjection{ID: turnID, Role: "assistant"}
 		}
+		itemID := dataString(data, "itemId")
+		if itemID == "" {
+			itemID = runID
+		}
 		part := ProjectionPart{
 			Type:           "workflow",
+			ItemID:         itemID,
 			WorkflowID:     runID,
 			WorkflowName:   dataString(data, "workflowName"),
 			WorkflowStatus: dataString(data, "workflowStatus"),
@@ -2175,13 +2180,23 @@ func (r *ProjectionReducer) flushLocked(ps *projectionSession) (ProjectionPatch,
 		g := cloneGoalViewGo(*ps.goal)
 		patch.Goal = &g
 	}
-	for _, t := range ps.upsertTurns {
+	for turnID, staged := range ps.upsertTurns {
+		// First content frame also stages append_text. The live turn already
+		// contains those bytes; emitting both made iOS apply the first chunk twice
+		// ("我会调用两个我会调用两个…"). Prefer the live shell and skip append_text.
+		t := staged
+		if live := ps.turnByID(turnID); live != nil {
+			t = *live
+		}
 		patch.UpsertTurns = append(patch.UpsertTurns, cloneTurn(t))
 	}
 	for turnID := range ps.upsertTurns {
 		ps.publishedTurnShells[turnID] = struct{}{}
 	}
 	for msgID, chunks := range ps.textAppends {
+		if _, hasShell := ps.upsertTurns[msgID]; hasShell {
+			continue
+		}
 		combined := ""
 		for _, c := range chunks {
 			combined += c

@@ -57,12 +57,11 @@ var (
 	ErrDetailBadID          = errors.New("detail-store: unsafe id segment")
 )
 
-// turnDetailMappingVersion fences persisted ProjectionPart semantics. Version 1
-// is the first cache generation that preserves the official agentMessage phase
-// (commentary -> progress, final_answer -> final). Manifests written before the
-// field existed decode as zero and are rebuilt from official pagination instead
-// of replaying incorrectly classified text forever after a runtime upgrade.
-const turnDetailMappingVersion = 1
+// turnDetailMappingVersion fences persisted ProjectionPart semantics. Version 2
+// additionally defers mutable collaboration workflow snapshots until upstream
+// EOF. Older manifests are rebuilt from official pagination instead of replaying
+// a first-page workflow image with missing members forever after an upgrade.
+const turnDetailMappingVersion = 2
 
 // safeBackendSeg: the only raw-ish segment allowed in paths (backend ids come
 // from internal config; handles are store-derived hex — both still validated;

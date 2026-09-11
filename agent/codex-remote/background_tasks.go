@@ -24,9 +24,13 @@ func backgroundTasksFromTurns(sessionID string, turns []core.TurnScopedHistoryTu
 	byID := make(map[string]core.BackgroundTask)
 	var order []string
 	for _, turn := range turns {
-		observedAt := turn.CompletedAt
-		if observedAt.IsZero() {
-			observedAt = turn.StartedAt
+		startedAt := turn.StartedAt
+		if startedAt.IsZero() {
+			startedAt = turn.CompletedAt
+		}
+		finishedAt := turn.CompletedAt
+		if finishedAt.IsZero() {
+			finishedAt = startedAt
 		}
 		for _, part := range turn.Parts {
 			if stringValue(part["type"]) != "workflow" {
@@ -49,17 +53,17 @@ func backgroundTasksFromTurns(sessionID string, turns []core.TurnScopedHistoryTu
 						current = core.BackgroundTask{
 							TaskID: childID, BackendID: BackendID, RootSessionID: sessionID,
 							AgentID: childID, Title: label, Status: status,
-							StartedAt: observedAt, UpdatedAt: observedAt, TranscriptAvailable: true,
+							StartedAt: startedAt, UpdatedAt: startedAt, TranscriptAvailable: true,
 						}
 						order = append(order, childID)
 					} else {
 						current.Status = status
-						if !observedAt.IsZero() {
-							current.UpdatedAt = observedAt
+						if !finishedAt.IsZero() {
+							current.UpdatedAt = finishedAt
 						}
 					}
-					if status != "running" && status != "queued" && !observedAt.IsZero() {
-						current.FinishedAt = observedAt
+					if status != "running" && status != "queued" && !finishedAt.IsZero() {
+						current.FinishedAt = finishedAt
 					}
 					byID[childID] = current
 				}

@@ -136,8 +136,8 @@ func TestCommitTurnStateOpsV2DrainsStagedLiveDelta(t *testing.T) {
 	if len(patches) != 2 {
 		t.Fatalf("chain = %d patches, want [staged-live, commit]", len(patches))
 	}
-	if len(patches[0].PartOps) == 0 {
-		t.Fatalf("chain head must be the staged live delta: %+v", patches[0])
+	if deliveredAssistantText(patches[0], "T2") != "live staged" || patchDuplicatesAssistantText(patches[0], "T2") {
+		t.Fatalf("chain head must deliver the staged live delta exactly once: %+v", patches[0])
 	}
 	if len(patches[1].TurnStateOps) != 1 {
 		t.Fatalf("chain tail must be the V2 commit: %+v", patches[1])

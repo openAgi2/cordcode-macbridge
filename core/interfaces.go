@@ -283,6 +283,12 @@ type UpstreamHistoryPager interface {
 type ColdHistoryResult struct {
 	HistoryMode string // "paginated" | "legacy"
 	Page        *UpstreamHistoryPage
+	// GoalRecord is the authoritative native Codex thread-goal snapshot for
+	// the same connection epoch as this baseline. nil means the capability or
+	// snapshot was unavailable; non-nil with Goal=nil is an authoritative
+	// clear. Keeping it in the cold transaction prevents a force rebuild from
+	// erasing a goal that arrived on the live stream just before hydration.
+	GoalRecord *SessionGoalSnapshot
 }
 
 // ColdHistoryReader is the T0.5-compliant cold-open surface: the AGENT owns the

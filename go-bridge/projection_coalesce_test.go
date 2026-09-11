@@ -27,22 +27,23 @@ func TestCoalesceMixedContentInOnePatch(t *testing.T) {
 		t.Fatalf("syncRev = %d, want 5 (turn_started no longer commits skeleton)", patch.SyncRev)
 	}
 
-	// One append_text carrying concatenated text deltas.
-	var appendText string
+	// First-frame shell + later deltas must deliver "abcd" once (not upsert+append).
+	gotText := deliveredAssistantText(patch, "T1")
+	if gotText != "abcd" {
+		t.Fatalf("delivered assistant text = %q, want %q (upsert=%+v partOps=%+v)", gotText, "abcd", patch.UpsertTurns, patch.PartOps)
+	}
+	if patchDuplicatesAssistantText(patch, "T1") {
+		t.Fatalf("first content patch duplicated text in upsertTurns and append_text: %+v", patch)
+	}
 	thinkText := ""
 	toolOps := 0
 	for _, op := range patch.PartOps {
 		switch op.Op {
-		case "append_text":
-			appendText += op.Text
 		case "set_thinking":
 			thinkText = op.Text
 		case "upsert_tool":
 			toolOps++
 		}
-	}
-	if appendText != "abcd" {
-		t.Fatalf("coalesced append_text = %q, want %q", appendText, "abcd")
 	}
 	if thinkText != "think" {
 		t.Fatalf("coalesced set_thinking = %q, want %q", thinkText, "think")
@@ -91,19 +92,16 @@ func TestCoalesceControlEventOrdersWithContent(t *testing.T) {
 	}
 	// The patch carries both the turn-completed upsert AND the content partOp.
 	foundComplete := false
-	foundText := false
 	for _, tu := range patch.UpsertTurns {
 		if tu.TurnID == "T1" && tu.Status == "completed" {
 			foundComplete = true
 		}
 	}
-	for _, op := range patch.PartOps {
-		if op.Op == "append_text" && op.Text == "hi" {
-			foundText = true
-		}
+	if !foundComplete || deliveredAssistantText(patch, "T1") != "hi" {
+		t.Fatalf("patch missing completion(%v) or text: upserts=%+v partOps=%+v", foundComplete, patch.UpsertTurns, patch.PartOps)
 	}
-	if !foundComplete || !foundText {
-		t.Fatalf("patch missing completion(%v) or text(%v): upserts=%+v partOps=%+v", foundComplete, foundText, patch.UpsertTurns, patch.PartOps)
+	if patchDuplicatesAssistantText(patch, "T1") {
+		t.Fatalf("completed first-frame patch duplicated text: %+v", patch)
 	}
 	// Execution reflects idle after completion.
 	proj, _ := r.Snapshot("codex", "s1")
@@ -115,6 +113,82 @@ func TestCoalesceControlEventOrdersWithContent(t *testing.T) {
 // When no v2 observer is online, live projection state remains authoritative but
 // its unsent patch accumulator must not grow for the duration of a turn. A later
 // observer receives the current snapshot, then starts a fresh delta base.
+func TestFirstTextDeltaAfterPersistOnlyDoesNotDuplicate(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex-remote", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex-remote", "s1", "text_delta", map[string]interface{}{
+		"turnId": "T1", "itemId": "item-1", "delta": "我会调用两个", "presentation": "progress",
+	}))
+	patch, ok := r.FlushPatch("codex-remote", "s1")
+	if !ok {
+		t.Fatal("expected first content patch")
+	}
+	if patchDuplicatesAssistantText(patch, "T1") {
+		t.Fatalf("first delta was in both upsertTurns and append_text: upserts=%+v partOps=%+v", patch.UpsertTurns, patch.PartOps)
+	}
+	if got := deliveredAssistantText(patch, "T1"); got != "我会调用两个" {
+		t.Fatalf("delivered %q, want 我会调用两个", got)
+	}
+	proj, _ := r.Snapshot("codex-remote", "s1")
+	if len(proj.Turns) != 1 || proj.Turns[0].Assistant == nil {
+		t.Fatalf("snapshot turns = %+v", proj.Turns)
+	}
+	var snap string
+	for _, part := range proj.Turns[0].Assistant.Parts {
+		if part.Type == "text" {
+			snap += part.Text
+		}
+	}
+	if snap != "我会调用两个" {
+		t.Fatalf("snapshot text = %q, want 我会调用两个", snap)
+	}
+}
+
+func deliveredAssistantText(p ProjectionPatch, turnID string) string {
+	var upsert string
+	for _, tu := range p.UpsertTurns {
+		if tu.TurnID != turnID || tu.Assistant == nil {
+			continue
+		}
+		for _, part := range tu.Assistant.Parts {
+			if part.Type == "text" {
+				upsert += part.Text
+			}
+		}
+	}
+	var appendText string
+	for _, op := range p.PartOps {
+		if op.Op == "append_text" && (op.TurnID == turnID || op.MessageID == turnID) {
+			appendText += op.Text
+		}
+	}
+	if upsert != "" {
+		return upsert
+	}
+	return appendText
+}
+
+func patchDuplicatesAssistantText(p ProjectionPatch, turnID string) bool {
+	var upsert string
+	for _, tu := range p.UpsertTurns {
+		if tu.TurnID != turnID || tu.Assistant == nil {
+			continue
+		}
+		for _, part := range tu.Assistant.Parts {
+			if part.Type == "text" {
+				upsert += part.Text
+			}
+		}
+	}
+	var appendText string
+	for _, op := range p.PartOps {
+		if op.Op == "append_text" && (op.TurnID == turnID || op.MessageID == turnID) {
+			appendText += op.Text
+		}
+	}
+	return upsert != "" && appendText != ""
+}
+
 func TestDropPendingPatchWithoutObserverRetainsSnapshot(t *testing.T) {
 	r := newTestReducer()
 	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))

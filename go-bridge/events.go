@@ -473,8 +473,13 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 			return "", nil, false
 		}
 		wr := ev.WorkflowRun
+		itemID := ev.ItemID
+		if itemID == "" {
+			itemID = wr.RunID
+		}
 		return "workflow_run", eventData(ev, map[string]interface{}{
 			"turnId":         ev.TurnID,
+			"itemId":         itemID,
 			"workflowId":     wr.RunID,
 			"workflowName":   wr.Name,
 			"workflowStatus": wr.Status,
