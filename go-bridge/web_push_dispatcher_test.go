@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -229,6 +230,55 @@ func TestDispatcherTopicStablePerSessionAcrossTurns(t *testing.T) {
 		if len(header.Get("Topic")) > 32 {
 			t.Fatalf("request %d Topic exceeds RFC 8030 limit: %q", i, header.Get("Topic"))
 		}
+	}
+}
+
+func TestDispatcherPayloadTagStablePerSession(t *testing.T) {
+	h := newDispatcherHarness(t, 200)
+	d := newTestDispatcher(h)
+	first := dispatcherCandidate(WebPushKindCompletion, "codex|disp-1|turn-1|completed")
+	secondTurn := first
+	secondTurn.NotificationKey = "codex|disp-1|turn-2|completed"
+	otherSession := first
+	otherSession.SessionID = "disp-2"
+	otherSession.NotificationKey = "codex|disp-2|turn-1|completed"
+	otherBackend := first
+	otherBackend.BackendID = "claude-code"
+	otherBackend.NotificationKey = "claude-code|disp-1|turn-1|completed"
+
+	tagOf := func(candidate WebPushCandidate) string {
+		t.Helper()
+		raw, _, _, err := d.buildPayload(candidate)
+		if err != nil {
+			t.Fatalf("buildPayload: %v", err)
+		}
+		var payload WebPushPayloadV1
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		return payload.Notification.Tag
+	}
+
+	firstTag := tagOf(first)
+	// tag 必须与 Topic 共用同一 (backendId, sessionId) 聚合身份：同会话跨 turn 稳定，
+	// 跨会话/跨 backend 不碰撞，且满足与 Topic 相同的长度与字母表约束。
+	if firstTag != "ccs_"+sessionAggregationKey(first) {
+		t.Fatalf("tag = %q, want ccs_+sessionAggregationKey (must share the Topic aggregation identity)", firstTag)
+	}
+	if !regexp.MustCompile(`^ccs_[A-Za-z0-9_-]{22}$`).MatchString(firstTag) {
+		t.Fatalf("tag = %q, want ccs_ prefix + 22 base64url characters", firstTag)
+	}
+	if len(firstTag) > 32 {
+		t.Fatalf("tag = %q exceeds 32 characters", firstTag)
+	}
+	if next := tagOf(secondTurn); next != firstTag {
+		t.Fatalf("same backend/session tag changed across turns: %q != %q", next, firstTag)
+	}
+	if next := tagOf(otherSession); next == firstTag {
+		t.Fatalf("different sessions collided on tag: %q", firstTag)
+	}
+	if next := tagOf(otherBackend); next == firstTag {
+		t.Fatalf("different backends collided on tag: %q", firstTag)
 	}
 }
 

@@ -187,7 +187,9 @@ func (d *WebPushDispatcher) buildPayload(candidate WebPushCandidate) ([]byte, in
 		Notification: WebPushNotificationPayload{
 			Title: title,
 			Body:  body,
-			Tag:   "cc_" + keyHashTag(candidate),
+			// tag 与 Topic 共用 (backendId, sessionId) 聚合身份：iOS 上同会话通知
+			// 互相替换（A2，丢历史换折叠）；ledger 幂等仍由 per-turn notification key 负责。
+			Tag: "ccs_" + sessionAggregationKey(candidate),
 		},
 		Target: WebPushTarget{
 			BridgeID:  candidate.BridgeID,
@@ -210,14 +212,6 @@ func (d *WebPushDispatcher) buildPayload(candidate WebPushCandidate) ([]byte, in
 		return nil, 0, "", err
 	}
 	return raw, int(ttl.Seconds()), urgency, nil
-}
-
-func keyHashTag(candidate WebPushCandidate) string {
-	hash := WebPushNotificationKeyHash(candidate.NotificationKey)
-	if len(hash) > 16 {
-		return hash[:16]
-	}
-	return hash
 }
 
 // sessionAggregationKey 是 Topic/tag 共用的展示聚合身份。它与按 turn 唯一的

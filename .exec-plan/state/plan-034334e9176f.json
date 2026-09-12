@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T09:02:00Z",
+  "updated_at": "2026-09-12T16:12:56.623365+00:00",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -46,7 +46,21 @@
       "depends_on": [],
       "source": "§4 A1 / §6 P1",
       "notes": "Cross-repo source pair: MacBridge plan/approval-layer; iOS plan/approval-layer-ios.",
-      "verification": {"required": true, "status": "present", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "Added a domain-separated 22-character base64url session aggregation key and switched only the RFC 8030 Topic header to ccs_<key>; per-turn notification ledger keys remain unchanged.", "artifacts": ["go-bridge/web_push_dispatcher.go:sessionAggregationKey", "go-bridge/web_push_dispatcher.go:WebPushDispatcher.deliverToSubscription", "go-bridge/web_push_dispatcher_test.go:TestSessionAggregationKeyStableAndBackendScoped", "go-bridge/web_push_dispatcher_test.go:TestDispatcherTopicStablePerSessionAcrossTurns"], "checked_at": "2026-09-12T04:31:00Z"}
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Added a domain-separated 22-character base64url session aggregation key and switched only the RFC 8030 Topic header to ccs_<key>; per-turn notification ledger keys remain unchanged.",
+        "artifacts": [
+          "go-bridge/web_push_dispatcher.go:sessionAggregationKey",
+          "go-bridge/web_push_dispatcher.go:WebPushDispatcher.deliverToSubscription",
+          "go-bridge/web_push_dispatcher_test.go:TestSessionAggregationKeyStableAndBackendScoped",
+          "go-bridge/web_push_dispatcher_test.go:TestDispatcherTopicStablePerSessionAcrossTurns"
+        ],
+        "checked_at": "2026-09-12T04:31:00Z"
+      }
     },
     {
       "id": "p1-session-topic-tests",
@@ -55,295 +69,1060 @@
       "status": "done",
       "phase": "p1",
       "kind": "tests",
-      "depends_on": ["p1-session-topic-impl"],
+      "depends_on": [
+        "p1-session-topic-impl"
+      ],
       "source": "§7 automated",
       "notes": "",
-      "verification": {"required": true, "status": "present", "method": "automated", "attestation": "re-verified", "na_reason": null, "summary": "Focused Web Push tests passed and were independently re-run during the exec-plan exit audit, covering the new stable Topic key plus existing dispatcher behavior.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-topic-tests.log", ".exec-plan/evidence/034334e9176f/p1-topic-tests-audit.log", "cmd:go test ./go-bridge -run 'Test(SessionAggregationKey|Dispatcher|WebPush)' -count=1"], "checked_at": "2026-09-12T04:35:00Z"}
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Focused Web Push tests passed and were independently re-run during the exec-plan exit audit, covering the new stable Topic key plus existing dispatcher behavior.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-topic-tests.log",
+          ".exec-plan/evidence/034334e9176f/p1-topic-tests-audit.log",
+          "cmd:go test ./go-bridge -run 'Test(SessionAggregationKey|Dispatcher|WebPush)' -count=1"
+        ],
+        "checked_at": "2026-09-12T04:35:00Z"
+      }
     },
     {
       "id": "p1-session-topic-regression",
       "title": "P1 offline Topic real-device regression",
       "description": "Verify on the installed iOS Home Screen web app that multiple pushes for one session accumulated while the phone is genuinely offline collapse to the latest outstanding message, without treating ordinary lock-screen state as offline.",
-      "status": "blocked",
+      "status": "done",
       "phase": "p1",
       "kind": "regression",
-      "depends_on": ["p1-session-topic-tests"],
+      "depends_on": [
+        "p1-session-topic-tests"
+      ],
       "source": "§7 real-device matrix #4",
-      "notes": "Repairable-heavy regression failure reported by owner: completion pushes were delivered only for sessions previously opened in the iOS Home Screen Web App; unopened Claude and Codex sessions produced no notification. review-fix-for:p1-session-topic-regression",
-      "verification": {"required": true, "status": "failed", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Owner observation proves the prerequisite delivery surface is incomplete: passive completion events for never-opened sessions do not become Web Push candidates. Topic offline-collapse cannot be accepted until this is repaired and the original matrix is rerun.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-release-build.log", ".exec-plan/evidence/034334e9176f/p1-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-management-status.json", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T04:38:00Z"}
+      "notes": "Repairable-heavy regression failure reported by owner: completion pushes were delivered only for sessions previously opened in the iOS Home Screen Web App; unopened Claude and Codex sessions produced no notification. review-fix-for:p1-session-topic-regression resolved-via:p1-claude-watcher-dedup-baseline-regression; owner real-device verification 2026-09-12/13, see evidence doc.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Owner confirmed 2026-09-13: with the Home Screen Web App installed and notifications on, a session completing multiple turns during a genuine network outage delivered only the latest pending message per session after reconnect (true offline, not lock screen). Plan §7 real-device matrix item 4 PASS.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-blocked-regressions-owner-verification.md",
+          "/Users/jacklee/.codex/sessions/2026/09/12/rollout-2026-09-12T11-48-56-01a093bb-897b-7472-a75b-29be66874e06.jsonl"
+        ],
+        "checked_at": "2026-09-13T00:00:00Z"
+      }
     },
     {
       "id": "p1-unopened-session-push-review-fix-impl",
       "title": "P1 unopened-session push delivery review fix",
       "description": "Decouple live passive completion push candidacy from Web App session observation/projection state so an enrolled device receives completion notifications for never-opened sessions, while preserving the single timeline-ingest owner and preventing hydrate/replay notifications.",
-      "status": "done", "phase": "p1-review-fix", "kind": "impl", "depends_on": ["p1-session-topic-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-session-topic-regression",
-      "verification": {"required": true, "status": "present", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "Commit 6383990 adds a replay-free live event seam for Codex Remote and a baseline-cut Claude transcript watcher so never-opened sessions produce completion candidates without observation, thread attachment, historical backfill, or hidden projection state.", "artifacts": ["commit:6383990", "core/interfaces.go:LiveEventSubscriber", "agent/codex-remote/session.go:SubscribeLive", "go-bridge/claude_web_push_watcher.go", "go-bridge/web_push_producer.go:enqueueReplayFreeLivePush", "docs/2026-09-12-remote-web-push-badge-and-collapse-plan.md:A0"], "checked_at": "2026-09-12T04:40:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "impl",
+      "depends_on": [
+        "p1-session-topic-tests"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-session-topic-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Commit 6383990 adds a replay-free live event seam for Codex Remote and a baseline-cut Claude transcript watcher so never-opened sessions produce completion candidates without observation, thread attachment, historical backfill, or hidden projection state.",
+        "artifacts": [
+          "commit:6383990",
+          "core/interfaces.go:LiveEventSubscriber",
+          "agent/codex-remote/session.go:SubscribeLive",
+          "go-bridge/claude_web_push_watcher.go",
+          "go-bridge/web_push_producer.go:enqueueReplayFreeLivePush",
+          "docs/2026-09-12-remote-web-push-badge-and-collapse-plan.md:A0"
+        ],
+        "checked_at": "2026-09-12T04:40:00Z"
+      }
     },
     {
       "id": "p1-unopened-session-push-review-fix-tests",
       "title": "P1 unopened-session push automated tests",
       "description": "Add and run focused tests proving a live passive terminal for a never-observed session produces exactly one candidate, observed/relayed paths do not duplicate it, non-terminal and replay/hydrate paths remain excluded, and Claude/Codex backend identities remain scoped.",
-      "status": "done", "phase": "p1-review-fix", "kind": "tests", "depends_on": ["p1-unopened-session-push-review-fix-impl"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-session-topic-regression",
-      "verification": {"required": true, "status": "present", "method": "automated", "attestation": "re-verified", "na_reason": null, "summary": "The complete Go suite passed, followed by a fresh focused re-run proving unattached Codex live delivery, Claude baseline/no-backfill behavior, never-opened Claude completion delivery, non-terminal rejection, and no hidden projection creation.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-unopened-session-review-fix-all-go-tests.log", ".exec-plan/evidence/034334e9176f/p1-unopened-session-review-fix-tests-audit.log", "go-bridge/claude_web_push_watcher_test.go", "agent/codex-remote/session_test.go:TestSubscribeLiveReceivesUnattachedThreadEvent", "go-bridge/web_push_producer_test.go:TestReplayFreeLivePushNotifiesWithoutCreatingProjection"], "checked_at": "2026-09-12T04:43:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "tests",
+      "depends_on": [
+        "p1-unopened-session-push-review-fix-impl"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-session-topic-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "The complete Go suite passed, followed by a fresh focused re-run proving unattached Codex live delivery, Claude baseline/no-backfill behavior, never-opened Claude completion delivery, non-terminal rejection, and no hidden projection creation.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-unopened-session-review-fix-all-go-tests.log",
+          ".exec-plan/evidence/034334e9176f/p1-unopened-session-review-fix-tests-audit.log",
+          "go-bridge/claude_web_push_watcher_test.go",
+          "agent/codex-remote/session_test.go:TestSubscribeLiveReceivesUnattachedThreadEvent",
+          "go-bridge/web_push_producer_test.go:TestReplayFreeLivePushNotifiesWithoutCreatingProjection"
+        ],
+        "checked_at": "2026-09-12T04:43:00Z"
+      }
     },
     {
       "id": "p1-unopened-session-push-review-fix-regression",
       "title": "P1 unopened-session push real-device regression",
       "description": "On the installed Home Screen Web App, verify never-opened Claude and Codex sessions notify after Mac-side completion, then rerun the original genuinely-offline same-session Topic collapse matrix.",
-      "status": "blocked", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-unopened-session-push-review-fix-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-session-topic-regression; blocked by replay-free EventID payload repair; owner authorization already granted for this real-device scope.",
-      "verification": {"required": true, "status": "failed", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Never-opened session push reached iOS but displayed the fixed schema-error notification. Local ledger confirms replay-free deliveries carried empty eventId while SW requires a non-empty target.eventId.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T06:01:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "regression",
+      "depends_on": [
+        "p1-unopened-session-push-review-fix-tests"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-session-topic-regression; blocked by replay-free EventID payload repair; owner authorization already granted for this real-device scope. resolved-via:p1-claude-watcher-dedup-baseline-regression; owner real-device verification 2026-09-12/13, see evidence doc.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Owner confirmed 2026-09-12 14:12/14:33 CST: sessions never opened in the iOS Web App (E/F) received notifications; final round reported normal notifications with no anomalous or extra ones.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-blocked-regressions-owner-verification.md",
+          "/Users/jacklee/.codex/sessions/2026/09/12/rollout-2026-09-12T11-48-56-01a093bb-897b-7472-a75b-29be66874e06.jsonl"
+        ],
+        "checked_at": "2026-09-13T00:00:00Z"
+      }
     },
     {
       "id": "p1-replay-free-event-id-impl",
       "title": "P1 replay-free eventId payload repair",
       "description": "Derive a deterministic domain-separated target.eventId for replay-free live completion candidates, reject missing EventID at the candidate boundary, and keep the identity stable across retries without synthesizing Kernel sequence IDs.",
-      "status": "done", "phase": "p1-review-fix", "kind": "impl", "depends_on": ["p1-unopened-session-push-review-fix-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-unopened-session-push-review-fix-regression",
-      "verification": {"required": true, "status": "present", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "Replay-free candidates now derive deterministic wplive- prefixed EventIDs from the per-turn notification key, serialize a complete web_push_v1 target, and fail closed when EventID is absent.", "artifacts": ["go-bridge/web_push_producer.go:enqueueReplayFreeLivePush", "go-bridge/web_push_candidate.go:IngestReplayFreeLive", "docs/2026-09-12-remote-web-push-badge-and-collapse-plan.md:A0"], "checked_at": "2026-09-12T06:03:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "impl",
+      "depends_on": [
+        "p1-unopened-session-push-review-fix-tests"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-unopened-session-push-review-fix-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Replay-free candidates now derive deterministic wplive- prefixed EventIDs from the per-turn notification key, serialize a complete web_push_v1 target, and fail closed when EventID is absent.",
+        "artifacts": [
+          "go-bridge/web_push_producer.go:enqueueReplayFreeLivePush",
+          "go-bridge/web_push_candidate.go:IngestReplayFreeLive",
+          "docs/2026-09-12-remote-web-push-badge-and-collapse-plan.md:A0"
+        ],
+        "checked_at": "2026-09-12T06:03:00Z"
+      }
     },
     {
       "id": "p1-replay-free-event-id-tests",
       "title": "P1 replay-free eventId automated tests",
       "description": "Prove replay-free candidates carry deterministic non-empty EventID, serialized web_push_v1 targets satisfy all required identity fields, and missing EventID is rejected before dispatch.",
-      "status": "done", "phase": "p1-review-fix", "kind": "tests", "depends_on": ["p1-replay-free-event-id-impl"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-unopened-session-push-review-fix-regression",
-      "verification": {"required": true, "status": "present", "method": "automated", "attestation": "re-verified", "na_reason": null, "summary": "Full Go suite passed. Focused tests prove deterministic retry-stable EventID, complete serialized target identity, duplicate EventID stability, and fail-closed rejection when EventID is missing.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-replay-free-event-id-all-go-tests.log", "go-bridge/web_push_producer_test.go:TestReplayFreeLivePushNotifiesWithoutCreatingProjection"], "checked_at": "2026-09-12T06:03:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "tests",
+      "depends_on": [
+        "p1-replay-free-event-id-impl"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-unopened-session-push-review-fix-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Full Go suite passed. Focused tests prove deterministic retry-stable EventID, complete serialized target identity, duplicate EventID stability, and fail-closed rejection when EventID is missing.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-replay-free-event-id-all-go-tests.log",
+          "go-bridge/web_push_producer_test.go:TestReplayFreeLivePushNotifiesWithoutCreatingProjection"
+        ],
+        "checked_at": "2026-09-12T06:03:00Z"
+      }
     },
     {
       "id": "p1-replay-free-event-id-regression",
       "title": "P1 replay-free eventId real-device regression",
       "description": "Verify an unopened-session completion on the installed build shows the real session completion notification rather than the fixed SW schema-error notification, then continue the original unopened/offline matrices.",
-      "status": "blocked", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-replay-free-event-id-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-unopened-session-push-review-fix-regression; blocked by Claude watcher terminal dedup and first-visible baseline repair; owner authorization already granted.",
-      "verification": {"required": true, "status": "failed", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Payload schema is now valid, but the Claude watcher double-queued textless and text-bearing terminal rows for one turn and replayed history from a transcript that first became visible after startup.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T06:09:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "regression",
+      "depends_on": [
+        "p1-replay-free-event-id-tests"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-unopened-session-push-review-fix-regression; blocked by Claude watcher terminal dedup and first-visible baseline repair; owner authorization already granted. resolved-via:p1-claude-watcher-dedup-baseline-regression; owner real-device verification 2026-09-12/13, see evidence doc.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Owner confirmed 2026-09-12 14:12+ CST: the 'cordcode push data error' notification no longer appeared after the replay-free eventId repair; 14:33 round clean.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-blocked-regressions-owner-verification.md",
+          "/Users/jacklee/.codex/sessions/2026/09/12/rollout-2026-09-12T11-48-56-01a093bb-897b-7472-a75b-29be66874e06.jsonl"
+        ],
+        "checked_at": "2026-09-13T00:00:00Z"
+      }
     },
     {
       "id": "p1-claude-watcher-dedup-baseline-impl",
       "title": "P1 Claude watcher terminal dedup and first-visible baseline repair",
       "description": "Baseline every Claude transcript when the watcher first observes it, and hold/deduplicate per-turn terminal candidates so textless and text-bearing end_turn rows produce exactly one notification with the available real preview.",
-      "status": "done", "phase": "p1-review-fix", "kind": "impl", "depends_on": ["p1-replay-free-event-id-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-replay-free-event-id-regression",
-      "verification": {"required": true, "status": "present", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "The Claude watcher now baselines first-visible rows timestamped before watcher startup while retaining post-startup live completions, holds one terminal candidate per logical turn until real text arrives or a bounded fallback hold elapses, and resets ownership when an interactive relay takes over.", "artifacts": ["go-bridge/claude_web_push_watcher.go:claudeFirstVisibleLiveCut", "go-bridge/claude_web_push_watcher.go:flushTerminal", "docs/2026-09-12-remote-web-push-badge-and-collapse-plan.md:A0"], "checked_at": "2026-09-12T06:23:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "impl",
+      "depends_on": [
+        "p1-replay-free-event-id-tests"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-replay-free-event-id-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "The Claude watcher now baselines first-visible rows timestamped before watcher startup while retaining post-startup live completions, holds one terminal candidate per logical turn until real text arrives or a bounded fallback hold elapses, and resets ownership when an interactive relay takes over.",
+        "artifacts": [
+          "go-bridge/claude_web_push_watcher.go:claudeFirstVisibleLiveCut",
+          "go-bridge/claude_web_push_watcher.go:flushTerminal",
+          "docs/2026-09-12-remote-web-push-badge-and-collapse-plan.md:A0"
+        ],
+        "checked_at": "2026-09-12T06:23:00Z"
+      }
     },
     {
       "id": "p1-claude-watcher-dedup-baseline-tests",
       "title": "P1 Claude watcher dedup and baseline automated tests",
       "description": "Prove first-visible historical transcripts never backfill, one turn with textless then text-bearing terminal rows emits exactly one candidate with real preview, unchanged transcripts emit none, and pending textless terminals eventually use the honest fallback.",
-      "status": "done", "phase": "p1-review-fix", "kind": "tests", "depends_on": ["p1-claude-watcher-dedup-baseline-impl"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-replay-free-event-id-regression",
-      "verification": {"required": true, "status": "present", "method": "automated", "attestation": "re-verified", "na_reason": null, "summary": "Full Go suite passed. Focused tests prove first-visible pre-start history does not backfill, post-start live completion is retained, textless then text-bearing terminal rows yield exactly one real-preview candidate, and a genuinely textless terminal yields one bounded fallback candidate.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-claude-watcher-dedup-baseline-all-go-tests.log", "go-bridge/claude_web_push_watcher_test.go"], "checked_at": "2026-09-12T06:23:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "tests",
+      "depends_on": [
+        "p1-claude-watcher-dedup-baseline-impl"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-replay-free-event-id-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Full Go suite passed. Focused tests prove first-visible pre-start history does not backfill, post-start live completion is retained, textless then text-bearing terminal rows yield exactly one real-preview candidate, and a genuinely textless terminal yields one bounded fallback candidate.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-claude-watcher-dedup-baseline-all-go-tests.log",
+          "go-bridge/claude_web_push_watcher_test.go"
+        ],
+        "checked_at": "2026-09-12T06:23:00Z"
+      }
     },
     {
       "id": "p1-claude-watcher-dedup-baseline-regression",
       "title": "P1 Claude watcher dedup and baseline real-device regression",
       "description": "Verify a never-opened session with history emits only the new turn notification once, with real content rather than a duplicate generic fallback, and no historical turns are replayed.",
-      "status": "done", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-claude-watcher-dedup-baseline-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-replay-free-event-id-regression; Claude-only regression proven by owner.",
-      "verification": {"required": true, "status": "present", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Owner confirmed multiple never-opened Claude completions notify normally with no schema error, abnormal notification, or extra notification after the dedup/baseline build.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-claude-watcher-dedup-baseline-release-build.log", ".exec-plan/evidence/034334e9176f/p1-claude-watcher-dedup-baseline-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T06:42:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "regression",
+      "depends_on": [
+        "p1-claude-watcher-dedup-baseline-tests"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-replay-free-event-id-regression; Claude-only regression proven by owner.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Owner confirmed multiple never-opened Claude completions notify normally with no schema error, abnormal notification, or extra notification after the dedup/baseline build.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-claude-watcher-dedup-baseline-release-build.log",
+          ".exec-plan/evidence/034334e9176f/p1-claude-watcher-dedup-baseline-installed-runtime.log",
+          ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"
+        ],
+        "checked_at": "2026-09-12T06:42:00Z"
+      }
     },
     {
       "id": "p1-codex-live-attach-impl",
       "title": "P1 Codex replay-free per-thread attach implementation",
       "description": "Attach the replay-free Codex observer to Desktop-loaded threads with thread/resume(excludeTurns:true), fall back to recency head when none are loaded, and periodically recheck so later-opened old threads receive future live completions without history replay.",
-      "status": "done", "phase": "p1-review-fix", "kind": "impl", "depends_on": ["p1-replay-free-event-id-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-replay-free-event-id-regression; protocol evidence agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json",
-      "verification": {"required": true, "status": "present", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "The Codex passive observer now attaches Desktop-loaded threads (falling back to recency head) with excludeTurns:true, deduplicates repeated resume calls, and rechecks the loaded catalog every three seconds for later-opened threads.", "artifacts": ["core/interfaces.go:LiveEventCatalogAttacher", "agent/codex-remote/session.go:AttachLiveCatalog", "go-bridge/main.go:attachLiveCatalogPeriodically", "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"], "checked_at": "2026-09-12T06:43:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "impl",
+      "depends_on": [
+        "p1-replay-free-event-id-tests"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-replay-free-event-id-regression; protocol evidence agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "The Codex passive observer now attaches Desktop-loaded threads (falling back to recency head) with excludeTurns:true, deduplicates repeated resume calls, and rechecks the loaded catalog every three seconds for later-opened threads.",
+        "artifacts": [
+          "core/interfaces.go:LiveEventCatalogAttacher",
+          "agent/codex-remote/session.go:AttachLiveCatalog",
+          "go-bridge/main.go:attachLiveCatalogPeriodically",
+          "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"
+        ],
+        "checked_at": "2026-09-12T06:43:00Z"
+      }
     },
     {
       "id": "p1-codex-live-attach-tests",
       "title": "P1 Codex replay-free attach automated tests",
       "description": "Prove loaded-thread attach uses excludeTurns, repeated catalog attachment is idempotent, fallback stays bounded, and attached thread completion reaches SubscribeLive without adding a thread listener or hydrating history.",
-      "status": "done", "phase": "p1-review-fix", "kind": "tests", "depends_on": ["p1-codex-live-attach-impl"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-replay-free-event-id-regression",
-      "verification": {"required": true, "status": "present", "method": "automated", "attestation": "re-verified", "na_reason": null, "summary": "Full Go suite passed. Focused integration test proves loaded/list attachment is replay-free, repeated attachment resumes only once, and attached turn/completed reaches SubscribeLive.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-codex-live-attach-all-go-tests.log", "agent/codex-remote/session_test.go:TestAttachLiveCatalogResumesLoadedThreadWithoutHistory"], "checked_at": "2026-09-12T06:43:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "tests",
+      "depends_on": [
+        "p1-codex-live-attach-impl"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-replay-free-event-id-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Full Go suite passed. Focused integration test proves loaded/list attachment is replay-free, repeated attachment resumes only once, and attached turn/completed reaches SubscribeLive.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-codex-live-attach-all-go-tests.log",
+          "agent/codex-remote/session_test.go:TestAttachLiveCatalogResumesLoadedThreadWithoutHistory"
+        ],
+        "checked_at": "2026-09-12T06:43:00Z"
+      }
     },
     {
       "id": "p1-codex-live-attach-regression",
       "title": "P1 Codex replay-free attach real-device regression",
       "description": "Verify a never-opened Codex Desktop session notifies while iOS remains in Claude mode with no session open, without replaying history or affecting already-passing Claude notifications.",
-      "status": "done", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-codex-live-attach-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-replay-free-event-id-regression; delivery objective proven by owner. Preview defect moved to p1-codex-replay-preview triplet.",
-      "verification": {"required": true, "status": "present", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Owner confirmed a never-opened Codex Desktop session notifies while iOS remains in Claude mode without opening or switching sessions; no history replay and Claude behavior remained correct.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-codex-live-attach-release-build.log", ".exec-plan/evidence/034334e9176f/p1-codex-live-attach-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T06:54:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "regression",
+      "depends_on": [
+        "p1-codex-live-attach-tests"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-replay-free-event-id-regression; delivery objective proven by owner. Preview defect moved to p1-codex-replay-preview triplet.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Owner confirmed a never-opened Codex Desktop session notifies while iOS remains in Claude mode without opening or switching sessions; no history replay and Claude behavior remained correct.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-codex-live-attach-release-build.log",
+          ".exec-plan/evidence/034334e9176f/p1-codex-live-attach-installed-runtime.log",
+          ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"
+        ],
+        "checked_at": "2026-09-12T06:54:00Z"
+      }
     },
     {
       "id": "p1-codex-replay-preview-impl",
       "title": "P1 Codex replay-free live preview implementation",
       "description": "Accumulate live assistant text deltas per backend/session/turn in a bounded replay-free cache and consume the preview at completion without reading history or creating projection state.",
-      "status": "done", "phase": "p1-review-fix", "kind": "impl", "depends_on": ["p1-codex-live-attach-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-codex-live-attach-regression",
-      "verification": {"required": true, "status": "present", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "The passive replay-free path now accumulates same-turn assistant text deltas in a bounded cache keyed by backend/session/turn and consumes the preview when the terminal event enqueues the completion candidate.", "artifacts": ["go-bridge/web_push_replay_preview.go", "go-bridge/main.go:startPassiveSubscription", "docs/2026-09-12-remote-web-push-badge-and-collapse-plan.md:A0"], "checked_at": "2026-09-12T06:55:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "impl",
+      "depends_on": [
+        "p1-codex-live-attach-tests"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-codex-live-attach-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "The passive replay-free path now accumulates same-turn assistant text deltas in a bounded cache keyed by backend/session/turn and consumes the preview when the terminal event enqueues the completion candidate.",
+        "artifacts": [
+          "go-bridge/web_push_replay_preview.go",
+          "go-bridge/main.go:startPassiveSubscription",
+          "docs/2026-09-12-remote-web-push-badge-and-collapse-plan.md:A0"
+        ],
+        "checked_at": "2026-09-12T06:55:00Z"
+      }
     },
     {
       "id": "p1-codex-replay-preview-tests",
       "title": "P1 Codex replay-free live preview automated tests",
       "description": "Prove multi-delta text forms the completion preview, cache identity is turn/backend scoped, Take is consumption-once, no preview state is fabricated, and no hidden projection is created.",
-      "status": "done", "phase": "p1-review-fix", "kind": "tests", "depends_on": ["p1-codex-replay-preview-impl"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-codex-live-attach-regression",
-      "verification": {"required": true, "status": "present", "method": "automated", "attestation": "re-verified", "na_reason": null, "summary": "Full Go suite passed. Focused tests prove turn-scoped/consume-once cache behavior and a passive Codex completion whose body is assembled from live text deltas without hidden projection state.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-codex-replay-preview-all-go-tests.log", "go-bridge/web_push_replay_preview_test.go"], "checked_at": "2026-09-12T06:55:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "tests",
+      "depends_on": [
+        "p1-codex-replay-preview-impl"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-codex-live-attach-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Full Go suite passed. Focused tests prove turn-scoped/consume-once cache behavior and a passive Codex completion whose body is assembled from live text deltas without hidden projection state.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-codex-replay-preview-all-go-tests.log",
+          "go-bridge/web_push_replay_preview_test.go"
+        ],
+        "checked_at": "2026-09-12T06:55:00Z"
+      }
     },
     {
       "id": "p1-codex-replay-preview-regression",
       "title": "P1 Codex replay-free preview real-device regression",
       "description": "Verify a never-opened Codex completion notification carries the actual latest assistant response preview instead of the generic fallback while iOS remains in Claude mode.",
-      "status": "done", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-codex-replay-preview-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-codex-live-attach-regression; owner authorization already granted.",
-      "verification": {"required": true, "status": "present", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Owner confirmed the never-opened Codex completion notification now carries actual response detail rather than generic fallback text.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-codex-replay-preview-release-build.log", ".exec-plan/evidence/034334e9176f/p1-codex-replay-preview-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T07:04:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "regression",
+      "depends_on": [
+        "p1-codex-replay-preview-tests"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-codex-live-attach-regression; owner authorization already granted.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Owner confirmed the never-opened Codex completion notification now carries actual response detail rather than generic fallback text.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-codex-replay-preview-release-build.log",
+          ".exec-plan/evidence/034334e9176f/p1-codex-replay-preview-installed-runtime.log",
+          ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"
+        ],
+        "checked_at": "2026-09-12T07:04:00Z"
+      }
     },
     {
       "id": "p1-dsh-replay-free-impl",
       "title": "P1 DSH replay-free notification implementation",
       "description": "Expose a replay-free DSH live channel that admits only turns observed on the current subscription, consumes each completion once, and rejects same-turn reconnect replay while preserving live text for notification preview.",
-      "status": "done", "phase": "p1-review-fix", "kind": "impl", "depends_on": ["p1-codex-replay-preview-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-codex-replay-preview-regression; DSH extends the A0 backend coverage requirement.",
-      "verification": {"required": true, "status": "present", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "dsh-web now implements a replay-free LiveEventSubscriber filter over its cursorless mux stream: observed turns flow once, reconnect replay is suppressed, and live text/turn identity remain available to the Web Push preview path.", "artifacts": ["agent/dsh-web/streams.go:SubscribeLive", "core/interfaces.go:LiveEventSubscriber", "go-bridge/main.go:startPassiveSubscription"], "checked_at": "2026-09-12T07:07:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "impl",
+      "depends_on": [
+        "p1-codex-replay-preview-tests"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-codex-replay-preview-regression; DSH extends the A0 backend coverage requirement.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "dsh-web now implements a replay-free LiveEventSubscriber filter over its cursorless mux stream: observed turns flow once, reconnect replay is suppressed, and live text/turn identity remain available to the Web Push preview path.",
+        "artifacts": [
+          "agent/dsh-web/streams.go:SubscribeLive",
+          "core/interfaces.go:LiveEventSubscriber",
+          "go-bridge/main.go:startPassiveSubscription"
+        ],
+        "checked_at": "2026-09-12T07:07:00Z"
+      }
     },
     {
       "id": "p1-dsh-replay-free-tests",
       "title": "P1 DSH replay-free automated tests",
       "description": "Prove an observed external DSH turn flows through start/text/completion once, reconnect replay of the same turn is rejected, and turn identity is retained for Web Push preview.",
-      "status": "done", "phase": "p1-review-fix", "kind": "tests", "depends_on": ["p1-dsh-replay-free-impl"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-codex-replay-preview-regression",
-      "verification": {"required": true, "status": "present", "method": "automated", "attestation": "re-verified", "na_reason": null, "summary": "Focused and full Go suites passed. The DSH test feeds an official-shaped external turn through start/text/completion once, forces stream reconnect/replay, and proves the replay-free channel suppresses the repeated turn.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-dsh-replay-free-focused-tests.log", ".exec-plan/evidence/034334e9176f/p1-dsh-replay-free-all-go-tests.log", "agent/dsh-web/streams_test.go:TestSubscribeLiveConsumesObservedTurnAndRejectsReplay"], "checked_at": "2026-09-12T07:07:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "tests",
+      "depends_on": [
+        "p1-dsh-replay-free-impl"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-codex-replay-preview-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Focused and full Go suites passed. The DSH test feeds an official-shaped external turn through start/text/completion once, forces stream reconnect/replay, and proves the replay-free channel suppresses the repeated turn.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-dsh-replay-free-focused-tests.log",
+          ".exec-plan/evidence/034334e9176f/p1-dsh-replay-free-all-go-tests.log",
+          "agent/dsh-web/streams_test.go:TestSubscribeLiveConsumesObservedTurnAndRejectsReplay"
+        ],
+        "checked_at": "2026-09-12T07:07:00Z"
+      }
     },
     {
       "id": "p1-dsh-replay-free-regression",
       "title": "P1 DSH replay-free real-device regression",
       "description": "Verify a DeepSeek Harness session completed in the Mac 3080 web app notifies iOS with actual response detail while the iOS Web App remains in Claude mode with no session open.",
-      "status": "done", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-dsh-replay-free-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-codex-replay-preview-regression; owner authorization already granted.",
-      "verification": {"required": true, "status": "present", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Owner confirmed the DeepSeek Harness session completed in the Mac 3080 web app notifies iOS.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-dsh-replay-free-release-build.log", ".exec-plan/evidence/034334e9176f/p1-dsh-replay-free-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T08:24:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "regression",
+      "depends_on": [
+        "p1-dsh-replay-free-tests"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-codex-replay-preview-regression; owner authorization already granted.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Owner confirmed the DeepSeek Harness session completed in the Mac 3080 web app notifies iOS.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-dsh-replay-free-release-build.log",
+          ".exec-plan/evidence/034334e9176f/p1-dsh-replay-free-installed-runtime.log",
+          ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"
+        ],
+        "checked_at": "2026-09-12T08:24:00Z"
+      }
     },
     {
       "id": "p1-grok-replay-free-impl",
       "title": "P1 Grok replay-free notification implementation",
       "description": "Add a read-only process-wide Grok updates.jsonl live watcher that skips completed history, preserves an in-progress tail at startup, observes newly created session journals, and feeds the shared official session/update codec without driving Grok.",
-      "status": "done", "phase": "p1-review-fix", "kind": "impl", "depends_on": ["p1-dsh-replay-free-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-dsh-replay-free-regression; extends A0 backend coverage.",
-      "verification": {"required": true, "status": "present", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "Grok Build now exposes a process-wide read-only LiveEventSubscriber over per-session updates.jsonl journals: completed history is baselined, an in-progress tail is retained, new journals are observed, and official replay markers/codec semantics remain authoritative.", "artifacts": ["agent/grokbuild/global_updates_subscriber.go:SubscribeLive", "agent/grokbuild/grokbuild.go:core.LiveEventSubscriber", "agent/grokbuild/updates_file_tailer.go:drainNew"], "checked_at": "2026-09-12T08:27:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "impl",
+      "depends_on": [
+        "p1-dsh-replay-free-tests"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-dsh-replay-free-regression; extends A0 backend coverage.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Grok Build now exposes a process-wide read-only LiveEventSubscriber over per-session updates.jsonl journals: completed history is baselined, an in-progress tail is retained, new journals are observed, and official replay markers/codec semantics remain authoritative.",
+        "artifacts": [
+          "agent/grokbuild/global_updates_subscriber.go:SubscribeLive",
+          "agent/grokbuild/grokbuild.go:core.LiveEventSubscriber",
+          "agent/grokbuild/updates_file_tailer.go:drainNew"
+        ],
+        "checked_at": "2026-09-12T08:27:00Z"
+      }
     },
     {
       "id": "p1-grok-replay-free-tests",
       "title": "P1 Grok replay-free automated tests",
       "description": "Prove existing completed history is not replayed, newly created journals are observed, an in-progress turn retains text written before watcher startup, and completion carries source-proven turn identity for notification preview.",
-      "status": "done", "phase": "p1-review-fix", "kind": "tests", "depends_on": ["p1-grok-replay-free-impl"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-dsh-replay-free-regression",
-      "verification": {"required": true, "status": "present", "method": "automated", "attestation": "re-verified", "na_reason": null, "summary": "Focused and full Go suites passed. Tests prove completed history is skipped, a new journal is observed, an in-progress turn retains pre-startup text, and completion carries the source-proven prompt ID for notification preview.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-grok-replay-free-focused-tests.log", ".exec-plan/evidence/034334e9176f/p1-grok-replay-free-all-go-tests.log", "agent/grokbuild/global_updates_subscriber_test.go"], "checked_at": "2026-09-12T08:27:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "tests",
+      "depends_on": [
+        "p1-grok-replay-free-impl"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-dsh-replay-free-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Focused and full Go suites passed. Tests prove completed history is skipped, a new journal is observed, an in-progress turn retains pre-startup text, and completion carries the source-proven prompt ID for notification preview.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-grok-replay-free-focused-tests.log",
+          ".exec-plan/evidence/034334e9176f/p1-grok-replay-free-all-go-tests.log",
+          "agent/grokbuild/global_updates_subscriber_test.go"
+        ],
+        "checked_at": "2026-09-12T08:27:00Z"
+      }
     },
     {
       "id": "p1-grok-replay-free-regression",
       "title": "P1 Grok replay-free real-device regression",
       "description": "Verify a Grok Build session completed on Mac notifies iOS with actual response detail while the iOS Web App remains in Claude mode with no session open.",
-      "status": "done", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-grok-replay-free-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-dsh-replay-free-regression; owner authorization already granted.",
-      "verification": {"required": true, "status": "present", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Owner confirmed Grok Build completion notifies iOS while the Web App remains in Claude mode.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-grok-replay-free-release-build.log", ".exec-plan/evidence/034334e9176f/p1-grok-replay-free-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T08:36:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "regression",
+      "depends_on": [
+        "p1-grok-replay-free-tests"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-dsh-replay-free-regression; owner authorization already granted.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Owner confirmed Grok Build completion notifies iOS while the Web App remains in Claude mode.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-grok-replay-free-release-build.log",
+          ".exec-plan/evidence/034334e9176f/p1-grok-replay-free-installed-runtime.log",
+          ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"
+        ],
+        "checked_at": "2026-09-12T08:36:00Z"
+      }
     },
     {
       "id": "p1-opencode-web-replay-free-impl",
       "title": "P1 OpenCode Web replay-free notification implementation",
       "description": "Expose a replay-free OpenCode Web live channel over the cursorless global SSE tap by admitting only turns observed on the current subscription and consuming each completion once.",
-      "status": "done", "phase": "p1-review-fix", "kind": "impl", "depends_on": ["p1-grok-replay-free-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-grok-replay-free-regression; extends A0 backend coverage.",
-      "verification": {"required": true, "status": "present", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "opencode-web now implements a replay-free LiveEventSubscriber over its single cursorless global SSE tap: observed turns flow once, reconnect replay is suppressed, and live text/turn identity remain available to Web Push preview.", "artifacts": ["agent/opencode-web/events.go:SubscribeLive", "agent/opencode-web/events.go:filterOpenCodeLiveEvents", "core/interfaces.go:LiveEventSubscriber"], "checked_at": "2026-09-12T08:39:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "impl",
+      "depends_on": [
+        "p1-grok-replay-free-tests"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-grok-replay-free-regression; extends A0 backend coverage.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "opencode-web now implements a replay-free LiveEventSubscriber over its single cursorless global SSE tap: observed turns flow once, reconnect replay is suppressed, and live text/turn identity remain available to Web Push preview.",
+        "artifacts": [
+          "agent/opencode-web/events.go:SubscribeLive",
+          "agent/opencode-web/events.go:filterOpenCodeLiveEvents",
+          "core/interfaces.go:LiveEventSubscriber"
+        ],
+        "checked_at": "2026-09-12T08:39:00Z"
+      }
     },
     {
       "id": "p1-opencode-web-replay-free-tests",
       "title": "P1 OpenCode Web replay-free automated tests",
       "description": "Prove an observed OpenCode turn flows user/start/text/completion once, reconnect replay is rejected, and an unobserved cold terminal cannot notify.",
-      "status": "done", "phase": "p1-review-fix", "kind": "tests", "depends_on": ["p1-opencode-web-replay-free-impl"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-grok-replay-free-regression",
-      "verification": {"required": true, "status": "present", "method": "automated", "attestation": "re-verified", "na_reason": null, "summary": "Focused and full Go suites passed. Tests prove a user/start/text/completion lifecycle flows once, full reconnect replay is rejected, and an unobserved cold terminal cannot notify.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-opencode-web-replay-free-focused-tests.log", ".exec-plan/evidence/034334e9176f/p1-opencode-web-replay-free-all-go-tests.log", "agent/opencode-web/live_filter_test.go"], "checked_at": "2026-09-12T08:39:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "tests",
+      "depends_on": [
+        "p1-opencode-web-replay-free-impl"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-grok-replay-free-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Focused and full Go suites passed. Tests prove a user/start/text/completion lifecycle flows once, full reconnect replay is rejected, and an unobserved cold terminal cannot notify.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-opencode-web-replay-free-focused-tests.log",
+          ".exec-plan/evidence/034334e9176f/p1-opencode-web-replay-free-all-go-tests.log",
+          "agent/opencode-web/live_filter_test.go"
+        ],
+        "checked_at": "2026-09-12T08:39:00Z"
+      }
     },
     {
       "id": "p1-opencode-web-replay-free-regression",
       "title": "P1 OpenCode Web replay-free real-device regression",
       "description": "Verify an OpenCode Web session completed on Mac notifies iOS with actual response detail while the iOS Web App remains in Claude mode with no session open.",
-      "status": "done", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-opencode-web-replay-free-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-grok-replay-free-regression; owner authorization already granted.",
-      "verification": {"required": true, "status": "present", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Owner confirmed OpenCode Web completion notifies iOS while the Web App remains in Claude mode.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-opencode-web-replay-free-release-build.log", ".exec-plan/evidence/034334e9176f/p1-opencode-web-replay-free-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T08:52:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "regression",
+      "depends_on": [
+        "p1-opencode-web-replay-free-tests"
+      ],
+      "source": "owner regression 2026-09-12",
+      "notes": "review-fix-for:p1-grok-replay-free-regression; owner authorization already granted.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Owner confirmed OpenCode Web completion notifies iOS while the Web App remains in Claude mode.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-opencode-web-replay-free-release-build.log",
+          ".exec-plan/evidence/034334e9176f/p1-opencode-web-replay-free-installed-runtime.log",
+          ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"
+        ],
+        "checked_at": "2026-09-12T08:52:00Z"
+      }
     },
     {
       "id": "p1-backend-notification-title-impl",
       "title": "P1 backend-specific notification title implementation",
       "description": "Map backend IDs to the fixed display enum Claude code, Codex, Grok build, Deepseek Harness, and Opencode, then compose completion titles as `<backend> 任务已完成` while retaining the response preview as body.",
-      "status": "done", "phase": "p1-review-fix", "kind": "impl", "depends_on": ["p1-opencode-web-replay-free-tests"], "source": "owner preference 2026-09-12", "notes": "",
-      "verification": {"required": true, "status": "present", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "Completion notifications now map backend IDs to the fixed display enum and compose `<backend> 任务已完成`; response preview remains the body and unknown backend falls back honestly to CordCode.", "artifacts": ["go-bridge/web_push_protocol.go:webPushBackendDisplayName", "go-bridge/web_push_protocol.go:buildWebPushNotificationText", "go-bridge/web_push_dispatcher.go:buildPayload"], "checked_at": "2026-09-12T08:55:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "impl",
+      "depends_on": [
+        "p1-opencode-web-replay-free-tests"
+      ],
+      "source": "owner preference 2026-09-12",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Completion notifications now map backend IDs to the fixed display enum and compose `<backend> 任务已完成`; response preview remains the body and unknown backend falls back honestly to CordCode.",
+        "artifacts": [
+          "go-bridge/web_push_protocol.go:webPushBackendDisplayName",
+          "go-bridge/web_push_protocol.go:buildWebPushNotificationText",
+          "go-bridge/web_push_dispatcher.go:buildPayload"
+        ],
+        "checked_at": "2026-09-12T08:55:00Z"
+      }
     },
     {
       "id": "p1-backend-notification-title-tests",
       "title": "P1 backend notification title automated tests",
       "description": "Prove all fixed backend display mappings compose the requested title, unknown backend falls back honestly to CordCode, body preview behavior is unchanged, and canonical/iOS Web Push fixtures remain field-compatible.",
-      "status": "done", "phase": "p1-review-fix", "kind": "tests", "depends_on": ["p1-backend-notification-title-impl"], "source": "owner preference 2026-09-12", "notes": "",
-      "verification": {"required": true, "status": "present", "method": "automated", "attestation": "re-verified", "na_reason": null, "summary": "The full Go suite passed, focused title tests covered every fixed enum plus unknown-backend fallback, and the iOS protocol mirror's 8 Web Push type assertions passed under Bun.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-backend-notification-title-all-go-tests.log", ".exec-plan/evidence/034334e9176f/p1-backend-notification-title-ios-bun-test.log", "go-bridge/web_push_titles_test.go:TestBuildWebPushNotificationTextUsesBackendDisplayName"], "checked_at": "2026-09-12T08:55:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "tests",
+      "depends_on": [
+        "p1-backend-notification-title-impl"
+      ],
+      "source": "owner preference 2026-09-12",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "The full Go suite passed, focused title tests covered every fixed enum plus unknown-backend fallback, and the iOS protocol mirror's 8 Web Push type assertions passed under Bun.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-backend-notification-title-all-go-tests.log",
+          ".exec-plan/evidence/034334e9176f/p1-backend-notification-title-ios-bun-test.log",
+          "go-bridge/web_push_titles_test.go:TestBuildWebPushNotificationTextUsesBackendDisplayName"
+        ],
+        "checked_at": "2026-09-12T08:55:00Z"
+      }
     },
     {
       "id": "p1-backend-notification-title-regression",
       "title": "P1 backend notification title real-device regression",
       "description": "Verify installed iOS notifications show the requested backend-specific title over the actual response body for Claude code, Codex, Grok build, Deepseek Harness, and Opencode.",
-      "status": "done", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-backend-notification-title-tests"], "source": "owner preference 2026-09-12", "notes": "owner authorization already granted; owner confirmed backend-specific titles. Residual from CordCode label is iOS/WebKit source attribution, not payload content.",
-      "verification": {"required": true, "status": "present", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Owner confirmed notifications show the specific backend. Payload/SW/manifest inspection proves the remaining from CordCode line is generated by iOS/WebKit as the Home Screen Web App source label and cannot be removed through the Web Notification API.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-backend-notification-title-release-build.log", ".exec-plan/evidence/034334e9176f/p1-backend-notification-title-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T09:02:00Z"}
+      "status": "done",
+      "phase": "p1-review-fix",
+      "kind": "regression",
+      "depends_on": [
+        "p1-backend-notification-title-tests"
+      ],
+      "source": "owner preference 2026-09-12",
+      "notes": "owner authorization already granted; owner confirmed backend-specific titles. Residual from CordCode label is iOS/WebKit source attribution, not payload content.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Owner confirmed notifications show the specific backend. Payload/SW/manifest inspection proves the remaining from CordCode line is generated by iOS/WebKit as the Home Screen Web App source label and cannot be removed through the Web Notification API.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p1-backend-notification-title-release-build.log",
+          ".exec-plan/evidence/034334e9176f/p1-backend-notification-title-installed-runtime.log",
+          ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"
+        ],
+        "checked_at": "2026-09-12T09:02:00Z"
+      }
     },
     {
       "id": "p2-session-tag-impl",
       "title": "P2 stable per-session notification tag implementation",
       "description": "Use the P1 sessionAggregationKey for notification.tag so the latest notification replaces older notifications only within the same backend/session.",
-      "status": "pending", "phase": "p2", "kind": "impl", "depends_on": ["p1-session-topic-regression"], "source": "§4 A2 / §6 P2", "notes": "",
-      "verification": {"required": true, "status": "missing", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "status": "done",
+      "phase": "p2",
+      "kind": "impl",
+      "depends_on": [
+        "p1-session-topic-regression"
+      ],
+      "source": "§4 A2 / §6 P2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Tag switched from per-notification cc_+keyHash to ccs_+sessionAggregationKey (same (backendId,sessionId) aggregation identity as Topic); keyHashTag helper removed. go-bridge/web_push_dispatcher.go:190 buildPayload.",
+        "artifacts": [
+          "go-bridge/web_push_dispatcher.go"
+        ],
+        "checked_at": "2026-09-12T16:12:56.623365+00:00"
+      }
     },
     {
       "id": "p2-session-tag-tests",
       "title": "P2 stable tag automated tests",
       "description": "Add and run Go and Service Worker contract tests proving Topic/tag key parity, backend isolation, and unchanged per-turn idempotency identity.",
-      "status": "pending", "phase": "p2", "kind": "tests", "depends_on": ["p2-session-tag-impl"], "source": "§7 automated", "notes": "",
-      "verification": {"required": true, "status": "missing", "method": "automated", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "status": "done",
+      "phase": "p2",
+      "kind": "tests",
+      "depends_on": [
+        "p2-session-tag-impl"
+      ],
+      "source": "§7 automated",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "New failing-first test TestDispatcherPayloadTagStablePerSession: same backend/session stable across turns, distinct across sessions/backends, ^ccs_[A-Za-z0-9_-]{22}$, <=32 chars, equals Topic aggregation identity. Focused web-push suite + full repo go test ./... all pass (20 packages).",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p2-session-tag-all-go-tests.log"
+        ],
+        "checked_at": "2026-09-12T16:12:56.623365+00:00"
+      }
     },
     {
       "id": "p2-session-tag-regression",
       "title": "P2 notification replacement real-device regression",
       "description": "Verify on the Home Screen web app that repeated completions retain only the latest notification per session while distinct sessions remain separate and deep-link to the latest target.",
-      "status": "pending", "phase": "p2", "kind": "regression", "depends_on": ["p2-session-tag-tests"], "source": "§7 real-device matrix #3", "notes": "Requires owner authorization for real-device/UI interaction.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "status": "pending",
+      "phase": "p2",
+      "kind": "regression",
+      "depends_on": [
+        "p2-session-tag-tests"
+      ],
+      "source": "§7 real-device matrix #3",
+      "notes": "Requires owner authorization for real-device/UI interaction.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
     },
     {
       "id": "p3-badge-state-protocol-impl",
       "title": "P3 per-device badge state and payload protocol implementation",
       "description": "Implement isolated fail-closed badge-state persistence, bindingId/revision assignment, bounded saturation, per-device payload construction, additive badge tuple/register fields, canonical protocol/schema/fixture updates, and iOS protocol mirror synchronization.",
-      "status": "pending", "phase": "p3", "kind": "impl", "depends_on": ["p1-session-topic-regression"], "source": "§5 B1-B3 / §6 P3", "notes": "Canonical protocol must land in MacBridge before the iOS mirror; docs changes require immediate per-repo commits.",
-      "verification": {"required": true, "status": "missing", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "status": "pending",
+      "phase": "p3",
+      "kind": "impl",
+      "depends_on": [
+        "p1-session-topic-regression"
+      ],
+      "source": "§5 B1-B3 / §6 P3",
+      "notes": "Canonical protocol must land in MacBridge before the iOS mirror; docs changes require immediate per-repo commits.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
     },
     {
       "id": "p3-badge-state-protocol-tests",
       "title": "P3 badge store dispatcher and contract tests",
       "description": "Add and run focused Go tests for device isolation, dedup, revision concurrency, 4096 saturation, persistence/failure, binding lifecycle, payload omission, and field-level canonical/mirror contract consistency.",
-      "status": "pending", "phase": "p3", "kind": "tests", "depends_on": ["p3-badge-state-protocol-impl"], "source": "§7 automated", "notes": "",
-      "verification": {"required": true, "status": "missing", "method": "automated", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "status": "pending",
+      "phase": "p3",
+      "kind": "tests",
+      "depends_on": [
+        "p3-badge-state-protocol-impl"
+      ],
+      "source": "§7 automated",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
     },
     {
       "id": "p3-badge-state-protocol-regression",
       "title": "P3 badge state cross-restart regression",
       "description": "Verify actual MacBridge restart persistence and two-device isolation without using cached or mock state; confirm badge-store corruption leaves notifications operational without a badge tuple.",
-      "status": "pending", "phase": "p3", "kind": "regression", "depends_on": ["p3-badge-state-protocol-tests"], "source": "§7 real-device matrix #6/#8", "notes": "May require owner-visible web interaction; perform only within current authorization.",
-      "verification": {"required": true, "status": "missing", "method": "mixed", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "status": "pending",
+      "phase": "p3",
+      "kind": "regression",
+      "depends_on": [
+        "p3-badge-state-protocol-tests"
+      ],
+      "source": "§7 real-device matrix #6/#8",
+      "notes": "May require owner-visible web interaction; perform only within current authorization.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
     },
     {
       "id": "p4-badge-client-lifecycle-impl",
       "title": "P4 badge RPC Service Worker and client lifecycle implementation",
       "description": "Implement authenticated get/ack RPCs, binding mismatch behavior, Service Worker binding/revision watermark and dirty message, page single-flight get/ack lifecycle, and disable/rebind clearing semantics in remote-web.",
-      "status": "pending", "phase": "p4", "kind": "impl", "depends_on": ["p3-badge-state-protocol-regression"], "source": "§5 B4-B5 / §6 P4", "notes": "No fallback, local counter, or silent-push path.",
-      "verification": {"required": true, "status": "missing", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "status": "pending",
+      "phase": "p4",
+      "kind": "impl",
+      "depends_on": [
+        "p3-badge-state-protocol-regression"
+      ],
+      "source": "§5 B4-B5 / §6 P4",
+      "notes": "No fallback, local counter, or silent-push path.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
     },
     {
       "id": "p4-badge-client-lifecycle-tests",
       "title": "P4 RPC and remote-web lifecycle tests",
       "description": "Run focused Go and Vitest suites for authenticated device isolation, binding mismatch, throughRevision ack, saturation, out-of-order push suppression, old binding rejection, single-flight rerun, failures, and disable clearing.",
-      "status": "pending", "phase": "p4", "kind": "tests", "depends_on": ["p4-badge-client-lifecycle-impl"], "source": "§7 automated", "notes": "",
-      "verification": {"required": true, "status": "missing", "method": "automated", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "status": "pending",
+      "phase": "p4",
+      "kind": "tests",
+      "depends_on": [
+        "p4-badge-client-lifecycle-impl"
+      ],
+      "source": "§7 automated",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
     },
     {
       "id": "p4-badge-client-lifecycle-regression",
       "title": "P4 badge lifecycle real-device regression",
       "description": "Verify badge counts, notification click acknowledgement, concurrent new completion preservation, per-device clearing, disable/re-enable behavior, and out-of-order resistance on the installed Home Screen web app.",
-      "status": "pending", "phase": "p4", "kind": "regression", "depends_on": ["p4-badge-client-lifecycle-tests"], "source": "§7 real-device matrix #1/#2/#5/#6/#7", "notes": "Requires owner authorization for real-device/UI interaction.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "status": "pending",
+      "phase": "p4",
+      "kind": "regression",
+      "depends_on": [
+        "p4-badge-client-lifecycle-tests"
+      ],
+      "source": "§7 real-device matrix #1/#2/#5/#6/#7",
+      "notes": "Requires owner authorization for real-device/UI interaction.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
     },
     {
       "id": "p5-badge-settings-impl",
       "title": "P5 badge availability settings UI implementation",
       "description": "Update PushNotificationSettings to report only API/enrollment/notification-permission facts and static iOS badge guidance, without claiming visibility of the independent system badge switch.",
-      "status": "pending", "phase": "p5", "kind": "impl", "depends_on": ["p4-badge-client-lifecycle-regression"], "source": "§5 B6 / §6 P5", "notes": "",
-      "verification": {"required": true, "status": "missing", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "status": "pending",
+      "phase": "p5",
+      "kind": "impl",
+      "depends_on": [
+        "p4-badge-client-lifecycle-regression"
+      ],
+      "source": "§5 B6 / §6 P5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
     },
     {
       "id": "p5-badge-settings-tests",
       "title": "P5 badge settings component tests",
       "description": "Add and run focused remote-web tests for unsupported API, disabled enrollment, permission denial, and available-with-static-guidance states.",
-      "status": "pending", "phase": "p5", "kind": "tests", "depends_on": ["p5-badge-settings-impl"], "source": "§7 automated", "notes": "",
-      "verification": {"required": true, "status": "missing", "method": "automated", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "status": "pending",
+      "phase": "p5",
+      "kind": "tests",
+      "depends_on": [
+        "p5-badge-settings-impl"
+      ],
+      "source": "§7 automated",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
     },
     {
       "id": "p5-badge-settings-regression",
       "title": "P5 badge settings visual regression",
       "description": "Manually inspect the four settings states on the real Home Screen web app and confirm the UI never claims to detect the hidden iOS badge preference.",
-      "status": "pending", "phase": "p5", "kind": "regression", "depends_on": ["p5-badge-settings-tests"], "source": "§6 P5 / §7", "notes": "Requires owner authorization for visual real-device validation.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "status": "pending",
+      "phase": "p5",
+      "kind": "regression",
+      "depends_on": [
+        "p5-badge-settings-tests"
+      ],
+      "source": "§6 P5 / §7",
+      "notes": "Requires owner authorization for visual real-device validation.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
     }
   ]
 }
