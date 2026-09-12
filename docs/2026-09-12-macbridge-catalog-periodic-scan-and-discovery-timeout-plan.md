@@ -262,6 +262,8 @@ codex-remote codec 对同一 connection epoch 内 byte-identical 的 terminal er
 **0d `daemon-churn-ab-test`**
 只读对照 `ensure-codex-shared-daemon.sh` churn 开/关时的 `thread/list` p50/p95、timeout 率与 transport error rate。若证明相关，先另开 daemon 修复方案；本方案不直接改脚本。
 
+> **处置补记（2026-09-12，独立审计 F2）**：0d 未分解进执行队列即结构性失效——codex 共享 daemon 已于同日三层清零退役，churn 开/关不再存在，A/B 失去对照；最终真机回归即在无 daemon 环境下运行。§6 问 3 的 7.2s 归因因此失去定论路径，与问 7、问 8 一并移交后续观察。
+
 **0e `background-task-starvation-attribution`**
 为 `background_tasks.list` 增加结构化指标：trigger / sessionId 前缀 / duration / itemRequestCount / distinctTurnCount / outcome / caller cancellation。只记录结构计数与错误码，不记录 prompt、回答或完整路径。验收要能把 §1.6 的 204 次 item fetch 归因到具体请求序列，并验证 single-flight / 取消 / 优先级修复的效果。
 
@@ -397,3 +399,5 @@ Claude 每 30s 全量重算 fork 谱系（`claude session fork detected` ×8/次
 7. iOS 为什么在 16:51 单分钟发出 8 次 `background_tasks.list`？是自动刷新、用户重试还是投影失败引发的重试链；服务端仍必须可承受重复请求。
 8. `grokbuild` 19 会话耗 406ms 是否正常（其余 backend 同等规模远快于此）？
 9. 30s 周期的第二个 filter 调用者是谁（Phase 3d）——在定位前不要动 3a 的节拍。
+
+> **移交后续观察（2026-09-12，独立审计 F5）**：问 1、2、5、6、9 已由实现与证据回答（审计报告 §4-F5）；问 3 因 0d daemon churn A/B 失效失去定论路径（见 0d 处置补记）；问 7（iOS 单分钟 8 次 `background_tasks.list` 的动机）与问 8（grokbuild 19 会话 406ms 是否正常）未证，留作后续观察，不阻断本方案收口。问 4 审计未裁定，保持待证。

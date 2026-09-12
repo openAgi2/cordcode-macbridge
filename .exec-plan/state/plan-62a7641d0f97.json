@@ -32,9 +32,9 @@
     "completion_report_path": "docs/2026-09-12-macbridge-catalog-periodic-scan-and-discovery-timeout-plan完成情况.md",
     "completion_report_status": "current",
     "last_generated_at": "2026-09-12T15:04:09.050547Z",
-    "based_on_queue_hash": "03271392a4aa"
+    "based_on_queue_hash": "59dd1852a7ff"
   },
-  "updated_at": "2026-09-12T15:04:09.050547Z",
+  "updated_at": "2026-09-12T15:29:18.877600Z",
   "todos": [
     {
       "id": "phase0-observability-impl",

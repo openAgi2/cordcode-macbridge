@@ -112,3 +112,13 @@ Device / runtime validation:
 - No iOS code was modified; therefore no iPhone reinstall was required. The existing iPhone app was only launched.
 - No UI tests, snapshot tests, simulator automation, or high-cost visual verification were run.
 - Diagnostic logging is aggregate-only and avoids prompt/response/full-path/stable-session identity.
+
+## 8. 审计后附录（2026-09-12，独立审计后补记）
+
+独立审计已完成并维持本报告 `proved-complete` 裁定、无降级（审计报告：`docs/2026-09-12-audit-2026-09-12-macbridge-catalog-periodic-scan-and-discovery-timeout-plan完成情况.md`）。以下为审计建议的非阻断修正记录；§0–§7 正文保留审计时原貌，不事后改写。
+
+- **F1（P2）队列哈希修正**：本报告头部与状态文件原记录 `03271392a4aa` 无法用 `references/state-format.md` 钉死的 canonical 算法复现——审计会话与接管会话各自独立重算一致得 `59dd1852a7ff`，且对全部 6 个历史状态版本重算均不命中，判定执行方使用了未记录的算法。2026-09-12 已将状态文件 `reports.based_on_queue_hash` 修正为 canonical 值 `59dd1852a7ff`；本报告头部 `Queue Hash` 行保留原值作审计痕迹，绑定以状态文件与本附录为准。
+- **F2（P3）交付物 0d 处置补记**：0d `daemon-churn-ab-test` 未入队即因 codex 共享 daemon 同日退役而结构性失效，已在 plan 0d 条目与 §6 补记处置；§6 问 3（thread/list 7.2s 归因）失去定论路径，与问 7、问 8 一并移交后续观察。
+- **F3（P3）标注口径**：头部"22 re-verified"中 4 项携带执行方自采 live 证据的 regression 项，按技能口径应为 `self-attested`；独立审计已对其全部可持久复核声明完成真正的独立复核且逐项吻合，实质成立、无需降级。口径教训：`re-verified` 仅用于独立审计/复跑，执行方自采现场证据一律标 `self-attested`。
+- **观察项**：grokbuild `TestSendUnknownModelIdSoftensToCurrentModel` 全量偶发失败一次为在案既有 flake（另案修复，非本轮回归）；上游 terminal transport error 风暴在最终窗口内外持续（窗口内约 210 万条、窗口后含一次 rebind 再 150 万+ 条被抑制），codec 抑制为当前唯一防线，是否向 upstream 反馈待 owner 决定。
+- **2026-09-13 跟进（审计方补记）**：上行"待 owner 决定"已闭环——owner 授权后已向 openai/codex 提交 bug openai/codex#45071（附脱敏 capture，错误原文确认为 "Unexpected ack message received from client"，relay 侧合成）与 feature request openai/codex#45072（旁观者的有界 workflow/collab 摘要）。
