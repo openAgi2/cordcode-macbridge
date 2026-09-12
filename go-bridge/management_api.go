@@ -27,17 +27,17 @@ var httpReadHeaderTimeout = 10 * time.Second
 // ── 管理 API 配置 ───────────────────────────────────────────────────────────
 // ManagementConfig 包含创建 ManagementServer 所需的全部依赖。
 type ManagementConfig struct {
-	Handlers     *Handlers
-	Token        string
-	DataDir      *DataDir
+	Handlers *Handlers
+	Token    string
+	DataDir  *DataDir
 	// ClaudeHookHolder（Phase 3）：自 spawn 会话 --settings hooks 端点的延迟
 	// 解析 holder；Heartbeat 自检通过时翻转其 probeOK。可为 nil（单测）。
 	ClaudeHookHolder *claudeHookConfigHolder
-	PairingStore PairingSessionStore
-	DeviceStore  TrustedDeviceStore
-	BridgeID     string
-	DisplayName  string
-	LocalURL     string
+	PairingStore     PairingSessionStore
+	DeviceStore      TrustedDeviceStore
+	BridgeID         string
+	DisplayName      string
+	LocalURL         string
 	// LocalURLs 是 Mac 全部 LAN 直连候选(主候选在前),用于 relay-first completion(RelayFirstResult.LocalURLs)。
 	LocalURLs        []string
 	TailscaleURL     string
@@ -314,6 +314,8 @@ func (s *ManagementServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleRemoteStatus(w, r)
 	case path == "/internal/relay/delivery-prekeys" && r.Method == http.MethodGet:
 		s.handleRelayDeliveryPrekeys(w, r)
+	case path == "/internal/diagnostics/runtime" && r.Method == http.MethodGet:
+		s.handleRuntimeDiagnostics(w)
 	case path == "/internal/topology/snapshot" && r.Method == http.MethodGet:
 		s.handleTopologySnapshot(w, r)
 	case path == "/internal/webpush/status" && r.Method == http.MethodGet:
@@ -326,6 +328,30 @@ func (s *ManagementServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"message": fmt.Sprintf("端点 %s %s 不存在", r.Method, path),
 		})
 	}
+}
+
+// ── GET /internal/diagnostics/runtime ────────────────────────────────────────
+// handleRuntimeDiagnostics exposes aggregate, privacy-safe runtime counters.
+// It intentionally does not include pprof payloads or raw log contents; a CPU
+// profile can be captured separately when explicitly requested for diagnosis.
+func (s *ManagementServer) handleRuntimeDiagnostics(w http.ResponseWriter) {
+	result := map[string]interface{}{}
+	if s.cfg.Handlers != nil {
+		result = s.cfg.Handlers.runtimeDiagnostics.snapshot()
+	}
+	for backendID, agent := range s.cfg.Agents {
+		provider, ok := agent.(backgroundTaskScanMetricsProvider)
+		if !ok {
+			continue
+		}
+		active, scans, successes, failures, itemRequests, turns, lastMillis := provider.BackgroundTaskScanCounters()
+		result["agentBackgroundScans:"+backendID] = map[string]interface{}{
+			"activeScans": active, "scans": scans, "successes": successes,
+			"failures": failures, "turnItemRequests": itemRequests,
+			"scannedTurns": turns, "lastDurationMillis": lastMillis,
+		}
+	}
+	writeMgmtJSON(w, http.StatusOK, result)
 }
 
 // ── GET /internal/topology/snapshot ──────────────────────────────────────────

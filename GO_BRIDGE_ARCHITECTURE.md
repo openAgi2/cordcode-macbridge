@@ -143,6 +143,12 @@ timeline；derived-legacy `question_asked` 永远不能成为第二个 projectio
 `turn_completed`/`error`，随后 session runtime state 回到 idle。中间 delta、tool 或
 session status 不能代替确定性完成信号。
 
+passive pump 的重复 error 日志按 `(backend, session fingerprint, event, error fingerprint)`
+聚合：首条与 error identity 变化立即 WARN，完全相同的重复项每 30 秒输出一次
+count/rate 摘要。聚合只作用于观测日志，不丢弃事件、不改变 runtime state，也不能吞掉
+新的真实错误。管理端 `/internal/diagnostics/runtime` 只暴露类别聚合计数、p50/p95、
+goroutine 与进程 CPU，不携带 prompt、回答、完整路径或稳定 session id。
+
 ### session registry 与 pending rebind
 
 `sessionRegistry` 保存 backend、directory、最后活动时间、running 状态和 agent session。
@@ -316,6 +322,16 @@ ChatGPT Desktop 私有 app-server
 - kind `codex-remote`，`LiveEventBroadcast`，`requiresPollingForExternalTurns=false`。
 - 历史/turn 明细走官方分页远程 API；turn detail 懒加载能力见
   [Session Projection（SSV2）](#session-projectionssv2) 一节。
+- Discovery 使用独立 12s 全量 `thread/list` 预算（list_sessions 仍为 8s）。timeout 走
+  10s→30s 有界重试，hard error 保留 15s→2m 指数退避；失败期间 `seen` 保留 last-good，
+  连续静默超过 1 分钟输出 push-liveness WARN。官方 lifecycle signal 仍是快路径，不开启
+  秒级 Remote head 轮询。
+- `background_tasks.list` 以 committed projection 为快路径；summary-only projection 不能
+  推断“无 workflow”。未知状态先返回可重试 `background_tasks.projection_not_ready`；
+  Ready 后的一次完整历史扫描按 `(session, SyncRev)` single-flight，成功负结果可复用，
+  错误不缓存。扫描有 30s 总预算，不能长期挤占 projection cold open。
+- persisted pairing 恢复期是 bounded transient state：client 未绑定时最多等待 5 秒并返回
+  `projection.hydrating`；只有无持久化身份或 pairing 终态失败才是未配对。
 - 设计与阶段证据：`docs/2026-08-26-codex-remote-backend-implementation-plan.md`、
   懒加载终案 `docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md`。
 
@@ -711,6 +727,12 @@ gate（`core/turn_detail_lazy_gate.go` / `core/turn_detail_chunks_gate.go`，当
 - **sessions_changed**：`session_discovery.go` 按 catalog 指纹周期重扫（默认
   60s）。Codex 另有 3s recency-head；Grok 在有客户端连接时 5s 全量指纹；
   dsh-web 由 host 流信号立即重扫，不另开快轮询。
+- **无变化扫描成本**：Grok discovery 对 raw membership 指纹未变的 5s fast poll 复用
+  50s 内的 visible 结果；该 TTL 低于 60s safety scan，磁盘目录删除最迟在下一分钟真实
+  re-filter。workspace filter 在单次调用内按 clean directory 去重 `os.Stat`，重复 drop
+  摘要降为 DEBUG，每分钟才汇总 INFO。declared Grok list 的出站 re-filter 同样使用 50s
+  snapshot-filter cache；Claude 在 transcript/sidecar/Desktop 指纹与成员完全未变时复用
+  已排序、已 fork/compact 过滤的 snapshot，不再重跑 lineage 检测。
 
 ## 已知风险与不可破坏约束
 

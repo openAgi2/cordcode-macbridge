@@ -362,6 +362,17 @@ func (h *Handlers) startProjectionLiveRelay(
 	agent core.Agent,
 	directory string,
 ) {
+	if waiter, ok := agent.(core.RestoreWaiter); ok {
+		if err := waiter.WaitForRestore(h.ctx); err != nil {
+			if errors.Is(err, core.ErrRestoreInProgress) {
+				return
+			}
+			slog.Warn("go-bridge: projection provider restore failed",
+				"backendID", backendID, "sessionID", sessionID, "error", err.Error())
+			// Keep the existing prepare/fallback path below so a terminal restore
+			// failure retains its prior fail-closed behavior.
+		}
+	}
 	if _, err := h.prepareProjectionLiveSession(h.ctx, sessionID, conn, backendID, agent, directory); err != nil {
 		slog.Warn("go-bridge: projection live session prepare failed",
 			"backendID", backendID, "sessionID", sessionID, "error", err)
@@ -586,6 +597,9 @@ func (h *Handlers) ensureProjectionHydrated(
 		directory,
 	)
 	if err != nil {
+		if errors.Is(err, errProjectionHydrating) {
+			return err
+		}
 		h.markHydrateFailed(
 			backendID, sessionID, "projection.source_inspection_failed", err.Error(), true,
 		)
@@ -839,6 +853,14 @@ func (h *Handlers) prepareProjectionHydrateSource(
 	// always rebuilds from GetRichSessionHistory. codex-web MUST NOT generate, look up,
 	// or borrow a rollout path here (design §9.1 hydrate-source row).
 	if backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" || backendID == "dsh-web" || backendID == "opencode-web" || backendID == "codex-web" || backendID == "codex-remote" {
+		if waiter, ok := agent.(core.RestoreWaiter); ok {
+			if err := waiter.WaitForRestore(ctx); err != nil {
+				if errors.Is(err, core.ErrRestoreInProgress) {
+					return ProjectionSourceDescriptor{}, fmt.Errorf("%w: %v", errProjectionHydrating, err)
+				}
+				return ProjectionSourceDescriptor{}, err
+			}
+		}
 		if _, ok := agent.(core.RichHistoryProvider); !ok {
 			if h.eventPublisher.ProjectionTurnCount(backendID, sessionID) > 0 {
 				return ProjectionSourceDescriptor{Identity: sessionID}, nil

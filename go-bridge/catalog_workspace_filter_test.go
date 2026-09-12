@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestFilterSessionsMissingWorkspace_DropsDeletedDirs(t *testing.T) {
@@ -108,5 +109,73 @@ func TestMatchCodexWorkspaceRoot_HomeOnlyExact(t *testing.T) {
 	nested := filepath.Join(other, "pkg")
 	if r, ok := matchCodexWorkspaceRoot(nested, []string{home, other}); !ok || r != other {
 		t.Fatalf("nested under registered root: root=%q ok=%v want %s", r, ok, other)
+	}
+}
+
+func TestCatalogFilterDeduplicatesDirectoryStatPerCall(t *testing.T) {
+	resetCatalogFilterLogForTest()
+	workspace := t.TempDir()
+	previous := sessionWorkspaceExistsForCatalogFn
+	calls := 0
+	sessionWorkspaceExistsForCatalogFn = func(clean string) bool {
+		calls++
+		return previous(clean)
+	}
+	t.Cleanup(func() { sessionWorkspaceExistsForCatalogFn = previous })
+
+	in := []map[string]interface{}{
+		{"id": "1", "directory": workspace},
+		{"id": "2", "directory": workspace},
+		{"id": "3", "directory": workspace},
+	}
+	out := filterSessionsMissingWorkspace(in)
+	if len(out) != 3 || calls != 1 {
+		t.Fatalf("kept=%d statCalls=%d, want 3/1", len(out), calls)
+	}
+}
+
+func TestCatalogFilterRepeatDropSignatureIsRateLimited(t *testing.T) {
+	resetCatalogFilterLogForTest()
+	now := time.Unix(1_000, 0)
+	if !shouldLogCatalogFilter("workspace=11", now) {
+		t.Fatal("new signature must log")
+	}
+	if shouldLogCatalogFilter("workspace=11", now.Add(time.Second)) {
+		t.Fatal("unchanged signature must not log at Info")
+	}
+	if !shouldLogCatalogFilter("workspace=11", now.Add(catalogFilterRepeatInfoInterval)) {
+		t.Fatal("unchanged signature must be summarized after one minute")
+	}
+	if !shouldLogCatalogFilter("workspace=12", now.Add(catalogFilterRepeatInfoInterval+time.Second)) {
+		t.Fatal("changed signature must log immediately")
+	}
+}
+
+func TestWorkspaceFilterCacheCachesSnapshotAndExpiresForDeletion(t *testing.T) {
+	resetCatalogFilterLogForTest()
+	current := time.Unix(1_000, 0)
+	previousNow := workspaceFilterCacheNow
+	workspaceFilterCacheNow = func() time.Time { return current }
+	t.Cleanup(func() { workspaceFilterCacheNow = previousNow })
+
+	workspace := t.TempDir()
+	cache := newWorkspaceFilterCache()
+	sessions := []map[string]interface{}{{"id": "one", "directory": workspace}}
+	first := cache.filterMissing("grok:global", sessions)
+	if len(first) != 1 {
+		t.Fatalf("first filtered result = %#v", first)
+	}
+	if err := os.RemoveAll(workspace); err != nil {
+		t.Fatal(err)
+	}
+	current = current.Add(49 * time.Second)
+	second := cache.filterMissing("grok:global", sessions)
+	if len(second) != 1 {
+		t.Fatalf("TTL cache result = %#v", second)
+	}
+	current = current.Add(2 * time.Second)
+	third := cache.filterMissing("grok:global", sessions)
+	if len(third) != 0 {
+		t.Fatalf("expired cache must re-filter deleted workspace: %#v", third)
 	}
 }

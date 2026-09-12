@@ -19,7 +19,39 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
+
+var (
+	catalogFilterLogMu         sync.Mutex
+	catalogFilterLastSignature string
+	catalogFilterLastInfo      time.Time
+	catalogFilterLogNow        = time.Now
+)
+
+const catalogFilterRepeatInfoInterval = time.Minute
+
+// shouldLogCatalogFilter logs a new drop signature at Info. An unchanged signature
+// returns false so its per-call record is Debug; after one minute it is summarized
+// at Info again. The signature contains counters only, never session content.
+func shouldLogCatalogFilter(signature string, now time.Time) bool {
+	catalogFilterLogMu.Lock()
+	defer catalogFilterLogMu.Unlock()
+	if signature != catalogFilterLastSignature || catalogFilterLastInfo.IsZero() || now.Sub(catalogFilterLastInfo) >= catalogFilterRepeatInfoInterval {
+		catalogFilterLastSignature = signature
+		catalogFilterLastInfo = now
+		return true
+	}
+	return false
+}
+
+func resetCatalogFilterLogForTest() {
+	catalogFilterLogMu.Lock()
+	catalogFilterLastSignature = ""
+	catalogFilterLastInfo = time.Time{}
+	catalogFilterLogMu.Unlock()
+}
 
 // filterSessionsMissingWorkspace 去掉 directory 为空、或绝对路径已不存在/非目录的 session。
 // 相对路径（罕见）保留，避免误伤测试 fixture。
@@ -47,10 +79,19 @@ func filterCatalogSessionsByVisibility(sessions []map[string]interface{}, codexR
 	out := make([]map[string]interface{}, 0, len(sessions))
 	droppedByBase := map[string]int{}
 	useRoots := requireCodexRoots && len(codexRoots) > 0
+	statResults := make(map[string]bool, len(sessions))
+	workspaceExists := func(clean string) bool {
+		if visible, cached := statResults[clean]; cached {
+			return visible
+		}
+		visible := sessionWorkspaceExistsForCatalogFn(clean)
+		statResults[clean] = visible
+		return visible
+	}
 	for _, s := range sessions {
 		dir := sessionDirectoryKey(s)
 		clean, ok := normalizeCatalogDirectory(dir)
-		if !ok || !sessionWorkspaceExistsForCatalog(clean) {
+		if !ok || !workspaceExists(clean) {
 			recordDroppedBase(droppedByBase, dir)
 			continue
 		}
@@ -85,15 +126,65 @@ func filterCatalogSessionsByVisibility(sessions []map[string]interface{}, codexR
 			total += n
 			parts = append(parts, name+"="+strconv.Itoa(n))
 		}
-		slog.Info("catalog workspace filter dropped sessions",
+		signature := strings.Join(parts, ",")
+		attrs := []any{
 			"dropped_count", total,
 			"kept_count", len(out),
 			"raw_count", len(sessions),
 			"codex_roots", len(codexRoots),
 			"codex_roots_enforced", useRoots,
-			"dropped_basenames", strings.Join(parts, ","),
-		)
+			"dropped_basenames", signature,
+		}
+		if shouldLogCatalogFilter(signature, catalogFilterLogNow()) {
+			slog.Info("catalog workspace filter dropped sessions", attrs...)
+		} else {
+			slog.Debug("catalog workspace filter dropped sessions (unchanged)", attrs...)
+		}
 	}
+	return out
+}
+
+// workspaceFilterCacheTTL stays below discovery's 60s safety scan. Declared
+// catalog snapshots may live for ten minutes, so serving a cached filtered view
+// for at most this window still exposes deleted workspaces without stat-ing every
+// directory on each list request.
+const workspaceFilterCacheTTL = 50 * time.Second
+
+var workspaceFilterCacheNow = time.Now
+
+type workspaceFilterCacheEntry struct {
+	signature  string
+	out        []map[string]interface{}
+	filteredAt time.Time
+}
+
+type workspaceFilterCache struct {
+	mu      sync.Mutex
+	entries map[string]workspaceFilterCacheEntry
+}
+
+func newWorkspaceFilterCache() *workspaceFilterCache {
+	return &workspaceFilterCache{entries: make(map[string]workspaceFilterCacheEntry)}
+}
+
+func (c *workspaceFilterCache) filterMissing(key string, sessions []map[string]interface{}) []map[string]interface{} {
+	if c == nil {
+		return filterSessionsMissingWorkspace(sessions)
+	}
+	signature := listSemanticFingerprint(sessions)
+	now := workspaceFilterCacheNow()
+	c.mu.Lock()
+	if entry, ok := c.entries[key]; ok && entry.signature == signature && now.Sub(entry.filteredAt) < workspaceFilterCacheTTL {
+		out := copyWireMaps(entry.out)
+		c.mu.Unlock()
+		return out
+	}
+	c.mu.Unlock()
+
+	out := filterSessionsMissingWorkspace(sessions)
+	c.mu.Lock()
+	c.entries[key] = workspaceFilterCacheEntry{signature: signature, out: copyWireMaps(out), filteredAt: now}
+	c.mu.Unlock()
 	return out
 }
 
@@ -137,6 +228,8 @@ func normalizeCatalogDirectory(directory string) (string, bool) {
 }
 
 // sessionWorkspaceExistsForCatalog：绝对路径必须仍是目录；相对路径放行（测试 fixture）。
+var sessionWorkspaceExistsForCatalogFn = sessionWorkspaceExistsForCatalog
+
 func sessionWorkspaceExistsForCatalog(clean string) bool {
 	if clean == "" {
 		return false

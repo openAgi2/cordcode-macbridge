@@ -2,7 +2,7 @@
 
 Date: 2026-09-12
 Author: 诊断会话（CPU 归因排查衍生；2026-09-12 两轮复审修订）
-Status: proposed（待 owner 确认后进 exec-plan）
+Status: implementing（exec-plan 队列执行中；实现与非 UI 验证已落地，真机回归待收口）
 
 关联：
 

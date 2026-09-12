@@ -423,6 +423,7 @@ func (a *Agent) ReadTurnItemsPage(ctx context.Context, threadID, turnID, cursor 
 	if cursor != "" {
 		params["cursor"] = cursor
 	}
+	a.turnItemRequests.Add(1)
 	raw, rpcErr, err := cl.RequestContext(ctx, "thread/items/list", params)
 	if err != nil {
 		return nil, err
@@ -627,6 +628,7 @@ func (a *Agent) fetchTurnItems(ctx context.Context, threadID, turnID string, gat
 			params["cursor"] = cursor
 		}
 		pageStart := time.Now()
+		a.turnItemRequests.Add(1)
 		raw, rpcErr, err := cl.RequestContext(fetchCtx, "thread/items/list", params)
 		pageElapsed := time.Since(pageStart)
 		stat := TurnItemsPageStat{Page: page, ElapsedMs: pageElapsed.Milliseconds(), RawBytes: len(raw)}

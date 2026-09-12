@@ -158,6 +158,7 @@ func TestClaudeSessionCatalogIncrementalRefreshAndDeletion(t *testing.T) {
 		t.Fatalf("first refresh metrics = %+v", firstMetrics.Snapshot())
 	}
 
+	snapshotAfterFirst := catalog.snapshot
 	hitMetrics := &core.SessionLoadMetrics{}
 	second := catalog.list("", hitMetrics)
 	if len(second) != 1 || parseCalls.Load() != 1 {
@@ -165,6 +166,9 @@ func TestClaudeSessionCatalogIncrementalRefreshAndDeletion(t *testing.T) {
 	}
 	if !hitMetrics.Snapshot().CacheHit {
 		t.Fatalf("second refresh should be a cache hit: %+v", hitMetrics.Snapshot())
+	}
+	if catalog.snapshot != snapshotAfterFirst {
+		t.Fatal("unchanged Claude fingerprints must reuse the lineage-filtered snapshot, not re-sort/re-detect forks")
 	}
 
 	info, err := os.Stat(sessionPath)

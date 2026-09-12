@@ -49,6 +49,15 @@ var (
 	codexDiscoveryRetryMax  = 2 * time.Minute
 )
 
+var (
+	// Remote's 440-thread catalog repeatedly measured 6.5–7.4s, with jitter pushed
+	// to the shared 8s limit. Discovery owns this larger wall budget; user-facing
+	// list requests retain catalogRequestTimeout.
+	codexRemoteDiscoveryRequestTimeout = 12 * time.Second
+	codexDiscoveryTimeoutRetryBase     = 10 * time.Second
+	codexDiscoveryTimeoutRetryMax      = 30 * time.Second
+)
+
 const codexDiscoveryHeadLimit = 25
 
 // Grok ACP session/list has no bounded head/page parameter, but the production catalog is small
@@ -72,6 +81,8 @@ func (h *Handlers) runSessionDiscovery(ctx context.Context) {
 		"codexRemoteHintInterval", codexRemoteDiscoveryHintInterval.String(),
 		"codexDiscoveryRetryBase", codexDiscoveryRetryBase.String(),
 		"codexDiscoveryRetryMax", codexDiscoveryRetryMax.String(),
+		"codexRemoteDiscoveryTimeout", codexRemoteDiscoveryRequestTimeout.String(),
+		"codexTimeoutRetryMax", codexDiscoveryTimeoutRetryMax.String(),
 		"backends", len(h.Agents()))
 	var workers sync.WaitGroup
 	for id, agent := range h.Agents() {
@@ -116,8 +127,8 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 	_, hasCatalogRefreshSignal := agent.(core.CatalogRefreshSignaler)
 	retry := catalogDiscoveryRetry{base: codexDiscoveryRetryBase, max: codexDiscoveryRetryMax}
 	probeRetry := catalogDiscoveryRetry{base: codexDiscoveryRetryBase, max: codexDiscoveryRetryMax}
-	if !h.snapshotBackendSession(ctx, seen, true, id, agent) && isCodexCatalog {
-		retry.fail(time.Now())
+	if result := h.snapshotBackendSessionResult(ctx, seen, true, id, agent); !result.ok && isCodexCatalog {
+		retry.failOutcome(time.Now(), result.err)
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -149,22 +160,37 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 	}
 	var hintSeen string
 	hintSeeded := false
+	liveness := newDiscoveryPushLiveness(time.Now())
+	var lastDiscoveryError error
 	authoritativeRefresh := func(trigger string) bool {
-		if isCodexCatalog && !retry.ready(time.Now()) {
+		now := time.Now()
+		if isCodexCatalog && !retry.ready(now) {
 			slog.Debug("go-bridge: Codex discovery authoritative refresh deferred",
 				"backend", id, "trigger", trigger, "retryAt", retry.next)
 			return false
 		}
-		if h.snapshotBackendSession(ctx, seen, false, id, agent) {
+		result := h.snapshotBackendSessionResult(ctx, seen, false, id, agent)
+		if result.ok {
+			liveness.recordSuccess(now)
+			lastDiscoveryError = nil
 			if isCodexCatalog {
 				retry.succeed()
 			}
 			return true
 		}
+		lastDiscoveryError = result.err
 		if isCodexCatalog {
-			delay := retry.fail(time.Now())
+			delay := retry.failOutcome(now, result.err)
 			slog.Warn("go-bridge: Codex discovery authoritative refresh backed off",
 				"backend", id, "trigger", trigger, "retryDelay", delay.String())
+			if silentFor, due := liveness.recordFailure(now); due {
+				errorMessage := ""
+				if lastDiscoveryError != nil {
+					errorMessage = lastDiscoveryError.Error()
+				}
+				slog.Warn("go-bridge: Codex discovery push liveness degraded",
+					"backend", id, "silentMillis", silentFor.Milliseconds(), "error", errorMessage)
+			}
 		}
 		return false
 	}
@@ -235,6 +261,32 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 	}
 }
 
+type discoveryPushLiveness struct {
+	lastSuccess time.Time
+	lastWarn    time.Time
+}
+
+func newDiscoveryPushLiveness(now time.Time) discoveryPushLiveness {
+	return discoveryPushLiveness{lastSuccess: now}
+}
+
+func (l *discoveryPushLiveness) recordSuccess(now time.Time) {
+	l.lastSuccess = now
+	l.lastWarn = time.Time{}
+}
+
+func (l *discoveryPushLiveness) recordFailure(now time.Time) (time.Duration, bool) {
+	silentFor := now.Sub(l.lastSuccess)
+	if silentFor < time.Minute {
+		return silentFor, false
+	}
+	if !l.lastWarn.IsZero() && now.Sub(l.lastWarn) < time.Minute {
+		return silentFor, false
+	}
+	l.lastWarn = now
+	return silentFor, true
+}
+
 type catalogDiscoveryRetry struct {
 	base    time.Duration
 	max     time.Duration
@@ -247,14 +299,25 @@ func (r *catalogDiscoveryRetry) ready(now time.Time) bool {
 }
 
 func (r *catalogDiscoveryRetry) fail(now time.Time) time.Duration {
-	delay := r.base
-	if delay <= 0 {
-		delay = time.Second
+	return r.failOutcome(now, nil)
+}
+
+// failOutcome keeps hard errors on the existing exponential curve while timeout
+// jitter retries on a shorter bounded curve. One slow-but-real catalog must not
+// silence sessions_changed for two minutes.
+func (r *catalogDiscoveryRetry) failOutcome(now time.Time, err error) time.Duration {
+	base, max := r.base, r.max
+	if errors.Is(err, context.DeadlineExceeded) {
+		base, max = codexDiscoveryTimeoutRetryBase, codexDiscoveryTimeoutRetryMax
 	}
-	for i := uint(0); i < r.attempt && delay < r.max; i++ {
+	if base <= 0 {
+		base = time.Second
+	}
+	delay := base
+	for i := uint(0); i < r.attempt && delay < max; i++ {
 		delay *= 2
-		if r.max > 0 && delay > r.max {
-			delay = r.max
+		if max > 0 && delay > max {
+			delay = max
 		}
 	}
 	r.attempt++
@@ -290,13 +353,37 @@ func (h *Handlers) codexDiscoveryHintFingerprint(ctx context.Context, agent core
 // snapshotSessions samples every backend's catalog fingerprint once and broadcasts
 // "sessions_changed" for any backend whose fingerprint changed since the last scan
 // (Phase 7 §442：provider fingerprint 驱动 sessions_changed)。
+func discoveryOutcome(err error) string {
+	switch {
+	case err == nil:
+		return "ok"
+	case errors.Is(err, core.ErrNotSupported):
+		return "unsupported"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		return "error"
+	}
+}
+
 func (h *Handlers) snapshotSessions(ctx context.Context, seen map[string]string, seed bool) {
 	for id, agent := range h.Agents() {
 		h.snapshotBackendSession(ctx, seen, seed, id, agent)
 	}
 }
 
+type backendSnapshotResult struct {
+	ok  bool
+	err error
+}
+
 func (h *Handlers) snapshotBackendSession(ctx context.Context, seen map[string]string, seed bool, id string, agent core.Agent) bool {
+	return h.snapshotBackendSessionResult(ctx, seen, seed, id, agent).ok
+}
+
+func (h *Handlers) snapshotBackendSessionResult(ctx context.Context, seen map[string]string, seed bool, id string, agent core.Agent) backendSnapshotResult {
 	tag := "poll"
 	if seed {
 		tag = "seed"
@@ -304,13 +391,14 @@ func (h *Handlers) snapshotBackendSession(ctx context.Context, seen map[string]s
 	started := time.Now()
 	current, count, rawCount, err := h.discoveryFingerprint(ctx, id, agent)
 	duration := time.Since(started)
+	h.runtimeDiagnostics.observeDiscovery(id, tag, discoveryOutcome(err), duration)
 	if err != nil {
 		// Live-only backends (dsh) have no list by design — a quiet skip, not
 		// a recurring warning (there is no fingerprint to preserve).
 		if errors.Is(err, core.ErrNotSupported) {
 			slog.Debug("go-bridge: session discovery skipped (backend has no session list)",
 				"phase", tag, "backend", id)
-			return false
+			return backendSnapshotResult{err: err}
 		}
 		// Previously this branch was silent. A recurring enumerate error leaves
 		// seen[id] at the seed fingerprint forever → fingerprint never changes →
@@ -319,14 +407,14 @@ func (h *Handlers) snapshotBackendSession(ctx context.Context, seen map[string]s
 		// poll can still detect change).
 		slog.Warn("go-bridge: session discovery fingerprint error (no broadcast)",
 			"phase", tag, "backend", id, "durationMs", duration.Milliseconds(), "error", err.Error())
-		return false
+		return backendSnapshotResult{err: err}
 	}
 	prev, hadPrev := seen[id]
 	if seed || !hadPrev {
 		seen[id] = current
 		slog.Info("go-bridge: session discovery snapshot seeded",
 			"backend", id, "sessionCount", count, "rawCount", rawCount, "durationMs", duration.Milliseconds())
-		return true
+		return backendSnapshotResult{ok: true}
 	}
 	// Phase 7 §442：fingerprint 变化即 catalog 变化（新增/删除/更新任一）→ 触发 sessions_changed。
 	// 不再区分 new/removed：fingerprint 是确定摘要，任一成员或 updatedAt 变化都改写它，
@@ -355,7 +443,7 @@ func (h *Handlers) snapshotBackendSession(ctx context.Context, seen map[string]s
 		// Phase 5：catalog 指纹变化同样意味着后台任务面可能变化（DSH 子任务
 		// 是 session 行、Claude sidechain 挂在 session 目录下）。对有任务面的
 		// backend 追加一条 background_tasks.changed invalidate 通知——客户端
-		// 重新 background_tasks.list 拿真值，事件本身不携带任务数据（不做
+		// 重新 background_tasks.list 拿真值（事件本身不携带任务数据，不做
 		// 双真值）。
 		if id == "claudecode" {
 			h.publishBackgroundTasksChanged(id, catalogGeneration)
@@ -365,7 +453,7 @@ func (h *Handlers) snapshotBackendSession(ctx context.Context, seen map[string]s
 	} else {
 		seen[id] = current
 	}
-	return true
+	return backendSnapshotResult{ok: true}
 }
 
 // discoveryFingerprint returns the catalog fingerprint for a backend, computed from
@@ -408,7 +496,11 @@ func (h *Handlers) discoveryFingerprint(ctx context.Context, id string, agent co
 		}
 		return wireFingerprint(visible), len(visible), len(all), nil
 	}
-	listCtx, cancel := context.WithTimeout(ctx, catalogRequestTimeout)
+	requestTimeout := catalogRequestTimeout
+	if id == "codex-remote" {
+		requestTimeout = codexRemoteDiscoveryRequestTimeout
+	}
+	listCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	// 能力断言而非 Name()=="codex"：codex-web 与 codex 共用同一 thread/list 富
 	// catalog seam（P0-4），discovery fingerprint 与 list_sessions 天然同源。
@@ -427,7 +519,7 @@ func (h *Handlers) discoveryFingerprint(ctx context.Context, id string, agent co
 		return remoteCatalogFingerprint(sessionsToWire(infos)), len(infos), len(infos), nil
 	}
 	if agent.Name() == "grokbuild" {
-		wire, _, err := h.grokVisibleMembership(listCtx, id)
+		wire, _, err := h.grokVisibleMembershipCached(listCtx, id)
 		if err != nil {
 			return "", 0, 0, err
 		}

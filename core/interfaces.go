@@ -9,6 +9,11 @@ import (
 // ErrNotSupported indicates an agent backend does not support a requested operation.
 var ErrNotSupported = errors.New("operation not supported")
 
+// ErrRestoreInProgress is a bounded transient state: persisted provider identity
+// exists, but its transport/client is not ready yet. It must surface as retryable
+// hydration, not as "not configured".
+var ErrRestoreInProgress = errors.New("provider restore in progress")
+
 // SessionEnvInjector is an optional interface for agents that accept
 // per-session environment variables (e.g. CC_PROJECT, CC_SESSION_KEY).
 type SessionEnvInjector interface {
@@ -249,6 +254,12 @@ type HistoryProvider interface {
 // the legacy HistoryProvider compatibility contract.
 type RichHistoryProvider interface {
 	GetRichSessionHistory(ctx context.Context, sessionID string, limit int) ([]RichHistoryEntry, error)
+}
+
+// RestoreWaiter optionally bounds the startup/rebind window for a provider whose
+// persisted identity exists but whose live client has not yet been restored.
+type RestoreWaiter interface {
+	WaitForRestore(ctx context.Context) error
 }
 
 // TurnScopedHistoryTurn is one official turn of a cold baseline for backends

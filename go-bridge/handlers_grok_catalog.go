@@ -144,7 +144,7 @@ func (h *Handlers) grokHandleListSessions(conn Connection, msg WireMessage, agen
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
 			return
 		}
-		full := filterSessionsMissingWorkspace(snap.maps)
+		full := h.workspaceFilterCache.filterMissing("grok:"+scopeKey.identity(), snap.maps)
 		result := packageFairHomePage(full, defaultSessionListPerDirectoryLimit, limit)
 		if ws, ok := result["sessions"].([]map[string]interface{}); ok {
 			slog.Info("grokbuild list_sessions v2 (session/list fair-home)",

@@ -1269,3 +1269,73 @@ func TestClaudeCatalogSurfacesArchivedAtMillis(t *testing.T) {
 		t.Fatalf("after archive: archivedAtMillis = %#v, want %d (catalog must surface sidecar archived time)", after[0]["archivedAtMillis"], archivedMs)
 	}
 }
+
+func TestCatalogDiscoveryTimeoutUsesBoundedShortBackoff(t *testing.T) {
+	retry := catalogDiscoveryRetry{base: 15 * time.Second, max: 2 * time.Minute}
+	now := time.Unix(1_000, 0)
+	seen := map[time.Duration]bool{}
+	for i := 0; i < 8; i++ {
+		delay := retry.failOutcome(now, context.DeadlineExceeded)
+		if delay > codexDiscoveryTimeoutRetryMax {
+			t.Fatalf("timeout retry %d = %s, exceeds %s", i, delay, codexDiscoveryTimeoutRetryMax)
+		}
+		seen[delay] = true
+		now = now.Add(time.Second)
+	}
+	if !seen[codexDiscoveryTimeoutRetryMax] {
+		t.Fatalf("timeout retry did not reach bounded maximum: %v", seen)
+	}
+
+	retry = catalogDiscoveryRetry{base: 15 * time.Second, max: 2 * time.Minute}
+	if delay := retry.failOutcome(time.Unix(2_000, 0), errors.New("hard upstream failure")); delay != 15*time.Second {
+		t.Fatalf("first hard delay = %s", delay)
+	}
+	if delay := retry.failOutcome(time.Unix(2_001, 0), errors.New("hard upstream failure")); delay != 30*time.Second {
+		t.Fatalf("second hard delay = %s", delay)
+	}
+}
+
+type remoteDiscoveryTimeoutAgent struct {
+	*fakeAgent
+}
+
+func (a *remoteDiscoveryTimeoutAgent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestCodexRemoteDiscoveryHasSeparatedTimeoutBudget(t *testing.T) {
+	previous := codexRemoteDiscoveryRequestTimeout
+	codexRemoteDiscoveryRequestTimeout = 2 * time.Millisecond
+	t.Cleanup(func() { codexRemoteDiscoveryRequestTimeout = previous })
+
+	handlers := newTestHandlers(t)
+	agent := &remoteDiscoveryTimeoutAgent{fakeAgent: &fakeAgent{name: "codex-remote"}}
+	_, _, _, err := handlers.discoveryFingerprint(context.Background(), "codex-remote", agent)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want deadline exceeded", err)
+	}
+}
+
+func TestDiscoveryPushLivenessWarnsOncePerMinuteAfterSilence(t *testing.T) {
+	start := time.Unix(3_000, 0)
+	liveness := newDiscoveryPushLiveness(start)
+	if _, due := liveness.recordFailure(start.Add(30 * time.Second)); due {
+		t.Fatal("30s silence must not warn")
+	}
+	silentFor, due := liveness.recordFailure(start.Add(time.Minute))
+	if !due || silentFor != time.Minute {
+		t.Fatalf("first minute failure: due=%v silent=%s", due, silentFor)
+	}
+	if _, due := liveness.recordFailure(start.Add(90 * time.Second)); due {
+		t.Fatal("repeat warning must be rate-limited")
+	}
+	silentFor, due = liveness.recordFailure(start.Add(2 * time.Minute))
+	if !due || silentFor != 2*time.Minute {
+		t.Fatalf("second minute warning: due=%v silent=%s", due, silentFor)
+	}
+	liveness.recordSuccess(start.Add(2*time.Minute + time.Second))
+	if _, due := liveness.recordFailure(start.Add(2*time.Minute + 2*time.Second)); due {
+		t.Fatal("success must reset liveness window")
+	}
+}

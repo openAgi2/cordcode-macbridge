@@ -289,7 +289,14 @@ func (c *claudeSessionCatalog) buildSnapshot(
 			}
 		}
 	}
-	metrics.RecordStatCompare(time.Since(compareStarted), changed, deleted, previous != nil && changed == 0 && deleted == 0)
+	cacheHit := previous != nil && changed == 0 && deleted == 0
+	metrics.RecordStatCompare(time.Since(compareStarted), changed, deleted, cacheHit)
+	if cacheHit {
+		// File/sidecar/Desktop fingerprints are unchanged and candidate membership did
+		// not shrink. Reuse the already lineage-filtered snapshot; do not re-sort and
+		// re-emit fork/compact detections on every 30s list/discovery call.
+		return previous
+	}
 
 	sortedEntries := make([]claudeSessionIndexEntry, 0, len(nextByKey))
 	for _, entry := range nextByKey {

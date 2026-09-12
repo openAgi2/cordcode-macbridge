@@ -1,0 +1,688 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge-plan-approval",
+  "plan_file": "docs/2026-09-12-macbridge-catalog-periodic-scan-and-discovery-timeout-plan.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-62a7641d0f97.json",
+    "legacy_path": ".claude/exec-plans/plan-62a7641d0f97.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "todo-write-optional-mirror",
+    "invocation_policy": "slash-or-natural-language-equivalent",
+    "persistence_rule": "persist-on-every-status-transition"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-09-12-macbridge-catalog-periodic-scan-and-discovery-timeout-plan完成情况.md",
+    "completion_report_status": "missing",
+    "last_generated_at": null,
+    "based_on_queue_hash": null
+  },
+  "updated_at": "2026-09-12T14:17:16.570309Z",
+  "todos": [
+    {
+      "id": "phase0-observability-impl",
+      "title": "Phase 0 observability: implementation",
+      "description": "Implement privacy-safe in-process observability for passive-event storms, background-task scans, and discovery outcomes. Reuse existing metrics patterns; expose counters through an existing management surface or bounded periodic log. No prompt/response/full-path logging.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "phase0",
+      "notes": "Starting on latest inspected HEAD 827f9d2 after origin fetch; branch plan/approval-layer is ahead of origin/main and contains the reviewed plan.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Implemented aggregate-only runtime diagnostics: passive event counters, background-task request/active counters, codex-remote item-request/scan counters, discovery outcome/duration counters, goroutine count, and process CPU seconds. Exposed via authenticated GET /internal/diagnostics/runtime on latest inspected HEAD 827f9d2.",
+        "artifacts": [
+          "go-bridge/runtime_diagnostics.go",
+          "go-bridge/runtime_diagnostics_test.go",
+          "go-bridge/management_api.go",
+          "go-bridge/main.go",
+          "go-bridge/session_discovery.go",
+          "go-bridge/background_tasks.go",
+          "agent/codex-remote/agent.go",
+          "agent/codex-remote/background_tasks.go",
+          "agent/codex-remote/history_paginated.go"
+        ],
+        "checked_at": "2026-09-12T11:13:07.654513Z"
+      }
+    },
+    {
+      "id": "phase0-observability-tests",
+      "title": "Phase 0 observability: focused tests",
+      "description": "Write/run focused Go tests for Implement privacy-safe in-process observability for passive-event storms, background-task scans, and discovery outcomes. Reuse existing metrics patterns; expose counters through an existing management surface or bounded periodic log. No prompt/response/full-path logging. Use real seams and fail-closed assertions; no UI/snapshot/simulator automation.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-observability-impl"
+      ],
+      "source": "phase0",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "go test ./go-bridge ./agent/codex-remote -count=1 passed: go-bridge 74.426s, codex-remote 2.714s. New tests cover aggregate categories, active scan lifecycle, management endpoint shape, codex-remote page-request counting.",
+        "artifacts": [
+          "go-bridge/runtime_diagnostics_test.go",
+          "agent/codex-remote/history_paginated_test.go"
+        ],
+        "checked_at": "2026-09-12T11:14:38.506631Z"
+      }
+    },
+    {
+      "id": "phase0-observability-regression",
+      "title": "Phase 0 observability: regression gate",
+      "description": "Run the non-UI regression evidence required for Phase 0 observability: focused Go tests, static/build checks, and log-structure or fixture evidence where possible. Do not claim device behavior without real evidence.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-observability-tests"
+      ],
+      "source": "phase0",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Non-UI regression passed: race-enabled focused go-bridge/codex-remote tests, go vet, and go build for both packages. No UI/snapshot/simulator automation run.",
+        "artifacts": [
+          "command:go test -race ./go-bridge -run TestRuntimeDiagnostics|TestManagementRuntimeDiagnostics|TestBackgroundTasksList -count=1",
+          "command:go test -race ./agent/codex-remote -run TestTurnItemRequestCounter|TestBackgroundTask -count=1",
+          "command:go vet ./go-bridge ./agent/codex-remote",
+          "command:go build ./go-bridge ./agent/codex-remote"
+        ],
+        "checked_at": "2026-09-12T11:16:03.180238Z"
+      }
+    },
+    {
+      "id": "phase2-passive-error-storm-impl",
+      "title": "Phase 2 passive error storm: implementation",
+      "description": "Deduplicate/aggregate repeated passive errors by stable identity and connection/stream epoch while preserving first occurrence, identity changes, and state transitions. Fail closed; do not suppress distinct real errors.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-observability-regression"
+      ],
+      "source": "phase2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Implemented per-backend/session/event passive error aggregation using short one-way fingerprints. First error and identity changes log immediately as WARN; identical repeats log one 30s count/rate summary. Event processing and error propagation remain unchanged.",
+        "artifacts": [
+          "go-bridge/passive_event_log_aggregation.go",
+          "go-bridge/main.go",
+          "go-bridge/handlers.go"
+        ],
+        "checked_at": "2026-09-12T11:18:49.500854Z"
+      }
+    },
+    {
+      "id": "phase2-passive-error-storm-tests",
+      "title": "Phase 2 passive error storm: focused tests",
+      "description": "Write/run focused Go tests for Deduplicate/aggregate repeated passive errors by stable identity and connection/stream epoch while preserving first occurrence, identity changes, and state transitions. Fail closed; do not suppress distinct real errors. Use real seams and fail-closed assertions; no UI/snapshot/simulator automation.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-passive-error-storm-impl"
+      ],
+      "source": "phase2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Focused aggregator tests and full go-bridge suite passed. Full suite runtime 75.496s; focused tests cover 10,000 identical repeats, periodic summary, and immediate identity-change logging.",
+        "artifacts": [
+          "go-bridge/passive_event_log_aggregation_test.go"
+        ],
+        "checked_at": "2026-09-12T11:20:23.235938Z"
+      }
+    },
+    {
+      "id": "phase2-passive-error-storm-regression",
+      "title": "Phase 2 passive error storm: regression gate",
+      "description": "Run the non-UI regression evidence required for Phase 2 passive error storm: focused Go tests, static/build checks, and log-structure or fixture evidence where possible. Do not claim device behavior without real evidence.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-passive-error-storm-tests"
+      ],
+      "source": "phase2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Race-focused aggregator test repeated 20x passed (1.693s), go vet and go build passed. No UI/snapshot/simulator automation run.",
+        "artifacts": [
+          "command:go test -race ./go-bridge -run TestPassiveEventAggregator -count=20",
+          "command:go vet ./go-bridge",
+          "command:go build ./go-bridge"
+        ],
+        "checked_at": "2026-09-12T11:23:52.697096Z"
+      }
+    },
+    {
+      "id": "phase2-background-task-starvation-impl",
+      "title": "Phase 2 background-task starvation: implementation",
+      "description": "Fix codex-remote no-workflow slow-path semantics with explicit no-workflow confidence, negative caching/single-flight, cancellation, and foreground cold-open protection. Do not return an invented empty task list when truth is unknown.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-passive-error-storm-regression"
+      ],
+      "source": "phase2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Implemented codex-remote background-task scan protection: projection-not-ready fail-closed response, 30s bounded real scan, per-session/per-syncRev single-flight, successful negative-result cache, error retry semantics, and workflow-present projection fast path. Summary-only no-workflow is never inferred as authoritative emptiness.",
+        "artifacts": [
+          "go-bridge/background_task_cache.go",
+          "go-bridge/background_tasks.go",
+          "go-bridge/handlers.go",
+          "go-bridge/background_tasks_test.go",
+          "go-bridge/background_task_cache_test.go"
+        ],
+        "checked_at": "2026-09-12T11:28:52.562769Z"
+      }
+    },
+    {
+      "id": "phase2-background-task-starvation-tests",
+      "title": "Phase 2 background-task starvation: focused tests",
+      "description": "Write/run focused Go tests for Fix codex-remote no-workflow slow-path semantics with explicit no-workflow confidence, negative caching/single-flight, cancellation, and foreground cold-open protection. Do not return an invented empty task list when truth is unknown. Use real seams and fail-closed assertions; no UI/snapshot/simulator automation.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-background-task-starvation-impl"
+      ],
+      "source": "phase2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Race-focused background-task tests passed (1.163s), then full go-bridge suite passed (74.580s). Coverage: single-flight, same-revision negative cache, error retry, revision invalidation, bounded timeout, no scan during projection hydration, one scan for repeated no-workflow requests.",
+        "artifacts": [
+          "go-bridge/background_task_cache_test.go",
+          "go-bridge/background_tasks_test.go"
+        ],
+        "checked_at": "2026-09-12T11:30:21.686820Z"
+      }
+    },
+    {
+      "id": "phase2-background-task-starvation-regression",
+      "title": "Phase 2 background-task starvation: regression gate",
+      "description": "Run the non-UI regression evidence required for Phase 2 background-task starvation: focused Go tests, static/build checks, and log-structure or fixture evidence where possible. Do not claim device behavior without real evidence.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-background-task-starvation-tests"
+      ],
+      "source": "phase2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "go vet, go build, and focused codex-remote counter tests passed after the background-task changes. No UI/snapshot/simulator automation run.",
+        "artifacts": [
+          "command:go vet ./go-bridge ./agent/codex-remote",
+          "command:go build ./go-bridge ./agent/codex-remote",
+          "command:go test ./agent/codex-remote -run TestBackgroundTask|TestTurnItemRequestCounter -count=1"
+        ],
+        "checked_at": "2026-09-12T13:56:02.808341Z"
+      }
+    },
+    {
+      "id": "phase2-pairing-restore-race-impl",
+      "title": "Phase 2 pairing restore race: implementation",
+      "description": "Make projection requests during token-refresh/stream-bind restoration return bounded hydrating behavior instead of an immediate unpaired hard failure; preserve genuine not-configured failure.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-background-task-starvation-regression"
+      ],
+      "source": "phase2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Implemented core.ErrRestoreInProgress and RestoreWaiter. Codex-remote waits a bounded 5s for persisted stream restoration; missing/terminal pairing remains not-configured. Projection relay/source paths map transient restore to projection.hydrating without marking source inspection failed.",
+        "artifacts": [
+          "core/interfaces.go",
+          "agent/codex-remote/agent.go",
+          "agent/codex-remote/pairing.go",
+          "go-bridge/handlers_projection.go"
+        ],
+        "checked_at": "2026-09-12T13:57:33.235389Z"
+      }
+    },
+    {
+      "id": "phase2-pairing-restore-race-tests",
+      "title": "Phase 2 pairing restore race: focused tests",
+      "description": "Write/run focused Go tests for Make projection requests during token-refresh/stream-bind restoration return bounded hydrating behavior instead of an immediate unpaired hard failure; preserve genuine not-configured failure. Use real seams and fail-closed assertions; no UI/snapshot/simulator automation.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-pairing-restore-race-impl"
+      ],
+      "source": "phase2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Full go-bridge (74.628s) and codex-remote (2.720s) suites passed. Race-focused restore tests each repeated 10x passed. Coverage: missing identity stays not-configured, persisted authorizing becomes bounded restore-in-progress, terminal failure stays not-configured, and projection RPC returns projection.hydrating during restore.",
+        "artifacts": [
+          "agent/codex-remote/restore_test.go",
+          "go-bridge/projection_restore_test.go"
+        ],
+        "checked_at": "2026-09-12T13:58:06.148980Z"
+      }
+    },
+    {
+      "id": "phase2-pairing-restore-race-regression",
+      "title": "Phase 2 pairing restore race: regression gate",
+      "description": "Run the non-UI regression evidence required for Phase 2 pairing restore race: focused Go tests, static/build checks, and log-structure or fixture evidence where possible. Do not claim device behavior without real evidence.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-pairing-restore-race-tests"
+      ],
+      "source": "phase2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "go build, git diff --check, and focused projection/session-sync regression tests passed after restore-race changes.",
+        "artifacts": [
+          "command:go build ./go-bridge ./agent/codex-remote",
+          "command:git diff --check",
+          "command:go test ./go-bridge -run TestSessionSyncV2|TestProjectionRPC|TestProjectionSource -count=1"
+        ],
+        "checked_at": "2026-09-12T13:58:55.528851Z"
+      }
+    },
+    {
+      "id": "phase2-discovery-push-resilience-impl",
+      "title": "Phase 2 discovery push resilience: implementation",
+      "description": "Add outcome-classified discovery metrics, preserve last-good fingerprint semantics, expose push liveness, and make timeout/backoff policy evidence-driven without increasing a 7s full-fetch storm.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-pairing-restore-race-regression"
+      ],
+      "source": "phase2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Separated codex-remote discovery timeout to 12s while preserving 8s list budget; timeout retries use 10–30s bounded backoff while hard errors retain 15s–2m; added one-minute rate-limited push-liveness warnings; retained last-good seen semantics and official notification path; diagnostics now expose p50/p95.",
+        "artifacts": [
+          "go-bridge/session_discovery.go",
+          "go-bridge/runtime_diagnostics.go"
+        ],
+        "checked_at": "2026-09-12T14:05:12.751796Z"
+      }
+    },
+    {
+      "id": "phase2-discovery-push-resilience-tests",
+      "title": "Phase 2 discovery push resilience: focused tests",
+      "description": "Write/run focused Go tests for Add outcome-classified discovery metrics, preserve last-good fingerprint semantics, expose push liveness, and make timeout/backoff policy evidence-driven without increasing a 7s full-fetch storm. Use real seams and fail-closed assertions; no UI/snapshot/simulator automation.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-discovery-push-resilience-impl"
+      ],
+      "source": "phase2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Race-focused discovery tests and full go-bridge/codex-remote suites passed. Full run: go-bridge 74.776s, codex-remote 2.793s. Coverage includes timeout budget separation, bounded timeout backoff, push-liveness rate limit/reset, and latency percentiles.",
+        "artifacts": [
+          "go-bridge/session_discovery_test.go",
+          "go-bridge/runtime_diagnostics_test.go"
+        ],
+        "checked_at": "2026-09-12T14:05:12.752190Z"
+      }
+    },
+    {
+      "id": "phase2-discovery-push-resilience-regression",
+      "title": "Phase 2 discovery push resilience: regression gate",
+      "description": "Run the non-UI regression evidence required for Phase 2 discovery push resilience: focused Go tests, static/build checks, and log-structure or fixture evidence where possible. Do not claim device behavior without real evidence.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-discovery-push-resilience-tests"
+      ],
+      "source": "phase2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "go vet, go build, and git diff --check passed after discovery timeout/backoff/liveness/metrics changes.",
+        "artifacts": [
+          "command:go vet ./go-bridge ./agent/codex-remote",
+          "command:go build ./go-bridge ./agent/codex-remote",
+          "command:git diff --check"
+        ],
+        "checked_at": "2026-09-12T14:06:42.757626Z"
+      }
+    },
+    {
+      "id": "phase3-catalog-scan-cost-impl",
+      "title": "Phase 3 catalog scan cost: implementation",
+      "description": "Reduce unchanged Grok/catalog scan cost: avoid repeated visible-filter/stat/log work when raw truth is unchanged, deduplicate os.Stat by directory within one call, and preserve 60s deletion safety.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-discovery-push-resilience-regression"
+      ],
+      "source": "phase3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Implemented per-call directory-stat dedupe, unchanged catalog-filter drop-signature rate limiting, and a 50s raw-membership cache for Grok discovery fast polls. User-facing Grok list build still filters on every real build; TTL is below the 60s safety scan so deleted workspaces reappear as filtered.",
+        "artifacts": [
+          "go-bridge/catalog_workspace_filter.go",
+          "go-bridge/catalog_native_membership.go",
+          "go-bridge/handlers.go",
+          "go-bridge/session_discovery.go"
+        ],
+        "checked_at": "2026-09-12T14:09:37.176010Z"
+      }
+    },
+    {
+      "id": "phase3-catalog-scan-cost-tests",
+      "title": "Phase 3 catalog scan cost: focused tests",
+      "description": "Write/run focused Go tests for Reduce unchanged Grok/catalog scan cost: avoid repeated visible-filter/stat/log work when raw truth is unchanged, deduplicate os.Stat by directory within one call, and preserve 60s deletion safety. Use real seams and fail-closed assertions; no UI/snapshot/simulator automation.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "tests",
+      "depends_on": [
+        "phase3-catalog-scan-cost-impl"
+      ],
+      "source": "phase3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Race-focused catalog/Grok tests passed (1.143s), followed by the full go-bridge suite (75.028s). Coverage: one stat per duplicate directory per call, repeat log rate limiting, unchanged raw membership cache hit, and TTL-expired deleted-workspace filtering.",
+        "artifacts": [
+          "go-bridge/catalog_workspace_filter_test.go",
+          "go-bridge/catalog_native_membership_test.go"
+        ],
+        "checked_at": "2026-09-12T14:09:37.176130Z"
+      }
+    },
+    {
+      "id": "phase3-catalog-scan-cost-regression",
+      "title": "Phase 3 catalog scan cost: regression gate",
+      "description": "Run the non-UI regression evidence required for Phase 3 catalog scan cost: focused Go tests, static/build checks, and log-structure or fixture evidence where possible. Do not claim device behavior without real evidence.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-catalog-scan-cost-tests"
+      ],
+      "source": "phase3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "go vet, go build, focused Grok/catalog/discovery regression tests, and git diff --check passed.",
+        "artifacts": [
+          "command:go vet ./go-bridge",
+          "command:go build ./go-bridge",
+          "command:go test ./go-bridge -run TestGrokCatalog|TestCatalogFilter|TestSessionDiscovery -count=1",
+          "command:git diff --check"
+        ],
+        "checked_at": "2026-09-12T14:11:22.103111Z"
+      }
+    },
+    {
+      "id": "phase3-secondary-scan-cadence-impl",
+      "title": "Phase 3 secondary scan cadence: implementation",
+      "description": "Identify and reduce the second 30s workspace-filter caller and unconditional Claude fork-lineage recomputation using existing cache/generation seams; do not weaken lineage correctness.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [
+        "phase3-catalog-scan-cost-regression"
+      ],
+      "source": "phase3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Identified the paired 30s filter caller as the declared Grok list_sessions outbound re-filter. Added a 50s snapshot-filter cache while retaining sub-60s deleted-workspace visibility. Claude unchanged fingerprint/cache hits now reuse the existing lineage-filtered snapshot instead of re-sorting and re-emitting fork/compact detection.",
+        "artifacts": [
+          "go-bridge/catalog_workspace_filter.go",
+          "go-bridge/handlers_grok_catalog.go",
+          "go-bridge/claude_session_catalog.go",
+          "go-bridge/handlers.go"
+        ],
+        "checked_at": "2026-09-12T14:14:09.467872Z"
+      }
+    },
+    {
+      "id": "phase3-secondary-scan-cadence-tests",
+      "title": "Phase 3 secondary scan cadence: focused tests",
+      "description": "Write/run focused Go tests for Identify and reduce the second 30s workspace-filter caller and unconditional Claude fork-lineage recomputation using existing cache/generation seams; do not weaken lineage correctness. Use real seams and fail-closed assertions; no UI/snapshot/simulator automation.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "tests",
+      "depends_on": [
+        "phase3-secondary-scan-cadence-impl"
+      ],
+      "source": "phase3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Race-focused Claude/workspace/Grok tests passed (1.235s), followed by full go-bridge suite (74.625s). Coverage: unchanged Claude snapshot pointer reuse and declared Grok filter cache TTL/expiry.",
+        "artifacts": [
+          "go-bridge/claude_session_catalog_test.go",
+          "go-bridge/catalog_workspace_filter_test.go"
+        ],
+        "checked_at": "2026-09-12T14:14:09.468007Z"
+      }
+    },
+    {
+      "id": "phase3-secondary-scan-cadence-regression",
+      "title": "Phase 3 secondary scan cadence: regression gate",
+      "description": "Run the non-UI regression evidence required for Phase 3 secondary scan cadence: focused Go tests, static/build checks, and log-structure or fixture evidence where possible. Do not claim device behavior without real evidence.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-secondary-scan-cadence-tests"
+      ],
+      "source": "phase3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "go vet, go build, focused Claude/Grok/workspace regression tests, and git diff --check passed after secondary cadence changes.",
+        "artifacts": [
+          "command:go vet ./go-bridge",
+          "command:go build ./go-bridge",
+          "command:go test ./go-bridge -run TestClaudeSessionCatalog|TestWorkspaceFilterCache|TestGrokCatalog -count=1",
+          "command:git diff --check"
+        ],
+        "checked_at": "2026-09-12T14:14:28.403378Z"
+      }
+    },
+    {
+      "id": "phase4-doc-sync-impl",
+      "title": "Phase 4 documentation and completion: implementation",
+      "description": "Update architecture/changelog/completion documentation with implemented behavior, invariants, metrics, and honest regression evidence.",
+      "status": "done",
+      "phase": "phase4",
+      "kind": "impl",
+      "depends_on": [
+        "phase3-secondary-scan-cadence-regression"
+      ],
+      "source": "phase4",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Updated CHANGELOG, architecture invariants, protocol background_tasks.list semantics, and plan execution status for passive aggregation, background-task starvation fix, restore race, discovery timeout/liveness, and catalog scan reductions.",
+        "artifacts": [
+          "CHANGELOG.md",
+          "GO_BRIDGE_ARCHITECTURE.md",
+          "docs/protocol/bridge-v1.md",
+          "docs/2026-09-12-macbridge-catalog-periodic-scan-and-discovery-timeout-plan.md"
+        ],
+        "checked_at": "2026-09-12T14:15:47.035760Z"
+      }
+    },
+    {
+      "id": "phase4-doc-sync-tests",
+      "title": "Phase 4 documentation and completion: focused tests",
+      "description": "Write/run focused Go tests for Update architecture/changelog/completion documentation with implemented behavior, invariants, metrics, and honest regression evidence. Use real seams and fail-closed assertions; no UI/snapshot/simulator automation.",
+      "status": "done",
+      "phase": "phase4",
+      "kind": "tests",
+      "depends_on": [
+        "phase4-doc-sync-impl"
+      ],
+      "source": "phase4",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Full go-bridge, codex-remote, and core packages passed after documentation updates; go vet and go build also passed. Full run: go-bridge 74.420s, codex-remote 2.757s, core 0.035s.",
+        "artifacts": [
+          "command:go test ./go-bridge ./agent/codex-remote ./core -count=1",
+          "command:go vet ./go-bridge ./agent/codex-remote ./core",
+          "command:go build ./go-bridge ./agent/codex-remote ./core"
+        ],
+        "checked_at": "2026-09-12T14:17:16.570182Z"
+      }
+    },
+    {
+      "id": "phase4-doc-sync-regression",
+      "title": "Phase 4 documentation and completion: regression gate",
+      "description": "Run the non-UI regression evidence required for Phase 4 documentation and completion: focused Go tests, static/build checks, and log-structure or fixture evidence where possible. Do not claim device behavior without real evidence.",
+      "status": "in_progress",
+      "phase": "phase4",
+      "kind": "regression",
+      "depends_on": [
+        "phase4-doc-sync-tests"
+      ],
+      "source": "phase4",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    }
+  ]
+}

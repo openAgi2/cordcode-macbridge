@@ -1261,3 +1261,22 @@ func TestMapTurnItemsPageFirstUserAbsorptionAcrossPages(t *testing.T) {
 		t.Fatalf("LATER user message must map to a text part: %+v", scratch.Parts[2])
 	}
 }
+
+func TestTurnItemRequestCounterCountsOfficialPages(t *testing.T) {
+	agent, _ := paginatedFake(t, func(call rpcCall) (any, *RPCError) {
+		if call.Method != "thread/items/list" {
+			return nil, &RPCError{Code: -32601, Message: call.Method}
+		}
+		if call.Params["cursor"] == nil {
+			return map[string]any{"data": []any{}, "nextCursor": "cursor-2"}, nil
+		}
+		return map[string]any{"data": []any{}}, nil
+	})
+	if _, err := agent.ReadTurnItems(context.Background(), "thread_counter", "turn_counter"); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, _, requests, _, _ := agent.BackgroundTaskScanCounters()
+	if requests != 2 {
+		t.Fatalf("turn item requests = %d, want 2", requests)
+	}
+}

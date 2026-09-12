@@ -2,6 +2,7 @@ package gobridge
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -301,5 +302,42 @@ func TestNativeListAndPollerPropagateCancellationAndDeadline(t *testing.T) {
 	}
 	if base.ListSessionsCallCount() != 0 {
 		t.Fatal("canceled native paths called disk-scan ListSessions")
+	}
+}
+
+func TestGrokCachedMembershipReusesUnchangedRawAndExpiresBeforeSafetyScan(t *testing.T) {
+	withCodexRootsDisabled(t)
+	current := time.Unix(1_000, 0)
+	previousNow := grokMembershipCacheNow
+	grokMembershipCacheNow = func() time.Time { return current }
+	t.Cleanup(func() { grokMembershipCacheNow = previousNow })
+
+	workspace := t.TempDir()
+	native := []core.AgentSessionInfo{{ID: "grok-native", Summary: "visible", Directory: workspace}}
+	agent := &fakeGrokCatalogAgent{
+		fakeAgent: &fakeAgent{name: "grokbuild"},
+		fetchFn: func(context.Context) ([]core.AgentSessionInfo, error) {
+			return append([]core.AgentSessionInfo(nil), native...), nil
+		},
+	}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("grokbuild", agent)
+
+	first, _, err := handlers.grokVisibleMembershipCached(context.Background(), "grokbuild")
+	if err != nil || len(first) != 1 {
+		t.Fatalf("first membership=%#v err=%v", first, err)
+	}
+	if err := os.RemoveAll(workspace); err != nil {
+		t.Fatal(err)
+	}
+	current = current.Add(49 * time.Second)
+	second, _, err := handlers.grokVisibleMembershipCached(context.Background(), "grokbuild")
+	if err != nil || len(second) != 1 {
+		t.Fatalf("TTL membership should reuse raw result: %#v err=%v", second, err)
+	}
+	current = current.Add(2 * time.Second)
+	third, _, err := handlers.grokVisibleMembershipCached(context.Background(), "grokbuild")
+	if err != nil || len(third) != 0 {
+		t.Fatalf("expired membership must re-filter deleted workspace: %#v err=%v", third, err)
 	}
 }

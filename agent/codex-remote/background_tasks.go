@@ -13,7 +13,22 @@ import (
 // real workflow records. create_thread contributes child identity/title and
 // later wait_threads polls refresh that child's status in transcript order.
 func (a *Agent) ListSessionBackgroundTasks(ctx context.Context, sessionID string) ([]core.BackgroundTask, error) {
-	turns, err := a.GetTurnScopedRichHistory(ctx, sessionID, 0)
+	started := time.Now()
+	a.backgroundScanActive.Add(1)
+	a.backgroundScanTotal.Add(1)
+	var turns []core.TurnScopedHistoryTurn
+	var err error
+	defer func() {
+		a.backgroundScanActive.Add(-1)
+		a.backgroundScanLastDurationMillis.Store(time.Since(started).Milliseconds())
+		if err != nil {
+			a.backgroundScanFailures.Add(1)
+			return
+		}
+		a.backgroundScanSuccesses.Add(1)
+		a.backgroundScannedTurns.Add(uint64(len(turns)))
+	}()
+	turns, err = a.GetTurnScopedRichHistory(ctx, sessionID, 0)
 	if err != nil {
 		return nil, err
 	}

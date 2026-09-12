@@ -17,6 +17,9 @@ import (
 
 var officialAPIBase = "https://chatgpt.com/backend-api"
 
+// Var only so tests can shrink the bounded restore wait.
+var remoteRestoreWaitTimeout = 5 * time.Second
+
 const (
 	PairPhaseIdle         = "idle"
 	PairPhaseAuthorizing  = "authorizing"

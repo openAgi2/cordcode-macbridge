@@ -1,8 +1,11 @@
 package codexremote
 
 import (
+	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
@@ -41,6 +44,15 @@ type Agent struct {
 	paired             bool
 	pairing            *PairingController
 	connEpoch          ConnectionEpoch
+	// Runtime diagnostics are aggregate-only counters. They never carry prompt,
+	// response, path, or stable session-identity data.
+	backgroundScanActive             atomic.Int64
+	backgroundScanTotal              atomic.Uint64
+	backgroundScanSuccesses          atomic.Uint64
+	backgroundScanFailures           atomic.Uint64
+	backgroundScannedTurns           atomic.Uint64
+	backgroundScanLastDurationMillis atomic.Int64
+	turnItemRequests                 atomic.Uint64
 	// collabFoldMu guards collabFolds, the session-keyed cross-turn workflow
 	// fold contexts used by every cold history mapping surface (the live
 	// codec keeps its own registry).
@@ -79,7 +91,56 @@ func New(opts map[string]any) *Agent {
 
 func (a *Agent) Name() string { return BackendID }
 
+// WaitForRestore bounds the gap between process startup and persisted Remote
+// Control stream binding. A missing client is ErrNotConfigured only when there is
+// no persisted identity or pairing has terminally failed; offline/authorizing are
+// transient retry states and return core.ErrRestoreInProgress after the bound.
+func (a *Agent) WaitForRestore(ctx context.Context) error {
+	a.mu.Lock()
+	cl := a.client
+	a.mu.Unlock()
+	if cl != nil {
+		return nil
+	}
+	if a.pairing == nil || !a.pairing.hasPersistedIdentity() {
+		return ErrNotConfigured
+	}
+	deadline := time.After(remoteRestoreWaitTimeout)
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		snapshot := a.pairing.Snapshot()
+		if snapshot.Phase == PairPhaseFailed {
+			return ErrNotConfigured
+		}
+		a.mu.Lock()
+		cl = a.client
+		a.mu.Unlock()
+		if cl != nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline:
+			return core.ErrRestoreInProgress
+		case <-ticker.C:
+		}
+	}
+}
+
+// BackgroundTaskScanCounters exposes aggregate scan/request counters for the
+// management diagnostics endpoint. Values are advisory observations, not truth
+// used to synthesize task lists.
+func (a *Agent) BackgroundTaskScanCounters() (active, scans, successes, failures, turnItemRequests, scannedTurns uint64, lastDurationMillis int64) {
+	return uint64(a.backgroundScanActive.Load()), a.backgroundScanTotal.Load(),
+		a.backgroundScanSuccesses.Load(), a.backgroundScanFailures.Load(),
+		a.turnItemRequests.Load(), a.backgroundScannedTurns.Load(),
+		a.backgroundScanLastDurationMillis.Load()
+}
+
 var _ core.CatalogRefreshSignaler = (*Agent)(nil)
+var _ core.RestoreWaiter = (*Agent)(nil)
 var _ core.LiveEventSubscriber = (*Agent)(nil)
 var _ core.LiveEventCatalogAttacher = (*Agent)(nil)
 

@@ -159,6 +159,21 @@ type Handlers struct {
 	transcriptIndex      *transcriptindex.Store
 	// capabilityPolicy 是集中式 RPC 授权层（P3 架构演进，§3.2/§8）。
 	capabilityPolicy *CapabilityPolicy
+	// runtimeDiagnostics 聚合 passive/background/discovery 计数；只存类别，
+	// 不存 session、路径、prompt、回答或原始错误文本。
+	runtimeDiagnostics *runtimeDiagnostics
+	// passiveEventLogs 聚合重复 passive error 日志；只保留短指纹，不保留
+	// 原始错误文本或稳定 session id。
+	passiveEventLogs *passiveEventAggregator
+	// workspaceFilterCache 抑制 declared catalog 出站过滤在快照 TTL 内的重复
+	// stat；自身 TTL 低于 60s safety scan。
+	workspaceFilterCache *workspaceFilterCache
+	// grokMembershipCache 仅复用“raw catalog 未变”的 visible membership 结果；
+	// TTL 低于 60s safety scan，磁盘删除仍会被周期性真实过滤。
+	grokMembershipCache *grokMembershipCache
+	// backgroundTaskFlights 为 codex-remote 的完整历史扫描提供 per-session
+	// single-flight / 负缓存，按 projection syncRev 失效。
+	backgroundTaskFlights *backgroundTaskCache
 	// filePool 是 §3.6.3 的全局专用 bounded file-read worker pool，把 read_file_v2
 	// 的 I/O 从 per-device inbound scheduler 解耦。nil 时（部分单测）handleReadFileV2
 	// 回退到同步内联读，不阻塞测试。
@@ -248,6 +263,10 @@ func newHandlersWithContext(ctx context.Context, bridgeEpoch string) *Handlers {
 		pendingClaudeRuntime:    make(map[string]claudeRuntimeSelection),
 		transcriptIndex:         transcriptindex.NewStore(defaultTranscriptIndexDir()),
 		capabilityPolicy:        NewCapabilityPolicy(),
+		runtimeDiagnostics:      newRuntimeDiagnostics(),
+		passiveEventLogs:        newPassiveEventAggregator(),
+		grokMembershipCache:     &grokMembershipCache{},
+		backgroundTaskFlights:   newBackgroundTaskCache(),
 		webPushTitles:           newWebPushTitleCache(),
 		relayEnabled:            true,
 		sessionListLimit:        defaultSessionListLimit,

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -52,7 +53,53 @@ func (h *Handlers) codexVisibleMembershipCounts(ctx context.Context, backendID, 
 	return filterCodexCatalogSessions(sessionsToWire(sessions)), len(sessions), nil
 }
 
+// grokMembershipCacheTTL stays below the 60s discovery safety scan. Fast polls
+// can reuse an unchanged raw membership without repeating per-directory stat or
+// drop logging, while disk deletion remains visible at least once per minute.
+const grokMembershipCacheTTL = 50 * time.Second
+
+// Var only so tests can move the TTL boundary deterministically.
+var grokMembershipCacheNow = time.Now
+
+type grokMembershipCache struct {
+	mu         sync.Mutex
+	rawFP      string
+	visible    []map[string]interface{}
+	filteredAt time.Time
+}
+
+func (c *grokMembershipCache) get(rawFP string, now time.Time) ([]map[string]interface{}, bool) {
+	if c == nil {
+		return nil, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if rawFP != c.rawFP || now.Sub(c.filteredAt) >= grokMembershipCacheTTL {
+		return nil, false
+	}
+	return copyWireMaps(c.visible), true
+}
+
+func (c *grokMembershipCache) put(rawFP string, visible []map[string]interface{}, now time.Time) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.rawFP = rawFP
+	c.visible = copyWireMaps(visible)
+	c.filteredAt = now
+	c.mu.Unlock()
+}
+
 func (h *Handlers) grokVisibleMembership(ctx context.Context, backendID string) ([]map[string]interface{}, core.Agent, error) {
+	return h.grokVisibleMembershipWithCache(ctx, backendID, false)
+}
+
+func (h *Handlers) grokVisibleMembershipCached(ctx context.Context, backendID string) ([]map[string]interface{}, core.Agent, error) {
+	return h.grokVisibleMembershipWithCache(ctx, backendID, true)
+}
+
+func (h *Handlers) grokVisibleMembershipWithCache(ctx context.Context, backendID string, allowCache bool) ([]map[string]interface{}, core.Agent, error) {
 	agent, ok := h.getAgent(backendID)
 	if !ok {
 		return nil, nil, fmt.Errorf("grokbuild agent not registered for backend %q", backendID)
@@ -66,7 +113,18 @@ func (h *Handlers) grokVisibleMembership(ctx context.Context, backendID string) 
 		return nil, nil, err
 	}
 	mapped := filterGrokPlaceholderSessions(sessionsToWire(sessions))
-	return filterSessionsMissingWorkspace(mapped), agent, nil
+	rawFP := listSemanticFingerprint(mapped)
+	now := grokMembershipCacheNow()
+	if allowCache {
+		if visible, hit := h.grokMembershipCache.get(rawFP, now); hit {
+			return visible, agent, nil
+		}
+	}
+	visible := filterSessionsMissingWorkspace(mapped)
+	if allowCache {
+		h.grokMembershipCache.put(rawFP, visible, now)
+	}
+	return visible, agent, nil
 }
 
 func copyWireMaps(maps []map[string]interface{}) []map[string]interface{} {

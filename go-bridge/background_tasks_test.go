@@ -155,9 +155,11 @@ type sessionBackgroundTaskProviderAgent struct {
 	*fakeAgent
 	tasks              []core.BackgroundTask
 	requestedSessionID string
+	calls              int
 }
 
 func (b *sessionBackgroundTaskProviderAgent) ListSessionBackgroundTasks(_ context.Context, sessionID string) ([]core.BackgroundTask, error) {
+	b.calls++
 	b.requestedSessionID = sessionID
 	return b.tasks, nil
 }
@@ -214,6 +216,9 @@ func TestBackgroundTasksListSessionProviderRoutingAndCapability(t *testing.T) {
 	}
 	handlers := newTestHandlers(t)
 	handlers.RegisterAgent("codex-remote", agent)
+	handlers.projectionKernel.mu.Lock()
+	handlers.projectionKernel.sessionLocked("codex-remote", "root-1").status.Phase = ProjectionHydrateReady
+	handlers.projectionKernel.mu.Unlock()
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
 
@@ -463,5 +468,61 @@ func TestBackgroundTaskToWireDurationPrecedence(t *testing.T) {
 	w = backgroundTaskToWire(bare)
 	if _, has := w["durationMillis"]; has {
 		t.Fatalf("unknown duration must be omitted, got %v", w["durationMillis"])
+	}
+}
+
+func TestCodexRemoteNoWorkflowScanCachesNegativeResult(t *testing.T) {
+	agent := &sessionBackgroundTaskProviderAgent{fakeAgent: &fakeAgent{name: "codex-remote"}}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex-remote", agent)
+	handlers.projectionKernel.mu.Lock()
+	session := handlers.projectionKernel.sessionLocked("codex-remote", "root-no-workflow")
+	session.status.Phase = ProjectionHydrateReady
+	session.coldBaseline = true
+	handlers.projectionKernel.mu.Unlock()
+	handlers.projectionKernel.IngestLive(ev(1, "codex-remote", "root-no-workflow", "turn_started", map[string]interface{}{"turnId": "turn"}))
+	handlers.projectionKernel.IngestLive(ev(2, "codex-remote", "root-no-workflow", "turn_completed", map[string]interface{}{"turnId": "turn"}))
+
+	for i := 0; i < 3; i++ {
+		serverConn, clientConn, cleanup := openTestConn(t)
+		handlers.HandleRPC(serverConn, WireMessage{
+			BackendID: "codex-remote", Method: "background_tasks.list", RequestID: "bt-negative",
+			Params: mustJSONRaw(t, map[string]any{"sessionId": "root-no-workflow"}),
+		})
+		messages := readJSONMaps(t, clientConn, 1)
+		if messages[0]["ok"] != true {
+			t.Fatalf("request %d failed: %#v", i, messages[0])
+		}
+		cleanup()
+	}
+	if agent.calls != 1 || agent.requestedSessionID != "root-no-workflow" {
+		t.Fatalf("slow scan calls=%d requestedSessionID=%q, want one real scan", agent.calls, agent.requestedSessionID)
+	}
+}
+
+func TestCodexRemoteHydratingProjectionDoesNotStartSlowScan(t *testing.T) {
+	agent := &sessionBackgroundTaskProviderAgent{fakeAgent: &fakeAgent{name: "codex-remote"}}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex-remote", agent)
+	handlers.projectionKernel.mu.Lock()
+	handlers.projectionKernel.sessionLocked("codex-remote", "root-hydrating").status.Phase = ProjectionHydrateHydrating
+	handlers.projectionKernel.mu.Unlock()
+
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex-remote", Method: "background_tasks.list", RequestID: "bt-hydrating",
+		Params: mustJSONRaw(t, map[string]any{"sessionId": "root-hydrating"}),
+	})
+	messages := readJSONMaps(t, clientConn, 1)
+	if messages[0]["ok"] != false {
+		t.Fatalf("hydrating projection must fail honestly: %#v", messages[0])
+	}
+	errObject, _ := messages[0]["error"].(map[string]any)
+	if errObject["code"] != "background_tasks.projection_not_ready" {
+		t.Fatalf("error = %#v", errObject)
+	}
+	if agent.requestedSessionID != "" {
+		t.Fatalf("slow scan ran during hydration: %q", agent.requestedSessionID)
 	}
 }

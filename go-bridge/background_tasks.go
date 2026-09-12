@@ -289,7 +289,13 @@ func (h *Handlers) handleBackgroundTasksList(conn Connection, msg WireMessage, a
 		_ = json.Unmarshal(msg.Params, &params)
 	}
 	params.SessionID = strings.TrimSpace(params.SessionID)
+	finishBackgroundMetrics := h.runtimeDiagnostics.beginBackgroundTask(msg.BackendID)
+	outcome := "success"
+	defer func() {
+		finishBackgroundMetrics(outcome)
+	}()
 	if params.SessionID == "" {
+		outcome = "missing_param"
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "missing_param", Message: "sessionId required"})
 		return
 	}
@@ -301,24 +307,41 @@ func (h *Handlers) handleBackgroundTasksList(conn Connection, msg WireMessage, a
 		var err error
 		tasks, err = claudeBackgroundTasks(projectsDir)
 		if err != nil {
+			outcome = "list_failed"
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
 			return
 		}
 	default:
-		// Codex workflow cards and the task center share one committed truth.
-		// When that truth is present, avoid a second full-history/items walk.
+		// Codex workflow cards and the task center share committed projection truth.
+		// Summary-only projection cannot prove "no workflow"; that case runs one
+		// full scan under the revision cache below instead of inferring an empty list.
 		if msg.BackendID == "codex-remote" && h.projectionKernel != nil {
-			if projection, ok := h.projectionKernel.Snapshot(msg.BackendID, params.SessionID); ok {
-				if projected, hasWorkflow := projectionBackgroundTasks(msg.BackendID, params.SessionID, projection); hasWorkflow {
-					tasks = projected
-					break
-				}
+			if projected, resolved := h.codexRemoteBackgroundTasks(msg.BackendID, params.SessionID); resolved {
+				tasks = projected
+				break
+			}
+			if status := h.projectionKernel.Status(msg.BackendID, params.SessionID).Phase; status != ProjectionHydrateReady {
+				outcome = "projection_not_ready"
+				retryAfter := int64(250)
+				retryable := true
+				conn.SendResult(msg.RequestID, nil, &WireError{
+					Code:             "background_tasks.projection_not_ready",
+					Message:          "session projection is not ready; retry after it commits",
+					Retryable:        &retryable,
+					RetryAfterMillis: &retryAfter,
+				})
+				return
 			}
 		}
 		if provider, ok := agent.(core.SessionBackgroundTaskProvider); ok {
 			var err error
-			tasks, err = provider.ListSessionBackgroundTasks(context.Background(), params.SessionID)
+			if msg.BackendID == "codex-remote" {
+				tasks, err = h.scanCodexRemoteBackgroundTasks(params.SessionID, provider)
+			} else {
+				tasks, err = provider.ListSessionBackgroundTasks(context.Background(), params.SessionID)
+			}
 			if err != nil {
+				outcome = "list_failed"
 				conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
 				return
 			}
@@ -326,10 +349,12 @@ func (h *Handlers) handleBackgroundTasksList(conn Connection, msg WireMessage, a
 			var err error
 			tasks, err = provider.ListBackgroundTasks(context.Background())
 			if err != nil {
+				outcome = "list_failed"
 				conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
 				return
 			}
 		} else {
+			outcome = "not_supported"
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: "not_supported", Message: "backend does not expose background tasks"})
 			return
 		}
@@ -342,6 +367,47 @@ func (h *Handlers) handleBackgroundTasksList(conn Connection, msg WireMessage, a
 		wire = append(wire, backgroundTaskToWire(t))
 	}
 	conn.SendResult(msg.RequestID, map[string]any{"tasks": wire}, nil)
+}
+
+// codexRemoteBackgroundTasks resolves tasks from a Ready projection when workflow
+// truth is present. It never treats a summary-only "no workflow" projection as
+// authoritative emptiness; that unknown state returns resolved=false so the caller
+// performs one full scan and caches the negative result by SyncRev.
+func (h *Handlers) codexRemoteBackgroundTasks(backendID, sessionID string) ([]core.BackgroundTask, bool) {
+	if h == nil || h.projectionKernel == nil {
+		return nil, false
+	}
+	if h.projectionKernel.Status(backendID, sessionID).Phase != ProjectionHydrateReady {
+		return nil, false
+	}
+	projection, ok := h.projectionKernel.Snapshot(backendID, sessionID)
+	if !ok {
+		return nil, false
+	}
+	tasks, hasWorkflow := projectionBackgroundTasks(backendID, sessionID, projection)
+	if hasWorkflow {
+		h.backgroundTaskFlights.pruneCompletedSession(backendID, sessionID, projection.SyncRev)
+		return tasks, true
+	}
+	cached, hit := h.backgroundTaskFlights.lookup(backendID, sessionID, projection.SyncRev)
+	if !hit {
+		return nil, false
+	}
+	return cached, true
+}
+
+// scanCodexRemoteBackgroundTasks runs the all-turn history scan at most once per
+// session/projection revision. The 30s bound prevents a pathological scan from
+// owning the Remote channel indefinitely; timeout remains an error.
+func (h *Handlers) scanCodexRemoteBackgroundTasks(sessionID string, provider core.SessionBackgroundTaskProvider) ([]core.BackgroundTask, error) {
+	var syncRev int
+	if projection, ok := h.projectionKernel.Snapshot("codex-remote", sessionID); ok {
+		syncRev = projection.SyncRev
+	}
+	defer h.backgroundTaskFlights.pruneCompletedSession("codex-remote", sessionID, syncRev)
+	return h.backgroundTaskFlights.fetch(h.ctx, "codex-remote", sessionID, syncRev, func(ctx context.Context) ([]core.BackgroundTask, error) {
+		return provider.ListSessionBackgroundTasks(ctx, sessionID)
+	})
 }
 
 func (h *Handlers) handleBackgroundTasksGet(conn Connection, msg WireMessage, agent core.Agent) {

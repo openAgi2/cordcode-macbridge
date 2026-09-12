@@ -1245,6 +1245,12 @@ Claude 状态派生：`running/failed/completed` 由 B4 同款 reducer walk 产�
 
 params: `{ sessionId: string }`（严格返回该根 session 的任务；排序 updatedAt 降序，服务端计算）。`sessionId` 缺席返回 `missing_param`，防止新会话意外看到其他会话的任务与徽标计数。
 
+Codex Desktop（codex-remote）的已提交 projection 中已出现 workflow 时直接返回 projection
+真值；summary-only projection 不能证明“无 workflow”，未 Ready/仍在恢复时返回可重试
+`background_tasks.projection_not_ready`（`retryAfterMillis`），不得启动全历史扫描。Ready 后
+的完整历史扫描按 `(sessionId, projection SyncRev)` single-flight；成功负结果在同一 revision
+内复用，真实错误不缓存、下次请求重试。服务端不得把“未知”伪造成空任务列表。
+
 ```ts
 { tasks: BackgroundTaskSummary[] }
 ```
