@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T07:08:00Z",
+  "updated_at": "2026-09-12T08:27:00Z",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -195,8 +195,29 @@
       "id": "p1-dsh-replay-free-regression",
       "title": "P1 DSH replay-free real-device regression",
       "description": "Verify a DeepSeek Harness session completed in the Mac 3080 web app notifies iOS with actual response detail while the iOS Web App remains in Claude mode with no session open.",
-      "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-dsh-replay-free-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-codex-replay-preview-regression; owner authorization already granted.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Release build 36406dc34a99 is installed and healthy. Runtime logs prove the external DSH instance resolved and mux/host passive streams opened; awaiting owner confirmation of a real-preview DSH completion notification.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-dsh-replay-free-release-build.log", ".exec-plan/evidence/034334e9176f/p1-dsh-replay-free-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T07:08:00Z"}
+      "status": "done", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-dsh-replay-free-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-codex-replay-preview-regression; owner authorization already granted.",
+      "verification": {"required": true, "status": "present", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Owner confirmed the DeepSeek Harness session completed in the Mac 3080 web app notifies iOS.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-dsh-replay-free-release-build.log", ".exec-plan/evidence/034334e9176f/p1-dsh-replay-free-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T08:24:00Z"}
+    },
+    {
+      "id": "p1-grok-replay-free-impl",
+      "title": "P1 Grok replay-free notification implementation",
+      "description": "Add a read-only process-wide Grok updates.jsonl live watcher that skips completed history, preserves an in-progress tail at startup, observes newly created session journals, and feeds the shared official session/update codec without driving Grok.",
+      "status": "done", "phase": "p1-review-fix", "kind": "impl", "depends_on": ["p1-dsh-replay-free-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-dsh-replay-free-regression; extends A0 backend coverage.",
+      "verification": {"required": true, "status": "present", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "Grok Build now exposes a process-wide read-only LiveEventSubscriber over per-session updates.jsonl journals: completed history is baselined, an in-progress tail is retained, new journals are observed, and official replay markers/codec semantics remain authoritative.", "artifacts": ["agent/grokbuild/global_updates_subscriber.go:SubscribeLive", "agent/grokbuild/grokbuild.go:core.LiveEventSubscriber", "agent/grokbuild/updates_file_tailer.go:drainNew"], "checked_at": "2026-09-12T08:27:00Z"}
+    },
+    {
+      "id": "p1-grok-replay-free-tests",
+      "title": "P1 Grok replay-free automated tests",
+      "description": "Prove existing completed history is not replayed, newly created journals are observed, an in-progress turn retains text written before watcher startup, and completion carries source-proven turn identity for notification preview.",
+      "status": "done", "phase": "p1-review-fix", "kind": "tests", "depends_on": ["p1-grok-replay-free-impl"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-dsh-replay-free-regression",
+      "verification": {"required": true, "status": "present", "method": "automated", "attestation": "re-verified", "na_reason": null, "summary": "Focused and full Go suites passed. Tests prove completed history is skipped, a new journal is observed, an in-progress turn retains pre-startup text, and completion carries the source-proven prompt ID for notification preview.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-grok-replay-free-focused-tests.log", ".exec-plan/evidence/034334e9176f/p1-grok-replay-free-all-go-tests.log", "agent/grokbuild/global_updates_subscriber_test.go"], "checked_at": "2026-09-12T08:27:00Z"}
+    },
+    {
+      "id": "p1-grok-replay-free-regression",
+      "title": "P1 Grok replay-free real-device regression",
+      "description": "Verify a Grok Build session completed on Mac notifies iOS with actual response detail while the iOS Web App remains in Claude mode with no session open.",
+      "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-grok-replay-free-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-dsh-replay-free-regression; owner authorization already granted.",
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
     },
     {
       "id": "p2-session-tag-impl",
