@@ -86,3 +86,11 @@
 - Codex preview：`FAIL`。通知正文为固定文案「Mac 上的会话已完成，点击查看结果」，没有 Claude 路径那样的真实回复详情。
 - 本地取证：passive log 在同一 Codex session 上收到多帧 `text_delta`，随后 completion 到达；旧 replay-free producer 只在 completion 帧取 `EventResult.Content`，而 Codex 官方 `turn/completed` 终态帧本身不携带正文。
 - 判定：必须按 `(backendId,sessionId,turnId)` 累积同一 live source 的 assistant text delta，并在 completion 时消费；不得历史回读或伪造正文。
+
+### Codex replay-preview 修复版本复测
+
+- 安装版本：`cordcode-bridge-runtime 0.1.0 (commit: 2bf41b2de382, built: 2026-09-12T06:54:58Z)`
+- 状态：等待 owner 复测
+- 部署证据：runtime ready；Codex Remote passive subscription 成功；`codex-remote attached live catalog threads loaded=2 attached=2`。
+- 复测动作：iOS 保持 Claude 默认模式且不打开/切换 session；Mac 端 Codex session 发送一个会产生文本回复的新回合，等待最多 10 秒。
+- 预期：通知正文显示该回合的真实回复预览；只有确实没有 live 文本的回合才允许固定文案。

@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T06:55:00Z",
+  "updated_at": "2026-09-12T06:56:00Z",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -175,7 +175,7 @@
       "title": "P1 Codex replay-free preview real-device regression",
       "description": "Verify a never-opened Codex completion notification carries the actual latest assistant response preview instead of the generic fallback while iOS remains in Claude mode.",
       "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-codex-replay-preview-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-codex-live-attach-regression; owner authorization already granted.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Release build 2bf41b2de382 is installed and healthy. Runtime logs prove Codex Remote reconnected, attached two Desktop-loaded threads, and the replay-free preview path is active; awaiting owner confirmation that notification body shows actual response text.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-codex-replay-preview-release-build.log", ".exec-plan/evidence/034334e9176f/p1-codex-replay-preview-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T06:56:00Z"}
     },
     {
       "id": "p2-session-tag-impl",
