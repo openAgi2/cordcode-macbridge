@@ -1,5 +1,34 @@
 # 后续计划索引（待办另案总账）
 
+## 2026-09-13 web-push 通知折叠+角标计划收口：tag/Topic 双聚合身份与「休眠功能」的部署语义
+
+P2-P4 三批（折叠 tag、per-device badge state、badge RPC+客户端生命周期）一天内完成
+部署，复盘四条可复用经验：
+
+1. **展示聚合与事件幂等必须分键**：`tag`/`Topic` 用 `(backendId, sessionId)` 稳定聚合
+   键（`ccs_` 前缀，26 字符满足 RFC 8030），notification key 保持 per-turn 唯一。若把
+   notification key 直接复用为聚合键，`LedgerShouldSend` 的 accepted-永久去重会把
+   「每会话一生只通知一次」当成「可替换通知」——两种语义一个键必然打架。
+2. **badge 状态的推进点在 dispatcher per-subscription 循环内、网络投递前**：payload
+   因 badge 按设备不同不能在 fan-out 外一次构造——共享模板 + 每设备锁内持久化快照
+   注入；状态写失败缺省三元组但通知照发（fail-open 只对通知，fail-closed 对数字）。
+   revision 分配在 store 锁内天然串行单调，不依赖 HTTP 投递顺序；乱序由 SW 的
+   `(bindingId, revision)` 水位拒绝。
+3. **「部署后功能未生效」先查客户端激活前提，不要先怀疑服务端缺陷**：角标 01:40 真机
+   未显示的根因是客户端在 01:19 部署后没重新打开过 Web App——旧注册无 bindingId，
+   服务端按设计不下发角标字段。增量协议字段（additive bindingId）的激活路径是
+   「客户端重连重新 register」，不是服务端热更新。
+4. **已完成但暂不启用的功能应「休眠保留」而非回滚**：角标链路对无 binding 设备零
+   开销（不下发字段、不写状态文件），owner 决策降优先级后不删代码；CHANGELOG 明确
+   记录激活方式（打开一次 Web App + iOS 徽标开关），避免未来排查「为什么图标没数字」
+   时重新考古。
+
+另：验证 iOS 仓预存测试失败是否与我相关时，`git stash push --include-untracked -- <path>`
++ pop 会把**别的会话的旧 stash**（2026-08-03 快照）pop 进工作树造成 4 个 Swift 文件
+UU 冲突——pop 前必须先 `git stash list` 确认栈顶归属；本次已全部 checkout 恢复，旧
+stash 原样保留。教训：多 agent 共仓时优先用 `git diff <file>` + 临时 worktree 对照，
+不要碰 stash 栈。
+
 ## 2026-09-12 codex-web 退役残留 LaunchAgent 清除：退役只拆了 seat，没拆 launchd 层
 
 Owner 报「ChatGPT App CPU 高」，排查发现全机第 6 忙进程是 cordcode-bridge-runtime

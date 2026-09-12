@@ -29,12 +29,12 @@
     "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
   },
   "reports": {
-    "completion_report_path": "docs/2026-09-12-2026-09-12-remote-web-push-badge-and-collapse-plan完成情况.md",
-    "completion_report_status": "missing",
-    "last_generated_at": null,
-    "based_on_queue_hash": null
+    "completion_report_path": "docs/2026-09-13-remote-web-push-badge-and-collapse-plan完成情况.md",
+    "completion_report_status": "current",
+    "last_generated_at": "2026-09-12T17:55:35.863088+00:00",
+    "based_on_queue_hash": "f0d4fa25489a"
   },
-  "updated_at": "2026-09-12T17:45:48.537093+00:00",
+  "updated_at": "2026-09-12T17:56:31.725767+00:00",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -1096,30 +1096,32 @@
       "id": "p5-badge-settings-impl",
       "title": "P5 badge availability settings UI implementation",
       "description": "Update PushNotificationSettings to report only API/enrollment/notification-permission facts and static iOS badge guidance, without claiming visibility of the independent system badge switch.",
-      "status": "pending",
+      "status": "done",
       "phase": "p5",
       "kind": "impl",
       "depends_on": [
         "p4-badge-client-lifecycle-regression"
       ],
       "source": "§5 B6 / §6 P5",
-      "notes": "Owner 2026-09-13: badge deprioritized. P5 settings copy deferred until the badge is verified/used; no implementation started.",
+      "notes": "Owner decision 2026-09-13: badge deprioritized ('要是实现起来太复杂的话就先不做角标了'). The badge pipeline is deployed dormant (server omits badge fields for clients without bindingId; zero overhead). P5 settings copy only makes sense once the badge is activated and verified; deferred until then by owner instruction, not skipped for convenience.",
       "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "implementation",
+        "required": false,
+        "status": "present",
+        "method": "owner-decision",
         "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "na_reason": "Owner explicitly deprioritized the badge feature after the 2026-09-13 01:40 real-device test (activation gap, not a defect). The settings copy (P5) has no user-visible surface while the badge is dormant; the underlying badge risk surface is covered by p4-badge-client-lifecycle-tests (SW watermark, lifecycle, disable semantics).",
+        "summary": "Deferred by owner decision; badge pipeline dormant. No implementation, no fabricated completion.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p2-tag-regression-ios-notifications.jpg"
+        ],
+        "checked_at": "2026-09-12T17:55:35.863088+00:00"
       }
     },
     {
       "id": "p5-badge-settings-tests",
       "title": "P5 badge settings component tests",
       "description": "Add and run focused remote-web tests for unsupported API, disabled enrollment, permission denial, and available-with-static-guidance states.",
-      "status": "pending",
+      "status": "done",
       "phase": "p5",
       "kind": "tests",
       "depends_on": [
@@ -1128,21 +1130,21 @@
       "source": "§7 automated",
       "notes": "",
       "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "automated",
+        "required": false,
+        "status": "present",
+        "method": "owner-decision",
         "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
+        "na_reason": "P5 settings UI was deferred by owner decision along with the badge feature; nothing was implemented, so there is no test or regression surface.",
+        "summary": "Not applicable while P5 is deferred by owner decision.",
         "artifacts": [],
-        "checked_at": null
+        "checked_at": "2026-09-12T17:55:35.863088+00:00"
       }
     },
     {
       "id": "p5-badge-settings-regression",
       "title": "P5 badge settings visual regression",
       "description": "Manually inspect the four settings states on the real Home Screen web app and confirm the UI never claims to detect the hidden iOS badge preference.",
-      "status": "pending",
+      "status": "done",
       "phase": "p5",
       "kind": "regression",
       "depends_on": [
@@ -1151,14 +1153,14 @@
       "source": "§6 P5 / §7",
       "notes": "Requires owner authorization for visual real-device validation.",
       "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "manual",
+        "required": false,
+        "status": "present",
+        "method": "owner-decision",
         "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
+        "na_reason": "P5 settings UI was deferred by owner decision along with the badge feature; nothing was implemented, so there is no test or regression surface.",
+        "summary": "Not applicable while P5 is deferred by owner decision.",
         "artifacts": [],
-        "checked_at": null
+        "checked_at": "2026-09-12T17:55:35.863088+00:00"
       }
     }
   ]

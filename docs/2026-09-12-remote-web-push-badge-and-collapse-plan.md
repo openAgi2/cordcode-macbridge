@@ -1,9 +1,33 @@
 # Remote Web 推送：通知折叠治理 + 应用图标角标 实施计划
 
 日期：2026-09-12  
-状态：**实施计划（本轮不写代码）**  
+状态：**已完成（2026-09-13 收口；角标链路已部署休眠，P5 按 owner 决策暂缓）**  
 适用面：Remote Web PWA（`/web/`，iOS「添加到主屏幕」的 web app），协议面 `web_push_v1`  
-读者：接手的实现 agent。先读 §1 现场与 §2 现状核查，再按 §6 的批次落地。
+
+执行记录（exec-plan 队列 `plan-034334e9176f.json`，全部批次已完成）：
+
+- **P1 通知覆盖**（2026-09-12，前序会话完成）：未打开 session 投递、replay-free eventId、
+  Claude/Codex/DSH/Grok/OpenCode 五个 backend 的 replay-free live 通道、backend 化通知标题。
+  三个曾 blocked 的真机回归按 owner 复测证据收口（2026-09-13）。
+- **P2 通知折叠**（2026-09-13，`a6ee5ec`）：payload `tag` 改用与 Topic 共用的
+  `ccs_<sessionAggregationKey>` 会话聚合身份；同会话通知互相替换。真机回归 PASS
+  （4 subagent 会话各留一条带真实预览的通知，无堆叠/无异常通知；同会话替换路径由
+  2026-09-13 离线 Topic 合并测试与单元测试覆盖）。
+- **P3 服务端角标状态**（2026-09-13，`24fb458` + iOS 镜像 `bd91f1fa`）：per-device
+  badge state（bindingId/revision/unreadSessions/saturated 4096 边界）独立 0600 文件持久化，
+  损坏只关角标不伤订阅；register 增量 `bindingId` 字段与生命周期（幂等/换绑拒绝
+  `web_push.binding_mismatch`）；payload 增加全有或全无 `badge/badgeBindingId/badgeRevision`
+  元组；协议 canonical/schema/夹具/iOS 镜像四处同步。
+- **P4 badge RPC + 客户端生命周期**（2026-09-13，`c7d120a` + iOS `aef93097`）：
+  `get_push_badge_state` / `acknowledge_push_badge` 两个 RPC；SW 解析 badge 元组、IndexedDB
+  原子水位（仅当前 binding 的严格更新 revision，乱序不回退、旧 binding 不复活）、
+  `setAppBadge` 失败不破坏通知展示、`CORDCODE_PUSH_BADGE_DIRTY_V1` 通知页面触发前台
+  get→ack（单飞 + saturated 有界重试）；disable 清角标与水印。生产部署 `c7d120a103da`。
+- **角标真机验证未完成**（owner 2026-09-13 01:40 测试时客户端尚未在部署后重新注册
+  binding，属激活缺口而非缺陷；owner 决策角标降优先级）。**链路保留休眠**：对未注册
+  binding 的设备服务端不下发角标字段，零开销；重新启用只需打开一次 Web App 让新代码
+  注册 bindingId，并确认 iOS 设置 → 通知 → 徽标开关。
+- **P5 设置页角标文案**：按 owner 决策暂缓，待角标被实际验证/需要时再做。
 
 相关文档：`docs/protocol/bridge-v1.md`「Web Push (`web_push_v1`)」章节（canonical）；iOS 仓镜像 `cordcode-ios-plan-approval/docs/protocol/`。
 
