@@ -537,3 +537,27 @@ func TestClaudeSessionCatalogCollapsesCompactContinuationByBoundaryUUID(t *testi
 		t.Fatalf("catalog kept %v, want active child-session", got[0]["id"])
 	}
 }
+
+func TestClaudeLineageLogRateLimitsUnchangedSignatures(t *testing.T) {
+	resetClaudeLineageLogForTest()
+	current := time.Unix(1_000, 0)
+	previous := claudeLineageLogNow
+	claudeLineageLogNow = func() time.Time { return current }
+	t.Cleanup(func() {
+		claudeLineageLogNow = previous
+		resetClaudeLineageLogForTest()
+	})
+
+	if !shouldLogClaudeLineage("fork:title", "2", current) {
+		t.Fatal("first fork signature must log")
+	}
+	if shouldLogClaudeLineage("fork:title", "2", current.Add(3*time.Second)) {
+		t.Fatal("unchanged fork signature must be rate-limited")
+	}
+	if !shouldLogClaudeLineage("fork:title", "3", current.Add(4*time.Second)) {
+		t.Fatal("changed hidden count must log immediately")
+	}
+	if !shouldLogClaudeLineage("compact", "2", current.Add(5*time.Second)) {
+		t.Fatal("different lineage kind has independent first log")
+	}
+}

@@ -735,7 +735,8 @@ gate（`core/turn_detail_lazy_gate.go` / `core/turn_detail_chunks_gate.go`，当
   re-filter。workspace filter 在单次调用内按 clean directory 去重 `os.Stat`，重复 drop
   摘要降为 DEBUG，每分钟才汇总 INFO。declared Grok list 的出站 re-filter 同样使用 50s
   snapshot-filter cache；Claude 在 transcript/sidecar/Desktop 指纹与成员完全未变时复用
-  已排序、已 fork/compact 过滤的 snapshot，不再重跑 lineage 检测。
+  已排序、已 fork/compact 过滤的 snapshot；活动文件导致重建时，相同 fork/compact
+  hidden 签名也按分钟级汇总，不再每 3 秒重复 INFO。
 
 ## 已知风险与不可破坏约束
 

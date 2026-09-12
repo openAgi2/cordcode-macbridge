@@ -335,6 +335,8 @@ pairing token 已刷新但 stream 尚未 `stream_bound` 时，projection 请求�
 定位 30s 周期的第二个 `filterSessionsMissingWorkspace` / `filterCodexCatalogSessions` 调用者（`23:53:33.839` + `.849` 成对），确认是否可与 3a 合并节拍。
 
 **3e `claude-fork-lineage-cadence`**
+2026-09-12 22:39 live regression补充：即使活动 Claude transcript 使 fingerprint 每次变化，相同 fork/compact hidden 签名也必须按分钟级汇总，避免 9 行 × 每 3s 的重复 INFO。
+
 Claude 每 30s 全量重算 fork 谱系（`claude session fork detected` ×8/次）。评估增量或按 catalogGeneration 失效缓存，而非无条件全量。
 
 ### Phase 4 — 验证与收口

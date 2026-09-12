@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -76,6 +77,38 @@ type claudeSessionIndexEntry struct {
 type claudeSessionSnapshot struct {
 	ByKey  map[claudeSessionKey]claudeSessionIndexEntry
 	Sorted []claudeSessionIndexEntry
+}
+
+var (
+	claudeLineageLogMu       sync.Mutex
+	claudeLineageLogNow      = time.Now
+	claudeLineageLastLogInfo map[string]time.Time
+)
+
+const claudeLineageRepeatInfoInterval = time.Minute
+
+// shouldLogClaudeLineage emits a new per-kind signature immediately, then
+// summarizes an unchanged signature at most once per minute. The signature is
+// only a kind plus counter; no title is retained in aggregator state.
+func shouldLogClaudeLineage(kind, signature string, now time.Time) bool {
+	claudeLineageLogMu.Lock()
+	defer claudeLineageLogMu.Unlock()
+	if claudeLineageLastLogInfo == nil {
+		claudeLineageLastLogInfo = make(map[string]time.Time)
+	}
+	key := kind + "|" + signature
+	last, exists := claudeLineageLastLogInfo[key]
+	if !exists || now.Sub(last) >= claudeLineageRepeatInfoInterval {
+		claudeLineageLastLogInfo[key] = now
+		return true
+	}
+	return false
+}
+
+func resetClaudeLineageLogForTest() {
+	claudeLineageLogMu.Lock()
+	claudeLineageLastLogInfo = make(map[string]time.Time)
+	claudeLineageLogMu.Unlock()
 }
 
 type claudeSessionCatalog struct {
@@ -395,8 +428,10 @@ func hideClaudeCompactContinuationParents(
 			result = append(result, entry)
 		}
 	}
-	slog.Info("claude compact continuation detected: hiding physical parent transcripts",
-		"hidden", len(hide))
+	if shouldLogClaudeLineage("compact", strconv.Itoa(len(hide)), time.Now()) {
+		slog.Info("claude compact continuation detected: hiding physical parent transcripts",
+			"hidden", len(hide))
+	}
 	return result
 }
 
@@ -466,6 +501,9 @@ func hideClaudeForkChildren(byKey map[claudeSessionKey]claudeSessionIndexEntry, 
 		result = append(result, e)
 	}
 	for title, n := range hiddenTitles {
+		if !shouldLogClaudeLineage("fork:"+title, strconv.Itoa(n), time.Now()) {
+			continue
+		}
 		slog.Info("claude session fork detected: hiding older fork children",
 			"title", title, "hidden", n)
 	}
