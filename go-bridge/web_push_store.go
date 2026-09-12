@@ -93,6 +93,11 @@ type WebPushStore struct {
 	ledger      map[string]WebPushLedgerEntry // key = NotificationKeyHash
 	ledgerDirty bool
 
+	// badgeDevices：per-device badge state（web_push_badge.go）；badgeDisabled 时
+	// 只关闭 badge 表达，不影响订阅健康度（badge-and-collapse plan §5 B2/B5）。
+	badgeDevices map[string]WebPushBadgeDeviceState
+	badgeDisabled bool
+
 	lastResetAt  int64  // 最近一次显式 Reset 的毫秒时间戳；0 = 从未重置
 	lastResetErr string // 最近一次 Reset 失败的原因（恢复成功后清空）
 }
@@ -178,6 +183,9 @@ func LoadWebPushStore(dataDir string) (*WebPushStore, error) {
 		}
 	}
 
+	// badge state（损坏只关闭 badge 表达，不影响订阅健康度）。
+	s.loadBadgeStateLocked()
+
 	return s, nil
 }
 
@@ -262,9 +270,14 @@ func (s *WebPushStore) VapidPrivateKey() *ecdsa.PrivateKey {
 }
 
 // Register upsert 该 device 的 subscription（原子替换旧记录）。返回 subscriptionId。
+// badge binding 生命周期走 RegisterWithBinding（web_push_badge.go）。
 func (s *WebPushStore) Register(deviceID string, record PushSubscriptionRecord) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.registerLocked(deviceID, record)
+}
+
+func (s *WebPushStore) registerLocked(deviceID string, record PushSubscriptionRecord) (string, error) {
 	if s.status != WebPushStoreHealthy {
 		return "", &webPushValidationError{code: WebPushErrUnsupported, message: "web push store is not healthy"}
 	}
@@ -301,6 +314,7 @@ func (s *WebPushStore) Unregister(deviceID, subscriptionID string) (bool, error)
 		return false, nil
 	}
 	delete(s.byDeviceID, deviceID)
+	s.deleteBadgeStateLocked(deviceID)
 	if err := s.persistSubscriptionsLocked(); err != nil {
 		s.byDeviceID[deviceID] = existing
 		return false, &webPushValidationError{code: WebPushErrStorageFailed, message: err.Error(), retryable: true}
@@ -316,6 +330,7 @@ func (s *WebPushStore) DeleteDevice(deviceID string) error {
 		return nil
 	}
 	delete(s.byDeviceID, deviceID)
+	s.deleteBadgeStateLocked(deviceID)
 	if err := s.persistSubscriptionsLocked(); err != nil {
 		return err
 	}
@@ -349,6 +364,8 @@ func (s *WebPushStore) ResetWebPush() error {
 	removed := len(s.byDeviceID)
 	s.byDeviceID = make(map[string]PushSubscriptionRecord)
 	s.ledger = make(map[string]WebPushLedgerEntry)
+	s.badgeDevices = make(map[string]WebPushBadgeDeviceState)
+	s.badgeDisabled = false
 	if err := s.persistSubscriptionsLocked(); err != nil {
 		return fmt.Errorf("clear subscriptions: %w", err)
 	}

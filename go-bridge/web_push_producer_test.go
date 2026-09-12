@@ -1,7 +1,6 @@
 package gobridge
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -248,13 +247,9 @@ func TestReplayFreeLivePushNotifiesWithoutCreatingProjection(t *testing.T) {
 		t.Fatalf("EventID = %q, want deterministic %q", got[0].EventID, wantEventID)
 	}
 	dispatcher := &WebPushDispatcher{}
-	raw, _, _, err := dispatcher.buildPayload(got[0])
+	payload, _, _, err := dispatcher.buildPayloadTemplate(got[0])
 	if err != nil {
-		t.Fatalf("buildPayload: %v", err)
-	}
-	var payload WebPushPayloadV1
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		t.Fatalf("unmarshal payload: %v", err)
+		t.Fatalf("buildPayloadTemplate: %v", err)
 	}
 	if payload.Target.BridgeID == "" || payload.Target.BackendID == "" ||
 		payload.Target.SessionID == "" || payload.Target.EventID != wantEventID {

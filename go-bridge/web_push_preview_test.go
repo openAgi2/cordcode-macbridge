@@ -272,17 +272,13 @@ func TestDispatcherPreviewReaderRefreshesEmptyIntentPreview(t *testing.T) {
 		return ""
 	})
 
-	payload, _, _, err := d.buildPayload(WebPushCandidate{
+	decoded, _, _, err := d.buildPayloadTemplate(WebPushCandidate{
 		Kind: WebPushKindCompletion, BackendID: "claude", SessionID: "lz-1",
 		AnchorID: "turn-lazy-1", NotificationKey: "claude|lz-1|turn-lazy-1|completed",
 		SessionTitle: "懒刷新会话", ContentPreview: "",
 	})
 	if err != nil {
-		t.Fatalf("buildPayload: %v", err)
-	}
-	var decoded WebPushPayloadV1
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+		t.Fatalf("buildPayloadTemplate: %v", err)
 	}
 	if decoded.Notification.Body != "发送前才落进投影的完整回复" {
 		t.Fatalf("body = %q (lazy refresh missing)", decoded.Notification.Body)
@@ -292,31 +288,25 @@ func TestDispatcherPreviewReaderRefreshesEmptyIntentPreview(t *testing.T) {
 	}
 
 	// reader 返回空（kernel 仍无文本）：保留 candidate 自带预览。
-	payload, _, _, err = d.buildPayload(WebPushCandidate{
+	decoded, _, _, err = d.buildPayloadTemplate(WebPushCandidate{
 		Kind: WebPushKindCompletion, BackendID: "claude", SessionID: "lz-2",
 		AnchorID: "turn-lazy-2", NotificationKey: "claude|lz-2|turn-lazy-2|completed",
 		SessionTitle: "懒刷新会话", ContentPreview: "intent 时已取到的预览",
 	})
 	if err != nil {
-		t.Fatalf("buildPayload: %v", err)
-	}
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+		t.Fatalf("buildPayloadTemplate: %v", err)
 	}
 	if decoded.Notification.Body != "intent 时已取到的预览" {
 		t.Fatalf("body = %q (reader must not clobber non-empty intent preview)", decoded.Notification.Body)
 	}
 
 	// 两者皆空：回退固定文案（诚实回退，不编造）。
-	payload, _, _, err = d.buildPayload(WebPushCandidate{
+	decoded, _, _, err = d.buildPayloadTemplate(WebPushCandidate{
 		Kind: WebPushKindCompletion, BackendID: "claude", SessionID: "lz-3",
 		AnchorID: "turn-lazy-3", NotificationKey: "claude|lz-3|turn-lazy-3|completed",
 	})
 	if err != nil {
-		t.Fatalf("buildPayload: %v", err)
-	}
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+		t.Fatalf("buildPayloadTemplate: %v", err)
 	}
 	if decoded.Notification.Body != "Mac 上的会话已完成，点击查看结果" {
 		t.Fatalf("fallback body = %q", decoded.Notification.Body)

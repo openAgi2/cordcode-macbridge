@@ -1606,7 +1606,7 @@ func (h *Handlers) handleWebPushRPC(conn Connection, msg WireMessage) bool {
 			conn.SendResult(msg.RequestID, nil, webPushWireError(verr))
 			return true
 		}
-		subscriptionID, err := store.Register(device.DeviceID, *record)
+		subscriptionID, err := store.RegisterWithBinding(device.DeviceID, *record, strings.TrimSpace(params.BindingID))
 		if err != nil {
 			if wpErr, ok := err.(*webPushValidationError); ok {
 				conn.SendResult(msg.RequestID, nil, webPushWireError(wpErr))

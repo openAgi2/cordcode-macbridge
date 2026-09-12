@@ -42,6 +42,10 @@ type RegisterPushSubscriptionParams struct {
 	Platform             string                  `json:"platform"`
 	ApplicationServerKey string                  `json:"applicationServerKey"`
 	Subscription         WebPushSubscriptionWire `json:"subscription"`
+	// BindingID 是 additive 的 badge binding 标识（badge-and-collapse plan §5 B2）：
+	// 每次创建新 browser subscription 时由客户端生成（wpb_ + 22 base64url 字符），
+	// 同一 subscription 的 hello reconcile 复用它。空 = 旧客户端，不启用 badge 状态。
+	BindingID string `json:"bindingId,omitempty"`
 }
 
 // UnregisterPushSubscriptionParams 是 unregister_push_subscription 的 params。

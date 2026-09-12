@@ -1143,6 +1143,12 @@ export interface BridgeRegisterPushSubscriptionParams {
   platform: string;
   /** Must equal hello_ack.webPush.vapidPublicKey byte-for-byte. */
   applicationServerKey: string;
+  /**
+   * Additive badge binding id (badge-and-collapse plan §5 B2): generated client-side per
+   * browser subscription creation ("wpb_" + 22 base64url chars), reused across reconciles
+   * of the same subscription. Legacy clients omit it and get no badge state.
+   */
+  bindingId?: string;
   subscription: {
     endpoint: string;
     expirationTime: number | null;
@@ -1170,7 +1176,17 @@ export interface BridgeWebPushPayloadV1 {
   notification: {
     title: string;
     body: string;
+    /** ccs_<session aggregation key>; same (backendId, sessionId) identity as the RFC 8030 Topic. */
     tag: string;
+    /**
+     * Badge tuple (additive, all-or-nothing): present only when the device has an active
+     * badge binding and its state was durably persisted before this send. Saturated or
+     * unwritable state omits all three fields; the notification still shows.
+     */
+    badge?: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90 | 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900 | 999;
+    badgeBindingId?: string;
+    /** Decimal string (uint64) to avoid JS integer precision loss; client-side watermark. */
+    badgeRevision?: string;
   };
   target: {
     bridgeId: string;

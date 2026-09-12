@@ -3,7 +3,10 @@
   "notification": {
     "title": "Codex 任务已完成",
     "body": "点击打开 CordCode 查看结果",
-    "tag": "cc_fixture_notification_key_hash"
+    "tag": "ccs_fixture_session_aggregation_key",
+    "badge": 2,
+    "badgeBindingId": "wpb_fixturebindingid0000AA",
+    "badgeRevision": "42"
   },
   "target": {
     "bridgeId": "brg_fixture",

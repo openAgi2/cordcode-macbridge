@@ -5,7 +5,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -248,13 +247,9 @@ func TestDispatcherPayloadTagStablePerSession(t *testing.T) {
 
 	tagOf := func(candidate WebPushCandidate) string {
 		t.Helper()
-		raw, _, _, err := d.buildPayload(candidate)
+		payload, _, _, err := d.buildPayloadTemplate(candidate)
 		if err != nil {
-			t.Fatalf("buildPayload: %v", err)
-		}
-		var payload WebPushPayloadV1
-		if err := json.Unmarshal(raw, &payload); err != nil {
-			t.Fatalf("unmarshal payload: %v", err)
+			t.Fatalf("buildPayloadTemplate: %v", err)
 		}
 		return payload.Notification.Tag
 	}

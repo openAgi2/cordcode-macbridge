@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -152,12 +153,14 @@ func (d *WebPushDispatcher) worker() {
 }
 
 // deliverCandidate 对全部 subscription 投递该 candidate 并按状态机记账。
+// badge 按设备不同：标题/正文/target 先构造共享模板，badge 元组从每设备状态锁内
+// 取得的持久化快照注入（B2）；取不到快照的设备照常投递、缺省三元组。
 func (d *WebPushDispatcher) deliverCandidate(candidate WebPushCandidate) {
 	if d.store == nil {
 		return
 	}
 	keyHash := WebPushNotificationKeyHash(candidate.NotificationKey)
-	payload, ttl, urgency, err := d.buildPayload(candidate)
+	template, ttl, urgency, err := d.buildPayloadTemplate(candidate)
 	if err != nil {
 		// payload 构造失败是真实缺陷：记录脱敏诊断，不伪造成功。
 		slog.Error("web-push: payload build failed",
@@ -168,13 +171,45 @@ func (d *WebPushDispatcher) deliverCandidate(candidate WebPushCandidate) {
 		)
 		return
 	}
+	// badge 只对 completion 推进（B1 口径：待查看的会话数）。
+	var badgeKey string
+	if candidate.Kind == WebPushKindCompletion {
+		badgeKey = sessionAggregationKey(candidate)
+	}
 	for _, sub := range d.store.Subscriptions() {
-		d.deliverToSubscription(candidate, keyHash, payload, ttl, urgency, sub)
+		var snap WebPushBadgeSnapshot
+		badged := false
+		if badgeKey != "" {
+			snap, badged = d.store.AdvanceBadgeOnCompletion(sub.DeviceID, badgeKey, d.cfg.Now().UTC().UnixMilli())
+		}
+		raw, merr := marshalBadgePayload(template, snap, badged)
+		if merr != nil {
+			slog.Error("web-push: payload marshal failed",
+				"backendID", candidate.BackendID,
+				"sessionPrefix", projectionSessionLogPrefix(candidate.SessionID),
+				"kind", string(candidate.Kind),
+				"error", merr.Error(),
+			)
+			continue
+		}
+		d.deliverToSubscription(candidate, keyHash, raw, ttl, urgency, sub)
 	}
 	_ = d.store.PersistLedgerIfNeeded()
 }
 
-func (d *WebPushDispatcher) buildPayload(candidate WebPushCandidate) ([]byte, int, webpush.Urgency, error) {
+// marshalBadgePayload 把共享模板 + 可选 badge 快照序列化为该设备的最终 payload。
+// ok=false（无 binding / saturated / 持久化失败）时三字段全部缺省——通知照常发送。
+func marshalBadgePayload(template WebPushPayloadV1, snap WebPushBadgeSnapshot, ok bool) ([]byte, error) {
+	if ok {
+		badge := snap.Count
+		template.Notification.Badge = &badge
+		template.Notification.BadgeBindingID = snap.BindingID
+		template.Notification.BadgeRevision = strconv.FormatUint(snap.Revision, 10)
+	}
+	return json.Marshal(template)
+}
+
+func (d *WebPushDispatcher) buildPayloadTemplate(candidate WebPushCandidate) (WebPushPayloadV1, int, webpush.Urgency, error) {
 	preview := candidate.ContentPreview
 	if d.previewReader != nil {
 		if fresh := d.previewReader(candidate); fresh != "" {
@@ -207,11 +242,7 @@ func (d *WebPushDispatcher) buildPayload(candidate WebPushCandidate) ([]byte, in
 		urgency = webpush.UrgencyHigh
 	case WebPushKindCompletion, WebPushKindError:
 	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return nil, 0, "", err
-	}
-	return raw, int(ttl.Seconds()), urgency, nil
+	return payload, int(ttl.Seconds()), urgency, nil
 }
 
 // sessionAggregationKey 是 Topic/tag 共用的展示聚合身份。它与按 turn 唯一的

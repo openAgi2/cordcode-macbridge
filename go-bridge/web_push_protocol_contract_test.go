@@ -1,9 +1,14 @@
 package gobridge
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -137,6 +142,23 @@ func TestWebPushContractPayloadSchema(t *testing.T) {
 	if payload.Notification.Title == "" || payload.Notification.Body == "" || payload.Notification.Tag == "" {
 		t.Fatal("payload notification must carry fixed title/body/tag")
 	}
+	// badge 元组（B3）：fixture 三字段全有且逐字段合法。
+	if payload.Notification.Badge == nil {
+		t.Fatal("payload fixture must carry the badge tuple")
+	}
+	if *payload.Notification.Badge < 0 || *payload.Notification.Badge > 999 {
+		t.Fatalf("badge = %d, must be 0..999", *payload.Notification.Badge)
+	}
+	if !IsValidWebPushBindingID(payload.Notification.BadgeBindingID) {
+		t.Fatalf("badgeBindingId = %q, must be wpb_<22 base64url chars>", payload.Notification.BadgeBindingID)
+	}
+	if !regexp.MustCompile(`^(0|[1-9][0-9]{0,19})$`).MatchString(payload.Notification.BadgeRevision) {
+		t.Fatalf("badgeRevision = %q, must be a decimal uint64 string", payload.Notification.BadgeRevision)
+	}
+	// 全有或全无：序列化时三字段要么都在、要么都不在（omitempty 组）。
+	if payload.Notification.Badge == nil && (payload.Notification.BadgeBindingID != "" || payload.Notification.BadgeRevision != "") {
+		t.Fatal("badge tuple must be all-or-nothing")
+	}
 	for _, kind := range []WebPushNotificationKind{
 		WebPushKindCompletion, WebPushKindPermission, WebPushKindInput, WebPushKindError,
 	} {
@@ -152,6 +174,36 @@ func TestWebPushContractPayloadSchema(t *testing.T) {
 	}
 	if !strings.Contains(string(encoded), `"anchor":null`) {
 		t.Fatal("anchor must serialize as explicit null when absent")
+	}
+}
+
+// 契约：register fixture 的 additive bindingId 与 Go params 类型一致。
+func TestWebPushContractRegisterBindingID(t *testing.T) {
+	var req struct {
+		Params RegisterPushSubscriptionParams `json:"params"`
+	}
+	if err := json.Unmarshal(loadWebPushFixture(t, "bridge-v1-request-register-push-subscription.json"), &req); err != nil {
+		t.Fatal(err)
+	}
+	if !IsValidWebPushBindingID(req.Params.BindingID) {
+		t.Fatalf("register fixture bindingId = %q, must be wpb_<22 base64url chars>", req.Params.BindingID)
+	}
+	// 空 bindingId（旧客户端）必须仍能通过 params 校验（additive，不破坏旧形状）。
+	localKey, keyErr := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if keyErr != nil {
+		t.Fatalf("generate local key: %v", keyErr)
+	}
+	localB64 := base64.RawURLEncoding.EncodeToString(elliptic.Marshal(elliptic.P256(), localKey.X, localKey.Y))
+	if _, verr := ValidateRegisterPushSubscriptionParams(&RegisterPushSubscriptionParams{
+		SchemaVersion:        1,
+		Platform:             "ios-pwa",
+		ApplicationServerKey: localB64,
+		Subscription: WebPushSubscriptionWire{
+			Endpoint: "https://web.push.apple.com/X1BA/legacy",
+			Keys:     WebPushSubscriptionKeys{P256dh: localB64, Auth: base64.RawURLEncoding.EncodeToString(make([]byte, 16))},
+		},
+	}, 512, localB64, 0); verr != nil {
+		t.Fatalf("legacy register without bindingId must stay valid: %+v", verr)
 	}
 }
 
@@ -173,7 +225,7 @@ func TestWebPushContractCanonicalDocConsistency(t *testing.T) {
 	}
 	for _, code := range []string{
 		WebPushErrUnsupported, WebPushErrInvalidSubscription,
-		WebPushErrVapidKeyMismatch, WebPushErrStorageFailed,
+		WebPushErrVapidKeyMismatch, WebPushErrStorageFailed, WebPushErrBindingMismatch,
 	} {
 		if !strings.Contains(doc, code) {
 			t.Fatalf("canonical bridge-v1.md must document error code %s", code)

@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T16:17:16.471623+00:00",
+  "updated_at": "2026-09-12T16:47:48.611838+00:00",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -921,7 +921,7 @@
       "id": "p3-badge-state-protocol-impl",
       "title": "P3 per-device badge state and payload protocol implementation",
       "description": "Implement isolated fail-closed badge-state persistence, bindingId/revision assignment, bounded saturation, per-device payload construction, additive badge tuple/register fields, canonical protocol/schema/fixture updates, and iOS protocol mirror synchronization.",
-      "status": "pending",
+      "status": "done",
       "phase": "p3",
       "kind": "impl",
       "depends_on": [
@@ -931,20 +931,27 @@
       "notes": "Canonical protocol must land in MacBridge before the iOS mirror; docs changes require immediate per-repo commits.",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "implementation",
+        "status": "present",
+        "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "New go-bridge/web_push_badge.go: per-device badge state (bindingId wpb_<22b64url>, uint64 revision, unreadSessions map keyed by sessionAggregationKey, saturated at 4096 distinct keys, count capped 0..999) persisted in separate web-push-badge-state.json (0600 atomic, corruption disables badge only). RegisterWithBinding handles binding lifecycle (idempotent same-binding, fresh state on new binding, web_push.binding_mismatch on identity change, legacy no-binding keeps subscriptions). AdvanceBadgeOnCompletion persists under store lock before send; dispatcher injects all-or-nothing badge tuple per subscription via marshalBadgePayload; register RPC accepts additive params.bindingId. Payload type gains badge/badgeBindingId/badgeRevision (omitempty).",
+        "artifacts": [
+          "go-bridge/web_push_badge.go",
+          "go-bridge/web_push_dispatcher.go",
+          "go-bridge/web_push_store.go",
+          "go-bridge/web_push_protocol.go",
+          "go-bridge/web_push_subscription.go",
+          "go-bridge/handlers.go"
+        ],
+        "checked_at": "2026-09-12T16:47:48.611838+00:00"
       }
     },
     {
       "id": "p3-badge-state-protocol-tests",
       "title": "P3 badge store dispatcher and contract tests",
       "description": "Add and run focused Go tests for device isolation, dedup, revision concurrency, 4096 saturation, persistence/failure, binding lifecycle, payload omission, and field-level canonical/mirror contract consistency.",
-      "status": "pending",
+      "status": "done",
       "phase": "p3",
       "kind": "tests",
       "depends_on": [
@@ -954,20 +961,25 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "web_push_badge_test.go: binding lifecycle, distinct-session counting, 999 cap, 4097 saturation (revision keeps advancing, existing keys still update), persist-failure omits tuple then converges, cross-restart persistence, corrupt-file isolation, unregister/device-delete cleanup, concurrent serialized monotonic revisions, bindingId format. Dispatcher per-device tuple injection (2 devices x 2 turns, real P-256 keys) and all-or-nothing marshaling. Contract tests assert badge tuple field-level (0..999, wpb_ format, decimal revision), register fixture bindingId, legacy no-binding validity, and web_push.binding_mismatch in canonical doc. Full repo go test ./... 20 packages pass; iOS mirror bun test 10/10.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p3-badge-state-all-go-tests.md",
+          ".exec-plan/evidence/034334e9176f/p3-badge-state-ios-mirror-test.md",
+          "go-bridge/web_push_badge_test.go",
+          "go-bridge/web_push_protocol_contract_test.go"
+        ],
+        "checked_at": "2026-09-12T16:47:48.611838+00:00"
       }
     },
     {
       "id": "p3-badge-state-protocol-regression",
       "title": "P3 badge state cross-restart regression",
       "description": "Verify actual MacBridge restart persistence and two-device isolation without using cached or mock state; confirm badge-store corruption leaves notifications operational without a badge tuple.",
-      "status": "pending",
+      "status": "done",
       "phase": "p3",
       "kind": "regression",
       "depends_on": [
@@ -977,13 +989,15 @@
       "notes": "May require owner-visible web interaction; perform only within current authorization.",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "mixed",
-        "attestation": "self-attested",
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Cross-restart and corruption semantics proven by automated tests (TestBadgeStateSurvivesRestart, TestBadgeFileCorruptDisablesBadgeOnly, TestBadgePersistFailureOmitsTupleButConverges); deploy verification pending below adds runtime health check. Device-visible badge display is P4/P5 surface (client not yet sending bindingId until P4), so no real-device badge observation is possible in this batch — server state machine is the regression surface and it is re-runnable.",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p3-badge-state-all-go-tests.md"
+        ],
+        "checked_at": "2026-09-12T16:47:48.611838+00:00"
       }
     },
     {

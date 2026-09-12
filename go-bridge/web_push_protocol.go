@@ -31,6 +31,10 @@ const (
 	WebPushErrInvalidSubscription = "web_push.invalid_subscription"
 	WebPushErrVapidKeyMismatch    = "web_push.vapid_key_mismatch"
 	WebPushErrStorageFailed       = "web_push.storage_failed"
+
+	// WebPushErrBindingMismatch：badge binding 与设备当前状态不符（需先 reconcile，
+	// 不是原请求盲重试）。badge-and-collapse plan §5 B4-3。
+	WebPushErrBindingMismatch = "web_push.binding_mismatch"
 )
 
 // WebPushStatus 是 hello_ack.webPush.status 的 additive 诊断值。
@@ -71,6 +75,12 @@ type WebPushNotificationPayload struct {
 	Title string `json:"title"`
 	Body  string `json:"body"`
 	Tag   string `json:"tag"`
+	// badge 元组（B3）：全有或全无。badge=待查看会话数（0..999，0 表示清除）；
+	// badgeBindingId/badgeRevision 是该 binding 持久化状态的单调版本（revision 用
+	// 十进制字符串避免 JS 大整数失真）。saturated 或状态不可用时三字段全部缺省。
+	Badge           *int   `json:"badge,omitempty"`
+	BadgeBindingID  string `json:"badgeBindingId,omitempty"`
+	BadgeRevision   string `json:"badgeRevision,omitempty"`
 }
 
 // WebPushTarget 唯一描述深链目标；anchor 只允许已验证的 turn/interaction id，
