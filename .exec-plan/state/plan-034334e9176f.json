@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T16:12:56.623365+00:00",
+  "updated_at": "2026-09-12T16:17:16.471623+00:00",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -905,7 +905,7 @@
         "p2-session-tag-tests"
       ],
       "source": "§7 real-device matrix #3",
-      "notes": "Requires owner authorization for real-device/UI interaction.",
+      "notes": "Deployed a6ee5ec20533 to /Applications/CordCodeLink.app on 2026-09-13 00:15 CST; runtime ready on 8777. Awaiting owner real-device test (plan §7 matrix item 3): same session completing multiple turns keeps only the latest notification in Notification Center; different sessions each keep one.",
       "verification": {
         "required": true,
         "status": "missing",
