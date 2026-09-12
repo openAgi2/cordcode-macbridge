@@ -54,3 +54,14 @@
 - Owner 观察：session F 是 Mac 端当天第一次打开、已有数条历史消息的 session；发送消息 2 后，除新消息通知外还收到多条历史 completion 通知。
 - Ledger/transcript 取证：14:08 左右连续出站 7 条 `wplive-*`，逐条对应 session F 中既有历史 user turn；该 session 是 watcher 启动后才首次出现在 catalog 的旧文件。
 - 判定：watcher 把“首次可见”误判为“启动后新文件”并从 byte 0 消费。首次可见必须建立 baseline，不得回放历史。
+
+### R1/R2 去重与 baseline 修复版本复测
+
+- 安装版本：`cordcode-bridge-runtime 0.1.0 (commit: 2b15e870cd7c, built: 2026-09-12T06:23:52Z)`
+- 状态：等待 owner 复测
+- 复测前先清除 iOS 通知中心中此前已送达的历史通知；这些通知已经交付，服务端修复不会 retroactively 撤回。
+
+| # | 前提条件 | 动作 | 应看到 |
+| --- | --- | --- | --- |
+| D1 | session E/F 均未在 iOS Web App 打开；session F 保留多轮历史；通知栏已清空 | 在 Mac 端 session E 发送一个新回合 | 只收到 1 条通知；正文为新回复内容，不额外出现 generic「Mac 上的会话已完成」 |
+| D2 | 通知栏继续清空或仅保留 D1 | 在 Mac 端 session F 发送一个新回合 | 只收到 message 2 对应的 1 条通知；session F 的历史 turn 全部不推送 |

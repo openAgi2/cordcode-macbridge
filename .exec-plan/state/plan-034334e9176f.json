@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T06:23:00Z",
+  "updated_at": "2026-09-12T06:25:00Z",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -133,7 +133,7 @@
       "title": "P1 Claude watcher dedup and baseline real-device regression",
       "description": "Verify a never-opened session with history emits only the new turn notification once, with real content rather than a duplicate generic fallback, and no historical turns are replayed.",
       "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-claude-watcher-dedup-baseline-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-replay-free-event-id-regression; owner authorization already granted.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Release build 2b15e870cd7c is installed and healthy; Codex Remote live observer connected. Awaiting owner confirmation that E emits one real-preview notification and F emits only its new turn without historical replay.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-claude-watcher-dedup-baseline-release-build.log", ".exec-plan/evidence/034334e9176f/p1-claude-watcher-dedup-baseline-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T06:25:00Z"}
     },
     {
       "id": "p2-session-tag-impl",
