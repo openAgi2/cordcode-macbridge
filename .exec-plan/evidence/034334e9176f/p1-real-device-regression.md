@@ -124,3 +124,10 @@
 - 部署证据：runtime ready；`backend=grokbuild` passive subscription started；启动时对一个 in-progress Grok turn 立即收到 live `text_delta`，说明 journal watcher 已生效并保留未完成 turn 尾部。
 - 复测动作：iOS 保持 Claude 默认模式且不打开/切换 session；在 Mac 端 Grok Build session 发送一个新回合，等待最多 10 秒。
 - 预期：iOS 收到 Grok completion 通知，正文为真实回复预览；无历史回放，Claude/Codex/DSH 已通过行为不受影响。
+
+### Grok Owner 结果与 OpenCode Web 失败
+
+- Grok Build：`PASS`。iOS 收到 Grok Build completion 通知。
+- OpenCode Web：`FAIL`。Mac 端 OpenCode Web session 完成后，iOS 未收到通知。
+- 本地取证：opencode-web 全局 SSE 已收到同一未打开 session 的 `turn_started`、多帧 `text_delta` 和 `turn_completed`；但该 backend 只实现普通 `EventSubscriber`，completion 仍被 observation/kernel gate 挡掉。
+- 协议事实：OpenCode `/global/event` 无 cursor；不能把原始流直接标成 replay-free，必须按 observed turn lifecycle 过滤并消费一次。

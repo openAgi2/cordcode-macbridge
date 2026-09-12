@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T08:29:00Z",
+  "updated_at": "2026-09-12T08:39:00Z",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -216,8 +216,29 @@
       "id": "p1-grok-replay-free-regression",
       "title": "P1 Grok replay-free real-device regression",
       "description": "Verify a Grok Build session completed on Mac notifies iOS with actual response detail while the iOS Web App remains in Claude mode with no session open.",
-      "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-grok-replay-free-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-dsh-replay-free-regression; owner authorization already granted.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Release build 0722548559a4 is installed and healthy. Runtime logs prove grokbuild passive subscription started and immediately observed live text from an in-progress turn; awaiting owner confirmation of a real-preview Grok completion notification.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-grok-replay-free-release-build.log", ".exec-plan/evidence/034334e9176f/p1-grok-replay-free-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T08:29:00Z"}
+      "status": "done", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-grok-replay-free-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-dsh-replay-free-regression; owner authorization already granted.",
+      "verification": {"required": true, "status": "present", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Owner confirmed Grok Build completion notifies iOS while the Web App remains in Claude mode.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-grok-replay-free-release-build.log", ".exec-plan/evidence/034334e9176f/p1-grok-replay-free-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T08:36:00Z"}
+    },
+    {
+      "id": "p1-opencode-web-replay-free-impl",
+      "title": "P1 OpenCode Web replay-free notification implementation",
+      "description": "Expose a replay-free OpenCode Web live channel over the cursorless global SSE tap by admitting only turns observed on the current subscription and consuming each completion once.",
+      "status": "done", "phase": "p1-review-fix", "kind": "impl", "depends_on": ["p1-grok-replay-free-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-grok-replay-free-regression; extends A0 backend coverage.",
+      "verification": {"required": true, "status": "present", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "opencode-web now implements a replay-free LiveEventSubscriber over its single cursorless global SSE tap: observed turns flow once, reconnect replay is suppressed, and live text/turn identity remain available to Web Push preview.", "artifacts": ["agent/opencode-web/events.go:SubscribeLive", "agent/opencode-web/events.go:filterOpenCodeLiveEvents", "core/interfaces.go:LiveEventSubscriber"], "checked_at": "2026-09-12T08:39:00Z"}
+    },
+    {
+      "id": "p1-opencode-web-replay-free-tests",
+      "title": "P1 OpenCode Web replay-free automated tests",
+      "description": "Prove an observed OpenCode turn flows user/start/text/completion once, reconnect replay is rejected, and an unobserved cold terminal cannot notify.",
+      "status": "done", "phase": "p1-review-fix", "kind": "tests", "depends_on": ["p1-opencode-web-replay-free-impl"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-grok-replay-free-regression",
+      "verification": {"required": true, "status": "present", "method": "automated", "attestation": "re-verified", "na_reason": null, "summary": "Focused and full Go suites passed. Tests prove a user/start/text/completion lifecycle flows once, full reconnect replay is rejected, and an unobserved cold terminal cannot notify.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-opencode-web-replay-free-focused-tests.log", ".exec-plan/evidence/034334e9176f/p1-opencode-web-replay-free-all-go-tests.log", "agent/opencode-web/live_filter_test.go"], "checked_at": "2026-09-12T08:39:00Z"}
+    },
+    {
+      "id": "p1-opencode-web-replay-free-regression",
+      "title": "P1 OpenCode Web replay-free real-device regression",
+      "description": "Verify an OpenCode Web session completed on Mac notifies iOS with actual response detail while the iOS Web App remains in Claude mode with no session open.",
+      "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-opencode-web-replay-free-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-grok-replay-free-regression; owner authorization already granted.",
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
     },
     {
       "id": "p2-session-tag-impl",

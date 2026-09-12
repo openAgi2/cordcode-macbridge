@@ -48,9 +48,9 @@ type sseSubscriber struct {
 	// fact is frame-derived — never guessed from position or timing.
 	assistantTurns map[string]string
 	partKinds      map[string]string
-	partContent  map[string]string
-	completed    map[string]bool
-	activeTurns  map[string]string // sessionID -> owning user/message turn id
+	partContent    map[string]string
+	completed      map[string]bool
+	activeTurns    map[string]string // sessionID -> owning user/message turn id
 	// userPrompts accumulates the live user prompt text for a message id so a
 	// bare message.updated (role=user, no parts) plus later part deltas still
 	// become one projection user_message. userTurnStarted de-dupes turn_started.
@@ -1432,6 +1432,100 @@ func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 	return tap, nil
 }
 
+type openCodeLiveTurnKey struct {
+	SessionID string
+	TurnID    string
+}
+
+type openCodeLiveTurnState struct {
+	replay bool
+}
+
+// SubscribeLive provides the replay-free Web Push view over the cursorless
+// global SSE tap. A turn is admitted only when its lifecycle was observed on
+// this subscription; completion is consumed once. A repeated turn-start for a
+// still-active turn marks reconnect replay and suppresses later frames through
+// that terminal.
+func (a *Agent) SubscribeLive(ctx context.Context) (<-chan core.Event, error) {
+	events, err := a.Subscribe(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan core.Event, 128)
+	go filterOpenCodeLiveEvents(ctx, events, out)
+	return out, nil
+}
+
+func filterOpenCodeLiveEvents(ctx context.Context, events <-chan core.Event, out chan<- core.Event) {
+	active := make(map[openCodeLiveTurnKey]*openCodeLiveTurnState)
+	completed := make(map[openCodeLiveTurnKey]struct{})
+	var completedOrder []openCodeLiveTurnKey
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev := <-events:
+			key := openCodeLiveTurnKey{SessionID: ev.SessionID, TurnID: ev.TurnID}
+			hasTurn := key.SessionID != "" && key.TurnID != ""
+			_, wasCompleted := completed[key]
+			if hasTurn && wasCompleted {
+				continue
+			}
+			if hasTurn {
+				switch ev.Type {
+				case core.EventUserMessage:
+					// User echo precedes EventTurnStarted in the normal OpenCode
+					// lifecycle and must not make that synthetic start look replay.
+				case core.EventTurnStarted:
+					if wasCompleted {
+						continue
+					}
+					if state := active[key]; state != nil {
+						state.replay = true
+						continue
+					}
+					active[key] = &openCodeLiveTurnState{}
+				case core.EventResult:
+					state := active[key]
+					if state == nil || wasCompleted {
+						continue
+					}
+					delete(active, key)
+					completed[key] = struct{}{}
+					completedOrder = append(completedOrder, key)
+					if len(completedOrder) > 1024 {
+						old := completedOrder[0]
+						completedOrder = completedOrder[1:]
+						delete(completed, old)
+					}
+					if state.replay {
+						continue
+					}
+				default:
+					state := active[key]
+					if wasCompleted {
+						continue
+					}
+					if state == nil {
+						state = &openCodeLiveTurnState{}
+						active[key] = state
+					}
+					if state.replay {
+						continue
+					}
+				}
+			}
+			select {
+			case out <- ev:
+			case <-ctx.Done():
+				return
+			default:
+				// Preserve the passive SSE tap's non-blocking contract.
+			}
+		}
+	}
+}
+
 // acquireGlobalSubscriber returns the ONE backend-instance subscriber,
 // dialing it on first use. Refcounted: the last release tears the stream
 // down. The subscriber rides the agent background context — it must outlive
@@ -1514,6 +1608,7 @@ func (a *Agent) unregisterRoute(sessionID string, ch chan core.Event) {
 }
 
 var _ core.EventSubscriber = (*Agent)(nil)
+var _ core.LiveEventSubscriber = (*Agent)(nil)
 
 // CatalogRefreshSignals implements core.CatalogRefreshSignaler: each SSE
 // session.created/deleted asks the bridge for an immediate fingerprint
