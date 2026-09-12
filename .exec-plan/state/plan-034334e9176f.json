@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T04:35:00Z",
+  "updated_at": "2026-09-12T04:37:00Z",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -69,8 +69,8 @@
       "kind": "regression",
       "depends_on": ["p1-session-topic-tests"],
       "source": "§7 real-device matrix #4",
-      "notes": "External blocker: repository policy requires current owner authorization before real-device web UI interaction. Need to build/install the current MacBridge source, then have the owner execute the offline Home Screen PWA scenario and report the observed notification count.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Awaiting explicit owner authorization and manual real-device observation; no cached or simulated evidence accepted.", "artifacts": [], "checked_at": "2026-09-12T04:34:00Z"}
+      "notes": "Release product from commit d3031bc593af is installed and healthy. External blocker now narrowed to the owner-only physical observation: keep the iPhone genuinely offline for 10 minutes while at least three turns complete in one session, restore network, then report count/latest-message result.",
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Build, product installation, runtime identity, and bridge health are proven; the required physical offline delivery observation is still pending and cannot be replaced by simulated or cached evidence.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-release-build.log", ".exec-plan/evidence/034334e9176f/p1-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-management-status.json", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T04:37:00Z"}
     },
     {
       "id": "p2-session-tag-impl",
