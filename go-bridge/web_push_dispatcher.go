@@ -3,6 +3,7 @@ package gobridge
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -219,6 +220,15 @@ func keyHashTag(candidate WebPushCandidate) string {
 	return hash
 }
 
+// sessionAggregationKey 是 Topic/tag 共用的展示聚合身份。它与按 turn 唯一的
+// notification key 分离：前者只负责同一 backend/session 的通知替换，后者继续
+// 负责 ledger 幂等。22 个 raw-base64url 字符加 "ccs_" 前缀后固定 26 字符，满足
+// RFC 8030 Topic 的 32 字符与 URL/filename-safe alphabet 约束。
+func sessionAggregationKey(candidate WebPushCandidate) string {
+	sum := sha256.Sum256([]byte("web-push-session-v1\x00" + candidate.BackendID + "\x00" + candidate.SessionID))
+	return base64.RawURLEncoding.EncodeToString(sum[:])[:22]
+}
+
 // buildAnchor 只允许已验证 kind 的 anchor（§7.3）：producer 已保证 kind 匹配
 // anchor 类型；未知形状回 nil（不伪造 anchor）。
 func buildAnchor(candidate WebPushCandidate) *WebPushAnchorType {
@@ -265,7 +275,7 @@ func (d *WebPushDispatcher) deliverToSubscription(
 		Subscriber:      d.cfg.Subscriber,
 		TTL:             ttlSeconds,
 		Urgency:         urgency,
-		Topic:           "cc_" + keyHashTag(candidate),
+		Topic:           "ccs_" + sessionAggregationKey(candidate),
 		VAPIDPublicKey:  d.store.VapidPublicKey(),
 		VAPIDPrivateKey: vapidPrivateScalarBase64(privateKey),
 		RecordSize:      webpush.MaxRecordSize,

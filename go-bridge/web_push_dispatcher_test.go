@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -173,6 +174,60 @@ func TestDispatcherHeadersPerKind(t *testing.T) {
 		auth := header.Get("Authorization")
 		if len(auth) < 20 || auth[:4] != "vapid "[:4] && len(auth) < 20 {
 			t.Fatalf("%s missing VAPID Authorization header: %q", tc.kind, auth)
+		}
+	}
+}
+
+func TestSessionAggregationKeyStableAndBackendScoped(t *testing.T) {
+	first := WebPushCandidate{BackendID: "codex", SessionID: "session-1", NotificationKey: "codex|session-1|turn-1|completed"}
+	secondTurn := first
+	secondTurn.NotificationKey = "codex|session-1|turn-2|completed"
+	otherBackend := first
+	otherBackend.BackendID = "dsh-web"
+	otherSession := first
+	otherSession.SessionID = "session-2"
+
+	got := sessionAggregationKey(first)
+	if got == "" || !regexp.MustCompile(`^[A-Za-z0-9_-]{22}$`).MatchString(got) {
+		t.Fatalf("sessionAggregationKey = %q, want 22 base64url characters", got)
+	}
+	if next := sessionAggregationKey(secondTurn); next != got {
+		t.Fatalf("same backend/session key changed across turns: %q != %q", next, got)
+	}
+	if next := sessionAggregationKey(otherBackend); next == got {
+		t.Fatalf("different backends collided: %q", got)
+	}
+	if next := sessionAggregationKey(otherSession); next == got {
+		t.Fatalf("different sessions collided: %q", got)
+	}
+	if WebPushNotificationKeyHash(first.NotificationKey) == WebPushNotificationKeyHash(secondTurn.NotificationKey) {
+		t.Fatal("per-turn notification ledger identity must remain distinct")
+	}
+}
+
+func TestDispatcherTopicStablePerSessionAcrossTurns(t *testing.T) {
+	h := newDispatcherHarness(t, 200, 200)
+	d := newTestDispatcher(h)
+	first := dispatcherCandidate(WebPushKindCompletion, "codex|disp-1|turn-1|completed")
+	second := dispatcherCandidate(WebPushKindCompletion, "codex|disp-1|turn-2|completed")
+	second.EventID = "e1:2"
+	second.AnchorID = "turn-2"
+
+	h.deliverSync(t, d, first)
+	h.deliverSync(t, d, second)
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.headers) != 2 {
+		t.Fatalf("requests = %d, want 2 distinct per-turn deliveries", len(h.headers))
+	}
+	want := "ccs_" + sessionAggregationKey(first)
+	for i, header := range h.headers {
+		if got := header.Get("Topic"); got != want {
+			t.Fatalf("request %d Topic = %q, want %q", i, got, want)
+		}
+		if len(header.Get("Topic")) > 32 {
+			t.Fatalf("request %d Topic exceeds RFC 8030 limit: %q", i, header.Get("Topic"))
 		}
 	}
 }

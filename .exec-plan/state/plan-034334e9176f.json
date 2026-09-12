@@ -34,43 +34,43 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T04:23:01Z",
+  "updated_at": "2026-09-12T04:35:00Z",
   "todos": [
     {
       "id": "p1-session-topic-impl",
       "title": "P1 stable per-session Topic implementation",
       "description": "In MacBridge, introduce one domain-separated sessionAggregationKey over backendId and sessionId, retain the per-turn notification idempotency key, and use the stable key for the RFC 8030 Topic header.",
-      "status": "pending",
+      "status": "done",
       "phase": "p1",
       "kind": "impl",
       "depends_on": [],
       "source": "§4 A1 / §6 P1",
       "notes": "Cross-repo source pair: MacBridge plan/approval-layer; iOS plan/approval-layer-ios.",
-      "verification": {"required": true, "status": "missing", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "verification": {"required": true, "status": "present", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "Added a domain-separated 22-character base64url session aggregation key and switched only the RFC 8030 Topic header to ccs_<key>; per-turn notification ledger keys remain unchanged.", "artifacts": ["go-bridge/web_push_dispatcher.go:sessionAggregationKey", "go-bridge/web_push_dispatcher.go:WebPushDispatcher.deliverToSubscription", "go-bridge/web_push_dispatcher_test.go:TestSessionAggregationKeyStableAndBackendScoped", "go-bridge/web_push_dispatcher_test.go:TestDispatcherTopicStablePerSessionAcrossTurns"], "checked_at": "2026-09-12T04:31:00Z"}
     },
     {
       "id": "p1-session-topic-tests",
       "title": "P1 stable Topic automated tests",
       "description": "Add and run focused Go tests proving same-session stability, backend isolation, Topic length/alphabet constraints, and preservation of per-turn ledger identity.",
-      "status": "pending",
+      "status": "done",
       "phase": "p1",
       "kind": "tests",
       "depends_on": ["p1-session-topic-impl"],
       "source": "§7 automated",
       "notes": "",
-      "verification": {"required": true, "status": "missing", "method": "automated", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "verification": {"required": true, "status": "present", "method": "automated", "attestation": "re-verified", "na_reason": null, "summary": "Focused Web Push tests passed and were independently re-run during the exec-plan exit audit, covering the new stable Topic key plus existing dispatcher behavior.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-topic-tests.log", ".exec-plan/evidence/034334e9176f/p1-topic-tests-audit.log", "cmd:go test ./go-bridge -run 'Test(SessionAggregationKey|Dispatcher|WebPush)' -count=1"], "checked_at": "2026-09-12T04:35:00Z"}
     },
     {
       "id": "p1-session-topic-regression",
       "title": "P1 offline Topic real-device regression",
       "description": "Verify on the installed iOS Home Screen web app that multiple pushes for one session accumulated while the phone is genuinely offline collapse to the latest outstanding message, without treating ordinary lock-screen state as offline.",
-      "status": "pending",
+      "status": "blocked",
       "phase": "p1",
       "kind": "regression",
       "depends_on": ["p1-session-topic-tests"],
       "source": "§7 real-device matrix #4",
-      "notes": "Requires owner authorization for real-device/UI interaction under repository policy.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "notes": "External blocker: repository policy requires current owner authorization before real-device web UI interaction. Need to build/install the current MacBridge source, then have the owner execute the offline Home Screen PWA scenario and report the observed notification count.",
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Awaiting explicit owner authorization and manual real-device observation; no cached or simulated evidence accepted.", "artifacts": [], "checked_at": "2026-09-12T04:34:00Z"}
     },
     {
       "id": "p2-session-tag-impl",
