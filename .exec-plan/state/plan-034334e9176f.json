@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T17:18:58.386269+00:00",
+  "updated_at": "2026-09-12T17:45:48.537093+00:00",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -898,23 +898,26 @@
       "id": "p2-session-tag-regression",
       "title": "P2 notification replacement real-device regression",
       "description": "Verify on the Home Screen web app that repeated completions retain only the latest notification per session while distinct sessions remain separate and deep-link to the latest target.",
-      "status": "pending",
+      "status": "done",
       "phase": "p2",
       "kind": "regression",
       "depends_on": [
         "p2-session-tag-tests"
       ],
       "source": "§7 real-device matrix #3",
-      "notes": "Deployed a6ee5ec20533 (superseded by later deploys 24fb458e8391/c7d120a103da which include the tag change). Awaiting owner real-device test: same session completing multiple turns keeps only the latest notification in Notification Center; different sessions each keep one.",
+      "notes": "Owner real-device test 2026-09-13 01:40 CST: multi-subagent /goal task (4 subagents, 4 distinct Codex sessions + orchestrator session) produced exactly one notification per session in Notification Center, each with real reply preview (four distinct ~200-char story excerpts), titles 'Codex 任务已完成', no error notifications, no per-session stacking. Same-session replacement itself was not exercised (each session completed once) but is covered by the 2026-09-13 offline Topic merge test and unit tests.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "manual",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Owner confirmed per-session notification behavior: 4 subagent completions (distinct sessions) each left exactly one notification with real content; no anomalies. Verified via owner screenshots + local Vision OCR transcription (vision-agent provider unavailable; OCR-only evidence, titles/previews legible).",
+        "artifacts": [
+          ".exec-plan/evidence/034334e9176f/p2-tag-regression-ios-notifications.jpg",
+          ".exec-plan/evidence/034334e9176f/p2-tag-regression-mac-goal.jpg"
+        ],
+        "checked_at": "2026-09-12T17:45:48.537093+00:00"
       }
     },
     {
@@ -1074,7 +1077,7 @@
         "p4-badge-client-lifecycle-tests"
       ],
       "source": "§7 real-device matrix #1/#2/#5/#6/#7",
-      "notes": "Requires owner authorization for real-device/UI interaction.",
+      "notes": "Requires owner authorization for real-device/UI interaction. Owner 2026-09-13 01:40 CST: badge NOT observed on icon during the same test. Most likely activation gap, not a defect: P4 deployed 01:19 CST; the client must reopen the web app once so the new push-manager code registers a bindingId (pre-deploy registration has no binding → server correctly omits the badge tuple). Also requires iOS Settings → Notifications → [web app] → Badges toggle ON. Owner deprioritized the badge ('not that important, skip if too complex').",
       "verification": {
         "required": true,
         "status": "present",
@@ -1100,7 +1103,7 @@
         "p4-badge-client-lifecycle-regression"
       ],
       "source": "§5 B6 / §6 P5",
-      "notes": "",
+      "notes": "Owner 2026-09-13: badge deprioritized. P5 settings copy deferred until the badge is verified/used; no implementation started.",
       "verification": {
         "required": true,
         "status": "missing",
