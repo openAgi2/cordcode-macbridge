@@ -71,3 +71,11 @@
 - Claude：`PASS`。多个 Mac 端消息均正常通知，无 schema error、异常通知或多余通知。
 - Codex：`FAIL`。iOS Web App 保持 Claude 默认模式且不打开/切换 session 时，Mac 端 Codex session 完成后没有通知。
 - 本地取证：Codex Remote catalog fingerprint 在消息后变化，但 passive observer 只看到 `__remote_control_transport__` error 帧，没有 thread-level completion。协议证据要求 `thread/resume(excludeTurns:true)` attach 后才能收到 turn/item 事件；此前的 `SubscribeLive` 只接入中央 pump，未建立 thread 订阅。
+
+### Codex live-attach 修复版本复测
+
+- 安装版本：`cordcode-bridge-runtime 0.1.0 (commit: a0cbbf5174e2, built: 2026-09-12T06:44:02Z)`
+- 状态：等待 owner 复测
+- 部署证据：runtime ready；Codex Remote passive subscription 成功；日志记录 `codex-remote attached live catalog threads loaded=2 attached=2`。
+- 复测动作：iOS Web App 保持默认 Claude 模式且不打开/切换任何 session；Mac 端打开/使用一个 Codex Desktop session 并发送一个新回合，等待最多 10 秒。
+- 预期：iOS 收到该 Codex session 的 completion 通知；无历史回放，Claude 已通过的通知行为不受影响。

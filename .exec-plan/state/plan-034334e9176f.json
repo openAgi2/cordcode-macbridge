@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T06:43:00Z",
+  "updated_at": "2026-09-12T06:45:00Z",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -154,7 +154,7 @@
       "title": "P1 Codex replay-free attach real-device regression",
       "description": "Verify a never-opened Codex Desktop session notifies while iOS remains in Claude mode with no session open, without replaying history or affecting already-passing Claude notifications.",
       "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-codex-live-attach-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-replay-free-event-id-regression; owner authorization already granted.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Release build a0cbbf5174e2 is installed and healthy. Runtime logs prove two Desktop-loaded Codex threads were attached with the replay-free catalog path; awaiting owner confirmation of a never-opened Codex completion notification.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-codex-live-attach-release-build.log", ".exec-plan/evidence/034334e9176f/p1-codex-live-attach-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T06:45:00Z"}
     },
     {
       "id": "p2-session-tag-impl",
