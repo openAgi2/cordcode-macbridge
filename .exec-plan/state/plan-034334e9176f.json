@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T16:47:48.611838+00:00",
+  "updated_at": "2026-09-12T16:50:00.680216+00:00",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -993,9 +993,11 @@
         "method": "automated",
         "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Cross-restart and corruption semantics proven by automated tests (TestBadgeStateSurvivesRestart, TestBadgeFileCorruptDisablesBadgeOnly, TestBadgePersistFailureOmitsTupleButConverges); deploy verification pending below adds runtime health check. Device-visible badge display is P4/P5 surface (client not yet sending bindingId until P4), so no real-device badge observation is possible in this batch — server state machine is the regression surface and it is re-runnable.",
+        "summary": "Cross-restart and corruption semantics proven by automated tests (TestBadgeStateSurvivesRestart, TestBadgeFileCorruptDisablesBadgeOnly, TestBadgePersistFailureOmitsTupleButConverges); deploy verification pending below adds runtime health check. Device-visible badge display is P4/P5 surface (client not yet sending bindingId until P4), so no real-device badge observation is possible in this batch — server state machine is the regression surface and it is re-runnable. Deployed 24fb458e8391 to /Applications/CordCodeLink.app on 2026-09-13 00:49 CST; runtime ready on 8777; existing web-push data files intact; badge-state file correctly absent until first client binding (P4).",
         "artifacts": [
-          ".exec-plan/evidence/034334e9176f/p3-badge-state-all-go-tests.md"
+          ".exec-plan/evidence/034334e9176f/p3-badge-state-all-go-tests.md",
+          ".exec-plan/evidence/034334e9176f/p3-badge-state-ios-mirror-test.md",
+          ".exec-plan/evidence/034334e9176f/p3-badge-state-deploy.md"
         ],
         "checked_at": "2026-09-12T16:47:48.611838+00:00"
       }
