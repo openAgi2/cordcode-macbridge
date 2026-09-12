@@ -225,8 +225,13 @@ func (h *Handlers) enqueueReplayFreeLivePush(backendID, sessionID, eventName str
 	if pipeline == nil {
 		return false
 	}
+	// Replay-free sources do not pass through Kernel EventMessage sequencing, but
+	// web_push_v1 still requires a target.eventId. Derive a deterministic,
+	// domain-separated ID from the per-turn notification identity: retries keep the
+	// same ID, while each turn remains distinct. Never synthesize a Kernel sequence.
+	eventID := "wplive-" + WebPushNotificationKeyHash(intent.NotificationKey)[:32]
 	pipeline.IngestReplayFreeLive(WebPushCandidate{
-		BackendID: backendID, SessionID: sessionID, Kind: intent.Kind,
+		BackendID: backendID, SessionID: sessionID, EventID: eventID, Kind: intent.Kind,
 		NotificationKey: intent.NotificationKey, AnchorKind: intent.AnchorKind,
 		AnchorID: intent.AnchorID, SessionTitle: intent.SessionTitle,
 		ContentPreview: intent.ContentPreview, ReceivedAt: time.Now().UTC().UnixMilli(),

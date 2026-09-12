@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T05:50:00Z",
+  "updated_at": "2026-09-12T06:03:00Z",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -90,8 +90,29 @@
       "id": "p1-unopened-session-push-review-fix-regression",
       "title": "P1 unopened-session push real-device regression",
       "description": "On the installed Home Screen Web App, verify never-opened Claude and Codex sessions notify after Mac-side completion, then rerun the original genuinely-offline same-session Topic collapse matrix.",
-      "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-unopened-session-push-review-fix-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-session-topic-regression; owner authorization already granted for this real-device scope.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Release build 638399047205 is installed and healthy; Codex Remote live observer successfully connected after pairing. Awaiting owner confirmation for never-opened Claude/Codex sessions and the original offline Topic collapse matrix.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-unopened-session-review-fix-release-build.log", ".exec-plan/evidence/034334e9176f/p1-unopened-session-review-fix-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T05:50:00Z"}
+      "status": "blocked", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-unopened-session-push-review-fix-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-session-topic-regression; blocked by replay-free EventID payload repair; owner authorization already granted for this real-device scope.",
+      "verification": {"required": true, "status": "failed", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Never-opened session push reached iOS but displayed the fixed schema-error notification. Local ledger confirms replay-free deliveries carried empty eventId while SW requires a non-empty target.eventId.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T06:01:00Z"}
+    },
+    {
+      "id": "p1-replay-free-event-id-impl",
+      "title": "P1 replay-free eventId payload repair",
+      "description": "Derive a deterministic domain-separated target.eventId for replay-free live completion candidates, reject missing EventID at the candidate boundary, and keep the identity stable across retries without synthesizing Kernel sequence IDs.",
+      "status": "done", "phase": "p1-review-fix", "kind": "impl", "depends_on": ["p1-unopened-session-push-review-fix-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-unopened-session-push-review-fix-regression",
+      "verification": {"required": true, "status": "present", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "Replay-free candidates now derive deterministic wplive- prefixed EventIDs from the per-turn notification key, serialize a complete web_push_v1 target, and fail closed when EventID is absent.", "artifacts": ["go-bridge/web_push_producer.go:enqueueReplayFreeLivePush", "go-bridge/web_push_candidate.go:IngestReplayFreeLive", "docs/2026-09-12-remote-web-push-badge-and-collapse-plan.md:A0"], "checked_at": "2026-09-12T06:03:00Z"}
+    },
+    {
+      "id": "p1-replay-free-event-id-tests",
+      "title": "P1 replay-free eventId automated tests",
+      "description": "Prove replay-free candidates carry deterministic non-empty EventID, serialized web_push_v1 targets satisfy all required identity fields, and missing EventID is rejected before dispatch.",
+      "status": "done", "phase": "p1-review-fix", "kind": "tests", "depends_on": ["p1-replay-free-event-id-impl"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-unopened-session-push-review-fix-regression",
+      "verification": {"required": true, "status": "present", "method": "automated", "attestation": "re-verified", "na_reason": null, "summary": "Full Go suite passed. Focused tests prove deterministic retry-stable EventID, complete serialized target identity, duplicate EventID stability, and fail-closed rejection when EventID is missing.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-replay-free-event-id-all-go-tests.log", "go-bridge/web_push_producer_test.go:TestReplayFreeLivePushNotifiesWithoutCreatingProjection"], "checked_at": "2026-09-12T06:03:00Z"}
+    },
+    {
+      "id": "p1-replay-free-event-id-regression",
+      "title": "P1 replay-free eventId real-device regression",
+      "description": "Verify an unopened-session completion on the installed build shows the real session completion notification rather than the fixed SW schema-error notification, then continue the original unopened/offline matrices.",
+      "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-replay-free-event-id-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-unopened-session-push-review-fix-regression; owner authorization already granted.",
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
     },
     {
       "id": "p2-session-tag-impl",

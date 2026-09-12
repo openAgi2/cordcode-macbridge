@@ -71,6 +71,7 @@ Owner 2026-09-11 报「web App 收不到通知」，排查后闭环：
 - 有效 Web Push enrollment 面向该设备可见的 backend completion，不得以 Web App 当前 backend、当前 session、`set_observation_scope`、session subscriber 或 reducer 是否已 hydrate 作为候选资格。客户端从未打开过的 session 也必须通知。
 - 仍保持单一 timeline ingest owner：不得为了发送通知给未打开 session 构造隐藏 projection。服务级 backend 使用明确的 replay-free live event seam；Claude Code 没有全局事件 API，使用启动时建立 byte cut 的 transcript 增量观察，只消费 enrollment 期间新增的完整记录。
 - 两条通知-free 路径都只接受真实 live completion，并继续使用每回合唯一 notification key 做持久化幂等；hydrate、history、resume replay、启动时已有 transcript、开启通知之前积累的历史记录均不得补发。
+- replay-free source 没有权威 Kernel `bridgeEpoch:seq` 时，必须派生确定性的域分隔 `target.eventId`（同一 turn 重试稳定，不同 turn 不同），不得发送空 `eventId`；`web_push_v1` 的 target 四个身份字段全部必填。
 - session 已被交互 relay/observation 接管时，通知-only observer 只推进自己的 source cut，不与现有 ingest owner 竞争，也不重复产生候选。
 
 ### A1. 稳定的 `Topic`（低风险，建议直接做）

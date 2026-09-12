@@ -131,6 +131,14 @@ func (p *WebPushCandidatePipeline) IngestReplayFreeLive(candidate WebPushCandida
 	if p == nil {
 		return
 	}
+	if candidate.EventID == "" {
+		slog.Warn("web-push: replay-free live candidate missing EventID (dropped)",
+			"backendID", candidate.BackendID,
+			"sessionPrefix", projectionSessionLogPrefix(candidate.SessionID),
+			"kind", string(candidate.Kind),
+		)
+		return
+	}
 	p.enqueueLocked(candidate)
 }
 

@@ -20,7 +20,7 @@
 ## 修复版本复测
 
 - 安装版本：`cordcode-bridge-runtime 0.1.0 (commit: 638399047205, built: 2026-09-12T05:48:41Z)`
-- 状态：等待 owner 复测
+- 状态：`FAIL`（投递已到达，但 replay-free payload 缺少 `target.eventId`，iOS SW 显示 schema error）
 
 | # | 前提条件 | 动作 | 应看到 |
 | --- | --- | --- | --- |
@@ -28,3 +28,9 @@
 | R2 | 仍不打开目标 session；选一个从未在 Web App 打开过的 Codex Desktop session | 在 Mac 端完成一个新回合，等待最多 10 秒 | 收到该 Codex session 的完成通知 |
 | R3 | R1/R2 完成后再打开对应 session | 观察通知栏 | 不补发修复版本启动前或 enrollment 前的历史 completion |
 | R4 | R1/R2 通过后，iPhone 真正断网 10 分钟 | 同一 session 连续完成至少 3 个回合，然后恢复网络 | 只收到该 session 尚未交付消息中的最新一条 |
+
+### R1 修复前失败记录
+
+- Owner 观察：Mac 端在从未由 iOS Web App 打开过的 session E 完成回合后，iOS 收到通知，但标题/正文为「CordCode 推送数据错误 / 打开 CordCode 查看连接状态」。
+- 本地 delivery ledger 证据：修复前最新 replay-free 两次投递记录的 `eventId` 均为空字符串；SW `isValidTargetShape` 要求 `eventId` 非空，因此必然落入固定 schema-error 通知。
+- 判定：投递覆盖修复有效，payload 契约缺陷真实；不能用客户端放宽校验掩盖。

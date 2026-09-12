@@ -1,6 +1,7 @@
 package gobridge
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -241,6 +242,42 @@ func TestReplayFreeLivePushNotifiesWithoutCreatingProjection(t *testing.T) {
 	got := pipeline.Drain()
 	if len(got) != 1 || got[0].SessionID != "never-opened" || got[0].AnchorID != "turn-live" {
 		t.Fatalf("candidate = %+v", got)
+	}
+	wantEventID := "wplive-" + WebPushNotificationKeyHash(got[0].NotificationKey)[:32]
+	if got[0].EventID != wantEventID {
+		t.Fatalf("EventID = %q, want deterministic %q", got[0].EventID, wantEventID)
+	}
+	dispatcher := &WebPushDispatcher{}
+	raw, _, _, err := dispatcher.buildPayload(got[0])
+	if err != nil {
+		t.Fatalf("buildPayload: %v", err)
+	}
+	var payload WebPushPayloadV1
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.Target.BridgeID == "" || payload.Target.BackendID == "" ||
+		payload.Target.SessionID == "" || payload.Target.EventID != wantEventID {
+		t.Fatalf("replay-free target = %+v", payload.Target)
+	}
+	pipeline.IngestReplayFreeLive(WebPushCandidate{
+		BackendID:       "codex-remote",
+		SessionID:       "never-opened",
+		EventID:         wantEventID,
+		Kind:            WebPushKindCompletion,
+		NotificationKey: got[0].NotificationKey,
+	})
+	if duplicate := pipeline.Drain(); len(duplicate) != 1 || duplicate[0].EventID != wantEventID {
+		t.Fatalf("duplicate replay-free event IDs = %+v", duplicate)
+	}
+	pipeline.IngestReplayFreeLive(WebPushCandidate{
+		BackendID:       "codex-remote",
+		SessionID:       "never-opened",
+		Kind:            WebPushKindCompletion,
+		NotificationKey: got[0].NotificationKey,
+	})
+	if rejected := pipeline.Drain(); len(rejected) != 0 {
+		t.Fatalf("missing EventID candidate was not rejected: %+v", rejected)
 	}
 	if h.projectionKernel.HasReducerState("codex-remote", "never-opened") {
 		t.Fatal("replay-free notification created hidden projection state")
