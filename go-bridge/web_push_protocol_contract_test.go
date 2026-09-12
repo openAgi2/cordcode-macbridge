@@ -34,6 +34,8 @@ func TestWebPushContractRequestEnvelopeIsCanonical(t *testing.T) {
 	for _, fixture := range []string{
 		"bridge-v1-request-register-push-subscription.json",
 		"bridge-v1-request-unregister-push-subscription.json",
+		"bridge-v1-request-get-push-badge-state.json",
+		"bridge-v1-request-acknowledge-push-badge.json",
 	} {
 		var req struct {
 			Type      string          `json:"type"`
@@ -55,7 +57,8 @@ func TestWebPushContractRequestEnvelopeIsCanonical(t *testing.T) {
 			t.Fatalf("%s: backendId is required by the canonical envelope (server ignores its business semantics)", fixture)
 		}
 		switch req.Method {
-		case WebPushMethodRegister, WebPushMethodUnregister:
+		case WebPushMethodRegister, WebPushMethodUnregister,
+			WebPushMethodGetBadgeState, WebPushMethodAcknowledgeBadge:
 		default:
 			t.Fatalf("%s: method %q is not a web push contract method", fixture, req.Method)
 		}
@@ -98,6 +101,32 @@ func TestWebPushContractResultFixtures(t *testing.T) {
 	}
 	if !unreg.Data.Removed {
 		t.Fatalf("unregister result fixture must carry removed flag")
+	}
+}
+
+// 契约：badge RPC result fixture 与 Go 类型逐字段一致（revision 十进制、
+// saturated 时无 count、bindingId 与请求一致）。
+func TestWebPushContractBadgeRPCResultFixtures(t *testing.T) {
+	var got struct {
+		Data PushBadgeStateResult `json:"data"`
+	}
+	if err := json.Unmarshal(loadWebPushFixture(t, "bridge-v1-result-get-push-badge-state.json"), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Data.BindingID == "" || !regexp.MustCompile(`^(0|[1-9][0-9]{0,19})$`).MatchString(got.Data.Revision) {
+		t.Fatalf("get badge result fixture shape mismatch: %+v", got.Data)
+	}
+	if got.Data.Status != "available" || got.Data.UnreadSessionCount == nil || *got.Data.UnreadSessionCount < 0 || *got.Data.UnreadSessionCount > 999 {
+		t.Fatalf("available result must carry 0..999 unreadSessionCount: %+v", got.Data)
+	}
+	var acked struct {
+		Data PushBadgeStateResult `json:"data"`
+	}
+	if err := json.Unmarshal(loadWebPushFixture(t, "bridge-v1-result-acknowledge-push-badge.json"), &acked); err != nil {
+		t.Fatal(err)
+	}
+	if acked.Data.Status == "saturated" && acked.Data.UnreadSessionCount != nil {
+		t.Fatal("saturated result must omit unreadSessionCount")
 	}
 }
 
@@ -215,7 +244,10 @@ func TestWebPushContractCanonicalDocConsistency(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := string(raw)
-	for _, method := range []string{WebPushMethodRegister, WebPushMethodUnregister} {
+	for _, method := range []string{
+		WebPushMethodRegister, WebPushMethodUnregister,
+		WebPushMethodGetBadgeState, WebPushMethodAcknowledgeBadge,
+	} {
 		if !strings.Contains(doc, method) {
 			t.Fatalf("canonical bridge-v1.md must list %s", method)
 		}

@@ -1,0 +1,11 @@
+{
+  "type": "request",
+  "requestId": "req_fixture_0003",
+  "backendId": "codex",
+  "method": "acknowledge_push_badge",
+  "params": {
+    "schemaVersion": 1,
+    "bindingId": "wpb_fixturebindingid0000AA",
+    "throughRevision": "42"
+  }
+}

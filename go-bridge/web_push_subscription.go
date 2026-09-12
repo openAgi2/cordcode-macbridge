@@ -65,6 +65,29 @@ type UnregisterPushSubscriptionResult struct {
 	Removed bool `json:"removed"`
 }
 
+// GetPushBadgeStateParams 是 get_push_badge_state 的 params（B4-3）。
+type GetPushBadgeStateParams struct {
+	SchemaVersion int    `json:"schemaVersion"`
+	BindingID     string `json:"bindingId"`
+}
+
+// AcknowledgePushBadgeParams 是 acknowledge_push_badge 的 params（B4-4）。
+type AcknowledgePushBadgeParams struct {
+	SchemaVersion   int    `json:"schemaVersion"`
+	BindingID       string `json:"bindingId"`
+	ThroughRevision string `json:"throughRevision"` // 十进制 uint64 字符串
+}
+
+// PushBadgeStateResult 是 get/acknowledge 成功 result.data（B4-3/4）。
+type PushBadgeStateResult struct {
+	SchemaVersion int    `json:"schemaVersion"`
+	BindingID     string `json:"bindingId"`
+	Revision      string `json:"revision"` // 十进制字符串（JS 大整数安全）
+	Status        string `json:"status"`   // "available" | "saturated"
+	// UnreadSessionCount 只在 available 时存在（0..999）。
+	UnreadSessionCount *int `json:"unreadSessionCount,omitempty"`
+}
+
 // PushSubscriptionRecord 是 subscription store 的持久化行（0600 文件内）。
 // 私钥不入此记录——这里只有发送所需的客户端公钥材料。
 type PushSubscriptionRecord struct {

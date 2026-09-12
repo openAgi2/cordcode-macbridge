@@ -46,6 +46,8 @@ var outOfSwitchRPCMethods = []string{
 	"enable_relay_pairing",         // handleRelayUpgradeRPC (relay_upgrade.go)
 	"register_push_subscription",   // handleWebPushRPC (handlers.go)
 	"unregister_push_subscription", // handleWebPushRPC (handlers.go)
+	"get_push_badge_state",         // handleWebPushRPC (handlers.go, badge-and-collapse §5 B4-3)
+	"acknowledge_push_badge",       // handleWebPushRPC (handlers.go, badge-and-collapse §5 B4-4)
 }
 
 func TestEveryDispatchedRPCHasScope(t *testing.T) {

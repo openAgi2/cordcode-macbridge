@@ -224,21 +224,51 @@ func (s *WebPushStore) BadgeStateForDevice(deviceID string) (bindingID string, r
 	return state.BindingID, state.Revision, len(state.UnreadSessions), state.Saturated, true
 }
 
-// AcknowledgeBadgeThroughRevision 处理 acknowledge_push_badge（B4-4）：
-//   - available：只删除 lastCompletionRevision <= throughRevision 的条目；全部删空时
-//     清除 saturated。
-//   - saturated：只有当前 revision 未超过 throughRevision 才能整体清空；否则保持。
-//
-// 返回 ack 完成后的当前绝对快照。
-func (s *WebPushStore) AcknowledgeBadgeThroughRevision(deviceID, bindingID string, throughRevision uint64, nowMillis int64) (WebPushBadgeSnapshot, bool) {
+// WebPushBadgeStateView 是 badge RPC（get/acknowledge）返回的设备状态视图。
+type WebPushBadgeStateView struct {
+	BindingID string
+	Revision  uint64
+	Count     int // 不同 unread session key 数（未截断视图；RPC 层负责 0..999 封顶）
+	Saturated bool
+}
+
+// BadgeStateView 处理 get_push_badge_state（B4-3）：只读当前设备自己的状态。
+// 错误：storage_failed（badge store 不可用，retryable）/ binding_mismatch（无状态或
+// binding 不符——客户端需先 reconcile，不得盲重试）。
+func (s *WebPushStore) BadgeStateView(deviceID, bindingID string) (*WebPushBadgeStateView, *webPushValidationError) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.badgeDisabled {
-		return WebPushBadgeSnapshot{}, false
+		return nil, &webPushValidationError{code: WebPushErrStorageFailed, message: "badge state store is unavailable", retryable: true}
 	}
 	state, ok := s.badgeDevices[deviceID]
 	if !ok || state.BindingID == "" || state.BindingID != bindingID {
-		return WebPushBadgeSnapshot{}, false
+		return nil, &webPushValidationError{code: WebPushErrBindingMismatch, message: "bindingId does not match this device's active badge binding", retryable: false}
+	}
+	return &WebPushBadgeStateView{
+		BindingID: state.BindingID,
+		Revision:  state.Revision,
+		Count:     len(state.UnreadSessions),
+		Saturated: state.Saturated,
+	}, nil
+}
+
+// AcknowledgeBadge 处理 acknowledge_push_badge（B4-4）：
+//   - available：只删除 lastCompletionRevision <= throughRevision 的条目。
+//   - saturated：只有当前 revision 未超过 throughRevision 才能整体清空并退出
+//     saturated；否则保持（页面不动现有角标，等下一轮 get→ack）。
+//
+// 返回 ack 完成后的当前绝对快照（可能包含查询之后到达的新 revision）。错误语义同
+// BadgeStateView；持久化失败为 storage_failed（retryable）。
+func (s *WebPushStore) AcknowledgeBadge(deviceID, bindingID string, throughRevision uint64, nowMillis int64) (*WebPushBadgeStateView, *webPushValidationError) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.badgeDisabled {
+		return nil, &webPushValidationError{code: WebPushErrStorageFailed, message: "badge state store is unavailable", retryable: true}
+	}
+	state, ok := s.badgeDevices[deviceID]
+	if !ok || state.BindingID == "" || state.BindingID != bindingID {
+		return nil, &webPushValidationError{code: WebPushErrBindingMismatch, message: "bindingId does not match this device's active badge binding", retryable: false}
 	}
 	if state.Saturated {
 		if state.Revision <= throughRevision {
@@ -258,16 +288,15 @@ func (s *WebPushStore) AcknowledgeBadgeThroughRevision(deviceID, bindingID strin
 	}
 	s.badgeDevices[deviceID] = state
 	if err := s.persistBadgeStateLocked(); err != nil {
-		return WebPushBadgeSnapshot{}, false
+		slog.Warn("web-push: badge ack persist failed", "devicePrefix", safeID(deviceID), "error", err.Error())
+		return nil, &webPushValidationError{code: WebPushErrStorageFailed, message: err.Error(), retryable: true}
 	}
-	if state.Saturated {
-		return WebPushBadgeSnapshot{BindingID: state.BindingID, Revision: state.Revision}, false
-	}
-	return WebPushBadgeSnapshot{
+	return &WebPushBadgeStateView{
 		BindingID: state.BindingID,
 		Revision:  state.Revision,
-		Count:     minInt(webPushBadgeMaxCount, len(state.UnreadSessions)),
-	}, true
+		Count:     len(state.UnreadSessions),
+		Saturated: state.Saturated,
+	}, nil
 }
 
 // deleteBadgeStateLocked 删除设备 badge 状态（unregister/revoke 联动，B2）。

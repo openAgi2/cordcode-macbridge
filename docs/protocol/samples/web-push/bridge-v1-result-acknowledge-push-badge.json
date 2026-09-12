@@ -1,0 +1,11 @@
+{
+  "type": "result",
+  "ok": true,
+  "data": {
+    "schemaVersion": 1,
+    "bindingId": "wpb_fixturebindingid0000AA",
+    "revision": "42",
+    "status": "available",
+    "unreadSessionCount": 0
+  }
+}

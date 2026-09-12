@@ -122,6 +122,8 @@ var rpcScopeTable = map[string]string{
 	// web_push.manage（bridge 级，switch 外方法 handlers.go handleWebPushRPC）
 	"register_push_subscription":   ScopeWebPushManage,
 	"unregister_push_subscription": ScopeWebPushManage,
+	"get_push_badge_state":         ScopeWebPushManage,
+	"acknowledge_push_badge":       ScopeWebPushManage,
 }
 
 // DefaultGrantedScopes 是配对设备默认拥有的全部 scope。

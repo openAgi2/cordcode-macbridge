@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"io"
 	"log/slog"
 	"math/rand"
@@ -1574,7 +1575,8 @@ func webPushWireError(err *webPushValidationError) *WireError {
 // 身份只取 authenticated connection 的 deviceID，绝不信任 params 内的 deviceId/bridgeId。
 func (h *Handlers) handleWebPushRPC(conn Connection, msg WireMessage) bool {
 	switch msg.Method {
-	case WebPushMethodRegister, WebPushMethodUnregister:
+	case WebPushMethodRegister, WebPushMethodUnregister,
+		WebPushMethodGetBadgeState, WebPushMethodAcknowledgeBadge:
 	default:
 		return false
 	}
@@ -1661,8 +1663,83 @@ func (h *Handlers) handleWebPushRPC(conn Connection, msg WireMessage) bool {
 		}
 		slog.Info("go-bridge: web push subscription unregistered", "removed", removed, "devicePrefix", safeID(device.DeviceID))
 		conn.SendResult(msg.RequestID, &UnregisterPushSubscriptionResult{Removed: removed}, nil)
+	case WebPushMethodGetBadgeState, WebPushMethodAcknowledgeBadge:
+		if store == nil {
+			conn.SendResult(msg.RequestID, nil, webPushWireError(&webPushValidationError{code: WebPushErrUnsupported, message: "web push is not configured on this bridge"}))
+			return true
+		}
+		// badge RPC 不依赖 VAPID 私钥：misconfigured 下仍可读（恢复路径与 unregister 一致）。
+		bindingID, throughRevision, verr := parseBadgeRPCParams(msg.Method, msg.Params)
+		if verr != nil {
+			conn.SendResult(msg.RequestID, nil, webPushWireError(verr))
+			return true
+		}
+		var view *WebPushBadgeStateView
+		if msg.Method == WebPushMethodGetBadgeState {
+			view, verr = store.BadgeStateView(device.DeviceID, bindingID)
+		} else {
+			view, verr = store.AcknowledgeBadge(device.DeviceID, bindingID, throughRevision, time.Now().UTC().UnixMilli())
+		}
+		if verr != nil {
+			conn.SendResult(msg.RequestID, nil, webPushWireError(verr))
+			return true
+		}
+		conn.SendResult(msg.RequestID, badgeStateResultOf(view), nil)
 	}
 	return true
+}
+
+// parseBadgeRPCParams 校验两个 badge RPC 的公共 params（schemaVersion + bindingId）；
+// acknowledge 额外解析十进制 throughRevision。
+func parseBadgeRPCParams(method string, raw json.RawMessage) (bindingID string, throughRevision uint64, verr *webPushValidationError) {
+	if method == WebPushMethodGetBadgeState {
+		var params GetPushBadgeStateParams
+		if err := json.Unmarshal(raw, &params); err != nil {
+			return "", 0, webPushInvalid("invalid get_push_badge_state params")
+		}
+		if params.SchemaVersion != WebPushSchemaVersion {
+			return "", 0, webPushInvalid(fmt.Sprintf("schemaVersion must be %d", WebPushSchemaVersion))
+		}
+		if !IsValidWebPushBindingID(strings.TrimSpace(params.BindingID)) {
+			return "", 0, webPushInvalid("bindingId must be wpb_<22 base64url chars>")
+		}
+		return strings.TrimSpace(params.BindingID), 0, nil
+	}
+	var params AcknowledgePushBadgeParams
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return "", 0, webPushInvalid("invalid acknowledge_push_badge params")
+	}
+	if params.SchemaVersion != WebPushSchemaVersion {
+		return "", 0, webPushInvalid(fmt.Sprintf("schemaVersion must be %d", WebPushSchemaVersion))
+	}
+	if !IsValidWebPushBindingID(strings.TrimSpace(params.BindingID)) {
+		return "", 0, webPushInvalid("bindingId must be wpb_<22 base64url chars>")
+	}
+	revision, err := strconv.ParseUint(strings.TrimSpace(params.ThroughRevision), 10, 64)
+	if err != nil {
+		return "", 0, webPushInvalid("throughRevision must be a decimal uint64 string")
+	}
+	return strings.TrimSpace(params.BindingID), revision, nil
+}
+
+// badgeStateResultOf 把 store 视图转成 RPC result（count 只在 available 时存在）。
+func badgeStateResultOf(view *WebPushBadgeStateView) *PushBadgeStateResult {
+	result := &PushBadgeStateResult{
+		SchemaVersion: WebPushSchemaVersion,
+		BindingID:     view.BindingID,
+		Revision:      strconv.FormatUint(view.Revision, 10),
+		Status:        "available",
+	}
+	if view.Saturated {
+		result.Status = "saturated"
+		return result
+	}
+	count := view.Count
+	if count > webPushBadgeMaxCount {
+		count = webPushBadgeMaxCount
+	}
+	result.UnreadSessionCount = &count
+	return result
 }
 
 func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agent) {

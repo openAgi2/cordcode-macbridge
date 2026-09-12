@@ -18,8 +18,12 @@ const (
 	// WebPushMethodRegister / WebPushMethodUnregister 是 bridge 级 RPC 方法名。
 	// 二者沿用标准 request envelope（backendId 必填，服务端在 agent 路由前分发并
 	// 忽略该字段的业务语义）；不存在无 backendId 的第二种 request 形状。
-	WebPushMethodRegister   = "register_push_subscription"
-	WebPushMethodUnregister = "unregister_push_subscription"
+	// WebPushMethodGetBadgeState / WebPushMethodAcknowledgeBadge 是 badge 状态的
+	// 只读/确认 RPC（badge-and-collapse plan §5 B4-3/4）。
+	WebPushMethodRegister        = "register_push_subscription"
+	WebPushMethodUnregister      = "unregister_push_subscription"
+	WebPushMethodGetBadgeState   = "get_push_badge_state"
+	WebPushMethodAcknowledgeBadge = "acknowledge_push_badge"
 
 	// WebPushSchemaVersion 是 register/unregister params 与 SW payload 的当前 schema 版本。
 	WebPushSchemaVersion = 1

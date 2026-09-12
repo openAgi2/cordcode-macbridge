@@ -194,7 +194,7 @@ scope only to keep the CI guard satisfied.
 | `workspace.read` | `get_workspace_diff`, `read_file_v2`, `list_directory`, `get_git_context`, `fetch_content_chunk`, `check_pull_request_support` | ✅ |
 | `workspace.mutate` | `checkout_git_branch`, `create_git_branch`, `create_git_worktree`, `create_pull_request`, `commit_and_push`, `list_projects` | ✅ (recommend an owner per-action confirmation on top) |
 | `delivery.manage` | `get_delivery_prekey_status`, `upload_delivery_prekeys`, `get_delivery_chain_head`, `enable_relay_pairing` | ✅ (own device chain only) |
-| `web_push.manage` | `register_push_subscription`, `unregister_push_subscription` | ✅ (own device subscription only; unregister stays reachable in `misconfigured`) |
+| `web_push.manage` | `register_push_subscription`, `unregister_push_subscription`, `get_push_badge_state`, `acknowledge_push_badge` | ✅ (own device subscription/badge state only; unregister and badge RPCs stay reachable in `misconfigured`) |
 | _(empty — unconditional)_ | `hello` (legacy dispatch placeholder) | ✅ (no scope required, else handshake deadlock) |
 
 **Backward compatibility.** A paired device with no `grantedScopes` recorded (every existing
@@ -2517,6 +2517,53 @@ category — never endpoint path/query, keys, or `auth`.
 Result `data`: `{ "removed": true|false }` — idempotent; a missing record is still success
 with `removed:false`. It operates only on the authenticated device's own record. A
 `misconfigured` VAPID state MUST NOT block this recovery RPC.
+
+### RPC: `get_push_badge_state`
+
+Reads the authenticated device's own badge state for the supplied binding. Scope
+`web_push.manage`; does not require the VAPID private key (readable while `misconfigured`).
+
+```json
+{
+  "type": "request",
+  "requestId": "req_<unique>",
+  "backendId": "<current-backend-id>",
+  "method": "get_push_badge_state",
+  "params": { "schemaVersion": 1, "bindingId": "wpb_<22-base64url-chars>" }
+}
+```
+
+Success result `data`:
+
+```json
+{
+  "schemaVersion": 1,
+  "bindingId": "wpb_<same>",
+  "revision": "42",
+  "status": "available",
+  "unreadSessionCount": 2
+}
+```
+
+- `revision` is a decimal string (uint64). `status` is `"available"` or `"saturated"`.
+- `unreadSessionCount` (0..999) exists only when `status === "available"`.
+- Error `web_push.binding_mismatch` (non-retryable): the device has no badge state or the
+  bindingId does not match its active binding — the client must re-register/reconcile, not
+  blindly retry. `web_push.storage_failed` (retryable) when the badge store is unavailable.
+
+### RPC: `acknowledge_push_badge`
+
+Confirms the device has observed completions through `throughRevision` (the revision
+returned by a prior get). Same scope and params shape plus `throughRevision`
+(decimal string). Semantics:
+
+- `available`: entries with `lastCompletionRevision <= throughRevision` are removed; the
+  result is the post-ack absolute snapshot (same shape as get; it may include revisions
+  that arrived after the query).
+- `saturated`: the whole set is cleared only when the current revision does not exceed
+  `throughRevision` (watermark stable); otherwise the state stays saturated and the client
+  must not touch the existing badge, retrying on the next foreground trigger.
+- Errors match `get_push_badge_state`; repeat acks at the same watermark are idempotent.
 
 ### Service Worker push payload (schema v1)
 

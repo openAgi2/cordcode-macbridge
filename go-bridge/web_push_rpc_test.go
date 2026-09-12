@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ── hello 协商（ApplyWebPushHelloProfile：direct 与 relay 共用同一 helper）─────────
@@ -433,5 +434,119 @@ func TestWebPushScopeDeniedForRestrictedDevice(t *testing.T) {
 	full := &TrustedDeviceRecord{DeviceID: "dev_full"}
 	if !deviceHasScope(full, ScopeWebPushManage) {
 		t.Fatal("nil GrantedScopes (legacy record) must default to all scopes")
+	}
+}
+
+// ── badge RPC（get_push_badge_state / acknowledge_push_badge）──────────────────
+
+func badgeRegisterRPC(t *testing.T, h *Handlers, store *WebPushStore, conn *webPushCaptureConn, device, binding string) {
+	t.Helper()
+	conn.deviceID = device
+	params := map[string]interface{}{
+		"schemaVersion":        1,
+		"platform":             "ios-pwa",
+		"applicationServerKey": store.VapidPublicKey(),
+		"bindingId":            binding,
+		"subscription": map[string]interface{}{
+			"endpoint":       "https://web.push.apple.com/X1BA/" + device,
+			"expirationTime": nil,
+			"keys": map[string]string{
+				"p256dh": base64.RawURLEncoding.EncodeToString(repeatByte(0x04, 65)),
+				"auth":   base64.RawURLEncoding.EncodeToString(repeatByte(0x07, 16)),
+			},
+		},
+	}
+	raw, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !h.handleWebPushRPC(conn, WireMessage{Type: "request", RequestID: "req_badge_reg", BackendID: "codex", Method: WebPushMethodRegister, Params: raw}) {
+		t.Fatal("register did not claim method")
+	}
+	if conn.wireErr != nil {
+		t.Fatalf("register: %+v", conn.wireErr)
+	}
+}
+
+func TestBadgeRPCGetAndAcknowledge(t *testing.T) {
+	h, store, conn := newWebPushRPCHarness(t)
+	binding := badgeTestBinding(0xD1)
+	badgeRegisterRPC(t, h, store, conn, "dev_push_1", binding)
+	if _, ok := store.AdvanceBadgeOnCompletion("dev_push_1", "sess-a", time.Now().UTC().UnixMilli()); !ok {
+		t.Fatal("advance failed")
+	}
+	if _, ok := store.AdvanceBadgeOnCompletion("dev_push_1", "sess-b", time.Now().UTC().UnixMilli()); !ok {
+		t.Fatal("advance failed")
+	}
+
+	// get：available + count=2 + revision 十进制字符串。
+	conn.result, conn.wireErr = nil, nil
+	if !h.handleWebPushRPC(conn, WireMessage{Type: "request", RequestID: "req_bg_1", BackendID: "codex", Method: WebPushMethodGetBadgeState,
+		Params: json.RawMessage(`{"schemaVersion":1,"bindingId":"` + binding + `"}`)}) {
+		t.Fatal("get did not claim method")
+	}
+	var got PushBadgeStateResult
+	decodeResult(t, conn, &got)
+	if got.BindingID != binding || got.Revision != "2" || got.Status != "available" || got.UnreadSessionCount == nil || *got.UnreadSessionCount != 2 {
+		t.Fatalf("get result = %+v", got)
+	}
+
+	// acknowledge through 1：sess-a 清除，sess-b 保留；返回 ack 后绝对快照。
+	if !h.handleWebPushRPC(conn, WireMessage{Type: "request", RequestID: "req_bg_2", BackendID: "codex", Method: WebPushMethodAcknowledgeBadge,
+		Params: json.RawMessage(`{"schemaVersion":1,"bindingId":"` + binding + `","throughRevision":"1"}`)}) {
+		t.Fatal("ack did not claim method")
+	}
+	var acked PushBadgeStateResult
+	decodeResult(t, conn, &acked)
+	if acked.Revision != "2" || acked.UnreadSessionCount == nil || *acked.UnreadSessionCount != 1 {
+		t.Fatalf("ack result = %+v", acked)
+	}
+}
+
+func TestBadgeRPCBindingMismatchStable(t *testing.T) {
+	h, store, conn := newWebPushRPCHarness(t)
+	binding := badgeTestBinding(0xD2)
+	badgeRegisterRPC(t, h, store, conn, "dev_push_1", binding)
+	store.AdvanceBadgeOnCompletion("dev_push_1", "sess-a", time.Now().UTC().UnixMilli())
+
+	conn.result, conn.wireErr = nil, nil
+	if !h.handleWebPushRPC(conn, WireMessage{Type: "request", RequestID: "req_bg_m", BackendID: "codex", Method: WebPushMethodGetBadgeState,
+		Params: json.RawMessage(`{"schemaVersion":1,"bindingId":"` + badgeTestBinding(0xEE) + `"}`)}) {
+		t.Fatal("get did not claim method")
+	}
+	if conn.wireErr == nil || conn.wireErr.Code != WebPushErrBindingMismatch {
+		t.Fatalf("err = %+v, want web_push.binding_mismatch", conn.wireErr)
+	}
+	if conn.wireErr.Retryable != nil && *conn.wireErr.Retryable {
+		t.Fatal("binding_mismatch must not be retryable")
+	}
+}
+
+func TestBadgeRPCRequiresAuthAndValidParams(t *testing.T) {
+	h, _, conn := newWebPushRPCHarness(t)
+	conn.deviceID = ""
+	if !h.handleWebPushRPC(conn, WireMessage{Type: "request", RequestID: "r", BackendID: "codex", Method: WebPushMethodGetBadgeState,
+		Params: json.RawMessage(`{"schemaVersion":1,"bindingId":"wpb_x"}`)}) {
+		t.Fatal("get did not claim method")
+	}
+	if conn.wireErr == nil || conn.wireErr.Code != "auth.required" {
+		t.Fatalf("err = %+v, want auth.required", conn.wireErr)
+	}
+
+	conn.deviceID = "dev_push_1"
+	if !h.handleWebPushRPC(conn, WireMessage{Type: "request", RequestID: "r2", BackendID: "codex", Method: WebPushMethodGetBadgeState,
+		Params: json.RawMessage(`{"schemaVersion":1,"bindingId":"wpb_x"}`)}) {
+		t.Fatal("get did not claim method")
+	}
+	if conn.wireErr == nil || conn.wireErr.Code != WebPushErrInvalidSubscription {
+		t.Fatalf("err = %+v, want invalid_subscription for malformed bindingId", conn.wireErr)
+	}
+
+	if !h.handleWebPushRPC(conn, WireMessage{Type: "request", RequestID: "r3", BackendID: "codex", Method: WebPushMethodAcknowledgeBadge,
+		Params: json.RawMessage(`{"schemaVersion":1,"bindingId":"` + badgeTestBinding(0xD3) + `","throughRevision":"not-a-number"}`)}) {
+		t.Fatal("ack did not claim method")
+	}
+	if conn.wireErr == nil || conn.wireErr.Code != WebPushErrInvalidSubscription {
+		t.Fatalf("err = %+v, want invalid_subscription for malformed throughRevision", conn.wireErr)
 	}
 }

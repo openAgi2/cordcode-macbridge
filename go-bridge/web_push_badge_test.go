@@ -498,3 +498,107 @@ func TestMarshalBadgePayloadTupleAllOrNothing(t *testing.T) {
 		}
 	}
 }
+
+func TestBadgeAcknowledgeSemantics(t *testing.T) {
+	store, err := LoadWebPushStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWebPushStore: %v", err)
+	}
+	const device = "dev_badge_ack"
+	binding := badgeTestBinding(0xA1)
+	if _, err := badgeRegister(t, store, device, binding, "https://web.push.apple.com/X1BA/dev_badge_ack"); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	badgeAdvance(store, device, "sess-a") // rev 1
+	badgeAdvance(store, device, "sess-b") // rev 2
+	badgeAdvance(store, device, "sess-c") // rev 3
+
+	// binding mismatch：稳定错误，不盲重试。
+	if _, ackErr := store.AcknowledgeBadge(device, badgeTestBinding(0xA2), 3, time.Now().UTC().UnixMilli()); ackErr == nil || ackErr.code != WebPushErrBindingMismatch {
+		t.Fatalf("ack with wrong binding: err = %+v, want %s", ackErr, WebPushErrBindingMismatch)
+	}
+
+	// available：只删除 ≤ throughRevision 的条目（sess-a@1、sess-b@2），sess-c@3 保留。
+	view, ackErr := store.AcknowledgeBadge(device, binding, 2, time.Now().UTC().UnixMilli())
+	if ackErr != nil {
+		t.Fatalf("ack through 2: %v", ackErr)
+	}
+	if view.Count != 1 || view.Revision != 3 || view.Saturated {
+		t.Fatalf("after ack through 2: view = %+v, want count=1 rev=3", view)
+	}
+	// 重复 ack（同水位）：幂等，不删除 sess-c。
+	view, ackErr = store.AcknowledgeBadge(device, binding, 2, time.Now().UTC().UnixMilli())
+	if ackErr != nil || view.Count != 1 {
+		t.Fatalf("idempotent re-ack: view = %+v err = %+v", view, ackErr)
+	}
+	// ack 到当前 revision：集合清空，count=0。
+	view, ackErr = store.AcknowledgeBadge(device, binding, 3, time.Now().UTC().UnixMilli())
+	if ackErr != nil || view.Count != 0 {
+		t.Fatalf("ack through head: view = %+v err = %+v", view, ackErr)
+	}
+}
+
+func TestBadgeAcknowledgeSaturatedOnlyClearsWhenStable(t *testing.T) {
+	store, err := LoadWebPushStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWebPushStore: %v", err)
+	}
+	const device = "dev_badge_acksat"
+	binding := badgeTestBinding(0xB1)
+	if _, err := badgeRegister(t, store, device, binding, "https://web.push.apple.com/X1BA/dev_badge_acksat"); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	for i := 0; i < webPushBadgeMaxUnreadSessions; i++ {
+		badgeAdvance(store, device, fmt.Sprintf("sess-%04d", i))
+	}
+	// 第 4097 个 key → saturated，revision = 4097。
+	badgeAdvance(store, device, "sess-overflow")
+
+	// 水位仍在前进（ack 落后于当前 revision）：保持 saturated，不清空。
+	view, ackErr := store.AcknowledgeBadge(device, binding, 4096, time.Now().UTC().UnixMilli())
+	if ackErr != nil {
+		t.Fatalf("ack behind head while saturated: %v", ackErr)
+	}
+	if !view.Saturated || view.Count != webPushBadgeMaxUnreadSessions {
+		t.Fatalf("ack behind head: view = %+v, want saturated with %d keys", view, webPushBadgeMaxUnreadSessions)
+	}
+	// 追上当前 revision：整体清空并退出 saturated。
+	view, ackErr = store.AcknowledgeBadge(device, binding, 4097, time.Now().UTC().UnixMilli())
+	if ackErr != nil {
+		t.Fatalf("ack at head while saturated: %v", ackErr)
+	}
+	if view.Saturated || view.Count != 0 {
+		t.Fatalf("ack at head: view = %+v, want cleared and not saturated", view)
+	}
+	// 清空后新 completion：从空集合重新计数。
+	if snap, ok := badgeAdvance(store, device, "sess-new"); !ok || snap.Count != 1 {
+		t.Fatalf("post-clear advance: snap = %+v ok = %v", snap, ok)
+	}
+}
+
+func TestBadgeStateView(t *testing.T) {
+	store, err := LoadWebPushStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWebPushStore: %v", err)
+	}
+	const device = "dev_badge_view"
+	binding := badgeTestBinding(0xC1)
+	if _, err := badgeRegister(t, store, device, binding, "https://web.push.apple.com/X1BA/dev_badge_view"); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	// 无状态设备 / binding 不符 → binding_mismatch（客户端需先 reconcile）。
+	if _, viewErr := store.BadgeStateView("dev_badge_none", binding); viewErr == nil || viewErr.code != WebPushErrBindingMismatch {
+		t.Fatalf("no-state view: err = %+v, want %s", viewErr, WebPushErrBindingMismatch)
+	}
+	if _, viewErr := store.BadgeStateView(device, badgeTestBinding(0xC2)); viewErr == nil || viewErr.code != WebPushErrBindingMismatch {
+		t.Fatalf("wrong-binding view: err = %+v, want %s", viewErr, WebPushErrBindingMismatch)
+	}
+	badgeAdvance(store, device, "sess-a")
+	view, viewErr := store.BadgeStateView(device, binding)
+	if viewErr != nil {
+		t.Fatalf("view: %v", viewErr)
+	}
+	if view.BindingID != binding || view.Revision != 1 || view.Count != 1 || view.Saturated {
+		t.Fatalf("view = %+v, want binding/rev=1/count=1/available", view)
+	}
+}

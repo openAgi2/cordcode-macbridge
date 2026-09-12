@@ -1170,6 +1170,30 @@ export interface BridgeUnregisterPushSubscriptionResult {
   removed: boolean;
 }
 
+/** get_push_badge_state params (badge-and-collapse plan §5 B4-3). */
+export interface BridgeGetPushBadgeStateParams {
+  schemaVersion: 1;
+  bindingId: string;
+}
+
+/** acknowledge_push_badge params (§5 B4-4); throughRevision is the revision from a prior get. */
+export interface BridgeAcknowledgePushBadgeParams {
+  schemaVersion: 1;
+  bindingId: string;
+  throughRevision: string;
+}
+
+/** Shared success result of get/acknowledge_push_badge. */
+export interface BridgePushBadgeStateResult {
+  schemaVersion: 1;
+  bindingId: string;
+  /** Decimal string (uint64). */
+  revision: string;
+  status: "available" | "saturated";
+  /** 0..999; present only when status === "available". */
+  unreadSessionCount?: number;
+}
+
 /** MacBridge-side fixed plaintext schema (RFC 8291-encrypted before transport). */
 export interface BridgeWebPushPayloadV1 {
   schemaVersion: 1;
