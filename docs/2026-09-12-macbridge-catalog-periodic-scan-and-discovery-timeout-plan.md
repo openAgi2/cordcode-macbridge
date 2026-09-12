@@ -2,7 +2,7 @@
 
 Date: 2026-09-12
 Author: 诊断会话（CPU 归因排查衍生；2026-09-12 两轮复审修订）
-Status: implementing（exec-plan 队列执行中；实现与非 UI 验证已落地，真机回归待收口）
+Status: implemented（exec-plan 完成；非 UI 验证与 10 分钟物理 iPhone 在线运行回归已通过）
 
 关联：
 

@@ -30,11 +30,11 @@
   },
   "reports": {
     "completion_report_path": "docs/2026-09-12-macbridge-catalog-periodic-scan-and-discovery-timeout-plan完成情况.md",
-    "completion_report_status": "missing",
-    "last_generated_at": null,
-    "based_on_queue_hash": null
+    "completion_report_status": "current",
+    "last_generated_at": "2026-09-12T15:04:09.050547Z",
+    "based_on_queue_hash": "03271392a4aa"
   },
-  "updated_at": "2026-09-12T14:44:12.575120Z",
+  "updated_at": "2026-09-12T15:04:09.050547Z",
   "todos": [
     {
       "id": "phase0-observability-impl",
@@ -253,7 +253,7 @@
       "id": "phase2-passive-error-suppression-review-fix-regression",
       "title": "phase2-passive-error-suppression-review-fix-regression",
       "description": "Review fix after live regression discovered log aggregation alone left 1.08M identical passive errors and 60-74% CPU in three minutes. Suppress byte-identical terminal error notifications at the codec boundary before passive dispatch.",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase2",
       "kind": "regression",
       "depends_on": [],
@@ -261,13 +261,17 @@
       "notes": "review-fix-for:phase2-passive-error-storm-regression",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Pending live runtime redeploy and repeated error-storm regression measurement.",
-        "artifacts": "",
-        "checked_at": null
+        "summary": "Live 10-minute physical-iPhone runtime regression on commit 79315c2: zero passive log rows in minutes 1-8, one in minute 9; 1,842,559 identical notifications suppressed by minute 8; average sampled bridge CPU 30.74% of one core (peak 39.6%). Pre-fix log-only build measured 60.7%-74.2% and 1,084,858 delivered passive errors in first 3 minutes.",
+        "artifacts": [
+          "live runtime PID 60871 commit 79315c2",
+          "management endpoint /internal/diagnostics/runtime",
+          "~/Library/Application Support/CordCode Link/logs/go-bridge.log"
+        ],
+        "checked_at": "2026-09-12T15:01:27.089334Z"
       }
     },
     {
@@ -403,7 +407,7 @@
       "id": "phase2-background-task-error-backoff-review-fix-regression",
       "title": "phase2-background-task-error-backoff-review-fix-regression",
       "description": "Review fix after live regression showed iOS repeatedly replaying the same failed background scan at one projection revision.",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase2",
       "kind": "regression",
       "depends_on": [],
@@ -411,13 +415,17 @@
       "notes": "review-fix-for:phase2-background-task-starvation-regression",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Pending latest runtime redeploy and live retry/regression measurement.",
-        "artifacts": "",
-        "checked_at": null
+        "summary": "Live runtime showed projection hydrating at 15.9s then retry snapshot in 1.19s; repeated background scan errors stopped re-running per iOS retry and were bounded by same-revision 30s backoff. No projection multi-minute failure occurred during the final 10-minute window.",
+        "artifacts": [
+          "live runtime PID 60871 commit 79315c2",
+          "go-bridge.log projection_rpc req_5/req_10",
+          "management endpoint background task counters"
+        ],
+        "checked_at": "2026-09-12T15:01:27.089334Z"
       }
     },
     {
@@ -795,7 +803,7 @@
       "id": "phase3-claude-lineage-log-review-fix-regression",
       "title": "phase3-claude-lineage-log-review-fix-regression",
       "description": "Review fix after live log inventory showed 252 Claude fork rows in one minute despite snapshot-level cache handling only fully unchanged fingerprints.",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase3",
       "kind": "regression",
       "depends_on": [],
@@ -803,13 +811,16 @@
       "notes": "review-fix-for:phase3-secondary-scan-cadence-regression",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Pending latest runtime redeploy and live log-rate measurement.",
-        "artifacts": "",
-        "checked_at": null
+        "summary": "Live final window produced exactly 90 Claude fork rows in 10 minutes (9 expected per-minute summaries), down from 252 rows in one minute before the review fix; total bridge log growth was 99,987 bytes/10 minutes (average 166.6 B/s).",
+        "artifacts": [
+          "live runtime PID 60871 commit 79315c2",
+          "go-bridge.log Claude lineage counts"
+        ],
+        "checked_at": "2026-09-12T15:01:27.089334Z"
       }
     },
     {
@@ -871,7 +882,7 @@
       "id": "phase4-doc-sync-regression",
       "title": "Phase 4 documentation and completion: regression gate",
       "description": "Run the non-UI regression evidence required for Phase 4 documentation and completion: focused Go tests, static/build checks, and log-structure or fixture evidence where possible. Do not claim device behavior without real evidence.",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase4",
       "kind": "regression",
       "depends_on": [
@@ -881,13 +892,20 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Final full-module test/build and live regression completed after documentation sync. Physical iPhone 16 Pro was connected and CordCode app launched; no UI/snapshot/simulator automation was run. Runtime 79315c2 remained installed and active after the run. Fresh exit audit rerun passed all Go packages, vet/build, Linux go-bridge cross-build, and diff check.",
+        "artifacts": [
+          "command:go test ./... -count=1",
+          "command:go vet ./...",
+          "command:go build ./...",
+          "command:GOOS=linux GOARCH=arm64 go build ./go-bridge",
+          "runtime version cordcode-bridge-runtime 0.1.0 commit 79315c218624",
+          "live 10-minute physical iPhone regression"
+        ],
+        "checked_at": "2026-09-12T15:01:27.089334Z"
       }
     }
   ]
