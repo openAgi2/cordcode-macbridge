@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T06:03:00Z",
+  "updated_at": "2026-09-12T06:05:00Z",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -112,7 +112,7 @@
       "title": "P1 replay-free eventId real-device regression",
       "description": "Verify an unopened-session completion on the installed build shows the real session completion notification rather than the fixed SW schema-error notification, then continue the original unopened/offline matrices.",
       "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-replay-free-event-id-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-unopened-session-push-review-fix-regression; owner authorization already granted.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Release build 8bdbaa805f8c is installed and healthy; Codex Remote live observer connected. Awaiting owner confirmation that a never-opened session completion shows the real notification rather than the SW schema-error notification.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-replay-free-event-id-release-build.log", ".exec-plan/evidence/034334e9176f/p1-replay-free-event-id-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T06:05:00Z"}
     },
     {
       "id": "p2-session-tag-impl",

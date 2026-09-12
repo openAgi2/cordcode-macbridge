@@ -34,3 +34,11 @@
 - Owner 观察：Mac 端在从未由 iOS Web App 打开过的 session E 完成回合后，iOS 收到通知，但标题/正文为「CordCode 推送数据错误 / 打开 CordCode 查看连接状态」。
 - 本地 delivery ledger 证据：修复前最新 replay-free 两次投递记录的 `eventId` 均为空字符串；SW `isValidTargetShape` 要求 `eventId` 非空，因此必然落入固定 schema-error 通知。
 - 判定：投递覆盖修复有效，payload 契约缺陷真实；不能用客户端放宽校验掩盖。
+
+### R1 EventID 修复版本复测
+
+- 安装版本：`cordcode-bridge-runtime 0.1.0 (commit: 8bdbaa805f8c, built: 2026-09-12T06:04:11Z)`
+- 状态：等待 owner 复测
+- 复测动作：Web App 不打开目标 session，在 Mac 端完成一个新回合，等待最多 10 秒。
+- 预期：显示真实的 `CordCode · <会话标题>` 完成通知与回复预览；不得再显示「CordCode 推送数据错误」。
+- 已修复的服务端不变量：同一 replay-free turn 的 `target.eventId` 稳定为 `wplive-<hash[:32]>`；缺失 EventID 的 candidate 在服务端出站前被拒绝。
