@@ -79,3 +79,10 @@
 - 部署证据：runtime ready；Codex Remote passive subscription 成功；日志记录 `codex-remote attached live catalog threads loaded=2 attached=2`。
 - 复测动作：iOS Web App 保持默认 Claude 模式且不打开/切换任何 session；Mac 端打开/使用一个 Codex Desktop session 并发送一个新回合，等待最多 10 秒。
 - 预期：iOS 收到该 Codex session 的 completion 通知；无历史回放，Claude 已通过的通知行为不受影响。
+
+### Codex live-attach Owner 结果与预览缺陷
+
+- Codex delivery：`PASS`。iOS 保持 Claude 默认模式且未打开/切换 session 时，Mac 端 Codex session 完成后能收到通知。
+- Codex preview：`FAIL`。通知正文为固定文案「Mac 上的会话已完成，点击查看结果」，没有 Claude 路径那样的真实回复详情。
+- 本地取证：passive log 在同一 Codex session 上收到多帧 `text_delta`，随后 completion 到达；旧 replay-free producer 只在 completion 帧取 `EventResult.Content`，而 Codex 官方 `turn/completed` 终态帧本身不携带正文。
+- 判定：必须按 `(backendId,sessionId,turnId)` 累积同一 live source 的 assistant text delta，并在 completion 时消费；不得历史回读或伪造正文。

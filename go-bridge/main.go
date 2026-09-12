@@ -872,6 +872,7 @@ func envOr(key, fallback string) string {
 func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string, subscribe func(context.Context) (<-chan core.Event, error), replayFreeLive bool, catalogAttacher core.LiveEventCatalogAttacher) {
 	backoff := 2 * time.Second
 	maxBackoff := 60 * time.Second
+	previews := newReplayFreePreviewCache()
 
 	for {
 		events, err := subscribe(ctx)
@@ -896,6 +897,9 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 
 		for ev := range events {
 			eventName, data, _ := mapAgentEvent(ev)
+			if replayFreeLive && eventName == "text_delta" {
+				previews.Observe(backendID, ev.SessionID, ev.TurnID, ev.Content)
+			}
 			if eventName == "todos_updated" || eventName == "turn_started" || eventName == "turn_completed" || eventName == "error" || eventName == "text_delta" || eventName == "permission_request" || eventName == "permission_resolved" || eventName == "question_asked" || eventName == "question_resolved" || eventName == "user_input_requested" || eventName == "user_input_resolved" || eventName == "session_retry_status" {
 				slog.Info("go-bridge: passive event", "backend", backendID, "session", ev.SessionID, "event", eventName)
 			} else {
@@ -970,7 +974,17 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 			} else if replayFreeLive && !agentRelayRunning {
 				// The service-level source proves this is a new live notification. Keep
 				// the session out of the Kernel while still notifying enrolled devices.
-				h.enqueueReplayFreeLivePush(backendID, ev.SessionID, eventName, data, h.webPushTitles.get(backendID, ev.SessionID), ev.Content)
+				preview := ev.Content
+				if eventName == "turn_completed" {
+					turnID := ev.TurnID
+					if m, ok := data.(map[string]interface{}); ok {
+						if id, _ := m["turnId"].(string); id != "" {
+							turnID = id
+						}
+					}
+					preview = previews.Take(backendID, ev.SessionID, turnID)
+				}
+				h.enqueueReplayFreeLivePush(backendID, ev.SessionID, eventName, data, h.webPushTitles.get(backendID, ev.SessionID), preview)
 			}
 		}
 		slog.Info("go-bridge: passive subscription ended, reconnecting", "backend", backendID)

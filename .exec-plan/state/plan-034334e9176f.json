@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T06:45:00Z",
+  "updated_at": "2026-09-12T06:55:00Z",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -153,8 +153,29 @@
       "id": "p1-codex-live-attach-regression",
       "title": "P1 Codex replay-free attach real-device regression",
       "description": "Verify a never-opened Codex Desktop session notifies while iOS remains in Claude mode with no session open, without replaying history or affecting already-passing Claude notifications.",
-      "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-codex-live-attach-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-replay-free-event-id-regression; owner authorization already granted.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Release build a0cbbf5174e2 is installed and healthy. Runtime logs prove two Desktop-loaded Codex threads were attached with the replay-free catalog path; awaiting owner confirmation of a never-opened Codex completion notification.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-codex-live-attach-release-build.log", ".exec-plan/evidence/034334e9176f/p1-codex-live-attach-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T06:45:00Z"}
+      "status": "done", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-codex-live-attach-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-replay-free-event-id-regression; delivery objective proven by owner. Preview defect moved to p1-codex-replay-preview triplet.",
+      "verification": {"required": true, "status": "present", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Owner confirmed a never-opened Codex Desktop session notifies while iOS remains in Claude mode without opening or switching sessions; no history replay and Claude behavior remained correct.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-codex-live-attach-release-build.log", ".exec-plan/evidence/034334e9176f/p1-codex-live-attach-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T06:54:00Z"}
+    },
+    {
+      "id": "p1-codex-replay-preview-impl",
+      "title": "P1 Codex replay-free live preview implementation",
+      "description": "Accumulate live assistant text deltas per backend/session/turn in a bounded replay-free cache and consume the preview at completion without reading history or creating projection state.",
+      "status": "done", "phase": "p1-review-fix", "kind": "impl", "depends_on": ["p1-codex-live-attach-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-codex-live-attach-regression",
+      "verification": {"required": true, "status": "present", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "The passive replay-free path now accumulates same-turn assistant text deltas in a bounded cache keyed by backend/session/turn and consumes the preview when the terminal event enqueues the completion candidate.", "artifacts": ["go-bridge/web_push_replay_preview.go", "go-bridge/main.go:startPassiveSubscription", "docs/2026-09-12-remote-web-push-badge-and-collapse-plan.md:A0"], "checked_at": "2026-09-12T06:55:00Z"}
+    },
+    {
+      "id": "p1-codex-replay-preview-tests",
+      "title": "P1 Codex replay-free live preview automated tests",
+      "description": "Prove multi-delta text forms the completion preview, cache identity is turn/backend scoped, Take is consumption-once, no preview state is fabricated, and no hidden projection is created.",
+      "status": "done", "phase": "p1-review-fix", "kind": "tests", "depends_on": ["p1-codex-replay-preview-impl"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-codex-live-attach-regression",
+      "verification": {"required": true, "status": "present", "method": "automated", "attestation": "re-verified", "na_reason": null, "summary": "Full Go suite passed. Focused tests prove turn-scoped/consume-once cache behavior and a passive Codex completion whose body is assembled from live text deltas without hidden projection state.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-codex-replay-preview-all-go-tests.log", "go-bridge/web_push_replay_preview_test.go"], "checked_at": "2026-09-12T06:55:00Z"}
+    },
+    {
+      "id": "p1-codex-replay-preview-regression",
+      "title": "P1 Codex replay-free preview real-device regression",
+      "description": "Verify a never-opened Codex completion notification carries the actual latest assistant response preview instead of the generic fallback while iOS remains in Claude mode.",
+      "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-codex-replay-preview-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-codex-live-attach-regression; owner authorization already granted.",
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
     },
     {
       "id": "p2-session-tag-impl",
