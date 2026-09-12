@@ -529,3 +529,55 @@ func collabPageOfItems(turnID string, rawItems ...string) *core.TurnItemsPage {
 	}
 	return page
 }
+
+// 2026-09-12 second-test fixes: connection rebinds (BindClient →
+// ResetNativeSessionState) must not orphan an in-flight collab run, and a wait
+// whose spawns were never seen (runtime started mid-run) rebuilds members from
+// its complete agentsStates (docs/2026-09-12-codex-goal-second-test-*-analysis.md).
+
+func TestCollabFoldSurvivesRebind(t *testing.T) {
+	codec := NewLiveCodec()
+	codec.Decode(Notification{Method: "item/completed", Params: json.RawMessage(`{"threadId":"root","turnId":"spawn-turn","item":{"type":"collabAgentToolCall","id":"spawn-1","tool":"spawn_agent","status":"completed","receiverThreadIds":["child-bao"],"prompt":"贾宝玉故事","agentsStates":{"child-bao":"pending_init"}}}`)})
+	// The pairing stream drops and reconnects mid-run: the rebind resets native
+	// state, but the run's fold must keep its members so the post-reconnect
+	// wait with authoritative states settles the SAME card.
+	codec.ResetNativeSessionState()
+	events := codec.Decode(Notification{Method: "item/completed", Params: json.RawMessage(`{"threadId":"root","turnId":"spawn-turn","item":{"type":"collabAgentToolCall","id":"wait-1","tool":"wait","status":"completed","receiverThreadIds":[],"agentsStates":{"child-bao":{"completed":"故事全文"}}}}`)})
+	if len(events) != 1 || events[0].WorkflowRun == nil {
+		t.Fatalf("post-rebind wait events = %+v", events)
+	}
+	wr := events[0].WorkflowRun
+	if wr.RunID != "codex-collab:spawn-turn" || wr.Status != core.WorkflowStatusCompleted {
+		t.Fatalf("card = %+v", wr)
+	}
+	if member := wr.Phases[0].Members[0]; member.ChildSessionID != "child-bao" ||
+		member.Status != core.WorkflowStatusCompleted || member.Label != "贾宝玉故事" {
+		t.Fatalf("member = %+v", member)
+	}
+}
+
+func TestCollabWaitRebuildsMembersWhenSpawnUnseen(t *testing.T) {
+	codec := NewLiveCodec()
+	// Runtime restarted mid-run (or the stream dropped the spawns): the first
+	// collab item seen is a wait carrying the full per-agent state map — the
+	// card rebuilds from it instead of never forming.
+	events := codec.Decode(Notification{Method: "item/completed", Params: json.RawMessage(`{"threadId":"root","turnId":"wait-turn","item":{"type":"collabAgentToolCall","id":"wait-1","tool":"wait","status":"completed","receiverThreadIds":[],"agentsStates":{"child-a":{"completed":"故事A"},"child-b":{"completed":"故事B"}}}}`)})
+	if len(events) != 1 || events[0].WorkflowRun == nil {
+		t.Fatalf("rebuild events = %+v", events)
+	}
+	wr := events[0].WorkflowRun
+	if wr.RunID != "codex-collab:wait-turn" || wr.Status != core.WorkflowStatusCompleted || len(wr.Phases[0].Members) != 2 {
+		t.Fatalf("card = %+v", wr)
+	}
+	for _, member := range wr.Phases[0].Members {
+		if member.Status != core.WorkflowStatusCompleted {
+			t.Fatalf("rebuilt members = %+v", wr.Phases[0].Members)
+		}
+	}
+	// Close of stale agents still never creates a card (spawn-only adoption
+	// rule preserved for close).
+	codec = NewLiveCodec()
+	if events := codec.Decode(Notification{Method: "item/completed", Params: json.RawMessage(`{"threadId":"root","turnId":"turn","item":{"type":"collabAgentToolCall","id":"close-old","tool":"close_agent","status":"completed","receiverThreadIds":["old-agent"],"agentsStates":{"old-agent":{"completed":"x"}}}}`)}); len(events) != 0 {
+		t.Fatalf("stale close must not adopt members: %+v", events)
+	}
+}

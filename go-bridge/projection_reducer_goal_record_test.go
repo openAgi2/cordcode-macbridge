@@ -129,3 +129,51 @@ func TestCodexGoalRecordRejectsIncompleteOrFractionalOfficialShape(t *testing.T)
 		t.Fatalf("fractional integer field mutated projection: %+v", projection.CodexGoal)
 	}
 }
+
+func TestGoalCommandTurnInsertsByTimeBeforeRunTurn(t *testing.T) {
+	r := NewProjectionReducer()
+	var clock int64 = 1_780_000_000_000
+	r.now = func() int64 { return clock }
+
+	// An older turn keeps its position ahead of the command card.
+	r.Apply(ev(1, "codex-remote", "thread", "turn_started", map[string]interface{}{"turnId": "turn-old"}))
+	// The live goal race: the run turn skeleton exists by the time the goal
+	// record arrives, and the goal was created 0.4s BEFORE the turn started.
+	clock = 1_780_000_001_000
+	r.Apply(ev(2, "codex-remote", "thread", "turn_started", map[string]interface{}{"turnId": "turn-run"}))
+	r.Apply(ev(3, "codex-remote", "thread", "session_goal_record", map[string]interface{}{"goal": map[string]interface{}{
+		"threadId": "thread", "objective": "四故事", "status": "active",
+		"tokensUsed": int64(0), "timeUsedSeconds": int64(0), "tokenBudget": nil,
+		"createdAt": int64(1_780_000_000), "updatedAt": int64(1_780_000_000),
+	}}))
+
+	projection, _ := r.Snapshot("codex-remote", "thread")
+	var ids []string
+	for _, turn := range projection.Turns {
+		ids = append(ids, turn.TurnID)
+	}
+	want := []string{"turn-old", "cmd:codex-goal:1780000000", "turn-run"}
+	if len(ids) != len(want) {
+		t.Fatalf("turns = %v want %v", ids, want)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("turns = %v want %v (command card must sit before the run turn, not at arrival-order end)", ids, want)
+		}
+	}
+
+	// A status refresh of the SAME goal updates the card in place, no reorder.
+	clock = 1_780_000_002_000
+	r.Apply(ev(4, "codex-remote", "thread", "session_goal_record", map[string]interface{}{"goal": map[string]interface{}{
+		"threadId": "thread", "objective": "四故事", "status": "complete",
+		"tokensUsed": int64(5), "timeUsedSeconds": int64(5), "tokenBudget": nil,
+		"createdAt": int64(1_780_000_000), "updatedAt": int64(1_780_000_002_000),
+	}}))
+	projection, _ = r.Snapshot("codex-remote", "thread")
+	if ids := projection.Turns[1].TurnID; ids != "cmd:codex-goal:1780000000" {
+		t.Fatalf("update moved the card: %+v", projection.Turns)
+	}
+	if part := projection.Turns[1].System.Parts[0]; part.CommandKind != "success" {
+		t.Fatalf("complete status kind = %q", part.CommandKind)
+	}
+}

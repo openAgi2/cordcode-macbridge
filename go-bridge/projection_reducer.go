@@ -339,7 +339,7 @@ func (ps *projectionSession) upsertTurn(turn TurnProjection) {
 // rendering path.
 func (ps *projectionSession) upsertSessionCommandTurn(commandID, name, kind, text, inputLine string, timestamp int64) {
 	turnID := "cmd:" + commandID
-	ps.upsertTurn(TurnProjection{
+	turn := TurnProjection{
 		TurnID:      turnID,
 		Status:      "completed",
 		StartedAt:   timestamp,
@@ -357,7 +357,32 @@ func (ps *projectionSession) upsertSessionCommandTurn(commandID, name, kind, tex
 				CommandLine: inputLine,
 			}},
 		},
-	})
+	}
+	if ps.turnByID(turnID) != nil {
+		ps.upsertTurn(turn)
+		return
+	}
+	// Insert a NEW command turn by StartedAt, not arrival order: the live goal
+	// flow creates the goal after the run's turn skeleton already exists
+	// (createdAt and turn start can differ by <1s), so appending parks the
+	// /goal card behind the whole run's output (2026-09-12 真机: 指令卡跑到
+	// 整段输出末尾). Cold rebuild already orders by official times — this
+	// gives live the same rule. Turns without a StartedAt keep their position
+	// and stay ahead of the command turn (unknown time is not "later").
+	idx := len(ps.projection.Turns)
+	for idx > 0 {
+		prev := ps.projection.Turns[idx-1].StartedAt
+		if prev == 0 || prev <= timestamp {
+			break
+		}
+		idx--
+	}
+	ps.projection.Turns = append(ps.projection.Turns, TurnProjection{})
+	copy(ps.projection.Turns[idx+1:], ps.projection.Turns[idx:])
+	ps.projection.Turns[idx] = turn
+	if ps.upsertTurns != nil {
+		ps.upsertTurns[turnID] = turn
+	}
 }
 
 // upsertTurnPersistOnly merges into projection.Turns without staging a flush delta. Used by
@@ -925,7 +950,17 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		// Persist-only updates keep Execution.ActiveTurnID armed (tool_started / text_delta attach
 		// point in content-only turns that never carry a user_message) and preserve StartedAt,
 		// without staging a flush delta that FlushPatch would publish.
-		ps.upsertTurnPersistOnly(TurnProjection{TurnID: turnID, Status: "running", StartedAt: ps.projection.UpdatedAt})
+		//
+		// StartedAt for a turn we have NOT yet timed must be the actual start moment
+		// (r.now), not the last commit's UpdatedAt: that value goes stale across
+		// quiet gaps (2026-09-12: goal 轮 StartedAt 停在上个回合完成时刻，导致
+		// /goal 命令卡按时间排序仍落错位)。An already-timed turn (cold hydrate
+		// carried the official time) keeps its value.
+		startedAt := r.now()
+		if existing := ps.turnByID(turnID); existing != nil && existing.StartedAt != 0 {
+			startedAt = existing.StartedAt
+		}
+		ps.upsertTurnPersistOnly(TurnProjection{TurnID: turnID, Status: "running", StartedAt: startedAt})
 		ps.setActiveTurnPersistOnly(turnID)
 
 	case "user_message":

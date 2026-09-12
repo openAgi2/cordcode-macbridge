@@ -107,7 +107,13 @@ func (c *LiveCodec) ResetNativeSessionState() {
 	c.mu.Lock()
 	c.collaborationByThread = map[string]versionedCollaborationSnapshot{}
 	c.goalByThread = map[string]versionedGoalSnapshot{}
-	c.collabFolds = newCollabFoldRegistry()
+	// collabFolds intentionally SURVIVE the rebind: official subagent runs
+	// span turns and connection epochs, runIds derive from anchor turns and
+	// re-observed items are idempotent, so keeping the folds lets post-reconnect
+	// wait/close states settle the card instead of freezing it at the
+	// spawn-time snapshot (2026-09-12 真机: 重连清空后「已中断 4/4」冻结).
+	// Collaboration/goal maps reset because the new epoch re-announces them;
+	// collab fold events are not re-announced.
 	c.mu.Unlock()
 }
 

@@ -208,6 +208,31 @@ func (f *codexCollabWorkflowFold) observeAppTool(item remoteThreadItem) bool {
 	}
 }
 
+// adoptStates establishes members from a WAIT item's complete agentsStates on
+// a fold that lost (or never saw) its spawns — e.g. the runtime started or the
+// registry was cleared mid-run. Official wait items carry the full per-agent
+// state map, so the card can rebuild from them instead of freezing at whatever
+// snapshot preceded the gap (2026-09-12 真机: 重连后 wait/close 全部失效).
+// Only a WAIT may adopt, and only onto a memberless fold: close of stale
+// agents from an earlier run must never create membership (the spawn-only
+// rule stays intact for folds that did see their spawns).
+func (f *codexCollabWorkflowFold) adoptStates(item remoteThreadItem) bool {
+	if f == nil || len(f.members) != 0 {
+		return false
+	}
+	tool := normalizeCollabTool(item.CollabTool)
+	if tool != "wait" && tool != "waitthreads" {
+		return false
+	}
+	changed := false
+	for childID, state := range item.CollabAgentStates {
+		if f.upsertChild(childID, "", remoteCollabMemberStatus(state.Status, core.WorkflowStatusRunning)) {
+			changed = true
+		}
+	}
+	return changed
+}
+
 func (f *codexCollabWorkflowFold) observeActivity(item remoteThreadItem) bool {
 	if f == nil || f.runID == "" {
 		return false
@@ -437,11 +462,11 @@ func (c *LiveCodec) foldCollabWorkflow(params remoteItemNotification, item remot
 	fold := c.collabFolds.route(params.ThreadID, params.TurnID, children, spawn, waitFallback)
 	var events []core.Event
 	if fold != nil {
-		changed := false
+		changed := fold.adoptStates(item)
 		if item.Type == "subAgentActivity" {
-			changed = fold.observeActivity(item)
+			changed = fold.observeActivity(item) || changed
 		} else {
-			changed = fold.observe(item)
+			changed = fold.observe(item) || changed
 		}
 		c.collabFolds.index(fold, children)
 		if snapshot, valid := fold.snapshot(); changed && valid {
@@ -515,6 +540,9 @@ func (h *remoteCollabHistoryFolds) fold(turn *core.TurnScopedHistoryTurn, item r
 	fold := h.reg.route(h.threadID, turn.TurnID, children, spawn, waitFallback)
 	if fold == nil {
 		return
+	}
+	if fold.adoptStates(item) {
+		h.reg.index(fold, children)
 	}
 	if item.Type == "subAgentActivity" {
 		fold.observeActivity(item)
