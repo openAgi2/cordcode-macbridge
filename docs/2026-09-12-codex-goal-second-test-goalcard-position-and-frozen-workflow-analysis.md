@@ -193,3 +193,45 @@ completed，**「最后一条 interrupted wire」只能来自 live 独有事件*
   修复把 fold 从「per-turn 自然消亡」改为「跨 turn 存活到显式重置」，
   使重连清空从「无害」变成「卡片永久冻结」的诱因。这是昨日修复引入的
   新脆弱点，需要在 §6.1 收口。
+
+## 9. 第三轮真机测试结果与决策记录（2026-09-12 18:0x，owner 授权自行决策 §6.2/§6.4）
+
+### 9.1 验收结果（38ce43c + iOS 153bee70 装机后）
+
+- ✅ /goal 命令卡位置正常（用户气泡下方、输出之前，截图 18.08.34）。
+- ✅ workflow 卡正常（单卡、真实 prompt 标题、运行中 2+2 → 完成）。
+- ✅ goal bar / 「进行中的目标」进度卡在 live 视图正常。
+- ⚠️ 任务完成后尾部出现成串「收起过程/思考」折叠行（截图 18.09.27，6 对，
+  全折叠、无摘要）——finalize 后 reasoning blocks 拆分渲染所致。
+- ⚠️ 切走再切回：goal bar、goal 命令卡消失（正文/面板情况待确认）。
+
+### 9.2 已实施决策
+
+- **§6.4 → 选 a（官方对齐）**：iOS `33a32976`——codex-remote 的 reasoning
+  blocks 在时间线快照构建层（MessageWebSnapshotBuilder）整体过滤，live/
+  finalize/重载/快照恢复同路生效；「用时」入口的回合详情展开仍可见
+  reasoning（显式查看途径）。Grok/DSH/Claude 不变。思考堆（含完成后的
+  尾部堆叠）就此根治。
+- **§6.2 → 暂缓**：collabAgentToolCall 通道冷路径失明的触发条件 = runtime
+  全量内核重建（默认 120 分钟自动重启）与 iOS 冷开同窗；根治需要官方
+  子线程元数据回填（thread/list 是否暴露 parent 归属未验证）。暴露面
+  有限（卡片不出现，正文不受影响），另立任务。
+
+### 9.3 新开放项：切回后 goal 命令卡/goal bar 消失（iOS 侧重开渲染链）
+
+已证事实：Mac 内核投影全程稳定（18:08:10 切走 → 18:09:09 切回，rev 289
+不变、delta_at_head、无重建，cmd turn 与 CodexGoal 均在投影里）；live
+视图渲染正常；丢失只发生在 iOS 重开路径。静态链路核查（switchSession
+清空 → ProjOpen pull → renderProjectionFromStore → messages sink →
+refreshGoalBanner，映射层覆盖 system/cmd turn）各环节齐备但结果丢失——
+需设备端 fgTrace 复现定案。复现配方：跑一个 goal 至完成 → 切走 → 切回
+→ Console.app 过滤 `[GoalBanner]`/`[Render]`/`[ProjOpen]`/`[PIPE]` 抓取
+（代码已有现成埋点，含 `[GoalBanner] refresh kindCodex=… codexGoal=…`
+last-mile 诊断行）。次要观察：18.08.34 截图段落②行首有叠字重影
+（渲染残留类，未处理）。
+
+### 9.4 部署记录（本轮）
+
+- iOS：`33a32976`（§6.4 过滤 + CHANGELOG；构建含 18:0x 全部前置修复），
+  已装 iPhone 16 Pro（devicectl，org.openagi.cordcode）。
+- Mac：无需变更（`38ce43c` 已于 17:52 部署，本轮无新 Mac 代码）。
