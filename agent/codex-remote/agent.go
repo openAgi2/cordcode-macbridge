@@ -81,6 +81,7 @@ func (a *Agent) Name() string { return BackendID }
 
 var _ core.CatalogRefreshSignaler = (*Agent)(nil)
 var _ core.LiveEventSubscriber = (*Agent)(nil)
+var _ core.LiveEventCatalogAttacher = (*Agent)(nil)
 
 // CatalogRefreshSignals exposes official catalog-affecting notifications to
 // the Bridge discovery worker. The signal is deliberately data-free:

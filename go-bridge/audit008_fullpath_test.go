@@ -48,9 +48,9 @@ type ssePushServe struct {
 	// replyBroadcasts/rejectBroadcasts toggle the official POST side effects:
 	// POST /question/{id}/reply|reject answers `true` AND broadcasts the
 	// question.replied/rejected frame on the SSE stream (real server order).
-	replyBroadcasts   bool
-	rejectBroadcasts  bool
-	questionPOSTs     []recordedQuestionPOST
+	replyBroadcasts  bool
+	rejectBroadcasts bool
+	questionPOSTs    []recordedQuestionPOST
 	// connDrops holds one done-channel per live SSE connection; drop() closes
 	// them all to simulate a mid-flight stream gap.
 	connDrops []chan struct{}
@@ -275,7 +275,7 @@ func newAuditHarnessWithOptions(t *testing.T, configure func(*ssePushServe)) (*H
 	// The passive subscription is the second consumer the audit convicted.
 	pctx, pcancel := context.WithCancel(context.Background())
 	t.Cleanup(pcancel)
-	go startPassiveSubscription(pctx, h, "opencode-web", subscriber.Subscribe, false)
+	go startPassiveSubscription(pctx, h, "opencode-web", subscriber.Subscribe, false, nil)
 
 	// Determinism: wait until the passive tap is attached before injecting.
 	deadline := time.After(5 * time.Second)
@@ -398,7 +398,7 @@ func TestAudit008_QuestionReachesProjection(t *testing.T) {
 	// precedes question.asked on the real stream (A7 frames 14→77) — the
 	// correlation is messageID-proven, not activeTurn-assumed.
 	serve.push(map[string]any{"type": "message.updated", "properties": map[string]any{
-		"info": map[string]any{"id": "msg_a7_tool", "role": "assistant", "parentID": "msg_u1"},
+		"info":      map[string]any{"id": "msg_a7_tool", "role": "assistant", "parentID": "msg_u1"},
 		"sessionID": "ses_ocw1"}})
 	// The real A7 asked frame shape (sanitized sample, identities preserved).
 	serve.push(map[string]any{"type": "question.asked", "properties": map[string]any{

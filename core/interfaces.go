@@ -1008,6 +1008,13 @@ type LiveEventSubscriber interface {
 	SubscribeLive(ctx context.Context) (<-chan Event, error)
 }
 
+// LiveEventCatalogAttacher is implemented by service-level transports that
+// require per-thread attach before live events fan out to a passive observer.
+// Attaching must subscribe without replaying or hydrating thread history.
+type LiveEventCatalogAttacher interface {
+	AttachLiveCatalog(ctx context.Context) error
+}
+
 // ErrObserverNotReady means the backend observer connection is not up yet
 // (typically still backing off after go-bridge start). set_observation_scope
 // must not report success in this state.

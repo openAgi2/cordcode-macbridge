@@ -196,6 +196,88 @@ func TestSubscribeLiveReceivesUnattachedThreadEvent(t *testing.T) {
 	cancel()
 }
 
+func TestAttachLiveCatalogResumesLoadedThreadWithoutHistory(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	stream := NewStream(clientConn, "client_live_catalog", "env_desktop", "stream_live_catalog")
+	defer stream.Close()
+
+	var mu sync.Mutex
+	calls := map[string]int{}
+	resumeParams := map[string]map[string]any{}
+	startEnvelopePeer(t, hostConn, func(_ int64, method string, params json.RawMessage) (any, *RPCError) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls[method]++
+		switch method {
+		case "thread/loaded/list":
+			return map[string]any{"data": []any{"thread_loaded"}}, nil
+		case "thread/resume":
+			var request map[string]any
+			_ = json.Unmarshal(params, &request)
+			resumeParams["thread_loaded"] = request
+			return map[string]any{"thread": map[string]any{"id": "thread_loaded"}}, nil
+		default:
+			return nil, &RPCError{Code: -32601, Message: method}
+		}
+	})
+
+	cl := NewClient(stream, 1)
+	defer cl.Close()
+	agent := New(nil)
+	agent.BindClient(cl)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	events, err := agent.SubscribeLive(ctx)
+	if err != nil {
+		t.Fatalf("SubscribeLive: %v", err)
+	}
+	if err := agent.AttachLiveCatalog(context.Background()); err != nil {
+		t.Fatalf("AttachLiveCatalog: %v", err)
+	}
+	if err := agent.AttachLiveCatalog(context.Background()); err != nil {
+		t.Fatalf("repeat AttachLiveCatalog: %v", err)
+	}
+
+	mu.Lock()
+	loadedCalls := calls["thread/loaded/list"]
+	resumeCalls := calls["thread/resume"]
+	var excludeTurns any
+	if request := resumeParams["thread_loaded"]; request != nil {
+		excludeTurns = request["excludeTurns"]
+	}
+	mu.Unlock()
+	if loadedCalls != 2 || resumeCalls != 1 {
+		t.Fatalf("loadedCalls=%d resumeCalls=%d, want 2/1 (idempotent resume)", loadedCalls, resumeCalls)
+	}
+	if excludeTurns != true {
+		t.Fatalf("thread/resume excludeTurns=%v, want true (no history replay)", excludeTurns)
+	}
+
+	seq := uint64(1)
+	payload, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "turn/completed",
+		"params": map[string]any{
+			"threadId": "thread_loaded",
+			"turn":     map[string]any{"id": "turn_live", "status": "completed"},
+		},
+	})
+	if err := hostConn.Write(Envelope{
+		Type: typeServerMessage, ClientID: "client_live_catalog", EnvID: "env_desktop",
+		StreamID: "stream_live_catalog", SeqID: &seq, Message: payload,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-events:
+		if event.Type != core.EventResult || event.ThreadID != "thread_loaded" || event.TurnID != "turn_live" || !event.Done {
+			t.Fatalf("attached live event = %+v", event)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("attached loaded thread completion did not reach live observer")
+	}
+}
+
 func TestProjectionAttachReceivesDesktopTurnBeforeAnySend(t *testing.T) {
 	clientConn, hostConn := LoopbackPair()
 	stream := NewStream(clientConn, "client_projection", "env_desktop", "stream_projection")

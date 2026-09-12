@@ -65,3 +65,9 @@
 | --- | --- | --- | --- |
 | D1 | session E/F 均未在 iOS Web App 打开；session F 保留多轮历史；通知栏已清空 | 在 Mac 端 session E 发送一个新回合 | 只收到 1 条通知；正文为新回复内容，不额外出现 generic「Mac 上的会话已完成」 |
 | D2 | 通知栏继续清空或仅保留 D1 | 在 Mac 端 session F 发送一个新回合 | 只收到 message 2 对应的 1 条通知；session F 的历史 turn 全部不推送 |
+
+### D1/D2 Owner 结果
+
+- Claude：`PASS`。多个 Mac 端消息均正常通知，无 schema error、异常通知或多余通知。
+- Codex：`FAIL`。iOS Web App 保持 Claude 默认模式且不打开/切换 session 时，Mac 端 Codex session 完成后没有通知。
+- 本地取证：Codex Remote catalog fingerprint 在消息后变化，但 passive observer 只看到 `__remote_control_transport__` error 帧，没有 thread-level completion。协议证据要求 `thread/resume(excludeTurns:true)` attach 后才能收到 turn/item 事件；此前的 `SubscribeLive` 只接入中央 pump，未建立 thread 订阅。

@@ -69,7 +69,7 @@ Owner 2026-09-11 报「web App 收不到通知」，排查后闭环：
 ### A0. 投递覆盖不依赖客户端打开 session（前置不变量）
 
 - 有效 Web Push enrollment 面向该设备可见的 backend completion，不得以 Web App 当前 backend、当前 session、`set_observation_scope`、session subscriber 或 reducer 是否已 hydrate 作为候选资格。客户端从未打开过的 session 也必须通知。
-- 仍保持单一 timeline ingest owner：不得为了发送通知给未打开 session 构造隐藏 projection。服务级 backend 使用明确的 replay-free live event seam；Claude Code 没有全局事件 API，使用按 watcher 启动时间建立 byte cut 的 transcript 增量观察。首次可见不等于新建：跳过启动前 timestamp 的完整记录，只消费启动后新增/完成的记录，防止 Mac 端打开旧 session 时回放历史。
+- 仍保持单一 timeline ingest owner：不得为了发送通知给未打开 session 构造隐藏 projection。服务级 backend 使用明确的 replay-free live event seam；若上游事件本身要求 per-thread attach（Codex app-server），replay-free observer 必须通过 `thread/loaded/list` / recency head 执行 `thread/resume(excludeTurns:true)` 建立订阅，并周期性捕捉后来驻留的 thread。Claude Code 没有全局事件 API，使用按 watcher 启动时间建立 byte cut 的 transcript 增量观察。首次可见不等于新建：跳过启动前 timestamp 的完整记录，只消费启动后新增/完成的记录，防止 Mac 端打开旧 session 时回放历史。
 - 两条通知-free 路径都只接受真实 live completion，并继续使用每回合唯一 notification key 做持久化幂等；hydrate、history、resume replay、启动时已有 transcript、开启通知之前积累的历史记录均不得补发。
 - replay-free source 没有权威 Kernel `bridgeEpoch:seq` 时，必须派生确定性的域分隔 `target.eventId`（同一 turn 重试稳定，不同 turn 不同），不得发送空 `eventId`；`web_push_v1` 的 target 四个身份字段全部必填。
 - session 已被交互 relay/observation 接管时，通知-only observer 只推进自己的 source cut，不与现有 ingest owner 竞争，也不重复产生候选。
@@ -192,7 +192,7 @@ deviceId -> {
 
 **自动化**
 
-- producer/source 单测：replay-free Codex live completion 在零 observation、零 reducer state 时仍产生恰好一个候选；Claude watcher 首次启动及 enrollment 前历史只建立 cut、不补发，首次可见的启动前历史不得回放而启动后 live completion 保留，textless/text 双终态只产生一个真实预览候选，交互 relay 接管时不重复；两条路径都不得创建隐藏 projection。
+- producer/source 单测：replay-free Codex live completion 在零 observation、零 reducer state 时仍产生恰好一个候选；Codex per-thread attach 必须 excludeTurns、幂等并让 loaded thread completion 到达 observer；Claude watcher 首次启动及 enrollment 前历史只建立 cut、不补发，首次可见的启动前历史不得回放而启动后 live completion 保留，textless/text 双终态只产生一个真实预览候选，交互 relay 接管时不重复；两条路径都不得创建隐藏 projection。
 - SW 单测：badge 三字段全有才解析，部分缺省/格式错误/数字越界时整组剔除且通知照弹；`setAppBadge` 不存在或 reject 时通知仍弹；同 binding 的 rev2 先于 rev1 到达时最终保持 rev2；旧 binding payload 不设角标。
 - Mac store 单测：设备 A/B 隔离；同会话重复只计 1；不同 backend 同 sessionId 计 2；4096 边界与 saturated 恢复；持久化重启；损坏/写失败时字段缺省；同 bindingId register 幂等、新 bindingId 清空旧状态、同 binding 换 subscription 拒绝、unregister/revoke 清理。
 - dispatcher 单测：两个 worker 同设备并发取得不同且单调的 revision；不同设备独立；失败投递保留已观察更新；后续成功 payload 收敛；badge store 失败不阻断通知；Topic/tag 共用聚合键且 ≤32 字符。

@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T06:25:00Z",
+  "updated_at": "2026-09-12T06:43:00Z",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -132,8 +132,29 @@
       "id": "p1-claude-watcher-dedup-baseline-regression",
       "title": "P1 Claude watcher dedup and baseline real-device regression",
       "description": "Verify a never-opened session with history emits only the new turn notification once, with real content rather than a duplicate generic fallback, and no historical turns are replayed.",
-      "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-claude-watcher-dedup-baseline-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-replay-free-event-id-regression; owner authorization already granted.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Release build 2b15e870cd7c is installed and healthy; Codex Remote live observer connected. Awaiting owner confirmation that E emits one real-preview notification and F emits only its new turn without historical replay.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-claude-watcher-dedup-baseline-release-build.log", ".exec-plan/evidence/034334e9176f/p1-claude-watcher-dedup-baseline-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T06:25:00Z"}
+      "status": "done", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-claude-watcher-dedup-baseline-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-replay-free-event-id-regression; Claude-only regression proven by owner.",
+      "verification": {"required": true, "status": "present", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Owner confirmed multiple never-opened Claude completions notify normally with no schema error, abnormal notification, or extra notification after the dedup/baseline build.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-claude-watcher-dedup-baseline-release-build.log", ".exec-plan/evidence/034334e9176f/p1-claude-watcher-dedup-baseline-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T06:42:00Z"}
+    },
+    {
+      "id": "p1-codex-live-attach-impl",
+      "title": "P1 Codex replay-free per-thread attach implementation",
+      "description": "Attach the replay-free Codex observer to Desktop-loaded threads with thread/resume(excludeTurns:true), fall back to recency head when none are loaded, and periodically recheck so later-opened old threads receive future live completions without history replay.",
+      "status": "done", "phase": "p1-review-fix", "kind": "impl", "depends_on": ["p1-replay-free-event-id-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-replay-free-event-id-regression; protocol evidence agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json",
+      "verification": {"required": true, "status": "present", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "The Codex passive observer now attaches Desktop-loaded threads (falling back to recency head) with excludeTurns:true, deduplicates repeated resume calls, and rechecks the loaded catalog every three seconds for later-opened threads.", "artifacts": ["core/interfaces.go:LiveEventCatalogAttacher", "agent/codex-remote/session.go:AttachLiveCatalog", "go-bridge/main.go:attachLiveCatalogPeriodically", "agent/codex-remote/testdata/phase0/live/attempt-008-thread-resume-live-turn-stream.json"], "checked_at": "2026-09-12T06:43:00Z"}
+    },
+    {
+      "id": "p1-codex-live-attach-tests",
+      "title": "P1 Codex replay-free attach automated tests",
+      "description": "Prove loaded-thread attach uses excludeTurns, repeated catalog attachment is idempotent, fallback stays bounded, and attached thread completion reaches SubscribeLive without adding a thread listener or hydrating history.",
+      "status": "done", "phase": "p1-review-fix", "kind": "tests", "depends_on": ["p1-codex-live-attach-impl"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-replay-free-event-id-regression",
+      "verification": {"required": true, "status": "present", "method": "automated", "attestation": "re-verified", "na_reason": null, "summary": "Full Go suite passed. Focused integration test proves loaded/list attachment is replay-free, repeated attachment resumes only once, and attached turn/completed reaches SubscribeLive.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-codex-live-attach-all-go-tests.log", "agent/codex-remote/session_test.go:TestAttachLiveCatalogResumesLoadedThreadWithoutHistory"], "checked_at": "2026-09-12T06:43:00Z"}
+    },
+    {
+      "id": "p1-codex-live-attach-regression",
+      "title": "P1 Codex replay-free attach real-device regression",
+      "description": "Verify a never-opened Codex Desktop session notifies while iOS remains in Claude mode with no session open, without replaying history or affecting already-passing Claude notifications.",
+      "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-codex-live-attach-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-replay-free-event-id-regression; owner authorization already granted.",
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
     },
     {
       "id": "p2-session-tag-impl",

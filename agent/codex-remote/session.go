@@ -317,6 +317,80 @@ func (a *Agent) SubscribeLive(ctx context.Context) (<-chan core.Event, error) {
 	return ch, nil
 }
 
+// AttachLiveCatalog mirrors the owner-authorized Phase 0 probe invariant:
+// Codex app-server delivers turn/item notifications only to connections that
+// have attached a thread. Prefer threads already resident in the Desktop app
+// (`thread/loaded/list`), then fall back to the recency head when none are
+// loaded. Every resume excludes turns; this is subscription-only, never history
+// hydration or replay.
+func (a *Agent) AttachLiveCatalog(ctx context.Context) error {
+	a.mu.Lock()
+	cl := a.client
+	a.mu.Unlock()
+	if cl == nil {
+		return ErrNotConfigured
+	}
+	raw, rpcErr, err := cl.RequestContext(ctx, "thread/loaded/list", map[string]any{"limit": 20})
+	if err != nil {
+		return err
+	}
+	if rpcErr != nil {
+		return rpcErr
+	}
+	var parsed struct {
+		Data []string `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return fmt.Errorf("thread/loaded/list: %w", err)
+	}
+	ids := make([]string, 0, len(parsed.Data))
+	seen := make(map[string]struct{}, len(parsed.Data))
+	for _, id := range parsed.Data {
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		infos, listErr := a.FetchThreadListHead(ctx, "", 8)
+		if listErr != nil {
+			return listErr
+		}
+		for _, info := range infos {
+			if info.ID == "" {
+				continue
+			}
+			if _, dup := seen[info.ID]; dup {
+				continue
+			}
+			seen[info.ID] = struct{}{}
+			ids = append(ids, info.ID)
+		}
+	}
+	attached := 0
+	for _, threadID := range ids {
+		a.mu.Lock()
+		already := a.attached[threadID] == cl
+		a.mu.Unlock()
+		if already {
+			continue
+		}
+		if err := a.attachLiveThreadOn(ctx, cl, threadID); err != nil {
+			return err
+		}
+		attached++
+	}
+	if attached > 0 {
+		slog.Info("codex-remote attached live catalog threads",
+			"loaded", len(parsed.Data), "attached", attached)
+	}
+	return nil
+}
+
 func (a *Agent) dispatchForClient(cl *Client, ev core.Event) {
 	a.mu.Lock()
 	if a.client != cl {

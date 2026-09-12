@@ -254,9 +254,10 @@ func Main() {
 		slog.Info("go-bridge: agent registered", "backendId", id, "agent", agentName, "workDir", *workDir)
 
 		if sub, ok := agent.(core.LiveEventSubscriber); ok {
-			go startPassiveSubscription(ctx, handlers, id, sub.SubscribeLive, true)
+			attacher, _ := agent.(core.LiveEventCatalogAttacher)
+			go startPassiveSubscription(ctx, handlers, id, sub.SubscribeLive, true, attacher)
 		} else if sub, ok := agent.(core.EventSubscriber); ok && shouldStartPassiveSubscription(id, *codexBackend, *codexAppServerURL, *ocBaseURL, *ocwBaseURL) {
-			go startPassiveSubscription(ctx, handlers, id, sub.Subscribe, false)
+			go startPassiveSubscription(ctx, handlers, id, sub.Subscribe, false, nil)
 		}
 
 		// opencode: also register a direct HTTP proxy
@@ -868,7 +869,7 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string, subscribe func(context.Context) (<-chan core.Event, error), replayFreeLive bool) {
+func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string, subscribe func(context.Context) (<-chan core.Event, error), replayFreeLive bool, catalogAttacher core.LiveEventCatalogAttacher) {
 	backoff := 2 * time.Second
 	maxBackoff := 60 * time.Second
 
@@ -889,6 +890,9 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 		}
 		backoff = 2 * time.Second
 		slog.Info("go-bridge: passive subscription started", "backend", backendID)
+		if replayFreeLive && catalogAttacher != nil {
+			go attachLiveCatalogPeriodically(ctx, backendID, catalogAttacher)
+		}
 
 		for ev := range events {
 			eventName, data, _ := mapAgentEvent(ev)
@@ -975,6 +979,28 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 		case <-ctx.Done():
 			return
 		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+func attachLiveCatalogPeriodically(ctx context.Context, backendID string, attacher core.LiveEventCatalogAttacher) {
+	attach := func() {
+		attachCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+		defer cancel()
+		if err := attacher.AttachLiveCatalog(attachCtx); err != nil {
+			slog.Warn("go-bridge: live catalog attach failed", "backend", backendID, "error", err)
+			return
+		}
+	}
+	attach()
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			attach()
 		}
 	}
 }
