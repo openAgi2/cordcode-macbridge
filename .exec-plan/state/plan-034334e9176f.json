@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T17:17:24.035395+00:00",
+  "updated_at": "2026-09-12T17:18:58.386269+00:00",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -905,7 +905,7 @@
         "p2-session-tag-tests"
       ],
       "source": "§7 real-device matrix #3",
-      "notes": "Deployed a6ee5ec20533 to /Applications/CordCodeLink.app on 2026-09-13 00:15 CST; runtime ready on 8777. Awaiting owner real-device test (plan §7 matrix item 3): same session completing multiple turns keeps only the latest notification in Notification Center; different sessions each keep one.",
+      "notes": "Deployed a6ee5ec20533 (superseded by later deploys 24fb458e8391/c7d120a103da which include the tag change). Awaiting owner real-device test: same session completing multiple turns keeps only the latest notification in Notification Center; different sessions each keep one.",
       "verification": {
         "required": true,
         "status": "missing",
@@ -1081,9 +1081,10 @@
         "method": "automated",
         "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Automated regression surface re-runnable: store ack/view semantics, RPC handler, SW watermark ordering, client lifecycle all covered by tests above. Real-device badge observation (setAppBadge visible on iOS home screen icon) requires P4 deployment + owner device test — queued as the combined P2/P4 owner regression below.",
+        "summary": "Automated regression surface re-runnable: store ack/view semantics, RPC handler, SW watermark ordering, client lifecycle all covered by tests above. Real-device badge observation (setAppBadge visible on iOS home screen icon) requires P4 deployment + owner device test — queued as the combined P2/P4 owner regression below. Deployed c7d120a103da 2026-09-13 01:19 CST; runtime ready on 8777; iOS client aef93097.",
         "artifacts": [
-          ".exec-plan/evidence/034334e9176f/p4-badge-client-ios-test.md"
+          ".exec-plan/evidence/034334e9176f/p4-badge-client-ios-test.md",
+          ".exec-plan/evidence/034334e9176f/p4-badge-client-deploy.md"
         ],
         "checked_at": "2026-09-12T17:17:24.035395+00:00"
       }
