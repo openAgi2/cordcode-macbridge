@@ -98,7 +98,7 @@ func TestRemoteHistoryCarriesOfficialAgentMessagePhase(t *testing.T) {
 			json.RawMessage(`{"type":"agentMessage","id":"final-1","phase":"final_answer","text":"检查完成。"}`),
 		},
 	}}}
-	turn := mapRemoteHistoryTurns(thread, 0)[0]
+	turn := mapRemoteHistoryTurns(thread, 0, newRemoteCollabHistoryFolds("th"))[0]
 	if len(turn.Parts) != 2 {
 		t.Fatalf("parts=%d, want 2: %+v", len(turn.Parts), turn.Parts)
 	}
@@ -126,7 +126,7 @@ func TestRemoteHistoryMapsOfficialItemVariants(t *testing.T) {
 			json.RawMessage(`{"type":"futureItem","id":"future1","payload":{"x":1}}`),
 		},
 	}}}
-	turn := mapRemoteHistoryTurns(thread, 0)[0]
+	turn := mapRemoteHistoryTurns(thread, 0, newRemoteCollabHistoryFolds("th"))[0]
 	if turn.UserItemID != "u1" || turn.UserText != "hello" {
 		t.Fatalf("user message = %+v", turn)
 	}
@@ -177,7 +177,7 @@ func TestRemoteHistoryDoesNotGuessTerminalState(t *testing.T) {
 		{ID: "running", Status: remoteTurnStatusInProgress},
 		{ID: "not_loaded", Status: remoteTurnStatusCompleted, ItemsView: remoteTurnItemsViewNotLoaded},
 	}}
-	turns := mapRemoteHistoryTurns(thread, 0)
+	turns := mapRemoteHistoryTurns(thread, 0, newRemoteCollabHistoryFolds("th"))
 	if turns[0].Status != remoteTurnStatusFailed || turns[0].ErrorMessage != "upstream failed" {
 		t.Fatalf("failed turn = %+v", turns[0])
 	}

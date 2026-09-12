@@ -200,7 +200,9 @@ func TestCollabPromptTruncationAndEmptyPromptFallback(t *testing.T) {
 func TestCollabColdHistoryProducesWorkflowPart(t *testing.T) {
 	turn := core.TurnScopedHistoryTurn{TurnID: "turn", Status: "completed"}
 	item := decodeRemoteThreadItem(json.RawMessage(`{"type":"collabAgentToolCall","id":"call-1","tool":"spawnAgent","status":"completed","senderThreadId":"th","receiverThreadIds":["agent-a"],"prompt":"写故事","agentsStates":{"agent-a":{"status":"completed","message":"done"}}}`))
-	mapRemoteHistoryItem(&turn, item)
+	folds := newRemoteCollabHistoryFolds("th")
+	holders := map[string]*core.TurnScopedHistoryTurn{"turn": &turn}
+	folds.mapItem(&turn, item, holders)
 	if len(turn.Parts) != 1 {
 		t.Fatalf("parts = %+v", turn.Parts)
 	}
@@ -232,8 +234,10 @@ func TestCollabColdHistoryFoldsSpawnWaitCloseIntoOneCard(t *testing.T) {
 		`{"type":"collabAgentToolCall","id":"close-old","tool":"closeAgent","status":"completed","receiverThreadIds":["old-agent"],"agentsStates":{"old-agent":{"status":"completed"}}}`,
 		`{"type":"collabAgentToolCall","id":"wait-a","tool":"wait","status":"completed","receiverThreadIds":["agent-a"],"agentsStates":{"agent-a":{"status":"completed"}}}`,
 	}
+	folds := newRemoteCollabHistoryFolds("th")
+	holders := map[string]*core.TurnScopedHistoryTurn{"turn": &turn}
 	for _, raw := range items {
-		mapRemoteHistoryItem(&turn, decodeRemoteThreadItem(json.RawMessage(raw)))
+		folds.mapItem(&turn, decodeRemoteThreadItem(json.RawMessage(raw)), holders)
 	}
 	if len(turn.Parts) != 1 {
 		t.Fatalf("cold collab calls produced %d parts: %+v", len(turn.Parts), turn.Parts)
@@ -254,7 +258,9 @@ func TestSubAgentActivityRemainsDeliberateNoCard(t *testing.T) {
 		}
 	}
 	turn := core.TurnScopedHistoryTurn{TurnID: "turn", Status: "completed"}
-	mapRemoteHistoryItem(&turn, decodeRemoteThreadItem(json.RawMessage(`{"type":"subAgentActivity","id":"act-1","kind":"completed","agentThreadId":"agent-a","agentPath":"/tmp"}`)))
+	coldFolds := newRemoteCollabHistoryFolds("th")
+	coldHolders := map[string]*core.TurnScopedHistoryTurn{"turn": &turn}
+	coldFolds.mapItem(&turn, decodeRemoteThreadItem(json.RawMessage(`{"type":"subAgentActivity","id":"act-1","kind":"completed","agentThreadId":"agent-a","agentPath":"/tmp"}`)), coldHolders)
 	if len(turn.Parts) != 0 {
 		t.Fatalf("cold parts = %+v", turn.Parts)
 	}
@@ -310,15 +316,16 @@ func TestWaitThreadsStatusUpdatesReuseOneCard(t *testing.T) {
 	}
 }
 
-func TestCodexAppWorkflowColdPartsDriveBackgroundTasks(t *testing.T) {
-	turn := core.TurnScopedHistoryTurn{
+func TestCodexAppWorkflowColdPartsDriveBackgroundTasks(t *testing.T) {	turn := core.TurnScopedHistoryTurn{
 		TurnID: "turn", Status: "completed",
 		StartedAt: time.Unix(100, 0), CompletedAt: time.Unix(140, 0),
 	}
 	create := decodeRemoteThreadItem(json.RawMessage(`{"type":"mcpToolCall","id":"create-1","server":"codex_app","tool":"create_thread","arguments":{"title":"故事任务"},"status":"completed","result":{"content":[{"type":"text","text":"{\"threadId\":\"child-1\"}"}],"isError":false}}`))
 	wait := decodeRemoteThreadItem(json.RawMessage(`{"type":"mcpToolCall","id":"wait-1","server":"codex_app","tool":"wait_threads","arguments":{"targets":[{"threadId":"child-1"}]},"status":"completed","result":{"content":[{"type":"text","text":"{\"polls\":[{\"thread\":{\"id\":\"child-1\",\"status\":{\"type\":\"idle\"}},\"latestTurn\":{\"status\":\"completed\"}}]}"}],"isError":false}}`))
-	mapRemoteHistoryItem(&turn, create)
-	mapRemoteHistoryItem(&turn, wait)
+	tasksFolds := newRemoteCollabHistoryFolds("root")
+	tasksHolders := map[string]*core.TurnScopedHistoryTurn{"turn": &turn}
+	tasksFolds.mapItem(&turn, create, tasksHolders)
+	tasksFolds.mapItem(&turn, wait, tasksHolders)
 	tasks := backgroundTasksFromTurns("root", []core.TurnScopedHistoryTurn{turn})
 	if len(tasks) != 1 {
 		t.Fatalf("tasks = %+v parts=%+v", tasks, turn.Parts)
@@ -327,4 +334,198 @@ func TestCodexAppWorkflowColdPartsDriveBackgroundTasks(t *testing.T) {
 	if task.TaskID != "child-1" || task.RootSessionID != "root" || task.Title != "故事任务" || task.Status != "completed" || !task.TranscriptAvailable {
 		t.Fatalf("task = %+v", task)
 	}
+}
+
+// 2026-09-12 goal-run fix: one logical subagent run officially spans turns —
+// the spawn turn creates the children and later turns keep polling. The run
+// must stay anchored at the spawn turn instead of becoming one card per turn
+// (docs/2026-09-12-codex-goal-duplicate-thinking-and-dual-workflow-card-analysis.md).
+
+func collabCreateRaw(turnID, childID, prompt string) json.RawMessage {
+	return json.RawMessage(`{"threadId":"root","turnId":"` + turnID + `","item":{"type":"mcpToolCall","id":"create-` + childID + `","server":"codex_app","tool":"create_thread","arguments":{"prompt":"` + prompt + `"},"status":"completed","result":{"content":[{"type":"text","text":"{\"threadId\":\"` + childID + `\"}"}],"isError":false}}}`)
+}
+
+func collabWaitRaw(turnID, pollJSON string, targets ...string) json.RawMessage {
+	targetObjs := make([]map[string]string, 0, len(targets))
+	for _, target := range targets {
+		targetObjs = append(targetObjs, map[string]string{"threadId": target})
+	}
+	// The {"polls":[…]} payload rides as a string inside the MCP result's
+	// text field; marshal the whole notification so escaping is Go's job
+	// (byte shape matches the official wire samples in the fixtures above).
+	notification := map[string]any{
+		"threadId": "root",
+		"turnId":   turnID,
+		"item": map[string]any{
+			"type": "mcpToolCall", "id": "wait-" + turnID, "server": "codex_app",
+			"tool":       "wait_threads",
+			"arguments":  map[string]any{"targets": targetObjs},
+			"status":     "completed",
+			"result": map[string]any{
+				"content": []map[string]string{{"type": "text", "text": `{"polls":[` + pollJSON + `]}`}},
+				"isError": false,
+			},
+		},
+	}
+	raw, err := json.Marshal(notification)
+	if err != nil {
+		panic(err)
+	}
+	return raw
+}
+
+const collabPollCompleted = `{"thread":{"id":"%s","status":{"type":"idle"}},"latestTurn":{"status":"completed"}}`
+
+func TestCollabRunSurvivesTurnBoundaryIntoWaitTurn(t *testing.T) {
+	codec := NewLiveCodec()
+	events := codec.Decode(Notification{Method: "item/completed", Params: collabCreateRaw("spawn-turn", "child-lin", "请为《红楼梦》中的林黛玉创作一段小故事")})
+	if len(events) != 2 || events[1].Type != core.EventWorkflowRun || events[1].WorkflowRun == nil {
+		t.Fatalf("create events = %+v", events)
+	}
+	if got := events[1].WorkflowRun.RunID; got != "codex-collab:spawn-turn" {
+		t.Fatalf("create runID = %q", got)
+	}
+	// The wait lives in a LATER turn: it must reuse the spawn-anchored run and
+	// report under the anchor turn, never anchor a second card of its own.
+	poll := `{"thread":{"id":"child-lin","status":{"type":"idle"}},"latestTurn":{"status":"completed"}}`
+	events = codec.Decode(Notification{Method: "item/completed", Params: collabWaitRaw("wait-turn", poll, "child-lin")})
+	if len(events) != 2 || events[1].WorkflowRun == nil {
+		t.Fatalf("wait events = %+v", events)
+	}
+	if events[1].WorkflowRun.RunID != "codex-collab:spawn-turn" || events[1].TurnID != "spawn-turn" {
+		t.Fatalf("cross-turn wait must reuse the spawn-anchored run: run=%q turn=%q",
+			events[1].WorkflowRun.RunID, events[1].TurnID)
+	}
+	wr := events[1].WorkflowRun
+	if wr.Status != core.WorkflowStatusCompleted || len(wr.Phases[0].Members) != 1 {
+		t.Fatalf("final card = %+v", wr)
+	}
+	if member := wr.Phases[0].Members[0]; member.ChildSessionID != "child-lin" ||
+		member.Status != core.WorkflowStatusCompleted ||
+		member.Label != "请为《红楼梦》中的林黛玉创作一段小故事" {
+		t.Fatalf("member = %+v", member)
+	}
+}
+
+func TestCollabPollNamingChildOverwritesActivityInterrupted(t *testing.T) {
+	codec := NewLiveCodec()
+	codec.Decode(Notification{Method: "item/completed", Params: collabCreateRaw("spawn-turn", "child-bao", "贾宝玉故事")})
+	flip := codec.Decode(Notification{Method: "item/completed", Params: json.RawMessage(`{"threadId":"root","turnId":"spawn-turn","item":{"type":"subAgentActivity","id":"act-1","kind":"interrupted","agentThreadId":"child-bao","agentPath":"/tmp"}}`)})
+	if len(flip) != 1 || flip[0].WorkflowRun.Phases[0].Members[0].Status != core.WorkflowStatusInterrupted {
+		t.Fatalf("activity flip = %+v", flip)
+	}
+	// A later poll that does NOT name the child must keep the member's current
+	// status (official polls are cumulative; absence is not a reset) while an
+	// unknown child still joins the card running.
+	partial := codec.Decode(Notification{Method: "item/completed", Params: collabWaitRaw("wait-turn", "", "child-bao", "child-feng")})
+	if len(partial) != 2 || partial[1].WorkflowRun == nil {
+		t.Fatalf("partial poll events = %+v", partial)
+	}
+	members := partial[1].WorkflowRun.Phases[0].Members
+	if len(members) != 2 || members[0].Status != core.WorkflowStatusInterrupted || members[1].Status != core.WorkflowStatusRunning {
+		t.Fatalf("after unnamed poll = %+v", members)
+	}
+	// Only a poll that NAMES the child settles it back to completed.
+	polls := `{"thread":{"id":"child-bao","status":{"type":"idle"}},"latestTurn":{"status":"completed"}},{"thread":{"id":"child-feng","status":{"type":"idle"}},"latestTurn":{"status":"completed"}}`
+	final := codec.Decode(Notification{Method: "item/completed", Params: collabWaitRaw("wait-turn-2", polls, "child-bao", "child-feng")})
+	wr := final[len(final)-1].WorkflowRun
+	if wr.Status != core.WorkflowStatusCompleted {
+		t.Fatalf("final card status = %q", wr.Status)
+	}
+	for _, member := range wr.Phases[0].Members {
+		if member.Status != core.WorkflowStatusCompleted {
+			t.Fatalf("final members = %+v", wr.Phases[0].Members)
+		}
+	}
+}
+
+func TestCollabNewSpawnBatchAfterSettledRunOpensNextRun(t *testing.T) {
+	codec := NewLiveCodec()
+	codec.Decode(Notification{Method: "item/completed", Params: collabCreateRaw("batch1-turn", "child-one", "第一批故事")})
+	codec.Decode(Notification{Method: "item/completed", Params: collabWaitRaw("batch1-turn", `{"thread":{"id":"child-one","status":{"type":"idle"}},"latestTurn":{"status":"completed"}}`, "child-one")})
+	// Batch 1 settled; a new spawn in a later turn opens the NEXT run anchored
+	// at its own spawn turn (one card per logical run, not per thread).
+	events := codec.Decode(Notification{Method: "item/completed", Params: collabCreateRaw("batch2-turn", "child-two", "第二批故事")})
+	if len(events) != 2 || events[1].WorkflowRun == nil {
+		t.Fatalf("batch2 events = %+v", events)
+	}
+	wr := events[1].WorkflowRun
+	if wr.RunID != "codex-collab:batch2-turn" || len(wr.Phases[0].Members) != 1 || wr.Phases[0].Members[0].ChildSessionID != "child-two" {
+		t.Fatalf("batch2 card = %+v", wr)
+	}
+}
+
+func workflowParts(parts []map[string]any) []map[string]any {
+	var out []map[string]any
+	for _, part := range parts {
+		if stringValue(part["type"]) == "workflow" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func TestColdHistoryCrossTurnRunFoldsIntoSpawnTurn(t *testing.T) {
+	thread := &remoteThread{ID: "root", Turns: []remoteTurn{
+		{ID: "spawn-turn", Status: remoteTurnStatusCompleted, Items: []json.RawMessage{
+			json.RawMessage(`{"type":"mcpToolCall","id":"create-1","server":"codex_app","tool":"create_thread","arguments":{"prompt":"薛宝钗故事"},"status":"completed","result":{"content":[{"type":"text","text":"{\"threadId\":\"child-xue\"}"}],"isError":false}}`),
+		}},
+		{ID: "wait-turn", Status: remoteTurnStatusCompleted, Items: []json.RawMessage{
+			json.RawMessage(`{"type":"mcpToolCall","id":"wait-1","server":"codex_app","tool":"wait_threads","arguments":{"targets":[{"threadId":"child-xue"}]},"status":"completed","result":{"content":[{"type":"text","text":"{\"polls\":[{\"thread\":{\"id\":\"child-xue\",\"status\":{\"type\":\"idle\"}},\"latestTurn\":{\"status\":\"completed\"}}]}"}],"isError":false}}`),
+		}},
+	}}
+	turns := mapRemoteHistoryTurns(thread, 0, newRemoteCollabHistoryFolds("root"))
+	if len(turns) != 2 {
+		t.Fatalf("turns = %+v", turns)
+	}
+	if parts := workflowParts(turns[0].Parts); len(parts) != 1 ||
+		parts[0]["workflowId"] != "codex-collab:spawn-turn" || parts[0]["workflowStatus"] != "completed" {
+		t.Fatalf("spawn-turn workflow parts = %+v", turns[0].Parts)
+	}
+	if parts := workflowParts(turns[1].Parts); len(parts) != 0 {
+		t.Fatalf("wait turn must not carry its own card: %+v", parts)
+	}
+	members := workflowMemberMaps(workflowPhaseMaps(workflowParts(turns[0].Parts)[0]["workflowPhases"])[0]["members"])
+	if len(members) != 1 || members[0]["childSessionId"] != "child-xue" ||
+		members[0]["status"] != "completed" || members[0]["label"] != "薛宝钗故事" {
+		t.Fatalf("cold folded members = %+v", members)
+	}
+}
+
+func TestMapTurnItemsPageForSessionFoldsWaitTurnIntoSpawnRun(t *testing.T) {
+	agent := New(nil)
+	spawnTurn := core.TurnScopedHistoryTurn{TurnID: "spawn-turn", Status: "completed"}
+	if err := agent.MapTurnItemsPageForSession("root", &spawnTurn, collabPageOfItems("spawn-turn",
+		`{"type":"mcpToolCall","id":"create-1","server":"codex_app","tool":"create_thread","arguments":{"prompt":"王熙凤故事"},"status":"completed","result":{"content":[{"type":"text","text":"{\"threadId\":\"child-feng\"}"}],"isError":false}}`)); err != nil {
+		t.Fatal(err)
+	}
+	waitTurn := core.TurnScopedHistoryTurn{TurnID: "wait-turn", Status: "completed"}
+	if err := agent.MapTurnItemsPageForSession("root", &waitTurn, collabPageOfItems("wait-turn",
+		`{"type":"mcpToolCall","id":"wait-1","server":"codex_app","tool":"wait_threads","arguments":{"targets":[{"threadId":"child-feng"}]},"status":"completed","result":{"content":[{"type":"text","text":"{\"polls\":[{\"thread\":{\"id\":\"child-feng\",\"status\":{\"type\":\"idle\"}},\"latestTurn\":{\"status\":\"completed\"}}]}"}],"isError":false}}`)); err != nil {
+		t.Fatal(err)
+	}
+	// Lazy per-turn detail fetched the wait turn AFTER the spawn turn: the
+	// session registry still resolves the spawn-anchored run, so the part keeps
+	// the anchored runId (the reducer coalesces it onto the spawn turn) and
+	// carries the real member label instead of "Subagents"/"Agent-N" defaults.
+	parts := workflowParts(waitTurn.Parts)
+	if len(parts) != 1 || parts[0]["workflowId"] != "codex-collab:spawn-turn" {
+		t.Fatalf("wait-turn parts = %+v", waitTurn.Parts)
+	}
+	members := workflowMemberMaps(workflowPhaseMaps(parts[0]["workflowPhases"])[0]["members"])
+	if len(members) != 1 || members[0]["label"] != "王熙凤故事" || members[0]["status"] != "completed" {
+		t.Fatalf("lazy members = %+v", members)
+	}
+}
+
+func collabPageOfItems(turnID string, rawItems ...string) *core.TurnItemsPage {
+	page := &core.TurnItemsPage{EOF: true}
+	for _, raw := range rawItems {
+		var item map[string]any
+		if err := json.Unmarshal([]byte(raw), &item); err != nil {
+			panic(err)
+		}
+		page.Entries = append(page.Entries, core.TurnItemsEntry{TurnID: turnID, Item: item})
+	}
+	return page
 }

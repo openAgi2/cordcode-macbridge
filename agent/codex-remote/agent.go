@@ -40,6 +40,11 @@ type Agent struct {
 	paired             bool
 	pairing            *PairingController
 	connEpoch          ConnectionEpoch
+	// collabFoldMu guards collabFolds, the session-keyed cross-turn workflow
+	// fold contexts used by every cold history mapping surface (the live
+	// codec keeps its own registry).
+	collabFoldMu sync.Mutex
+	collabFolds  map[string]*remoteCollabHistoryFolds
 }
 
 // New constructs an unenrolled agent.

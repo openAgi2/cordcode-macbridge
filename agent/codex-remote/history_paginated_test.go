@@ -627,7 +627,7 @@ func TestReasoningMappingIsSummaryOnlyPerG05(t *testing.T) {
 			json.RawMessage(`{"type":"reasoning","id":"r3","summary":[],"content":[]}`),
 		},
 	}}}
-	turn := mapRemoteHistoryTurns(thread, 0)[0]
+	turn := mapRemoteHistoryTurns(thread, 0, newRemoteCollabHistoryFolds("th"))[0]
 	if len(turn.Parts) != 1 {
 		t.Fatalf("parts = %+v", turn.Parts)
 	}

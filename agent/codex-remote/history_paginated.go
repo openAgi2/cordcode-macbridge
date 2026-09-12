@@ -473,15 +473,38 @@ func (a *Agent) ReadTurnItemsPage(ctx context.Context, threadID, turnID, cursor 
 // turn's user slot (the projection Summary already owns it), so mapping must
 // proceed in page order across the whole batch.
 func (a *Agent) MapTurnItemsPage(turn *core.TurnScopedHistoryTurn, page *core.TurnItemsPage) error {
+	return a.mapTurnItemsPage("", turn, page)
+}
+
+// MapTurnItemsPageForSession is the session-aware variant the batch engine
+// prefers (core.TurnItemsSessionMapper): per-turn lazy detail folds collab
+// items onto the session's cross-turn runs, so a wait-only turn updates the
+// spawn turn's card instead of anchoring a duplicate.
+func (a *Agent) MapTurnItemsPageForSession(sessionID string, turn *core.TurnScopedHistoryTurn, page *core.TurnItemsPage) error {
+	if sessionID == "" {
+		return errors.New("codex-remote: map turn items page: empty session")
+	}
+	return a.mapTurnItemsPage(sessionID, turn, page)
+}
+
+func (a *Agent) mapTurnItemsPage(sessionID string, turn *core.TurnScopedHistoryTurn, page *core.TurnItemsPage) error {
 	if turn == nil || page == nil {
 		return errors.New("codex-remote: map turn items page: nil argument")
 	}
+	// Empty sessionID (the legacy MapTurnItemsPage entry) maps with a
+	// throwaway fold context: one turn in isolation cannot know cross-turn
+	// runs, matching the per-turn anchoring the diagnostic walk pins.
+	folds := newRemoteCollabHistoryFolds(sessionID)
+	if sessionID != "" {
+		folds = a.sessionCollabFolds(sessionID)
+	}
+	holders := map[string]*core.TurnScopedHistoryTurn{turn.TurnID: turn}
 	for _, entry := range page.Entries {
 		raw, err := json.Marshal(entry.Item)
 		if err != nil {
 			return fmt.Errorf("%w: item encode: %v", ErrUnknownThreadItem, err)
 		}
-		mapRemoteHistoryItem(turn, decodeRemoteThreadItem(raw))
+		folds.mapItem(turn, decodeRemoteThreadItem(raw), holders)
 	}
 	return nil
 }
@@ -504,8 +527,12 @@ func (a *Agent) ReadTurnItemsDiagnostic(ctx context.Context, threadID, turnID st
 	report := &TurnItemsDiagnosticReport{Metrics: m, Entries: entries}
 	if err == nil && len(entries) > 0 {
 		turn := core.TurnScopedHistoryTurn{TurnID: turnID, Status: "completed"}
+		// Evidence-only walk: one turn in isolation with a throwaway fold
+		// context (per-turn anchoring, no cross-turn session state).
+		folds := newRemoteCollabHistoryFolds(threadID)
+		holders := map[string]*core.TurnScopedHistoryTurn{turnID: &turn}
 		for _, entry := range entries {
-			mapRemoteHistoryItem(&turn, entry.Item)
+			folds.mapItem(&turn, entry.Item, holders)
 		}
 		report.HistoryTurn = &turn
 		if blob, jsonErr := json.Marshal(turn); jsonErr == nil {
@@ -716,7 +743,7 @@ func (a *Agent) GetTurnScopedRichHistory(ctx context.Context, sessionID string, 
 		if err != nil {
 			return nil, err
 		}
-		return mapRemoteHistoryTurns(thread, limit), nil
+		return mapRemoteHistoryTurns(thread, limit, a.sessionCollabFolds(sessionID)), nil
 	case "paginated":
 		return a.turnScopedHistoryPaginated(ctx, sessionID, limit)
 	default:
@@ -735,7 +762,7 @@ func (a *Agent) ReadUpstreamHistoryPage(ctx context.Context, sessionID, cursor s
 		return nil, err
 	}
 	page := summary.Page
-	turns := mapRemoteHistoryTurns(&remoteThread{ID: sessionID, Turns: page.Turns}, len(page.Turns))
+	turns := mapRemoteHistoryTurns(&remoteThread{ID: sessionID, Turns: page.Turns}, len(page.Turns), a.sessionCollabFolds(sessionID))
 	// network order is newest→oldest; reverse to ascending so the bridge prepends
 	// in kernel order without re-sorting.
 	for i, j := 0, len(turns)-1; i < j; i, j = i+1, j-1 {
@@ -769,7 +796,9 @@ func (a *Agent) turnScopedHistoryPaginated(ctx context.Context, threadID string,
 	if limit > 0 && len(desc) > limit {
 		desc = desc[:limit]
 	}
-	out := make([]core.TurnScopedHistoryTurn, 0, len(desc))
+	folds := a.sessionCollabFolds(threadID)
+	holders := map[string]*core.TurnScopedHistoryTurn{}
+	mapped := make([]*core.TurnScopedHistoryTurn, 0, len(desc))
 	for i := len(desc) - 1; i >= 0; i-- {
 		turn := desc[i]
 		entries, err := a.ReadTurnItems(ctx, threadID, turn.ID)
@@ -777,10 +806,15 @@ func (a *Agent) turnScopedHistoryPaginated(ctx context.Context, threadID string,
 			return nil, err
 		}
 		historyTurn := mapRemoteTurnShell(turn)
+		mapped = append(mapped, &historyTurn)
+		holders[historyTurn.TurnID] = &historyTurn
 		for _, entry := range entries {
-			mapRemoteHistoryItem(&historyTurn, entry.Item)
+			folds.mapItem(&historyTurn, entry.Item, holders)
 		}
-		out = append(out, historyTurn)
+	}
+	out := make([]core.TurnScopedHistoryTurn, len(mapped))
+	for i, turn := range mapped {
+		out[i] = *turn
 	}
 	return out, nil
 }
@@ -792,7 +826,7 @@ func (a *Agent) turnScopedHistoryPaginated(ctx context.Context, threadID string,
 // items/list walk, opening a 15-minute-old running turn permanently loses its
 // first 15 minutes and can only display notifications observed after entry.
 func (a *Agent) mapColdPage(ctx context.Context, threadID string, rawTurns []remoteTurn) ([]core.TurnScopedHistoryTurn, error) {
-	turns := mapRemoteHistoryTurns(&remoteThread{ID: threadID, Turns: rawTurns}, len(rawTurns))
+	turns := mapRemoteHistoryTurns(&remoteThread{ID: threadID, Turns: rawTurns}, len(rawTurns), a.sessionCollabFolds(threadID))
 	for index, envelope := range rawTurns {
 		if envelope.Status != remoteTurnStatusInProgress || envelope.ID == "" {
 			continue
@@ -804,7 +838,7 @@ func (a *Agent) mapColdPage(ctx context.Context, threadID string, rawTurns []rem
 			if err != nil {
 				return nil, err
 			}
-			if err := a.MapTurnItemsPage(&active, page); err != nil {
+			if err := a.MapTurnItemsPageForSession(threadID, &active, page); err != nil {
 				return nil, err
 			}
 			if page.EOF {
@@ -890,7 +924,7 @@ func (a *Agent) ReadColdHistory(ctx context.Context, threadID string) (*core.Col
 		if err != nil {
 			return nil, err
 		}
-		mapped := mapRemoteHistoryTurns(turns, 0)
+		mapped := mapRemoteHistoryTurns(turns, 0, a.sessionCollabFolds(threadID))
 		for i := range mapped {
 			if mapped[i].Status == remoteTurnStatusCompleted {
 				mapped[i].DetailPreloaded = true
@@ -916,8 +950,10 @@ func (a *Agent) ReadTurnDetail(ctx context.Context, sessionID, turnID string) (c
 		return core.TurnScopedHistoryTurn{}, err
 	}
 	turn := core.TurnScopedHistoryTurn{TurnID: turnID, Status: "completed"}
+	folds := a.sessionCollabFolds(sessionID)
+	holders := map[string]*core.TurnScopedHistoryTurn{turnID: &turn}
 	for _, entry := range entries {
-		mapRemoteHistoryItem(&turn, entry.Item)
+		folds.mapItem(&turn, entry.Item, holders)
 	}
 	return turn, nil
 }

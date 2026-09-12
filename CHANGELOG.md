@@ -7,6 +7,7 @@
 版本号对齐 MacBridge Release 构建的 `MARKETING_VERSION`（见 `MacBridge/project.yml`）。日期为协调世界时（UTC）。
 
 ## [Unreleased]
+- **修复：Codex Desktop Goal 多轮子代理任务不再出现重复 workflow 卡与伪「已中断」**：官方一次子代理运行横跨多个回合（spawn 回合创建子线程、后续回合轮询等待），桥此前按回合建卡（runId 含 turnId），每个含 collab 操作的回合各发一张卡：spawn 回合的卡冻结在中途，wait 回合的卡拿不到成员名只剩「Subagents / Agent-1..N」占位，live 独有的 activity 事件把当时未完成的成员翻成「已中断」后永远冻结。现 runId 改为跨回合稳定（锚定首个 spawn 回合），后续回合的 wait/activity 更新合并进同一 run，reducer 的按 runId 原位替换天然收敛成一张卡；wait 轮询按官方累积语义以点名状态为准（点名 completed 可覆盖陈旧的 activity「已中断」，缺席不重置）；新批次 spawn 在旧 run 结项后另开新卡。直播 codec 与全部冷路径（全量历史、分页历史、逐回合懒加载详情）共享同一 runId 纪律，冷重建后同一 run 收敛到 spawn 回合位置。纯 Mac 侧修复；归因与证据见 `docs/2026-09-12-codex-goal-duplicate-thinking-and-dual-workflow-card-analysis.md`。
 - **修复：Codex Desktop Goal 在切换会话后不再从时间线消失**：强制冷重建此前只提交官方 turn 摘要，会覆盖刚由 `thread/goal/get` 刷新的原生 Goal 投影。现冷历史携带同一连接 epoch 的权威 Goal 整值快照，并按官方创建时间把 `/goal <目标>` 命令卡放回续跑回合之前；`nil` 与权威 clear 仍严格区分，不制造本地兜底状态。纯 Mac 侧修复。
 - **修复：Codex Desktop 多子代理过程结束后不再从 4 名退化为 1 名**：详情分页 mapper 会原地更新同一个 workflow 部件，旧 batch engine 却只按 parts 长度取新增后缀，第一页的一名成员一旦落盘，后续页的三名成员永远不会再输出。现 workflow 整值快照延迟到官方 EOF 后一次落盘，普通思考/工具仍逐页流式交付；详情映射版本升至 2，既有残缺缓存会从官方分页自动重建。纯 Mac 侧修复。
 - **修复：Codex Desktop Goal 直播介绍正文不再重复（「我会调用两个我会调用两个…」）**：persist-only `turn_started` 之后的首个 `text_delta` 会同时挂上 turn shell 与 `append_text`；iPhone 先套用 shell 里已有的正文再追加同一段，首句被写两遍。现同一 patch 里若已有该回合 shell，不再重复发送这段 `append_text`。纯 Mac 侧修复。

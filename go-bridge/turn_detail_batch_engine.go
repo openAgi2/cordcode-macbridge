@@ -620,8 +620,18 @@ func (h *Handlers) runTurnDetailBatch(
 			continue
 		}
 
-		if err := pager.MapTurnItemsPage(&scratch, page); err != nil {
-			return failTerminal(turnDetailPageReasonCode(err), deliveredFirst, deliveredLast)
+		// Session-aware mapping first (core.TurnItemsSessionMapper): codex-remote
+		// folds collab workflow runs across turns, so per-turn lazy detail must
+		// observe the session's shared fold state. Backends without the optional
+		// interface keep the base TurnItemsPager contract.
+		var mapErr error
+		if sessionMapper, ok := agent.(core.TurnItemsSessionMapper); ok {
+			mapErr = sessionMapper.MapTurnItemsPageForSession(sessionID, &scratch, page)
+		} else {
+			mapErr = pager.MapTurnItemsPage(&scratch, page)
+		}
+		if mapErr != nil {
+			return failTerminal(turnDetailPageReasonCode(mapErr), deliveredFirst, deliveredLast)
 		}
 		// The FIRST userMessage of the batch is consumed by the turn's user
 		// slot (the Summary owns it): treat its id as accepted so a re-walk

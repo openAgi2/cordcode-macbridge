@@ -340,6 +340,16 @@ type TurnItemsPager interface {
 	MapTurnItemsPage(turn *TurnScopedHistoryTurn, page *TurnItemsPage) error
 }
 
+// TurnItemsSessionMapper is the session-aware MapTurnItemsPage variant for
+// backends whose item mapping carries cross-turn session state (codex-remote
+// folds collab workflow runs across turns: a wait-only turn must update the
+// spawn turn's card, not anchor a duplicate). The batch engine prefers it
+// when the agent implements it; TurnItemsPager stays the base contract for
+// everyone else.
+type TurnItemsSessionMapper interface {
+	MapTurnItemsPageForSession(sessionID string, turn *TurnScopedHistoryTurn, page *TurnItemsPage) error
+}
+
 type TurnScopedHistoryTurn struct {
 	TurnID       string
 	Status       string

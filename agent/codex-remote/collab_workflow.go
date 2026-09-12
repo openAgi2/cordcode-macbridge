@@ -1,16 +1,24 @@
 package codexremote
 
-// Codex collabAgentToolCall does not carry the runId used by DeepSeek
-// Harness' tool-workflow protocol. Its item id identifies one operation
-// (spawn/wait/close), not one user-visible workflow. Fold the operations in an
-// owning turn into one keyed workflow snapshot, matching the existing DSH
-// workflowFold contract: first spawn anchors the card, later operations update
-// the same members in place.
+// Codex collab subagent operations (collabAgentToolCall spawn/wait/close items
+// and the codex_app create_thread / wait_threads MCP tools) do not carry a
+// runId: their item ids identify single OPERATIONS, not one user-visible
+// workflow. Officially one logical run also spans MULTIPLE turns — the spawn
+// turn creates the children and later turns keep polling them. Fold the
+// operations of one run into a single keyed workflow snapshot anchored at the
+// SPAWN turn: runID = codex-collab:<spawnTurnID> stays stable across turns, so
+// the projection reducer's runId-keyed in-place upsert converges wait/activity
+// updates from later turns onto the one card the first spawn anchored
+// (official workflow-run parity: "first spawn anchors the card, later
+// operations update the same members in place"). runIds deliberately derive
+// from anchor TURNS, never from registry generations, so replaying the same
+// official items through any registry state converges to the same runId.
 
 import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
@@ -25,17 +33,20 @@ type codexCollabMemberState struct {
 }
 
 type codexCollabWorkflowFold struct {
-	runID   string
-	name    string
-	members []codexCollabMemberState
-	byChild map[string]int
+	runID        string
+	anchorTurnID string
+	name         string
+	members      []codexCollabMemberState
+	byChild      map[string]int
 }
 
-func newCodexCollabWorkflowFold(turnID string) *codexCollabWorkflowFold {
+// newCodexCollabWorkflowFold anchors a run at the turn that first spawns it.
+func newCodexCollabWorkflowFold(anchorTurnID string) *codexCollabWorkflowFold {
 	return &codexCollabWorkflowFold{
-		runID:   codexCollabRunPrefix + turnID,
-		name:    "Subagents",
-		byChild: map[string]int{},
+		runID:        codexCollabRunPrefix + anchorTurnID,
+		anchorTurnID: anchorTurnID,
+		name:         "Subagents",
+		byChild:      map[string]int{},
 	}
 }
 
@@ -170,12 +181,25 @@ func (f *codexCollabWorkflowFold) observeAppTool(item remoteThreadItem) bool {
 		statuses := remoteWaitThreadStatuses(item.Result)
 		changed := false
 		for _, target := range args.Targets {
-			status := statuses[strings.TrimSpace(target.ThreadID)]
-			if status == "" {
-				status = core.WorkflowStatusRunning
+			childID := strings.TrimSpace(target.ThreadID)
+			if childID == "" {
+				continue
 			}
-			if f.upsertChild(target.ThreadID, "", status) {
-				changed = true
+			if status, ok := statuses[childID]; ok {
+				if f.upsertChild(childID, "", status) {
+					changed = true
+				}
+				continue
+			}
+			// Known member absent from this poll: official polls are
+			// cumulative, so absence is not evidence of reset. Keep the
+			// member's current status — only a poll that NAMES the child can
+			// settle it (e.g. overwrite a stale activity-derived interrupted
+			// back to completed); an unknown child still joins the card.
+			if _, member := f.byChild[childID]; !member {
+				if f.upsertChild(childID, "", core.WorkflowStatusRunning) {
+					changed = true
+				}
 			}
 		}
 		return changed
@@ -258,31 +282,261 @@ func (f *codexCollabWorkflowFold) snapshot() (core.WorkflowRunEvent, bool) {
 	}, true
 }
 
+// settled reports whether every member reached a terminal status. A spawn
+// arriving after the thread's fold settled opens the NEXT run instead of
+// appending to the finished card.
+func (f *codexCollabWorkflowFold) settled() bool {
+	if f == nil || len(f.members) == 0 {
+		return false
+	}
+	snapshot, ok := f.snapshot()
+	return ok && snapshot.Status != core.WorkflowStatusRunning
+}
+
+// collabFoldRegistry routes operation items onto cross-turn workflow folds.
+// One registry serves one surface (the live codec, or one session's cold
+// history mapping); it is NOT shared between them — both derive identical
+// runIds from anchor turns, so their parts coalesce downstream.
+type collabFoldRegistry struct {
+	current map[string]*codexCollabWorkflowFold
+	byChild map[string]*codexCollabWorkflowFold
+}
+
+func newCollabFoldRegistry() *collabFoldRegistry {
+	return &collabFoldRegistry{
+		current: map[string]*codexCollabWorkflowFold{},
+		byChild: map[string]*codexCollabWorkflowFold{},
+	}
+}
+
+// route resolves the fold an item belongs to. Only a spawn establishes a new
+// run: re-observing a known child is idempotent, a spawn joins the thread's
+// still-running fold (later operations update the same members in place), and
+// a spawn after that fold settled opens the next run. Wait-class items whose
+// children are all unknown anchor a fallback run at the arrival turn (codec
+// restart mid-run, detail fetched before the spawn turn) without detaching
+// routing for the thread's live run; activity/close and other classes only
+// update folds they can resolve and never open runs.
+func (r *collabFoldRegistry) route(threadID, turnID string, children []string, spawn, waitFallback bool) *codexCollabWorkflowFold {
+	for _, child := range children {
+		if fold, ok := r.byChild[child]; ok {
+			return fold
+		}
+	}
+	if spawn {
+		if current := r.current[threadID]; current != nil && !current.settled() {
+			return current
+		}
+		return r.open(threadID, turnID)
+	}
+	if waitFallback {
+		return newCodexCollabWorkflowFold(turnID)
+	}
+	return nil
+}
+
+// open anchors a new run for the thread, releasing the previous fold's child
+// routing so a late operation for the superseded batch cannot reopen it.
+func (r *collabFoldRegistry) open(threadID, anchorTurnID string) *codexCollabWorkflowFold {
+	if old := r.current[threadID]; old != nil {
+		for child := range old.byChild {
+			if r.byChild[child] == old {
+				delete(r.byChild, child)
+			}
+		}
+	}
+	fold := newCodexCollabWorkflowFold(anchorTurnID)
+	r.current[threadID] = fold
+	return fold
+}
+
+// index publishes the children an observation added to the fold so operations
+// from OTHER turns route to the same run. Children already routed to a
+// different fold are never stolen (mixed-batch waits may upsert foreign
+// members without taking over their routing).
+func (r *collabFoldRegistry) index(fold *codexCollabWorkflowFold, children []string) {
+	if fold == nil {
+		return
+	}
+	for _, child := range children {
+		child = strings.TrimSpace(child)
+		if child == "" {
+			continue
+		}
+		if _, member := fold.byChild[child]; !member {
+			continue
+		}
+		if existing, routed := r.byChild[child]; routed && existing != fold {
+			continue
+		}
+		r.byChild[child] = fold
+	}
+}
+
+// collabRoute classifies a collab item for fold routing: the child thread ids
+// it references (receivers ∪ agent states, the created thread, poll targets,
+// the activity child), whether it is spawn-class, and whether it is a wait
+// that may anchor a fallback run when its children are unknown. ok=false for
+// non-collab items.
+func collabRoute(item remoteThreadItem) (children []string, spawn, waitFallback, ok bool) {
+	seen := map[string]bool{}
+	add := func(id string) {
+		id = strings.TrimSpace(id)
+		if id != "" && !seen[id] {
+			seen[id] = true
+			children = append(children, id)
+		}
+	}
+	switch item.Type {
+	case "collabAgentToolCall":
+		for _, receiver := range item.CollabReceivers {
+			add(receiver)
+		}
+		for child := range item.CollabAgentStates {
+			add(child)
+		}
+		tool := normalizeCollabTool(item.CollabTool)
+		return children, tool == "spawnagent", tool == "wait" || tool == "waitthreads", true
+	case "mcpToolCall":
+		if item.Server != "codex_app" {
+			return nil, false, false, false
+		}
+		switch item.Tool {
+		case "create_thread":
+			add(remoteCreateThreadID(item.Result))
+			return children, true, false, true
+		case "wait_threads":
+			var args struct {
+				Targets []struct {
+					ThreadID string `json:"threadId"`
+				} `json:"targets"`
+			}
+			_ = json.Unmarshal(item.Arguments, &args)
+			for _, target := range args.Targets {
+				add(target.ThreadID)
+			}
+			return children, false, true, true
+		}
+		return nil, false, false, false
+	case "subAgentActivity":
+		add(item.CollabAgentThreadID)
+		return children, false, false, true
+	}
+	return nil, false, false, false
+}
+
 func (c *LiveCodec) foldCollabWorkflow(params remoteItemNotification, item remoteThreadItem) []core.Event {
 	if params.ThreadID == "" || params.TurnID == "" || item.ID == "" {
 		return nil
 	}
-	key := params.ThreadID + "\x00" + params.TurnID
-	c.mu.Lock()
-	fold := c.collabByTurn[key]
-	if fold == nil {
-		fold = newCodexCollabWorkflowFold(params.TurnID)
-		c.collabByTurn[key] = fold
-	}
-	changed := false
-	if item.Type == "subAgentActivity" {
-		changed = fold.observeActivity(item)
-	} else {
-		changed = fold.observe(item)
-	}
-	snapshot, ok := fold.snapshot()
-	c.mu.Unlock()
-	if !changed || !ok {
+	children, spawn, waitFallback, applicable := collabRoute(item)
+	if !applicable {
 		return nil
 	}
-	return []core.Event{{
-		Type: core.EventWorkflowRun, SessionID: params.ThreadID,
-		ThreadID: params.ThreadID, TurnID: params.TurnID,
-		ItemID: snapshot.RunID, WorkflowRun: &snapshot,
-	}}
+	c.mu.Lock()
+	fold := c.collabFolds.route(params.ThreadID, params.TurnID, children, spawn, waitFallback)
+	var events []core.Event
+	if fold != nil {
+		changed := false
+		if item.Type == "subAgentActivity" {
+			changed = fold.observeActivity(item)
+		} else {
+			changed = fold.observe(item)
+		}
+		c.collabFolds.index(fold, children)
+		if snapshot, valid := fold.snapshot(); changed && valid {
+			// TurnID is the run's ANCHOR turn, not the observing turn: later
+			// turns' wait/activity updates must land on the card the first
+			// spawn anchored (the reducer keys workflow parts by runId and
+			// keeps the first owning turn).
+			events = []core.Event{{
+				Type: core.EventWorkflowRun, SessionID: params.ThreadID, ThreadID: params.ThreadID,
+				TurnID: fold.anchorTurnID, ItemID: snapshot.RunID, WorkflowRun: &snapshot,
+			}}
+		}
+	}
+	c.mu.Unlock()
+	return events
 }
+
+// remoteCollabHistoryFolds is the session-scoped cross-turn state for cold
+// collab folding. Every cold mapping surface for a session (full-thread
+// reads, paginated history, per-turn lazy detail) shares one registry so
+// waits and activities observed in later turns fold onto the run the spawn
+// turn anchored — the same runId discipline as the live codec's registry.
+// State lives for the runtime process: re-observing the same official items
+// is idempotent and runIds derive from anchor turns, so replays converge.
+type remoteCollabHistoryFolds struct {
+	threadID string
+	mu       sync.Mutex
+	reg      *collabFoldRegistry
+}
+
+func newRemoteCollabHistoryFolds(threadID string) *remoteCollabHistoryFolds {
+	return &remoteCollabHistoryFolds{threadID: threadID, reg: newCollabFoldRegistry()}
+}
+
+// sessionCollabFolds returns the agent-lifetime fold context for a session
+// (lazily created). Concurrent per-turn detail mappings for one session
+// serialize on the context lock inside mapItem: cross-turn fold writes into
+// an anchor turn's parts must not race that turn's own part appends.
+func (a *Agent) sessionCollabFolds(sessionID string) *remoteCollabHistoryFolds {
+	a.collabFoldMu.Lock()
+	defer a.collabFoldMu.Unlock()
+	if a.collabFolds == nil {
+		a.collabFolds = map[string]*remoteCollabHistoryFolds{}
+	}
+	folds, ok := a.collabFolds[sessionID]
+	if !ok {
+		folds = newRemoteCollabHistoryFolds(sessionID)
+		a.collabFolds[sessionID] = folds
+	}
+	return folds
+}
+
+// fold applies one collab item to the session registry and materializes the
+// run's latest whole-value part. holders carries the CURRENT mapping call's
+// turns by id: an update whose anchor turn is being mapped in the same pass
+// upserts the part in the anchor turn; otherwise (lazy pages delivered
+// newest-first, per-turn detail fetched before the spawn turn) the part lands
+// in the observing turn while keeping the anchored runId — the projection
+// reducer's runId-keyed upsert coalesces it onto the anchor turn once that
+// turn hydrates. The part is written even when the observation changed
+// nothing: mapping is stateless per call, so re-reads must still materialize
+// the run.
+func (h *remoteCollabHistoryFolds) fold(turn *core.TurnScopedHistoryTurn, item remoteThreadItem, holders map[string]*core.TurnScopedHistoryTurn) {
+	if turn == nil || strings.TrimSpace(turn.TurnID) == "" {
+		return
+	}
+	children, spawn, waitFallback, applicable := collabRoute(item)
+	if !applicable {
+		return
+	}
+	fold := h.reg.route(h.threadID, turn.TurnID, children, spawn, waitFallback)
+	if fold == nil {
+		return
+	}
+	if item.Type == "subAgentActivity" {
+		fold.observeActivity(item)
+	} else {
+		fold.observe(item)
+	}
+	h.reg.index(fold, children)
+	snapshot, valid := fold.snapshot()
+	if !valid {
+		return
+	}
+	part := remoteWorkflowPart(&snapshot, fold.runID)
+	holder := turn
+	if anchor, ok := holders[fold.anchorTurnID]; ok && anchor != nil {
+		holder = anchor
+	}
+	for i := range holder.Parts {
+		if stringValue(holder.Parts[i]["type"]) == "workflow" && stringValue(holder.Parts[i]["workflowId"]) == fold.runID {
+			holder.Parts[i] = part
+			return
+		}
+	}
+	holder.Parts = append(holder.Parts, part)
+}
+

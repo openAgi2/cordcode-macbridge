@@ -423,25 +423,36 @@ func mapRemoteTurnShell(turn remoteTurn) core.TurnScopedHistoryTurn {
 	return historyTurn
 }
 
-func mapRemoteHistoryTurns(thread *remoteThread, limit int) []core.TurnScopedHistoryTurn {
+func mapRemoteHistoryTurns(thread *remoteThread, limit int, folds *remoteCollabHistoryFolds) []core.TurnScopedHistoryTurn {
 	if thread == nil {
 		return nil
 	}
-	out := make([]core.TurnScopedHistoryTurn, 0, len(thread.Turns))
+	// Map through stable pointers: a later turn's wait/activity observations
+	// fold into the ANCHOR turn's parts, so turns already mapped in this pass
+	// must stay mutable by reference.
+	mapped := make([]*core.TurnScopedHistoryTurn, 0, len(thread.Turns))
+	holders := map[string]*core.TurnScopedHistoryTurn{}
 	for _, turn := range thread.Turns {
 		historyTurn := mapRemoteTurnShell(turn)
+		mapped = append(mapped, &historyTurn)
+		holders[historyTurn.TurnID] = &historyTurn
 		for _, rawItem := range turn.Items {
-			mapRemoteHistoryItem(&historyTurn, decodeRemoteThreadItem(rawItem))
+			folds.mapItem(&historyTurn, decodeRemoteThreadItem(rawItem), holders)
 		}
-		out = append(out, historyTurn)
 	}
-	if limit > 0 && len(out) > limit {
-		out = out[len(out)-limit:]
+	if limit > 0 && len(mapped) > limit {
+		mapped = mapped[len(mapped)-limit:]
+	}
+	out := make([]core.TurnScopedHistoryTurn, len(mapped))
+	for i, turn := range mapped {
+		out[i] = *turn
 	}
 	return out
 }
 
-func mapRemoteHistoryItem(turn *core.TurnScopedHistoryTurn, item remoteThreadItem) {
+func (h *remoteCollabHistoryFolds) mapItem(turn *core.TurnScopedHistoryTurn, item remoteThreadItem, holders map[string]*core.TurnScopedHistoryTurn) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	switch item.Type {
 	case "userMessage":
 		text := item.userText()
@@ -512,7 +523,7 @@ func mapRemoteHistoryItem(turn *core.TurnScopedHistoryTurn, item remoteThreadIte
 			step["output"] = json.RawMessage(item.ToolError)
 		}
 		turn.Parts = append(turn.Parts, map[string]any{"type": "tool", "step": step, "itemId": item.ID})
-		foldRemoteCollabHistoryPart(turn, item)
+		h.fold(turn, item, holders)
 	case "dynamicToolCall":
 		step := map[string]any{"id": item.ID, "toolName": item.Tool, "status": remoteCommandStepStatus(item.ToolStatus)}
 		if len(item.Arguments) > 0 {
@@ -537,75 +548,15 @@ func mapRemoteHistoryItem(turn *core.TurnScopedHistoryTurn, item remoteThreadIte
 			"type": "context_compaction", "itemId": item.ID, "status": "completed",
 		})
 	case "collabAgentToolCall":
-		// Cold parity with the live fold: operation item ids (spawn/wait/close)
-		// update one turn-scoped keyed card instead of each becoming a new card.
-		foldRemoteCollabHistoryPart(turn, item)
+		// Cold parity with the live fold: operation items fold onto the
+		// spawn-anchored cross-turn run (collab_workflow.go).
+		h.fold(turn, item, holders)
 	case "subAgentActivity":
-		foldRemoteCollabHistoryPart(turn, item)
+		h.fold(turn, item, holders)
 	default:
 		if item.Type != "" {
 			turn.SkippedTypes = append(turn.SkippedTypes, item.Type)
 		}
-	}
-}
-
-func foldRemoteCollabHistoryPart(turn *core.TurnScopedHistoryTurn, item remoteThreadItem) {
-	if turn == nil || strings.TrimSpace(turn.TurnID) == "" {
-		return
-	}
-	runID := codexCollabRunPrefix + turn.TurnID
-	fold := newCodexCollabWorkflowFold(turn.TurnID)
-	partIndex := -1
-	for i, part := range turn.Parts {
-		if stringValue(part["type"]) != "workflow" || stringValue(part["workflowId"]) != runID {
-			continue
-		}
-		partIndex = i
-		if name := strings.TrimSpace(stringValue(part["workflowName"])); name != "" {
-			fold.name = name
-		}
-		for _, phase := range workflowPhaseMaps(part["workflowPhases"]) {
-			for _, member := range workflowMemberMaps(phase["members"]) {
-				childID := strings.TrimSpace(stringValue(member["childSessionId"]))
-				if childID == "" {
-					continue
-				}
-				seq, _ := member["seq"].(int)
-				if seq <= 0 {
-					if number, ok := member["seq"].(float64); ok {
-						seq = int(number)
-					}
-				}
-				if seq <= 0 {
-					seq = len(fold.members) + 1
-				}
-				fold.byChild[childID] = len(fold.members)
-				fold.members = append(fold.members, codexCollabMemberState{
-					seq: seq, label: stringValue(member["label"]), childID: childID,
-					status: stringValue(member["status"]),
-				})
-			}
-		}
-		break
-	}
-	changed := false
-	if item.Type == "subAgentActivity" {
-		changed = fold.observeActivity(item)
-	} else {
-		changed = fold.observe(item)
-	}
-	if !changed {
-		return
-	}
-	snapshot, ok := fold.snapshot()
-	if !ok {
-		return
-	}
-	part := remoteWorkflowPart(&snapshot, runID)
-	if partIndex >= 0 {
-		turn.Parts[partIndex] = part
-	} else {
-		turn.Parts = append(turn.Parts, part)
 	}
 }
 

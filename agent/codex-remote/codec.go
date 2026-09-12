@@ -34,9 +34,11 @@ type LiveCodec struct {
 	// overwriting a newer Desktop notification.
 	collaborationByThread map[string]versionedCollaborationSnapshot
 	goalByThread          map[string]versionedGoalSnapshot
-	// collabByTurn folds operation-scoped collabAgentToolCall items into the
-	// same keyed workflow-card model used by DeepSeek Harness.
-	collabByTurn map[string]*codexCollabWorkflowFold
+	// collabFolds routes collabAgentToolCall / codex_app create_thread +
+	// wait_threads operations onto cross-turn workflow cards keyed by the
+	// spawn-anchored run (shared model with DeepSeek Harness' tool-workflow
+	// folds; see collab_workflow.go).
+	collabFolds *collabFoldRegistry
 }
 
 type versionedCollaborationSnapshot struct {
@@ -65,7 +67,7 @@ func NewLiveCodec() *LiveCodec {
 		awaitingPlanReview:    map[string]codexProposedPlan{},
 		collaborationByThread: map[string]versionedCollaborationSnapshot{},
 		goalByThread:          map[string]versionedGoalSnapshot{},
-		collabByTurn:          map[string]*codexCollabWorkflowFold{},
+		collabFolds:           newCollabFoldRegistry(),
 	}
 }
 
@@ -105,7 +107,7 @@ func (c *LiveCodec) ResetNativeSessionState() {
 	c.mu.Lock()
 	c.collaborationByThread = map[string]versionedCollaborationSnapshot{}
 	c.goalByThread = map[string]versionedGoalSnapshot{}
-	c.collabByTurn = map[string]*codexCollabWorkflowFold{}
+	c.collabFolds = newCollabFoldRegistry()
 	c.mu.Unlock()
 }
 
@@ -338,7 +340,9 @@ func (c *LiveCodec) decodeTurnCompleted(n Notification) []core.Event {
 	c.mu.Lock()
 	delete(c.turnByThread, params.ThreadID)
 	delete(c.retryByThread, params.ThreadID)
-	delete(c.collabByTurn, params.ThreadID+"\x00"+params.Turn.ID)
+	// Collab workflow folds intentionally SURVIVE turn completion: official
+	// runs span turns (spawn turn + later wait turns), and the fold registry
+	// itself bounds lifecycle (a new spawn batch supersedes the settled run).
 	plan := c.inFlightPlan[params.ThreadID]
 	delete(c.inFlightPlan, params.ThreadID)
 	emitReview := params.Turn.Status == remoteTurnStatusCompleted &&
