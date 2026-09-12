@@ -250,6 +250,9 @@ all turns × each turn items/list × repeated background_tasks.list
 - 是一次连接关闭被 replay/dispatch 多次？
 - 还是 stale stream / stale observer 清理缺失？
 
+**0a+ `identical-error-notification-suppression`**
+codex-remote codec 对同一 connection epoch 内 byte-identical 的 terminal error notification 只交付首个事件；重复项在进入 passive pump 前丢弃并计数。error 参数变化不抑制，rebind 清零。该修复针对 2026-09-12 22:25 实测：仅聚合日志后 bridge 仍在 3 分钟内收到 1,084,858 次同一 passive error，CPU 60%–74%。
+
 **0b `passive-event-log-aggregation`**
 按 `(backend, session, connection/stream epoch, error identity)` 聚合重复 passive error：状态进入时打 WARN，重复期间按较长周期输出 count/rate，error identity 变化立即打 WARN。禁止无身份的去重导致新错误被吞。日志降噪是可观测性修复，不是把失败伪装成成功。
 

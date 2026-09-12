@@ -144,6 +144,10 @@ func cloneRuntimeStats(src map[string]*runtimeDiagnosticStat) map[string]*runtim
 // backgroundTaskScanMetricsProvider is an optional, dependency-cycle-free
 // agent seam. Providers return aggregate counters only; no transcript content
 // or stable session identity crosses the seam.
+type passiveErrorSuppressionMetricsProvider interface {
+	SuppressedErrorNotifications() uint64
+}
+
 type backgroundTaskScanMetricsProvider interface {
 	BackgroundTaskScanCounters() (
 		active uint64,

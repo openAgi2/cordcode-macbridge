@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T14:17:16.570309Z",
+  "updated_at": "2026-09-12T14:32:17.484475Z",
   "todos": [
     {
       "id": "phase0-observability-impl",
@@ -198,6 +198,76 @@
           "command:go build ./go-bridge"
         ],
         "checked_at": "2026-09-12T11:23:52.697096Z"
+      }
+    },
+    {
+      "id": "phase2-passive-error-suppression-review-fix-impl",
+      "title": "phase2-passive-error-suppression-review-fix-impl",
+      "description": "Review fix after live regression discovered log aggregation alone left 1.08M identical passive errors and 60-74% CPU in three minutes. Suppress byte-identical terminal error notifications at the codec boundary before passive dispatch.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "live regression review fix",
+      "notes": "review-fix-for:phase2-passive-error-storm-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Implemented epoch-scoped byte-identical terminal error suppression before passive pump, aggregate counter, management exposure, and rebind reset. Changed params remain delivery-enabled.",
+        "artifacts": [
+          "agent/codex-remote/codec.go",
+          "agent/codex-remote/agent.go",
+          "go-bridge/management_api.go"
+        ],
+        "checked_at": "2026-09-12T14:32:17.484475Z"
+      }
+    },
+    {
+      "id": "phase2-passive-error-suppression-review-fix-tests",
+      "title": "phase2-passive-error-suppression-review-fix-tests",
+      "description": "Review fix after live regression discovered log aggregation alone left 1.08M identical passive errors and 60-74% CPU in three minutes. Suppress byte-identical terminal error notifications at the codec boundary before passive dispatch.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [],
+      "source": "live regression review fix",
+      "notes": "review-fix-for:phase2-passive-error-storm-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Race-focused codec and diagnostics tests passed; full go-bridge/codex-remote/core suites, vet, Linux cross-build, and diff check passed after the fix.",
+        "artifacts": [
+          "agent/codex-remote/codec_test.go",
+          "command:go test ./go-bridge ./agent/codex-remote ./core -count=1"
+        ],
+        "checked_at": "2026-09-12T14:32:17.484475Z"
+      }
+    },
+    {
+      "id": "phase2-passive-error-suppression-review-fix-regression",
+      "title": "phase2-passive-error-suppression-review-fix-regression",
+      "description": "Review fix after live regression discovered log aggregation alone left 1.08M identical passive errors and 60-74% CPU in three minutes. Suppress byte-identical terminal error notifications at the codec boundary before passive dispatch.",
+      "status": "in_progress",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [],
+      "source": "live regression review fix",
+      "notes": "review-fix-for:phase2-passive-error-storm-regression",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Pending live runtime redeploy and repeated error-storm regression measurement.",
+        "artifacts": "",
+        "checked_at": null
       }
     },
     {

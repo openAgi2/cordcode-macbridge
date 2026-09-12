@@ -143,7 +143,10 @@ timeline；derived-legacy `question_asked` 永远不能成为第二个 projectio
 `turn_completed`/`error`，随后 session runtime state 回到 idle。中间 delta、tool 或
 session status 不能代替确定性完成信号。
 
-passive pump 的重复 error 日志按 `(backend, session fingerprint, event, error fingerprint)`
+codex-remote codec 先丢弃 byte-identical 的 terminal error notification：首个事件照常
+解码/派发，重复项只累加聚合计数，不再进入 passive pump。参数变化不会被抑制；连接
+rebind 时该 epoch 级抑制状态清零。随后 passive pump 的重复 error 日志按
+`(backend, session fingerprint, event, error fingerprint)`
 聚合：首条与 error identity 变化立即 WARN，完全相同的重复项每 30 秒输出一次
 count/rate 摘要。聚合只作用于观测日志，不丢弃事件、不改变 runtime state，也不能吞掉
 新的真实错误。管理端 `/internal/diagnostics/runtime` 只暴露类别聚合计数、p50/p95、

@@ -8,6 +8,7 @@ package codexremote
 // silently so an event backlog cannot grow.
 
 import (
+	"bytes"
 	"encoding/json"
 	"log/slog"
 	"strings"
@@ -34,6 +35,11 @@ type LiveCodec struct {
 	// overwriting a newer Desktop notification.
 	collaborationByThread map[string]versionedCollaborationSnapshot
 	goalByThread          map[string]versionedGoalSnapshot
+	// lastErrorParams suppresses byte-identical terminal error notifications.
+	// Upstream has emitted the same transport error hundreds of thousands of times
+	// per minute; the first notification is truth, exact repeats carry no state.
+	lastErrorParams              []byte
+	suppressedErrorNotifications uint64
 	// collabFolds routes collabAgentToolCall / codex_app create_thread +
 	// wait_threads operations onto cross-turn workflow cards keyed by the
 	// spawn-anchored run (shared model with DeepSeek Harness' tool-workflow
@@ -105,6 +111,8 @@ func (c *LiveCodec) applyCollaborationMode(threadID string, state core.SessionCo
 
 func (c *LiveCodec) ResetNativeSessionState() {
 	c.mu.Lock()
+	c.lastErrorParams = nil
+	c.suppressedErrorNotifications = 0
 	c.collaborationByThread = map[string]versionedCollaborationSnapshot{}
 	c.goalByThread = map[string]versionedGoalSnapshot{}
 	// collabFolds intentionally SURVIVE the rebind: official subagent runs
@@ -683,6 +691,19 @@ func decodeRemoteTokenUsage(n Notification) []core.Event {
 }
 
 func (c *LiveCodec) decodeErrorNotification(n Notification) []core.Event {
+	c.mu.Lock()
+	if len(c.lastErrorParams) > 0 && bytes.Equal(c.lastErrorParams, n.Params) {
+		c.suppressedErrorNotifications++
+		count := c.suppressedErrorNotifications
+		c.mu.Unlock()
+		if count == 1_000 || count%100_000 == 0 {
+			slog.Warn("codex-remote suppressed byte-identical error notifications",
+				"count", count)
+		}
+		return nil
+	}
+	c.mu.Unlock()
+
 	var params struct {
 		Error struct {
 			Message string `json:"message"`
@@ -696,12 +717,24 @@ func (c *LiveCodec) decodeErrorNotification(n Notification) []core.Event {
 	}
 	if params.WillRetry {
 		c.mu.Lock()
+		c.lastErrorParams = nil
 		c.retryByThread[params.ThreadID]++
 		attempt := c.retryByThread[params.ThreadID]
 		c.mu.Unlock()
 		return []core.Event{{Type: core.EventRetryStatus, SessionID: params.ThreadID, ThreadID: params.ThreadID, TurnID: params.TurnID, RetryAttempt: attempt, Content: params.Error.Message}}
 	}
+	c.mu.Lock()
+	c.lastErrorParams = append([]byte(nil), n.Params...)
+	c.mu.Unlock()
 	return []core.Event{{Type: core.EventError, SessionID: params.ThreadID, ThreadID: params.ThreadID, TurnID: params.TurnID, Error: &remoteOfficialError{message: params.Error.Message}}}
+}
+
+// SuppressedErrorNotifications reports how many byte-identical terminal error
+// notifications were dropped after the first was decoded and delivered.
+func (c *LiveCodec) SuppressedErrorNotifications() uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.suppressedErrorNotifications
 }
 
 func decodeRemotePlanUpdated(n Notification) []core.Event {

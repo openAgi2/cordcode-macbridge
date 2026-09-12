@@ -225,3 +225,32 @@ func TestRemoteCodecEmptyPlanTextDoesNotEmitReview(t *testing.T) {
 		t.Fatalf("whitespace plan must not synthesize a review card: %+v", completed)
 	}
 }
+
+func TestRemoteCodecSuppressesByteIdenticalTerminalErrors(t *testing.T) {
+	codec := NewLiveCodec()
+	params := json.RawMessage(`{"threadId":"__remote_control_transport__","error":{"message":"detached"}}`)
+	first := codec.Decode(Notification{Method: "error", Params: params})
+	if len(first) != 1 || first[0].Type != core.EventError {
+		t.Fatalf("first error events=%+v", first)
+	}
+	for i := 0; i < 100_000; i++ {
+		if events := codec.Decode(Notification{Method: "error", Params: params}); len(events) != 0 {
+			t.Fatalf("identical repeat %d produced events", i)
+		}
+	}
+	if got := codec.SuppressedErrorNotifications(); got != 100_000 {
+		t.Fatalf("suppressed=%d, want 100000", got)
+	}
+
+	changed := codec.Decode(Notification{Method: "error", Params: json.RawMessage(`{"threadId":"thread","turnId":"turn","error":{"message":"different"}}`)})
+	if len(changed) != 1 {
+		t.Fatalf("changed error events=%+v", changed)
+	}
+	if got := codec.SuppressedErrorNotifications(); got != 100_000 {
+		t.Fatalf("changed error reset suppression counter: %d", got)
+	}
+	codec.ResetNativeSessionState()
+	if got := codec.SuppressedErrorNotifications(); got != 0 {
+		t.Fatalf("rebind reset suppressed=%d", got)
+	}
+}

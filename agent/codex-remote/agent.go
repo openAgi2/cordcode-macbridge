@@ -132,6 +132,18 @@ func (a *Agent) WaitForRestore(ctx context.Context) error {
 // BackgroundTaskScanCounters exposes aggregate scan/request counters for the
 // management diagnostics endpoint. Values are advisory observations, not truth
 // used to synthesize task lists.
+// SuppressedErrorNotifications exposes the codec's aggregate duplicate-error
+// suppression counter without carrying error text or session identity.
+func (a *Agent) SuppressedErrorNotifications() uint64 {
+	a.mu.Lock()
+	codec := a.codec
+	a.mu.Unlock()
+	if codec == nil {
+		return 0
+	}
+	return codec.SuppressedErrorNotifications()
+}
+
 func (a *Agent) BackgroundTaskScanCounters() (active, scans, successes, failures, turnItemRequests, scannedTurns uint64, lastDurationMillis int64) {
 	return uint64(a.backgroundScanActive.Load()), a.backgroundScanTotal.Load(),
 		a.backgroundScanSuccesses.Load(), a.backgroundScanFailures.Load(),

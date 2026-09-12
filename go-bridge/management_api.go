@@ -345,6 +345,9 @@ func (s *ManagementServer) handleRuntimeDiagnostics(w http.ResponseWriter) {
 			continue
 		}
 		active, scans, successes, failures, itemRequests, turns, lastMillis := provider.BackgroundTaskScanCounters()
+		if suppressor, ok := agent.(passiveErrorSuppressionMetricsProvider); ok {
+			result["agentSuppressedErrors:"+backendID] = suppressor.SuppressedErrorNotifications()
+		}
 		result["agentBackgroundScans:"+backendID] = map[string]interface{}{
 			"activeScans": active, "scans": scans, "successes": successes,
 			"failures": failures, "turnItemRequests": itemRequests,
