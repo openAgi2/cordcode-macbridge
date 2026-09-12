@@ -116,3 +116,11 @@
 - Grok Build：`FAIL`。Mac 端发送 Grok Build session 消息后，iOS 未收到通知。
 - 本地取证：Grok Build 没有 service-level passive subscriber；默认 inline 模式无 leader socket，外部 turn 依赖 session-scoped `SubscribeSessionEvents`/updates tailer，未打开 session 不会启动。
 - 可用真值源：Grok 在 inline 与 leader 模式都追加 per-session `updates.jsonl`，且官方 session/update codec 已过滤 replay 标记。全局只读 journal watcher 可提供 replay-free live 观察而不驱动 Grok。
+
+### Grok replay-free 修复版本复测
+
+- 安装版本：`cordcode-bridge-runtime 0.1.0 (commit: 0722548559a4, built: 2026-09-12T08:27:21Z)`
+- 状态：等待 owner 复测
+- 部署证据：runtime ready；`backend=grokbuild` passive subscription started；启动时对一个 in-progress Grok turn 立即收到 live `text_delta`，说明 journal watcher 已生效并保留未完成 turn 尾部。
+- 复测动作：iOS 保持 Claude 默认模式且不打开/切换 session；在 Mac 端 Grok Build session 发送一个新回合，等待最多 10 秒。
+- 预期：iOS 收到 Grok completion 通知，正文为真实回复预览；无历史回放，Claude/Codex/DSH 已通过行为不受影响。

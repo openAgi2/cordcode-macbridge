@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T08:27:00Z",
+  "updated_at": "2026-09-12T08:29:00Z",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -217,7 +217,7 @@
       "title": "P1 Grok replay-free real-device regression",
       "description": "Verify a Grok Build session completed on Mac notifies iOS with actual response detail while the iOS Web App remains in Claude mode with no session open.",
       "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-grok-replay-free-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-dsh-replay-free-regression; owner authorization already granted.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Release build 0722548559a4 is installed and healthy. Runtime logs prove grokbuild passive subscription started and immediately observed live text from an in-progress turn; awaiting owner confirmation of a real-preview Grok completion notification.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-grok-replay-free-release-build.log", ".exec-plan/evidence/034334e9176f/p1-grok-replay-free-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T08:29:00Z"}
     },
     {
       "id": "p2-session-tag-impl",
