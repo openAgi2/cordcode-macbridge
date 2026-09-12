@@ -42,3 +42,15 @@
 - 复测动作：Web App 不打开目标 session，在 Mac 端完成一个新回合，等待最多 10 秒。
 - 预期：显示真实的 `CordCode · <会话标题>` 完成通知与回复预览；不得再显示「CordCode 推送数据错误」。
 - 已修复的服务端不变量：同一 replay-free turn 的 `target.eventId` 稳定为 `wplive-<hash[:32]>`；缺失 EventID 的 candidate 在服务端出站前被拒绝。
+
+### R1 EventID 后续失败记录
+
+- Owner 观察：session E 一个回合收到两条通知，一条为具体消息内容，另一条为「Mac 上的会话已完成，点击查看结果」。
+- Ledger/transcript 取证：同一 Claude turn 可先写一条无正文 `end_turn`，再写一条带正文 `end_turn`；watcher 对两条立即入队，ledger 只能阻止后续重试，不能撤销已在队列中的本次双发。
+- 判定：watcher 缺少 per-turn terminal 挂起/去重。
+
+### R2 历史回放失败记录
+
+- Owner 观察：session F 是 Mac 端当天第一次打开、已有数条历史消息的 session；发送消息 2 后，除新消息通知外还收到多条历史 completion 通知。
+- Ledger/transcript 取证：14:08 左右连续出站 7 条 `wplive-*`，逐条对应 session F 中既有历史 user turn；该 session 是 watcher 启动后才首次出现在 catalog 的旧文件。
+- 判定：watcher 把“首次可见”误判为“启动后新文件”并从 byte 0 消费。首次可见必须建立 baseline，不得回放历史。

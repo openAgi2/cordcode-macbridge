@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestClaudeWebPushWatcherNotifiesForNeverOpenedSessionWithoutProjection(t *testing.T) {
@@ -101,5 +102,196 @@ func TestClaudeWebPushWatcherDoesNotBackfillWhenEnrollmentStarts(t *testing.T) {
 	watcher.sweep()
 	if got := pipeline.Drain(); len(got) != 0 {
 		t.Fatalf("enrollment backfilled %d historical candidates", len(got))
+	}
+}
+
+func TestClaudeWebPushWatcherDoesNotBackfillFirstVisibleHistoricalSession(t *testing.T) {
+	enableKindGateForTest(t, WebPushKindCompletion)
+	projectsDir := t.TempDir()
+	workspace := catalogFixtureWorkspace(t, projectsDir, "push-first-visible")
+	projectDir := filepath.Join(projectsDir, "-tmp-push-first-visible")
+	if err := os.Mkdir(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	transcript := filepath.Join(projectDir, "first-visible-session.jsonl")
+	rows := ""
+	for i, reply := range []string{"old one", "old two", "old three"} {
+		rows += `{"uuid":"u-first-` + string(rune('a'+i)) + `","type":"user","timestamp":"2026-07-21T11:4` + string(rune('7'+i)) + `:00Z","cwd":"` + workspace + `","message":{"role":"user","content":"old prompt"}}` + "\n"
+		rows += `{"uuid":"a-first-` + string(rune('a'+i)) + `","parentUuid":"u-first-` + string(rune('a'+i)) + `","type":"assistant","timestamp":"2026-07-21T11:4` + string(rune('7'+i)) + `:01Z","cwd":"` + workspace + `","message":{"role":"assistant","content":[{"type":"text","text":"` + reply + `"}],"stop_reason":"end_turn"}}` + "\n"
+	}
+	if err := os.WriteFile(transcript, []byte(rows), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewHandlers()
+	h.claudeSessions = newClaudeSessionCatalog(projectsDir)
+	store := newTestWebPushStore(t)
+	if _, err := store.Register("dev_first_visible", testSubscriptionRecord("https://push.example.com/first-visible")); err != nil {
+		t.Fatal(err)
+	}
+	pipeline := NewWebPushCandidatePipeline(store)
+	h.SetWebPushStore(store)
+	h.SetWebPushPipeline(pipeline)
+	watcher := &claudeWebPushWatcher{h: h, states: make(map[claudeSessionKey]*claudeWebPushWatchState)}
+	watcher.sweep()
+	if got := pipeline.Drain(); len(got) != 0 {
+		t.Fatalf("first-visible historical session backfilled %d candidates", len(got))
+	}
+}
+
+func appendTranscriptFixture(t *testing.T, path, content string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(content); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClaudeWebPushWatcherDedupsTextlessThenTextTerminal(t *testing.T) {
+	enableKindGateForTest(t, WebPushKindCompletion)
+	projectsDir := t.TempDir()
+	workspace := catalogFixtureWorkspace(t, projectsDir, "push-terminal-dedup")
+	projectDir := filepath.Join(projectsDir, "-tmp-push-terminal-dedup")
+	if err := os.Mkdir(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := "terminal-dedup-session"
+	transcript := filepath.Join(projectDir, sessionID+".jsonl")
+	baseline := `{"uuid":"u-old","type":"user","timestamp":"2026-09-12T00:00:00Z","cwd":"` + workspace + `","message":{"role":"user","content":"old"}}` + "\n" +
+		`{"uuid":"a-old","parentUuid":"u-old","type":"assistant","timestamp":"2026-09-12T00:00:01Z","cwd":"` + workspace + `","message":{"role":"assistant","content":[{"type":"text","text":"old reply"}],"stop_reason":"end_turn"}}` + "\n"
+	if err := os.WriteFile(transcript, []byte(baseline), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandlers()
+	h.claudeSessions = newClaudeSessionCatalog(projectsDir)
+	store := newTestWebPushStore(t)
+	if _, err := store.Register("dev_dedup", testSubscriptionRecord("https://push.example.com/dedup")); err != nil {
+		t.Fatal(err)
+	}
+	pipeline := NewWebPushCandidatePipeline(store)
+	pipeline.SetBridgeID("brg_terminal_dedup")
+	h.SetWebPushStore(store)
+	h.SetWebPushPipeline(pipeline)
+	watcher := &claudeWebPushWatcher{h: h, states: make(map[claudeSessionKey]*claudeWebPushWatchState)}
+	watcher.sweep()
+	if got := pipeline.Drain(); len(got) != 0 {
+		t.Fatalf("baseline produced %d candidates", len(got))
+	}
+
+	firstTerminal := `{"uuid":"u-live","parentUuid":"a-old","type":"user","timestamp":"2026-09-12T00:01:00Z","cwd":"` + workspace + `","message":{"role":"user","content":"new"}}` + "\n" +
+		`{"uuid":"a-live-empty","parentUuid":"u-live","type":"assistant","timestamp":"2026-09-12T00:01:01Z","cwd":"` + workspace + `","message":{"role":"assistant","content":[],"stop_reason":"end_turn"}}` + "\n"
+	appendTranscriptFixture(t, transcript, firstTerminal)
+	watcher.sweep()
+	if got := pipeline.Drain(); len(got) != 0 {
+		t.Fatalf("textless terminal flushed early: %+v", got)
+	}
+
+	secondTerminal := `{"uuid":"a-live-text","parentUuid":"a-live-empty","type":"assistant","timestamp":"2026-09-12T00:01:04Z","cwd":"` + workspace + `","message":{"role":"assistant","content":[{"type":"text","text":"fresh answer"}],"stop_reason":"end_turn"}}` + "\n"
+	appendTranscriptFixture(t, transcript, secondTerminal)
+	watcher.sweep()
+	got := pipeline.Drain()
+	if len(got) != 1 {
+		t.Fatalf("candidates = %d, want one deduplicated candidate", len(got))
+	}
+	if got[0].SessionID != sessionID || got[0].AnchorID != "u-live" || got[0].ContentPreview != "fresh answer" {
+		t.Fatalf("candidate = %+v", got[0])
+	}
+	watcher.sweep()
+	if got := pipeline.Drain(); len(got) != 0 {
+		t.Fatalf("unchanged transcript produced %d duplicate candidates", len(got))
+	}
+}
+
+func TestClaudeWebPushWatcherFirstVisibleRetainsLiveCompletion(t *testing.T) {
+	enableKindGateForTest(t, WebPushKindCompletion)
+	projectsDir := t.TempDir()
+	workspace := catalogFixtureWorkspace(t, projectsDir, "push-first-live")
+	projectDir := filepath.Join(projectsDir, "-tmp-push-first-live")
+	if err := os.Mkdir(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := "first-live-session"
+	transcript := filepath.Join(projectDir, sessionID+".jsonl")
+	oldRows := `{"uuid":"u-old","type":"user","timestamp":"2026-07-21T11:47:00Z","cwd":"` + workspace + `","message":{"role":"user","content":"old"}}` + "\n" +
+		`{"uuid":"a-old","parentUuid":"u-old","type":"assistant","timestamp":"2026-07-21T11:47:01Z","cwd":"` + workspace + `","message":{"role":"assistant","content":[{"type":"text","text":"old reply"}],"stop_reason":"end_turn"}}` + "\n"
+	if err := os.WriteFile(transcript, []byte(oldRows), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandlers()
+	h.claudeSessions = newClaudeSessionCatalog(projectsDir)
+	store := newTestWebPushStore(t)
+	if _, err := store.Register("dev_first_live", testSubscriptionRecord("https://push.example.com/first-live")); err != nil {
+		t.Fatal(err)
+	}
+	pipeline := NewWebPushCandidatePipeline(store)
+	h.SetWebPushStore(store)
+	h.SetWebPushPipeline(pipeline)
+	watcher := &claudeWebPushWatcher{h: h, states: make(map[claudeSessionKey]*claudeWebPushWatchState)}
+	watcher.startedAt = time.Now().UTC().Add(-time.Second)
+	liveAt := time.Now().UTC().Format(time.RFC3339Nano)
+	liveRows := `{"uuid":"u-live","parentUuid":"a-old","type":"user","timestamp":"` + liveAt + `","cwd":"` + workspace + `","message":{"role":"user","content":"new"}}` + "\n" +
+		`{"uuid":"a-live","parentUuid":"u-live","type":"assistant","timestamp":"` + liveAt + `","cwd":"` + workspace + `","message":{"role":"assistant","content":[{"type":"text","text":"live reply"}],"stop_reason":"end_turn"}}` + "\n"
+	appendTranscriptFixture(t, transcript, liveRows)
+	watcher.sweep()
+	watcher.sweep()
+	got := pipeline.Drain()
+	if len(got) != 1 {
+		t.Fatalf("candidates = %d, want only the post-start live turn", len(got))
+	}
+	if got[0].SessionID != sessionID || got[0].AnchorID != "u-live" || got[0].ContentPreview != "live reply" {
+		t.Fatalf("candidate = %+v", got[0])
+	}
+}
+
+func TestClaudeWebPushWatcherTextlessTerminalUsesFallbackAfterHold(t *testing.T) {
+	prevHold := claudeWebPushTerminalHold
+	claudeWebPushTerminalHold = time.Millisecond
+	t.Cleanup(func() { claudeWebPushTerminalHold = prevHold })
+	enableKindGateForTest(t, WebPushKindCompletion)
+	projectsDir := t.TempDir()
+	workspace := catalogFixtureWorkspace(t, projectsDir, "push-terminal-fallback")
+	projectDir := filepath.Join(projectsDir, "-tmp-push-terminal-fallback")
+	if err := os.Mkdir(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	transcript := filepath.Join(projectDir, "fallback-session.jsonl")
+	baseline := `{"uuid":"u-old","type":"user","timestamp":"2026-09-12T00:00:00Z","cwd":"` + workspace + `","message":{"role":"user","content":"old"}}` + "\n" +
+		`{"uuid":"a-old","parentUuid":"u-old","type":"assistant","timestamp":"2026-09-12T00:00:01Z","cwd":"` + workspace + `","message":{"role":"assistant","content":[{"type":"text","text":"old reply"}],"stop_reason":"end_turn"}}` + "\n"
+	if err := os.WriteFile(transcript, []byte(baseline), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandlers()
+	h.claudeSessions = newClaudeSessionCatalog(projectsDir)
+	store := newTestWebPushStore(t)
+	if _, err := store.Register("dev_fallback", testSubscriptionRecord("https://push.example.com/fallback")); err != nil {
+		t.Fatal(err)
+	}
+	pipeline := NewWebPushCandidatePipeline(store)
+	h.SetWebPushStore(store)
+	h.SetWebPushPipeline(pipeline)
+	watcher := &claudeWebPushWatcher{h: h, states: make(map[claudeSessionKey]*claudeWebPushWatchState)}
+	watcher.sweep()
+	if got := pipeline.Drain(); len(got) != 0 {
+		t.Fatalf("baseline produced %d candidates", len(got))
+	}
+	live := `{"uuid":"u-live","parentUuid":"a-old","type":"user","timestamp":"2026-09-12T00:01:00Z","cwd":"` + workspace + `","message":{"role":"user","content":"new"}}` + "\n" +
+		`{"uuid":"a-live","parentUuid":"u-live","type":"assistant","timestamp":"2026-09-12T00:01:01Z","cwd":"` + workspace + `","message":{"role":"assistant","content":[],"stop_reason":"end_turn"}}` + "\n"
+	appendTranscriptFixture(t, transcript, live)
+	watcher.sweep()
+	if got := pipeline.Drain(); len(got) != 0 {
+		t.Fatalf("textless terminal flushed before hold: %+v", got)
+	}
+	time.Sleep(2 * time.Millisecond)
+	watcher.sweep()
+	got := pipeline.Drain()
+	if len(got) != 1 || got[0].ContentPreview != "" {
+		t.Fatalf("fallback candidate = %+v, want one with empty real preview", got)
 	}
 }

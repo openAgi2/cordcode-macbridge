@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T06:05:00Z",
+  "updated_at": "2026-09-12T06:23:00Z",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -111,8 +111,29 @@
       "id": "p1-replay-free-event-id-regression",
       "title": "P1 replay-free eventId real-device regression",
       "description": "Verify an unopened-session completion on the installed build shows the real session completion notification rather than the fixed SW schema-error notification, then continue the original unopened/offline matrices.",
-      "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-replay-free-event-id-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-unopened-session-push-review-fix-regression; owner authorization already granted.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Release build 8bdbaa805f8c is installed and healthy; Codex Remote live observer connected. Awaiting owner confirmation that a never-opened session completion shows the real notification rather than the SW schema-error notification.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-replay-free-event-id-release-build.log", ".exec-plan/evidence/034334e9176f/p1-replay-free-event-id-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T06:05:00Z"}
+      "status": "blocked", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-replay-free-event-id-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-unopened-session-push-review-fix-regression; blocked by Claude watcher terminal dedup and first-visible baseline repair; owner authorization already granted.",
+      "verification": {"required": true, "status": "failed", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Payload schema is now valid, but the Claude watcher double-queued textless and text-bearing terminal rows for one turn and replayed history from a transcript that first became visible after startup.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T06:09:00Z"}
+    },
+    {
+      "id": "p1-claude-watcher-dedup-baseline-impl",
+      "title": "P1 Claude watcher terminal dedup and first-visible baseline repair",
+      "description": "Baseline every Claude transcript when the watcher first observes it, and hold/deduplicate per-turn terminal candidates so textless and text-bearing end_turn rows produce exactly one notification with the available real preview.",
+      "status": "done", "phase": "p1-review-fix", "kind": "impl", "depends_on": ["p1-replay-free-event-id-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-replay-free-event-id-regression",
+      "verification": {"required": true, "status": "present", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "The Claude watcher now baselines first-visible rows timestamped before watcher startup while retaining post-startup live completions, holds one terminal candidate per logical turn until real text arrives or a bounded fallback hold elapses, and resets ownership when an interactive relay takes over.", "artifacts": ["go-bridge/claude_web_push_watcher.go:claudeFirstVisibleLiveCut", "go-bridge/claude_web_push_watcher.go:flushTerminal", "docs/2026-09-12-remote-web-push-badge-and-collapse-plan.md:A0"], "checked_at": "2026-09-12T06:23:00Z"}
+    },
+    {
+      "id": "p1-claude-watcher-dedup-baseline-tests",
+      "title": "P1 Claude watcher dedup and baseline automated tests",
+      "description": "Prove first-visible historical transcripts never backfill, one turn with textless then text-bearing terminal rows emits exactly one candidate with real preview, unchanged transcripts emit none, and pending textless terminals eventually use the honest fallback.",
+      "status": "done", "phase": "p1-review-fix", "kind": "tests", "depends_on": ["p1-claude-watcher-dedup-baseline-impl"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-replay-free-event-id-regression",
+      "verification": {"required": true, "status": "present", "method": "automated", "attestation": "re-verified", "na_reason": null, "summary": "Full Go suite passed. Focused tests prove first-visible pre-start history does not backfill, post-start live completion is retained, textless then text-bearing terminal rows yield exactly one real-preview candidate, and a genuinely textless terminal yields one bounded fallback candidate.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-claude-watcher-dedup-baseline-all-go-tests.log", "go-bridge/claude_web_push_watcher_test.go"], "checked_at": "2026-09-12T06:23:00Z"}
+    },
+    {
+      "id": "p1-claude-watcher-dedup-baseline-regression",
+      "title": "P1 Claude watcher dedup and baseline real-device regression",
+      "description": "Verify a never-opened session with history emits only the new turn notification once, with real content rather than a duplicate generic fallback, and no historical turns are replayed.",
+      "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-claude-watcher-dedup-baseline-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-replay-free-event-id-regression; owner authorization already granted.",
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
     },
     {
       "id": "p2-session-tag-impl",
