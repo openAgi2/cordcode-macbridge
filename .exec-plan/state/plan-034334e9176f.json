@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T04:39:00Z",
+  "updated_at": "2026-09-12T05:50:00Z",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -76,22 +76,22 @@
       "id": "p1-unopened-session-push-review-fix-impl",
       "title": "P1 unopened-session push delivery review fix",
       "description": "Decouple live passive completion push candidacy from Web App session observation/projection state so an enrolled device receives completion notifications for never-opened sessions, while preserving the single timeline-ingest owner and preventing hydrate/replay notifications.",
-      "status": "in_progress", "phase": "p1-review-fix", "kind": "impl", "depends_on": ["p1-session-topic-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-session-topic-regression",
-      "verification": {"required": true, "status": "missing", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "status": "done", "phase": "p1-review-fix", "kind": "impl", "depends_on": ["p1-session-topic-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-session-topic-regression",
+      "verification": {"required": true, "status": "present", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "Commit 6383990 adds a replay-free live event seam for Codex Remote and a baseline-cut Claude transcript watcher so never-opened sessions produce completion candidates without observation, thread attachment, historical backfill, or hidden projection state.", "artifacts": ["commit:6383990", "core/interfaces.go:LiveEventSubscriber", "agent/codex-remote/session.go:SubscribeLive", "go-bridge/claude_web_push_watcher.go", "go-bridge/web_push_producer.go:enqueueReplayFreeLivePush", "docs/2026-09-12-remote-web-push-badge-and-collapse-plan.md:A0"], "checked_at": "2026-09-12T04:40:00Z"}
     },
     {
       "id": "p1-unopened-session-push-review-fix-tests",
       "title": "P1 unopened-session push automated tests",
       "description": "Add and run focused tests proving a live passive terminal for a never-observed session produces exactly one candidate, observed/relayed paths do not duplicate it, non-terminal and replay/hydrate paths remain excluded, and Claude/Codex backend identities remain scoped.",
-      "status": "pending", "phase": "p1-review-fix", "kind": "tests", "depends_on": ["p1-unopened-session-push-review-fix-impl"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-session-topic-regression",
-      "verification": {"required": true, "status": "missing", "method": "automated", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "status": "done", "phase": "p1-review-fix", "kind": "tests", "depends_on": ["p1-unopened-session-push-review-fix-impl"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-session-topic-regression",
+      "verification": {"required": true, "status": "present", "method": "automated", "attestation": "re-verified", "na_reason": null, "summary": "The complete Go suite passed, followed by a fresh focused re-run proving unattached Codex live delivery, Claude baseline/no-backfill behavior, never-opened Claude completion delivery, non-terminal rejection, and no hidden projection creation.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-unopened-session-review-fix-all-go-tests.log", ".exec-plan/evidence/034334e9176f/p1-unopened-session-review-fix-tests-audit.log", "go-bridge/claude_web_push_watcher_test.go", "agent/codex-remote/session_test.go:TestSubscribeLiveReceivesUnattachedThreadEvent", "go-bridge/web_push_producer_test.go:TestReplayFreeLivePushNotifiesWithoutCreatingProjection"], "checked_at": "2026-09-12T04:43:00Z"}
     },
     {
       "id": "p1-unopened-session-push-review-fix-regression",
       "title": "P1 unopened-session push real-device regression",
       "description": "On the installed Home Screen Web App, verify never-opened Claude and Codex sessions notify after Mac-side completion, then rerun the original genuinely-offline same-session Topic collapse matrix.",
-      "status": "pending", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-unopened-session-push-review-fix-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-session-topic-regression; owner authorization already granted for this real-device scope.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-unopened-session-push-review-fix-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-session-topic-regression; owner authorization already granted for this real-device scope.",
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Release build 638399047205 is installed and healthy; Codex Remote live observer successfully connected after pairing. Awaiting owner confirmation for never-opened Claude/Codex sessions and the original offline Topic collapse matrix.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-unopened-session-review-fix-release-build.log", ".exec-plan/evidence/034334e9176f/p1-unopened-session-review-fix-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T05:50:00Z"}
     },
     {
       "id": "p2-session-tag-impl",
