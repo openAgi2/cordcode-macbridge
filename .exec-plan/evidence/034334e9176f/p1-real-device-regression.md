@@ -131,3 +131,11 @@
 - OpenCode Web：`FAIL`。Mac 端 OpenCode Web session 完成后，iOS 未收到通知。
 - 本地取证：opencode-web 全局 SSE 已收到同一未打开 session 的 `turn_started`、多帧 `text_delta` 和 `turn_completed`；但该 backend 只实现普通 `EventSubscriber`，completion 仍被 observation/kernel gate 挡掉。
 - 协议事实：OpenCode `/global/event` 无 cursor；不能把原始流直接标成 replay-free，必须按 observed turn lifecycle 过滤并消费一次。
+
+### OpenCode Web replay-free 修复版本复测
+
+- 安装版本：`cordcode-bridge-runtime 0.1.0 (commit: 69722268d0d6, built: 2026-09-12T08:40:58Z)`
+- 状态：等待 owner 复测
+- 部署证据：runtime ready；opencode-web generation 1.18 `/global/event` SSE subscriber connected；opencode-web passive subscription started。
+- 复测动作：iOS 保持 Claude 默认模式且不打开/切换 session；在 Mac 端 OpenCode Web session 发送一个新回合，等待最多 10 秒。
+- 预期：iOS 收到 OpenCode Web completion 通知，正文为真实回复预览；无历史回放，Claude/Codex/DSH/Grok 已通过行为不受影响。

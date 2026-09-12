@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T08:39:00Z",
+  "updated_at": "2026-09-12T08:42:00Z",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -238,7 +238,7 @@
       "title": "P1 OpenCode Web replay-free real-device regression",
       "description": "Verify an OpenCode Web session completed on Mac notifies iOS with actual response detail while the iOS Web App remains in Claude mode with no session open.",
       "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-opencode-web-replay-free-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-grok-replay-free-regression; owner authorization already granted.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Release build 69722268d0d6 is installed and healthy. Runtime logs prove opencode-web generation 1.18 /global/event SSE connected and passive subscription started; awaiting owner confirmation of a real-preview OpenCode completion notification.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-opencode-web-replay-free-release-build.log", ".exec-plan/evidence/034334e9176f/p1-opencode-web-replay-free-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T08:42:00Z"}
     },
     {
       "id": "p2-session-tag-impl",
