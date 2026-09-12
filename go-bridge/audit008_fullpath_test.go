@@ -275,7 +275,7 @@ func newAuditHarnessWithOptions(t *testing.T, configure func(*ssePushServe)) (*H
 	// The passive subscription is the second consumer the audit convicted.
 	pctx, pcancel := context.WithCancel(context.Background())
 	t.Cleanup(pcancel)
-	go startPassiveSubscription(pctx, h, "opencode-web", subscriber)
+	go startPassiveSubscription(pctx, h, "opencode-web", subscriber.Subscribe, false)
 
 	// Determinism: wait until the passive tap is attached before injecting.
 	deadline := time.After(5 * time.Second)

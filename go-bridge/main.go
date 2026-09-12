@@ -253,8 +253,10 @@ func Main() {
 		}
 		slog.Info("go-bridge: agent registered", "backendId", id, "agent", agentName, "workDir", *workDir)
 
-		if sub, ok := agent.(core.EventSubscriber); ok && shouldStartPassiveSubscription(id, *codexBackend, *codexAppServerURL, *ocBaseURL, *ocwBaseURL) {
-			go startPassiveSubscription(ctx, handlers, id, sub)
+		if sub, ok := agent.(core.LiveEventSubscriber); ok {
+			go startPassiveSubscription(ctx, handlers, id, sub.SubscribeLive, true)
+		} else if sub, ok := agent.(core.EventSubscriber); ok && shouldStartPassiveSubscription(id, *codexBackend, *codexAppServerURL, *ocBaseURL, *ocwBaseURL) {
+			go startPassiveSubscription(ctx, handlers, id, sub.Subscribe, false)
 		}
 
 		// opencode: also register a direct HTTP proxy
@@ -301,6 +303,7 @@ func Main() {
 		})
 		webPushDispatcher.Start()
 		defer webPushDispatcher.Stop()
+		handlers.StartClaudeWebPushWatcher(ctx)
 	}
 	advertisedLocalURL := BuildBridgeLocalURL(ResolveAdvertisedHost(), *port)
 	// advertisedLocalURLs:全部 LAN 直连候选(主候选 advertisedLocalURL 在前),用于 relay-first completion
@@ -389,8 +392,8 @@ func Main() {
 			RuntimeIdentity: admission.RuntimeIdentity{
 				PID: int32(os.Getpid()), BridgeEpoch: managementBridgeEpoch(bridgeEpoch),
 			},
-			TopologyProvider:   topologyProvider,
-			ClaudeHookHolder:   claudeHooks,
+			TopologyProvider: topologyProvider,
+			ClaudeHookHolder: claudeHooks,
 		}
 		mgmtSrv = NewManagementServer(mgmtCfg)
 
@@ -865,12 +868,12 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string, sub core.EventSubscriber) {
+func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string, subscribe func(context.Context) (<-chan core.Event, error), replayFreeLive bool) {
 	backoff := 2 * time.Second
 	maxBackoff := 60 * time.Second
 
 	for {
-		events, err := sub.Subscribe(ctx)
+		events, err := subscribe(ctx)
 		if err != nil {
 			slog.Error("go-bridge: passive subscribe failed", "backend", backendID, "error", err)
 			select {
@@ -939,11 +942,13 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 			// catalog/control-only (§6.5): the registry bookkeeping above
 			// already ran; feeding the Kernel here would build a hidden
 			// timeline for a session nobody opened.
+			agentRelayRunning := h.agentRelayRunningFor(ev.SessionID)
+			hasObservation := h.observation != nil && h.observation.HasSessionInterest(backendID, ev.SessionID)
 			hasKernelState := h.projectionKernel != nil &&
 				h.projectionKernel.HasReducerState(backendID, ev.SessionID)
 			if ev.SessionID == "" || passiveFeedAllowed(
-				h.agentRelayRunningFor(ev.SessionID),
-				h.observation != nil && h.observation.HasSessionInterest(backendID, ev.SessionID),
+				agentRelayRunning,
+				hasObservation,
 				hasKernelState,
 				eventName) {
 				h.deltaBatcher.Send(LogicalEvent{
@@ -958,6 +963,10 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 					// 该分支不可达）。只认 terminal completion。
 					PushIntent: pushIntentForPassiveEvent(h.projectionKernel, backendID, ev.SessionID, eventName, data, h.webPushTitles.get(backendID, ev.SessionID)),
 				})
+			} else if replayFreeLive && !agentRelayRunning {
+				// The service-level source proves this is a new live notification. Keep
+				// the session out of the Kernel while still notifying enrolled devices.
+				h.enqueueReplayFreeLivePush(backendID, ev.SessionID, eventName, data, h.webPushTitles.get(backendID, ev.SessionID), ev.Content)
 			}
 		}
 		slog.Info("go-bridge: passive subscription ended, reconnecting", "backend", backendID)

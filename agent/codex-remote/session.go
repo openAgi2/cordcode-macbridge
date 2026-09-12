@@ -287,11 +287,47 @@ func (a *Agent) dispatch(ev core.Event) {
 	}
 }
 
+// SubscribeLive exposes the Remote connection's central notification pump without
+// attaching or resuming any thread. The pump contains only notifications observed
+// on the current connection epoch, so this channel never replays cold history.
+// This lets MacBridge notify for a Mac-side completion even when no Web client has
+// opened that thread. Thread-specific listeners remain unchanged.
+func (a *Agent) SubscribeLive(ctx context.Context) (<-chan core.Event, error) {
+	a.mu.Lock()
+	if a.client == nil {
+		a.mu.Unlock()
+		return nil, ErrNotConfigured
+	}
+	ch := make(chan core.Event, 256)
+	if a.passiveObservers == nil {
+		a.passiveObservers = map[chan core.Event]struct{}{}
+	}
+	a.passiveObservers[ch] = struct{}{}
+	a.mu.Unlock()
+
+	go func() {
+		<-ctx.Done()
+		a.mu.Lock()
+		if _, ok := a.passiveObservers[ch]; ok {
+			delete(a.passiveObservers, ch)
+			close(ch)
+		}
+		a.mu.Unlock()
+	}()
+	return ch, nil
+}
+
 func (a *Agent) dispatchForClient(cl *Client, ev core.Event) {
 	a.mu.Lock()
 	if a.client != cl {
 		a.mu.Unlock()
 		return
+	}
+	for ch := range a.passiveObservers {
+		select {
+		case ch <- ev:
+		default:
+		}
 	}
 	set := a.listeners[ev.ThreadID]
 	var chans []chan core.Event

@@ -227,3 +227,27 @@ func TestProducerKeyLayoutMatchesLedgerContract(t *testing.T) {
 		t.Fatalf("ledger hash leaks key fields: %q", hash)
 	}
 }
+
+func TestReplayFreeLivePushNotifiesWithoutCreatingProjection(t *testing.T) {
+	enableKindGateForTest(t, WebPushKindCompletion)
+	h := NewHandlers()
+	pipeline, _ := newCandidatePipelineForTest(t)
+	h.SetWebPushPipeline(pipeline)
+	if !h.enqueueReplayFreeLivePush("codex-remote", "never-opened", "turn_completed", map[string]interface{}{
+		"turnId": "turn-live",
+	}, "Unopened", "finished") {
+		t.Fatal("replay-free live completion was not accepted")
+	}
+	got := pipeline.Drain()
+	if len(got) != 1 || got[0].SessionID != "never-opened" || got[0].AnchorID != "turn-live" {
+		t.Fatalf("candidate = %+v", got)
+	}
+	if h.projectionKernel.HasReducerState("codex-remote", "never-opened") {
+		t.Fatal("replay-free notification created hidden projection state")
+	}
+	if h.enqueueReplayFreeLivePush("codex-remote", "never-opened", "text_delta", map[string]interface{}{
+		"turnId": "turn-live",
+	}, "", "") {
+		t.Fatal("non-terminal event entered replay-free notification path")
+	}
+}

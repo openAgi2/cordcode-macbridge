@@ -2,6 +2,7 @@ package gobridge
 
 import (
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -205,4 +206,30 @@ func pushIntentForPassiveEvent(kernel *ProjectionKernel, backendID, sessionID, e
 		return nil
 	}
 	return pushIntentForRelayTerminal(kernel, backendID, sessionID, eventName, data, sessionTitle, "")
+}
+
+// enqueueReplayFreeLivePush is the notification-only path for a source that has
+// already proven the event is newly observed live data. It never publishes a
+// timeline event and therefore never creates reducer state for an unopened session.
+func (h *Handlers) enqueueReplayFreeLivePush(backendID, sessionID, eventName string, data interface{}, sessionTitle, preview string) bool {
+	if h == nil || backendID == "" || sessionID == "" || eventName != "turn_completed" {
+		return false
+	}
+	intent := pushIntentForRelayTerminal(nil, backendID, sessionID, eventName, data, sessionTitle, preview)
+	if intent == nil {
+		return false
+	}
+	h.mu.Lock()
+	pipeline := h.webPushPipeline
+	h.mu.Unlock()
+	if pipeline == nil {
+		return false
+	}
+	pipeline.IngestReplayFreeLive(WebPushCandidate{
+		BackendID: backendID, SessionID: sessionID, Kind: intent.Kind,
+		NotificationKey: intent.NotificationKey, AnchorKind: intent.AnchorKind,
+		AnchorID: intent.AnchorID, SessionTitle: intent.SessionTitle,
+		ContentPreview: intent.ContentPreview, ReceivedAt: time.Now().UTC().UnixMilli(),
+	})
+	return true
 }

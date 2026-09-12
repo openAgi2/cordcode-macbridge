@@ -122,6 +122,18 @@ func (p *WebPushCandidatePipeline) Ingest(candidate WebPushCandidate, result Pro
 	}
 }
 
+// IngestReplayFreeLive accepts a candidate from a source whose interface contract
+// guarantees that it is a newly observed live event, not hydrate/resume/history
+// replay. It intentionally bypasses projection tri-state gating: unopened sessions
+// must not require a hidden projection merely to produce a completion notification.
+// NotificationKey + the persistent delivery ledger remain the idempotency boundary.
+func (p *WebPushCandidatePipeline) IngestReplayFreeLive(candidate WebPushCandidate) {
+	if p == nil {
+		return
+	}
+	p.enqueueLocked(candidate)
+}
+
 // enqueueLocked 名字沿用"非阻塞"语义：绝不阻塞；queue 满时 fail closed。
 // ledger 去重走 store 内存 map（ mutex 保护的小读，不做磁盘 IO）。
 func (p *WebPushCandidatePipeline) enqueueLocked(candidate WebPushCandidate) {

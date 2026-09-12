@@ -166,6 +166,36 @@ deltas:
 	}
 }
 
+func TestSubscribeLiveReceivesUnattachedThreadEvent(t *testing.T) {
+	agent := New(nil)
+	client := &Client{}
+	agent.mu.Lock()
+	agent.client = client
+	agent.mu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	events, err := agent.SubscribeLive(ctx)
+	if err != nil {
+		t.Fatalf("SubscribeLive: %v", err)
+	}
+	want := core.Event{Type: core.EventResult, ThreadID: "never-attached", SessionID: "never-attached", TurnID: "turn-live", Done: true}
+	agent.dispatchForClient(client, want)
+	select {
+	case got := <-events:
+		if got.ThreadID != want.ThreadID || got.TurnID != want.TurnID || !got.Done {
+			t.Fatalf("live event = %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("unattached thread event did not reach live observer")
+	}
+	agent.mu.Lock()
+	listeners := len(agent.listeners)
+	agent.mu.Unlock()
+	if listeners != 0 {
+		t.Fatalf("SubscribeLive attached %d thread listeners", listeners)
+	}
+	cancel()
+}
+
 func TestProjectionAttachReceivesDesktopTurnBeforeAnySend(t *testing.T) {
 	clientConn, hostConn := LoopbackPair()
 	stream := NewStream(clientConn, "client_projection", "env_desktop", "stream_projection")

@@ -1,6 +1,6 @@
 # P1 真机离线 Topic 回归
 
-- 状态：等待 owner 观察
+- 状态：`FAIL`（前置投递范围缺陷，尚未进入离线 Topic 折叠断言）
 - 测试设备：已连接的 iPhone 16 Pro（真机）
 - MacBridge 安装产物：`cordcode-bridge-runtime 0.1.0 (commit: d3031bc593af, built: 2026-09-12T04:30:45Z)`
 - 前置条件：iPhone 主屏幕 Web App 已安装且通知权限开启；使用一个测试会话；不要用普通锁屏代替真正断网。
@@ -11,9 +11,8 @@
 
 ## Owner 结果
 
-- 结果：`PENDING`（请填写 `PASS` 或 `FAIL`）
-- 实际收到的该会话通知数：待填写
-- 最新通知是否对应最后一个完成回合：待填写
-- 异常现象：待填写
-- 观察时间：待填写
-
+- 结果：`FAIL`
+- 实际观察：iOS Web App 从未打开过的 Claude/Codex session，在 Mac 端完成回合后不产生通知；一旦 Web App 打开过该 session，后续 Mac 端完成回合可以收到通知。
+- 对照：Claude session A 打开后可收到 A；未打开的 session B 不通知，打开 B 后可收到 B，随后切回 A 的 Mac 端完成仍可收到 A。
+- 判定：推送候选错误依赖 session observation/projection 初始化，导致未打开 session 的 completion 被过滤。原离线折叠矩阵尚不能成立。
+- 观察时间：2026-09-12（owner 自述）

@@ -23,6 +23,7 @@ type Agent struct {
 	client             *Client
 	codec              *LiveCodec
 	listeners          map[string]map[chan core.Event]struct{}
+	passiveObservers   map[chan core.Event]struct{}
 	attached           map[string]*Client
 	resumeInitialPages map[string]*resumeInitialPage
 	resumePageBroken   bool
@@ -79,6 +80,7 @@ func New(opts map[string]any) *Agent {
 func (a *Agent) Name() string { return BackendID }
 
 var _ core.CatalogRefreshSignaler = (*Agent)(nil)
+var _ core.LiveEventSubscriber = (*Agent)(nil)
 
 // CatalogRefreshSignals exposes official catalog-affecting notifications to
 // the Bridge discovery worker. The signal is deliberately data-free:

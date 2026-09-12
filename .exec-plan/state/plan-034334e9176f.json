@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T04:37:00Z",
+  "updated_at": "2026-09-12T04:39:00Z",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -69,8 +69,29 @@
       "kind": "regression",
       "depends_on": ["p1-session-topic-tests"],
       "source": "§7 real-device matrix #4",
-      "notes": "Release product from commit d3031bc593af is installed and healthy. External blocker now narrowed to the owner-only physical observation: keep the iPhone genuinely offline for 10 minutes while at least three turns complete in one session, restore network, then report count/latest-message result.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Build, product installation, runtime identity, and bridge health are proven; the required physical offline delivery observation is still pending and cannot be replaced by simulated or cached evidence.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-release-build.log", ".exec-plan/evidence/034334e9176f/p1-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-management-status.json", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T04:37:00Z"}
+      "notes": "Repairable-heavy regression failure reported by owner: completion pushes were delivered only for sessions previously opened in the iOS Home Screen Web App; unopened Claude and Codex sessions produced no notification. review-fix-for:p1-session-topic-regression",
+      "verification": {"required": true, "status": "failed", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Owner observation proves the prerequisite delivery surface is incomplete: passive completion events for never-opened sessions do not become Web Push candidates. Topic offline-collapse cannot be accepted until this is repaired and the original matrix is rerun.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-release-build.log", ".exec-plan/evidence/034334e9176f/p1-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-management-status.json", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T04:38:00Z"}
+    },
+    {
+      "id": "p1-unopened-session-push-review-fix-impl",
+      "title": "P1 unopened-session push delivery review fix",
+      "description": "Decouple live passive completion push candidacy from Web App session observation/projection state so an enrolled device receives completion notifications for never-opened sessions, while preserving the single timeline-ingest owner and preventing hydrate/replay notifications.",
+      "status": "in_progress", "phase": "p1-review-fix", "kind": "impl", "depends_on": ["p1-session-topic-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-session-topic-regression",
+      "verification": {"required": true, "status": "missing", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+    },
+    {
+      "id": "p1-unopened-session-push-review-fix-tests",
+      "title": "P1 unopened-session push automated tests",
+      "description": "Add and run focused tests proving a live passive terminal for a never-observed session produces exactly one candidate, observed/relayed paths do not duplicate it, non-terminal and replay/hydrate paths remain excluded, and Claude/Codex backend identities remain scoped.",
+      "status": "pending", "phase": "p1-review-fix", "kind": "tests", "depends_on": ["p1-unopened-session-push-review-fix-impl"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-session-topic-regression",
+      "verification": {"required": true, "status": "missing", "method": "automated", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+    },
+    {
+      "id": "p1-unopened-session-push-review-fix-regression",
+      "title": "P1 unopened-session push real-device regression",
+      "description": "On the installed Home Screen Web App, verify never-opened Claude and Codex sessions notify after Mac-side completion, then rerun the original genuinely-offline same-session Topic collapse matrix.",
+      "status": "pending", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-unopened-session-push-review-fix-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-session-topic-regression; owner authorization already granted for this real-device scope.",
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
     },
     {
       "id": "p2-session-tag-impl",

@@ -66,6 +66,13 @@ Owner 2026-09-11 报「web App 收不到通知」，排查后闭环：
 
 折叠的根因是**条数**：每个回合一条、`tag`/`Topic` 都按通知唯一，几十条自然堆成一叠。本版明确同时实施 A1+A2；A3 移出本轮。
 
+### A0. 投递覆盖不依赖客户端打开 session（前置不变量）
+
+- 有效 Web Push enrollment 面向该设备可见的 backend completion，不得以 Web App 当前 backend、当前 session、`set_observation_scope`、session subscriber 或 reducer 是否已 hydrate 作为候选资格。客户端从未打开过的 session 也必须通知。
+- 仍保持单一 timeline ingest owner：不得为了发送通知给未打开 session 构造隐藏 projection。服务级 backend 使用明确的 replay-free live event seam；Claude Code 没有全局事件 API，使用启动时建立 byte cut 的 transcript 增量观察，只消费 enrollment 期间新增的完整记录。
+- 两条通知-free 路径都只接受真实 live completion，并继续使用每回合唯一 notification key 做持久化幂等；hydrate、history、resume replay、启动时已有 transcript、开启通知之前积累的历史记录均不得补发。
+- session 已被交互 relay/observation 接管时，通知-only observer 只推进自己的 source cut，不与现有 ingest owner 竞争，也不重复产生候选。
+
 ### A1. 稳定的 `Topic`（低风险，建议直接做）
 
 - `Topic` 是 RFC 8030 的**离线合并**机制：同一 Topic 的**待发**通知只保留最新一条（已投递的不受影响）。
@@ -169,7 +176,7 @@ deviceId -> {
 
 | 批次 | 内容 | 依赖 | 可独立验收 |
 | --- | --- | --- | --- |
-| P1 | 提取唯一 `sessionAggregationKey` helper；A1 Topic 改为按 `(backendId, sessionId)` 稳定 | 无 | 两个 backend 的同名 session 不碰撞；Topic ≤32 且字符合法；真实离线期间同会话只交付最新待发消息 |
+| P1 | 落实 A0 未打开 session 的投递覆盖；提取唯一 `sessionAggregationKey` helper；A1 Topic 改为按 `(backendId, sessionId)` 稳定 | 无 | 从未打开的 Claude/Codex session completion 均通知且不创建隐藏 projection；两个 backend 的同名 session 不碰撞；Topic ≤32 且字符合法；真实离线期间同会话只交付最新待发消息 |
 | P2 | A2 tag 与 Topic 共用同一聚合键 | P1 | 真机：通知中心同会话只留最新一条，不同会话各留一条 |
 | P3 | 按设备持久化 badge state、bindingId、revision 分配；payload 加 badge 元组；协议、schema、夹具同步 | P1 | 多设备独立；同会话多回合只计 1；MacBridge 重启后状态保留；badge 文件损坏不阻断通知 |
 | P4 | `get_push_badge_state` / `acknowledge_push_badge` RPC；SW revision 水位；页面 get→ack single-flight；disable/重绑定生命周期 | P3 | 乱序 push 不回退数字；打开或点通知后只确认查询 revision 之前的更新；期间新 completion 不被误清；关闭通知后不再恢复角标 |
@@ -183,6 +190,7 @@ deviceId -> {
 
 **自动化**
 
+- producer/source 单测：replay-free Codex live completion 在零 observation、零 reducer state 时仍产生恰好一个候选；Claude watcher 首次启动及 enrollment 前历史只建立 cut、不补发，未打开 session 的新增 terminal 产生候选，交互 relay 接管时不重复；两条路径都不得创建隐藏 projection。
 - SW 单测：badge 三字段全有才解析，部分缺省/格式错误/数字越界时整组剔除且通知照弹；`setAppBadge` 不存在或 reject 时通知仍弹；同 binding 的 rev2 先于 rev1 到达时最终保持 rev2；旧 binding payload 不设角标。
 - Mac store 单测：设备 A/B 隔离；同会话重复只计 1；不同 backend 同 sessionId 计 2；4096 边界与 saturated 恢复；持久化重启；损坏/写失败时字段缺省；同 bindingId register 幂等、新 bindingId 清空旧状态、同 binding 换 subscription 拒绝、unregister/revoke 清理。
 - dispatcher 单测：两个 worker 同设备并发取得不同且单调的 revision；不同设备独立；失败投递保留已观察更新；后续成功 payload 收敛；badge store 失败不阻断通知；Topic/tag 共用聚合键且 ≤32 字符。
@@ -192,6 +200,7 @@ deviceId -> {
 
 **真机矩阵（owner）**
 
+0. Web App 保持默认 backend 且不打开任何 session：分别在 Mac 端完成一个从未由 Web App 打开过的 Claude session 和 Codex session，两者都必须收到通知；随后打开其中一个 session 不得导致历史 completion 补发。
 1. 已安装 web app、通知与徽标权限均开：两个不同会话完成后角标为 2；其中任一会话再次完成仍为 2。
 2. 关掉 iOS 的「徽标」开关：通知照常弹、图标不出数字、web 端无任何报错（该开关对 web 不可见，属平台预期）。
 3. 同一会话连续完成多个回合：通知中心只留最新一条，角标只计 1；不同会话各保留一条。

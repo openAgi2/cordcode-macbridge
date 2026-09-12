@@ -999,6 +999,15 @@ type EventSubscriber interface {
 	Subscribe(ctx context.Context) (<-chan Event, error)
 }
 
+// LiveEventSubscriber is the replay-free variant used by service-level transports
+// whose stream contains only notifications observed after subscription. Callers may
+// use this stronger provenance to drive side effects (for example Web Push) without
+// first materializing an otherwise-unobserved session projection. Implementations
+// must not emit hydrate, resume replay, or cold-history rows through this interface.
+type LiveEventSubscriber interface {
+	SubscribeLive(ctx context.Context) (<-chan Event, error)
+}
+
 // ErrObserverNotReady means the backend observer connection is not up yet
 // (typically still backing off after go-bridge start). set_observation_scope
 // must not report success in this state.
