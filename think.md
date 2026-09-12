@@ -1,5 +1,87 @@
 # 后续计划索引（待办另案总账）
 
+## 2026-09-12 codex goal 四轮连环：改生命周期要枚举重置点、「最后一词定终身」与 iOS 真机取证三件套
+
+四轮真机修复（双卡→伪中断→重连冻结→/goal 卡错位→思考卡对齐），可复用经验：
+
+1. **扩大状态作用域时，必须枚举旧作用域赖以消亡的所有清理点**。把 collab fold 从
+   per-turn 改为跨 turn 存活后，旧实现靠 `decodeTurnCompleted` 的 delete 自然消亡；
+   新实现撞上 `BindClient → ResetNativeSessionState` 的整表清空（pairing 流断连重连
+   即触发，spawn 后 2 秒断连 = 卡片永久冻结在中途快照）。教训：改生命周期时 grep
+   全部 cleanup/reset 路径（turn end、rebind、reset native state），逐一裁决新旧
+   语义，并补「重连中段」回归用例。
+2. **只有 live 一条命的状态会「最后一词定终身」**：collabAgentToolCall 通道官方
+   `items/list` 不回放该类型（冷重建无卡可折），live 断连后没有任何通道能把冻结态
+   收敛回真值。设计期必答检查项：「这个状态在最坏时刻（断连/runtime 重启后）靠
+   什么收敛到官方真值？」——昨天 MCP 通道有 wait_threads 轮询可纠偏，今天原生通道
+   没有，同一缺陷两种严重度。冷回放缺失的通道要么补权威重读，要么如实标记 live-only。
+3. **跨路径幂等身份用「内容锚定」而不是「注册表代际」派生**：runID=
+   `codex-collab:<spawnTurnID>` 让任意注册表状态重放同一批官方 item 都收敛到同一
+   runId（reducer 的 runId 原位替换自动合卡）。凡是需要 live/冷/store 重放三方
+   收敛的合成身份，都应从官方事件的稳定字段派生，不从本地会话状态派生。
+4. **iOS 真机取证三件套**（unified syslog 里 app 几乎无输出，别在那浪费）：
+   ① 真值在 app 容器 `Documents/fg-trace.log`：
+   `xcrun devicectl device copy from --device <id> --domain-type appDataContainer
+   --domain-identifier org.openagi.cordcode --source Documents/fg-trace.log`；
+   ② `[PIPE]/[TimelineShape]/[GoalBanner]/[InputBar]` 等标记可直读定位；
+   ③ 截图判读用 glm-vision agent 逐项走查（含坐标换算，可配合 devicectl screenshot）。
+5. **无日志的 UI 呈现路径 = 复现时静默黑洞，先补埋点再等复现**：composer 面板失效
+   （goal 后点 ➕/⚙️/模型 收起不弹）复现期间日志零行——不是没事发生，是路径没埋点。
+   交付埋点构建（零行为变化）后下次复现直接定位；owner 发现的「··· 弹窗可恢复」
+   这类反直觉恢复法本身就是状态错乱类 bug 的最强指纹（强制 layout/重聚焦复位）。
+6. **截图定性「状态丢失 vs 合法移除」用同状态两时刻对照**：goal bar 在完成后 live
+   视图保留（已完成态可见）而切回后消失——两个完成态对照即判丢失；单看一张完成态
+   截图无法区分。
+
+另：第三方只读 checkout 上的验证 patch 必须落专用分支（本次 codex 上游 177 行 WIP
+以未提交状态留在 main，pull 时 auto-stash 撞上上游重构三处冲突；已迁
+`cordcode/plan-cold-verify` 分支，main 恢复干净跟流）。
+
+## 2026-09-13 catalog 性能方案复盘：两个目标都修好了，但真凶都不是最初怀疑的对象
+
+2026-09-12 方案（catalog 周期扫描/discovery 超时/passive 风暴/projection 冷打开饥饿）
+33/33 收口，独立审计维持 proved-complete（F1 队列哈希已修正为 canonical
+59dd1852a7ff，commit 5c71eab）。大白话账本（owner 问「最终实现了什么」）：
+
+1. **CPU 高：真凶是上游错误风暴，不是 Grok 5s 扫描**。最初怀疑 Grok fast poll（每 5s
+   重复相同工作确实浪费，但只是小头）；实测真凶是 Codex relay 在一条活连接上每秒重发
+   上千条 byte-identical terminal error——3 分钟 108 万条、CPU 60.7%–74.2%、日志
+   1MB/s（12GB 轮转日志的来源）。修复双层：codec 边界丢弃 byte-identical 重复（进
+   passive pump 前），bridge 层 30s 聚合剩余重复。真机 10 分钟窗口：错误日志 100 万+
+   行 → 1 行，CPU 平均 30.7%/峰值 39.6%。**剩余 ~30% 是解码税**：每帧仍需接收+解析
+   才能判重，只有上游修复能消。
+2. **打开 session 卡数分钟：真凶是无 workflow 会话的全量 N+1 扫描**。iOS 打开会话时
+   顺带问「有无后台任务」，老逻辑只有已确认有 workflow 的走捷径，普通会话每次触发
+   「全部回合全部内容拉到 EOF」——同一 406KB 会话被重复拉 204 次，与正文加载挤同一
+   Remote 通道，投影 75s 才响应、2m33s 失败。修复：投影未 Ready 诚实返回可重试、
+   (session,SyncRev) single-flight、负缓存、30s 扫描预算、同 revision 错误 30s 退避、
+   真失败不伪装空列表。效果：15.9s 返回 hydrating + 重试 1.19s 拿到 snapshot。
+3. 顺带修复：配对恢复竞态（最多等 5s 返回 hydrating 而非误报未配对）、discovery
+   独立 12s 预算 + timeout 10–30s 有界退避 + 推送静默 1 分钟 WARN（不引入秒级 head
+   轮询）、Grok 无变化 50s 缓存（TTL<60s safety scan）、Claude 谱系日志 252 行/分钟
+   → 90 行/10 分钟、`/internal/diagnostics/runtime` 聚合诊断端点。
+
+方法论教训：方案最初的因果链（「codex-remote 推送失效 → iOS 只能轮询 → Grok 5s
+扫描」）被证据推翻——Grok fast poll 只受「有无客户端连接」门控，与推送失效无关；
+两轮复审把一条因果链拆成四个独立问题分别归因（SIGSTOP A/B、wall vs on-CPU、日志
+计数）。CPU 归因必须实测，不能从「谁在跑」推「谁烧 CPU」。
+
+上游闭环（2026-09-13）：错误原文 "Unexpected ack message received from client"
+（167B、willRetry:false、threadId/turnId 均为合成值 `__remote_control_transport__`），
+第二 controller WS 连接在 codec 抑制前捕获，errorFingerprint 与线上日志精确闭环；
+字面量不在 codex-rs 开源仓（含 git 历史）/已安装二进制/Desktop JS 任何一层，生产者
+为闭源 relay。已提 openai/codex#45071（bug，附脱敏 capture）与 #45072（feature：
+旁观者的有界 workflow 摘要——上游 itemsView:summary 每 turn 只物化 first_user+
+final_agent 两个 item，结构性不含 collabAgentToolCall；官方客户端靠 live
+item/completed，旁观者无有界数据源）。遗留风险均上游根因：解码税 + 超大 turn
+（629KB > 我方 512KB 护栏）诚实失败按 30s 退避；官方客户端同场景也全量失败（Full
+为默认值），前台截断是超越官方的 UX 决策，维持现状等 #45072。
+
+另：9-09 compact-history 调查在 grok-build checkout 跑官方测试留下 23GB target/
+（已清，cargo 可再生）；风暴轮转日志 ~12GB 取证价值已榨干进 #45071，删否待 owner
+拍板；capture 工具（agent/codex-remote/capture_transport_error_test.go，stormcapture
+tag + 环境变量双门控）未入库，#45071 需补证可复用。
+
 ## 2026-09-13 web-push 通知折叠+角标计划收口：tag/Topic 双聚合身份与「休眠功能」的部署语义
 
 P2-P4 三批（折叠 tag、per-device badge state、badge RPC+客户端生命周期）一天内完成
