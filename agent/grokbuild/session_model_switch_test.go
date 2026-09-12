@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
@@ -143,18 +144,36 @@ func startModelProbeAgent(t *testing.T, initPayload map[string]any, newResult ma
 	return sess, &reqs, &mu, stop
 }
 
+// findRequest returns the first recorded request with method, waiting up to
+// 2s for the fake agent's recorder goroutine to observe it. session/prompt is
+// fire-and-forget on the wire (dispatchTurn writes and returns without
+// waiting for the response), so the recorder's append races the test's
+// assertion under full-suite CPU contention — polling is the honest observer.
 func findRequest(reqs *[]capturedRequest, mu *sync.Mutex, method string) *capturedRequest {
-	mu.Lock()
-	defer mu.Unlock()
-	for i := range *reqs {
-		if (*reqs)[i].Method == method {
-			return &(*reqs)[i]
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		for i := range *reqs {
+			if (*reqs)[i].Method == method {
+				req := &(*reqs)[i]
+				mu.Unlock()
+				return req
+			}
 		}
+		mu.Unlock()
+		if time.Now().After(deadline) {
+			return nil
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	return nil
 }
 
+// requestCount is for negative assertions ("must NOT have been sent"): the
+// guarded requests (set_model) are issued synchronously before Send returns,
+// so an immediate count is sound — but a short drain window keeps the
+// assertion honest if a stray write is still in flight.
 func requestCount(reqs *[]capturedRequest, mu *sync.Mutex, method string) int {
+	time.Sleep(50 * time.Millisecond)
 	mu.Lock()
 	defer mu.Unlock()
 	n := 0
