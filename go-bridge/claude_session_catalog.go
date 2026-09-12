@@ -96,7 +96,7 @@ func shouldLogClaudeLineage(kind, signature string, now time.Time) bool {
 	if claudeLineageLastLogInfo == nil {
 		claudeLineageLastLogInfo = make(map[string]time.Time)
 	}
-	key := kind + "|" + signature
+	key := kind + "|" + passiveFingerprint(signature)
 	last, exists := claudeLineageLastLogInfo[key]
 	if !exists || now.Sub(last) >= claudeLineageRepeatInfoInterval {
 		claudeLineageLastLogInfo[key] = now
