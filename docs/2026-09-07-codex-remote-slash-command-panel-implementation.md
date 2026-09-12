@@ -1,5 +1,7 @@
 # Codex Desktop（codex-remote）斜杠命令面板接入方案
 
+> **状态更新 2026-09-12：一期完成（proved-complete）。** Compact/Plan/Goal 三项原生动作 + P5.7 智能体可见性与 /goal 对齐全部通过 owner 真机验收（「goal，plan，compact 命令都正常执行✅」；「workflow 卡片展示正常」）。50/50 队列项 done（24 re-verified / 26 self-attested），完成报告见 [2026-09-09-2026-09-07-codex-remote-slash-command-panel-implementation完成情况.md](2026-09-09-2026-09-07-codex-remote-slash-command-panel-implementation完成情况.md)。已知交付后遗留（切回 goal 卡丢失、composer 面板失效埋点待复现、collab 冷路径失明）与矩阵第⑥行并发 gap 均在报告 §1/§5 如实记录；Review/Skills 仍未实施（§9 边界不变，不声称全量 slash 支持）。
+>
 > **v1.2 · 2026-09-09 · 审计后有条件可执行，未实施。** 本案将 Codex 的客户端动作接入 iPhone `＋` 菜单，复用现有官方 RPC 适配、投影与 UI，不创造通用 slash 执行协议。**一期必须完整交付 Compact、Plan、Goal 三项原生动作**；任何一项缺失都不能宣告一期完成。本文可直接交给下一开发 agent **从 P0 取证开始执行**，但不能跳过 C0–C4 直接实现或广告能力；目标 Remote Control 链路的三项完整实证尚未采集。
 >
 > 这是 Codex 客户端动作子集方案，不是“官方命令目录全量透传”。没有找到官方通用 slash list/execute 方法；`command/exec` 是 OS 命令执行，不能拿来执行 `/compact`。文件名沿用同组方案命名，产品入口仍是 `＋ → 命令`。
