@@ -1,0 +1,160 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge-plan-approval",
+  "plan_file": "docs/2026-09-12-remote-web-push-badge-and-collapse-plan.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-034334e9176f.json",
+    "legacy_path": ".claude/exec-plans/plan-034334e9176f.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "host-tracker-optional-mirror",
+    "invocation_policy": "slash-or-natural-language-equivalent",
+    "persistence_rule": "persist-on-every-status-transition"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-09-12-2026-09-12-remote-web-push-badge-and-collapse-plan完成情况.md",
+    "completion_report_status": "missing",
+    "last_generated_at": null,
+    "based_on_queue_hash": null
+  },
+  "updated_at": "2026-09-12T04:23:01Z",
+  "todos": [
+    {
+      "id": "p1-session-topic-impl",
+      "title": "P1 stable per-session Topic implementation",
+      "description": "In MacBridge, introduce one domain-separated sessionAggregationKey over backendId and sessionId, retain the per-turn notification idempotency key, and use the stable key for the RFC 8030 Topic header.",
+      "status": "pending",
+      "phase": "p1",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "§4 A1 / §6 P1",
+      "notes": "Cross-repo source pair: MacBridge plan/approval-layer; iOS plan/approval-layer-ios.",
+      "verification": {"required": true, "status": "missing", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+    },
+    {
+      "id": "p1-session-topic-tests",
+      "title": "P1 stable Topic automated tests",
+      "description": "Add and run focused Go tests proving same-session stability, backend isolation, Topic length/alphabet constraints, and preservation of per-turn ledger identity.",
+      "status": "pending",
+      "phase": "p1",
+      "kind": "tests",
+      "depends_on": ["p1-session-topic-impl"],
+      "source": "§7 automated",
+      "notes": "",
+      "verification": {"required": true, "status": "missing", "method": "automated", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+    },
+    {
+      "id": "p1-session-topic-regression",
+      "title": "P1 offline Topic real-device regression",
+      "description": "Verify on the installed iOS Home Screen web app that multiple pushes for one session accumulated while the phone is genuinely offline collapse to the latest outstanding message, without treating ordinary lock-screen state as offline.",
+      "status": "pending",
+      "phase": "p1",
+      "kind": "regression",
+      "depends_on": ["p1-session-topic-tests"],
+      "source": "§7 real-device matrix #4",
+      "notes": "Requires owner authorization for real-device/UI interaction under repository policy.",
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+    },
+    {
+      "id": "p2-session-tag-impl",
+      "title": "P2 stable per-session notification tag implementation",
+      "description": "Use the P1 sessionAggregationKey for notification.tag so the latest notification replaces older notifications only within the same backend/session.",
+      "status": "pending", "phase": "p2", "kind": "impl", "depends_on": ["p1-session-topic-regression"], "source": "§4 A2 / §6 P2", "notes": "",
+      "verification": {"required": true, "status": "missing", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+    },
+    {
+      "id": "p2-session-tag-tests",
+      "title": "P2 stable tag automated tests",
+      "description": "Add and run Go and Service Worker contract tests proving Topic/tag key parity, backend isolation, and unchanged per-turn idempotency identity.",
+      "status": "pending", "phase": "p2", "kind": "tests", "depends_on": ["p2-session-tag-impl"], "source": "§7 automated", "notes": "",
+      "verification": {"required": true, "status": "missing", "method": "automated", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+    },
+    {
+      "id": "p2-session-tag-regression",
+      "title": "P2 notification replacement real-device regression",
+      "description": "Verify on the Home Screen web app that repeated completions retain only the latest notification per session while distinct sessions remain separate and deep-link to the latest target.",
+      "status": "pending", "phase": "p2", "kind": "regression", "depends_on": ["p2-session-tag-tests"], "source": "§7 real-device matrix #3", "notes": "Requires owner authorization for real-device/UI interaction.",
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+    },
+    {
+      "id": "p3-badge-state-protocol-impl",
+      "title": "P3 per-device badge state and payload protocol implementation",
+      "description": "Implement isolated fail-closed badge-state persistence, bindingId/revision assignment, bounded saturation, per-device payload construction, additive badge tuple/register fields, canonical protocol/schema/fixture updates, and iOS protocol mirror synchronization.",
+      "status": "pending", "phase": "p3", "kind": "impl", "depends_on": ["p1-session-topic-regression"], "source": "§5 B1-B3 / §6 P3", "notes": "Canonical protocol must land in MacBridge before the iOS mirror; docs changes require immediate per-repo commits.",
+      "verification": {"required": true, "status": "missing", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+    },
+    {
+      "id": "p3-badge-state-protocol-tests",
+      "title": "P3 badge store dispatcher and contract tests",
+      "description": "Add and run focused Go tests for device isolation, dedup, revision concurrency, 4096 saturation, persistence/failure, binding lifecycle, payload omission, and field-level canonical/mirror contract consistency.",
+      "status": "pending", "phase": "p3", "kind": "tests", "depends_on": ["p3-badge-state-protocol-impl"], "source": "§7 automated", "notes": "",
+      "verification": {"required": true, "status": "missing", "method": "automated", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+    },
+    {
+      "id": "p3-badge-state-protocol-regression",
+      "title": "P3 badge state cross-restart regression",
+      "description": "Verify actual MacBridge restart persistence and two-device isolation without using cached or mock state; confirm badge-store corruption leaves notifications operational without a badge tuple.",
+      "status": "pending", "phase": "p3", "kind": "regression", "depends_on": ["p3-badge-state-protocol-tests"], "source": "§7 real-device matrix #6/#8", "notes": "May require owner-visible web interaction; perform only within current authorization.",
+      "verification": {"required": true, "status": "missing", "method": "mixed", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+    },
+    {
+      "id": "p4-badge-client-lifecycle-impl",
+      "title": "P4 badge RPC Service Worker and client lifecycle implementation",
+      "description": "Implement authenticated get/ack RPCs, binding mismatch behavior, Service Worker binding/revision watermark and dirty message, page single-flight get/ack lifecycle, and disable/rebind clearing semantics in remote-web.",
+      "status": "pending", "phase": "p4", "kind": "impl", "depends_on": ["p3-badge-state-protocol-regression"], "source": "§5 B4-B5 / §6 P4", "notes": "No fallback, local counter, or silent-push path.",
+      "verification": {"required": true, "status": "missing", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+    },
+    {
+      "id": "p4-badge-client-lifecycle-tests",
+      "title": "P4 RPC and remote-web lifecycle tests",
+      "description": "Run focused Go and Vitest suites for authenticated device isolation, binding mismatch, throughRevision ack, saturation, out-of-order push suppression, old binding rejection, single-flight rerun, failures, and disable clearing.",
+      "status": "pending", "phase": "p4", "kind": "tests", "depends_on": ["p4-badge-client-lifecycle-impl"], "source": "§7 automated", "notes": "",
+      "verification": {"required": true, "status": "missing", "method": "automated", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+    },
+    {
+      "id": "p4-badge-client-lifecycle-regression",
+      "title": "P4 badge lifecycle real-device regression",
+      "description": "Verify badge counts, notification click acknowledgement, concurrent new completion preservation, per-device clearing, disable/re-enable behavior, and out-of-order resistance on the installed Home Screen web app.",
+      "status": "pending", "phase": "p4", "kind": "regression", "depends_on": ["p4-badge-client-lifecycle-tests"], "source": "§7 real-device matrix #1/#2/#5/#6/#7", "notes": "Requires owner authorization for real-device/UI interaction.",
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+    },
+    {
+      "id": "p5-badge-settings-impl",
+      "title": "P5 badge availability settings UI implementation",
+      "description": "Update PushNotificationSettings to report only API/enrollment/notification-permission facts and static iOS badge guidance, without claiming visibility of the independent system badge switch.",
+      "status": "pending", "phase": "p5", "kind": "impl", "depends_on": ["p4-badge-client-lifecycle-regression"], "source": "§5 B6 / §6 P5", "notes": "",
+      "verification": {"required": true, "status": "missing", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+    },
+    {
+      "id": "p5-badge-settings-tests",
+      "title": "P5 badge settings component tests",
+      "description": "Add and run focused remote-web tests for unsupported API, disabled enrollment, permission denial, and available-with-static-guidance states.",
+      "status": "pending", "phase": "p5", "kind": "tests", "depends_on": ["p5-badge-settings-impl"], "source": "§7 automated", "notes": "",
+      "verification": {"required": true, "status": "missing", "method": "automated", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+    },
+    {
+      "id": "p5-badge-settings-regression",
+      "title": "P5 badge settings visual regression",
+      "description": "Manually inspect the four settings states on the real Home Screen web app and confirm the UI never claims to detect the hidden iOS badge preference.",
+      "status": "pending", "phase": "p5", "kind": "regression", "depends_on": ["p5-badge-settings-tests"], "source": "§6 P5 / §7", "notes": "Requires owner authorization for visual real-device validation.",
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+    }
+  ]
+}
