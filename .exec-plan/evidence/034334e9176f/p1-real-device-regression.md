@@ -144,3 +144,10 @@
 
 - OpenCode Web：`PASS`。iOS 收到 OpenCode Web completion 通知。
 - Owner 后续文案需求：completion title 改为 backend 显示名 + `任务已完成`，固定枚举：`Claude code`、`Codex`、`Grok build`、`Deepseek Harness`、`Opencode`；body 继续为具体回复内容。
+
+### Backend title Owner 结果与来源标识判定
+
+- Backend title：`PASS`。Owner 确认通知已显示具体 backend。
+- 剩余视觉项：系统通知仍显示 `from CordCode` 来源标识。
+- 代码取证：MacBridge payload title 只生成 `<backend> 任务已完成`；SW 只传 `title/body/tag/data`；manifest 与页面没有 `from CordCode` 字符串。
+- 平台判定：`from CordCode` 是 iOS/WebKit 为 Home Screen Web App 推送自动标注的来源应用名，W3C Web Notification API 没有隐藏该标识的选项。把 manifest 名字改成空白只会破坏安装体验或替换成域名，不是删除来源标识；彻底移除需要改走原生 App APNs 通知通道。
