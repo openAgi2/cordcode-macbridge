@@ -101,3 +101,11 @@
 - DSH：`FAIL`。Mac 端 3080 Web 里完成 DeepSeek Harness session 后，iOS 未收到通知。
 - 本地取证：dsh-web passive stream 已收到同一未打开 session 的 `turn_started`、多帧 `text_delta` 和 `turn_completed`；但 dsh-web 只实现普通 `EventSubscriber`，未提供 replay-free live seam，completion 仍被 observation/kernel gate 挡掉。
 - 协议事实：DSH mux stream 覆盖所有 external session 但无 cursor；不能把原始流直接标成 replay-free，必须按 observed turn lifecycle 过滤并消费一次。
+
+### DSH replay-free 修复版本复测
+
+- 安装版本：`cordcode-bridge-runtime 0.1.0 (commit: 36406dc34a99, built: 2026-09-12T07:07:26Z)`
+- 状态：等待 owner 复测
+- 部署证据：runtime ready；`dsh-web` external instance `http://127.0.0.1:3080` resolved；mux/host streams opened；dsh-web passive subscription started。
+- 复测动作：iOS 保持 Claude 默认模式且不打开/切换 session；在 Mac 端 3080 Web 的 DeepSeek Harness session 发送一个新回合，等待最多 10 秒。
+- 预期：iOS 收到 DSH completion 通知，正文为真实回复预览；无历史回放，Claude/Codex 已通过行为不受影响。

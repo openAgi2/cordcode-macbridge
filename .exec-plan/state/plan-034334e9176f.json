@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T07:07:00Z",
+  "updated_at": "2026-09-12T07:08:00Z",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -196,7 +196,7 @@
       "title": "P1 DSH replay-free real-device regression",
       "description": "Verify a DeepSeek Harness session completed in the Mac 3080 web app notifies iOS with actual response detail while the iOS Web App remains in Claude mode with no session open.",
       "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-dsh-replay-free-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-codex-replay-preview-regression; owner authorization already granted.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Release build 36406dc34a99 is installed and healthy. Runtime logs prove the external DSH instance resolved and mux/host passive streams opened; awaiting owner confirmation of a real-preview DSH completion notification.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-dsh-replay-free-release-build.log", ".exec-plan/evidence/034334e9176f/p1-dsh-replay-free-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T07:08:00Z"}
     },
     {
       "id": "p2-session-tag-impl",
