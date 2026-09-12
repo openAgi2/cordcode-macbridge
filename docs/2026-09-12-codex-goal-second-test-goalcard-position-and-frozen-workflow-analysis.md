@@ -235,3 +235,39 @@ last-mile 诊断行）。次要观察：18.08.34 截图段落②行首有叠字�
 - iOS：`33a32976`（§6.4 过滤 + CHANGELOG；构建含 18:0x 全部前置修复），
   已装 iPhone 16 Pro（devicectl，org.openagi.cordcode）。
 - Mac：无需变更（`38ce43c` 已于 17:52 部署，本轮无新 Mac 代码）。
+
+## 10. 第四轮：goal 后输入栏面板失效（➕/⚙️/模型 点击即收起，2026-09-12 18:4x）
+
+### 10.1 现象与证据
+
+- 现象：codex 会话跑完 goal 后，编辑态输入栏的 ➕/⚙️/模型 点击后键盘收起、
+  输入栏转空闲态、面板不弹。
+- owner 发现的恢复路径：点导航「···」更多设置（弹窗会同时带起输入框与
+  键盘），之后三个按钮恢复正常。
+- 设备 fg-trace（Documents/fg-trace.log，devicectl 拉取）：goal 收尾渲染
+  （10:36:41Z，[TimelineShape]/[PIPE]）之后到复现/恢复全程**零 UI trace**——
+  输入栏呈现路径原本没有任何埋点，这是无法定案的根本原因。
+- 旁证：PIPE 停在 `snapshotApplied rev=106 awaiting=107` 而 store 在
+  syncRev=176（rs_resp_* 空 blocks item 恰在 rev 107 批次内）；但「···」
+  恢复按钮时同样无任何 PIPE 活动——渲染管线缺口与按钮失效大概率是两个
+  独立问题，缺口本身可能只是空闲会话未推送的无趣 rev。
+
+### 10.2 主嫌疑（待埋点定案）
+
+输入栏「视觉展开态」与「第一响应者/模式状态」在 goal 结束时失同步：
+`setAwaitingUserAction` 内有 `dismissKeyboard()` + `applyComposerInteractionLock()`
+（锁输入），`isGenerating` 切换驱动 `setGenerating/setAwaitingUserAction`
+重建——若 goal 收尾把 composer 带入错误 awaiting/locked 态，僵尸态下按钮
+点击走「归一化收起」而非面板呈现；「···」弹窗周期强制 layout/重聚焦后
+状态复位。
+
+### 10.3 已交付（iOS `6f71af01`）
+
+整条链路埋点（行为零变化）：textViewDidBegin/EndEditing、setGenerating/
+setAwaitingUserAction 状态迁移（含 dismissKeyboard 分支）、customizeTapped/
+modelTagTapped 入口、模型 popover present 入口、权限后端 early-return 分支。
+下次复现（无需任何操作）拉取 fg-trace.log 即可定位到具体行。
+
+复现配方：任意 codex 会话跑一个 goal 至完成 → 唤起键盘点 ➕ → 若复现，
+`devicectl copy from --domain-type appDataContainer --domain-identifier
+org.openagi.cordcode --source Documents/fg-trace.log` 直接出定案坐标。
