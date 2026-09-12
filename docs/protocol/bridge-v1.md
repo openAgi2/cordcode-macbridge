@@ -1249,7 +1249,7 @@ Codex Desktop（codex-remote）的已提交 projection 中已出现 workflow 时
 真值；summary-only projection 不能证明“无 workflow”，未 Ready/仍在恢复时返回可重试
 `background_tasks.projection_not_ready`（`retryAfterMillis`），不得启动全历史扫描。Ready 后
 的完整历史扫描按 `(sessionId, projection SyncRev)` single-flight；成功负结果在同一 revision
-内复用，真实错误不缓存、下次请求重试。服务端不得把“未知”伪造成空任务列表。
+内复用，真实错误不转为成功；同一 projection revision 内按 30 秒退避复用错误事实，revision 变化立即重扫。服务端不得把“未知”伪造成空任务列表。
 
 ```ts
 { tasks: BackgroundTaskSummary[] }

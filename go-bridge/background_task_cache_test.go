@@ -70,10 +70,26 @@ func TestBackgroundTaskCacheCachesSuccessAndRetriesError(t *testing.T) {
 		t.Fatalf("successful negative result was not cached: calls=%d", calls)
 	}
 
-	fail := func(context.Context) ([]core.BackgroundTask, error) { return nil, errors.New("real upstream failure") }
+	failCalls := 0
+	fail := func(context.Context) ([]core.BackgroundTask, error) {
+		failCalls++
+		return nil, errors.New("real upstream failure")
+	}
 	if _, err := cache.fetch(context.Background(), "codex-remote", "session", 21, fail); err == nil {
 		t.Fatal("first error must surface")
 	}
+	if _, err := cache.fetch(context.Background(), "codex-remote", "session", 21, fail); err == nil {
+		t.Fatal("same-revision retry during backoff must surface the cached real error")
+	}
+	if failCalls != 1 {
+		t.Fatalf("same-revision error was re-scanned: calls=%d", failCalls)
+	}
+
+	cache.mu.Lock()
+	if flight := cache.flights[backgroundTaskFlightKey("codex-remote", "session", 21)]; flight != nil {
+		flight.retryAt = time.Now().Add(-time.Second)
+	}
+	cache.mu.Unlock()
 	if _, err := cache.fetch(context.Background(), "codex-remote", "session", 21, func(context.Context) ([]core.BackgroundTask, error) {
 		calls++
 		return nil, nil
@@ -81,7 +97,7 @@ func TestBackgroundTaskCacheCachesSuccessAndRetriesError(t *testing.T) {
 		t.Fatal(err)
 	}
 	if calls != 2 {
-		t.Fatalf("errors must not be cached as success: calls=%d", calls)
+		t.Fatalf("errors must not become cached success: calls=%d", calls)
 	}
 }
 

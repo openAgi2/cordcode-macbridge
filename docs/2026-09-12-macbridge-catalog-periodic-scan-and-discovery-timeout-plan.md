@@ -301,6 +301,8 @@ codex-remote 的 fingerprint 当前走 `agent.ListSessions`（`session_discovery
 在「持续超时导致 `seen` 长期不更新」时**主动暴露**该状态（例如周期性 WARN 升级 + 指标），使「推送已静默 N 分钟」可被观测，而不是只在退避时各打一行。
 
 **2d `codex-remote-background-task-no-workflow-slow-path`**
+2026-09-12 22:33 live regression补充：同一 revision 的 full-scan 资源门错误（如单 turn `max_bytes`）不能被 iOS 重试立即重放；错误保留为错误并按 30s 退避，projection revision 变化仍立即重扫。
+
 修复 `projectionBackgroundTasks` fast path 只认 `hasWorkflow=true` 的语义：
 
 - 明确三态：`no-workflow confirmed` / `workflow present` / `projection detail not loaded`；不得把后两者混淆；

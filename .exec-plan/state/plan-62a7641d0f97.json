@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T14:32:17.484475Z",
+  "updated_at": "2026-09-12T14:37:48.485818Z",
   "todos": [
     {
       "id": "phase0-observability-impl",
@@ -350,6 +350,74 @@
           "command:go test ./agent/codex-remote -run TestBackgroundTask|TestTurnItemRequestCounter -count=1"
         ],
         "checked_at": "2026-09-12T13:56:02.808341Z"
+      }
+    },
+    {
+      "id": "phase2-background-task-error-backoff-review-fix-impl",
+      "title": "phase2-background-task-error-backoff-review-fix-impl",
+      "description": "Review fix after live regression showed iOS repeatedly replaying the same failed background scan at one projection revision.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "live regression review fix",
+      "notes": "review-fix-for:phase2-background-task-starvation-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Same-revision scan errors are retained as errors and returned without a new upstream scan for 30s; changed projection revision retries immediately.",
+        "artifacts": [
+          "go-bridge/background_task_cache.go"
+        ],
+        "checked_at": "2026-09-12T14:37:48.485818Z"
+      }
+    },
+    {
+      "id": "phase2-background-task-error-backoff-review-fix-tests",
+      "title": "phase2-background-task-error-backoff-review-fix-tests",
+      "description": "Review fix after live regression showed iOS repeatedly replaying the same failed background scan at one projection revision.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [],
+      "source": "live regression review fix",
+      "notes": "review-fix-for:phase2-background-task-starvation-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Race-focused cache tests plus full go-bridge/codex-remote/core suites passed.",
+        "artifacts": [
+          "go-bridge/background_task_cache_test.go",
+          "command:go test ./go-bridge ./agent/codex-remote ./core -count=1"
+        ],
+        "checked_at": "2026-09-12T14:37:48.485818Z"
+      }
+    },
+    {
+      "id": "phase2-background-task-error-backoff-review-fix-regression",
+      "title": "phase2-background-task-error-backoff-review-fix-regression",
+      "description": "Review fix after live regression showed iOS repeatedly replaying the same failed background scan at one projection revision.",
+      "status": "in_progress",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [],
+      "source": "live regression review fix",
+      "notes": "review-fix-for:phase2-background-task-starvation-regression",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Pending latest runtime redeploy and live retry/regression measurement.",
+        "artifacts": "",
+        "checked_at": null
       }
     },
     {

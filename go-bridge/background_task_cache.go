@@ -13,8 +13,13 @@ import (
 // Var only so tests can shrink the bounded real scan timeout.
 var backgroundTaskScanTimeout = 30 * time.Second
 
+// Failed scans are not converted to success, but repeated iOS retries against the
+// same projection revision are backed off rather than re-running an expensive walk.
+var backgroundTaskErrorRetryDelay = 30 * time.Second
+
 type backgroundTaskFlight struct {
 	done     chan struct{}
+	retryAt  time.Time
 	tasks    []core.BackgroundTask
 	err      error
 	complete bool
@@ -44,7 +49,7 @@ func (c *backgroundTaskCache) fetch(
 	scan func(context.Context) ([]core.BackgroundTask, error),
 ) ([]core.BackgroundTask, error) {
 	key := backgroundTaskFlightKey(backendID, sessionID, syncRev)
-	flight, leader := c.start(key)
+	flight, leader := c.start(key, time.Now())
 	if !leader {
 		select {
 		case <-flight.done:
@@ -60,14 +65,17 @@ func (c *backgroundTaskCache) fetch(
 	return tasks, err
 }
 
-func (c *backgroundTaskCache) start(key string) (*backgroundTaskFlight, bool) {
+func (c *backgroundTaskCache) start(key string, now time.Time) (*backgroundTaskFlight, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if flight := c.flights[key]; flight != nil {
 		if !flight.complete || flight.err == nil {
 			return flight, false
 		}
-		// Completed errors are not negative-cached. Replace with a real retry.
+		if now.Before(flight.retryAt) {
+			return flight, false
+		}
+		// A completed error may be retried only after its bounded backoff.
 	}
 	flight := &backgroundTaskFlight{done: make(chan struct{})}
 	c.flights[key] = flight
@@ -84,10 +92,10 @@ func (c *backgroundTaskCache) finish(key string, tasks []core.BackgroundTask, er
 	flight.tasks = append([]core.BackgroundTask(nil), tasks...)
 	flight.err = err
 	flight.complete = true
-	close(flight.done)
 	if err != nil {
-		delete(c.flights, key)
+		flight.retryAt = time.Now().Add(backgroundTaskErrorRetryDelay)
 	}
+	close(flight.done)
 }
 
 func (c *backgroundTaskCache) lookup(backendID, sessionID string, syncRev int) ([]core.BackgroundTask, bool) {
