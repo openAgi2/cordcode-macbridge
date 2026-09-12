@@ -36,8 +36,9 @@ Owner 2026-09-11 报「web App 收不到通知」，排查后闭环：
 
 平台事实（外部，供设计定界）：
 
-- 苹果官方口径：web push = Push + Notifications + **Badging** + Service Worker；角标用 `navigator.setAppBadge` 设、`navigator.clearAppBadge` 清。
-- iOS **16.4+** 且**必须已「添加到主屏幕」**；角标另有**独立的用户开关**（设置 → 通知 → 该 web app → 徽标）；未授予时调用会抛 `NotAllowedError`。
+- 苹果官方口径：web push = Push + Notifications + **Badging** + Service Worker；角标用 `navigator.setAppBadge` 设、`navigator.clearAppBadge` 清；`setAppBadge(0)` 与 `clearAppBadge()` 等效（WebKit 官方博客 2023-04-25「Badging for Home Screen Web Apps」）。
+- iOS **16.4+** 且**必须已「添加到主屏幕」**；API 只在主屏幕 web app 暴露（Safari 标签页与 WKWebView 内都没有），用 `'setAppBadge' in navigator` 特性检测。
+- **角标权限的真实模型（2026-09-12 评审按 WebKit 官方原文校正）**：`setAppBadge` 随时可调；角标是否**显示**只取决于通知权限是否授予。iOS 另有独立的「徽标」用户开关（设置 → 通知 → 该 web app），但 **WebKit 明确「we never expose this user preference to the web app」**——该开关对网页完全不可见、调用也不会因此 reject，徽标关闭时 `setAppBadge` 照常 resolve、只是图标不出数字。`NotAllowedError` 只在 `Notification.permission !== "granted"` 时抛出。⇒ 任何「检测徽标开关状态」的设计都不可实现，只能检测「API 存在 + 通知权限」。
 - **Safari 不允许静默推送**：每次 push 必须立刻呈现通知，否则**吊销该站点推送权限** ⇒ 不存在「只更新角标、不弹通知」的后台路径。
 - Android Chrome 不暴露该 API；Firefox 全平台不支持 ⇒ 必须特性检测 + 静默降级。
 - 角标是**提示值**：大数会被截断（常见 99 / 999+），`0` 等同清除。
@@ -50,7 +51,7 @@ Owner 2026-09-11 报「web App 收不到通知」，排查后闭环：
 
 1. 同一条会话的连续完成不再堆成几十条：iOS 上表现为「每个会话最多一条 + 一个数字」。
 2. web app 图标显示角标，含义 = **当前有多少件事在等你**（默认取「待处理」口径，见 §4.3）。
-3. 全程 fail-closed：取不到真值就不设角标（清除），不伪造数字。
+3. 全程 fail-closed：取不到真值就**不下发角标字段**（本次不表达，沿用现状值）；页面侧取得真值后校正，真值为 0 才清除。任何路径都不伪造数字。
 
 **非目标（本计划不做）**
 
@@ -98,34 +99,40 @@ Owner 2026-09-11 报「web App 收不到通知」，排查后闭环：
 
 | 方案 | 口径 | 是否需要读状态 | 评价 |
 | --- | --- | --- | --- |
-| **B1-a 待处理数**（阶段 1，推荐） | 待批准 + 待回答的会话数（投影真值已有） | **不需要** | 天然有生命周期：批准/回答后自动归零；与原生 App 的 `requiresAction` 同义，语义一致 |
+| **B1-a 待处理数**（阶段 1，推荐） | 待批准 + 待回答的会话数（投影真值已有） | **不需要新增持久化** | 天然有生命周期：批准/回答后自动归零；与原生 App 的 `requiresAction` 同义，语义一致。下发时需**实时读 kernel 投影**（新增 reducer 计数方法，见 B1 注） |
 | B1-b 未读完成数 | 自上次打开以来完成的回合数 | 需要（按设备记 lastOpen，或客户端本地记） | 更贴直觉，但要防漂移（多设备、清缓存、重装） |
 | B1-c 客户端自增 | SW 每收一条 push 就 +1，页面打开清零 | 不需要 | 零 Mac 改动，但数的是「通知条数」而非「未读事项」，遇合并即偏；不建议作为唯一口径 |
 
 **注意一个硬约束**：后台改角标只能搭在「本来就要弹的那条通知」上（不能静默推送）。所以 B1-a 的角标**随 `completion` 通知一起下发**（在下发时计算当时的待处理数），而不是靠 `permission`/`input` 通知——后两类的通知门还没开。这也正好让「等你的审批/问题」在通知量不变的前提下被看见。
 
+**B1 注（2026-09-12 评审补充，计数口径与真值边界）**：
+
+- 计数规则（唯一口径，Mac kernel 为唯一 owner）：遍历 reducer 全部会话投影，满足任一即计 1——① 任一 part `RequiresPermissionConfirmation == true`（reducer 只在 pending 时保持 true）；② 任一 `user_input` part `status == "pending" && canRespond == true`。单位是**会话数**。
+- 真值边界（诚实声明）：计数只覆盖 **kernel 已建立投影的会话**。冷重启后尚未 hydrate 的会话其待处理项不可见 ⇒ 计数可能**偏少**（绝不偏多、不伪造）；会话打开/被动泵 hydrate 后自然收敛。文档与 UI 文案不得承诺「全量精确」。
+- reducer 目前只有按会话 `Snapshot`，无枚举 ⇒ 需新增一个锁内只读计数方法（不克隆投影，逐会话算布尔后汇总），dispatcher 经注入 reader 调用（沿用 `SetPreviewReader` 的注入先例）。
+
 ### B2. 载荷（增量字段，向后兼容）
 
-- 在 `notification` 下新增可选 `badge`（整数，缺省 = 不下发角标、不改角标）。
-- SW 只认 `schemaVersion === 1`，未知字段天然被忽略 ⇒ **旧客户端零影响**，无需升 `schemaVersion`。
+- 在 `notification` 下新增可选 `badge`（整数，0..999，producer 端封顶）。语义：**下发时的待处理会话数（含 0；0 = 清除角标）**；字段缺省 = 本次不表达角标（真值不可得），**不是**清零。
+- SW 只认 `schemaVersion === 1`；`parsePayload` 是**白名单返回**（显式挑字段重组对象），旧 SW 会丢掉 `badge` 但通知照常弹出 ⇒ **旧客户端零影响**，无需升 `schemaVersion`；新 SW 必须显式解析并校验 `badge`（可选、整数、0..9999 外的值视为非法字段剔除但不影响通知）。
 - 需同步：`docs/protocol/bridge-v1.md` 的 Web Push 章节（canonical）、iOS 仓镜像、`docs/protocol/schema/` 与 `docs/protocol/samples/web-push/` 夹具；`web_push_protocol_contract_test.go` 的字段级断言一并更新。
 
 ### B3. 调用点
 
-1. **SW 的 `push` 处理器**（应用未打开也能更新）：解析到 `badge` 就 `self.navigator.setAppBadge(n)`；`badge === 0` 或字段缺省时不清（缺省表示「本次不表达角标」，不是「清零」）。
-   - 必须特性检测（`'setAppBadge' in navigator`）并吞掉 rejection（iOS 徽标权限关闭时是 `NotAllowedError`，不得因此让通知弹不出来）。
+1. **SW 的 `push` 处理器**（应用未打开也能更新）：`badge` 字段存在 → `self.navigator.setAppBadge(n)`（`n === 0` 等效清除，与 WebKit 语义一致）；字段缺省 → **不动角标**（本次不表达）。
+   - 必须特性检测（`'setAppBadge' in navigator`）并吞掉 rejection（`Notification.permission !== "granted"` 时会 reject `NotAllowedError`）；rejection 绝不能让 `waitUntil` 失败——通知必须照常弹出（userVisibleOnly 契约）。iOS 徽标独立开关**不会**产生 rejection（平台不可见，见 §2），无需也不能特判。
    - 始终传**数字**（不传参数的「圆点」在 iOS Safari 上不可靠）。
-2. **页面**（应用打开/状态变化时校正）：按同一口径从投影算一遍，`setAppBadge(n)`；算得 0 时 `clearAppBadge()`。
-3. **清除规则**：点击通知深链进来**不要盲目清零**——页面重算真值再设；只有真值为 0 才清。
+2. **页面**（应用打开/前台化/本人批准或回答后校正）：页面**不在本地重算**——remote-web 的会话列表行不携带待处理标记、页面只持有活跃会话投影，全局口径在客户端**没有数据源**（2026-09-12 评审发现的实现缺口）。改为：新增 additive RPC `get_push_badge_count`（`web_push.manage` scope，结果 `{ schemaVersion: 1, pendingActionCount: <int> }`，与下发侧共用同一 kernel 计数方法），页面调用后 `setAppBadge(n)`；`n === 0` 时 `clearAppBadge()`；RPC 失败/不可用 = 真值不可得 → 不动角标。禁止客户端自增或从通知条数推算。
+3. **清除规则**：点击通知深链进来**不要盲目清零**——页面经 RPC 取真值再设；只有真值为 0 才清。
 
 ### B4. 失败与降级
 
-- 徽标权限未授予 / API 不存在 / 平台不支持 ⇒ 静默跳过，界面可用性不受影响；诊断面（`__cccodeWebDebug` 或设置页）如实显示「角标不可用」。
+- API 不存在 / 平台不支持 / `Notification.permission !== "granted"`（`NotAllowedError`）⇒ 静默跳过，界面可用性不受影响。可检测的只有「API 存在性 + 通知权限」两项；iOS 徽标独立开关**不可检测**（WebKit 隐私设计），诊断面/设置页**不得声称**能识别它——最多显示「角标 API 可用 + 通知权限已授予」并附静态提示（若图标不出数字，去 iOS 设置 → 通知 → 该 web app 检查「徽标」）。
 - 不因为角标失败而重试推送、不补发。
 
 ### B5. UI 提示
 
-- 设置页的「通知」开关旁补一行状态：角标是否可用（iOS 徽标权限是否开启），不可用时给一句可操作提示（去 iOS 设置 → 通知 → 该 web app 打开「徽标」）。
+- 设置页的「通知」开关旁补一行角标状态，文案严格限定在可检测事实内：① API 不存在/平台不支持 → 「当前环境不支持图标角标」；② 通知权限未授予 → 「开启通知后可显示角标」；③ 两者皆备 → 「角标已启用」+ 一行静态提示「若图标不显示数字，请在 iOS 设置 → 通知 → 该 web app 中打开『徽标』」。**不得**写成「检测到徽标开关已关闭」（平台不可检测，见 §2/B4）。
 
 ---
 
@@ -134,7 +141,7 @@ Owner 2026-09-11 报「web App 收不到通知」，排查后闭环：
 | 批次 | 内容 | 依赖 | 可独立验收 |
 | --- | --- | --- | --- |
 | P1 | A1 稳定 `Topic`（按会话） | 无 | 真机：离线一段时间后只收到最新一条 |
-| P2 | B1-a + B2 + B3 + B4：载荷加 `badge`、SW 设角标、页面校正、协议与夹具同步 | P1 无强依赖，可并行 | 真机：角标随通知出现；打开 app 后按真值收敛/清零 |
+| P2 | B1-a + B2 + B3 + B4：reducer 计数方法、载荷加 `badge`、`get_push_badge_count` RPC、SW 设角标、页面经 RPC 校正、协议与夹具同步 | P1 无强依赖，可并行 | 真机：角标随通知出现；打开 app 后按真值收敛/清零 |
 | P3 | A2 稳定 `tag`（**需 owner 裁决**） | P1 | 真机：同会话只留一条 |
 | P4 | A3 发送侧合并/节流（视 P1–P3 效果决定） | P1/P3 | 真机：连续多回合不再刷屏 |
 | P5 | B5 设置页角标状态与提示 | P2 | 目视 |
@@ -147,14 +154,15 @@ Owner 2026-09-11 报「web App 收不到通知」，排查后闭环：
 
 **自动化**
 
-- SW 单测：`badge` 存在/缺省/0/超大值；`setAppBadge` 不存在；`setAppBadge` reject 时**通知仍要弹**。
-- Mac 单测：`badge` 只在真值可得时下发；真值不可得时字段缺省（不写 0、不猜）；`Topic` 稳定且 ≤32 字符、字符集合法；`tag` 语义变更的回归（去重/替换）。
+- SW 单测：`badge` 存在/缺省/0/非整数或越界（剔除字段、通知照弹）；`setAppBadge` 不存在时静默跳过；`setAppBadge` reject 时**通知仍要弹**（`waitUntil` 不失败）。
+- Mac 单测：计数方法（pending 权限 / pending 可回答 user_input / 已解决归零 / 跨会话计数 / reducer 未接线 = 真值不可得）；`badge` 只在真值可得时下发（含真值 0）；真值不可得时字段缺省（不写 0、不猜）；`get_push_badge_count` RPC 形状与 scope；`Topic` 按会话稳定、同会话多次完成同 Topic、≤32 字符、字符集合法；`tag` 语义变更的回归（去重/替换，P3 时）。
 - 契约测试：`web_push_protocol_contract_test.go` 字段级断言 + canonical Markdown + iOS 镜像一致性（本仓既有机制）。
+- remote-web 单测：页面校正在 RPC 成功时 set/clear、RPC 失败时不动角标；设置页三种文案状态（不支持 / 未授权 / 已启用+静态提示）。
 
 **真机矩阵（owner）**
 
 1. 已安装 web app、通知与徽标权限均开：收到完成通知时角标出现，数字与「待处理数」一致。
-2. 关掉 iOS 的「徽标」开关：通知照常弹、角标不出现、无报错。
+2. 关掉 iOS 的「徽标」开关：通知照常弹、图标不出数字、web 端无任何报错（该开关对 web 不可见，属平台预期）。
 3. 连续完成多个回合：只看到每会话一条（A2 生效时），角标反映累计待处理数。
 4. 手机离线 10 分钟后恢复：只收到最新一条（A1 生效时）。
 5. 点通知深链进入：落到正确会话；角标按真值收敛，未读清零逻辑不误清。
