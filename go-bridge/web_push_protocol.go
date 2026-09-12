@@ -89,13 +89,29 @@ type WebPushAnchorType struct {
 }
 
 // buildWebPushNotificationText 组合通知文案（设计 delta §2.1，监工指令 1 号；
-// owner 2026-08-27 更新）：Title = 来源常量 + authoritative session 标题（清洗/
-// 截断后；缺失时诚实回退到类别文案，不编造标题）；completion 的 Body 为该 turn
+// owner 2026-09-12 更新）：Title = backend 显示名 + 通知类别；completion 的 Body 为该 turn
 // 的真实回复预览（authoritative kernel text parts，对齐 Antigravity 通知样式），
 // 无可预览文本时回退固定文案；其余 kind 保持固定文案。预览在显示边界再过一次
 // 控制字符清洗。字段路径未由真实样本证明的 kind 不能启用。
-func buildWebPushNotificationText(kind WebPushNotificationKind, sessionTitle, contentPreview string) (title, body string) {
-	const source = "CordCode"
+func webPushBackendDisplayName(backendID string) string {
+	switch backendID {
+	case "claude", "claudecode":
+		return "Claude code"
+	case "codex", "codex-remote":
+		return "Codex"
+	case "grokbuild":
+		return "Grok build"
+	case "dsh-web", "dsh":
+		return "Deepseek Harness"
+	case "opencode", "opencode-web":
+		return "Opencode"
+	default:
+		return "CordCode"
+	}
+}
+
+func buildWebPushNotificationText(kind WebPushNotificationKind, backendID, sessionTitle, contentPreview string) (title, body string) {
+	source := webPushBackendDisplayName(backendID)
 	cleaned := webPushSanitizeSessionTitle(sessionTitle)
 	completionFallback := "Mac 上的会话已完成，点击查看结果"
 	preview := webPushSanitizePreview(contentPreview)
@@ -106,19 +122,14 @@ func buildWebPushNotificationText(kind WebPushNotificationKind, sessionTitle, co
 		} else {
 			body = completionFallback
 		}
-		if cleaned != "" {
-			return source + " · " + cleaned, body
-		}
-		return source + " · 任务已完成", body
+		return source + " 任务已完成", body
 	case WebPushKindPermission:
-		if cleaned != "" {
-			return source + " · " + cleaned, "Mac 上的会话需要审批，点击处理"
-		}
-		return source + " · 需要审批", "Mac 上的会话需要审批，点击处理"
+		_ = cleaned
+		return source + " 需要审批", "Mac 上的会话需要审批，点击处理"
 	case WebPushKindInput:
-		return "Agent 正在等待回复", "点击打开 CordCode 回答"
+		return source + " 正在等待回复", "点击打开 CordCode 回答"
 	case WebPushKindError:
-		return "任务异常中断", "点击打开 CordCode 查看详情"
+		return source + " 任务异常中断", "点击打开 CordCode 查看详情"
 	default:
 		return "", ""
 	}

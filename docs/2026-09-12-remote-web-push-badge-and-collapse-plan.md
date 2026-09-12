@@ -23,7 +23,7 @@ Owner 2026-09-11 报「web App 收不到通知」，排查后闭环：
 
 | 面 | 现状 | 锚点 |
 | --- | --- | --- |
-| 通知文案与聚合键 | `tag = "cc_" + keyHash[:16]`、`Topic = "cc_" + keyHash[:16]`——**按通知唯一**，所以每条通知各自成条，离线积压也不会被合并 | `go-bridge/web_push_dispatcher.go` `buildPayload` / `keyHashTag` |
+| 通知文案与聚合键 | completion Title 固定为 backend 显示名 + `任务已完成`（`Claude code` / `Codex` / `Grok build` / `Deepseek Harness` / `Opencode`；未知回退 `CordCode`），Body 为真实回复预览；`tag = "cc_" + keyHash[:16]`、`Topic = "cc_" + keyHash[:16]`——**按通知唯一**，所以每条通知各自成条，离线积压也不会被合并 | `go-bridge/web_push_protocol.go` `webPushBackendDisplayName` / `buildWebPushNotificationText`；`go-bridge/web_push_dispatcher.go` `buildPayload` |
 | 通知键 | `<backend>\|<sessionId>\|<turnId>\|completed`（permission 为 `…\|<requestId>\|permission`）⇒ **每个回合一条通知**，跨回合不会合并 | `go-bridge/web_push_producer.go:160,189` |
 | 类别门 | 只有 `completion` 开启；`permission` / `input` / `error` 三类 `Passed=false`（等真实样本 EVT-PERM-1 / EVT-INPUT-1 / EVT-ERROR-1） | `web_push_producer.go` `webPushKindGates` |
 | 载荷 | `schemaVersion:1 { notification{title,body,tag}, target{bridgeId,backendId,sessionId,eventId,anchor} }`——**没有角标字段** | `go-bridge/web_push_protocol.go:64–84` |

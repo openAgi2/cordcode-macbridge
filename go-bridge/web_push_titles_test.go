@@ -90,33 +90,44 @@ func TestTitleCacheBounded(t *testing.T) {
 
 // 设计 delta §2.1 —— 通知内容模型：authoritative 标题 + 无标题诚实回退。
 // owner 2026-08-27 更新：completion 正文优先真实回复预览，缺失回退固定文案。
-func TestBuildWebPushNotificationTextWithSessionTitle(t *testing.T) {
-	title, body := buildWebPushNotificationText(WebPushKindCompletion, "修复登录问题", "")
-	if title != "CordCode · 修复登录问题" {
+func TestBuildWebPushNotificationTextUsesBackendDisplayName(t *testing.T) {
+	title, body := buildWebPushNotificationText(WebPushKindCompletion, "claude", "修复登录问题", "")
+	if title != "Claude code 任务已完成" {
 		t.Fatalf("completion title = %q", title)
 	}
 	if body != "Mac 上的会话已完成，点击查看结果" {
 		t.Fatalf("completion fallback body = %q", body)
 	}
-	title, body = buildWebPushNotificationText(WebPushKindCompletion, "修复登录问题", "已完成登录修复，共改动 3 个文件")
+	title, body = buildWebPushNotificationText(WebPushKindCompletion, "codex-remote", "修复登录问题", "已完成登录修复，共改动 3 个文件")
+	if title != "Codex 任务已完成" {
+		t.Fatalf("completion title = %q", title)
+	}
 	if body != "已完成登录修复，共改动 3 个文件" {
 		t.Fatalf("completion preview body = %q", body)
 	}
-	title, body = buildWebPushNotificationText(WebPushKindPermission, "  ", "")
-	if title != "CordCode · 需要审批" {
+	title, body = buildWebPushNotificationText(WebPushKindPermission, "grokbuild", "  ", "")
+	if title != "Grok build 需要审批" {
 		t.Fatalf("permission fallback title = %q", title)
+	}
+	title, _ = buildWebPushNotificationText(WebPushKindCompletion, "future-backend", "", "")
+	if title != "CordCode 任务已完成" {
+		t.Fatalf("unknown backend title = %q", title)
 	}
 	if body != "Mac 上的会话需要审批，点击处理" {
 		t.Fatalf("permission body = %q", body)
 	}
 	// 标题进入前先清洗截断——通知 Title 组装结果必须落在 SW 端 200 上限内。
 	long := strings.Repeat("标", 300)
-	title, _ = buildWebPushNotificationText(WebPushKindCompletion, long, "")
+	title, _ = buildWebPushNotificationText(WebPushKindCompletion, "dsh-web", long, "")
+	if title != "Deepseek Harness 任务已完成" {
+		t.Fatalf("completion title = %q", title)
+	}
+	title, _ = buildWebPushNotificationText(WebPushKindCompletion, "opencode-web", long, "")
+	if !strings.HasPrefix(title, "Opencode 任务已完成") {
+		t.Fatalf("completion title = %q", title)
+	}
 	if len([]rune(title)) > 200 {
 		t.Fatalf("composed title exceeds SW limit: %d runes", len([]rune(title)))
-	}
-	if !strings.HasSuffix(title, "…") {
-		t.Fatalf("long title must end with ellipsis, got %q", title)
 	}
 }
 

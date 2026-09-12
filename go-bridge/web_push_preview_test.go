@@ -149,7 +149,7 @@ func TestWebPushCompletedTurnPreviewFallsBackWhenNoText(t *testing.T) {
 	if got[0].ContentPreview != "" {
 		t.Fatalf("reasoning-only turn must yield empty preview, got %q", got[0].ContentPreview)
 	}
-	_, body := buildWebPushNotificationText(got[0].Kind, got[0].SessionTitle, got[0].ContentPreview)
+	_, body := buildWebPushNotificationText(got[0].Kind, got[0].BackendID, got[0].SessionTitle, got[0].ContentPreview)
 	if body != "Mac 上的会话已完成，点击查看结果" {
 		t.Fatalf("fallback body = %q", body)
 	}
@@ -287,7 +287,7 @@ func TestDispatcherPreviewReaderRefreshesEmptyIntentPreview(t *testing.T) {
 	if decoded.Notification.Body != "发送前才落进投影的完整回复" {
 		t.Fatalf("body = %q (lazy refresh missing)", decoded.Notification.Body)
 	}
-	if decoded.Notification.Title != "CordCode · 懒刷新会话" {
+	if decoded.Notification.Title != "Claude code 任务已完成" {
 		t.Fatalf("title = %q", decoded.Notification.Title)
 	}
 

@@ -139,3 +139,8 @@
 - 部署证据：runtime ready；opencode-web generation 1.18 `/global/event` SSE subscriber connected；opencode-web passive subscription started。
 - 复测动作：iOS 保持 Claude 默认模式且不打开/切换 session；在 Mac 端 OpenCode Web session 发送一个新回合，等待最多 10 秒。
 - 预期：iOS 收到 OpenCode Web completion 通知，正文为真实回复预览；无历史回放，Claude/Codex/DSH/Grok 已通过行为不受影响。
+
+### OpenCode Web Owner 结果与标题模板需求
+
+- OpenCode Web：`PASS`。iOS 收到 OpenCode Web completion 通知。
+- Owner 后续文案需求：completion title 改为 backend 显示名 + `任务已完成`，固定枚举：`Claude code`、`Codex`、`Grok build`、`Deepseek Harness`、`Opencode`；body 继续为具体回复内容。

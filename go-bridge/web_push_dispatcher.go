@@ -181,7 +181,7 @@ func (d *WebPushDispatcher) buildPayload(candidate WebPushCandidate) ([]byte, in
 			preview = fresh
 		}
 	}
-	title, body := buildWebPushNotificationText(candidate.Kind, candidate.SessionTitle, preview)
+	title, body := buildWebPushNotificationText(candidate.Kind, candidate.BackendID, candidate.SessionTitle, preview)
 	payload := WebPushPayloadV1{
 		SchemaVersion: WebPushSchemaVersion,
 		Notification: WebPushNotificationPayload{
