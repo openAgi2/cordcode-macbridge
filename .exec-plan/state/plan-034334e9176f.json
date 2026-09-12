@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-09-12T06:56:00Z",
+  "updated_at": "2026-09-12T07:07:00Z",
   "todos": [
     {
       "id": "p1-session-topic-impl",
@@ -174,8 +174,29 @@
       "id": "p1-codex-replay-preview-regression",
       "title": "P1 Codex replay-free preview real-device regression",
       "description": "Verify a never-opened Codex completion notification carries the actual latest assistant response preview instead of the generic fallback while iOS remains in Claude mode.",
-      "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-codex-replay-preview-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-codex-live-attach-regression; owner authorization already granted.",
-      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Release build 2bf41b2de382 is installed and healthy. Runtime logs prove Codex Remote reconnected, attached two Desktop-loaded threads, and the replay-free preview path is active; awaiting owner confirmation that notification body shows actual response text.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-codex-replay-preview-release-build.log", ".exec-plan/evidence/034334e9176f/p1-codex-replay-preview-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T06:56:00Z"}
+      "status": "done", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-codex-replay-preview-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-codex-live-attach-regression; owner authorization already granted.",
+      "verification": {"required": true, "status": "present", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "Owner confirmed the never-opened Codex completion notification now carries actual response detail rather than generic fallback text.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-codex-replay-preview-release-build.log", ".exec-plan/evidence/034334e9176f/p1-codex-replay-preview-installed-runtime.log", ".exec-plan/evidence/034334e9176f/p1-real-device-regression.md"], "checked_at": "2026-09-12T07:04:00Z"}
+    },
+    {
+      "id": "p1-dsh-replay-free-impl",
+      "title": "P1 DSH replay-free notification implementation",
+      "description": "Expose a replay-free DSH live channel that admits only turns observed on the current subscription, consumes each completion once, and rejects same-turn reconnect replay while preserving live text for notification preview.",
+      "status": "done", "phase": "p1-review-fix", "kind": "impl", "depends_on": ["p1-codex-replay-preview-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-codex-replay-preview-regression; DSH extends the A0 backend coverage requirement.",
+      "verification": {"required": true, "status": "present", "method": "implementation", "attestation": "self-attested", "na_reason": null, "summary": "dsh-web now implements a replay-free LiveEventSubscriber filter over its cursorless mux stream: observed turns flow once, reconnect replay is suppressed, and live text/turn identity remain available to the Web Push preview path.", "artifacts": ["agent/dsh-web/streams.go:SubscribeLive", "core/interfaces.go:LiveEventSubscriber", "go-bridge/main.go:startPassiveSubscription"], "checked_at": "2026-09-12T07:07:00Z"}
+    },
+    {
+      "id": "p1-dsh-replay-free-tests",
+      "title": "P1 DSH replay-free automated tests",
+      "description": "Prove an observed external DSH turn flows through start/text/completion once, reconnect replay of the same turn is rejected, and turn identity is retained for Web Push preview.",
+      "status": "done", "phase": "p1-review-fix", "kind": "tests", "depends_on": ["p1-dsh-replay-free-impl"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-codex-replay-preview-regression",
+      "verification": {"required": true, "status": "present", "method": "automated", "attestation": "re-verified", "na_reason": null, "summary": "Focused and full Go suites passed. The DSH test feeds an official-shaped external turn through start/text/completion once, forces stream reconnect/replay, and proves the replay-free channel suppresses the repeated turn.", "artifacts": [".exec-plan/evidence/034334e9176f/p1-dsh-replay-free-focused-tests.log", ".exec-plan/evidence/034334e9176f/p1-dsh-replay-free-all-go-tests.log", "agent/dsh-web/streams_test.go:TestSubscribeLiveConsumesObservedTurnAndRejectsReplay"], "checked_at": "2026-09-12T07:07:00Z"}
+    },
+    {
+      "id": "p1-dsh-replay-free-regression",
+      "title": "P1 DSH replay-free real-device regression",
+      "description": "Verify a DeepSeek Harness session completed in the Mac 3080 web app notifies iOS with actual response detail while the iOS Web App remains in Claude mode with no session open.",
+      "status": "in_progress", "phase": "p1-review-fix", "kind": "regression", "depends_on": ["p1-dsh-replay-free-tests"], "source": "owner regression 2026-09-12", "notes": "review-fix-for:p1-codex-replay-preview-regression; owner authorization already granted.",
+      "verification": {"required": true, "status": "missing", "method": "manual", "attestation": "self-attested", "na_reason": null, "summary": "", "artifacts": [], "checked_at": null}
     },
     {
       "id": "p2-session-tag-impl",

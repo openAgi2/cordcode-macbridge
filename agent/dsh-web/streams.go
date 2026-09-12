@@ -24,6 +24,7 @@ import (
 )
 
 var _ core.EventSubscriber = (*Agent)(nil)
+var _ core.LiveEventSubscriber = (*Agent)(nil)
 
 // streamReconnectBackoff is the delay between stream reopen attempts.
 const streamReconnectBackoff = 2 * time.Second
@@ -39,6 +40,98 @@ func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 	}
 	a.startStreams(ctx)
 	return a.passiveEvents(), nil
+}
+
+type dshLiveTurnKey struct {
+	SessionID string
+	TurnID    string
+}
+
+type dshLiveTurnState struct {
+	replay bool
+}
+
+// SubscribeLive implements the replay-free variant used by Web Push. DSH v1 has
+// no stream cursor, so the raw passive channel cannot itself claim replay-free
+// provenance. This filter admits a turn only when its lifecycle was observed on
+// this subscription (turn/start, or orphan text adoption) and consumes each
+// turn once. A repeated turn/start for the same still-active turn is treated as
+// a reconnect replay: later text/completion for that turn is suppressed.
+func (a *Agent) SubscribeLive(ctx context.Context) (<-chan core.Event, error) {
+	events, err := a.Subscribe(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan core.Event, 128)
+	go func() {
+		active := make(map[dshLiveTurnKey]*dshLiveTurnState)
+		completed := make(map[dshLiveTurnKey]struct{})
+		var completedOrder []dshLiveTurnKey
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ev := <-events:
+				key := dshLiveTurnKey{SessionID: ev.SessionID, TurnID: ev.TurnID}
+				hasTurn := key.SessionID != "" && key.TurnID != ""
+				_, wasCompleted := completed[key]
+				switch ev.Type {
+				case core.EventTurnStarted:
+					if !hasTurn || wasCompleted {
+						continue
+					}
+					if state := active[key]; state != nil {
+						state.replay = true
+						continue
+					}
+					active[key] = &dshLiveTurnState{}
+				case core.EventText:
+					if !hasTurn || wasCompleted {
+						continue
+					}
+					state := active[key]
+					if state == nil {
+						state = &dshLiveTurnState{}
+						active[key] = state
+					}
+					if state.replay {
+						continue
+					}
+				case core.EventResult:
+					if !hasTurn {
+						continue
+					}
+					state := active[key]
+					if state == nil || wasCompleted {
+						continue
+					}
+					delete(active, key)
+					completed[key] = struct{}{}
+					completedOrder = append(completedOrder, key)
+					if len(completedOrder) > 1024 {
+						old := completedOrder[0]
+						completedOrder = completedOrder[1:]
+						delete(completed, old)
+					}
+					if state.replay {
+						continue
+					}
+				default:
+					// Non-turn control events are not replay candidates; retain the
+					// existing passive subscription semantics for them.
+				}
+				select {
+				case out <- ev:
+				case <-ctx.Done():
+					return
+				default:
+					// Web Push is a side effect, not the timeline source. Preserve the
+					// passive channel's lossy-tolerant contract rather than blocking.
+				}
+			}
+		}
+	}()
+	return out, nil
 }
 
 // passiveEvents returns (creating on demand) the passive channel.

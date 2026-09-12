@@ -94,3 +94,10 @@
 - 部署证据：runtime ready；Codex Remote passive subscription 成功；`codex-remote attached live catalog threads loaded=2 attached=2`。
 - 复测动作：iOS 保持 Claude 默认模式且不打开/切换 session；Mac 端 Codex session 发送一个会产生文本回复的新回合，等待最多 10 秒。
 - 预期：通知正文显示该回合的真实回复预览；只有确实没有 live 文本的回合才允许固定文案。
+
+### Codex replay-preview Owner 结果与 DSH 失败
+
+- Codex preview：`PASS`。iOS 通知正文显示真实回复详情。
+- DSH：`FAIL`。Mac 端 3080 Web 里完成 DeepSeek Harness session 后，iOS 未收到通知。
+- 本地取证：dsh-web passive stream 已收到同一未打开 session 的 `turn_started`、多帧 `text_delta` 和 `turn_completed`；但 dsh-web 只实现普通 `EventSubscriber`，未提供 replay-free live seam，completion 仍被 observation/kernel gate 挡掉。
+- 协议事实：DSH mux stream 覆盖所有 external session 但无 cursor；不能把原始流直接标成 replay-free，必须按 observed turn lifecycle 过滤并消费一次。

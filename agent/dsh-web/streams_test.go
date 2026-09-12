@@ -248,6 +248,69 @@ func TestSubscribeRoutesExternalSessionToPassiveChannel(t *testing.T) {
 	}
 }
 
+func TestSubscribeLiveConsumesObservedTurnAndRejectsReplay(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+	f.SetMuxFrames([]any{
+		map[string]any{"type": "session/event", "sessionId": "ext-live",
+			"event": map[string]any{"type": "turn/start", "seq": 0, "time": 1, "data": map[string]any{"turn": 1}}},
+		map[string]any{"type": "session/event", "sessionId": "ext-live",
+			"event": map[string]any{"type": "step/start", "seq": 1, "time": 2,
+				"data": map[string]any{"turn": 1, "step": 1}}},
+		map[string]any{"type": "session/event", "sessionId": "ext-live",
+			"event": map[string]any{"type": "assistant/chunk", "seq": 2, "time": 3,
+				"data": map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{"type": "block-start", "index": 0, "blockType": "text"}}}},
+		map[string]any{"type": "session/event", "sessionId": "ext-live",
+			"event": map[string]any{"type": "assistant/chunk", "seq": 3, "time": 4,
+				"data": map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{"type": "text-delta", "index": 0, "text": "真实回复"}}}},
+		map[string]any{"type": "session/event", "sessionId": "ext-live",
+			"event": map[string]any{"type": "assistant/chunk", "seq": 4, "time": 5,
+				"data": map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{"type": "block-end", "index": 0, "block": map[string]any{"type": "text", "text": "真实回复"}}}}},
+		map[string]any{"type": "session/event", "sessionId": "ext-live",
+			"event": map[string]any{"type": "step/end", "seq": 5, "time": 6,
+				"data": map[string]any{"turn": 1, "step": 1}}},
+		map[string]any{"type": "session/event", "sessionId": "ext-live",
+			"event": map[string]any{"type": "turn/end", "seq": 6, "time": 7, "turn": 1,
+				"data": map[string]any{"turn": 1, "reason": map[string]any{"kind": "completed"}}}},
+	})
+	f.closeAfterPush = true
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events, err := a.SubscribeLive(ctx)
+	if err != nil {
+		t.Fatalf("SubscribeLive: %v", err)
+	}
+	want := []core.EventType{core.EventTurnStarted, core.EventText, core.EventResult}
+	for i, wantType := range want {
+		select {
+		case ev := <-events:
+			if ev.Type != wantType || ev.SessionID != "ext-live" || ev.TurnID == "" {
+				t.Fatalf("event %d = %+v, want %v", i, ev, wantType)
+			}
+			if wantType == core.EventText && ev.Content != "真实回复" {
+				t.Fatalf("text event = %+v", ev)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("event %d (%v) never reached live channel", i, wantType)
+		}
+	}
+
+	if !waitFor(t, 5*time.Second, func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return f.upgradeSeen["/api/events.mux"] >= 2
+	}) {
+		t.Fatalf("stream did not replay frames after reconnect (dials=%d)", f.upgradeSeen["/api/events.mux"])
+	}
+	select {
+	case ev := <-events:
+		t.Fatalf("replayed turn leaked to replay-free channel: %+v", ev)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
 func TestBoundSessionReceivesOwnEventsNotPassive(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
@@ -801,15 +864,15 @@ func TestCodecSubagentSettledContextInjection(t *testing.T) {
 		}),
 		env("user/message", 2, map[string]any{
 			"content": []map[string]any{{"type": "text", "text": "形状未知"}},
-			"source": map[string]any{"kind": "subagent-settled", "form": "notice"},
+			"source":  map[string]any{"kind": "subagent-settled", "form": "notice"},
 		}),
 		env("user/message", 3, map[string]any{
 			"content": []map[string]any{{"type": "text", "text": "<goal_round>"}},
-			"source": map[string]any{"kind": "goal"},
+			"source":  map[string]any{"kind": "goal"},
 		}),
 		env("user/message", 4, map[string]any{
 			"content": []map[string]any{{"type": "text", "text": "正常输入"}},
-			"source": map[string]any{"kind": "user"},
+			"source":  map[string]any{"kind": "user"},
 		}),
 	})
 	var injections []*core.ContextInjectionEvent
