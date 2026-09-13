@@ -45,6 +45,12 @@ type Agent struct {
 	model            string
 	reasoningEffort  string // "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
 	mode             string // "default" | "acceptEdits" | "plan" | "auto" | "bypassPermissions" | "dontAsk"
+	// modeExplicit 区分「配置/用户显式选了 default」与「从未设置（normalize("") 的
+	// default）」。~/.claude/settings.json 的 permissions.defaultMode 会在 CLI 不带
+	// --permission-mode 时接管生效模式（真机 2026-09-13 取证：owner 设置了
+	// bypassPermissions，app 显式切 default 后 spawn 仍按 bypass 跑）。显式选择必须
+	// 带旗标覆盖 settings；未设置则不带旗标、维持 settings 决定的现状行为。
+	modeExplicit bool
 	allowedTools     []string
 	disallowedTools  []string
 	maxContextTokens int // optional: passed as --max-context-tokens when > 0
@@ -148,8 +154,9 @@ func New(opts map[string]any) (core.Agent, error) {
 	cliArgsFlag, _ := opts["cli_args_flag"].(string)
 	model, _ := opts["model"].(string)
 	reasoningEffort, _ := opts["reasoning_effort"].(string)
-	mode, _ := opts["mode"].(string)
-	mode = normalizePermissionMode(mode)
+	rawMode, _ := opts["mode"].(string)
+	mode := normalizePermissionMode(rawMode)
+	modeExplicit := strings.TrimSpace(rawMode) != ""
 
 	var allowedTools []string
 	if tools, ok := opts["allowed_tools"].([]any); ok {
@@ -220,6 +227,7 @@ func New(opts map[string]any) (core.Agent, error) {
 		model:            model,
 		reasoningEffort:  normalizeEffort(reasoningEffort),
 		mode:             mode,
+		modeExplicit:     modeExplicit,
 		allowedTools:     allowedTools,
 		disallowedTools:  disallowedTools,
 		maxContextTokens: maxContextTokens,
@@ -506,6 +514,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	cliExtraArgs := append([]string(nil), a.cliExtraArgs...)
 	cliArgsFlag := a.cliArgsFlag
 	mode := a.mode
+	modeExplicit := a.modeExplicit
 	spawnOpts := a.spawnOpts
 	extraEnv := a.runtimeEnvLocked()
 
@@ -535,7 +544,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	}
 	a.mu.Unlock()
 
-	sess, err := newClaudeSession(ctx, workDir, cliBin, cliExtraArgs, cliArgsFlag, model, effort, sessionID, mode, tools, disTools, extraEnv, platformPrompt, disableVerbose, spawnOpts, maxTok, hookSettings)
+	sess, err := newClaudeSession(ctx, workDir, cliBin, cliExtraArgs, cliArgsFlag, model, effort, sessionID, mode, modeExplicit, tools, disTools, extraEnv, platformPrompt, disableVerbose, spawnOpts, maxTok, hookSettings)
 	if err != nil {
 		return nil, err
 	}
@@ -1861,7 +1870,10 @@ func (a *Agent) SetMode(mode string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.mode = normalizePermissionMode(mode)
-	slog.Info("claudecode: permission mode changed", "mode", a.mode)
+	// App 侧齿轮菜单的选择是用户显式意图：即使选 default 也要在 spawn 时带
+	// --permission-mode 旗标，覆盖 ~/.claude/settings.json 的 defaultMode。
+	a.modeExplicit = true
+	slog.Info("claudecode: permission mode changed", "mode", a.mode, "explicit", a.modeExplicit)
 }
 
 // GetMode returns the current permission mode.

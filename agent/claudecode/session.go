@@ -140,7 +140,7 @@ func baseClaudeInnerArgs(disableVerbose bool) []string {
 	return innerArgs
 }
 
-func newClaudeSession(ctx context.Context, workDir, cliBin string, cliExtraArgs []string, cliArgsFlag string, model, effort, sessionID, mode string, allowedTools, disallowedTools []string, extraEnv []string, platformPrompt string, disableVerbose bool, spawnOpts core.SpawnOptions, maxContextTokens int, hookSettings string) (*claudeSession, error) {
+func newClaudeSession(ctx context.Context, workDir, cliBin string, cliExtraArgs []string, cliArgsFlag string, model, effort, sessionID, mode string, modeExplicit bool, allowedTools, disallowedTools []string, extraEnv []string, platformPrompt string, disableVerbose bool, spawnOpts core.SpawnOptions, maxContextTokens int, hookSettings string) (*claudeSession, error) {
 	sessionCtx, cancel := context.WithCancel(ctx)
 
 	// innerArgs are Claude Code CLI flags — when a wrapper is used with
@@ -155,7 +155,12 @@ func newClaudeSession(ctx context.Context, workDir, cliBin string, cliExtraArgs 
 		innerArgs = append(innerArgs, "--settings", hookSettings)
 	}
 
-	if mode != "" && mode != "default" {
+	// 显式选择的 default 也要带旗标：~/.claude/settings.json 的
+	// permissions.defaultMode 会在无旗标时接管生效模式（真机 2026-09-13：owner
+	// settings=defaultMode:bypassPermissions，app 切 default 后 spawn 仍跑 bypass，
+	// 权限卡永远不出现）。未显式设置（modeExplicit=false）维持无旗标现状，
+	// settings 的 defaultMode 继续生效。
+	if mode != "" && (mode != "default" || modeExplicit) {
 		innerArgs = append(innerArgs, "--permission-mode", mode)
 	}
 	switch sessionID {
