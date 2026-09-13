@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -1347,6 +1348,7 @@ func (k *ProjectionKernel) CommitHydrateTransaction(
 	// execution (real device 2026-08-20: user_message patches then sinceRev=0
 	// hydrate committed {"phase":"idle"}). Turns still come from the cold source;
 	// execution takes the in-flight max (running/requires_action > idle).
+	coldPhase := baseline.Execution.Phase
 	if tx.unionLiveTurns {
 		baseline = unionColdBaselineWithLiveTurns(baseline, liveSnap, liveOK)
 	} else {
@@ -1357,11 +1359,27 @@ func (k *ProjectionKernel) CommitHydrateTransaction(
 	for _, msg := range tx.pendingLive {
 		before := k.reducer.LastAppliedRev(msg.BackendID, msg.SessionID)
 		k.reducer.Apply(msg)
-		if k.reducer.LastAppliedRev(msg.BackendID, msg.SessionID) != before && msg.EventID != "" {
+		advanced := k.reducer.LastAppliedRev(msg.BackendID, msg.SessionID) != before
+		if advanced && msg.EventID != "" {
 			appliedPendingIDs = append(appliedPendingIDs, msg.EventID)
+		}
+		if !advanced {
+			// 2026-09-13 真机排障：pendingLive 行未推进 rev 时（seq 幂等门拒收 /
+			// 身份不匹配 no-op）此前完全不可见——iOS 只看到 rev 停在 baseline。
+			slog.Info("projection kernel: pendingLive drain no-op",
+				"backendID", backendID, "sessionID", sessionID,
+				"event", msg.Event, "seq", msg.PerSessionSeq, "eventID", msg.EventID,
+				"turnId", dataStringFromEventData(msg.Data))
 		}
 	}
 	committed, _ := k.reducer.Snapshot(backendID, sessionID)
+	slog.Info("projection kernel: hydrate commit merged",
+		"backendID", backendID, "sessionID", sessionID,
+		"coldPhase", coldPhase,
+		"livePhase", phaseOrNone(liveOK, liveSnap.Execution.Phase),
+		"mergedPhase", baseline.Execution.Phase,
+		"finalPhase", committed.Execution.Phase, "finalRev", committed.SyncRev,
+		"pendingLive", len(tx.pendingLive), "appliedPending", len(appliedPendingIDs))
 	var patch *ProjectionPatch
 	if pendingPatch, ok := k.reducer.FlushPatch(backendID, sessionID); ok {
 		patch = &pendingPatch
@@ -1394,27 +1412,83 @@ func executionInFlight(e ExecutionView) bool {
 	}
 }
 
+// phaseOrNone renders a live-snapshot phase for diagnostics ("none" when the
+// main reducer carried no state for the session).
+func phaseOrNone(ok bool, phase string) string {
+	if !ok {
+		return "none"
+	}
+	return phase
+}
+
+// dataStringFromEventData extracts a diagnostic field (turnId/itemId) from an
+// event payload; empty when absent. Diagnostic-only — never gates behavior.
+func dataStringFromEventData(data interface{}) string {
+	m, ok := data.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	for _, key := range []string{"turnId", "itemId"} {
+		if v, ok := m[key].(string); ok && v != "" {
+			return key + "=" + v
+		}
+	}
+	return ""
+}
+
 // mergeHydrateBaselineWithLiveExecution keeps an already-live in-flight execution
 // when the cold baseline would otherwise Restore idle. Cold turns/content stay
 // the hydrate baseline; this is not a second writer — commit is still one Restore.
+//
+// Reverse direction (PR0 行 6 权限半边, 2026-09-13 真机): the hydrate cut can land
+// mid-turn on disk (user row flushed, assistant/result row still after the cut —
+// projectionJSONLStartCut only guarantees complete lines, not complete turns), so the
+// cold baseline replays to a phantom "running" while the authoritative live
+// turn_completed already applied to the main reducer BEFORE BeginHydrate (it therefore
+// never enters pendingLive). Committing the cold baseline as-is would Restore running
+// over the already-idle live truth and the session sticks in running forever (iOS
+// composer stays in stop mode; no rev ever flips it). Live terminal state wins: the
+// turn_completed event is the authoritative lifecycle signal; a cold cut that predates
+// it is simply stale.
 func mergeHydrateBaselineWithLiveExecution(cold, live SessionProjection, liveOK bool) SessionProjection {
-	if !liveOK || !executionInFlight(live.Execution) || executionInFlight(cold.Execution) {
+	if !liveOK {
 		return cold
 	}
-	cold.Execution = live.Execution
-	active := live.Execution.ActiveTurnID
-	if active == "" {
+	if executionInFlight(live.Execution) && !executionInFlight(cold.Execution) {
+		cold.Execution = live.Execution
+		active := live.Execution.ActiveTurnID
+		if active == "" {
+			return cold
+		}
+		for i := range cold.Turns {
+			if cold.Turns[i].TurnID != active {
+				continue
+			}
+			switch cold.Turns[i].Status {
+			case "completed", "aborted", "error":
+				cold.Turns[i].Status = "running"
+				cold.Turns[i].CompletedAt = 0
+			}
+		}
 		return cold
 	}
-	for i := range cold.Turns {
-		if cold.Turns[i].TurnID != active {
-			continue
+	if !executionInFlight(live.Execution) && executionInFlight(cold.Execution) {
+		// Cold cut is mid-turn but live already reached a terminal execution state.
+		// Keep live's terminal execution; settle the cold-armed running turns so the
+		// baseline does not carry zombie running rows under a terminal phase. Live
+		// turn_completed is the authoritative lifecycle signal (it applied before
+		// BeginHydrate, hence outside pendingLive); the mid-turn cold cut is stale.
+		cold.Execution = live.Execution
+		for i := range cold.Turns {
+			if cold.Turns[i].Status != "running" {
+				continue
+			}
+			cold.Turns[i].Status = "completed"
+			if cold.Turns[i].CompletedAt == 0 {
+				cold.Turns[i].CompletedAt = cold.UpdatedAt
+			}
 		}
-		switch cold.Turns[i].Status {
-		case "completed", "aborted", "error":
-			cold.Turns[i].Status = "running"
-			cold.Turns[i].CompletedAt = 0
-		}
+		return cold
 	}
 	return cold
 }
