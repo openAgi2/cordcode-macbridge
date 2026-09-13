@@ -1802,3 +1802,75 @@ func TestRelayEventsSharedDaemonChannelClosedDoesNotSynthesize(t *testing.T) {
 		t.Fatal("relayEvents 退出后必须清理 agentRelayRunning（被动泵据此接管官方帧）")
 	}
 }
+
+// PR0 行 6 复现：AskUserQuestion 的 v2 事件（EventUserInputRequested）经 relayEvents
+// 泵是否被投递（真机轮 2 观察：legacy question_asked 有日志、user_input_requested
+// 无 kernel ingest——先钉住泵路径行为再定位）。
+func TestRelayEventsForwardsUserInputRequested(t *testing.T) {
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers := NewHandlers()
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{
+		BackendID: "claude",
+		SessionID: "ses_ui_test",
+	})
+	session := &fakeAgentSession{
+		id:     "ses_ui_test",
+		events: make(chan core.Event, 3),
+	}
+	session.events <- core.Event{
+		Type:      core.EventUserInputRequested,
+		SessionID: "ses_ui_test",
+		TurnID:    "msg_ask_1",
+		ItemID:    "req_ask_1",
+		UserInput: &core.UserInputInteraction{
+			InteractionID: "ui_1",
+			Status:        core.UserInputStatusPending,
+			Questions: []core.UserInputQuestion{{
+				ID:         "q1",
+				Prompt:     "Which fruit?",
+				AnswerMode: core.UserInputAnswerModeSingle,
+				Options: []core.UserInputOption{
+					{ID: "o1", Label: "Apple"},
+					{ID: "o2", Label: "Banana"},
+				},
+				AllowsCustomAnswer: true,
+				Required:           true,
+			}},
+			CanRespond: true,
+			CanReject:  true,
+		},
+	}
+	session.events <- core.Event{Type: core.EventResult, Done: true, Content: "done"}
+	close(session.events)
+
+	done := make(chan struct{})
+	go func() {
+		handlers.relayEvents(serverConn, session, "ses_ui_test", "claude")
+		close(done)
+	}()
+
+	// user_input_requested 是 projection-only canonical 事件（isProjectionOnlyCanonicalEvent）：
+	// raw 帧按设计被滤（shouldDeliverRawEventLocked=false），只经 kernel patch 投递。
+	// 本 harness 无 syncV2 协商连接 → patch 无投递目标 → 客户端只见
+	// turn_completed + session_state_changed。此测试钉住「泵转发 + kernel ingest Applied」
+	//（日志断言），不预设 raw 帧。
+	events := readEventNames(t, clientConn, 2)
+	want := []string{"turn_completed", "session_state_changed"}
+	if len(events) != 2 || events[0] != want[0] || events[1] != want[1] {
+		t.Fatalf("events = %#v, want %#v", events, want)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("relayEvents did not finish")
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

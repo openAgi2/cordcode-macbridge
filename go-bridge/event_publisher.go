@@ -1079,6 +1079,16 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 		kernelIngest = p.kernel.IngestLive(msg)
 		kernelIngested = true
 		projectionApplied = kernelIngest == ProjectionIngestApplied
+		if logical.Event == "user_input_requested" {
+			// PR0 行 6 取证：AskUserQuestion live 投递链可观察性（真机轮 2 卡片未达
+			// iOS，[K4Patch] flush 是 Debug 级不可见）。INFO 级记录 ingest 三态结果。
+			slog.Info("go-bridge: user_input_requested ingest",
+				"backendID", logical.BackendID,
+				"sessionPrefix", projectionSessionLogPrefix(logical.SessionID),
+				"result", fmt.Sprintf("%d", int(kernelIngest)),
+				"interactionId", dataString(asDataMap(logical.Data), "interactionId"),
+			)
+		}
 	} else if p.projection != nil {
 		before := p.projection.LastAppliedRev(logical.BackendID, logical.SessionID)
 		p.projection.Apply(msg)

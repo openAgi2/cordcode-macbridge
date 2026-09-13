@@ -389,3 +389,50 @@ func TestReducerRestorePreservesUserInputParts(t *testing.T) {
 		t.Fatalf("restored part = %+v, want pending/canRespond=true", p)
 	}
 }
+
+// TestReducerUserInputRegistryMissAfterRestoreKeepsOwningTurn：PR0 行 6 真机回归
+//（2026-09-13）：hydrate Restore 清空 userInputs 注册表但投影 part 存活；Stop-hook
+// 冷读重放 user_input_requested 时注册表 miss，旧逻辑把同一 interactionId 挂到冷读
+// turn 上形成双卡（live pending + 冷读 answered），resolve 提交等待扫到第一份 pending
+// 副本即超时。注册表 miss 时必须扫投影 part 找回原 owning turn 原地 upsert。
+func TestReducerUserInputRegistryMissAfterRestoreKeepsOwningTurn(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "claude", "s1", "turn_started", map[string]interface{}{"turnId": "assistant-message-id"}))
+	r.Apply(ev(2, "claude", "s1", "user_input_requested", map[string]interface{}{
+		"turnId": "assistant-message-id", "interactionId": "ui_r6", "status": "pending",
+		"questions": uiQuestionsWire(), "canRespond": true, "canReject": true,
+	}))
+	snapshot, ok := r.Snapshot("claude", "s1")
+	if !ok {
+		t.Fatal("no projection")
+	}
+
+	// 模拟 hydrate Restore：新 reducer 恢复投影（注册表为空、part 存活）。
+	r2 := newTestReducer()
+	r2.Restore("claude", "s1", snapshot)
+
+	// 冷读重放：同一 interactionId 但 turnId 是冷读身份（hydrate user-line turn）。
+	r2.Apply(ev(3, "claude", "s1", "user_input_requested", map[string]interface{}{
+		"turnId": "user-line-4", "interactionId": "ui_r6", "status": "pending",
+		"questions": uiQuestionsWire(), "canRespond": false, "canReject": false,
+	}))
+
+	projection, _ := r2.Snapshot("claude", "s1")
+	parts := 0
+	for _, turn := range projection.Turns {
+		if turn.Assistant == nil {
+			continue
+		}
+		for _, part := range turn.Assistant.Parts {
+			if part.Type == "user_input" && part.UserInputInteractionID == "ui_r6" {
+				parts++
+				if turn.TurnID != "assistant-message-id" {
+					t.Fatalf("interaction re-projected onto %s, want original owning turn assistant-message-id", turn.TurnID)
+				}
+			}
+		}
+	}
+	if parts != 1 {
+		t.Fatalf("interaction projected %d times, want exactly one (no phantom second card)", parts)
+	}
+}

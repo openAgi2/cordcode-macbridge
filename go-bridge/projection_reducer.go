@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -553,6 +554,27 @@ func findUserInputPart(msg *MessageProjection, interactionID string) int {
 		}
 	}
 	return -1
+}
+
+// turnIDWithUserInputPart scans the whole projection for an existing user_input
+// part with this interactionId and returns its owning turn id ("" when absent).
+// The userInputs registry is the fast path but a hydrate Restore clears it while
+// the parts survive — this scan recovers the original owning turn so a cold
+// re-ingest updates in place instead of creating a phantom second card.
+func (ps *projectionSession) turnIDWithUserInputPart(interactionID string) string {
+	if interactionID == "" {
+		return ""
+	}
+	for i := range ps.projection.Turns {
+		assistant := ps.projection.Turns[i].Assistant
+		if assistant == nil {
+			continue
+		}
+		if findUserInputPart(assistant, interactionID) >= 0 {
+			return ps.projection.Turns[i].TurnID
+		}
+	}
+	return ""
 }
 
 // upsertWorkflowPart inserts or replaces (in place, by workflowId) a workflow part
@@ -1830,6 +1852,14 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		// owning turn and update in place instead of creating a phantom second card.
 		if existing, ok := ps.userInputs[interactionID]; ok && existing.turnID != "" {
 			turnID = existing.turnID
+		} else if owning := ps.turnIDWithUserInputPart(interactionID); owning != "" {
+			// PR0 行 6（2026-09-13 真机）：hydrate Restore 会清空 userInputs 注册表，
+			// 但投影里的 part 仍在——Stop-hook 冷读重放 user_input_requested 时注册表
+			// miss，同一 interactionId 被挂到冷读 turn 上，形成「live turn pending +
+			// 冷读 turn answered」双卡；resolve 提交等待扫到第一份 pending 副本即超时
+			// （resolve_user_input_failed）。注册表 miss 时扫投影 part 找回原 owning
+			// turn，原地 upsert，维持一交互一卡不变量。
+			turnID = owning
 		}
 		if turnID == "" && (msg.BackendID == "dsh-web" || msg.BackendID == "grokbuild") {
 			// dsh-web Mac-initiated asks after codec reset may omit turnId.
@@ -1843,6 +1873,15 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			}
 		}
 		if turnID == "" {
+			if msg.BackendID == "claude" || msg.BackendID == "claudecode" {
+				// PR0 行 6 取证：claude live AskUserQuestion 无 turn 归属被静默丢弃，
+				// iOS 卡片缺失无日志可查。INFO 级暴露 drop 点。
+				slog.Info("go-bridge: user_input_requested dropped (no turnId)",
+					"backendID", msg.BackendID,
+					"sessionPrefix", projectionSessionLogPrefix(msg.SessionID),
+					"interactionId", interactionID,
+				)
+			}
 			return
 		}
 		commit()
