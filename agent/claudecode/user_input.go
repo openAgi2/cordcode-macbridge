@@ -439,8 +439,12 @@ func (cs *claudeSession) handleAskUserQuestionV2(requestID string, input map[str
 			InteractionID: iid,
 			Status:        core.UserInputStatusPending,
 			Questions:     normalized,
-			CanRespond:    true,
-			CanReject:     true, // Claude 有真实 deny control_response 路径（§9.3）
+			// Claude 问答卡对 CordCode 客户端只读（owner 2026-08-31 裁决；作答在 Mac 端
+			// Claude Code 会话里给）。live 与 cold/hydrate 的 observe_only 语义对齐；
+			// ResolveUserInput 的 §9.3 作答/拒绝路径保留，供未来按客户端能力放开。
+			CanRespond:     false,
+			CanReject:      false,
+			DiagnosticCode: "observe_only",
 		},
 	})
 	cs.emitLegacyAskUserQuestion(requestID, parsed)

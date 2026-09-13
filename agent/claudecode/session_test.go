@@ -27,7 +27,7 @@ func TestProductionSessionStructuredInputHelperProcess(t *testing.T) {
 			defer cancel()
 			cs, err := newClaudeSession(ctx, t.TempDir(), os.Args[0],
 				[]string{"-test.run=TestHelperProcess", "--", "structured-input-fixture"}, "",
-				"", "", tc.resumeID, "default", nil, nil,
+				"", "", tc.resumeID, "default", true, nil, nil,
 				[]string{"GO_WANT_HELPER_PROCESS=1"}, "", false, core.SpawnOptions{}, 0, "")
 			if err != nil {
 				t.Fatalf("newClaudeSession: %v", err)

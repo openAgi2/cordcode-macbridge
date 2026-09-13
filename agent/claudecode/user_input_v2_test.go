@@ -112,8 +112,11 @@ func TestV2_FlagOn_SingleQuestionEmitsPending(t *testing.T) {
 	if ev.UserInput.Status != core.UserInputStatusPending {
 		t.Fatalf("status = %q want pending", ev.UserInput.Status)
 	}
-	if !ev.UserInput.CanRespond || !ev.UserInput.CanReject {
-		t.Fatalf("Claude canRespond=true canReject=true，实际 respond=%v reject=%v", ev.UserInput.CanRespond, ev.UserInput.CanReject)
+	if ev.UserInput.CanRespond || ev.UserInput.CanReject {
+		t.Fatalf("Claude live 问答卡应 observe_only（canRespond=false canReject=false），实际 respond=%v reject=%v", ev.UserInput.CanRespond, ev.UserInput.CanReject)
+	}
+	if ev.UserInput.DiagnosticCode != "observe_only" {
+		t.Fatalf("diagnosticCode = %q want observe_only（与 cold/hydrate 对齐）", ev.UserInput.DiagnosticCode)
 	}
 	iid := deriveClaudeInteractionID("req-1")
 	if ev.UserInput.InteractionID != iid {
