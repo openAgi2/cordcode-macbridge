@@ -47,6 +47,7 @@ type DeviceObservation struct {
 type ObservationManager struct {
 	mu         sync.RWMutex
 	devices    map[string]*DeviceObservation // deviceID -> observation
+	rebinds    map[string]map[string]string  // backendID -> pendingID -> realID（lazy-create 解析记录）
 	leaseTimer *time.Ticker
 	stopCh     chan struct{}
 	startOnce  sync.Once
@@ -60,6 +61,7 @@ type ObservationManager struct {
 func NewObservationManager() *ObservationManager {
 	return &ObservationManager{
 		devices: make(map[string]*DeviceObservation),
+		rebinds: make(map[string]map[string]string),
 		stopCh:  make(chan struct{}),
 	}
 }
@@ -74,6 +76,11 @@ func (om *ObservationManager) Start(ctx context.Context) {
 }
 
 // SetScope 设置设备的 observation scope。
+//
+// SessionIDs 先经过 rebind 映射改写：lazy-create（draft 首 turn）解析出真实 id 后，
+// 客户端在下一个 lease tick 之前仍只知道 pending-* id；若原样存入，ShouldSendEvent
+// 会把真实 id 的 projection_patch 全部滤掉，客户端永远学不到真实 id（2026-09-13
+// 真机 PR0 矩阵 Finding 1：draft 首 turn ~85% 概率 patch 全丢、2 分钟+ 假死）。
 func (om *ObservationManager) SetScope(deviceID string, scope ObservationScope) {
 	om.mu.Lock()
 	defer om.mu.Unlock()
@@ -88,6 +95,29 @@ func (om *ObservationManager) SetScope(deviceID string, scope ObservationScope) 
 
 	dev.mu.Lock()
 	defer dev.mu.Unlock()
+
+	// pending→real 改写（链式映射防御，上限 4 跳）。
+	if len(scope.SessionIDs) > 0 && len(om.rebinds[scope.BackendID]) > 0 {
+		rewritten := 0
+		for i, sid := range scope.SessionIDs {
+			for hop := 0; hop < 4; hop++ {
+				next, ok := om.rebinds[scope.BackendID][sid]
+				if !ok {
+					break
+				}
+				scope.SessionIDs[i] = next
+				sid = next
+				rewritten++
+			}
+		}
+		if rewritten > 0 {
+			slog.Info("observation: scope rebind rewrite on set",
+				"deviceID", safeID(deviceID),
+				"backendID", scope.BackendID,
+				"rewritten", rewritten,
+			)
+		}
+	}
 
 	// 设置租约时间
 	if scope.LeaseSeconds <= 0 {
@@ -111,6 +141,11 @@ func (om *ObservationManager) SetScope(deviceID string, scope ObservationScope) 
 // pending id until their next lease renew, and ShouldSendEvent would otherwise
 // filter projection_patch / text for the real id (first-turn blank body).
 //
+// The mapping is also recorded so subsequent SetScope calls (lease renew with a
+// stale pending id) are rewritten at ingest — without this, a lease tick landing
+// between send and turn completion re-introduces the pending id and filters all
+// patches for the real id (2026-09-13 real-device PR0 Finding 1).
+//
 // Returns how many scopes were rewritten.
 func (om *ObservationManager) RebindSessionID(backendID, oldSessionID, newSessionID string) int {
 	if om == nil || backendID == "" || oldSessionID == "" || newSessionID == "" || oldSessionID == newSessionID {
@@ -118,6 +153,11 @@ func (om *ObservationManager) RebindSessionID(backendID, oldSessionID, newSessio
 	}
 	om.mu.Lock()
 	defer om.mu.Unlock()
+
+	if om.rebinds[backendID] == nil {
+		om.rebinds[backendID] = make(map[string]string)
+	}
+	om.rebinds[backendID][oldSessionID] = newSessionID
 
 	rewritten := 0
 	for _, dev := range om.devices {

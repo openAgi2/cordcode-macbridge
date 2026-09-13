@@ -89,6 +89,92 @@ func TestObservationRebindSessionIDRewritesPendingAlias(t *testing.T) {
 	}
 }
 
+// TestObservationSetScopeRewritesStalePendingIDAfterRebind pins the
+// 2026-09-13 real-device PR0 Finding 1 race: a draft first turn resolves
+// pending-* → real id (rebind), then the client's lease tick re-sends
+// set_observation_scope with the stale pending id before it has received
+// any patch. SetScope must rewrite the pending id at ingest; otherwise
+// ShouldSendEvent filters every patch for the real id and the client
+// stalls for the rest of the turn with zero event frames.
+func TestObservationSetScopeRewritesStalePendingIDAfterRebind(t *testing.T) {
+	om := NewObservationManager()
+	om.Start(context.Background())
+	defer om.Stop()
+
+	// 1) Client opens draft session: lease scope with pending id.
+	om.SetScope("dev_phone", ObservationScope{
+		BackendID:    "claude",
+		SessionIDs:   []string{"pending-83412441"},
+		DeliveryMode: scopeFullStream,
+		LeaseSeconds: 90,
+	})
+
+	// 2) First turn resolves the real id; rebind rewrites the live scope.
+	if n := om.RebindSessionID("claude", "pending-83412441", "d163411b-real"); n != 1 {
+		t.Fatalf("rebind rewritten = %d, want 1", n)
+	}
+
+	// 3) Race window: lease tick lands before the client learned the real id —
+	//    it re-sends the scope with the stale pending id.
+	om.SetScope("dev_phone", ObservationScope{
+		BackendID:    "claude",
+		SessionIDs:   []string{"pending-83412441"},
+		DeliveryMode: scopeFullStream,
+		LeaseSeconds: 90,
+	})
+
+	// 4) The turn's patches for the real id must still pass.
+	if !om.ShouldSendEvent("dev_phone", "claude", "d163411b-real", "projection_patch") {
+		t.Fatal("stale pending re-set must not filter patches for the real id (Finding 1 race)")
+	}
+	if !om.ShouldSendEvent("dev_phone", "claude", "d163411b-real", "text_delta") {
+		t.Fatal("text_delta for real id must pass full_stream after stale pending re-set")
+	}
+	if !om.ShouldSendEvent("dev_phone", "claude", "d163411b-real", "turn_completed") {
+		t.Fatal("turn_completed for real id must pass after stale pending re-set")
+	}
+
+	// 5) Stored scope holds the real id, not the pending alias.
+	scope := om.GetScope("dev_phone", "claude")
+	if scope == nil {
+		t.Fatal("scope missing")
+	}
+	for _, sid := range scope.SessionIDs {
+		if sid == "pending-83412441" {
+			t.Fatalf("stale pending id persisted in scope: %#v", scope.SessionIDs)
+		}
+	}
+
+	// 6) A later, unrelated scope for the same backend is untouched.
+	om.SetScope("dev_phone", ObservationScope{
+		BackendID:    "claude",
+		SessionIDs:   []string{"sess-unrelated"},
+		DeliveryMode: scopeFullStream,
+		LeaseSeconds: 90,
+	})
+	if om.ShouldSendEvent("dev_phone", "claude", "d163411b-real", "text_delta") {
+		t.Fatal("unrelated scope re-set must not keep observing the old session")
+	}
+}
+
+// TestObservationSetScopeRebindChainRewritesTransitively pins the chained
+// mapping path: pending-A → pending-B → real (double lazy-create resolution)
+// must collapse to real in one SetScope pass.
+func TestObservationSetScopeRebindChainRewritesTransitively(t *testing.T) {
+	om := NewObservationManager()
+	om.RebindSessionID("codex", "pending-a", "pending-b")
+	om.RebindSessionID("codex", "pending-b", "real-thread-9")
+	om.SetScope("dev_1", ObservationScope{
+		BackendID:    "codex",
+		SessionIDs:   []string{"pending-a"},
+		DeliveryMode: scopeFullStream,
+		LeaseSeconds: 90,
+	})
+	if !om.ShouldSendEvent("dev_1", "codex", "real-thread-9", "projection_patch") {
+		t.Fatal("chained pending→real must resolve to the final real id")
+	}
+}
+
 type observationResultConn struct {
 	relayBroadcastCaptureConn
 	result interface{}
