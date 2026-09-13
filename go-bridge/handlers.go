@@ -1527,6 +1527,14 @@ func (h *Handlers) SetWebPushPipeline(pipeline *WebPushCandidatePipeline) {
 // markHydrateFailed 统一 MarkFailed 调用点：kernel 失败后把未提交的 deferred
 // web push candidate 显式丢弃（§8.1：不假发送，记脱敏诊断）。
 func (h *Handlers) markHydrateFailed(backendID, sessionID, code, message string, retryable bool) {
+	// 2026-09-13 真机排障：此前失败原因只回给 iOS（WireError.Message），bridge 日志
+	// 完全不可见——req 级 2ms hydrate_failed 无从归因。message 截断防路径扩散。
+	if len(message) > 200 {
+		message = message[:200]
+	}
+	slog.Warn("projection hydrate failed",
+		"backendID", backendID, "sessionID", sessionID,
+		"code", code, "retryable", retryable, "reason", message)
 	// A failed hydrate must not leave its page-1 producer seed behind (T2.1):
 	// the seed is a claim about a baseline that never committed.
 	h.hydrateProducerSeeds.Delete(projectionDeliveryKey(backendID, sessionID))
@@ -3231,6 +3239,23 @@ func (h *Handlers) rebindSessionIDIfResolved(currentID string, sess core.AgentSe
 	h.broadcaster.Rebind(currentID, realID, backendID, directory)
 	h.eventPublisher.EventBuffer().Rebind(backendID, currentID, realID)
 	h.rebindRelayKind(currentID, realID, relayKindAgent)
+	// Agent relay (relayEvents goroutine) 常以 pending id 启动，会话 id 解析后其
+	// 服务对象已是 real id，但 agentRelayRunning/agentRelaySess 仍留在 pending 键下。
+	// 不 re-key 会让 agentRelayActive(realID)=false——claude file-relay 初扫的「stdout
+	// 拥有自有回合生命周期」门失效，重新合成 turn_started 把已收口的回合武装成
+	// running（真机 2026-09-13 23:46 取证：mux turn_completed 已达 idle，file-relay
+	// 初扫仍发 turn_started seq15 → kernel 卡 running）。relayEvents 的 defer 同时
+	// 清理 orig 与 current 两键，re-key 无泄漏。
+	h.mu.Lock()
+	if h.agentRelayRunning[currentID] {
+		h.agentRelayRunning[realID] = true
+		delete(h.agentRelayRunning, currentID)
+	}
+	if sess, ok := h.agentRelaySess[currentID]; ok && h.agentRelaySess[realID] == nil {
+		h.agentRelaySess[realID] = sess
+		delete(h.agentRelaySess, currentID)
+	}
+	h.mu.Unlock()
 	// Observation: rewrite pending → real so ShouldSendEvent / rebindLiveTargets
 	// accept projection_patch for the real session before the client's next lease renew.
 	if h.observation != nil {
@@ -5088,15 +5113,29 @@ func (h *Handlers) projectedUserInput(backendID, sessionID, interactionID string
 	if !ok {
 		return ProjectionPart{}, 0, false
 	}
+	// 同一 interactionId 在 claude 双身份（live turn + 冷读 turn）下可能短暂存在
+	// 两份 part；resolve 提交等待以「已结算」为准——先扫非 pending 副本，全部
+	// pending 时返回第一份（保持请求期语义）。
+	var firstPending ProjectionPart
+	foundPending := false
 	for _, turn := range projection.Turns {
 		if turn.Assistant == nil {
 			continue
 		}
 		for _, part := range turn.Assistant.Parts {
 			if part.Type == "user_input" && part.UserInputInteractionID == interactionID {
-				return part, projection.SyncRev, true
+				if part.UserInputStatus != string(core.UserInputStatusPending) {
+					return part, projection.SyncRev, true
+				}
+				if !foundPending {
+					firstPending = part
+					foundPending = true
+				}
 			}
 		}
+	}
+	if foundPending {
+		return firstPending, projection.SyncRev, true
 	}
 	return ProjectionPart{}, projection.SyncRev, false
 }

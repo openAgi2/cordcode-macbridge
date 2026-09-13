@@ -792,3 +792,69 @@ func TestClaudeFileRelayRealTranscript429Sequence(t *testing.T) {
 			stillRunning, len(names), names)
 	}
 }
+
+// 真机 2026-09-13 23:17 取证（PR0 行 6 权限半边）：iOS pull 触发的 hydrate 冷开在
+// agent stdout relay 活跃、回合为自有（ClientTurnOwner 自持 uuid）时启动 file-relay；
+// transcript 刷盘滞后令 initialEntry 仍分类为「user 尾」，初扫合成 turn_started 会把
+// stdout 已收口（mux turn_completed 已达）的回合重新武装成 running，且 growth 路径的
+// stdout_owns_assistant_content 跳过保证永远没有文件侧 turn_completed 收口——kernel
+// 卡 running、iOS composer 永远等不到完成翻转。回归：自有回合 + agent relay 活跃时
+// 初扫不得 arm；自有 assistant 完成行保持 cursor-only；watcher 仍须为后续外部回合服务。
+// 断言形态：上述任何回归事件都会先于（或取代）外部回合的 turn_started 到达——
+// 用首个收到的事件校验，避免 gorilla 读超时后的连接毒性。
+func TestClaudeFileRelayOwnedWarmStartDoesNotArmRunning(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	withFastClaudeFileRelay(t)
+	const sessionID = "owned-warm-start"
+	path := writeClaudeFileRelayTranscript(t, home, sessionID,
+		`{"type":"user","uuid":"u-self","message":{"role":"user","content":"Reply with the single word READY."}}`,
+	)
+	handlers := newTestHandlers(t)
+	agent := &fakeAgent{
+		name: "claudecode",
+		liveProcesses: map[string]core.LiveSessionProcess{
+			sessionID: {SessionID: sessionID, PID: 4242, Live: true},
+		},
+		alivePIDs: map[int]bool{4242: true},
+	}
+	handlers.RegisterAgent("claude", agent)
+	// 自有回合 + agent stdout relay 活跃（真机时序：hydrate 冷开发生在 turn 刚被
+	// mux 收口、transcript 终行尚未刷盘的窗口内）。
+	handlers.putSession(sessionID, &fakeAgentSession{events: make(chan core.Event, 1), ownsClientTurns: map[string]bool{"u-self": true}})
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "claude", SessionID: sessionID})
+	handlers.mu.Lock()
+	handlers.agentRelayRunning[sessionID] = true
+	handlers.mu.Unlock()
+	handlers.startClaudeSessionFileRelayAt(sessionID, serverConn, "claude", nil)
+	client := &websocketClient{conn: clientConn}
+
+	// 静默窗口 1：初扫（若回归，turn_started(u-self) 会立即发出）。
+	time.Sleep(200 * time.Millisecond)
+	// 自有回合的 assistant 完成行到达（stdout 权威，cursor-only）。
+	appendClaudeFileRelayTranscript(t, path,
+		`{"type":"assistant","uuid":"as-self","parentUuid":"u-self","message":{"id":"msg-self","role":"assistant","content":[{"type":"text","text":"READY"}],"stop_reason":"end_turn"}}`,
+	)
+	// 静默窗口 2：growth 扫描消费该行（若回归，text_delta/turn_completed 会发出）。
+	time.Sleep(200 * time.Millisecond)
+	// 外部回合（uuid 不在自持集）——watcher 存活证明。
+	appendClaudeFileRelayTranscript(t, path,
+		`{"type":"user","uuid":"u-external","parentUuid":"as-self","message":{"role":"user","content":"external prompt"}}`,
+	)
+
+	// 首个事件必须是外部回合的 turn_started：任何回归（warm-start arm 或文件侧
+	// 自有回合事件）都会先于它到达。
+	messages := client.readEvents(t, 2) // turn_started + user_message
+	if got := messages[0]["event"]; got != "turn_started" {
+		t.Fatalf("first event = %v, want external turn_started (no owned warm-start/assistant events may precede it)", got)
+	}
+	data, _ := messages[0]["data"].(map[string]any)
+	if tid, _ := data["turnId"].(string); tid != "u-external" {
+		t.Fatalf("first turn_started turnId = %#v, want u-external", tid)
+	}
+	if !handlers.relayKindIs(sessionID, relayKindClaudeFile) {
+		t.Fatal("relay exited; must keep watching")
+	}
+}

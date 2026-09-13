@@ -832,6 +832,18 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 		// No discoverable process: stay idle and watch for future transcript growth.
 		// Do not arm running from historical tail (process may have died mid-turn).
 		h.broadcastIdleState(sessionID, backendID)
+	} else if h.agentRelayActive(sessionID) && h.agentOwnsClaudeTurn(sessionID, currentTurnID) {
+		// 官方单源模型对初始状态合成同样成立（真机 2026-09-13 23:17 取证）：自有
+		// 回合（本进程 Send 发起，user 行 uuid ∈ 自持集）且 agent stdout relay 活跃
+		// 时，回合生命周期由 stdout 权威供给——mux 的 turn_completed 可能已把 live
+		// 收口成 idle，而 transcript 刷盘滞后让 initialEntry 仍分类为「user 尾」。
+		// 此时再合成 turn_started 会经 hydrate pendingLive drain 把已 idle 的基线
+		// 重新武装成 running（turn_started 不 bump rev），且 growth 路径的
+		// stdout_owns_assistant_content 跳过保证永远没有文件侧 turn_completed 来收
+		// 口——kernel 卡 running、iOS composer 永远等不到完成翻转。与下方 growth
+		// 循环的归属规则同一谓词：不合成自己不拥有的状态，只继续 watch。
+		slog.Info("go-bridge: claudeSessionFileRelay initial state owned by agent stdout; watching without arming",
+			"sessionID", sessionID, "backendID", backendID, "pid", cachedPID, "turnId", currentTurnID)
 	} else {
 		switch {
 		case !initialEntry.hasMeaningfulEntry || initialEntry.finalAssistant:
