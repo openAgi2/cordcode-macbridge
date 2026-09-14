@@ -715,6 +715,13 @@ func (c *LiveCodec) decodeErrorNotification(n Notification) []core.Event {
 	if json.Unmarshal(n.Params, &params) != nil || strings.TrimSpace(params.Error.Message) == "" {
 		return nil
 	}
+	if strings.HasPrefix(params.ThreadID, "__remote") {
+		// Transport-level diagnostic stamped with a synthetic sentinel thread id
+		// (e.g. "__remote_control_transport"). It names no session/turn, so it
+		// must not become a core session event; the transport-side ack circuit
+		// breaker (stream.go) reacts to the same sentinel on the wire.
+		return nil
+	}
 	if params.WillRetry {
 		c.mu.Lock()
 		c.lastErrorParams = nil

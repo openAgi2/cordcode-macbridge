@@ -270,3 +270,100 @@ func TestStreamStillFailsOnForeignRouting(t *testing.T) {
 		}
 	}
 }
+
+// 2026-09-14 ack 风暴：Desktop 0.154.0-alpha.6.2 对每条客户端 ack 回一条
+// 哨兵 error 通知；若无断路，ack→error→ack 在 relay RTT 上自激振荡
+// （实测 ~750 通知/s、2.8MB/s）。断路器语义：哨兵错误到达后，本连接
+// 不再回 ack；普通错误（无哨兵）不受影响。
+func TestStreamAckCircuitBreakerOnTransportSentinel(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	defer hostConn.Close()
+	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_probe")
+	defer stream.Close()
+
+	writeMsg := func(seq uint64, payload string) {
+		t.Helper()
+		if err := hostConn.Write(Envelope{
+			Type:     typeServerMessage,
+			ClientID: "client_probe", EnvID: "env_desktop", StreamID: "stream_probe",
+			SeqID:   &seq,
+			Message: json.RawMessage(payload),
+		}); err != nil {
+			t.Fatalf("host write seq=%d: %v", seq, err)
+		}
+	}
+
+	// 采集 client→host 的 ack（hostConn.Read 阻塞，交给后台 goroutine）。
+	type hostFrame struct {
+		env Envelope
+		err error
+	}
+	frames := make(chan hostFrame, 16)
+	go func() {
+		for {
+			env, err := hostConn.Read()
+			frames <- hostFrame{env: env, err: err}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// 1. 普通通知：断路器未武装，应回 ack（这就是点燃服务器错误的那条）。
+	writeMsg(1, `{"jsonrpc":"2.0","method":"remoteControl/status/changed","params":{}}`)
+	// 2. 服务器对 ack 的拒绝（哨兵 threadId）。
+	writeMsg(2, `{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"Unexpected ack message received from client"},"willRetry":false,"threadId":"__remote_control_transport__","turnId":"__remote_control_transport__"}}`)
+	// 3. 后续任何通知都不得再 ack。
+	writeMsg(3, `{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"th"}}`)
+
+	var ackedSeqs []uint64
+	deadline := time.After(1200 * time.Millisecond)
+collect:
+	for {
+		select {
+		case f := <-frames:
+			if f.err != nil {
+				break collect
+			}
+			if f.env.Type == typeAck && f.env.SeqID != nil {
+				ackedSeqs = append(ackedSeqs, *f.env.SeqID)
+			}
+		case <-deadline:
+			break collect
+		}
+	}
+	if len(ackedSeqs) != 1 || ackedSeqs[0] != 1 {
+		t.Fatalf("acks after sentinel breaker = %v, want exactly [1]", ackedSeqs)
+	}
+	if !stream.AcksDisabled() {
+		t.Fatal("breaker must be armed after sentinel error")
+	}
+}
+
+// 无哨兵的普通 error 通知照常 ack（断路器不过度匹配）。
+func TestStreamStillAcksOrdinaryErrors(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	defer hostConn.Close()
+	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_probe2")
+	defer stream.Close()
+
+	seq := uint64(7)
+	if err := hostConn.Write(Envelope{
+		Type:     typeServerMessage,
+		ClientID: "client_probe", EnvID: "env_desktop", StreamID: "stream_probe2",
+		SeqID:   &seq,
+		Message: json.RawMessage(`{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"boom"},"willRetry":false,"threadId":"th","turnId":"t"}}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	env, err := hostConn.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Type != typeAck || env.SeqID == nil || *env.SeqID != 7 {
+		t.Fatalf("ordinary error ack = %+v", env)
+	}
+	if stream.AcksDisabled() {
+		t.Fatal("ordinary error must not arm the breaker")
+	}
+}

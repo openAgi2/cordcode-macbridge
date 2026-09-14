@@ -228,7 +228,7 @@ func TestRemoteCodecEmptyPlanTextDoesNotEmitReview(t *testing.T) {
 
 func TestRemoteCodecSuppressesByteIdenticalTerminalErrors(t *testing.T) {
 	codec := NewLiveCodec()
-	params := json.RawMessage(`{"threadId":"__remote_control_transport__","error":{"message":"detached"}}`)
+	params := json.RawMessage(`{"threadId":"thread","error":{"message":"detached"}}`)
 	first := codec.Decode(Notification{Method: "error", Params: params})
 	if len(first) != 1 || first[0].Type != core.EventError {
 		t.Fatalf("first error events=%+v", first)
@@ -252,5 +252,27 @@ func TestRemoteCodecSuppressesByteIdenticalTerminalErrors(t *testing.T) {
 	codec.ResetNativeSessionState()
 	if got := codec.SuppressedErrorNotifications(); got != 0 {
 		t.Fatalf("rebind reset suppressed=%d", got)
+	}
+}
+
+// Transport diagnostics carry synthetic "__remote*" sentinel thread ids that
+// name no session; they must not become session events (the stream-layer ack
+// breaker reacts to the same sentinel on the wire). 2026-09-14: Desktop
+// 0.154.0-alpha.6.2 answered every client ack with one of these, and the
+// ack→error→ack loop pushed ~750 notifications/s through the relay.
+func TestRemoteCodecDropsTransportSentinelErrors(t *testing.T) {
+	codec := NewLiveCodec()
+	for _, params := range []json.RawMessage{
+		json.RawMessage(`{"threadId":"__remote_control_transport__","turnId":"__remote_control_transport__","willRetry":false,"error":{"message":"Unexpected ack message received from client"}}`),
+		json.RawMessage(`{"threadId":"__remote_other_internal","willRetry":true,"error":{"message":"transient"}}`),
+	} {
+		if events := codec.Decode(Notification{Method: "error", Params: params}); len(events) != 0 {
+			t.Fatalf("sentinel params produced session events: %s -> %+v", params, events)
+		}
+	}
+	// Ordinary thread errors (incl. willRetry) keep their existing semantics.
+	terminal := codec.Decode(Notification{Method: "error", Params: json.RawMessage(`{"threadId":"th","turnId":"t","error":{"message":"boom"}}`)})
+	if len(terminal) != 1 || terminal[0].Type != core.EventError {
+		t.Fatalf("terminal thread error events=%+v", terminal)
 	}
 }

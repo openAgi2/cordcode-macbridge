@@ -1,12 +1,22 @@
 package codexremote
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 )
+
+// transportErrorSentinel matches the synthetic thread ids the remote-control
+// transport layer stamps on connection-level diagnostics (e.g. the
+// "Unexpected ack message received from client" error Desktop
+// 0.154.0-alpha.6.2 emits for every client ack — see the 2026-09-14 ack
+// storm: ~750 byte-identical notifications/s, 2.8MB/s relay ingress, all
+// thread/list RPCs starved to their 12s deadline). Matched as raw payload
+// prefix-contains so the breaker stays inside the transport layer.
+var transportErrorSentinel = []byte(`"threadId":"__remote_control_transport`)
 
 // FrameConn is one controller WSS (or a test double) that reads/writes envelopes.
 type FrameConn interface {
@@ -37,6 +47,12 @@ type Stream struct {
 	// each is diagnosed once. Their payloads must never cross the stream/epoch
 	// boundary: JSON-RPC request ids restart for each Client.
 	staleStreams map[string]struct{}
+	// acksDisabled is the transport-ack circuit breaker. Servers that reject
+	// client acks answer each one with a sentinel error notification; acking
+	// those answers again would self-oscillate at relay RTT (2026-09-14
+	// storm). Connection-scoped: a fresh stream re-arms so a server that
+	// later accepts acks regains the documented chunk-retention protocol.
+	acksDisabled bool
 	inbound      chan []byte
 	done         chan struct{}
 
@@ -301,6 +317,7 @@ func (s *Stream) readLoop() {
 				s.fail(err)
 				return
 			}
+			s.observeTransportErrorSentinel(env.Message)
 			s.ack(env)
 		case typeServerMessageChunk:
 			s.markHostActivity()
@@ -314,6 +331,7 @@ func (s *Stream) readLoop() {
 					s.fail(err)
 					return
 				}
+				s.observeTransportErrorSentinel(payload)
 			}
 			s.ack(env)
 		default:
@@ -335,8 +353,45 @@ func (s *Stream) deliver(payload []byte) error {
 	}
 }
 
+// observeTransportErrorSentinel arms the ack circuit breaker when an inbound
+// payload carries the transport layer's sentinel thread id. Called before
+// ack(env) so the sentinel error itself is never answered.
+func (s *Stream) observeTransportErrorSentinel(payload []byte) {
+	if bytes.Contains(payload, transportErrorSentinel) {
+		s.mu.Lock()
+		armed := s.acksDisabled
+		s.acksDisabled = true
+		s.mu.Unlock()
+		if !armed {
+			slog.Warn("codex-remote transport rejects client acks; disabling acks for this stream",
+				"streamID", s.streamID)
+		}
+	}
+}
+
+// DisableAcks turns off client acks without waiting for the next sentinel
+// error (wired for callers that learn the rejection out-of-band).
+func (s *Stream) DisableAcks() {
+	s.mu.Lock()
+	s.acksDisabled = true
+	s.mu.Unlock()
+}
+
+// AcksDisabled reports the breaker state (diagnostics/tests).
+func (s *Stream) AcksDisabled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.acksDisabled
+}
+
 func (s *Stream) ack(env Envelope) {
 	if env.SeqID == nil {
+		return
+	}
+	s.mu.Lock()
+	disabled := s.acksDisabled
+	s.mu.Unlock()
+	if disabled {
 		return
 	}
 	_ = s.conn.Write(Envelope{
