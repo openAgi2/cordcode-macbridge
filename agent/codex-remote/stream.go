@@ -9,13 +9,16 @@ import (
 	"time"
 )
 
-// transportErrorSentinel matches the synthetic thread ids the remote-control
-// transport layer stamps on connection-level diagnostics (e.g. the
-// "Unexpected ack message received from client" error Desktop
-// 0.154.0-alpha.6.2 emits for every client ack — see the 2026-09-14 ack
-// storm: ~750 byte-identical notifications/s, 2.8MB/s relay ingress, all
-// thread/list RPCs starved to their 12s deadline). Matched as raw payload
-// prefix-contains so the breaker stays inside the transport layer.
+// transportErrorSentinel matches the synthetic thread ids the CLOSED-SOURCE
+// remote-control relay (chatgpt.com/backend-api/wham/remote/control) stamps on
+// connection-level diagnostics — e.g. "Unexpected ack message received from
+// client", which the relay synthesizes as a terminal error notification for
+// every client ack (producer pinned by the 2026-09-13 three-layer literal
+// exclusion in codex-rs/binary/Desktop-bundle; the ack trigger pinned by the
+// 2026-09-14 breaker verification: inbound fell to zero while paired and
+// connected once acks stopped). See the 2026-09-14 postmortem in think.md.
+// Matched as raw payload prefix-contains so the breaker stays inside the
+// transport layer.
 var transportErrorSentinel = []byte(`"threadId":"__remote_control_transport`)
 
 // FrameConn is one controller WSS (or a test double) that reads/writes envelopes.

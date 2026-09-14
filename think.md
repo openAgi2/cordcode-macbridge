@@ -32,6 +32,36 @@ bridge 进程启动同秒开始、跨 Desktop 11:12 重启存活。
 - awk '/start/,0' 的 range 起始模式若该秒恰好无日志行则整个范围不启用、输出为空，
   是假阴性；用 `$1>="time=..."` 字符串比较代替。
 
+### 2026-09-14 补记：与 09-13 审计附录的对账（重要，后续 agent 必读）
+
+09-13 附录（`docs/2026-09-12-macbridge-catalog-periodic-scan-and-discovery-timeout-plan完成情况.md` §8）
+对本风暴的三层 producer 排除（codex-rs 全 git 历史 / 已装 codex 二进制 strings / Desktop JS bundle 均
+零命中错误字面量）**正确**：producer 是闭源 relay 服务端。当晚最初提交（8f33ea8 commit message 与
+初版文档）把它归因给 "Desktop 0.154.0-alpha.6.2 回敬 ack" —— **归因错误，以本补记与 CHANGELOG 修正
+为准**；机制（ack 触发）与修复本身不受影响。
+
+09-13 的两条结论被本轮实测推翻或修正：
+
+1. 「处理量归零的唯一途径是退出 runtime 或解除配对」——**被推翻**。断路器部署后 runtime 保持
+   配对连接，relay 入站 5s +14.2MB → 60s +48B；部署后抑制行 0；4 次流重绑各仅 1 帧哨兵错误
+   （= 断路器每次重新武装的试探代价，有界自愈）。
+2. 「风暴是 relay 重发行为本身、本地无解、只能提 issue」——**触发器在我们自己**：每条带 seq 的
+   服务端消息都会被 ack，relay 对每条 ack 合成一条 error，而该 error 又带 seq 又被 ack。09-13
+   没做「停止 ack」这个对照实验；其 stormcapture 诊断连接用的就是生产 Stream（同样回 ack），
+   观测仪器本身在给回路供能。capture 里 2 条错误相距 78µs 的突发 = relay 侧排队倾泻，不影响
+   「停 ack 即停流」的因果结论。
+
+流量账（对账 owner 2026-09-14 DMIT 复盘）：裸 payload 87GB/天（09-12 实测速率）到 240GB/天
+（09-14 实测 2.8MB/s）区间 × Hysteria2/DMIT 双向计费两段计费 ≈ 数天 TB 级，与 DMIT 9 月
+1.06TB、9-09 计费重置后数日跑满的时间线吻合。风暴止断后该项归零（60s +48B 实测）。
+
+监控信号（风暴若回归）：go-bridge.log 重新出现 `suppressed byte-identical` 行 + relay 方向
+nettop 入站速率回升。触发回归的条件 = relay 改了哨兵 threadId 或错误文案（断路器匹配
+`"threadId":"__remote_control_transport` 前缀）。届时按前缀失配更新 transportErrorSentinel。
+
+待 owner 决定：是否把「触发器是客户端 ack、停止 ack 即停流」的对照实验结论回帖到
+openai/codex#45071（09-13 已附脱敏 capture 提交，当时缺因果定位）。
+
 同日关联事故（非本缺陷）：relay VPS 17:54:46 被宿主重启，cordcode-relay.service 处于
 disabled 未自启，relay 502 至人工介入；iPhone 走 LAN 直连不受影响。修复需
 `systemctl enable --now cordcode-relay`（owner 授权后执行）。
