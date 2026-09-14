@@ -1,3 +1,40 @@
+
+## 2026-09-14 codex-remote error 通知风暴：上游 alpha 协议拒绝客户端 ack 的自激振荡
+
+现象：go-bridge 自 01:15 起 codex-remote suppressed byte-identical error notifications
+以 ~750/s 累积（全天 >2000 万条、单周期 1860 万），nettop 实测 relay 方向 2.8MB/s
+持续入站、累计 >1GB；thread/list 12s 超时 → discovery push liveness degraded（466 次）
+→ live catalog attach failed: stream closed（318 次）；iOS/web 间歇卡「执行中」。风暴与
+bridge 进程启动同秒开始、跨 Desktop 11:12 重启存活。
+
+根因链（全部实证，非推断）：
+1. stormcapture 捕获（脱敏）：错误原文 "Unexpected ack message received from client"，
+   threadId/turnId = `__remote_control_transport__`（内部哨兵，非真实会话——所以按
+   session 指纹反查 669 个 rollout thread 全部不中）。
+2. 上游 Codex Desktop 0.154.0-alpha.6.2 对每条客户端 ack 回一条该终态 error 通知；
+   而我们 Stream.readLoop 对每条带 seq 的 server message/chunk 都回 ack → ack→error→ack
+   无限自激。新流 attach 后 360ms 即点火（capture 复现）。
+3. 当前上游源码（codex ee6814bfa4，2026-09-12）仍把 ClientEvent::Ack 定义为合法流控
+   （chunk 保留/重放依赖它）——alpha 与源码行为不一致，以真实样本为准。
+
+修复（commit 8f33ea8，配套 iOS 分支树）：
+- Stream 传输哨兵断路器：payload 含 `"threadId":"__remote_control_transport` 前缀 →
+  本连接停止 ack；每条新流重新武装（上游修复后自动恢复 ack）。
+- LiveCodec 丢弃 `__remote` 前缀哨兵错误（不派发假会话事件）。
+- 验证：单测 4 项 + 包全量绿；开发机部署后运行态验证 = 断路器 WARN 唯一日志行出现、
+  抑制流归零、入站网络 10s +0B（风暴期 5s +14.2MB）。
+
+可复用经验：
+- 「抑制计数狂涨但内容不可见」时，先反查指纹算法（sha256[:12]）穷举日志中全部
+  UUID/rollout 文件名；全部不中即指向内部哨兵 ID，用 stormcapture 二连接拿原文。
+- rg 的 `-r` 是 replace 标志：`rg -rn pattern` 会把输出里的匹配替换成 "n"，看起来
+  像「没有匹配」——排障时极易误判成字符串不存在，必须用 `rg -n`。
+- awk '/start/,0' 的 range 起始模式若该秒恰好无日志行则整个范围不启用、输出为空，
+  是假阴性；用 `$1>="time=..."` 字符串比较代替。
+
+同日关联事故（非本缺陷）：relay VPS 17:54:46 被宿主重启，cordcode-relay.service 处于
+disabled 未自启，relay 502 至人工介入；iPhone 走 LAN 直连不受影响。修复需
+`systemctl enable --now cordcode-relay`（owner 授权后执行）。
 # 后续计划索引（待办另案总账）
 
 ## 2026-09-12 codex goal 四轮连环：改生命周期要枚举重置点、「最后一词定终身」与 iOS 真机取证三件套
