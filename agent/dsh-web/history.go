@@ -505,13 +505,34 @@ func (t *dshTurnAccumulator) addMessage(seq int64, at int64, d dshAssistantData,
 				continue
 			}
 			output := outputs[strings.TrimSpace(block.ID)]
+			if name == "ask_user_question" {
+				// 冷拉重建结构化问答面（2026-09-15 owner 真机：重开带 pending
+				// 问答的 dsh 会话，iOS 弹出卡只剩 L1 缓存首帧 ~1s 即被权威冷快照
+				// 收起——冷拉把 ask_user_question 折成普通工具卡，user_input part
+				// 丢失）。live 路径经 question/requested RPC 建 user_input part
+				// （canRespond=true）；冷拉同形重建。pending（journal 无该 call 的
+				// tool/result）只出 user_input part、不出工具 step——live codec 对
+				// tool-call 块本就不发工具事件；answered（有 tool/result）工具
+				// step 照旧（live 由 tool/result 补全）+ 终态 user_input part。
+				// 解析失败 fail closed 落回普通工具卡，不造半张问答卡。
+				if uiParts := askUserQuestionUserInputParts(block.Arguments, output != ""); len(uiParts) > 0 {
+					if output == "" {
+						t.parts = append(t.parts, uiParts...)
+						continue
+					}
+					t.steps = append(t.steps, askUserQuestionToolStep(t.sessionID, seq, block, output))
+					t.parts = append(t.parts, map[string]any{"type": "tool", "step": t.steps[len(t.steps)-1]})
+					t.parts = append(t.parts, uiParts...)
+					continue
+				}
+			}
 			stepID := fmt.Sprintf("%s:%d:%s", t.sessionID, seq, strings.TrimSpace(block.ID))
 			step := map[string]any{
 				"id":                             stepID,
 				"toolName":                       name,
 				"status":                         "unknown",
 				"output":                         map[string]any{"kind": "inline", "text": output},
-				"duration":                       nil,
+				"duration":                      nil,
 				"requiresPermissionConfirmation": false,
 				"availablePermissionOptions":     []any{},
 			}
@@ -690,4 +711,109 @@ func dshLogTime(ms int64) time.Time {
 		return time.Time{}
 	}
 	return time.UnixMilli(ms)
+}
+
+// askUserQuestionArguments is ask_user_question's arguments payload (official
+// user-questions tool: header/id/multi_select/options/question per entry).
+type askUserQuestionArguments struct {
+	Questions []struct {
+		ID          string `json:"id"`
+		Header      string `json:"header"`
+		Question    string `json:"question"`
+		MultiSelect bool   `json:"multi_select"`
+		Options     []struct {
+			Label       string `json:"label"`
+			Description string `json:"description"`
+		} `json:"options"`
+	} `json:"questions"`
+}
+
+// askUserQuestionUserInputParts folds one ask_user_question tool-call into
+// user_input parts — one part per question, interactionId = the dsh question
+// id (same identity as the live question/requested path, so resolve_user_input
+// and reconnect replays upsert the same card). answered = the journal already
+// carries this call's tool/result (the harness feeds the answer back to the
+// model as the tool result). Question/options field mapping mirrors the live
+// approvals.go construction; dsh options carry no ids — the label IS the
+// identifier, echoed verbatim in the answer's selected[].
+func askUserQuestionUserInputParts(arguments []byte, answered bool) []map[string]any {
+	if len(arguments) == 0 {
+		return nil
+	}
+	// DSH 把 tool-call 的 arguments 记为 JSON 编码的 *string*（toolStepTitle
+	// 同款约束）：对象与字符串包裹对象两种形态都接受。
+	raw := arguments
+	var args askUserQuestionArguments
+	if jsonUnmarshal(raw, &args) != nil {
+		var wrapped string
+		if jsonUnmarshal(raw, &wrapped) != nil || jsonUnmarshal([]byte(wrapped), &args) != nil {
+			return nil
+		}
+	}
+	status := "pending"
+	if answered {
+		status = "answered"
+	}
+	var parts []map[string]any
+	for _, q := range args.Questions {
+		qid := strings.TrimSpace(q.ID)
+		prompt := strings.TrimSpace(q.Question)
+		if qid == "" || prompt == "" {
+			continue
+		}
+		mode := "single"
+		if q.MultiSelect {
+			mode = "multiple"
+		}
+		opts := make([]map[string]any, 0, len(q.Options))
+		for _, o := range q.Options {
+			opts = append(opts, map[string]any{
+				"id":          o.Label,
+				"label":       o.Label,
+				"description": o.Description,
+			})
+		}
+		question := map[string]any{
+			"id":                 qid,
+			"prompt":             prompt,
+			"answerMode":         mode,
+			"options":            opts,
+			"allowsCustomAnswer": true,
+			"isSecret":           false,
+			"required":           true,
+		}
+		// 空 header 落 nil（iOS 卡 eyebrow 按 nil 隐藏；空串会留一个空 label 位）。
+		if header := strings.TrimSpace(q.Header); header != "" {
+			question["header"] = header
+		}
+		parts = append(parts, map[string]any{
+			"type":          "user_input",
+			"interactionId": qid,
+			"status":        status,
+			"questions":     []map[string]any{question},
+			"canRespond":    !answered,
+			"canReject":     !answered,
+		})
+	}
+	return parts
+}
+
+// askUserQuestionToolStep builds the (answered) ask_user_question tool step
+// for the cold fold — same shape as the generic tool-call step, with the
+// journal's tool/result output and a completed status (live parity: the step
+// only materializes once tool/result arrives).
+func askUserQuestionToolStep(sessionID string, seq int64, block dshContentBlock, output string) map[string]any {
+	step := map[string]any{
+		"id":                             fmt.Sprintf("%s:%d:%s", sessionID, seq, strings.TrimSpace(block.ID)),
+		"toolName":                       "ask_user_question",
+		"status":                         "completed",
+		"output":                         map[string]any{"kind": "inline", "text": output},
+		"duration":                      nil,
+		"requiresPermissionConfirmation": false,
+		"availablePermissionOptions":     []any{},
+	}
+	if title := toolStepTitle("ask_user_question", block.Arguments); title != "" {
+		step["title"] = title
+	}
+	return step
 }
