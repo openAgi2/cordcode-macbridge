@@ -2276,6 +2276,54 @@ func TestGrokBuildProjectionHydratePendingQuestionGate(t *testing.T) {
 	}
 }
 
+// TestDshWebProjectionHydratePendingQuestionGate: dsh-web cold-fold (fa3d41e)
+// rebuilds an unanswered ask_user_question as a pending user_input part, so
+// the last turn is a blocking requires_action boundary with no terminal
+// event. sourceIsLive must sample the pulling conn's subscription (same §3.1
+// signal as grokbuild) — without it the commit gate deadlocks (15s hydrating
+// loop, 2026-09-15 session-4f0912f7). handleGetSessionProjection subscribes
+// before admission, so the real pull path commits the honest partial.
+func TestDshWebProjectionHydratePendingQuestionGate(t *testing.T) {
+	pendingParts := []map[string]any{{
+		"type": "user_input", "itemId": "call_open", "interactionId": "call_open",
+		"status": "pending", "canRespond": true, "canReject": true,
+		"questions": []map[string]any{{
+			"id": "call_open", "prompt": "选一个？", "answerMode": "single",
+			"options":            []map[string]any{{"id": "A", "label": "A", "description": "da"}},
+			"allowsCustomAnswer": true, "required": true,
+		}},
+	}}
+	rich := func() []core.RichHistoryEntry {
+		return []core.RichHistoryEntry{
+			{ID: "u1", Role: "user", Content: "问个问题"},
+			{ID: "a1", Role: "assistant", Parts: pendingParts},
+		}
+	}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "ses-dsh-ask-gate", "sinceRev": 0})
+
+	h := NewHandlers()
+	h.mu.Lock()
+	h.agents = map[string]core.Agent{"dsh-web": &fakeAgent{name: "dsh-web", richHistory: rich()}}
+	h.mu.Unlock()
+	conn := &readFileCaptureConn{}
+	start := time.Now()
+	h.handleGetSessionProjection(conn, WireMessage{RequestID: "r-dsh-sub", BackendID: "dsh-web", Method: "get_session_projection", Params: params}, nil)
+	elapsed := time.Since(start)
+	if elapsed >= 5*time.Second {
+		t.Fatalf("dsh-web pending-question cold open took %s; must not wait the 15s hydrate budget", elapsed)
+	}
+	if conn.err != nil {
+		t.Fatalf("pull error: %v", conn.err)
+	}
+	raw, _ := json.Marshal(conn.data)
+	if !strings.Contains(string(raw), "call_open") {
+		t.Fatalf("snapshot missing the pending question card: %s", string(raw))
+	}
+	if !strings.Contains(string(raw), "requires_action") {
+		t.Fatalf("pending question must keep execution in requires_action: %s", string(raw))
+	}
+}
+
 // A Ready kernel may be stale when the direct Grok relay died during a long
 // silent goal wait. A non-zero reconnect pull must reconcile the pathless rich
 // history instead of returning an empty at-head delta from that stale kernel.

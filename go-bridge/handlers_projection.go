@@ -653,15 +653,23 @@ func (h *Handlers) ensureProjectionHydrated(
 			sourceIsLive = true
 		}
 	}
-	if backendID == "grokbuild" {
-		// The pending-question hydrate face (D-G4) rehydrates an unanswered
-		// ask_user_question as a requires_action turn that deliberately carries
-		// no terminal event (hydrate converter: pending user_input is a blocking
-		// boundary). Like an in-flight running turn, it may only commit as an
-		// honest partial. grokbuild's §3.1 signal is the session's live event
-		// subscription (leader subscriber / updates tailer) — it exists exactly
-		// while the session may still resolve that question or run a turn.
+	if backendID == "grokbuild" || backendID == "dsh-web" {
+		// The pending-question hydrate face (D-G4 / dsh-web fa3d41e) rehydrates
+		// an unanswered ask_user_question as a requires_action turn that
+		// deliberately carries no terminal event (hydrate converter: pending
+		// user_input is a blocking boundary). Like an in-flight running turn,
+		// it may only commit as an honest partial.
+		//
+		// §3.1 signal is the session's live event subscription — handleGetSessionProjection
+		// itself subscribes the pulling conn before admission (WP5), so a pull
+		// is the honest "someone is here and may still resolve that question"
+		// window. grokbuild used HasSessionSubscriber; dsh-web was missing from
+		// this list, so a cold session whose last turn is pending user_input
+		// deadlocked the commit gate (15s hydrating loop, 2026-09-15).
 		// Observed-but-idle sessions are unaffected: their cold turns all seal.
+		// Do NOT use IsSessionActive / running cache: that answers "is a turn
+		// running", and sealTrailingUnanswered is designed not to settle a
+		// pending user_input.
 		if h.broadcaster != nil && h.broadcaster.HasSessionSubscriber(backendID, sessionID) {
 			sourceIsLive = true
 		}
