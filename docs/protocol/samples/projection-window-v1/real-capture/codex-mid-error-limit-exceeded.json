@@ -1,0 +1,8 @@
+{
+ "error": {
+  "code": "projection_window.limit_exceeded",
+  "message": "xxxxx xxxxxxx xxxxxxxxxxxxxx xxxxx",
+  "retryable": false
+ },
+ "requestId": "capture-error-limit-exceeded"
+}

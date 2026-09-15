@@ -1,0 +1,8 @@
+{
+ "error": {
+  "code": "projection_window.cursor_scope_mismatch",
+  "message": "xxxxxxxxxx xxxxxx xxxxxx xxxxx xxxxxxxx",
+  "retryable": false
+ },
+ "requestId": "capture-error-cursor-scope-mismatch"
+}
