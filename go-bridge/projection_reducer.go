@@ -2046,6 +2046,20 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		}
 		commit()
 		t := ps.turnByID(turnID)
+		if t == nil && (msg.BackendID == "claude" || msg.BackendID == "claudecode") {
+			// 2026-09-16 owner 真机瑕疵：live requested 以 assistant message id 作 turnId
+			//（currentStructuredInputTurnID），而 relay transcript 内容以 user message id
+			// 开 turn。requested 先到时为 assistant-id 新建幽灵 turn 会让卡片独立成
+			// 回合、排到时间线末尾（带「已回复」header）。回退到活跃 turn（user-id
+			// turn 已在场），不得新建幽灵 turn；无活跃 turn 才按原 turnId 建（保持
+			// 旧行为，卡片至少可见）。
+			if active := ps.projection.Execution.ActiveTurnID; active != "" {
+				turnID = active
+			} else if latest := ps.latestRunningTurnID(); latest != "" {
+				turnID = latest
+			}
+			t = ps.turnByID(turnID)
+		}
 		if t == nil {
 			ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "running"})
 			t = ps.turnByID(turnID)

@@ -5038,6 +5038,15 @@ func (h *Handlers) handleResolveUserInput(conn Connection, msg WireMessage, agen
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: "interaction_not_found", Message: "interaction not found in current projection"})
 			return
 		}
+		// Terminal 交互（resolved/submitted/turn_terminated）在服务器侧已无 pending
+		// question——权威拒绝是 interaction_not_found（Audit012/013：终态后第二次
+		// 提交零 POST）。response_not_supported 留给「pending 但本端不可拒」
+		//（observe-only 等）。
+		if status := core.UserInputStatus(part.UserInputStatus); status != core.UserInputStatusPending ||
+			part.UserInputDiagnosticCode == "turn_terminated" {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "interaction_not_found", Message: "the interaction is no longer pending (it may already be answered by another client)"})
+			return
+		}
 		if !part.UserInputCanReject {
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: "response_not_supported", Message: "this interaction cannot be rejected"})
 			return
@@ -5066,6 +5075,15 @@ func (h *Handlers) handleResolveUserInput(conn Connection, msg WireMessage, agen
 	if params.Answers != nil {
 		answers = *params.Answers
 	}
+	// §4.5.3（设计 v6）资格快照：调用 responder 前投影是否 interactive pending
+	//（本 RPC 有真实提交资格）。teardown 转换只对「调用前可提交、期间投影收口」
+	// 生效；调用前已是 terminal/resolved 的迟到 resolve（Audit012/013：另一客户端
+	// 已答终态后的第二次提交）必须透传 responder 的权威拒绝。
+	wasSubmittable := false
+	if part, _, found := h.projectedUserInput(msg.BackendID, params.SessionID, params.InteractionID); found {
+		wasSubmittable = core.UserInputStatus(part.UserInputStatus) == core.UserInputStatusPending &&
+			part.UserInputDiagnosticCode != "turn_terminated"
+	}
 	resolution, err := responder.ResolveUserInput(resolveCtx, params.InteractionID, params.ClientActionID, params.Action, answers)
 	if err != nil {
 		// §4.5.3（设计 v6）：responder 在等待期间因 cancel/session death 返回
@@ -5074,7 +5092,7 @@ func (h *Handlers) handleResolveUserInput(conn Connection, msg WireMessage, agen
 		// interactive pending 才返回 typed error。terminal 与 registry teardown 的
 		// 跨 producer 顺序不会把已终止卡误报成可重试传输失败。
 		var uie *core.UserInputError
-		if errors.As(err, &uie) && (uie.Code == "session_not_active" || uie.Code == "interaction_not_found") {
+		if errors.As(err, &uie) && (uie.Code == "session_not_active" || uie.Code == "interaction_not_found") && wasSubmittable {
 			if part, headRev, found := h.projectedUserInput(msg.BackendID, params.SessionID, params.InteractionID); found {
 				status := core.UserInputStatus(part.UserInputStatus)
 				if status != core.UserInputStatusPending || part.UserInputDiagnosticCode == "turn_terminated" {

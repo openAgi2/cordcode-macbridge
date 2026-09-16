@@ -294,3 +294,55 @@ func TestUserInputPartRankPriority(t *testing.T) {
 		}
 	}
 }
+
+// TestClaudeRequestedGhostTurnFallsBackToActiveTurn 锁定 2026-09-16 owner 真机瑕疵：
+// live requested 以 assistant message id 作 turnId（currentStructuredInputTurnID），而
+// relay transcript 内容以 user message id 开 turn。requested 先到时 reducer 曾为
+// assistant-id 新建幽灵 turn（卡片独立成回合、排到时间线末尾，带「已回复」header）。
+// 修复：Claude 的 requested turn 不存在时回退到活跃 turn（user-id turn 已在场），不得
+// 新建幽灵 turn。
+func TestClaudeRequestedGhostTurnFallsBackToActiveTurn(t *testing.T) {
+	r := newTestReducer()
+	// user prompt 行先开 turn（relay transcript 路径的 turn key = user message id）。
+	r.Apply(EventMessage{
+		BackendID: "claude", SessionID: "s1", PerSessionSeq: 1,
+		Event: "user_message",
+		Data:  map[string]interface{}{"itemId": "user-msg-1", "turnId": "user-msg-1", "text": "新建文件"},
+	})
+	// live requested 携带 assistant message id（幽灵身份）。
+	r.Apply(requestedEvFor(2, "claude", "ui-ghost", "assistant-msg-9", "pending", true, true))
+
+	projection, ok := r.Snapshot("claude", "s1")
+	if !ok {
+		t.Fatal("missing projection")
+	}
+	if len(projection.Turns) != 1 {
+		t.Fatalf("requested 不得为 assistant-id 新建幽灵 turn；turns=%d", len(projection.Turns))
+	}
+	turn := projection.Turns[0]
+	if turn.TurnID != "user-msg-1" {
+		t.Fatalf("卡片应落在活跃 user-id turn 上，实际 turn=%s", turn.TurnID)
+	}
+	if turn.Assistant == nil || findUserInputPart(turn.Assistant, "ui-ghost") < 0 {
+		t.Fatalf("user_input part 应挂在 user-msg-1 的 assistant 消息上：%+v", turn.Assistant)
+	}
+	// registry 归属也应是真实 turn（后续 submitted/resolved 不再分裂）。
+	// 用行为断言代替内部状态访问：submitted 事件携带幽灵 turnId 也应更新 user-msg-1 上的 part。
+	r.Apply(userEv(3, "claude", "user_input_submitted", "ui-ghost", "assistant-msg-9", nil))
+	projection2, _ := r.Snapshot("claude", "s1")
+	for _, turn2 := range projection2.Turns {
+		if turn2.Assistant == nil {
+			continue
+		}
+		if idx := findUserInputPart(turn2.Assistant, "ui-ghost"); idx >= 0 {
+			if turn2.TurnID != "user-msg-1" {
+				t.Fatalf("submitted 后卡片仍在错误 turn：%s", turn2.TurnID)
+			}
+			if turn2.Assistant.Parts[idx].UserInputStatus != "submitted" {
+				t.Fatalf("submitted 应更新原 part，实际 %s", turn2.Assistant.Parts[idx].UserInputStatus)
+			}
+			return
+		}
+	}
+	t.Fatal("submitted 后找不到 part")
+}
