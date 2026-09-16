@@ -52,10 +52,12 @@ const (
 
 // claudeAskAnsweringEnabled 是 iOS 作答能力的证据门开关（设计 v6 §0 交付门/§4.6）。
 // Claude Code 2.1.261 answer/deny 配对样本（完整 control request/response + transcript
-// 三向关联）采集并通过前保持 false：live requested 维持 observe_only 只读呈现，
-// answerability oracle 恒 false。门通过后置 true 才翻转 canRespond 并按 §4.6 决策表
-// 删除旧 live resolved producer。测试通过 withClaudeAskAnswering 临时翻转，不得改默认值。
-var claudeAskAnsweringEnabled = false
+// claudeAskAnsweringEnabled：live Claude AskUserQuestion 可答翻转（设计 v6 §0/§4.6）。
+// 2026-09-16 证据门 PASSED（CLI 2.1.261，answer envelope + deny 形状双场景 fixture
+// 锁定，见 scripts/claudecode-phase0/fixtures/ask-evidence-2026-09-16/）后翻转为
+// true：live requested 的 canRespond 由活控制通道证明（registry pending + session
+// alive）。测试用 withClaudeAskAnswering 临时翻转（含验证 fail-closed 的场景）。
+var claudeAskAnsweringEnabled = true
 
 // withClaudeAskAnswering 在 fn 执行期间临时翻转证据门开关（仅测试使用）。
 func withClaudeAskAnswering(enabled bool, fn func()) {
@@ -652,19 +654,6 @@ func (cs *claudeSession) currentStructuredInputTurnID() string {
 	return id
 }
 
-func (cs *claudeSession) emitUserInputResolved(turnID, iid string, status core.UserInputStatus, source string) {
-	cs.emitUserInputEvent(core.Event{
-		Type:      core.EventUserInputResolved,
-		SessionID: cs.CurrentSessionID(),
-		TurnID:    turnID,
-		UserInput: &core.UserInputInteraction{
-			InteractionID:    iid,
-			Status:           status,
-			ResolutionSource: source,
-		},
-	})
-}
-
 // emitUserInputSubmitted 发射 submitted 事件（设计 v6 §4.5.2/§4.7）：payload 只带
 // interactionId/turnId/itemId（registry 保存的 tool-use 派生身份），不带答案正文。
 // at-least-once：首次 control write 成功后与幂等重放命中时都调用；reducer 对
@@ -766,11 +755,9 @@ func (cs *claudeSession) resolveUserInput(ctx context.Context, interactionID, cl
 		}
 		if cs.claudeUserInputReg.ConfirmResolved(interactionID, clientActionID, source) {
 			// control write 成功 → submitted 至少一次（§4.5.2）。deny 的耐久终态
-			//（rejected）由 transcript tool_result 证明（§4.6 证据门）。
+			//（rejected）由 transcript tool_result 证明（§4.6 证据门 PASSED，
+			// 2026-09-16 删除旧 live resolved producer）。
 			cs.emitUserInputSubmitted(snap.owningTurnID, interactionID, snap.toolUseID)
-			// 旧 live resolved producer：证据门（§4.6）通过并按决策表删除前保留不动
-			//（设计 v6 §0 交付门）；reducer 中 resolved 权威高于 submitted。
-			cs.emitUserInputResolved(snap.owningTurnID, interactionID, core.UserInputStatusRejected, source)
 		}
 		return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: core.UserInputStatusRejected}, nil
 	}
@@ -790,11 +777,9 @@ func (cs *claudeSession) resolveUserInput(ctx context.Context, interactionID, cl
 	}
 	if cs.claudeUserInputReg.ConfirmResolved(interactionID, clientActionID, source) {
 		// control write 成功 → submitted 至少一次；answered 耐久终态由 transcript
-		// tool_result 产生（§4.6）。
+		// tool_result 产生（§4.6 证据门 PASSED，2026-09-16 删除旧 live resolved
+		// producer——transcript 是 resolved 唯一耐久证据）。
 		cs.emitUserInputSubmitted(snap.owningTurnID, interactionID, snap.toolUseID)
-		// 旧 live resolved producer：证据门（§4.6）通过并按决策表删除前保留不动
-		//（设计 v6 §0 交付门）；reducer 中 resolved 权威高于 submitted。
-		cs.emitUserInputResolved(snap.owningTurnID, interactionID, core.UserInputStatusAnswered, source)
 	}
 	return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: core.UserInputStatusAnswered}, nil
 }

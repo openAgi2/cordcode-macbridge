@@ -24,31 +24,35 @@ import (
 // 此断言保证 Claude adapter 已满足该接口，resolve_user_input RPC 可达 Claude（非仅 Codex）。
 var _ core.UserInputResponder = (*claudeSession)(nil)
 
-// drainUserInputEvents 排空事件并按类型分桶返回 requested/resolved 列表（保持抵达顺序）。
-func drainUserInputEvents(cs *claudeSession) (requested, resolved []*core.Event) {
+// drainUserInputEvents 排空事件并按类型分桶返回 requested/submitted/resolved 列表
+//（保持抵达顺序）。证据门 PASSED（2026-09-16）后 live resolved producer 已删——
+// resolved 桶只可能收 transcript 侧事件（本包测试不产生）。
+func drainUserInputEvents(cs *claudeSession) (requested, submitted, resolved []*core.Event) {
 	for {
 		select {
 		case ev := <-cs.events:
 			switch ev.Type {
 			case core.EventUserInputRequested:
 				requested = append(requested, &ev)
+			case core.EventUserInputSubmitted:
+				submitted = append(submitted, &ev)
 			case core.EventUserInputResolved:
 				resolved = append(resolved, &ev)
 			}
 		default:
-			return requested, resolved
+			return requested, submitted, resolved
 		}
 	}
 }
 
-// fullAnswerLifecycle 在给定 session 上跑一次 control_request→pending→answer→resolved 全链路，
-// 返回 (pending event, resolved event)，并在中途断言 control_response allow 写回 + answers 正确。
+// fullAnswerLifecycle 在给定 session 上跑一次 control_request→pending→answer→submitted 全链路，
+// 返回 (pending event, submitted event)，并在中途断言 control_response allow 写回 + answers 正确。
 func fullAnswerLifecycle(t *testing.T, cs *claudeSession, stdin *captureStdin, requestID, qText, optLabel string) (*core.Event, *core.Event) {
 	t.Helper()
 	cs.handleControlRequest(makeAskControlRequest(requestID, []any{
 		singleQuestionMap(qText, "", false, [2]string{optLabel, ""}, [2]string{"other", ""}),
 	}))
-	reqs, _ := drainUserInputEvents(cs)
+	reqs, _, _ := drainUserInputEvents(cs)
 	if len(reqs) != 1 || reqs[0].UserInput.Status != core.UserInputStatusPending {
 		t.Fatalf("[%s] 应恰好 1 个 pending requested，实际 %+v", requestID, reqs)
 	}
@@ -61,9 +65,12 @@ func fullAnswerLifecycle(t *testing.T, cs *claudeSession, stdin *captureStdin, r
 		[]core.UserInputAnswer{{QuestionID: qid, Values: []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: optID}}}}); err != nil {
 		t.Fatalf("[%s] answer 失败: %v", requestID, err)
 	}
-	_, resolved := drainUserInputEvents(cs)
-	if len(resolved) != 1 || resolved[0].UserInput.Status != core.UserInputStatusAnswered || resolved[0].UserInput.ResolutionSource != "ios" {
-		t.Fatalf("[%s] 应 1 个 resolved(answered,ios)，实际 %+v", requestID, resolved)
+	_, subs, resolved := drainUserInputEvents(cs)
+	if len(subs) != 1 || subs[0].UserInput.Status != core.UserInputStatusSubmitted {
+		t.Fatalf("[%s] 应 1 个 submitted，实际 %+v", requestID, subs)
+	}
+	if len(resolved) != 0 {
+		t.Fatalf("[%s] 旧 live resolved producer 已删，不应有 resolved，实际 %+v", requestID, resolved)
 	}
 	// control_response allow + answers[qText]=optLabel。
 	resp := respInner(t, stdin)
@@ -74,7 +81,7 @@ func fullAnswerLifecycle(t *testing.T, cs *claudeSession, stdin *captureStdin, r
 	if answers[qText] != optLabel {
 		t.Fatalf("[%s] answers[%q]=%v want %q", requestID, qText, answers[qText], optLabel)
 	}
-	return pending, resolved[0]
+	return pending, subs[0]
 }
 
 // TestLifecycle_V2_FullAnswerRoundTrip：端到端 answer 全序。
@@ -83,13 +90,13 @@ func TestLifecycle_V2_FullAnswerRoundTrip(t *testing.T) {
 	fullAnswerLifecycle(t, cs, stdin, "life-ans", "Color?", "Red")
 }
 
-// TestLifecycle_V2_FullRejectRoundTrip：端到端 reject 全序——control_response deny + resolved(rejected)。
+// TestLifecycle_V2_FullRejectRoundTrip：端到端 reject 全序——control_response deny + submitted。
 func TestLifecycle_V2_FullRejectRoundTrip(t *testing.T) {
 	cs, stdin := newAskV2TestSession(t)
 	cs.handleControlRequest(makeAskControlRequest("life-rj", []any{
 		singleQuestionMap("Skip?", "", false, [2]string{"a", ""}),
 	}))
-	reqs, _ := drainUserInputEvents(cs)
+	reqs, _, _ := drainUserInputEvents(cs)
 	if len(reqs) != 1 {
 		t.Fatalf("应 1 pending，实际 %+v", reqs)
 	}
@@ -98,9 +105,12 @@ func TestLifecycle_V2_FullRejectRoundTrip(t *testing.T) {
 	if _, err := cs.ResolveUserInput(t.Context(), iid, "client-life-rj", core.UserInputActionReject, nil); err != nil {
 		t.Fatalf("reject 失败: %v", err)
 	}
-	_, resolved := drainUserInputEvents(cs)
-	if len(resolved) != 1 || resolved[0].UserInput.Status != core.UserInputStatusRejected || resolved[0].UserInput.ResolutionSource != "ios" {
-		t.Fatalf("应 resolved(rejected,ios)，实际 %+v", resolved)
+	_, subs, resolved := drainUserInputEvents(cs)
+	if len(subs) != 1 || subs[0].UserInput.Status != core.UserInputStatusSubmitted {
+		t.Fatalf("应 1 个 submitted，实际 %+v", subs)
+	}
+	if len(resolved) != 0 {
+		t.Fatalf("旧 live resolved producer 已删，不应有 resolved，实际 %+v", resolved)
 	}
 	resp := respInner(t, stdin)
 	if b, _ := resp["behavior"].(string); b != "deny" {
@@ -144,14 +154,13 @@ func TestLifecycle_LegacyAndV2CompeteForOneClaim(t *testing.T) {
 		t.Fatalf("legacy RespondQuestion 失败: %v", err)
 	}
 	resolvedEvents := drainAllEvents(cs)
-	// 设计 v6 §4.5.2：legacy answer 经 canonical 路径写 control response 成功后
-	// 先发 submitted（控制事实），再发旧 live resolved（证据门前保留），最后 legacy
-	// question_resolved（展示层）。
-	if len(resolvedEvents) != 3 ||
+	// 证据门 PASSED（2026-09-16）后旧 live resolved producer 已删：legacy answer 经
+	// canonical 路径写 control response 成功后只发 submitted（控制事实）+ legacy
+	// question_resolved（展示层）；耐久 resolved 由 transcript tool_result 产生。
+	if len(resolvedEvents) != 2 ||
 		resolvedEvents[0].Type != core.EventUserInputSubmitted ||
-		resolvedEvents[1].Type != core.EventUserInputResolved ||
-		resolvedEvents[2].Type != core.EventQuestionResolved {
-		t.Fatalf("legacy answer 应先 submitted 后 canonical resolved 再 legacy resolved，实际 %+v", resolvedEvents)
+		resolvedEvents[1].Type != core.EventQuestionResolved {
+		t.Fatalf("legacy answer 应先 submitted 再 legacy question_resolved，实际 %+v", resolvedEvents)
 	}
 	writes := stdin.linesWritten()
 	resolution, err := cs.ResolveUserInput(t.Context(), iid, "client-after-legacy", core.UserInputActionAnswer,
@@ -175,7 +184,7 @@ func TestLifecycle_V2_ResolvedInteractionNotReopenedByReplay(t *testing.T) {
 	cs.handleControlRequest(makeAskControlRequest("replay-1", []any{
 		singleQuestionMap("Once?", "", false, [2]string{"Yes", ""}),
 	}))
-	reqs, _ := drainUserInputEvents(cs)
+	reqs, _, _ := drainUserInputEvents(cs)
 	// 已 resolved → 不再重发 pending（不降级）。
 	for _, e := range reqs {
 		if e.UserInput.Status == core.UserInputStatusPending {

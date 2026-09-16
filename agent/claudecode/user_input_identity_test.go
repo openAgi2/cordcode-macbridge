@@ -141,38 +141,41 @@ func TestClaudeMissingRequestIDFailsClosed(t *testing.T) {
 	}
 }
 
-// TestClaudeLiveRequestedObserveOnlyUntilGate：证据门（claudeAskAnsweringEnabled 默认
-// false）未翻转前，live requested 保持 observe_only（canRespond/canReject=false）；
-// 门翻转后同一 registry pending + session alive 才可答。
+// TestClaudeLiveRequestedObserveOnlyUntilGate：证据门（claudeAskAnsweringEnabled）
+// 语义锁定。2026-09-16 门 PASSED 后默认翻转：registry pending + session alive →
+// 可答；withClaudeAskAnswering(false)（fail-closed 回归）→ observe_only。
 func TestClaudeLiveRequestedObserveOnlyUntilGate(t *testing.T) {
 	cs, _ := newAskTestSession(t)
-	cs.handleControlRequest(makeAskControlRequest("req-gate", []any{
-		singleQuestionMap("Pick a color", "Color", false, [2]string{"red", "r"}),
-	}))
+	withClaudeAskAnswering(false, func() {
+		cs.handleControlRequest(makeAskControlRequest("req-gate", []any{
+			singleQuestionMap("Pick a color", "Color", false, [2]string{"red", "r"}),
+		}))
+	})
 	ev := findUserInputEvent(drainAllEvents(cs), core.EventUserInputRequested)
 	if ev == nil || ev.UserInput == nil {
 		t.Fatal("expected canonical requested event")
 	}
 	if ev.UserInput.CanRespond || ev.UserInput.CanReject {
-		t.Fatalf("证据门未过：canRespond/canReject 应为 false，实际 %v/%v",
+		t.Fatalf("门关闭：canRespond/canReject 应为 false，实际 %v/%v",
 			ev.UserInput.CanRespond, ev.UserInput.CanReject)
 	}
 	if ev.UserInput.DiagnosticCode != "observe_only" {
 		t.Fatalf("诊断码应为 observe_only，实际 %q", ev.UserInput.DiagnosticCode)
 	}
 
-	// 门翻转后（测试专用翻转）：仍 pending + alive → 可答。
-	withClaudeAskAnswering(true, func() {
-		cs.handleControlRequest(makeAskControlRequest("req-gate2", []any{
-			singleQuestionMap("Pick again", "Color", false, [2]string{"red", "r"}),
-		}))
-	})
+	// 默认（门已翻转）：pending + alive → 可答。
+	cs.handleControlRequest(makeAskControlRequest("req-gate2", []any{
+		singleQuestionMap("Pick again", "Color", false, [2]string{"red", "r"}),
+	}))
 	ev2 := findUserInputEvent(drainAllEvents(cs), core.EventUserInputRequested)
 	if ev2 == nil || ev2.UserInput == nil {
-		t.Fatal("expected canonical requested event after gate flip")
+		t.Fatal("expected canonical requested event with default flag")
 	}
 	if !ev2.UserInput.CanRespond || !ev2.UserInput.CanReject {
-		t.Fatalf("门翻转 + pending + alive：canRespond/canReject 应为 true，实际 %v/%v",
+		t.Fatalf("门已翻转 + pending + alive：canRespond/canReject 应为 true，实际 %v/%v",
 			ev2.UserInput.CanRespond, ev2.UserInput.CanReject)
+	}
+	if ev2.UserInput.DiagnosticCode != "" {
+		t.Fatalf("可答态诊断码应为空，实际 %q", ev2.UserInput.DiagnosticCode)
 	}
 }

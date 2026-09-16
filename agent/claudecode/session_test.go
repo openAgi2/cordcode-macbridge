@@ -57,20 +57,22 @@ func TestProductionSessionStructuredInputHelperProcess(t *testing.T) {
 			if _, err := cs.ResolveUserInput(ctx, ui.InteractionID, "f40f8934-8f3d-4e5f-a9b5-883b6a8f5147", core.UserInputActionAnswer, answer); err != nil {
 				t.Fatalf("ResolveUserInput: %v", err)
 			}
+			// 证据门 PASSED（2026-09-16）后 live resolved producer 已删：answer 只发
+			// submitted（控制事实），耐久 resolved 由 transcript tool_result 产生。
 			var resolved core.Event
-			for resolved.Type != core.EventUserInputResolved {
+			for resolved.Type != core.EventUserInputSubmitted {
 				select {
 				case ev, ok := <-cs.Events():
 					if !ok {
-						t.Fatal("session exited before resolved event")
+						t.Fatal("session exited before submitted event")
 					}
 					resolved = ev
 				case <-ctx.Done():
-					t.Fatal("timed out waiting for resolved event")
+					t.Fatal("timed out waiting for submitted event")
 				}
 			}
 			if resolved.TurnID != requested.TurnID {
-				t.Fatalf("resolved turn %q != owning turn %q", resolved.TurnID, requested.TurnID)
+				t.Fatalf("submitted turn %q != owning turn %q", resolved.TurnID, requested.TurnID)
 			}
 		})
 	}

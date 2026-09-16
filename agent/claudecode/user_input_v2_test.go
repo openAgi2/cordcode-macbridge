@@ -97,7 +97,8 @@ func respInner(t *testing.T, stdin *captureStdin) map[string]any {
 // A. request path：handleAskUserQuestionV2
 // =====================================================================
 
-// TestV2_FlagOn_SingleQuestionEmitsPending：v2 flag ON + 单选 → pending + 规范化 + registry 注册。
+// TestV2_FlagOn_SingleQuestionEmitsPending：v2 + 单选 → pending + 规范化 + registry 注册。
+// 证据门 PASSED（2026-09-16）后默认可答：canRespond/canReject=true、无诊断码。
 func TestV2_FlagOn_SingleQuestionEmitsPending(t *testing.T) {
 	cs, _ := newAskV2TestSession(t)
 	cs.handleControlRequest(makeAskControlRequest("req-1", []any{
@@ -112,11 +113,11 @@ func TestV2_FlagOn_SingleQuestionEmitsPending(t *testing.T) {
 	if ev.UserInput.Status != core.UserInputStatusPending {
 		t.Fatalf("status = %q want pending", ev.UserInput.Status)
 	}
-	if ev.UserInput.CanRespond || ev.UserInput.CanReject {
-		t.Fatalf("Claude live 问答卡应 observe_only（canRespond=false canReject=false），实际 respond=%v reject=%v", ev.UserInput.CanRespond, ev.UserInput.CanReject)
+	if !ev.UserInput.CanRespond || !ev.UserInput.CanReject {
+		t.Fatalf("门已翻转 + pending + alive：canRespond/canReject 应为 true，实际 respond=%v reject=%v", ev.UserInput.CanRespond, ev.UserInput.CanReject)
 	}
-	if ev.UserInput.DiagnosticCode != "observe_only" {
-		t.Fatalf("diagnosticCode = %q want observe_only（与 cold/hydrate 对齐）", ev.UserInput.DiagnosticCode)
+	if ev.UserInput.DiagnosticCode != "" {
+		t.Fatalf("可答态 diagnosticCode 应为空，实际 %q", ev.UserInput.DiagnosticCode)
 	}
 	iid := deriveClaudeInteractionID("toolu_req-1")
 	if ev.UserInput.InteractionID != iid {
@@ -376,9 +377,18 @@ func TestV2_ResolveAnswerSingle(t *testing.T) {
 		t.Fatalf("answers['Which color?'] = %v want 'Blue'", label)
 	}
 
-	ev := findUserInputEvent(drainAllEvents(cs), core.EventUserInputResolved)
-	if ev == nil || ev.UserInput.Status != core.UserInputStatusAnswered || ev.UserInput.ResolutionSource != "ios" {
-		t.Fatalf("resolved 事件错: %+v", ev)
+	// 证据门 PASSED 后旧 live resolved producer 已删：answer 只发 submitted；
+	// 耐久 answered 由 transcript tool_result 产生（§4.6）。
+	emitted := drainAllEvents(cs)
+	ev := findUserInputEvent(emitted, core.EventUserInputSubmitted)
+	if ev == nil || ev.UserInput.Status != core.UserInputStatusSubmitted || ev.TurnID == "" || ev.ItemID == "" {
+		t.Fatalf("submitted 事件错: %+v", ev)
+	}
+	if ev.UserInput.InteractionID != deriveClaudeInteractionID("toolu_req-a1") {
+		t.Fatalf("submitted interactionId = %q", ev.UserInput.InteractionID)
+	}
+	if findUserInputEvent(emitted, core.EventUserInputResolved) != nil {
+		t.Fatal("不应再发 live resolved")
 	}
 }
 
@@ -466,9 +476,15 @@ func TestV2_ResolveReject(t *testing.T) {
 	if _, hasUpdated := resp["updatedInput"]; hasUpdated {
 		t.Fatalf("reject 不应带 updatedInput")
 	}
-	ev := findUserInputEvent(drainAllEvents(cs), core.EventUserInputResolved)
-	if ev == nil || ev.UserInput.Status != core.UserInputStatusRejected || ev.UserInput.ResolutionSource != "ios" {
-		t.Fatalf("reject resolved 事件错: %+v", ev)
+	// 证据门 PASSED 后旧 live resolved producer 已删：reject 只发 submitted；
+	// 耐久 rejected 由 transcript tool_result（Error: User declined…）产生（§4.6）。
+	emitted := drainAllEvents(cs)
+	ev := findUserInputEvent(emitted, core.EventUserInputSubmitted)
+	if ev == nil || ev.UserInput.Status != core.UserInputStatusSubmitted {
+		t.Fatalf("reject submitted 事件错: %+v", ev)
+	}
+	if findUserInputEvent(emitted, core.EventUserInputResolved) != nil {
+		t.Fatal("不应再发 live resolved")
 	}
 }
 
