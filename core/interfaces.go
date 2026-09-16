@@ -220,6 +220,15 @@ type UserInputResponder interface {
 	ResolveUserInput(ctx context.Context, interactionID string, clientActionID string, action UserInputAction, answers []UserInputAnswer) (UserInputResolution, error)
 }
 
+// UserInputAnswerabilityOracle 是可选会话能力：按 tool-use 派生的 interactionId 证明
+// 该交互当前可经本会话的活控制通道作答（registry pending + session alive）。设计 v6 §4.2：
+// transcript 侧 mapper（冷拉/live batch/hydrate legacy row/pathless rich history）用它决定
+// canRespond；nil/未实现 = fail closed（observe_only）。可答性只由可证明的活控制通道决定，
+// 不从 transcript 来源或 registry miss 推断。
+type UserInputAnswerabilityOracle interface {
+	UserInputAnswerable(interactionID string) bool
+}
+
 // StructuredUserInputProvider marks an agent whose production adapter, real
 // responder, and canonical interaction producer are enabled together. Backend
 // capability advertisement must use this readiness instead of backend-name

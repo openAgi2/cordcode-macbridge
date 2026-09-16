@@ -1,0 +1,208 @@
+{
+  "gate": "claudecode-userinput-ios-answer-design v6 §4.6 (2.1.261 evidence gate)",
+  "captured": "2026-09-16",
+  "producer_version": "Claude Code 2.1.261 (PATH /opt/homebrew/bin/claude)",
+  "probe": "scripts/claudecode-phase0/ask_evidence_probe.py (scenarios ask-answer/ask-deny synthetic; ask-file-answer/ask-file-deny owner-provided real file-conflict flow)",
+  "offline_reverify": "scripts/claudecode-phase0/reverify_ask_dump.py",
+  "files": {
+    "ask-answer": {
+      "raw_dump": "dumps/ask-answer.jsonl",
+      "raw_dump_sha256": "9e2680ef2fc9c019a44e18267e5edab0c3ccd6d8d07d2e3632790c974cde4ca7",
+      "fixture": "fixtures/ask-evidence-2026-09-16/ask-answer.fixture.json",
+      "fixture_sha256": "8513aceaf46271736537d266f810e0aed274770adb2704a74fe306c9799405fa",
+      "reverify": {
+        "scenario": "ask-answer",
+        "verdicts": {
+          "captured_control_request": {
+            "ok": true,
+            "request_id": "cb214c54-e087-4ad8-bf12-6b2621c7fe26"
+          },
+          "captured_tool_use": {
+            "ok": true,
+            "id": "call_f7a144e8b51943b9a316e0a1"
+          },
+          "captured_ask_tool_result": {
+            "ok": true,
+            "tool_use_id": "call_f7a144e8b51943b9a316e0a1",
+            "content_preview": "\"Your questions have been answered: \\\"Continue?\\\"=\\\"Yes\\\". You can now continue with these answers in mind.\""
+          },
+          "request_id_pairing": {
+            "ok": true,
+            "request_id": "cb214c54-e087-4ad8-bf12-6b2621c7fe26",
+            "behavior_sent": "allow",
+            "note": "verified against archived out frame"
+          },
+          "tool_use_id_three_way": {
+            "ok": true,
+            "control": "call_f7a144e8b51943b9a316e0a1",
+            "tool_use": "call_f7a144e8b51943b9a316e0a1",
+            "tool_result": "call_f7a144e8b51943b9a316e0a1"
+          },
+          "tool_use_result_envelope_shape": {
+            "ok": true,
+            "envelope_type": "dict",
+            "envelope_preview": "{\"questions\": [{\"question\": \"Continue?\", \"header\": \"Continue\", \"options\": [{\"label\": \"Yes\", \"description\": \"Proceed with the task.\"}, {\"label\": \"No\", \"description\": \"Stop and do not proceed.\"}], \"multiSelect\": false}], \"answers\": {\"Continue?\": \"Yes\"}}"
+          },
+          "recursive_scan_parity": {
+            "ok": true,
+            "recursive_control_requests": 1,
+            "recursive_tool_uses": 2,
+            "recursive_ask_tool_results": 1
+          }
+        }
+      }
+    },
+    "ask-deny": {
+      "raw_dump": "dumps/ask-deny.jsonl",
+      "raw_dump_sha256": "81b0c9faf7687aa4d9ee5c139c5a28fb039c2290f5f3346336b184014e5b1b66",
+      "fixture": "fixtures/ask-evidence-2026-09-16/ask-deny.fixture.json",
+      "fixture_sha256": "4b1974871511c9cc0cd3553a86b69956cef97f906b358e9349c3d6eac7e94df2",
+      "reverify": {
+        "scenario": "ask-deny",
+        "verdicts": {
+          "captured_control_request": {
+            "ok": true,
+            "request_id": "e87e8493-74f8-486f-a20a-406cc83bddfe"
+          },
+          "captured_tool_use": {
+            "ok": true,
+            "id": "call_e3f25d622636446cb582d49c"
+          },
+          "captured_ask_tool_result": {
+            "ok": true,
+            "tool_use_id": "call_e3f25d622636446cb582d49c",
+            "content_preview": "\"User declined to answer this question.\""
+          },
+          "request_id_pairing": {
+            "ok": true,
+            "request_id": "e87e8493-74f8-486f-a20a-406cc83bddfe",
+            "behavior_sent": "deny",
+            "note": "verified against archived out frame"
+          },
+          "tool_use_id_three_way": {
+            "ok": true,
+            "control": "call_e3f25d622636446cb582d49c",
+            "tool_use": "call_e3f25d622636446cb582d49c",
+            "tool_result": "call_e3f25d622636446cb582d49c"
+          },
+          "tool_use_result_envelope_shape": {
+            "ok": true,
+            "envelope_type": "str",
+            "envelope_preview": "\"Error: User declined to answer this question.\""
+          },
+          "recursive_scan_parity": {
+            "ok": true,
+            "recursive_control_requests": 1,
+            "recursive_tool_uses": 2,
+            "recursive_ask_tool_results": 1
+          }
+        }
+      }
+    },
+    "ask-file-answer": {
+      "raw_dump": "dumps/ask-file-answer.jsonl",
+      "raw_dump_sha256": "9cd350ae302a3e907d0509a791b55cf410c751efd4e9a8fd1a99ec2a30a5f0a1",
+      "fixture": "fixtures/ask-evidence-2026-09-16/ask-file-answer.fixture.json",
+      "fixture_sha256": "f60946a601bba28aa24574a2f43218baedf5dad365391fc28ca18d79797d8b81",
+      "reverify": {
+        "scenario": "ask-file-answer",
+        "verdicts": {
+          "captured_control_request": {
+            "ok": true,
+            "request_id": "3e95c961-6d2e-4500-8cc3-e2d0a55e455c"
+          },
+          "captured_tool_use": {
+            "ok": true,
+            "id": "call_a62471af73704fe4955e1213"
+          },
+          "captured_ask_tool_result": {
+            "ok": true,
+            "tool_use_id": "call_a62471af73704fe4955e1213",
+            "content_preview": "\"Your questions have been answered: \\\"文件 /Users/jacklee/Projects/Chat/漫威战斗故事.txt 已存在（约119KB），如何处理？\\\"=\\\"覆盖重写\\\". You can now continue with these answers in mind.\""
+          },
+          "request_id_pairing": {
+            "ok": true,
+            "request_id": "3e95c961-6d2e-4500-8cc3-e2d0a55e455c",
+            "behavior_sent": "allow",
+            "note": "verified against archived out frame"
+          },
+          "tool_use_id_three_way": {
+            "ok": true,
+            "control": "call_a62471af73704fe4955e1213",
+            "tool_use": "call_a62471af73704fe4955e1213",
+            "tool_result": "call_a62471af73704fe4955e1213"
+          },
+          "tool_use_result_envelope_shape": {
+            "ok": true,
+            "envelope_type": "dict",
+            "envelope_preview": "{\"questions\": [{\"question\": \"文件 /Users/jacklee/Projects/Chat/漫威战斗故事.txt 已存在（约119KB），如何处理？\", \"header\": \"文件冲突\", \"options\": [{\"label\": \"覆盖重写\", \"description\": \"用新的约100字故事替换整个文件内容\"}, {\"label\": \"追加到末尾\", \"description\": \"在现有内容末尾追加新故事，原有内容保留\"}, {\"label\": \"不动它\", \"description\": \"不修改文件，本次任务取消\"}], \"multiSelect\": false}], \"answers\": {\"文件 /Users/jacklee/Projects/Chat/漫威战斗故事.txt 已存在（约119KB），如何处理？\": \"覆盖重写\"}}"
+          },
+          "recursive_scan_parity": {
+            "ok": true,
+            "recursive_control_requests": 1,
+            "recursive_tool_uses": 2,
+            "recursive_ask_tool_results": 1
+          }
+        }
+      },
+      "disk_transcript_fixture": "fixtures/ask-evidence-2026-09-16/ask-file-answer.disk-transcript.fixture.json",
+      "disk_transcript_fixture_sha256": "c291065a014e5f3e3886d48f495f04854ca418f769acd0c13937573cd75965af"
+    },
+    "ask-file-deny": {
+      "raw_dump": "dumps/ask-file-deny.jsonl",
+      "raw_dump_sha256": "02e5953df33757d0bd70b6364354e1d9cf2dd3d8e7163afc1619e396983fd737",
+      "fixture": "fixtures/ask-evidence-2026-09-16/ask-file-deny.fixture.json",
+      "fixture_sha256": "6322e55df334507fbb2460d81e6cc9502f5b61d480820e835b529241d2b22d9a",
+      "reverify": {
+        "scenario": "ask-file-deny",
+        "verdicts": {
+          "captured_control_request": {
+            "ok": true,
+            "request_id": "0ed11c16-e4ae-4057-b254-00597466ace6"
+          },
+          "captured_tool_use": {
+            "ok": true,
+            "id": "call_992c50a9d2524c5f80a9433e"
+          },
+          "captured_ask_tool_result": {
+            "ok": true,
+            "tool_use_id": "call_992c50a9d2524c5f80a9433e",
+            "content_preview": "\"User declined to answer this question.\""
+          },
+          "request_id_pairing": {
+            "ok": true,
+            "request_id": "0ed11c16-e4ae-4057-b254-00597466ace6",
+            "behavior_sent": "deny",
+            "note": "verified against archived out frame"
+          },
+          "tool_use_id_three_way": {
+            "ok": true,
+            "control": "call_992c50a9d2524c5f80a9433e",
+            "tool_use": "call_992c50a9d2524c5f80a9433e",
+            "tool_result": "call_992c50a9d2524c5f80a9433e"
+          },
+          "tool_use_result_envelope_shape": {
+            "ok": true,
+            "envelope_type": "str",
+            "envelope_preview": "\"Error: User declined to answer this question.\""
+          },
+          "recursive_scan_parity": {
+            "ok": true,
+            "recursive_control_requests": 1,
+            "recursive_tool_uses": 2,
+            "recursive_ask_tool_results": 1
+          }
+        }
+      },
+      "disk_transcript_fixture": "fixtures/ask-evidence-2026-09-16/ask-file-deny.disk-transcript.fixture.json",
+      "disk_transcript_fixture_sha256": "74879695c2971ba4aad742558499b58f784791de38309351c003c2a36be9c8ad"
+    }
+  },
+  "disk_vs_stdout_note": "Disk transcript (relay live-loop scan source) uses camelCase toolUseResult; live CLI stream-json stdout frames use snake_case tool_use_result. The relay consumes the disk file, so the Go struct tag json:\"toolUseResult\" is correct for the projection path. Both spellings verified 2026-09-16 on 2.1.261.",
+  "gate_decision": {
+    "answer_envelope_stable_questions_answers": true,
+    "deny_distinguishable_durable_shape": true,
+    "implementation": "HasStructuredUserInputResultEnvelope (answer->answered, pre-existing) + IsStructuredUserInputDeniedResult gated on Ask toolUseMeta (deny->rejected, new); locked by TestClaudeAskUserQuestionDeniedResultProjectsRejected / TestClaudeAskUserQuestionDeniedShapeRequiresAskMeta",
+    "verdict": "PASSED (2026-09-16, Claude Code 2.1.261, owner-provided file-conflict scenario + synthetic scenarios, strict-path + recursive-scan parity, request_id pairing and tool_use_id three-way link all green)"
+  }
+}

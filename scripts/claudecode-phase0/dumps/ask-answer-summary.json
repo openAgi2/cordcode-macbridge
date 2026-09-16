@@ -1,0 +1,43 @@
+{
+  "scenario": "ask-answer",
+  "verdicts": {
+    "initialize": {
+      "request_id": "req_init",
+      "verdict": "success",
+      "response_subtype": "success"
+    },
+    "captured_control_request": {
+      "ok": true,
+      "request_id": "cb214c54-e087-4ad8-bf12-6b2621c7fe26"
+    },
+    "captured_tool_use": {
+      "ok": true,
+      "id": "call_f7a144e8b51943b9a316e0a1"
+    },
+    "captured_tool_result": {
+      "ok": true,
+      "tool_use_id": "call_f7a144e8b51943b9a316e0a1"
+    },
+    "request_id_pairing": {
+      "ok": false,
+      "request_id": "cb214c54-e087-4ad8-bf12-6b2621c7fe26"
+    },
+    "tool_use_id_three_way": {
+      "ok": true,
+      "control": "call_f7a144e8b51943b9a316e0a1",
+      "tool_use": "call_f7a144e8b51943b9a316e0a1",
+      "tool_result": "call_f7a144e8b51943b9a316e0a1"
+    },
+    "recursive_scan_parity": {
+      "ok": true,
+      "recursive_control_requests": 1,
+      "recursive_tool_uses": 2,
+      "recursive_tool_results": 1
+    },
+    "tool_result_durable_shape": {
+      "ok": true,
+      "content_type": "str",
+      "content_preview": "\"Your questions have been answered: \\\"Continue?\\\"=\\\"Yes\\\". You can now continue with these answers in mind.\""
+    }
+  }
+}

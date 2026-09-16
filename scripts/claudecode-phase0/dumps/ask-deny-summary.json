@@ -1,0 +1,43 @@
+{
+  "scenario": "ask-deny",
+  "verdicts": {
+    "initialize": {
+      "request_id": "req_init",
+      "verdict": "success",
+      "response_subtype": "success"
+    },
+    "captured_control_request": {
+      "ok": true,
+      "request_id": "e87e8493-74f8-486f-a20a-406cc83bddfe"
+    },
+    "captured_tool_use": {
+      "ok": true,
+      "id": "call_e3f25d622636446cb582d49c"
+    },
+    "captured_tool_result": {
+      "ok": true,
+      "tool_use_id": "call_e3f25d622636446cb582d49c"
+    },
+    "request_id_pairing": {
+      "ok": false,
+      "request_id": "e87e8493-74f8-486f-a20a-406cc83bddfe"
+    },
+    "tool_use_id_three_way": {
+      "ok": true,
+      "control": "call_e3f25d622636446cb582d49c",
+      "tool_use": "call_e3f25d622636446cb582d49c",
+      "tool_result": "call_e3f25d622636446cb582d49c"
+    },
+    "recursive_scan_parity": {
+      "ok": true,
+      "recursive_control_requests": 1,
+      "recursive_tool_uses": 2,
+      "recursive_tool_results": 1
+    },
+    "tool_result_durable_shape": {
+      "ok": true,
+      "content_type": "str",
+      "content_preview": "\"User declined to answer this question.\""
+    }
+  }
+}

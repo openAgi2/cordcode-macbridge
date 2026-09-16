@@ -209,7 +209,7 @@ func (w *claudeWebPushWatcher) consumeGrowth(entry claudeSessionIndexEntry, stat
 		if !record.Admitted {
 			continue
 		}
-		events := claudeEntryToProjectionEvents(record.Entry, &state.currentTurnID, nil)
+		events := claudeEntryToProjectionEvents(record.Entry, &state.currentTurnID, nil, nil)
 		for _, event := range events {
 			if event.Event != "user_message" || state.pendingTurnID == "" {
 				continue

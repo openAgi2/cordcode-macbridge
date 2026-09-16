@@ -473,6 +473,11 @@ func (cs *claudeSession) handleReadLoopLine(line string) {
 	case "control_cancel_request":
 		requestID, _ := raw["request_id"].(string)
 		slog.Debug("claudeSession: permission cancelled", "request_id", requestID)
+		// §4.5.1（设计 v6）：control cancel 必须按 request ID 找到 entry 并 Remove，
+		// 唤醒等待中的并发 claimant（醒来后 interaction_not_found 停止写）。
+		if requestID != "" && cs.claudeUserInputReg != nil {
+			cs.claudeUserInputReg.RemoveByRequest(requestID)
+		}
 	}
 }
 
@@ -1035,7 +1040,13 @@ func (cs *claudeSession) handleControlRequest(raw map[string]any) {
 	// permission-mode bypass. Legacy wire presentation is derived later from the
 	// same interaction; it is not a second adapter/registry path.
 	if StructuredUserInputReady && toolName == "AskUserQuestion" {
-		cs.handleAskUserQuestionV2(requestID, input)
+		// Dual identity (design v6 §2.1/§4.1): the outer control request_id only
+		// pairs control_response writes; request.tool_use_id is the canonical seed
+		// for the cross-domain timeline interactionId (transcript mapper, rich
+		// history, submitted, resolved all key on it). Real 2.1.209 paired
+		// fixtures prove the two IDs differ, so neither may substitute the other.
+		toolUseID, _ := request["tool_use_id"].(string)
+		cs.handleAskUserQuestionV2(requestID, toolUseID, input)
 		return
 	}
 

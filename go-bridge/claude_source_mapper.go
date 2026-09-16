@@ -12,6 +12,7 @@ func buildClaudeSourceRecordBatch(
 	backendID, sessionID, bridgeEpoch string,
 	correlation claudeSourceCorrelation,
 	fileOrderTurnID string,
+	oracle claudeAnswerabilityOracle,
 ) (ClaudeSourceRecordBatch, error) {
 	entry := record.Entry
 	if entry.UUID == "" || entry.Message == nil ||
@@ -37,7 +38,9 @@ func buildClaudeSourceRecordBatch(
 		return ClaudeSourceRecordBatch{}, err
 	}
 	currentTurnID := turnID
-	events := claudeEntryToProjectionEvents(entry, &currentTurnID, nil)
+	// live source batch 是 Kernel-entering 调用边（source-batch transaction 是 Claude
+	// 内容唯一投影写者）——传真实 oracle（设计 v6 §4.2）。
+	events := claudeEntryToProjectionEvents(entry, &currentTurnID, nil, oracle)
 	claudeTagSourceBlockOrdinals(entry, events)
 	partID := turnID
 	if entry.Type == "user" {

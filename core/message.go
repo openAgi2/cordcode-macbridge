@@ -333,6 +333,7 @@ const (
 	EventQuestionAsked            EventType = "question_asked"             // agent asks user a question (Codex)
 	EventQuestionResolved         EventType = "question_resolved"          // question was answered or cancelled
 	EventUserInputRequested       EventType = "user_input_requested"       // 结构化用户输入交互产生（pending/failed），权威 payload 在 Event.UserInput（设计 §10.1）
+	EventUserInputSubmitted       EventType = "user_input_submitted"       // 结构化用户输入已被提交（control response 写成功；Kernel 控制事实，非耐久 resolved；设计 v6 §4.7）
 	EventUserInputResolved        EventType = "user_input_resolved"        // 结构化用户输入交互被解决（answered/rejected/auto_resolved/unavailable）
 	EventRetryStatus              EventType = "retry_status"               // transient provider-retry notice (serve keeps the turn alive; wire session_retry_status)
 	EventSessionCommand           EventType = "session_command"            // host 斜杠命令生命周期（各 backend 按 commandId 折叠；权威 payload 在 Event.SessionCommand）
@@ -375,6 +376,7 @@ type UserInputStatus string
 
 const (
 	UserInputStatusPending      UserInputStatus = "pending"
+	UserInputStatusSubmitted    UserInputStatus = "submitted" // control response 已写成功（Kernel 控制事实；transcript tool_result 才是耐久 resolved）
 	UserInputStatusAnswered     UserInputStatus = "answered"
 	UserInputStatusRejected     UserInputStatus = "rejected"
 	UserInputStatusAutoResolved UserInputStatus = "auto_resolved"

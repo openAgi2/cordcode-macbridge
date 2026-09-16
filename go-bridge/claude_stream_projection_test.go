@@ -45,7 +45,7 @@ func TestBackfillClaudeStreamTurnID_AppendsToActiveTurn(t *testing.T) {
 		t.Fatalf("scan: err=%v records=%d", err, len(scan.Records))
 	}
 	current, _ := handlers.projectionKernel.ClaudeSourceStateSnapshot("claude", sessionID)
-	batch, err := buildClaudeSourceRecordBatch(current, scan.Records[0], "claude", sessionID, "e", correlation, "")
+	batch, err := buildClaudeSourceRecordBatch(current, scan.Records[0], "claude", sessionID, "e", correlation, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

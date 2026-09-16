@@ -34,7 +34,13 @@ import (
 
 // ── 稳定 ID 派生（§6.1，Claude 分支）─────────────────────────────────────────
 // 与 codex 包的派生语义一致（小写十六进制 SHA-256 前 32 字符、"ui_" 前缀），但 Claude 的 hash
-// 输入是 "claudecode\0" + requestId。本地定义避免跨 adapter 包依赖；canonical 语义由本文件单测锁死。
+// 输入是 "claudecode\0" + toolUseID。本地定义避免跨 adapter 包依赖；canonical 语义由本文件单测锁死。
+//
+// 双 identity（设计 v6 §2.1，R5-P0-1）：control envelope 外层 request_id 只用于
+// control_response 配对；Ask 的 request.tool_use_id（= transcript assistant tool_use id =
+// user tool_result tool_use_id）是唯一 timeline canonical seed。两者缺一不可且不可互换：
+// 真实 2.1.209 配对 fixture 证明二者恒不相等，用 request_id 派生 interactionId 会与
+// transcript mapper 确定性分叉成两张卡。
 
 const (
 	claudeSUIHexLen = 32
@@ -44,10 +50,30 @@ const (
 	StructuredUserInputReady = true
 )
 
-func deriveClaudeInteractionID(requestID string) string {
+// claudeAskAnsweringEnabled 是 iOS 作答能力的证据门开关（设计 v6 §0 交付门/§4.6）。
+// Claude Code 2.1.261 answer/deny 配对样本（完整 control request/response + transcript
+// 三向关联）采集并通过前保持 false：live requested 维持 observe_only 只读呈现，
+// answerability oracle 恒 false。门通过后置 true 才翻转 canRespond 并按 §4.6 决策表
+// 删除旧 live resolved producer。测试通过 withClaudeAskAnswering 临时翻转，不得改默认值。
+var claudeAskAnsweringEnabled = false
+
+// withClaudeAskAnswering 在 fn 执行期间临时翻转证据门开关（仅测试使用）。
+func withClaudeAskAnswering(enabled bool, fn func()) {
+	prev := claudeAskAnsweringEnabled
+	claudeAskAnsweringEnabled = enabled
+	defer func() { claudeAskAnsweringEnabled = prev }()
+	fn()
+}
+
+// ClaudeAskAnsweringEnabled reports whether the 2.1.261 evidence gate has flipped the
+// iOS answering capability on. Exposed for the transcript-side answerability oracle
+// (go-bridge) so live and cold paths gate on the same switch.
+func ClaudeAskAnsweringEnabled() bool { return claudeAskAnsweringEnabled }
+
+func deriveClaudeInteractionID(toolUseID string) string {
 	h := sha256.New()
 	h.Write([]byte("claudecode\x00"))
-	h.Write([]byte(requestID))
+	h.Write([]byte(toolUseID))
 	sum := h.Sum(nil)
 	return claudeSUIPrefix + hex.EncodeToString(sum[:claudeSUIHexLen/2])
 }
@@ -56,8 +82,8 @@ func deriveClaudeInteractionID(requestID string) string {
 // derivation to transcript consumers. Passive transcript projection must derive the same
 // interactionId as the live Claude adapter from the persisted tool_use id; duplicating the
 // hash here would let cold/live paths disagree silently.
-func DeriveStructuredUserInputInteractionID(requestID string) string {
-	return deriveClaudeInteractionID(requestID)
+func DeriveStructuredUserInputInteractionID(toolUseID string) string {
+	return deriveClaudeInteractionID(toolUseID)
 }
 
 // HasStructuredUserInputResultEnvelope recognizes the persisted Claude Desktop
@@ -76,6 +102,25 @@ func HasStructuredUserInputResultEnvelope(raw json.RawMessage) bool {
 	}
 	return len(envelope.Questions) > 0 && string(envelope.Questions) != "null" &&
 		len(envelope.Answers) > 0 && string(envelope.Answers) != "null"
+}
+
+// IsStructuredUserInputDeniedResult recognizes the persisted deny shape of an
+// AskUserQuestion resolution (evidence gate 2026-09-16, CLI 2.1.261, scenarios
+// ask-file-deny/ask-deny): frame-level tool_use_result is the plain string
+// "Error: User declined to answer this question." — no questions/answers
+// envelope, and the message.content tool_result block carries is_error=true
+// with content "User declined to answer this question.". Callers must gate on
+// the owning tool_result belonging to an AskUserQuestion (toolUseMeta) before
+// treating this as a user-input rejection.
+func IsStructuredUserInputDeniedResult(raw json.RawMessage) bool {
+	if len(raw) == 0 || string(raw) == "null" {
+		return false
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(s), "Error: User declined to answer this question")
 }
 
 func claudeQuestionID(interactionID string, questionIndex int) string {
@@ -111,11 +156,13 @@ type claudePendingOption struct {
 	label string // Claude answers map 期望的 option label
 }
 
-// claudeUIEntry 保存回答所需的原始 identity：Claude control_request request_id、
-// 原始 input（shallowCopy 基底）、question text → mode/options 映射。
+// claudeUIEntry 保存回答所需的原始 identity：Claude control_request request_id（仅控制回包
+// 配对）、tool_use_id（timeline canonical seed，与 transcript mapper 同键）、原始 input
+// （shallowCopy 基底）、question text → mode/options 映射。
 type claudeUIEntry struct {
 	interactionID      string
 	requestID          string
+	toolUseID          string
 	owningTurnID       string
 	rawInput           map[string]any
 	questionMode       map[string]core.UserInputAnswerMode // questionText → single|multiple
@@ -126,12 +173,27 @@ type claudeUIEntry struct {
 	resolver           string
 	outcomeByAction    map[string]core.UserInputResolutionOutcome
 	activeClientAction string
+	// transition generation/channel（设计 v6 §4.5.1）：ConfirmCommitted/ReleaseClaim/
+	// Remove/Clear 推进 generation 并关闭旧 channel 唤醒等待方。等待方醒来后循环重判。
+	transitionGen uint64
+	transitionCh  chan struct{}
+}
+
+// advanceTransitionLocked 推进 entry 的 transition generation 并唤醒所有等待方。
+// 调用方必须持有 r.mu。
+func (r *claudeUserInputRegistry) advanceTransitionLocked(e *claudeUIEntry) {
+	if e.transitionCh != nil {
+		close(e.transitionCh)
+	}
+	e.transitionGen++
+	e.transitionCh = make(chan struct{})
 }
 
 // claudeClaimSnapshot 是 Claim 成功时返回的只读视图，供 session 层序列化 control_response。
 type claudeClaimSnapshot struct {
 	interactionID string
 	requestID     string
+	toolUseID     string
 	owningTurnID  string
 	rawInput      map[string]any
 	questionMode  map[string]core.UserInputAnswerMode
@@ -144,6 +206,10 @@ type claudeClaimDecision struct {
 	snapshot *claudeClaimSnapshot
 	outcome  core.UserInputResolutionOutcome
 	status   claudeUIStatus
+	// waitCh/waitGen（§4.5.1）：entry 已被其他 claimant 占用时非 nil——调用方在锁外
+	// 等待该 channel 关闭（transition 发生）后循环重判。
+	waitCh chan struct{}
+	waitGen uint64
 }
 
 type claudeUserInputRegistry struct {
@@ -166,6 +232,7 @@ func (r *claudeUserInputRegistry) Register(e claudeUIEntry) bool {
 		return false
 	}
 	e.status = claudeEntryPending
+	e.transitionCh = make(chan struct{})
 	r.entries[e.interactionID] = &e
 	if e.requestID != "" {
 		r.byRequest[e.requestID] = e.interactionID
@@ -177,6 +244,25 @@ func (r *claudeUserInputRegistry) SnapshotByRequest(requestID string) (*claudeCl
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	interactionID := r.byRequest[requestID]
+	e := r.entries[interactionID]
+	if e == nil {
+		return nil, claudeUIAbsent
+	}
+	status := claudeUIPending
+	switch e.status {
+	case claudeEntryClaimed:
+		status = claudeUIClaimed
+	case claudeEntryResolved:
+		status = claudeUIResolved
+	}
+	return claudeSnapshotOf(e), status
+}
+
+// SnapshotByInteraction 按 interactionId 返回 entry 快照（submitted 重发需要
+// registry 保存的 turn/item/tool-use 身份，§4.5.2）。
+func (r *claudeUserInputRegistry) SnapshotByInteraction(interactionID string) (*claudeClaimSnapshot, claudeUIStatus) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	e := r.entries[interactionID]
 	if e == nil {
 		return nil, claudeUIAbsent
@@ -225,13 +311,44 @@ func (r *claudeUserInputRegistry) Claim(interactionID, clientActionID string) cl
 	case claudeEntryResolved:
 		return claudeClaimDecision{outcome: core.UserInputOutcomeAlreadyResolved, status: claudeUIResolved}
 	case claudeEntryClaimed:
-		return claudeClaimDecision{status: claudeUIClaimed}
+		// §4.5.1：已占用不立即成功返回——调用方拿 waiter 在锁外等待 transition，
+		// 醒来后重判（committed→already_resolved / released→重 Claim）。
+		return claudeClaimDecision{
+			status:  claudeUIClaimed,
+			waitCh:  e.transitionCh,
+			waitGen: e.transitionGen,
+		}
 	case claudeEntryPending:
 		e.status = claudeEntryClaimed
 		e.activeClientAction = clientActionID
 		return claudeClaimDecision{claimed: true, snapshot: claudeSnapshotOf(e), status: claudeUIClaimed}
 	}
 	return claudeClaimDecision{status: claudeUIAbsent}
+}
+
+// WaitTransition 在锁外等待 entry 的下一次 transition（§4.5.1）。返回等待后的最新
+// status；entry 消失返回 claudeUIAbsent；ctx 结束返回 ctx.Err()。不得持 registry
+// mutex 等待 channel。
+func (r *claudeUserInputRegistry) WaitTransition(interactionID string, lastGen uint64, ctx context.Context) (claudeUIStatus, error) {
+	r.mu.Lock()
+	e, ok := r.entries[interactionID]
+	if !ok {
+		r.mu.Unlock()
+		return claudeUIAbsent, nil
+	}
+	ch := e.transitionCh
+	gen := e.transitionGen
+	r.mu.Unlock()
+	if ch == nil || gen != lastGen {
+		// 已发生过 transition（或 entry 重建）：直接返回当前状态供重判。
+		return r.Status(interactionID), nil
+	}
+	select {
+	case <-ch:
+		return r.Status(interactionID), nil
+	case <-ctx.Done():
+		return claudeUIAbsent, ctx.Err()
+	}
 }
 
 func (r *claudeUserInputRegistry) ConfirmResolved(interactionID, clientActionID, resolver string) bool {
@@ -253,6 +370,7 @@ func (r *claudeUserInputRegistry) ConfirmResolved(interactionID, clientActionID,
 		e.outcomeByAction[clientActionID] = core.UserInputOutcomeAccepted
 	}
 	e.activeClientAction = ""
+	r.advanceTransitionLocked(e)
 	return true
 }
 
@@ -265,21 +383,46 @@ func (r *claudeUserInputRegistry) ReleaseClaim(interactionID string) bool {
 	}
 	e.status = claudeEntryPending
 	e.activeClientAction = ""
+	r.advanceTransitionLocked(e)
+	return true
+}
+
+// RemoveByRequest 按 control request ID 找到 entry 并移除（§4.5.1：
+// control_cancel_request 必须按 request ID Remove 并唤醒等待方）。
+func (r *claudeUserInputRegistry) RemoveByRequest(requestID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	interactionID := r.byRequest[requestID]
+	e := r.entries[interactionID]
+	if e == nil {
+		return false
+	}
+	delete(r.byRequest, requestID)
+	delete(r.entries, interactionID)
+	r.advanceTransitionLocked(e)
 	return true
 }
 
 func (r *claudeUserInputRegistry) Remove(interactionID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if e := r.entries[interactionID]; e != nil && e.requestID != "" {
+	e := r.entries[interactionID]
+	if e == nil {
+		return
+	}
+	if e.requestID != "" {
 		delete(r.byRequest, e.requestID)
 	}
 	delete(r.entries, interactionID)
+	r.advanceTransitionLocked(e)
 }
 
 func (r *claudeUserInputRegistry) Clear() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	for _, e := range r.entries {
+		r.advanceTransitionLocked(e)
+	}
 	r.entries = make(map[string]*claudeUIEntry)
 	r.byRequest = make(map[string]string)
 }
@@ -300,6 +443,7 @@ func claudeSnapshotOf(e *claudeUIEntry) *claudeClaimSnapshot {
 	return &claudeClaimSnapshot{
 		interactionID: e.interactionID,
 		requestID:     e.requestID,
+		toolUseID:     e.toolUseID,
 		owningTurnID:  e.owningTurnID,
 		rawInput:      e.rawInput,
 		questionMode:  mode,
@@ -362,7 +506,7 @@ func NormalizeStructuredUserInputQuestions(interactionID string, input map[strin
 
 // buildClaudePendingEntry 把规范化结果组装成 registry entry。
 // parsed[i] 与 normalized[i] 一一对应（normalize 成功时不跳过任何题）。
-func buildClaudePendingEntry(interactionID, requestID, owningTurnID string, rawInput map[string]any, parsed []core.UserQuestion, normalized []core.UserInputQuestion) claudeUIEntry {
+func buildClaudePendingEntry(interactionID, requestID, toolUseID, owningTurnID string, rawInput map[string]any, parsed []core.UserQuestion, normalized []core.UserInputQuestion) claudeUIEntry {
 	mode := make(map[string]core.UserInputAnswerMode, len(normalized))
 	opts := make(map[string][]claudePendingOption, len(normalized))
 	order := make([]string, 0, len(normalized))
@@ -379,6 +523,7 @@ func buildClaudePendingEntry(interactionID, requestID, owningTurnID string, rawI
 	return claudeUIEntry{
 		interactionID: interactionID,
 		requestID:     requestID,
+		toolUseID:     toolUseID,
 		owningTurnID:  owningTurnID,
 		rawInput:      rawInput,
 		questionMode:  mode,
@@ -389,10 +534,32 @@ func buildClaudePendingEntry(interactionID, requestID, owningTurnID string, rawI
 
 // ── session 层：request 处理 + ResolveUserInput ───────────────────────────────
 
-// handleAskUserQuestionV2 处理 v2 路径的 AskUserQuestion（§9.1/§9.2）。
+// handleAskUserQuestionV2 处理 v2 路径的 AskUserQuestion（§9.1/§9.2；identity 依设计 v6 §4.1）。
 // 在 permission-mode bypass 之前由 handleControlRequest 调用。
-func (cs *claudeSession) handleAskUserQuestionV2(requestID string, input map[string]any) {
-	iid := deriveClaudeInteractionID(requestID)
+//
+// 双 identity fail closed（§2.1）：requestID 只用于 control_response 配对；toolUseID 是
+// timeline canonical seed。缺 toolUseID 无法建立跨域 identity——不发 canonical requested，
+// requestID 可用时回 deny（invalid_backend_request）避免 CLI 永久等待，绝不回退用另一
+// identity 猜测。缺 requestID（空）时同样不发卡：无法回 control response 的 Ask 无法被
+// 本 bridge 作答，只留 transcript 侧 observe-only 投影。
+func (cs *claudeSession) handleAskUserQuestionV2(requestID, toolUseID string, input map[string]any) {
+	if toolUseID == "" {
+		slog.Error("claudeSession: AskUserQuestion missing tool_use_id; failing closed",
+			"request_id", requestID)
+		if requestID != "" {
+			_ = cs.RespondPermission(requestID, core.PermissionResult{
+				Behavior: "deny",
+				Message:  "CordCode could not establish the tool_use identity for this question.",
+			})
+		}
+		return
+	}
+	if requestID == "" {
+		slog.Error("claudeSession: AskUserQuestion missing control request_id; failing closed",
+			"tool_use_id", toolUseID)
+		return
+	}
+	iid := deriveClaudeInteractionID(toolUseID)
 	turnID := cs.currentStructuredInputTurnID()
 	if turnID == "" {
 		slog.Error("claudeSession: AskUserQuestion has no attributable turn", "request_id", requestID)
@@ -410,6 +577,7 @@ func (cs *claudeSession) handleAskUserQuestionV2(requestID string, input map[str
 			Type:      core.EventUserInputRequested,
 			SessionID: cs.CurrentSessionID(),
 			TurnID:    turnID,
+			ItemID:    toolUseID,
 			UserInput: &core.UserInputInteraction{
 				InteractionID:  iid,
 				Status:         core.UserInputStatusFailed,
@@ -422,7 +590,7 @@ func (cs *claudeSession) handleAskUserQuestionV2(requestID string, input map[str
 		return
 	}
 
-	entry := buildClaudePendingEntry(iid, requestID, turnID, input, parsed, normalized)
+	entry := buildClaudePendingEntry(iid, requestID, toolUseID, turnID, input, parsed, normalized)
 	if !cs.claudeUserInputReg.Register(entry) {
 		// 重放：只在仍 pending 时重发 pending（幂等 upsert）；已 resolved 不降级。
 		if cs.claudeUserInputReg.Status(iid) != claudeUIPending {
@@ -430,21 +598,30 @@ func (cs *claudeSession) handleAskUserQuestionV2(requestID string, input map[str
 		}
 	}
 
+	// 可答性（§2.2）：证据门（claudeAskAnsweringEnabled，默认 false）未翻转前维持
+	// owner 2026-08-31 裁决的 observe_only 只读呈现；门翻转后桥持有活会话 + registry
+	// pending 即可答可跳过。canRespond 不从 transcript 来源或 registry miss 推断。
+	canRespond := claudeAskAnsweringEnabled && cs.alive.Load()
+	diagnosticCode := ""
+	if !canRespond {
+		diagnosticCode = "observe_only"
+	}
+
 	cs.emitUserInputEvent(core.Event{
 		Type:      core.EventUserInputRequested,
 		SessionID: cs.CurrentSessionID(),
 		TurnID:    turnID,
-		ItemID:    requestID,
+		ItemID:    toolUseID,
 		UserInput: &core.UserInputInteraction{
 			InteractionID: iid,
 			Status:        core.UserInputStatusPending,
 			Questions:     normalized,
-			// Claude 问答卡对 CordCode 客户端只读（owner 2026-08-31 裁决；作答在 Mac 端
-			// Claude Code 会话里给）。live 与 cold/hydrate 的 observe_only 语义对齐；
-			// ResolveUserInput 的 §9.3 作答/拒绝路径保留，供未来按客户端能力放开。
-			CanRespond:     false,
-			CanReject:      false,
-			DiagnosticCode: "observe_only",
+			CanRespond:    canRespond,
+			CanReject:     canRespond,
+			// 证据门未过：Claude 问答卡对 CordCode 客户端只读（owner 2026-08-31 裁决；
+			// 作答在 Mac 端 Claude Code 会话里给）。live 与 cold/hydrate 的 observe_only
+			// 语义对齐；ResolveUserInput 的 §9.3 作答/拒绝路径保留，供门翻转后放开。
+			DiagnosticCode: diagnosticCode,
 		},
 	})
 	cs.emitLegacyAskUserQuestion(requestID, parsed)
@@ -488,6 +665,34 @@ func (cs *claudeSession) emitUserInputResolved(turnID, iid string, status core.U
 	})
 }
 
+// emitUserInputSubmitted 发射 submitted 事件（设计 v6 §4.5.2/§4.7）：payload 只带
+// interactionId/turnId/itemId（registry 保存的 tool-use 派生身份），不带答案正文。
+// at-least-once：首次 control write 成功后与幂等重放命中时都调用；reducer 对
+// terminal/resolved 后的迟到 submitted 丢弃，重发安全。
+func (cs *claudeSession) emitUserInputSubmitted(turnID, interactionID, toolUseID string) {
+	cs.emitUserInputEvent(core.Event{
+		Type:      core.EventUserInputSubmitted,
+		SessionID: cs.CurrentSessionID(),
+		TurnID:    turnID,
+		ItemID:    toolUseID,
+		UserInput: &core.UserInputInteraction{
+			InteractionID: interactionID,
+			Status:        core.UserInputStatusSubmitted,
+		},
+	})
+}
+
+// resolveUserInput 实现 core.UserInputResponder（§9.3；并发收口按设计 v6 §4.5）。
+//
+// 并发 claimant：entry 已占用时在 registry transition waiter 上等待（锁外）：
+//   - A ConfirmCommitted → 本端返回 already_resolved（submitted 事件由 A 发出，
+//     投影收口由调用方 waitForUserInputResolution 完成）；
+//   - A ReleaseClaim → 本端在同一 RPC 内重新 Claim，成功则用本端 action/answers
+//     写一次 control response；
+//   - cancel/remove/session dead → 停止写，返回 typed error；
+//   - ctx 超时 → retryable error（调用方按失败回执解锁客户端）。
+//
+// 不把 OutcomeInProgress+pending 作为成功回执暴露（§3.2）。
 // ResolveUserInput 实现 core.UserInputResponder（§9.3）。
 func (cs *claudeSession) ResolveUserInput(ctx context.Context, interactionID, clientActionID string, action core.UserInputAction, answers []core.UserInputAnswer) (core.UserInputResolution, error) {
 	return cs.resolveUserInput(ctx, interactionID, clientActionID, action, answers, "ios")
@@ -501,23 +706,58 @@ func (cs *claudeSession) resolveUserInput(ctx context.Context, interactionID, cl
 		return core.UserInputResolution{}, &core.UserInputError{Code: "session_not_active", Message: "claude session not active"}
 	}
 
-	dec := cs.claudeUserInputReg.Claim(interactionID, clientActionID)
-	if dec.outcome == core.UserInputOutcomeAccepted {
-		return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: core.UserInputStatusAnswered}, nil
-	}
-	if dec.outcome == core.UserInputOutcomeAlreadyResolved {
-		return core.UserInputResolution{Outcome: core.UserInputOutcomeAlreadyResolved, CurrentStatus: core.UserInputStatusAnswered}, nil
-	}
-	if !dec.claimed {
-		if dec.status == claudeUIAbsent {
+	var snap *claudeClaimSnapshot
+	for {
+		if err := ctx.Err(); err != nil {
+			return core.UserInputResolution{}, &core.UserInputError{Code: "claim_timeout", Message: "timed out waiting for the in-flight claim to settle"}
+		}
+		dec := cs.claudeUserInputReg.Claim(interactionID, clientActionID)
+		if dec.outcome == core.UserInputOutcomeAccepted {
+			// 同 clientActionID 幂等重放：无条件重发 submitted（§4.5.2 at-least-once），
+			// 绝不重写 control response。
+			cs.reemitSubmittedIfCommitted(interactionID)
+			return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: core.UserInputStatusAnswered}, nil
+		}
+		if dec.outcome == core.UserInputOutcomeAlreadyResolved {
+			// 已 committed 的幂等命中（新 action id）：同样重发 submitted。
+			cs.reemitSubmittedIfCommitted(interactionID)
+			return core.UserInputResolution{Outcome: core.UserInputOutcomeAlreadyResolved, CurrentStatus: core.UserInputStatusAnswered}, nil
+		}
+		if dec.claimed {
+			snap = dec.snapshot
+			break // 拿到 claim，进入写路径
+		}
+		switch dec.status {
+		case claudeUIAbsent:
 			return core.UserInputResolution{}, &core.UserInputError{Code: "interaction_not_found", Message: "interaction not found"}
+		case claudeUIResolved:
+			cs.reemitSubmittedIfCommitted(interactionID)
+			return core.UserInputResolution{Outcome: core.UserInputOutcomeAlreadyResolved, CurrentStatus: core.UserInputStatusAnswered}, nil
+		case claudeUIClaimed:
+			// 等待当前 claimant 的确定结果（§4.5.1 waiter；锁外等待）。
+			if dec.waitCh == nil {
+				return core.UserInputResolution{}, &core.UserInputError{Code: "response_in_progress", Message: "another client is answering this question"}
+			}
+			status, err := cs.claudeUserInputReg.WaitTransition(interactionID, dec.waitGen, ctx)
+			if err != nil {
+				return core.UserInputResolution{}, &core.UserInputError{Code: "claim_timeout", Message: "timed out waiting for the in-flight claim to settle"}
+			}
+			switch status {
+			case claudeUIAbsent:
+				// cancel/remove/session teardown：停止写。
+				return core.UserInputResolution{}, &core.UserInputError{Code: "interaction_not_found", Message: "interaction was cancelled or removed while waiting"}
+			case claudeUIResolved:
+				cs.reemitSubmittedIfCommitted(interactionID)
+				return core.UserInputResolution{Outcome: core.UserInputOutcomeAlreadyResolved, CurrentStatus: core.UserInputStatusAnswered}, nil
+			case claudeUIPending:
+				// A ReleaseClaim → 本端循环重试自己 Claim。
+				continue
+			case claudeUIClaimed:
+				// 新 claimant 抢到（罕见：A release 后 B 先到）——继续等待。
+				continue
+			}
 		}
-		if dec.status == claudeUIClaimed {
-			return core.UserInputResolution{Outcome: core.UserInputOutcomeInProgress, CurrentStatus: core.UserInputStatusPending}, nil
-		}
-		return core.UserInputResolution{Outcome: core.UserInputOutcomeAlreadyResolved, CurrentStatus: core.UserInputStatusAnswered}, nil
 	}
-	snap := dec.snapshot
 
 	if action == core.UserInputActionReject {
 		if err := cs.respondPermissionContext(ctx, snap.requestID, core.PermissionResult{Behavior: "deny", Message: "User skipped the question."}); err != nil {
@@ -525,6 +765,11 @@ func (cs *claudeSession) resolveUserInput(ctx context.Context, interactionID, cl
 			return core.UserInputResolution{}, &core.UserInputError{Code: "backend_response_failed", Message: "failed to write claude deny control_response"}
 		}
 		if cs.claudeUserInputReg.ConfirmResolved(interactionID, clientActionID, source) {
+			// control write 成功 → submitted 至少一次（§4.5.2）。deny 的耐久终态
+			//（rejected）由 transcript tool_result 证明（§4.6 证据门）。
+			cs.emitUserInputSubmitted(snap.owningTurnID, interactionID, snap.toolUseID)
+			// 旧 live resolved producer：证据门（§4.6）通过并按决策表删除前保留不动
+			//（设计 v6 §0 交付门）；reducer 中 resolved 权威高于 submitted。
 			cs.emitUserInputResolved(snap.owningTurnID, interactionID, core.UserInputStatusRejected, source)
 		}
 		return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: core.UserInputStatusRejected}, nil
@@ -544,9 +789,37 @@ func (cs *claudeSession) resolveUserInput(ctx context.Context, interactionID, cl
 		return core.UserInputResolution{}, &core.UserInputError{Code: "backend_response_failed", Message: "failed to write claude allow control_response"}
 	}
 	if cs.claudeUserInputReg.ConfirmResolved(interactionID, clientActionID, source) {
+		// control write 成功 → submitted 至少一次；answered 耐久终态由 transcript
+		// tool_result 产生（§4.6）。
+		cs.emitUserInputSubmitted(snap.owningTurnID, interactionID, snap.toolUseID)
+		// 旧 live resolved producer：证据门（§4.6）通过并按决策表删除前保留不动
+		//（设计 v6 §0 交付门）；reducer 中 resolved 权威高于 submitted。
 		cs.emitUserInputResolved(snap.owningTurnID, interactionID, core.UserInputStatusAnswered, source)
 	}
 	return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: core.UserInputStatusAnswered}, nil
+}
+
+// reemitSubmittedIfCommitted 在幂等/already-resolved 命中时重发 submitted（§4.5.2）：
+// registry 已 committed 但首次 submitted 可能在 map/publisher/Kernel 前丢失——
+// 重发让投影可恢复为 submitted 一卡；control response 绝不重写。
+func (cs *claudeSession) reemitSubmittedIfCommitted(interactionID string) {
+	snap, status := cs.claudeUserInputReg.SnapshotByInteraction(interactionID)
+	if status != claudeUIResolved || snap == nil {
+		return
+	}
+	cs.emitUserInputSubmitted(snap.owningTurnID, interactionID, snap.toolUseID)
+}
+
+// UserInputAnswerable 实现 core.UserInputAnswerabilityOracle（设计 v6 §4.2）。
+// 可答 = 证据门已翻转 + 会话存活 + registry 在 tool-use 派生键上仍 pending。
+// 任一不满足即 false（fail closed）；不从 transcript 来源或 registry miss 推断可答。
+// transcript mapper（冷拉/live batch/hydrate legacy row/pathless rich history）经此
+// 谓词决定 canRespond，与 live requested 的判定同源。
+func (cs *claudeSession) UserInputAnswerable(interactionID string) bool {
+	if interactionID == "" || !claudeAskAnsweringEnabled || !cs.alive.Load() {
+		return false
+	}
+	return cs.claudeUserInputReg.Status(interactionID) == claudeUIPending
 }
 
 // buildClaudeUpdatedInput 按 §9.3 构建 updatedInput = shallowCopy(originalInput) + answers。

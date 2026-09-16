@@ -1,0 +1,41 @@
+{
+  "scenario": "ask-deny",
+  "verdicts": {
+    "captured_control_request": {
+      "ok": true,
+      "request_id": "e87e8493-74f8-486f-a20a-406cc83bddfe"
+    },
+    "captured_tool_use": {
+      "ok": true,
+      "id": "call_e3f25d622636446cb582d49c"
+    },
+    "captured_ask_tool_result": {
+      "ok": true,
+      "tool_use_id": "call_e3f25d622636446cb582d49c",
+      "content_preview": "\"User declined to answer this question.\""
+    },
+    "request_id_pairing": {
+      "ok": true,
+      "request_id": "e87e8493-74f8-486f-a20a-406cc83bddfe",
+      "behavior_sent": "deny",
+      "note": "verified against archived out frame"
+    },
+    "tool_use_id_three_way": {
+      "ok": true,
+      "control": "call_e3f25d622636446cb582d49c",
+      "tool_use": "call_e3f25d622636446cb582d49c",
+      "tool_result": "call_e3f25d622636446cb582d49c"
+    },
+    "tool_use_result_envelope_shape": {
+      "ok": true,
+      "envelope_type": "str",
+      "envelope_preview": "\"Error: User declined to answer this question.\""
+    },
+    "recursive_scan_parity": {
+      "ok": true,
+      "recursive_control_requests": 1,
+      "recursive_tool_uses": 2,
+      "recursive_ask_tool_results": 1
+    }
+  }
+}

@@ -826,6 +826,166 @@ func (ps *projectionSession) hasPendingUserInput(turnID string) bool {
 	return false
 }
 
+// userInputStatusIsResolved 报告 status 是否耐久终态（answered/rejected/auto_resolved/
+// unavailable/failed）。submitted 是控制事实（非耐久 resolved），pending+turn_terminated
+// 是未答终止——两者都不算 resolved。
+func userInputStatusIsResolved(status string) bool {
+	switch status {
+	case "answered", "rejected", "auto_resolved", "unavailable", "failed":
+		return true
+	}
+	return false
+}
+
+// userInputPartRank 是 §4.4 副本收敛的权威优先级：resolved > terminal(pending+
+// turn_terminated) > submitted > interactive pending。值越大越权威。
+func userInputPartRank(part ProjectionPart) int {
+	switch {
+	case userInputStatusIsResolved(part.UserInputStatus):
+		return 4
+	case part.UserInputStatus == "pending" && part.UserInputDiagnosticCode == "turn_terminated":
+		return 3
+	case part.UserInputStatus == "submitted":
+		return 2
+	case part.UserInputStatus == "pending":
+		return 1
+	}
+	return 0
+}
+
+// locateUserInputParts 扫描全部 turn，返回携带该 interactionId 的 user_input part 及其
+// 所属 turn（§4.4「一 interaction 一卡」的收敛输入）。
+func (ps *projectionSession) locateUserInputParts(interactionID string) []struct {
+	turnID string
+	part   ProjectionPart
+	index  int
+} {
+	var out []struct {
+		turnID string
+		part   ProjectionPart
+		index  int
+	}
+	if interactionID == "" {
+		return out
+	}
+	for i := range ps.projection.Turns {
+		assistant := ps.projection.Turns[i].Assistant
+		if assistant == nil {
+			continue
+		}
+		for j := range assistant.Parts {
+			if assistant.Parts[j].Type == "user_input" && assistant.Parts[j].UserInputInteractionID == interactionID {
+				out = append(out, struct {
+					turnID string
+					part   ProjectionPart
+					index  int
+				}{ps.projection.Turns[i].TurnID, assistant.Parts[j], j})
+			}
+		}
+	}
+	return out
+}
+
+// convergeUserInputCopies 在同一事务内收敛同 interaction 的多副本（§4.4）：
+//  1. canonical owning turn 优先用 ps.userInputs 已登记 turn；否则用 projection 顺序首个；
+//  2. 按 resolved > terminal > submitted > interactive pending 合并完整字段；
+//  3. canonical turn 原位更新，其余 turn 删除同 interaction part，并 stage 所有受影响 turn；
+//  4. registry 只保存 canonical turn。
+//
+// 单副本时是幂等 no-op（registry 同步 + 无删除）。
+func (ps *projectionSession) convergeUserInputCopies(interactionID string) {
+	locations := ps.locateUserInputParts(interactionID)
+	if len(locations) == 0 {
+		return
+	}
+	// canonical turn：registry 登记的 turn，否则 projection 顺序首个。
+	canonicalTurnID := ""
+	if existing, ok := ps.userInputs[interactionID]; ok && existing.turnID != "" {
+		canonicalTurnID = existing.turnID
+	}
+	if canonicalTurnID == "" {
+		canonicalTurnID = locations[0].turnID
+	}
+	// 合并：取最高 rank 副本的完整字段；同 rank 取后者（更新事件覆盖）。
+	var merged ProjectionPart
+	mergedRank := -1
+	for _, loc := range locations {
+		if rank := userInputPartRank(loc.part); rank >= mergedRank {
+			merged = loc.part
+			mergedRank = rank
+		}
+	}
+	// 原位更新 canonical turn；删除其他 turn 的同 interaction part。
+	affected := map[string]bool{}
+	for _, loc := range locations {
+		affected[loc.turnID] = true
+		t := ps.turnByID(loc.turnID)
+		if t == nil || t.Assistant == nil {
+			continue
+		}
+		if loc.turnID == canonicalTurnID {
+			if idx := findUserInputPart(t.Assistant, interactionID); idx >= 0 {
+				t.Assistant.Parts[idx] = merged
+			}
+			continue
+		}
+		// 删除非 canonical 副本。
+		idx := findUserInputPart(t.Assistant, interactionID)
+		if idx < 0 {
+			continue
+		}
+		t.Assistant.Parts = append(t.Assistant.Parts[:idx], t.Assistant.Parts[idx+1:]...)
+	}
+	ps.userInputs[interactionID] = userInputPending{turnID: canonicalTurnID, part: merged}
+	for turnID := range affected {
+		if t := ps.turnByID(turnID); t != nil {
+			ps.upsertTurns[turnID] = *t
+		}
+	}
+}
+
+// markTurnUserInputsTerminated 把 turn 上未收口的 user_input part 翻为
+// pending+turn_terminated（§4.4）：interactive pending/submitted → terminal 呈现；
+// resolved 不动（terminal 不得覆盖已有耐久结果）；已 terminal 幂等。
+// 迟到 transcript resolved 仍可 supersede terminal（resolved case 无 terminal 拦截）。
+func (ps *projectionSession) markTurnUserInputsTerminated(turnID string) {
+	t := ps.turnByID(turnID)
+	if t == nil || t.Assistant == nil {
+		return
+	}
+	changed := false
+	for i := range t.Assistant.Parts {
+		part := &t.Assistant.Parts[i]
+		if part.Type != "user_input" {
+			continue
+		}
+		if part.UserInputStatus != "pending" && part.UserInputStatus != "submitted" {
+			continue
+		}
+		if part.UserInputDiagnosticCode == "turn_terminated" {
+			continue
+		}
+		part.UserInputStatus = "pending"
+		part.UserInputDiagnosticCode = "turn_terminated"
+		part.UserInputCanRespond = false
+		part.UserInputCanReject = false
+		changed = true
+		// registry 同步为 terminal 呈现（selector 优先级用）。
+		if existing, ok := ps.userInputs[part.UserInputInteractionID]; ok && existing.turnID == turnID {
+			ps.userInputs[part.UserInputInteractionID] = userInputPending{turnID: turnID, part: *part}
+		}
+	}
+	if changed {
+		if _, published := ps.publishedTurnShells[turnID]; !published {
+			ps.upsertTurns[turnID] = *t
+		} else {
+			ps.upsertTurns[turnID] = *t
+		}
+		// terminal 呈现变化后重算 execution（pending+turn_terminated 不再 requires_action）。
+		ps.applyUserInputExecution(turnID)
+	}
+}
+
 // applyUserInputExecution derives execution.phase from user_input state (design §6.2):
 //   - active turn has a pending user_input → requires_action
 //   - no pending user_input and the turn is still running/pending → running
@@ -1906,15 +2066,35 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if part.UserInputStatus == "" {
 			part.UserInputStatus = "pending"
 		}
+		// §4.4（设计 v6）：requested 对已有 part 的转移语义——
+		//   pending+turn_terminated → 保持 terminal（不降级）；
+		//   submitted/resolved → 保持高权威态（不降级）；
+		//   interactive pending → canRespond/canReject 各自单调 OR，其余以 canonical
+		//   requested 更新（题面/诊断码以新事件为准）。
+		if idx := findUserInputPart(t.Assistant, interactionID); idx >= 0 {
+			existing := t.Assistant.Parts[idx]
+			switch {
+			case existing.UserInputDiagnosticCode == "turn_terminated":
+				// 保持 terminal：requested 重放不得复活已终止的卡。
+				part = existing
+			case existing.UserInputStatus == "submitted" || userInputStatusIsResolved(existing.UserInputStatus):
+				// 保持高权威态。
+				part = existing
+			default:
+				part.UserInputCanRespond = part.UserInputCanRespond || existing.UserInputCanRespond
+				part.UserInputCanReject = part.UserInputCanReject || existing.UserInputCanReject
+			}
+		}
 		upsertUserInputPart(t.Assistant, part)
 		ps.userInputs[interactionID] = userInputPending{turnID: turnID, part: part}
 		ps.stageTurnForFlush(turnID)
 		ps.applyUserInputExecution(turnID)
+		ps.convergeUserInputCopies(interactionID)
 
-	case "user_input_resolved":
-		// Resolved in place: update the existing part's status/source/resolvedAt (design §10.2).
-		// Projection never stores the answer text. If no matching requested part exists, the
-		// resolution is stale/unattributable — do not fabricate one (no second path).
+	case "user_input_submitted":
+		// §4.4（设计 v6）：control response 写成功后的 Kernel 控制事实（非耐久 resolved）。
+		// interactive pending → submitted；canRespond/canReject=false；清 diagnostic。
+		// terminal/resolved 后的迟到 submitted 丢弃；submitted 幂等。payload 不带答案。
 		interactionID := dataString(data, "interactionId")
 		if interactionID == "" {
 			return
@@ -1922,6 +2102,57 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		turnID := dataString(data, "turnId")
 		if existing, ok := ps.userInputs[interactionID]; ok && existing.turnID != "" {
 			turnID = existing.turnID
+		} else if owning := ps.turnIDWithUserInputPart(interactionID); owning != "" {
+			turnID = owning
+		}
+		if turnID == "" {
+			turnID = ps.projection.Execution.ActiveTurnID
+		}
+		t := ps.turnByID(turnID)
+		if t == nil || t.Assistant == nil {
+			return
+		}
+		idx := findUserInputPart(t.Assistant, interactionID)
+		if idx < 0 {
+			// 无 requested part 的 submitted 无处落卡（不伪造第二路径）。
+			return
+		}
+		existing := t.Assistant.Parts[idx]
+		if existing.UserInputDiagnosticCode == "turn_terminated" ||
+			userInputStatusIsResolved(existing.UserInputStatus) {
+			// terminal/resolved 后迟到 submitted：保持原态（§3.3 terminal 先于 submitted）。
+			return
+		}
+		if existing.UserInputStatus == "submitted" {
+			// 幂等：submitted → submitted 不重复推进。
+			return
+		}
+		commit()
+		t.Assistant.Parts[idx].UserInputStatus = "submitted"
+		t.Assistant.Parts[idx].UserInputCanRespond = false
+		t.Assistant.Parts[idx].UserInputCanReject = false
+		t.Assistant.Parts[idx].UserInputDiagnosticCode = ""
+		ps.userInputs[interactionID] = userInputPending{turnID: turnID, part: t.Assistant.Parts[idx]}
+		ps.stageTurnForFlush(turnID)
+		ps.applyUserInputExecution(turnID)
+		ps.convergeUserInputCopies(interactionID)
+
+	case "user_input_resolved":
+		// Resolved in place: update the existing part's status/source/resolvedAt (design §10.2).
+		// Projection never stores the answer text. If no matching requested part exists, the
+		// resolution is stale/unattributable — do not fabricate one (no second path).
+		// §4.4（设计 v6）：pending/submitted/terminal → resolved；双 capability=false；
+		// 清 diagnostic；写 source/resolvedAt。resolved 幂等（重复 resolved 覆盖为最新
+		// 权威事实——transcript 是唯一耐久证据）。
+		interactionID := dataString(data, "interactionId")
+		if interactionID == "" {
+			return
+		}
+		turnID := dataString(data, "turnId")
+		if existing, ok := ps.userInputs[interactionID]; ok && existing.turnID != "" {
+			turnID = existing.turnID
+		} else if owning := ps.turnIDWithUserInputPart(interactionID); owning != "" {
+			turnID = owning
 		}
 		if turnID == "" {
 			turnID = ps.projection.Execution.ActiveTurnID
@@ -1937,6 +2168,9 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		commit()
 		t.Assistant.Parts[idx].UserInputStatus = dataString(data, "status")
 		t.Assistant.Parts[idx].UserInputResolutionSource = dataString(data, "source")
+		t.Assistant.Parts[idx].UserInputCanRespond = false
+		t.Assistant.Parts[idx].UserInputCanReject = false
+		t.Assistant.Parts[idx].UserInputDiagnosticCode = ""
 		if resolvedAt := dataInt64(data, "resolvedAt"); resolvedAt != 0 {
 			t.Assistant.Parts[idx].UserInputResolvedAt = resolvedAt
 		} else {
@@ -1944,6 +2178,7 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		}
 		ps.userInputs[interactionID] = userInputPending{turnID: turnID, part: t.Assistant.Parts[idx]}
 		ps.applyUserInputExecution(turnID)
+		ps.convergeUserInputCopies(interactionID)
 
 	case "turn_completed":
 		turnID := dataString(data, "turnId")
@@ -1985,6 +2220,9 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			ps.settleResolvedPermissionCards(turn)
 			ps.upsertTurns[turnID] = *turn
 		}
+		// §4.4（设计 v6）：turn 权威终止时未收口的 user_input part 翻
+		// pending+turn_terminated（resolved 不动；幂等）。
+		ps.markTurnUserInputsTerminated(turnID)
 		// Completing the active turn also settles any older zombie running/pending turns
 		// left by missing task_complete boundaries in Codex rollouts.
 		ps.settleOtherOpenTurns(turnID, ps.projection.UpdatedAt)
@@ -2039,6 +2277,10 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			ps.interruptRunningWorkflowParts(turn)
 			ps.upsertTurns[turnID] = *turn
 		}
+		// §4.4（设计 v6）：terminal 事件把该 turn 上未收口的 user_input part 翻为
+		// pending+turn_terminated（双 capability=false）——「未见耐久结果即终止」。
+		// resolved 不动（terminal 不得覆盖已有 resolved）；幂等。
+		ps.markTurnUserInputsTerminated(turnID)
 		// Settling other open turns mirrors turn_completed: at most one live turn, so a
 		// terminal event also retires any older non-settled zombie turns.
 		ps.settleOtherOpenTurns(turnID, ps.projection.UpdatedAt)
@@ -2121,6 +2363,8 @@ func (r *ProjectionReducer) Restore(backendID, sessionID string, projection Sess
 	// Heal pre-settle / missing-task_complete checkpoints: composer SoT is execution.phase,
 	// but zombie running turns still pollute observers and future checkpoint writes.
 	healProjectionTurnConsistency(&projection)
+	// §4.4（设计 v6）：hydrate Restore 后收敛历史双副本（一 interaction 一卡）。
+	convergeUserInputCopiesInProjection(&projection)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// Rebuild the userInputs index from the baseline so a live
@@ -2165,6 +2409,61 @@ func (r *ProjectionReducer) Restore(backendID, sessionID string, projection Sess
 		upsertTurns: make(map[string]TurnProjection),
 		userInputs:  userInputs,
 		workflows:   workflowRuns,
+	}
+}
+
+// convergeUserInputCopiesInProjection 在 hydrate Restore 的 baseline 上收敛同
+// interaction 的多副本（§4.4）：canonical turn = projection 顺序首个携带该
+// interaction 的 turn；按 resolved > terminal > submitted > interactive pending 取
+// 最高权威副本的完整字段；其余 turn 删除该 part。Restore 时 registry 尚未建立，
+// 首个 turn 即 canonical（与 reducer 内 convergeUserInputCopies 的 registry 优先
+// 规则兼容——Restore 后 registry 由 canonical part 重建）。
+func convergeUserInputCopiesInProjection(projection *SessionProjection) {
+	if projection == nil {
+		return
+	}
+	type copyLoc struct {
+		turnIdx int
+		partIdx int
+		rank    int
+	}
+	byInteraction := map[string][]copyLoc{}
+	for i := range projection.Turns {
+		assistant := projection.Turns[i].Assistant
+		if assistant == nil {
+			continue
+		}
+		for j := range assistant.Parts {
+			part := &assistant.Parts[j]
+			if part.Type != "user_input" || part.UserInputInteractionID == "" {
+				continue
+			}
+			byInteraction[part.UserInputInteractionID] = append(
+				byInteraction[part.UserInputInteractionID],
+				copyLoc{turnIdx: i, partIdx: j, rank: userInputPartRank(*part)},
+			)
+		}
+	}
+	for _, locations := range byInteraction {
+		if len(locations) < 2 {
+			continue
+		}
+		// canonical = projection 顺序首个；merged = 最高 rank（后者胜出）副本。
+		canonical := locations[0]
+		merged := locations[0]
+		for _, loc := range locations[1:] {
+			if loc.rank >= merged.rank {
+				merged = loc
+			}
+		}
+		projection.Turns[canonical.turnIdx].Assistant.Parts[canonical.partIdx] =
+			projection.Turns[merged.turnIdx].Assistant.Parts[merged.partIdx]
+		// 删除其余副本（倒序删避免索引位移）。
+		for k := len(locations) - 1; k >= 1; k-- {
+			loc := locations[k]
+			parts := projection.Turns[loc.turnIdx].Assistant.Parts
+			projection.Turns[loc.turnIdx].Assistant.Parts = append(parts[:loc.partIdx], parts[loc.partIdx+1:]...)
+		}
 	}
 }
 

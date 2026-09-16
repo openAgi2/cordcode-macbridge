@@ -1,0 +1,81 @@
+{
+  "scenario": "ask-deny",
+  "producer": {
+    "cli": "claude",
+    "version": "2.1.261",
+    "captured": "2026-09-16"
+  },
+  "redaction": "personal absolute path prefix /Users/jacklee replaced with ~; no secret values present (tokenSource enum only)",
+  "control_request": {
+    "type": "control_request",
+    "request_id": "e87e8493-74f8-486f-a20a-406cc83bddfe",
+    "request": {
+      "subtype": "can_use_tool",
+      "tool_name": "AskUserQuestion",
+      "display_name": "AskUserQuestion",
+      "input": {
+        "questions": [
+          {
+            "question": "Continue?",
+            "header": "Continue",
+            "options": [
+              {
+                "label": "Yes",
+                "description": "继续执行后续任务"
+              },
+              {
+                "label": "No",
+                "description": "停止，不继续"
+              }
+            ],
+            "multiSelect": false
+          }
+        ]
+      },
+      "tool_use_id": "call_e3f25d622636446cb582d49c",
+      "requires_user_interaction": true
+    }
+  },
+  "control_response_sent": {
+    "type": "control_response",
+    "response": {
+      "subtype": "success",
+      "request_id": "e87e8493-74f8-486f-a20a-406cc83bddfe",
+      "response": {
+        "behavior": "deny",
+        "message": "User declined to answer this question."
+      }
+    }
+  },
+  "assistant_tool_use": {
+    "type": "tool_use",
+    "id": "call_e3f25d622636446cb582d49c",
+    "name": "AskUserQuestion",
+    "input": {}
+  },
+  "user_tool_result_frame": {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "content": "User declined to answer this question.",
+          "is_error": true,
+          "tool_use_id": "call_e3f25d622636446cb582d49c"
+        }
+      ]
+    },
+    "parent_tool_use_id": null,
+    "session_id": "b43259a6-42c3-483a-83c0-7c805b6fcb41",
+    "uuid": "335059b2-472a-4c44-ae13-d88825c01381",
+    "timestamp": "2026-09-16T09:03:08.436Z",
+    "tool_use_result": "Error: User declined to answer this question.",
+    "tool_result_meta": [
+      {
+        "id": "call_e3f25d622636446cb582d49c",
+        "non_execution_kind": "permission-rule"
+      }
+    ]
+  }
+}

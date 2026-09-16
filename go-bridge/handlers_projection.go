@@ -1117,6 +1117,21 @@ func (h *Handlers) runProjectionHydrateTransaction(
 			}
 		}
 	}
+	// §4.3 coverage（设计 v6，Claude）：冷折叠完成后识别尾部未答 Ask，向当前
+	// generation 的 relay loop 请求 coverCurrentProcess。dead → 同一 hydrate 内
+	// 追加 turn_aborted；liveBound → 持 lease，最终 commit 必须走 commit pin；
+	// failed → retryable hydrate failure，拒绝 commit。
+	coverageLeaseHeld := false
+	if backendID == "claude" || backendID == "claudecode" {
+		held, covErr := h.coverClaudeTrailingUnansweredAsk(backendID, sessionID, admission)
+		if covErr != nil {
+			h.markHydrateFailed(
+				backendID, sessionID, "projection.coverage_failed", covErr.Error(), true,
+			)
+			return
+		}
+		coverageLeaseHeld = held
+	}
 	// §3.3 rule #2 / D6 / K1: cold-source ingest (mainstream + Claude sidechain) is now
 	// complete — no more ApplyHydrateEvent calls will be made from the cold source. Arm the
 	// commit gate so WaitHydrateCommitReady decides readiness from authoritative source-EOF +
@@ -1129,10 +1144,18 @@ func (h *Handlers) runProjectionHydrateTransaction(
 		)
 		return
 	}
-	commit, err := h.projectionKernel.CommitHydrateTransaction(backendID, sessionID)
-	if err != nil {
+	var commit ProjectionHydrateCommit
+	var commitErr error
+	if coverageLeaseHeld {
+		// Lease 持有下的 commit pin（§4.3.3）：generation/source cut/lease 在 coverage
+		// registry 同一互斥边界内验证；「校验后、commit 前切换 generation」不可发生。
+		commit, commitErr = h.commitClaudeHydrateWithCoverage(backendID, sessionID, admission)
+	} else {
+		commit, commitErr = h.projectionKernel.CommitHydrateTransaction(backendID, sessionID)
+	}
+	if commitErr != nil {
 		h.markHydrateFailed(
-			backendID, sessionID, "projection.commit_failed", err.Error(), true,
+			backendID, sessionID, "projection.commit_failed", commitErr.Error(), true,
 		)
 		return
 	}
@@ -1323,21 +1346,23 @@ func (h *Handlers) produceProjectionHydrateRange(
 		); err != nil {
 			return err
 		}
-		return streamClaudeTranscriptProjectionEventsRangeSeed(
-			ctx, path, startOffset, endOffset, currentTurnID, emit,
+		// 冷拉 RangeSeed 是 Kernel-entering 调用边——传真实 oracle（设计 v6 §4.2）。
+		return streamClaudeTranscriptProjectionEventsRangeSeedOracle(
+			ctx, path, startOffset, endOffset, currentTurnID,
+			h.claudeUserInputOracle(backendID, sessionID), emit,
 		)
 	case "opencode":
 		return h.streamOpenCodeRichHistoryProjectionEvents(ctx, sessionID, emit)
 	case "opencode-web":
 		// NOT streamOpenCodeRichHistoryProjectionEvents — that helper resolves
 		// the agent by name "opencode"; opencode-web is its own driver.
-		return h.streamBackendRichHistoryProjectionEvents(ctx, "opencode-web", sessionID, emit)
+		return h.streamBackendRichHistoryProjectionEvents(ctx, "opencode-web", sessionID, nil, emit)
 	case "grokbuild":
-		return h.streamBackendRichHistoryProjectionEvents(ctx, "grokbuild", sessionID, emit)
+		return h.streamBackendRichHistoryProjectionEvents(ctx, "grokbuild", sessionID, nil, emit)
 	case "deepseek":
-		return h.streamBackendRichHistoryProjectionEvents(ctx, "dsh", sessionID, emit)
+		return h.streamBackendRichHistoryProjectionEvents(ctx, "dsh", sessionID, nil, emit)
 	case "dsh-web":
-		return h.streamBackendRichHistoryProjectionEvents(ctx, "dsh-web", sessionID, emit)
+		return h.streamBackendRichHistoryProjectionEvents(ctx, "dsh-web", sessionID, nil, emit)
 	case "codex-web":
 		// NOT streamBackendRichHistoryProjectionEvents — that helper folds entries
 		// through the OpenCode flat convention (user message id as turnId). codex-web
@@ -1697,7 +1722,7 @@ func (h *Handlers) streamOpenCodeRichHistoryProjectionEvents(
 	sessionID string,
 	emit func(projectionHydrateEvent) bool,
 ) error {
-	return h.streamBackendRichHistoryProjectionEvents(ctx, "opencode", sessionID, emit)
+	return h.streamBackendRichHistoryProjectionEvents(ctx, "opencode", sessionID, nil, emit)
 }
 
 func (h *Handlers) streamClaudeRichHistoryProjectionEvents(
@@ -1705,12 +1730,14 @@ func (h *Handlers) streamClaudeRichHistoryProjectionEvents(
 	sessionID string,
 	emit func(projectionHydrateEvent) bool,
 ) error {
-	return h.streamBackendRichHistoryProjectionEvents(ctx, "claudecode", sessionID, emit)
+	// pathless rich history 是 Kernel-entering 调用边——传真实 oracle（设计 v6 §4.2）。
+	return h.streamBackendRichHistoryProjectionEvents(ctx, "claudecode", sessionID, h.claudeUserInputOracle("claudecode", sessionID), emit)
 }
 
 func (h *Handlers) streamBackendRichHistoryProjectionEvents(
 	ctx context.Context,
 	agentName, sessionID string,
+	userInputOracle claudeAnswerabilityOracle,
 	emit func(projectionHydrateEvent) bool,
 ) error {
 	if h == nil {
@@ -1731,6 +1758,9 @@ func (h *Handlers) streamBackendRichHistoryProjectionEvents(
 	if err != nil {
 		return err
 	}
+	// Claude pathless 边：freshly built entries 上的 user_input part 按同一 oracle
+	// 决定 canRespond（nil oracle 保持 observe_only fail closed）。
+	applyClaudeUserInputOracle(entries, userInputOracle)
 	// Seal trailing unanswered user turns only when the backend confirms the
 	// session is idle (no turn in flight). Backends without activity probing
 	// keep the previous behavior — the commit gate waits rather than guessing.

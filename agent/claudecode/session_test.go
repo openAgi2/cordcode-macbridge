@@ -358,7 +358,7 @@ func TestHelperProcess(t *testing.T) {
 			}
 		}
 		_, _ = os.Stdout.WriteString(`{"type":"stream_event","event":{"type":"message_start","message":{"id":"assistant-tool-only"}}}` + "\n")
-		_, _ = os.Stdout.WriteString(`{"type":"control_request","request_id":"fixture-request","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"Retry?","header":"Build","multiSelect":false,"options":[{"label":"Retry","description":"Try again"},{"label":"Fail","description":"Stop"}]}]}}}` + "\n")
+		_, _ = os.Stdout.WriteString(`{"type":"control_request","request_id":"fixture-request","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","tool_use_id":"fixture-tool-use","input":{"questions":[{"question":"Retry?","header":"Build","multiSelect":false,"options":[{"label":"Retry","description":"Try again"},{"label":"Fail","description":"Stop"}]}]}}}` + "\n")
 		scanner := bufio.NewScanner(os.Stdin)
 		if !scanner.Scan() {
 			os.Exit(3)

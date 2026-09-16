@@ -53,7 +53,7 @@ func applyClaudeSourceInlineFixture(t *testing.T, name string, data string) *Pro
 		if !ok {
 			t.Fatal("source state disappeared")
 		}
-		batch, err := buildClaudeSourceRecordBatch(current, record, "claude", name, "epoch", correlation, currentTurnID)
+		batch, err := buildClaudeSourceRecordBatch(current, record, "claude", name, "epoch", correlation, currentTurnID, nil)
 		if err != nil {
 			t.Fatalf("map %s (currentTurnID=%q): %v", name, currentTurnID, err)
 		}

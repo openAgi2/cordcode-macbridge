@@ -1229,7 +1229,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 		StopReason string          `json:"stop_reason"`
 		Content    json.RawMessage `json:"content"`
 	}{ID: "u1", Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello"}]`)}}
-	evs := claudeEntryToProjectionEvents(user, &currentTurnID, nil)
+	evs := claudeEntryToProjectionEvents(user, &currentTurnID, nil, nil)
 	if len(evs) != 1 || evs[0].Event != "user_message" || evs[0].Data["turnId"] != "u1" {
 		t.Fatalf("user entry → %+v", evs)
 	}
@@ -1243,7 +1243,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 		StopReason string          `json:"stop_reason"`
 		Content    json.RawMessage `json:"content"`
 	}{ID: "a1", Role: "assistant", StopReason: "end_turn", Content: json.RawMessage(`[{"type":"text","text":"hi"},{"type":"thinking","thinking":"plan"},{"type":"tool_use","id":"tool-1","name":"Read","input":{"path":"x"}}]`)}}
-	evs = claudeEntryToProjectionEvents(asst, &currentTurnID, nil)
+	evs = claudeEntryToProjectionEvents(asst, &currentTurnID, nil, nil)
 	// expect: text_delta, reasoning_delta, tool_started, turn_completed (TurnDone)
 	if len(evs) != 4 {
 		t.Fatalf("assistant entry → %d events: %+v", len(evs), evs)
@@ -1267,7 +1267,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 		StopReason string          `json:"stop_reason"`
 		Content    json.RawMessage `json:"content"`
 	}{ID: "u2", Role: "user", Content: json.RawMessage(`[{"type":"tool_result","tool_use_id":"tool-1","content":"file body"}]`)}}
-	evs = claudeEntryToProjectionEvents(tr, &currentTurnID, nil)
+	evs = claudeEntryToProjectionEvents(tr, &currentTurnID, nil, nil)
 	if len(evs) != 1 || evs[0].Event != "tool_finished" || evs[0].Data["itemId"] != "tool-1" {
 		t.Fatalf("tool_result → tool_finished matched by tool_use_id: %+v", evs)
 	}
@@ -1284,7 +1284,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 			Content    json.RawMessage `json:"content"`
 		}{Role: "user", Content: json.RawMessage(`"讲个程序员笑话"`)},
 	}
-	evs = claudeEntryToProjectionEvents(userUUID, &currentTurnID, nil)
+	evs = claudeEntryToProjectionEvents(userUUID, &currentTurnID, nil, nil)
 	if len(evs) != 1 || evs[0].Event != "user_message" {
 		t.Fatalf("uuid-only user → %+v", evs)
 	}
@@ -1304,7 +1304,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 			Content    json.RawMessage `json:"content"`
 		}{ID: "msg_asst_1", Role: "assistant", StopReason: "end_turn", Content: json.RawMessage(`[{"type":"text","text":"SQL JOIN joke"}]`)},
 	}
-	evs = claudeEntryToProjectionEvents(asstUUID, &currentTurnID, nil)
+	evs = claudeEntryToProjectionEvents(asstUUID, &currentTurnID, nil, nil)
 	if len(evs) != 2 {
 		t.Fatalf("uuid-turn assistant → %d events: %+v", len(evs), evs)
 	}
@@ -1325,7 +1325,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 			PostTokens: 8605,
 		},
 	}
-	evs = claudeEntryToProjectionEvents(compact, &currentTurnID, nil)
+	evs = claudeEntryToProjectionEvents(compact, &currentTurnID, nil, nil)
 	if len(evs) != 1 || evs[0].Event != "system_message" {
 		t.Fatalf("compact boundary → %+v", evs)
 	}
@@ -1346,7 +1346,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 			StopReason string          `json:"stop_reason"`
 			Content    json.RawMessage `json:"content"`
 		}{Role: "user", Content: json.RawMessage(`"internal compact prompt"`)}}
-	if got := claudeEntryToProjectionEvents(internalSummary, &currentTurnID, nil); len(got) != 0 {
+	if got := claudeEntryToProjectionEvents(internalSummary, &currentTurnID, nil, nil); len(got) != 0 {
 		t.Fatalf("internal compact summary must be filtered, got %+v", got)
 	}
 }
@@ -1372,7 +1372,7 @@ func TestClaudeAskUserQuestionTranscriptProjectsAsObserveOnlyUserInput(t *testin
 		},
 	}
 
-	events := claudeEntryToProjectionEvents(entry, &currentTurnID, nil)
+	events := claudeEntryToProjectionEvents(entry, &currentTurnID, nil, nil)
 	if len(events) != 1 || events[0].Event != "user_input_requested" {
 		t.Fatalf("AskUserQuestion must map to one user_input_requested event, got %+v", events)
 	}
@@ -1410,7 +1410,7 @@ func TestClaudeAskUserQuestionTranscriptResolutionProjectsWithoutAnswerBody(t *t
 	if err := json.Unmarshal(line, &entry); err != nil {
 		t.Fatalf("unmarshal real Claude result shape: %v", err)
 	}
-	events := claudeEntryToProjectionEvents(entry, &currentTurnID, nil)
+	events := claudeEntryToProjectionEvents(entry, &currentTurnID, nil, nil)
 	if len(events) != 1 || events[0].Event != "user_input_resolved" {
 		t.Fatalf("AskUserQuestion result must map to one user_input_resolved event, got %+v", events)
 	}
@@ -1461,6 +1461,66 @@ func TestClaudeRichHistoryAskUserQuestionProjectsStructuredEventsWithoutToolActi
 	if resolved == nil || resolved.Data["turnId"] != "user-ask" || resolved.Data["status"] != "answered" ||
 		resolved.Data["source"] != "other_client" || resolved.Data["resolvedAt"] != int64(1785657297860) {
 		t.Fatalf("resolved = %+v; events=%+v", resolved, events)
+	}
+}
+
+// TestClaudeAskUserQuestionDeniedResultProjectsRejected locks the deny durable shape
+// proven by the 2026-09-16 evidence gate (CLI 2.1.261, scenarios ask-file-deny/ask-deny):
+// frame-level toolUseResult is the plain string "Error: User declined to answer this
+// question." and the tool_result block carries is_error=true. The relay maps it to
+// user_input_resolved(rejected) — distinguishable from the answered envelope.
+func TestClaudeAskUserQuestionDeniedResultProjectsRejected(t *testing.T) {
+	currentTurnID := "turn-claude-deny"
+	// Real shape from dumps/ask-file-deny.jsonl (probe-generated call ids, not secrets).
+	assistantAsk := []byte(`{"type":"assistant","uuid":"assistant-ask-deny","timestamp":"2026-09-16T09:15:00.000Z","message":{"id":"assistant-ask-deny","role":"assistant","content":[{"type":"tool_use","id":"call-ask-deny","name":"AskUserQuestion","input":{"questions":[{"header":"文件冲突","multiSelect":false,"options":[{"label":"覆盖重写","description":"替换"},{"label":"追加到末尾","description":"保留"},{"label":"不动它","description":"取消"}],"question":"文件已存在，如何处理？"}]}}]}}`)
+	denyResult := []byte(`{"type":"user","uuid":"user-ask-deny-result","timestamp":"2026-09-16T09:15:30.000Z","toolUseResult":"Error: User declined to answer this question.","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-ask-deny","content":"User declined to answer this question.","is_error":true}]}}`)
+
+	toolUseMeta := make(map[string]claudeToolUseMeta)
+	var askEntry claudeTranscriptRelayEntry
+	if err := json.Unmarshal(assistantAsk, &askEntry); err != nil {
+		t.Fatalf("unmarshal assistant ask: %v", err)
+	}
+	claudeEntryToProjectionEvents(askEntry, &currentTurnID, toolUseMeta, nil)
+	if toolUseMeta["call-ask-deny"].ToolName != "AskUserQuestion" {
+		t.Fatalf("assistant pass must register AskUserQuestion meta, got %+v", toolUseMeta)
+	}
+
+	var denyEntry claudeTranscriptRelayEntry
+	if err := json.Unmarshal(denyResult, &denyEntry); err != nil {
+		t.Fatalf("unmarshal deny result: %v", err)
+	}
+	events := claudeEntryToProjectionEvents(denyEntry, &currentTurnID, toolUseMeta, nil)
+	if len(events) != 1 || events[0].Event != "user_input_resolved" {
+		t.Fatalf("deny result must map to one user_input_resolved event, got %+v", events)
+	}
+	data := events[0].Data
+	if data["interactionId"] != claudecode.DeriveStructuredUserInputInteractionID("call-ask-deny") ||
+		data["status"] != "rejected" || data["source"] != "other_client" {
+		t.Fatalf("deny resolution = %+v", data)
+	}
+	if _, hasAnswers := data["answers"]; hasAnswers {
+		t.Fatalf("deny projection must not carry answers: %+v", data)
+	}
+}
+
+// TestClaudeAskUserQuestionDeniedShapeRequiresAskMeta guards the deny predicate against
+// generic failing tools: an is_error tool_result whose toolUseResult matches the deny
+// string but whose owner is NOT an AskUserQuestion must stay an ordinary tool_finished.
+func TestClaudeAskUserQuestionDeniedShapeRequiresAskMeta(t *testing.T) {
+	currentTurnID := "turn-claude-generic-error"
+	line := []byte(`{"type":"user","uuid":"user-generic-error","timestamp":"2026-09-16T09:20:00.000Z","toolUseResult":"Error: User declined to answer this question.","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-generic","content":"User declined to answer this question.","is_error":true}]}}`)
+	var entry claudeTranscriptRelayEntry
+	if err := json.Unmarshal(line, &entry); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	events := claudeEntryToProjectionEvents(entry, &currentTurnID, nil, nil)
+	for _, ev := range events {
+		if ev.Event == "user_input_resolved" {
+			t.Fatalf("non-Ask owner must not produce user_input_resolved: %+v", ev)
+		}
+	}
+	if len(events) == 0 || events[0].Event != "tool_finished" {
+		t.Fatalf("generic error result must remain tool_finished: %+v", events)
 	}
 }
 

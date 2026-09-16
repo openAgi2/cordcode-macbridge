@@ -1,0 +1,51 @@
+{
+  "scenario": "ask-file-answer",
+  "verdicts": {
+    "initialize": {
+      "request_id": "req_init",
+      "verdict": "success",
+      "response_subtype": "success"
+    },
+    "captured_control_request": {
+      "ok": true,
+      "request_id": "3e95c961-6d2e-4500-8cc3-e2d0a55e455c"
+    },
+    "captured_tool_use": {
+      "ok": true,
+      "id": "call_a62471af73704fe4955e1213"
+    },
+    "captured_tool_result": {
+      "ok": true,
+      "tool_use_id": "call_5fdc1374c4d34dcf86b89ba4"
+    },
+    "request_id_pairing": {
+      "ok": true,
+      "request_id": "3e95c961-6d2e-4500-8cc3-e2d0a55e455c",
+      "sent_request_id": "3e95c961-6d2e-4500-8cc3-e2d0a55e455c",
+      "note": "verified against archived out frame (CLI does not echo can_use_tool responses)"
+    },
+    "tool_use_id_three_way": {
+      "ok": false,
+      "control": "call_a62471af73704fe4955e1213",
+      "tool_use": "call_a62471af73704fe4955e1213",
+      "tool_result": "call_5fdc1374c4d34dcf86b89ba4"
+    },
+    "recursive_scan_parity": {
+      "ok": false,
+      "recursive_control_requests": 1,
+      "recursive_tool_uses": 2,
+      "recursive_tool_results": 5
+    },
+    "tool_result_durable_shape": {
+      "ok": true,
+      "content_type": "str",
+      "content_preview": "\"-rw-------@ 1 jacklee  staff  121952 Sep 15 23:23 /Users/jacklee/Projects/Chat/漫威战斗故事.txt\\n---exit:0\""
+    },
+    "tool_use_result_envelope_shape": {
+      "ok": false,
+      "mode": "answer",
+      "envelope_type": "dict",
+      "envelope_preview": "{\"stdout\": \"-rw-------@ 1 jacklee  staff  121952 Sep 15 23:23 /Users/jacklee/Projects/Chat/漫威战斗故事.txt\\n---exit:0\", \"stderr\": \"\", \"interrupted\": false, \"isImage\": false, \"noOutputExpected\": false}"
+    }
+  }
+}

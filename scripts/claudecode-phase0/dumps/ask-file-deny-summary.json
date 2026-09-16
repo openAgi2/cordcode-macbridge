@@ -1,0 +1,51 @@
+{
+  "scenario": "ask-file-deny",
+  "verdicts": {
+    "initialize": {
+      "request_id": "req_init",
+      "verdict": "success",
+      "response_subtype": "success"
+    },
+    "captured_control_request": {
+      "ok": true,
+      "request_id": "0ed11c16-e4ae-4057-b254-00597466ace6"
+    },
+    "captured_tool_use": {
+      "ok": true,
+      "id": "call_992c50a9d2524c5f80a9433e"
+    },
+    "captured_tool_result": {
+      "ok": true,
+      "tool_use_id": "call_334146d63cc84e8787e4dff8"
+    },
+    "request_id_pairing": {
+      "ok": true,
+      "request_id": "0ed11c16-e4ae-4057-b254-00597466ace6",
+      "sent_request_id": "0ed11c16-e4ae-4057-b254-00597466ace6",
+      "note": "verified against archived out frame (CLI does not echo can_use_tool responses)"
+    },
+    "tool_use_id_three_way": {
+      "ok": false,
+      "control": "call_992c50a9d2524c5f80a9433e",
+      "tool_use": "call_992c50a9d2524c5f80a9433e",
+      "tool_result": "call_334146d63cc84e8787e4dff8"
+    },
+    "recursive_scan_parity": {
+      "ok": true,
+      "recursive_control_requests": 1,
+      "recursive_tool_uses": 2,
+      "recursive_tool_results": 1
+    },
+    "tool_result_durable_shape": {
+      "ok": true,
+      "content_type": "str",
+      "content_preview": "\"-rw-------@ 1 jacklee  staff  121952 Sep 16 17:15 /Users/jacklee/Projects/Chat/漫威战斗故事.txt\\n---\\n<归档根目录>\\nBytetally_竞品分析与架构设计文档.md\\nREADME.md\\n__pycache__\\nclaude-desktop-zh-cn\\nconfigs\\ndemo-plan108-part-1-starlord.txt\\ndemo-plan108-part-2-gamora.txt\\ndemo-plan108-part-3-drax.txt\\ndemo-plan108-part-4-rocket.txt\\ndemo-plan108-part-5-groot.txt\\ndemo-plan109-part-1-tangseng.txt\\ndemo-plan109-part-2-"
+    },
+    "tool_use_result_envelope_shape": {
+      "ok": false,
+      "mode": "deny",
+      "envelope_type": "dict",
+      "envelope_preview": "{\"stdout\": \"-rw-------@ 1 jacklee  staff  121952 Sep 16 17:15 /Users/jacklee/Projects/Chat/漫威战斗故事.txt\\n---\\n<归档根目录>\\nBytetally_竞品分析与架构设计文档.md\\nREADME.md\\n__pycache__\\nclaude-desktop-zh-cn\\nconfigs\\ndemo-plan108-part-1-starlord.txt\\ndemo-plan108-part-2-gamora.txt\\ndemo-plan108-part-3-drax.txt\\ndemo-plan108-part-4-rocket.txt\\ndemo-plan108-part-5-groot.txt\\ndemo-plan109-part-1-tangseng.txt\\ndemo-plan"
+    }
+  }
+}

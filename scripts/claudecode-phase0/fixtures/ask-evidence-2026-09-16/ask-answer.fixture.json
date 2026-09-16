@@ -1,0 +1,116 @@
+{
+  "scenario": "ask-answer",
+  "producer": {
+    "cli": "claude",
+    "version": "2.1.261",
+    "captured": "2026-09-16"
+  },
+  "redaction": "personal absolute path prefix /Users/jacklee replaced with ~; no secret values present (tokenSource enum only)",
+  "control_request": {
+    "type": "control_request",
+    "request_id": "cb214c54-e087-4ad8-bf12-6b2621c7fe26",
+    "request": {
+      "subtype": "can_use_tool",
+      "tool_name": "AskUserQuestion",
+      "display_name": "AskUserQuestion",
+      "input": {
+        "questions": [
+          {
+            "question": "Continue?",
+            "header": "Continue",
+            "options": [
+              {
+                "label": "Yes",
+                "description": "Proceed with the task."
+              },
+              {
+                "label": "No",
+                "description": "Stop and do not proceed."
+              }
+            ],
+            "multiSelect": false
+          }
+        ]
+      },
+      "tool_use_id": "call_f7a144e8b51943b9a316e0a1",
+      "requires_user_interaction": true
+    }
+  },
+  "control_response_sent": {
+    "type": "control_response",
+    "response": {
+      "subtype": "success",
+      "request_id": "cb214c54-e087-4ad8-bf12-6b2621c7fe26",
+      "response": {
+        "behavior": "allow",
+        "updatedInput": {
+          "questions": [
+            {
+              "question": "Continue?",
+              "header": "Continue",
+              "options": [
+                {
+                  "label": "Yes",
+                  "description": "Proceed with the task."
+                },
+                {
+                  "label": "No",
+                  "description": "Stop and do not proceed."
+                }
+              ],
+              "multiSelect": false
+            }
+          ],
+          "answers": {
+            "Continue?": "Yes"
+          }
+        }
+      }
+    }
+  },
+  "assistant_tool_use": {
+    "type": "tool_use",
+    "id": "call_f7a144e8b51943b9a316e0a1",
+    "name": "AskUserQuestion",
+    "input": {}
+  },
+  "user_tool_result_frame": {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "content": "Your questions have been answered: \"Continue?\"=\"Yes\". You can now continue with these answers in mind.",
+          "tool_use_id": "call_f7a144e8b51943b9a316e0a1"
+        }
+      ]
+    },
+    "parent_tool_use_id": null,
+    "session_id": "2281972f-e572-4abd-ab56-3b7efec7e1ad",
+    "uuid": "9e211e96-5853-43d0-9962-968cd78b308b",
+    "timestamp": "2026-09-16T08:59:42.513Z",
+    "tool_use_result": {
+      "questions": [
+        {
+          "question": "Continue?",
+          "header": "Continue",
+          "options": [
+            {
+              "label": "Yes",
+              "description": "Proceed with the task."
+            },
+            {
+              "label": "No",
+              "description": "Stop and do not proceed."
+            }
+          ],
+          "multiSelect": false
+        }
+      ],
+      "answers": {
+        "Continue?": "Yes"
+      }
+    }
+  }
+}

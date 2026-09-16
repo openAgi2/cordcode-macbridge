@@ -320,6 +320,60 @@ func TestCanonicalUserInputIsProjectionOnlyAndLegacyIsOneWayDerived(t *testing.T
 	}
 }
 
+// TestUserInputSubmittedIsProjectionOnly: user_input_submitted（设计 v6 §4.7）经
+// EventPublisher → Kernel ingest → reducer → projection_patch 投递；raw frame 不外泄给
+// v2 或 legacy 连接；patch 携带 submitted part 翻转（status=submitted、双 capability=false）。
+func TestUserInputSubmittedIsProjectionOnly(t *testing.T) {
+	broadcaster := NewBroadcaster()
+	ep := NewEventPublisher("epoch-submitted", broadcaster)
+	key := SubscriptionKey{BackendID: "claude", SessionID: "s-sub"}
+	v2 := newPublisherCaptureConn(nil)
+	v2.device = &TrustedDeviceRecord{DeviceID: "dev-v2-sub"}
+	legacy := newPublisherCaptureConn(nil)
+	legacy.device = &TrustedDeviceRecord{DeviceID: "dev-legacy-sub"}
+	broadcaster.Subscribe(v2, key)
+	broadcaster.Subscribe(legacy, key)
+	ep.SetConnSyncV2(v2, true)
+
+	ep.PublishLogical(LogicalEvent{BackendID: "claude", SessionID: "s-sub", Event: "turn_started", Data: map[string]interface{}{"turnId": "T1"}, Broadcast: true})
+	ep.PublishLogical(LogicalEvent{BackendID: "claude", SessionID: "s-sub", Event: "user_input_requested", Data: map[string]interface{}{
+		"turnId": "T1", "interactionId": "ui_sub_1", "status": "pending", "questions": uiQuestionsWire(), "canRespond": true, "canReject": true,
+	}, Broadcast: true})
+	waitForProjectionPatches(t, v2, 1)
+
+	ep.PublishLogical(LogicalEvent{BackendID: "claude", SessionID: "s-sub", Event: "user_input_submitted", Data: map[string]interface{}{
+		"turnId": "T1", "itemId": "toolu_1", "interactionId": "ui_sub_1", "status": "submitted",
+	}, Broadcast: true})
+	patches := waitForProjectionPatches(t, v2, 2)
+
+	if got := len(rawEventFrames(v2.snapshot(), "user_input_submitted")); got != 0 {
+		t.Fatalf("v2 received %d raw submitted frames, want 0 (projection-only)", got)
+	}
+	if got := len(rawEventFrames(legacy.snapshot(), "user_input_submitted")); got != 0 {
+		t.Fatalf("legacy received %d raw submitted frames, want 0 (projection-only)", got)
+	}
+
+	// 第二个 patch 应携带 submitted part 翻转（status=submitted、canRespond/canReject=false）。
+	submitted := false
+	for _, p := range patches {
+		pp := p.Data.(ProjectionPatch)
+		for _, turn := range pp.UpsertTurns {
+			if turn.Assistant == nil {
+				continue
+			}
+			for _, part := range turn.Assistant.Parts {
+				if part.UserInputInteractionID == "ui_sub_1" && part.UserInputStatus == "submitted" &&
+					!part.UserInputCanRespond && !part.UserInputCanReject {
+					submitted = true
+				}
+			}
+		}
+	}
+	if !submitted {
+		t.Fatalf("no patch carried the submitted part flip (status=submitted, caps=false); patches=%+v", patches)
+	}
+}
+
 // TestProjectionPatchCarriesContent: the text_delta patch carries an append_text partOp with the
 // delta text, and the turn_started patch carries the turn upsert — proving the reduce output is
 // delivered intact over the funnel (Phase 1 "reduce correctness over the live funnel" proof).

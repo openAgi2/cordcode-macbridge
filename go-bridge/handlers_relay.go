@@ -713,13 +713,114 @@ func (h *Handlers) ensureRelaysForSubscribedCodexSessions() {
 	}
 }
 
+// handleClaudeCoverageCommand 处理一次 coverCurrentProcess 命令（设计 v6 §4.3.2）。
+// 由 relay loop goroutine 串行调用（poll 状态指针无并发写）：
+//   - 当前无活进程 → dead：冷事务在同一 hydrate 内追加 turn_aborted；
+//   - 当前有活进程 B → 在回复 liveBound 前原子设置 cachedPID/liveLister、清 miss、
+//     先 issueLease 再回复——只有收到 liveBound 的事务才可不合成；
+//   - lookup error / generation 或 source 不匹配 → failed（fail closed）。
+//
+// cachedPID>0 但进程已死时，先做一次替代复查：见 B 活 → 同一状态转移直接 rebind B
+//（§4.3.2「已绑 A 连续死亡 miss 后复查到 B 时不得先清零回 late-bind」）；无替代者
+// 才回 dead。
+func (h *Handlers) handleClaudeCoverageCommand(
+	sessionID, backendID string,
+	coverageGen uint64,
+	req *claudeRelayCoverageRequest,
+	cachedPID *int,
+	liveLister *core.LiveSessionLister,
+	processDeathMisses *int,
+) {
+	if req == nil {
+		return
+	}
+	reply := func(res claudeRelayCoverageResult) {
+		select {
+		case req.reply <- res:
+		default:
+		}
+	}
+	if req.generation != coverageGen {
+		reply(claudeRelayCoverageResult{outcome: claudeCoverageFailed, err: errClaudeCoverageGeneration})
+		return
+	}
+	proc, lister, err := h.sessionLiveProcess(context.Background(), sessionID, backendID)
+	if err != nil {
+		reply(claudeRelayCoverageResult{outcome: claudeCoverageFailed, err: err})
+		return
+	}
+	if !proc.Live || proc.PID <= 0 {
+		reply(claudeRelayCoverageResult{outcome: claudeCoverageDead})
+		return
+	}
+	// 活进程 B：先验证 PID 真活（catalog 可能残留刚死 worker），再原子绑定 + 签发
+	// lease + 回 liveBound。绑定动作与 liveBound 回执在同一 goroutine 内顺序完成，
+	// 冷事务收到回执时 watcher 已绑定 B（B 在下一 poll 前死亡由已绑定 watcher 收口）。
+	if lister != nil && !lister.IsProcessAlive(context.Background(), proc.PID) {
+		reply(claudeRelayCoverageResult{outcome: claudeCoverageDead})
+		return
+	}
+	*cachedPID = proc.PID
+	if lister != nil {
+		*liveLister = lister
+	}
+	*processDeathMisses = 0
+	h.claudeRelayCoverage.issueLease(sessionID, claudeRelayCoverageLease{
+		generation:     coverageGen,
+		sourceIdentity: req.sourceIdentity,
+		sourceCut:      req.sourceCut,
+		pid:            proc.PID,
+	})
+	slog.Info("go-bridge: claudeSessionFileRelay coverage liveBound",
+		"sessionID", sessionID, "backendID", backendID, "pid", proc.PID, "generation", coverageGen)
+	reply(claudeRelayCoverageResult{outcome: claudeCoverageLiveBound, pid: proc.PID})
+}
+
+// claudeRelayReplacementRebind 已绑进程死亡后的替代复查（设计 v6 §4.3.2 窗口 B）：
+// 复查见替代进程 B 活 → 同一状态转移直接 rebind B（原子换 PID/lister、清 miss），
+// 不得先清零回 late-bind；只有确实没有替代者时才由调用方清 PID 进入 late-bind。
+// 返回 true 表示已 rebind。
+func (h *Handlers) claudeRelayReplacementRebind(
+	sessionID, backendID string,
+	cachedPID *int,
+	liveLister *core.LiveSessionLister,
+	processDeathMisses *int,
+) bool {
+	proc, lister, err := h.sessionLiveProcess(context.Background(), sessionID, backendID)
+	if err != nil || !proc.Live || proc.PID <= 0 {
+		return false
+	}
+	if proc.PID == *cachedPID {
+		return false // 同一 PID 复查仍活——非替代者（IsProcessAlive 误报场景）
+	}
+	if lister != nil && !lister.IsProcessAlive(context.Background(), proc.PID) {
+		return false
+	}
+	*cachedPID = proc.PID
+	if lister != nil {
+		*liveLister = lister
+	}
+	*processDeathMisses = 0
+	slog.Info("go-bridge: claudeSessionFileRelay replacement rebind",
+		"sessionID", sessionID, "backendID", backendID, "pid", proc.PID)
+	return true
+}
+
 func (h *Handlers) claudeSessionFileRelayLoop(
 	sessionID string,
 	conn Connection,
 	backendID string,
 	initialOffset *int64,
 ) {
+	// Coverage handshake（设计 v6 §4.3.1）：relay loop 注册 {generation, sourceIdentity,
+	// admissionCut}。退出（含 superseded）恰好注销一次；命令队列关闭即唤醒等待方。
+	// 注册在 offset 确定后进行，admissionCut = 本 loop 的起始 cut（继承 hydrate
+	// admission cut 或 complete-record cut）。
+	var coverageGen uint64
 	defer func() {
+		if coverageGen != 0 {
+			h.claudeRelayCoverage.unregister(sessionID, coverageGen)
+		}
 		h.clearRelayKindIf(sessionID, relayKindClaudeFile)
 		slog.Info("go-bridge: claudeSessionFileRelay exited", "sessionID", sessionID)
 	}()
@@ -753,6 +854,8 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 		}
 		offset = *initialOffset
 	}
+	coverageGen = h.claudeRelayCoverage.register(sessionID, sessionID, offset)
+	coverageCommands := h.claudeRelayCoverage.commands(sessionID, coverageGen)
 	initialInfo, err := os.Stat(sessPath)
 	if err != nil {
 		slog.Error("go-bridge: claudeSessionFileRelay initial stat failed",
@@ -902,6 +1005,12 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 		case <-ticker.C:
 		case <-nudgeCh:
 			// Phase 3 Stop hook 事件驱动的立即轮询（定向刷新；失活时纯轮询兜底）
+		case req := <-coverageCommands:
+			// Coverage command（设计 v6 §4.3.2）：冷事务尾部未答 Ask 的「不合成」
+			// 决定必须由本 loop 同步绑定活进程后授权。命令在本 goroutine 串行处理，
+			// poll 状态（cachedPID/liveLister/processDeathMisses）无并发写。
+			h.handleClaudeCoverageCommand(sessionID, backendID, coverageGen, req, &cachedPID, &liveLister, &processDeathMisses)
+			continue
 		}
 		if !h.relayKindIs(sessionID, relayKindClaudeFile) {
 			slog.Info("go-bridge: claudeSessionFileRelay superseded by agent relay", "sessionID", sessionID)
@@ -927,6 +1036,12 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 			if !liveLister.IsProcessAlive(context.Background(), cachedPID) {
 				processDeathMisses++
 				if processDeathMisses >= claudeFileRelayProcessDeathMisses {
+					// §4.3.2 窗口 B（设计 v6）：先做替代复查——见替代进程 B 活则同一
+					// 状态转移直接 rebind B（B 在下一 poll 前死亡由已绑定 watcher 合成
+					// terminal），不得先清零回 late-bind 留出无人覆盖的间隙。
+					if h.claudeRelayReplacementRebind(sessionID, backendID, &cachedPID, &liveLister, &processDeathMisses) {
+						continue
+					}
 					// §3.3 (required, not optional): a dead process with a non-terminal transcript
 					// tail must close the in-flight turn with turn_aborted, mirroring the codex
 					// producer. Without it a crashed Claude session stays a non-live cold-armed
@@ -1253,7 +1368,7 @@ func (h *Handlers) applyClaudeLiveSourceRecord(
 			"Claude source ledger not installed for live ingest", true)
 		return
 	}
-	batch, err := buildClaudeSourceRecordBatch(state, scanned, backendID, sessionID, h.eventPublisher.BridgeEpoch(), correlation, *currentTurnID)
+	batch, err := buildClaudeSourceRecordBatch(state, scanned, backendID, sessionID, h.eventPublisher.BridgeEpoch(), correlation, *currentTurnID, h.claudeUserInputOracle(backendID, sessionID))
 	if err != nil {
 		// Mapper cannot attribute this content row (no graph-resolved owner AND no file-order
 		// fallback turn — an orphan row with no prior user). Expose honestly rather than auto-
@@ -1423,7 +1538,9 @@ func (h *Handlers) deliverClaudeLegacyRow(
 	held *[]claudeHeldTerminalEvent,
 	accum *claudeTurnTextAccumulator,
 ) {
-	evs := claudeEntryToProjectionEvents(e, currentTurnID, nil)
+	// hydrate 期 legacy row 是 Kernel-entering 调用边（经 EventPublisher 进 pendingLive，
+	// commit 后进主 reducer）——传真实 oracle（设计 v6 §4.2）。
+	evs := claudeEntryToProjectionEvents(e, currentTurnID, nil, h.claudeUserInputOracle(backendID, sessionID))
 	accum.observe(evs)
 	for _, ev := range evs {
 		switch ev.Event {
@@ -1928,11 +2045,36 @@ func streamClaudeTranscriptProjectionEventsRange(
 	return streamClaudeTranscriptProjectionEventsRangeSeed(ctx, sessPath, startOffset, endOffset, "", emit)
 }
 
+// streamClaudeTranscriptProjectionEventsRangeSeedOracle 是冷拉 RangeSeed 的
+// Kernel-entering 变体（设计 v6 §4.2）：携带真实可答性 oracle。sidechain child reducer
+// 继续用无 oracle 的 RangeSeed（fail closed）。
+func streamClaudeTranscriptProjectionEventsRangeSeedOracle(
+	ctx context.Context,
+	sessPath string,
+	startOffset, endOffset int64,
+	initialTurnID string,
+	oracle claudeAnswerabilityOracle,
+	emit func(projectionHydrateEvent) bool,
+) error {
+	return streamClaudeTranscriptProjectionEventsRangeSeedInner(ctx, sessPath, startOffset, endOffset, initialTurnID, oracle, emit)
+}
+
 func streamClaudeTranscriptProjectionEventsRangeSeed(
 	ctx context.Context,
 	sessPath string,
 	startOffset, endOffset int64,
 	initialTurnID string,
+	emit func(projectionHydrateEvent) bool,
+) error {
+	return streamClaudeTranscriptProjectionEventsRangeSeedInner(ctx, sessPath, startOffset, endOffset, initialTurnID, nil, emit)
+}
+
+func streamClaudeTranscriptProjectionEventsRangeSeedInner(
+	ctx context.Context,
+	sessPath string,
+	startOffset, endOffset int64,
+	initialTurnID string,
+	oracle claudeAnswerabilityOracle,
 	emit func(projectionHydrateEvent) bool,
 ) error {
 	if ctx == nil {
@@ -1979,7 +2121,7 @@ func streamClaudeTranscriptProjectionEventsRangeSeed(
 			continue
 		}
 		if isClaudeCompactionBoundaryRelayEntry(e) {
-			for _, ev := range claudeEntryToProjectionEvents(e, &currentTurnID, nil) {
+			for _, ev := range claudeEntryToProjectionEvents(e, &currentTurnID, nil, nil) {
 				if !emit(ev) {
 					return ctx.Err()
 				}
@@ -2006,7 +2148,7 @@ func streamClaudeTranscriptProjectionEventsRangeSeed(
 		if e.Type != "user" && e.Type != "assistant" {
 			continue
 		}
-		for _, ev := range claudeEntryToProjectionEvents(e, &currentTurnID, toolUseMeta) {
+		for _, ev := range claudeEntryToProjectionEvents(e, &currentTurnID, toolUseMeta, oracle) {
 			if !emit(ev) {
 				return ctx.Err()
 			}
@@ -2029,7 +2171,11 @@ func streamClaudeTranscriptProjectionEventsRangeSeed(
 // so tool_finished carries the same path-bearing title/toolName iOS needs for cold-start
 // activity rows (Phase 1C L-α on the relay-transcript path). May be nil when the caller does
 // not need cross-entry correlation.
-func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *string, toolUseMeta map[string]claudeToolUseMeta) []projectionHydrateEvent {
+//
+// oracle（设计 v6 §4.2）：进入主 Kernel 的调用边传真实可答性谓词（Ask 的 canRespond 由
+// 活控制通道证明）；sidechain child reducer、push preview、trace、测试传 nil（fail closed
+// → observe_only）。
+func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *string, toolUseMeta map[string]claudeToolUseMeta, oracle claudeAnswerabilityOracle) []projectionHydrateEvent {
 	if isClaudeInternalCompactRelayEntry(e) {
 		return nil
 	}
@@ -2066,21 +2212,42 @@ func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *
 			if b.Type != "tool_result" {
 				continue
 			}
-			if b.ToolUseID != "" && claudecode.HasStructuredUserInputResultEnvelope(e.ToolUseResult) {
-				data := map[string]interface{}{
-					"turnId":        *currentTurnID,
-					"itemId":        b.ToolUseID,
-					"interactionId": claudecode.DeriveStructuredUserInputInteractionID(b.ToolUseID),
-					"status":        "answered",
-					"source":        "other_client",
+			if b.ToolUseID != "" {
+				// AskUserQuestion resolutions are structured user_input updates, never
+				// tool_finished. Answer = persisted questions+answers envelope (evidence
+				// gate 2026-09-16, 2.1.261); deny = "Error: User declined..." string with
+				// is_error=true — both shapes proven distinguishable by the gate fixtures.
+				isAskResult := toolUseMeta != nil && toolUseMeta[b.ToolUseID].ToolName == "AskUserQuestion"
+				if claudecode.HasStructuredUserInputResultEnvelope(e.ToolUseResult) {
+					data := map[string]interface{}{
+						"turnId":        *currentTurnID,
+						"itemId":        b.ToolUseID,
+						"interactionId": claudecode.DeriveStructuredUserInputInteractionID(b.ToolUseID),
+						"status":        "answered",
+						"source":        "other_client",
+					}
+					if timestampMillis := claudeRelayTimestampMillis(e.Timestamp); timestampMillis > 0 {
+						data["resolvedAt"] = timestampMillis
+					}
+					// Do not emit tool_finished for AskUserQuestion. Its resolution is a structured
+					// user_input update; the answer body remains outside projection by contract.
+					out = append(out, projectionHydrateEvent{Event: "user_input_resolved", Data: data})
+					continue
 				}
-				if timestampMillis := claudeRelayTimestampMillis(e.Timestamp); timestampMillis > 0 {
-					data["resolvedAt"] = timestampMillis
+				if isAskResult && claudecode.IsStructuredUserInputDeniedResult(e.ToolUseResult) {
+					data := map[string]interface{}{
+						"turnId":        *currentTurnID,
+						"itemId":        b.ToolUseID,
+						"interactionId": claudecode.DeriveStructuredUserInputInteractionID(b.ToolUseID),
+						"status":        "rejected",
+						"source":        "other_client",
+					}
+					if timestampMillis := claudeRelayTimestampMillis(e.Timestamp); timestampMillis > 0 {
+						data["resolvedAt"] = timestampMillis
+					}
+					out = append(out, projectionHydrateEvent{Event: "user_input_resolved", Data: data})
+					continue
 				}
-				// Do not emit tool_finished for AskUserQuestion. Its resolution is a structured
-				// user_input update; the answer body remains outside projection by contract.
-				out = append(out, projectionHydrateEvent{Event: "user_input_resolved", Data: data})
-				continue
 			}
 			data := map[string]interface{}{"toolResult": claudeToolResultText(b), "toolStatus": "completed"}
 			if b.ToolUseID != "" {
@@ -2156,20 +2323,35 @@ func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *
 				if normalizeErr != nil || len(normalized) == 0 {
 					status = "failed"
 					diagnosticCode = "invalid_backend_request"
+				} else if oracle != nil && oracle(interactionID) {
+					// 可答由活控制通道证明（registry pending + session alive + 证据门，
+					// 设计 v6 §4.2）；oracle nil / miss 保持 observe_only fail closed。
+					canRespond = true
+					canReject = true
+					diagnosticCode = ""
+				}
+				data := map[string]interface{}{
+					"turnId":        turnID,
+					"itemId":        b.ID,
+					"interactionId": interactionID,
+					"status":        status,
+					"questions":     userInputQuestionsToWire(normalized),
+					"canRespond":    canRespond,
+					"canReject":     canReject,
+				}
+				if diagnosticCode != "" {
+					data["diagnosticCode"] = diagnosticCode
 				}
 				out = append(out, projectionHydrateEvent{
 					Event: "user_input_requested",
-					Data: map[string]interface{}{
-						"turnId":         turnID,
-						"itemId":         b.ID,
-						"interactionId":  interactionID,
-						"status":         status,
-						"questions":      userInputQuestionsToWire(normalized),
-						"canRespond":     canRespond,
-						"canReject":      canReject,
-						"diagnosticCode": diagnosticCode,
-					},
+					Data:  data,
 				})
+				// Register Ask ownership so the later tool_result pass can route the
+				// deny durable shape (evidence gate 2026-09-16) to user_input_resolved
+				// instead of ordinary tool_finished.
+				if toolUseMeta != nil && b.ID != "" {
+					toolUseMeta[b.ID] = claudeToolUseMeta{ToolName: b.Name}
+				}
 				continue
 			}
 			data := map[string]interface{}{"toolName": b.Name}

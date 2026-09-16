@@ -103,7 +103,8 @@ func TestReducerUserInputInteractionIdentityPreventsHydrateLivePhantomTurn(t *te
 		for _, part := range turn.Assistant.Parts {
 			if part.Type == "user_input" && part.UserInputInteractionID == "ui_same" {
 				parts++
-				if turn.TurnID != "hydrate-user-turn" || part.UserInputStatus != "answered" || !part.UserInputCanRespond {
+				// §4.4（设计 v6）：resolved → answered + 双 capability=false（耐久终态不可再答）。
+				if turn.TurnID != "hydrate-user-turn" || part.UserInputStatus != "answered" || part.UserInputCanRespond {
 					t.Fatalf("interaction not updated in place: turn=%s part=%+v", turn.TurnID, part)
 				}
 			}

@@ -48,7 +48,7 @@ func applyClaudeSourceFixture(
 			t.Fatal("source state disappeared")
 		}
 		batch, err := buildClaudeSourceRecordBatch(
-			current, record, "claude", name, "epoch", correlation, "",
+			current, record, "claude", name, "epoch", correlation, "", nil,
 		)
 		if err != nil {
 			t.Fatalf("map %s [%d,%d): %v", name, record.ByteStart, record.ByteEnd, err)

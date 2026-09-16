@@ -299,6 +299,7 @@ context_usage_updated
 question_asked
 question_resolved
 user_input_requested
+user_input_submitted
 user_input_resolved
 session_command
 session_plan_mode
@@ -478,19 +479,32 @@ The v1 and v2 paths MUST NOT be mixed for the same interaction, and v2 MUST NOT 
 - `user_input_requested` is the bridge event for one structured-input interaction. It carries
   `turnId`, `interactionId`, `status` (`pending` normal, or `failed` for malformed questions —
   both project once), `questions[]`, `canRespond`, `canReject`, `expiresAt?`, and
-  `diagnosticCode?` (e.g. `invalid_backend_request`). Each question is
+  `diagnosticCode?` (e.g. `invalid_backend_request`, `observe_only`, `turn_terminated`). Each
+  question is
   `{ id, header?, prompt, answerMode: "single"|"multiple"|"text", options[], allowsCustomAnswer,
   isSecret, required }`; each option is `{ id, label, description? }`. Stable ids are derived
   (lowercase SHA-256 prefix `"ui_"`): legacy Codex `interactionId = "ui_"+sha256("codex\0"+requestIdType+
   "\0"+requestIdValue+"\0"+threadId+"\0"+turnId+"\0"+itemId)[:32]`, Claude
-  `interactionId = "ui_"+sha256("claudecode\0"+requestId)[:32]`; `questionId = interactionId+"_q_"+i`,
+  `interactionId = "ui_"+sha256("claudecode\0"+toolUseId)[:32]` (the Ask `request.tool_use_id`
+  is the canonical timeline seed — the outer control `request_id` only pairs `control_response`
+  writes; real 2.1.209 paired fixtures prove the two differ); `questionId = interactionId+"_q_"+i`,
   `optionId = questionId+"_o_"+j`. The independent `codex-web` backend preserves the official
   request identity as `interactionId = threadId + ":" + itemId`; its question and option ids are
   deterministic children of that interaction id.
+- `user_input_submitted` (2026-09-16, Claude answering design v6 §4.7) is the Kernel control
+  fact that the backend control response was written successfully. It carries only `turnId`,
+  `itemId`, `interactionId`, `status: "submitted"` — never answer text. It is projection-only
+  (raw frame never delivered to any client); the reducer folds `pending → submitted`
+  (`canRespond`/`canReject` → false, diagnostic cleared). `submitted` is at-least-once
+  (idempotent replay re-emits it without rewriting the control response); durable
+  answered/rejected still comes only from the transcript `tool_result`
+  (`user_input_resolved`). A turn that terminates without a durable result presents
+  `pending` + `diagnosticCode: "turn_terminated"`; a late transcript resolution supersedes it.
 - `user_input_resolved` carries `turnId`, `interactionId`, `status` (`answered`|`rejected`|
   `auto_resolved`|`unavailable`|`failed`), `source` (`ios`|`mac`|`other_client`|`backend`), and
   `resolvedAt`. The projection never stores answer text (esp. for `isSecret`); the resolved event
-  only carries status/source/resolvedAt.
+  only carries status/source/resolvedAt. The projection part status enum additionally includes
+  `submitted` (set by `user_input_submitted`, not by `user_input_resolved`).
 - `resolve_user_input` is the backend-neutral bridge RPC for answering/rejecting a v2
   interaction. Payload: `{ interactionId, clientActionId, action: "answer"|"reject",
   answers?: [{ questionId, values: [{ kind: "option"|"text", optionId?, text? }] }] }`. MacBridge

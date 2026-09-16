@@ -144,8 +144,14 @@ func TestLifecycle_LegacyAndV2CompeteForOneClaim(t *testing.T) {
 		t.Fatalf("legacy RespondQuestion 失败: %v", err)
 	}
 	resolvedEvents := drainAllEvents(cs)
-	if len(resolvedEvents) != 2 || resolvedEvents[0].Type != core.EventUserInputResolved || resolvedEvents[1].Type != core.EventQuestionResolved {
-		t.Fatalf("legacy answer 应先 canonical resolved 后 legacy resolved，实际 %+v", resolvedEvents)
+	// 设计 v6 §4.5.2：legacy answer 经 canonical 路径写 control response 成功后
+	// 先发 submitted（控制事实），再发旧 live resolved（证据门前保留），最后 legacy
+	// question_resolved（展示层）。
+	if len(resolvedEvents) != 3 ||
+		resolvedEvents[0].Type != core.EventUserInputSubmitted ||
+		resolvedEvents[1].Type != core.EventUserInputResolved ||
+		resolvedEvents[2].Type != core.EventQuestionResolved {
+		t.Fatalf("legacy answer 应先 submitted 后 canonical resolved 再 legacy resolved，实际 %+v", resolvedEvents)
 	}
 	writes := stdin.linesWritten()
 	resolution, err := cs.ResolveUserInput(t.Context(), iid, "client-after-legacy", core.UserInputActionAnswer,

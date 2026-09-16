@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
@@ -215,24 +216,32 @@ func TestResolveUserInput_EnvelopeAndBackendScopeValidation(t *testing.T) {
 	})
 }
 
-func TestResolveUserInput_ClaimedReturnsInProgressWithoutFakeTerminalState(t *testing.T) {
+// TestResolveUserInput_InProgressWaitsForProjectionNotFakePending（设计 v6 §3.2/§4.5.3）：
+// responder 返回 in_progress+pending（旧 Claude 形状）时，RPC 不再把它当成功回执立即
+// 返回——waitForUserInputResolution 只认投影完成条件（resolved/terminal/submitted），
+// 投影保持 interactive pending 则等待至超时并返回错误（客户端走失败解锁路径）。
+// 不得出现 ok=true + pending 后失去唤醒源。
+func TestResolveUserInput_InProgressWaitsForProjectionNotFakePending(t *testing.T) {
 	h := newTestHandlers(t)
 	sess := &userInputMockSession{resolveFunc: func(context.Context, string, string, core.UserInputAction, []core.UserInputAnswer) (core.UserInputResolution, error) {
 		return core.UserInputResolution{Outcome: core.UserInputOutcomeInProgress, CurrentStatus: core.UserInputStatusPending}, nil
 	}}
 	h.putSessionWithMeta("ses_1", "claude", "", sess)
 	seedUserInputProjection(h, "claude", "ses_1", "ui_abc", false)
+	// 缩短 resolve 超时避免整 10s 等待。
+	prevTimeout := resolveUserInputWaitTimeout
+	resolveUserInputWaitTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { resolveUserInputWaitTimeout = prevTimeout })
 	conn := &userInputCaptureConn{}
 	h.handleResolveUserInput(conn, resolveMsg(t, map[string]any{
 		"sessionId": "ses_1", "interactionId": "ui_abc", "action": "answer",
 		"answers": []map[string]any{{"questionId": "q", "values": []map[string]any{{"kind": "text", "text": "x"}}}},
 	}), nil)
-	if conn.wireErr != nil {
-		t.Fatal(conn.wireErr)
+	if conn.wireErr == nil {
+		t.Fatalf("in_progress+pending 不得作为成功回执返回；应超时返回错误，实际 data=%+v", conn.data)
 	}
-	result := conn.data.(map[string]any)
-	if result["outcome"] != core.UserInputOutcomeInProgress || result["currentStatus"] != core.UserInputStatusPending || result["headRev"] != 1 {
-		t.Fatalf("claimed result = %+v", result)
+	if conn.wireErr.Code != "resolve_user_input_failed" {
+		t.Fatalf("错误码应为 resolve_user_input_failed，实际 %q", conn.wireErr.Code)
 	}
 }
 

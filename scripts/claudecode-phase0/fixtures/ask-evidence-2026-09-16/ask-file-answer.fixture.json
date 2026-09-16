@@ -1,0 +1,128 @@
+{
+  "scenario": "ask-file-answer",
+  "producer": {
+    "cli": "claude",
+    "version": "2.1.261",
+    "captured": "2026-09-16"
+  },
+  "redaction": "personal absolute path prefix /Users/jacklee replaced with ~; no secret values present (tokenSource enum only)",
+  "control_request": {
+    "type": "control_request",
+    "request_id": "3e95c961-6d2e-4500-8cc3-e2d0a55e455c",
+    "request": {
+      "subtype": "can_use_tool",
+      "tool_name": "AskUserQuestion",
+      "display_name": "AskUserQuestion",
+      "input": {
+        "questions": [
+          {
+            "question": "文件 ~/Projects/Chat/漫威战斗故事.txt 已存在（约119KB），如何处理？",
+            "header": "文件冲突",
+            "options": [
+              {
+                "label": "覆盖重写",
+                "description": "用新的约100字故事替换整个文件内容"
+              },
+              {
+                "label": "追加到末尾",
+                "description": "在现有内容末尾追加新故事，原有内容保留"
+              },
+              {
+                "label": "不动它",
+                "description": "不修改文件，本次任务取消"
+              }
+            ],
+            "multiSelect": false
+          }
+        ]
+      },
+      "tool_use_id": "call_a62471af73704fe4955e1213",
+      "requires_user_interaction": true
+    }
+  },
+  "control_response_sent": {
+    "type": "control_response",
+    "response": {
+      "subtype": "success",
+      "request_id": "3e95c961-6d2e-4500-8cc3-e2d0a55e455c",
+      "response": {
+        "behavior": "allow",
+        "updatedInput": {
+          "questions": [
+            {
+              "question": "文件 ~/Projects/Chat/漫威战斗故事.txt 已存在（约119KB），如何处理？",
+              "header": "文件冲突",
+              "options": [
+                {
+                  "label": "覆盖重写",
+                  "description": "用新的约100字故事替换整个文件内容"
+                },
+                {
+                  "label": "追加到末尾",
+                  "description": "在现有内容末尾追加新故事，原有内容保留"
+                },
+                {
+                  "label": "不动它",
+                  "description": "不修改文件，本次任务取消"
+                }
+              ],
+              "multiSelect": false
+            }
+          ],
+          "answers": {
+            "文件 ~/Projects/Chat/漫威战斗故事.txt 已存在（约119KB），如何处理？": "覆盖重写"
+          }
+        }
+      }
+    }
+  },
+  "assistant_tool_use": {
+    "type": "tool_use",
+    "id": "call_a62471af73704fe4955e1213",
+    "name": "AskUserQuestion",
+    "input": {}
+  },
+  "user_tool_result_frame": {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "content": "Your questions have been answered: \"文件 ~/Projects/Chat/漫威战斗故事.txt 已存在（约119KB），如何处理？\"=\"覆盖重写\". You can now continue with these answers in mind.",
+          "tool_use_id": "call_a62471af73704fe4955e1213"
+        }
+      ]
+    },
+    "parent_tool_use_id": null,
+    "session_id": "3cf74d3a-8e37-4a0d-b5db-139441124919",
+    "uuid": "c8baed6b-83b1-4f9b-87a2-dc7c660378e6",
+    "timestamp": "2026-09-16T09:09:34.512Z",
+    "tool_use_result": {
+      "questions": [
+        {
+          "question": "文件 ~/Projects/Chat/漫威战斗故事.txt 已存在（约119KB），如何处理？",
+          "header": "文件冲突",
+          "options": [
+            {
+              "label": "覆盖重写",
+              "description": "用新的约100字故事替换整个文件内容"
+            },
+            {
+              "label": "追加到末尾",
+              "description": "在现有内容末尾追加新故事，原有内容保留"
+            },
+            {
+              "label": "不动它",
+              "description": "不修改文件，本次任务取消"
+            }
+          ],
+          "multiSelect": false
+        }
+      ],
+      "answers": {
+        "文件 ~/Projects/Chat/漫威战斗故事.txt 已存在（约119KB），如何处理？": "覆盖重写"
+      }
+    }
+  }
+}

@@ -118,7 +118,7 @@ func TestV2_FlagOn_SingleQuestionEmitsPending(t *testing.T) {
 	if ev.UserInput.DiagnosticCode != "observe_only" {
 		t.Fatalf("diagnosticCode = %q want observe_only（与 cold/hydrate 对齐）", ev.UserInput.DiagnosticCode)
 	}
-	iid := deriveClaudeInteractionID("req-1")
+	iid := deriveClaudeInteractionID("toolu_req-1")
 	if ev.UserInput.InteractionID != iid {
 		t.Fatalf("interactionId = %q want %q", ev.UserInput.InteractionID, iid)
 	}
@@ -172,7 +172,7 @@ func TestV2_FlagOn_MultiQuestionAllNormalized(t *testing.T) {
 	if ev == nil || len(ev.UserInput.Questions) != 2 {
 		t.Fatalf("应规范化 2 题，实际 %+v", ev)
 	}
-	iid := deriveClaudeInteractionID("req-mq")
+	iid := deriveClaudeInteractionID("toolu_req-mq")
 	if ev.UserInput.Questions[0].ID != claudeQuestionID(iid, 0) || ev.UserInput.Questions[1].ID != claudeQuestionID(iid, 1) {
 		t.Fatalf("多题 questionId 原序派生错: %q %q", ev.UserInput.Questions[0].ID, ev.UserInput.Questions[1].ID)
 	}
@@ -195,7 +195,7 @@ func TestV2_FlagOn_DuplicateQuestionTextFails(t *testing.T) {
 	if ev.UserInput.DiagnosticCode != "invalid_backend_request" || ev.UserInput.CanRespond {
 		t.Fatalf("failed 应 diagnosticCode=invalid_backend_request canRespond=false，实际 %q/%v", ev.UserInput.DiagnosticCode, ev.UserInput.CanRespond)
 	}
-	if cs.claudeUserInputReg.Status(deriveClaudeInteractionID("req-dup")) != claudeUIAbsent {
+	if cs.claudeUserInputReg.Status(deriveClaudeInteractionID("toolu_req-dup")) != claudeUIAbsent {
 		t.Fatalf("failed 不应注册 responder")
 	}
 }
@@ -289,7 +289,11 @@ func TestResolveUserInputContextTimeoutReleasesClaimBeforeWrite(t *testing.T) {
 	}
 }
 
-func TestResolveUserInputConcurrentClaimReportsInProgress(t *testing.T) {
+// TestResolveUserInputConcurrentClaimWaitsForSettle（设计 v6 §3.2/§4.5.1）：
+// A Claim 成功后 B 到达 claimed entry——B 不再得到成功 in_progress+pending，而是
+// 在 registry transition waiter 上等待 A 的确定结果：A 成功 → B already_resolved。
+// 任何路径都不得返回 ok=true+pending 后失去唤醒源。
+func TestResolveUserInputConcurrentClaimWaitsForSettle(t *testing.T) {
 	cs, stdin := newAskV2TestSession(t)
 	cs.handleControlRequest(makeAskControlRequest("req-race", []any{
 		singleQuestionMap("Which?", "", false, [2]string{"a", ""}),
@@ -297,26 +301,36 @@ func TestResolveUserInputConcurrentClaimReportsInProgress(t *testing.T) {
 	ev := findUserInputEvent(drainAllEvents(cs), core.EventUserInputRequested)
 	ui := ev.UserInput
 	answers := []core.UserInputAnswer{{QuestionID: ui.Questions[0].ID, Values: []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: ui.Questions[0].Options[0].ID}}}}
-	cs.stdinMu.Lock()
+
 	firstDone := make(chan error, 1)
 	go func() {
 		_, err := cs.ResolveUserInput(context.Background(), ui.InteractionID, "first", core.UserInputActionAnswer, answers)
 		firstDone <- err
 	}()
+	// 等 A 拿到 claim（或已写完——两者对断言等价）。
 	deadline := time.Now().Add(time.Second)
-	for cs.claudeUserInputReg.Status(ui.InteractionID) != claudeUIClaimed && time.Now().Before(deadline) {
+	for {
+		st := cs.claudeUserInputReg.Status(ui.InteractionID)
+		if st == claudeUIClaimed || st == claudeUIResolved {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("first writer never claimed")
+		}
 		time.Sleep(time.Millisecond)
 	}
 	second, err := cs.ResolveUserInput(t.Context(), ui.InteractionID, "second", core.UserInputActionAnswer, answers)
-	if err != nil || second.Outcome != core.UserInputOutcomeInProgress || second.CurrentStatus != core.UserInputStatusPending {
-		t.Fatalf("second writer = %+v, %v; want in_progress/pending", second, err)
+	if err != nil {
+		t.Fatalf("second writer error: %v", err)
 	}
-	cs.stdinMu.Unlock()
+	if second.Outcome != core.UserInputOutcomeAlreadyResolved {
+		t.Fatalf("second writer = %+v; want already_resolved（A 成功后 B 收口）", second)
+	}
 	if err := <-firstDone; err != nil {
 		t.Fatalf("first writer: %v", err)
 	}
 	if stdin.linesWritten() != 1 {
-		t.Fatalf("backend writes = %d, want 1", stdin.linesWritten())
+		t.Fatalf("backend writes = %d, want 1（control response 至多一次）", stdin.linesWritten())
 	}
 }
 
@@ -332,7 +346,7 @@ func TestV2_ResolveAnswerSingle(t *testing.T) {
 	}))
 	drainAllEvents(cs)
 
-	iid := deriveClaudeInteractionID("req-a1")
+	iid := deriveClaudeInteractionID("toolu_req-a1")
 	qid := claudeQuestionID(iid, 0)
 	optBlue := claudeOptionID(qid, 1) // Blue
 
@@ -375,7 +389,7 @@ func TestV2_ResolveAnswerMultiple(t *testing.T) {
 		multiQuestionMap("Pick many", "", [2]string{"a", ""}, [2]string{"b", ""}, [2]string{"c", ""}),
 	}))
 	drainAllEvents(cs)
-	iid := deriveClaudeInteractionID("req-am")
+	iid := deriveClaudeInteractionID("toolu_req-am")
 	qid := claudeQuestionID(iid, 0)
 
 	if _, err := cs.ResolveUserInput(t.Context(), iid, "client-A", core.UserInputActionAnswer,
@@ -404,7 +418,7 @@ func TestV2_ResolveAnswerMultiQuestion(t *testing.T) {
 		multiQuestionMap("Tops?", "", [2]string{"X", ""}, [2]string{"Y", ""}),
 	}))
 	drainAllEvents(cs)
-	iid := deriveClaudeInteractionID("req-mqa")
+	iid := deriveClaudeInteractionID("toolu_req-mqa")
 	q0 := claudeQuestionID(iid, 0)
 	q1 := claudeQuestionID(iid, 1)
 
@@ -433,7 +447,7 @@ func TestV2_ResolveReject(t *testing.T) {
 		singleQuestionMap("Skip me?", "", false, [2]string{"a", ""}),
 	}))
 	drainAllEvents(cs)
-	iid := deriveClaudeInteractionID("req-rj")
+	iid := deriveClaudeInteractionID("toolu_req-rj")
 
 	res, err := cs.ResolveUserInput(t.Context(), iid, "client-A", core.UserInputActionReject, nil)
 	if err != nil {
@@ -465,7 +479,7 @@ func TestV2_ResolveIdempotentRetry(t *testing.T) {
 		singleQuestionMap("Which?", "", false, [2]string{"a", ""}, [2]string{"b", ""}),
 	}))
 	drainAllEvents(cs)
-	iid := deriveClaudeInteractionID("req-idem")
+	iid := deriveClaudeInteractionID("toolu_req-idem")
 	qid := claudeQuestionID(iid, 0)
 	ans := []core.UserInputAnswer{{QuestionID: qid, Values: []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: claudeOptionID(qid, 0)}}}}
 
@@ -485,8 +499,14 @@ func TestV2_ResolveIdempotentRetry(t *testing.T) {
 	if stdin.linesWritten() != before {
 		t.Fatalf("幂等重试不应再写 backend，before=%d after=%d", before, stdin.linesWritten())
 	}
-	if len(drainAllEvents(cs)) != 0 {
-		t.Fatalf("幂等重试不应再发事件")
+	// §4.5.2 at-least-once：幂等命中无条件重发恰好一个 submitted（不带答案正文），
+	// 绝不重写 control response。
+	replay := drainAllEvents(cs)
+	if len(replay) != 1 || replay[0].Type != core.EventUserInputSubmitted {
+		t.Fatalf("幂等重试应重发 1 个 submitted，实际 %+v", replay)
+	}
+	if replay[0].UserInput == nil || replay[0].UserInput.InteractionID != iid {
+		t.Fatalf("重发 submitted 的 interactionId 应为 %q，实际 %+v", iid, replay[0].UserInput)
 	}
 }
 
@@ -497,7 +517,7 @@ func TestV2_ResolveBadShapeReleasesClaim(t *testing.T) {
 		singleQuestionMap("Which?", "", false, [2]string{"a", ""}),
 	}))
 	drainAllEvents(cs)
-	iid := deriveClaudeInteractionID("req-bs")
+	iid := deriveClaudeInteractionID("toolu_req-bs")
 	qid := claudeQuestionID(iid, 0)
 
 	_, err := cs.ResolveUserInput(t.Context(), iid, "client-A", core.UserInputActionAnswer,
@@ -528,7 +548,7 @@ func TestV2_ResolveMultiQuestionMissingOneInvalid(t *testing.T) {
 		singleQuestionMap("Size?", "", false, [2]string{"Big", ""}),
 	}))
 	drainAllEvents(cs)
-	iid := deriveClaudeInteractionID("req-miss")
+	iid := deriveClaudeInteractionID("toolu_req-miss")
 	q0 := claudeQuestionID(iid, 0)
 
 	_, err := cs.ResolveUserInput(t.Context(), iid, "client-A", core.UserInputActionAnswer,
@@ -550,7 +570,7 @@ func TestV2_ResolveCustomTextAccepted(t *testing.T) {
 		singleQuestionMap("Which?", "", false, [2]string{"a", ""}),
 	}))
 	drainAllEvents(cs)
-	iid := deriveClaudeInteractionID("req-ct")
+	iid := deriveClaudeInteractionID("toolu_req-ct")
 	qid := claudeQuestionID(iid, 0)
 
 	_, err := cs.ResolveUserInput(t.Context(), iid, "client-A", core.UserInputActionAnswer,
@@ -584,7 +604,7 @@ func TestV2_ResolveDeadSession(t *testing.T) {
 	}))
 	drainAllEvents(cs)
 	cs.alive.Store(false)
-	iid := deriveClaudeInteractionID("req-dead")
+	iid := deriveClaudeInteractionID("toolu_req-dead")
 	_, err := cs.ResolveUserInput(t.Context(), iid, "client-A", core.UserInputActionAnswer, nil)
 	uie, ok := err.(*core.UserInputError)
 	if !ok || uie.Code != "session_not_active" {
@@ -598,9 +618,9 @@ func TestV2_ResolveDeadSession(t *testing.T) {
 
 // TestV2_DeriveClaudeInteractionIDStable：确定性、32 hex、"ui_" 前缀、与 requestId 单调绑定。
 func TestV2_DeriveClaudeInteractionIDStable(t *testing.T) {
-	a := deriveClaudeInteractionID("req-1")
-	b := deriveClaudeInteractionID("req-1")
-	c := deriveClaudeInteractionID("req-2")
+	a := deriveClaudeInteractionID("toolu_req-1")
+	b := deriveClaudeInteractionID("toolu_req-1")
+	c := deriveClaudeInteractionID("toolu_req-2")
 	if a != b {
 		t.Fatalf("非确定性: %q != %q", a, b)
 	}

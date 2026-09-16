@@ -130,7 +130,12 @@ type Handlers struct {
 	agentRelaySess          map[string]core.AgentSession
 	agentRelayGen           map[string]uint64
 	claudeSourceCorrelation *claudeSourceCorrelationTracker
-	deliveryPrekeys         *PrekeyStore
+	// claudeRelayCoverage（设计 v6 §4.3）：relay-owned coverage command/lease 注册表。
+	// 冷事务尾部未答 Ask 的「不合成」决定必须由当前 generation 的 relay loop 同步
+	// 绑定活进程后授权；commit 在同一互斥边界验证 generation/source cut/lease。
+	// 锁顺序：claudeRelayCoverage → ProjectionKernel。
+	claudeRelayCoverage *claudeRelayCoverageRegistry
+	deliveryPrekeys     *PrekeyStore
 	// webPush 是 per-bridge VAPID/subscription/ledger store（web_push_store.go）。
 	// nil = 未接线（无 dataDir 的 dev 模式 / 未注入的单元测试）→ capability 不 echo、RPC 关闭。
 	webPush *WebPushStore
@@ -254,6 +259,7 @@ func newHandlersWithContext(ctx context.Context, bridgeEpoch string) *Handlers {
 		agentRelaySess:          make(map[string]core.AgentSession),
 		agentRelayGen:           make(map[string]uint64),
 		claudeSourceCorrelation: newClaudeSourceCorrelationTracker(),
+		claudeRelayCoverage:     newClaudeRelayCoverageRegistry(),
 		deliveryPrekeys:         prekeys,
 		observation:             observation,
 		relayOutbox:             outbox,
@@ -4981,6 +4987,10 @@ func (h *Handlers) handleQuestionReject(conn Connection, msg WireMessage) {
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
 }
 
+// resolveUserInputWaitTimeout 是 resolve_user_input 的端到端预算（responder 等待 +
+// 投影收口）。包级 var 供测试缩短，生产 10s。
+var resolveUserInputWaitTimeout = 10 * time.Second
+
 // handleResolveUserInput 是 v2 结构化用户输入回答的唯一入口（设计 §7/§10.1）。
 // 它只调用可选能力 core.UserInputResponder；旧 RespondQuestion/RejectQuestion 不作 fallback。
 // 把 adapter 返回的 *core.UserInputError 映射为 WireError（保留稳定 code），不回显 secret/答案正文。
@@ -5050,7 +5060,7 @@ func (h *Handlers) handleResolveUserInput(conn Connection, msg WireMessage, agen
 		return
 	}
 
-	resolveCtx, cancel := context.WithTimeout(h.ctx, 10*time.Second)
+	resolveCtx, cancel := context.WithTimeout(h.ctx, resolveUserInputWaitTimeout)
 	defer cancel()
 	var answers []core.UserInputAnswer
 	if params.Answers != nil {
@@ -5058,7 +5068,26 @@ func (h *Handlers) handleResolveUserInput(conn Connection, msg WireMessage, agen
 	}
 	resolution, err := responder.ResolveUserInput(resolveCtx, params.InteractionID, params.ClientActionID, params.Action, answers)
 	if err != nil {
+		// §4.5.3（设计 v6）：responder 在等待期间因 cancel/session death 返回
+		// session_not_active / interaction_not_found 时，先做一次最终投影查询——
+		// 已出现 turn_terminated/resolved/submitted 就按权威 rev 收口，仍是
+		// interactive pending 才返回 typed error。terminal 与 registry teardown 的
+		// 跨 producer 顺序不会把已终止卡误报成可重试传输失败。
 		var uie *core.UserInputError
+		if errors.As(err, &uie) && (uie.Code == "session_not_active" || uie.Code == "interaction_not_found") {
+			if part, headRev, found := h.projectedUserInput(msg.BackendID, params.SessionID, params.InteractionID); found {
+				status := core.UserInputStatus(part.UserInputStatus)
+				if status != core.UserInputStatusPending || part.UserInputDiagnosticCode == "turn_terminated" {
+					conn.SendResult(msg.RequestID, map[string]any{
+						"interactionId": params.InteractionID,
+						"outcome":       resolutionOutcomeForTerminalPart(part),
+						"currentStatus": part.UserInputStatus,
+						"headRev":       headRev,
+					}, nil)
+					return
+				}
+			}
+		}
 		if errors.As(err, &uie) {
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: uie.Code, Message: uie.Message})
 			return
@@ -5113,33 +5142,40 @@ func (h *Handlers) projectedUserInput(backendID, sessionID, interactionID string
 	if !ok {
 		return ProjectionPart{}, 0, false
 	}
-	// 同一 interactionId 在 claude 双身份（live turn + 冷读 turn）下可能短暂存在
-	// 两份 part；resolve 提交等待以「已结算」为准——先扫非 pending 副本，全部
-	// pending 时返回第一份（保持请求期语义）。
-	var firstPending ProjectionPart
-	foundPending := false
+	// §4.5.3（设计 v6）：同 interaction 多副本（历史双 turn 或迁移前快照）的选择
+	// 优先级固定为 resolved > pending+turn_terminated > submitted > interactive
+	// pending——普通 pending 不得遮住 terminal；与 waitForUserInputResolution 的
+	// 完成条件一致。
+	var best ProjectionPart
+	bestRank := -1
+	found := false
 	for _, turn := range projection.Turns {
 		if turn.Assistant == nil {
 			continue
 		}
 		for _, part := range turn.Assistant.Parts {
 			if part.Type == "user_input" && part.UserInputInteractionID == interactionID {
-				if part.UserInputStatus != string(core.UserInputStatusPending) {
-					return part, projection.SyncRev, true
-				}
-				if !foundPending {
-					firstPending = part
-					foundPending = true
+				rank := userInputPartRank(part)
+				if !found || rank >= bestRank {
+					best = part
+					bestRank = rank
+					found = true
 				}
 			}
 		}
 	}
-	if foundPending {
-		return firstPending, projection.SyncRev, true
+	if !found {
+		return ProjectionPart{}, projection.SyncRev, false
 	}
-	return ProjectionPart{}, projection.SyncRev, false
+	return best, projection.SyncRev, true
 }
 
+// waitForUserInputResolution 等待投影到达可收口状态（设计 v6 §4.5.3）。
+// 完成条件只认 Kernel 可观测事实（selector 优先级 resolved > pending+turn_terminated
+// > submitted > interactive pending）：answered/rejected → 返回 resolved rev；
+// submitted → submitted rev；pending+turn_terminated → terminal rev。
+// OutcomeInProgress 不再有直接成功捷径——Claude 路径不得把 ok=true+pending 暴露给
+// 客户端后失去唤醒源。超时/管线失败返回错误，由既有客户端失败回执解锁。
 func (h *Handlers) waitForUserInputResolution(ctx context.Context, backendID, sessionID, interactionID string, resolution core.UserInputResolution) (ProjectionPart, int, error) {
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
@@ -5147,7 +5183,12 @@ func (h *Handlers) waitForUserInputResolution(ctx context.Context, backendID, se
 		part, headRev, found := h.projectedUserInput(backendID, sessionID, interactionID)
 		if found {
 			status := core.UserInputStatus(part.UserInputStatus)
-			if resolution.Outcome == core.UserInputOutcomeInProgress || status != core.UserInputStatusPending {
+			switch {
+			case status != core.UserInputStatusPending:
+				// answered/rejected/auto_resolved/unavailable/failed/submitted。
+				return part, headRev, nil
+			case part.UserInputDiagnosticCode == "turn_terminated":
+				// terminal-first：投影已终止，按 terminal rev 收口。
 				return part, headRev, nil
 			}
 		}
@@ -6060,4 +6101,14 @@ func isSensitiveReadFilePath(path string) bool {
 		}
 	}
 	return false
+}
+
+// resolutionOutcomeForTerminalPart 把最终投影查询命中的 part 映射为 RPC outcome
+//（§4.5.3）：terminal-first（pending+turn_terminated）与 submitted → accepted
+//（投影已终止/已提交是成功收口）；resolved → already_resolved。
+func resolutionOutcomeForTerminalPart(part ProjectionPart) core.UserInputResolutionOutcome {
+	if userInputStatusIsResolved(part.UserInputStatus) {
+		return core.UserInputOutcomeAlreadyResolved
+	}
+	return core.UserInputOutcomeAccepted
 }

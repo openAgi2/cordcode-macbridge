@@ -93,9 +93,10 @@ func isSessionSyncV2RawTimelineEvent(event string) bool {
 // Canonical structured-input events are projection-only for every connection. Legacy clients
 // receive the one-way question_asked/question_resolved presentation emitted by the adapter after
 // the canonical event has entered the reducer; v2 clients receive only the resulting projection.
+// user_input_submitted（设计 v6 §4.7）同属 canonical 控制事实：raw frame 不外泄。
 func isProjectionOnlyCanonicalEvent(event string) bool {
 	switch event {
-	case "user_input_requested", "user_input_resolved":
+	case "user_input_requested", "user_input_resolved", "user_input_submitted":
 		return true
 	default:
 		return false

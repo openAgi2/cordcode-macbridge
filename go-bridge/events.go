@@ -315,6 +315,21 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 			"resolvedAt":    ui.ResolvedAt,
 		}), false
 
+	case core.EventUserInputSubmitted:
+		// Submitted（设计 v6 §4.7）：control response 写成功的 Kernel 控制事实。
+		// payload 只带 interactionId/turnId/itemId，不带答案正文；projection-only
+		//（isProjectionOnlyCanonicalEvent 白名单），raw frame 不外泄。
+		if ev.UserInput == nil {
+			return "", nil, false
+		}
+		ui := ev.UserInput
+		return "user_input_submitted", eventData(ev, map[string]interface{}{
+			"turnId":        ev.TurnID,
+			"itemId":        ev.ItemID,
+			"interactionId": ui.InteractionID,
+			"status":        string(ui.Status),
+		}), false
+
 	case core.EventSessionCommand:
 		// Host slash-command lifecycle (folded by commandId): dsh-web maps the
 		// official command/run|done rail; Grok mirrors the official pager's local

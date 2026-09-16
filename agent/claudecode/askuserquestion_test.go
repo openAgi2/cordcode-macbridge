@@ -82,16 +82,29 @@ func newAskTestSession(t *testing.T) (*claudeSession, *captureStdin) {
 // makeAskControlRequest builds a can_use_tool control request for AskUserQuestion
 // with the given parsed question payloads (each a map[string]any with
 // question/header/multiSelect/options).
+//
+// 双 identity（设计 v6 §2.1）：外层 request_id（control_response 配对）与
+// request.tool_use_id（timeline canonical seed）是两个不同值——真实 2.1.209 配对
+// fixture 证明二者恒不相等，测试构造保持同一形状。
 func makeAskControlRequest(requestID string, questions []any) map[string]any {
+	return makeAskControlRequestWithToolUse(requestID, "toolu_"+requestID, questions)
+}
+
+// makeAskControlRequestWithToolUse 允许显式指定 tool_use_id（缺省/空值 fail-closed 测试用）。
+func makeAskControlRequestWithToolUse(requestID, toolUseID string, questions []any) map[string]any {
+	request := map[string]any{
+		"subtype":   "can_use_tool",
+		"tool_name": "AskUserQuestion",
+		"input": map[string]any{
+			"questions": questions,
+		},
+	}
+	if toolUseID != "" {
+		request["tool_use_id"] = toolUseID
+	}
 	return map[string]any{
 		"request_id": requestID,
-		"request": map[string]any{
-			"subtype":   "can_use_tool",
-			"tool_name": "AskUserQuestion",
-			"input": map[string]any{
-				"questions": questions,
-			},
-		},
+		"request":    request,
 	}
 }
 
@@ -125,7 +138,10 @@ func drainLegacyEvent(t *testing.T, cs *claudeSession) *core.Event {
 	for {
 		select {
 		case ev := <-cs.events:
-			if ev.Type != core.EventUserInputRequested && ev.Type != core.EventUserInputResolved {
+			// user_input_submitted 是 canonical 控制事实（设计 v6 §4.7），legacy
+			// 展示层测试跳过它继续找 question_asked/question_resolved。
+			if ev.Type != core.EventUserInputRequested && ev.Type != core.EventUserInputResolved &&
+				ev.Type != core.EventUserInputSubmitted {
 				return &ev
 			}
 		case <-deadline:
