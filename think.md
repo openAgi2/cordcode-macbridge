@@ -1,4 +1,39 @@
 
+## 2026-09-16 dsh-web 活会话尾 turn 测试失败：86df3f1 之后「gate 等待」断言过时，不是回归
+
+`TestDSHWebProjectionTrailingUnansweredWaitsWhenActive`（0a4e945 加入）自 round 8
+Defect B 修复 `86df3f1`（2026-09-15，dsh-web 加入 HasSessionSubscriber → sourceIsLive
+§3.1 名单）起失败。临时 worktree 在 `86df3f1^`（fa3d41e）复跑通过，实证因果。
+
+**根因不是产品缺陷，是测试断言过时。** 旧断言「探活 active → commit gate 等待、
+kernel 不得 Ready」写于 86df3f1 之前，与 §3.1 语义正面冲突：
+
+- e6a16a2（2026-08-12，Claude running-session cold-open）的原始裁决：commit gate
+  阻塞在无终态的活跃 turn 上正是 15s 卡死形态；§3.1 live 信号（sourceIsLive）让
+  活跃 turn 以 honest running partial 提交，终态事件归 live rail。
+- 86df3f1 给 dsh-web 的 §3.1 信号 = pull 自订阅（handleGetSessionProjection 在
+  admission 前订阅，WP5）。任何 pull 都使 HasSessionSubscriber 恒真 → sourceIsLive
+  恒真 → 活跃尾 turn 必然 running partial 提交。旧测试的「等待」断言在该信号存在
+  时不可满足，恰好复现 e6a16a2 修掉的死锁形态。
+- live rail 承诺成立：dsh-web mux 流覆盖全部会话（外部 turn 含，streams.go 头注释），
+  未绑定会话走 passive channel → startPassiveSubscription（passiveFeedAllowed：
+  hasKernelState 即放行）→ deltaBatcher → kernel。running partial 提交后终态事件
+  会经 live rail 收口，不是猜完成。
+
+**M1 核心不变量保留**：探活 active → 绝不把尾 turn 按死封口（无 turn_error seal、
+无 terminal 提交）。死会话（SettlesWhenIdle）路径不受影响——86df3f1 只加 §3.1 信号，
+sealTrailingUnanswered 仍由 IsSessionActive 驱动。
+
+**修**：测试改名 `TestDSHWebProjectionTrailingUnansweredCommitsRunningPartialWhenActive`，
+断言改为：pull 快速返回（不烧 hydrate 预算）、无 terminal 结算、kernel Ready、
+execution.phase=running、ActiveTurnID=u1、尾 turn status=running。注释保留旧名与
+演进链（e6a16a2 → 86df3f1）。go-bridge 全包 -count=1 全绿（158.9s）。
+
+**教训**：给 backend 加 §3.1 live 信号后，要同步审计该 backend 域内所有「gate 必须
+等待」形状的断言——它们写在没有 live 信号的年代，语义已翻转。同类信号（grokbuild
+HasSessionSubscriber、opencode-web/codex-remote registry liveness）的域内测试值得
+同查（grokbuild 无 trailing-waits 断言，已核对）。
+
 ## 2026-09-14 codex-remote error 通知风暴：闭源 relay 对客户端 ack 的自激振荡（producer 归因见补记）
 
 现象：go-bridge 自 01:15 起 codex-remote suppressed byte-identical error notifications

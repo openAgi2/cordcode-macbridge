@@ -144,8 +144,14 @@ func TestDSHWebProjectionTrailingUnansweredSettlesWhenIdle(t *testing.T) {
 	}
 }
 
-// 活会话不封口：探活 active → commit gate 等待（不猜完成）。
-func TestDSHWebProjectionTrailingUnansweredWaitsWhenActive(t *testing.T) {
+// 活会话不封口（M1）：探活 active → 绝不把尾 turn 按死封口；pull 自订阅即
+// §3.1 live 信号（86df3f1，同 claude/codex e6a16a2 裁决），活跃尾 turn 以
+// honest running partial 提交，终态事件归 live rail（mux 全会话覆盖）。
+// （原名 TestDSHWebProjectionTrailingUnansweredWaitsWhenActive：86df3f1 把
+// dsh-web 加入 HasSessionSubscriber §3.1 名单后，旧「gate 等待、kernel 不得
+// Ready」断言过时——阻塞正是 e6a16a2 修掉的 15s 卡死形态，对活跃 turn 冷开
+// 同样成立。）
+func TestDSHWebProjectionTrailingUnansweredCommitsRunningPartialWhenActive(t *testing.T) {
 	prevTimeout := coldHydrateTimeout
 	coldHydrateTimeout = 200 * time.Millisecond
 	t.Cleanup(func() { coldHydrateTimeout = prevTimeout })
@@ -165,17 +171,38 @@ func TestDSHWebProjectionTrailingUnansweredWaitsWhenActive(t *testing.T) {
 	h.agents = map[string]core.Agent{"dsh-web": agent}
 	h.mu.Unlock()
 
+	start := time.Now()
 	conn, _ := dshWebPull(h, sessionID, 0)
-	if conn.err == nil {
-		// 活跃尾部要么 hydrating（budget 内等待）——绝不能以完成态成功。
-		raw, _ := json.Marshal(conn.data)
-		if strings.Contains(string(raw), "aborted") || strings.Contains(string(raw), "error") {
-			t.Fatalf("active session must not settle as terminal: %s", string(raw))
+	if elapsed := time.Since(start); elapsed >= 5*time.Second {
+		t.Fatalf("active cold open took %s; running partial must commit without burning the hydrate budget", elapsed)
+	}
+	if conn.err != nil {
+		t.Fatalf("active session pull error: %+v", conn.err)
+	}
+	// 不封口：活跃尾 turn 绝不能以终态结算。
+	raw, _ := json.Marshal(conn.data)
+	if strings.Contains(string(raw), "aborted") || strings.Contains(string(raw), "error") {
+		t.Fatalf("active session must not settle as terminal: %s", string(raw))
+	}
+	// §3.1 honest running partial：kernel Ready 提交，尾 turn 保持 running。
+	if st := h.projectionKernel.Status("dsh-web", sessionID); st.Phase != ProjectionHydrateReady {
+		t.Fatalf("active trailing turn must commit as running partial (phase=%q)", st.Phase)
+	}
+	proj := liveOnlyProjectionOf(t, conn)
+	if proj.Execution.Phase != "running" {
+		t.Fatalf("execution phase = %q, want running (honest partial)", proj.Execution.Phase)
+	}
+	if proj.Execution.ActiveTurnID != "u1" {
+		t.Fatalf("activeTurnId = %q, want u1", proj.Execution.ActiveTurnID)
+	}
+	turnStatus := ""
+	for _, turn := range proj.Turns {
+		if turn.TurnID == "u1" {
+			turnStatus = turn.Status
 		}
 	}
-	// kernel 不得 Ready（活跃尾 turn 无终态可提交）。
-	if st := h.projectionKernel.Status("dsh-web", sessionID); st.Phase == ProjectionHydrateReady {
-		t.Fatal("active trailing turn must NOT commit as ready")
+	if turnStatus != "running" {
+		t.Fatalf("trailing turn status = %q, want running (not sealed)", turnStatus)
 	}
 }
 
