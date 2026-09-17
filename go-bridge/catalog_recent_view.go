@@ -81,14 +81,21 @@ func recentCatalogScope(backendID string) catalogWireScope {
 }
 
 // prepareRecentSnapshot normalizes a global enriched wire list into the recent
-// view: drop non-root rows (non-empty parentID), then sort by authoritative
-// recency (updatedAtMillis DESC, id ASC tie-break — the same stable order the
-// cursor anchor relies on). The input is the backend's own enriched global
-// snapshot; the output is the frozen recent catalog a pageV2 call slices.
+// view: drop non-root rows (non-empty parentID) and archived rows, then sort by
+// authoritative recency (updatedAtMillis DESC, id ASC tie-break — the same
+// stable order the cursor anchor relies on). The input is the backend's own
+// enriched global snapshot; the output is the frozen recent catalog a pageV2
+// call slices.
 //
 // parentID is the only child marker on the wire (opencode/dsh-web carry it;
 // claude fork children are already hidden upstream of this point). Rows without
 // the field are root by definition.
+//
+// Archived rows (top-level archivedAtMillis > 0) are hidden: the recent feed is
+// the active timeline (Phase 3 §5.5 — archived conversations disappear from the
+// list, ChatGPT parity). Without this filter an archived row re-enters the feed
+// on the next sessions_changed refresh after the client-side convergence
+// already removed it.
 func prepareRecentSnapshot(maps []map[string]interface{}) []map[string]interface{} {
 	roots := make([]map[string]interface{}, 0, len(maps))
 	for _, m := range maps {
@@ -96,6 +103,9 @@ func prepareRecentSnapshot(maps []map[string]interface{}) []map[string]interface
 			continue
 		}
 		if parent, _ := m["parentId"].(string); strings.TrimSpace(parent) != "" {
+			continue
+		}
+		if archivedMs, _ := m["archivedAtMillis"].(int64); archivedMs > 0 {
 			continue
 		}
 		roots = append(roots, m)

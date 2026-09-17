@@ -111,6 +111,32 @@ func TestPrepareRecentSnapshot_RootFilterAndRecencyOrder(t *testing.T) {
 	}
 }
 
+// TestPrepareRecentSnapshot_HidesArchivedRows: rows carrying a top-level
+// archivedAtMillis marker must not enter the recent feed (Phase 3 §5.5 — the
+// feed is the active timeline). Without this filter an archived row re-enters
+// on the next refresh after client-side convergence removed it.
+func TestPrepareRecentSnapshot_HidesArchivedRows(t *testing.T) {
+	input := []map[string]interface{}{
+		{"id": "live", "updatedAtMillis": int64(100)},
+		{"id": "archived", "updatedAtMillis": int64(500), "archivedAtMillis": int64(400)},
+		{"id": "archived-zero", "updatedAtMillis": int64(600), "archivedAtMillis": int64(0)},
+	}
+	got := prepareRecentSnapshot(input)
+	ids := make([]string, 0, len(got))
+	for _, m := range got {
+		ids = append(ids, m["id"].(string))
+	}
+	want := []string{"archived-zero", "live"}
+	if len(ids) != len(want) {
+		t.Fatalf("prepareRecentSnapshot ids = %v, want %v", ids, want)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("prepareRecentSnapshot ids = %v, want %v", ids, want)
+		}
+	}
+}
+
 // TestRecentView_CapabilityGateFailsClosed: a backend that does not opt into
 // RecentCatalogProvider gets not_supported (never a standard-view fallback).
 // The connection must declare catalog_cursor_epoch_v2 first so the request
@@ -352,3 +378,62 @@ var _ core.RecentCatalogProvider = (*fakeRecentCatalogAgent)(nil)
 
 // context compile guard: the builder closures must accept a context.Context.
 var _ = context.Background
+
+// TestRecentView_ArchiveFencesWireSnapshot: archive_session 成功后必须 fence 该
+// backend 的 catalog wire cache（catalogSnapshotTTL=10min，不 fence 的话归档行在
+// TTL 窗口内持续从 recent feed 回流，压过客户端收敛——2026-09-17 真机回归）。
+// 流程：page-0 建快照（含 target）→ agent 侧 target 获得归档标记 → archive_session →
+// 再 page-0：快照必须重建，target 不得返回。
+func TestRecentView_ArchiveFencesWireSnapshot(t *testing.T) {
+	base := []core.AgentSessionInfo{
+		{ID: "live", Summary: "live", ModifiedAt: time.Unix(1710000100, 0).UTC()},
+		{ID: "target", Summary: "to archive", ModifiedAt: time.Unix(1710000200, 0).UTC()},
+	}
+	agent := &fakeRecentCatalogAgent{
+		fakeAgent:    &fakeAgent{name: "dsh-web", sessionInfos: append([]core.AgentSessionInfo(nil), base...)},
+		recentOK:     true,
+	}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("dsh-web", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+	handlers.eventPublisher.SetConnCatalogCursorEpochV2(serverConn, true)
+
+	// 1. page-0：建快照，target 在 feed 里。
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "dsh-web", Method: "list_sessions", RequestID: "r1",
+		Params: recentRequestParams(t, map[string]any{"limit": 10}),
+	})
+	msgs := readJSONMaps(t, clientConn, 1)
+	if ids := resultSessionIDs(t, msgs[0]); len(ids) != 2 {
+		t.Fatalf("page-0 ids = %v, want both sessions", ids)
+	}
+
+	// 2. 归档 target：agent 侧集合更新为带 ArchivedAt 标记的 target。
+	archivedAt := time.Unix(1710000300, 0).UTC()
+	agent.fakeAgent.sessionInfos = []core.AgentSessionInfo{
+		base[0],
+		{ID: "target", Summary: "to archive", ModifiedAt: base[1].ModifiedAt, ArchivedAt: archivedAt},
+	}
+	agent.fakeAgent.archiveResult = &core.AgentSessionInfo{
+		ID: "target", Summary: "to archive", ModifiedAt: base[1].ModifiedAt, ArchivedAt: archivedAt,
+	}
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "dsh-web", Method: "archive_session", RequestID: "arch-1",
+		Params: mustJSONRaw(t, map[string]any{"sessionId": "target", "archivedAtMillis": float64(archivedAt.UnixMilli())}),
+	})
+	if msgs := readJSONMaps(t, clientConn, 1); msgs[0]["ok"] != true {
+		t.Fatalf("archive_session ok = %#v, want true", msgs[0]["ok"])
+	}
+
+	// 3. 再 page-0：fence 必须强制重建快照；带标记的 target 被
+	// prepareRecentSnapshot 过滤，且不得从缓存快照回流。
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "dsh-web", Method: "list_sessions", RequestID: "r2",
+		Params: recentRequestParams(t, map[string]any{"limit": 10}),
+	})
+	msgs = readJSONMaps(t, clientConn, 1)
+	if ids := resultSessionIDs(t, msgs[0]); len(ids) != 1 || ids[0] != "live" {
+		t.Fatalf("post-archive page-0 ids = %v, want [live] (fence rebuilt snapshot; archived row must not return)", ids)
+	}
+}

@@ -2558,6 +2558,11 @@ func (h *Handlers) handleArchiveSession(conn Connection, msg WireMessage, agent 
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "archive_failed", Message: "backend returned no session"})
 		return
 	}
+	// 归档改变 catalog 内容，必须立刻作废 wire cache 快照（catalogSnapshotTTL 长达
+	// 10 分钟，标准 catalog 按 sidecar mtime 失效，但 recent view 等走
+	// catalogWireSnapshotCache 的快照不会感知归档标记——不 fence 的话归档行会在
+	// TTL 窗口内持续从 recent feed 回流，压过客户端收敛）。
+	h.openCodeCatalogWireCache().FenceBackend(agentBackendID(agent))
 	conn.SendResult(msg.RequestID, map[string]interface{}{"session": sessionsToWire([]core.AgentSessionInfo{*session})[0]}, nil)
 }
 
