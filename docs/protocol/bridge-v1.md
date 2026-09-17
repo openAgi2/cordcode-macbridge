@@ -673,6 +673,24 @@ Rules:
 - For OpenCode directory-scoped lists, the upstream `/session` endpoint is array-only (no upstream cursor). MacBridge fetches a bounded upstream page (≤100, the upstream API's hard cap), then synthesizes bridge-owned cursor pagination over that in-memory result; `hasMore` reflects the remaining bridge-owned slice for the current request scope. If the workspace has more than 100 sessions, the excess is silently invisible at the upstream boundary — a known ceiling imposed by the upstream API shape, not a bridge choice.
 - `rootsOnly` remains valid for legacy/non-OpenCode list calls. OpenCode forwards it as the server-side root-session filter; clients must still scope cursors to the same backend/project/directory.
 
+### `list_sessions` catalog views (`catalogView`, additive)
+
+`list_sessions` gains an optional `catalogView` parameter selecting a catalog view (session-list parity plan `docs/2026-09-17-session-list-chatgpt-parity-implementation-plan.md` §6.1):
+
+```ts
+{
+  "catalogView"?: "standard" | "recent"
+  // recent view: no directory, rootsOnly must be true
+}
+```
+
+- Omitted or `"standard"`: existing semantics unchanged (global fair-home / directory-scoped / cursor paging).
+- `"recent"`: a **global root-session recency view**. The response is the same `{ sessions, nextCursor, hasMore }` envelope; `sessions` are root sessions (rows carrying a non-empty `parentID`/`parentId` are excluded) ordered by authoritative recency (`updatedAtMillis` DESC, `id` ASC tie-break), paged over the bridge-owned cursor-v2 frozen snapshot. `directoryTotals` is NOT sent for the recent view (it is fair-home-only).
+- Fail-closed parameter matrix: `catalogView:"recent"` + non-empty `directory` → `invalid_params`; `catalogView:"recent"` without `rootsOnly:true` → `invalid_params`. Unknown values → `invalid_params`. The bridge never silently degrades a recent request to standard.
+- `catalogView` participates in the snapshot scope identity: a recent-view cursor cannot be replayed against a standard view (rejected `cursor_stale`) and vice versa. Clients MUST treat cursors as scoped to the catalog view.
+- Capability: the backend advertises `session_catalog_recent` when its driver opts in via the `RecentCatalogProvider` interface (claudecode, codex/codex-web/codex-remote, grokbuild, dsh-web, opencode-web at introduction). Backends without the capability return `not_supported` for `catalogView:"recent"`; clients MUST NOT show a time-ordered mode for them.
+- Codex Remote upstream ceiling: the official catalog read is capped at 500 rows; reaching the cap reports `hasMore:false` (honest EOF), not a fabricated "all history loaded" claim.
+
 ### Cursor invalidity (`cursor_stale`)
 
 `cursor_stale` is the shared, generic cursor-invalidity error code for BOTH pagination surfaces — `list_sessions` session-list paging and `get_session_messages` history paging. It is a pagination-negotiation result, NOT a catalog live/stale state and NOT a UI error: clients MUST NOT surface it as an error. On receipt, the client discards the current cursor chain and reloads from page-0 (list) / the first page (history), merging the fresh result with unchanged local state by id.
@@ -2349,6 +2367,16 @@ session_pin
 A backend advertises `session_pin` in `capabilities` when its agent implements the `SessionPinner`
 interface (independent of `session_mutation` / `session_delete`). It is advertised for Claude,
 Codex, and OpenCode. Clients MUST gate pin/unpin on `session_pin`, not on `session_mutation`.
+
+## Recent Session Catalog (`session_catalog_recent`)
+
+The `session_catalog_recent` capability backs the time-ordered session list mode
+(`list_sessions` with `catalogView:"recent"`; see § `list_sessions` catalog views). A backend
+advertises it when its agent implements the `RecentCatalogProvider` interface. It is advertised
+for claudecode, codex/codex-web/codex-remote, grokbuild, dsh-web, and opencode-web; live-only
+backends (dsh) do not advertise it. Clients MUST gate the time-ordered mode on this capability
+and MUST NOT request `catalogView:"recent"` from a backend that lacks it (the bridge answers
+`not_supported` fail-closed).
 
 ### Wire field
 
