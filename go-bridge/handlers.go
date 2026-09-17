@@ -3827,6 +3827,17 @@ func (h *Handlers) findClaudeSessionFile(sessionID string, optDir string) (proje
 }
 
 func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent core.Agent) {
+	// `catalogView:"recent"` 全局 recency 视图（docs/2026-09-17-session-list-chatgpt-parity
+	// -implementation-plan.md §6.1）：参数矩阵 fail-closed 校验 + RecentCatalogProvider
+	// capability 门，然后按 backend 取其全局 enriched 快照 → root 过滤 + recency 排序 →
+	// cursor-v2 冻结快照分页。standard 视图（缺省）不受影响，继续走下面既有分支。
+	if view, invalid := parseCatalogView(extractStringParam(msg, "catalogView"), extractDir(msg), extractBool(msg, "rootsOnly")); invalid != nil {
+		conn.SendResult(msg.RequestID, nil, invalid)
+		return
+	} else if view == catalogViewRecent {
+		h.recentHandleListSessions(conn, msg, agent)
+		return
+	}
 	// Canonical public routing reaches this function only after catalog_cursor_epoch_v2
 	// negotiation. Claude intentionally keeps its declared v1-shaped compatibility cursor.
 	// Capability 断言而非 Name()=="codex"：codex-web 与 codex 共用 thread/list 富 catalog
@@ -3891,7 +3902,13 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 		if requestedDir != "" {
 			wireSessions = filterWireSessionsByDirectory(wireSessions, requestedDir)
 		}
-		result := paginateSessionList(wireSessions, extractStringParam(msg, "cursor"), limit)
+		cursor := extractStringParam(msg, "cursor")
+		// recent 视图的 v2 cursor 不得回放进 standard 视图（v1 路径会静默盲切首页）。
+		if stale := rejectCrossViewCursor(cursor); stale != nil {
+			metrics.sendResult(conn, msg.RequestID, nil, stale)
+			return
+		}
+		result := paginateSessionList(wireSessions, cursor, limit)
 		// 通知标题缓存（设计 delta §2.2）：标题只能来自真实 catalog 响应。
 		h.webPushTitles.noteFromWire(agentBackendID(agent), result)
 		metrics.wireMapping += time.Since(mappingStarted)
@@ -3906,6 +3923,11 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 	// immutable snapshot instead of reparsing every project transcript.
 	dir := extractDir(msg)
 	cursor := extractStringParam(msg, "cursor")
+	// recent 视图的 v2 cursor 不得回放进 standard 视图（v1 路径会静默盲切首页）。
+	if stale := rejectCrossViewCursor(cursor); stale != nil {
+		metrics.sendResult(conn, msg.RequestID, nil, stale)
+		return
+	}
 	projectKey := ""
 	if dir != "" {
 		if resolvedKey, projectPath := resolveProjectDir(dir); projectPath != "" {

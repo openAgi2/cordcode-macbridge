@@ -864,6 +864,22 @@ type SessionPinner interface {
 	ListPinnedSessions(ctx context.Context) ([]SessionPin, error)
 }
 
+// RecentCatalogProvider is an opt-in interface for agents whose global
+// ListSessions can back the `catalogView:"recent"` session-list view
+// (docs/2026-09-17-session-list-chatgpt-parity-implementation-plan.md §6.1).
+// The recent view is bridge-owned (global root sessions, authoritative recency
+// order, cursor-v2 paging over a frozen snapshot); the driver opts in by
+// implementing this interface to advertise `session_catalog_recent`. Drivers
+// whose global list is live-only (dsh) or otherwise unable to provide a stable
+// recency-ordered root catalog must NOT implement it — the handler then fails
+// closed with not_supported and iOS hides the time-ordered mode.
+type RecentCatalogProvider interface {
+	// SupportsRecentCatalog reports whether this driver's global ListSessions is a
+	// usable recent-catalog source (root sessions in authoritative recency order).
+	// It is a method (not a bare marker) so mode-conditional drivers can decline.
+	SupportsRecentCatalog() bool
+}
+
 // CheckpointProvider is an opt-in interface for agents whose sessions MacBridge may
 // snapshot into hidden git refs after each completed turn (§6.1 read-only checkpoint
 // diff). The snapshot is a workspace FILE snapshot only — it is NOT a session truth

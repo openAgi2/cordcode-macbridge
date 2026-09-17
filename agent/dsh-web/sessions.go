@@ -356,3 +356,8 @@ func pinScope(directory string) string {
 var _ core.SessionPinner = (*Agent)(nil)
 var _ core.SessionRenamer = (*Agent)(nil)
 var _ core.RunningSessionLister = (*Agent)(nil)
+
+// SupportsRecentCatalog opts dsh-web into the `catalogView:"recent"` session-list
+// view (core.RecentCatalogProvider). Its official session.list is a global
+// recency-ordered catalog; the bridge filters to root sessions (parentID empty).
+func (a *Agent) SupportsRecentCatalog() bool { return true }

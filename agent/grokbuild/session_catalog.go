@@ -1276,3 +1276,8 @@ func looksLikeFrameworkBootstrap(text string) bool {
 	}
 	return false
 }
+
+// SupportsRecentCatalog opts grokbuild into the `catalogView:"recent"` session-list
+// view (core.RecentCatalogProvider). session/list is backend-global and
+// recency-ordered; the bridge filters to root sessions for the recent view.
+func (a *Agent) SupportsRecentCatalog() bool { return true }

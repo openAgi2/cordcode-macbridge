@@ -2436,3 +2436,10 @@ func findProjectDir(homeDir, absWorkDir string) string {
 
 	return ""
 }
+
+// SupportsRecentCatalog opts claudecode into the `catalogView:"recent"` session-list
+// view (core.RecentCatalogProvider; docs/2026-09-17-session-list-chatgpt-parity
+// -implementation-plan.md §6.1). The claude session catalog already maintains a
+// global recency-ordered snapshot with fork children hidden, so the bridge can
+// serve root-only recent paging from the same source.
+func (a *Agent) SupportsRecentCatalog() bool { return true }

@@ -81,6 +81,11 @@ type catalogWireScope struct {
 	Global    bool
 	Directory string
 	RootsOnly bool
+	// View separates the standard catalog views (fair-home / directory paging) from the
+	// recent view (`catalogView:"recent"`, catalog_recent_view.go). Empty == standard;
+	// a recent snapshot and its cursor chain must never be reused by a standard request
+	// or vice versa (plan §3.1/§6.1「catalogView 必须进入 scope identity」).
+	View string
 }
 
 func newCatalogWireScope(backendID, dir string, rootsOnly bool) catalogWireScope {
@@ -116,7 +121,11 @@ func (s catalogWireScope) identity() string {
 	if s.RootsOnly {
 		roots = "1"
 	}
-	return s.BackendID + "\x00" + global + "\x00" + s.Directory + "\x00" + roots
+	view := s.View
+	if view == "" {
+		view = catalogViewStandard
+	}
+	return s.BackendID + "\x00" + global + "\x00" + s.Directory + "\x00" + roots + "\x00" + view
 }
 
 // openCodeCatalogScopeKey 派生 OpenCode scope 缓存键：(backendID, directory, rootsOnly)。

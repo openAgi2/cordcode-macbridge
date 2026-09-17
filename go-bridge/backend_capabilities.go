@@ -89,6 +89,14 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 	if _, ok := agent.(core.SessionPinner); ok {
 		caps = append(caps, "session_pin")
 	}
+	// session_catalog_recent（session-list parity 方案 §6.1）：backend 的全局列表可承载
+	// `catalogView:"recent"` 全局 recency 视图时广告。opt-in 接口派生（与 SessionPinner 同
+	// 模板）：claudecode / codex(codex-web,codex-remote) / grokbuild / dsh-web / opencode-web
+	// 实现 RecentCatalogProvider；live-only dsh 不实现 → 不广告 → iOS 不显示时间模式。
+	// handler 侧 fail-closed：无 capability 的 backend 请求 recent 返回 not_supported。
+	if provider, ok := agent.(core.RecentCatalogProvider); ok && provider.SupportsRecentCatalog() {
+		caps = append(caps, "session_catalog_recent")
+	}
 	// SessionPermissionResponder is the truthful agent-level path used when a client is
 	// observing a Mac-originated turn without a live bridge AgentSession. Prefer that
 	// explicit capability over legacy ToolAuthorizer inference. The old codex/opencode

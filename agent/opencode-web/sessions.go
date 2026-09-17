@@ -287,3 +287,9 @@ func (a *Agent) fetchSessionInfo(ctx context.Context, c *Client, sessionID strin
 	}
 	return &entry, nil
 }
+
+// SupportsRecentCatalog opts opencode-web into the `catalogView:"recent"`
+// session-list view (core.RecentCatalogProvider). The desktop-persisted project
+// list plus per-project session fetch yields a global recency-ordered catalog;
+// the bridge filters to root sessions (parentId empty) for the recent view.
+func (a *Agent) SupportsRecentCatalog() bool { return true }

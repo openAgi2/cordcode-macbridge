@@ -120,3 +120,9 @@ func mapCatalogThread(row catalogThreadRow) core.AgentSessionInfo {
 	}
 	return info
 }
+
+// SupportsRecentCatalog opts codex-remote into the `catalogView:"recent"` session-list
+// view (core.RecentCatalogProvider). thread/list is a global recency-ordered root
+// catalog; the official 500-row read ceiling is surfaced as hasMore=false by the
+// bridge (plan §6.1) rather than hidden here.
+func (a *Agent) SupportsRecentCatalog() bool { return true }
