@@ -2378,6 +2378,28 @@ backends (dsh) do not advertise it. Clients MUST gate the time-ordered mode on t
 and MUST NOT request `catalogView:"recent"` from a backend that lacks it (the bridge answers
 `not_supported` fail-closed).
 
+## Atomic Session Action Capabilities (`session_rename` / `session_archive`)
+
+Session mutation surfaces are advertised as ATOMIC capabilities (session-list parity plan §6.2 /
+Phase 3), each derived from its own driver interface:
+
+```text
+session_rename   ← core.SessionRenamer
+session_archive  ← core.SessionArchiver
+session_delete   ← core.SessionDeleter (pre-existing)
+session_pin      ← core.SessionPinner (pre-existing)
+```
+
+- A backend advertises each capability independently: Grok Build (rename + delete, no archive)
+  and DSH Web (rename + pin, no archive/delete) express their real surfaces without the legacy
+  combination hiding them.
+- The legacy `session_mutation = SessionRenamer && SessionArchiver` AND-combination is RETAINED
+  unchanged for old clients. New clients MUST consume the atomic capabilities only — no backend
+  name special-casing and no `session_mutation` fallback.
+- Clients MUST gate each action on its own capability: long-press rename on `session_rename`,
+  swipe/long-press archive on `session_archive`, long-press delete on `session_delete`, and
+  pin/unpin on `session_pin`. Absence means the action is NOT rendered at all.
+
 ### Wire field
 
 `BridgeSessionInfo.pinnedAtMillis?: number` — epoch-ms representing when the user pinned the

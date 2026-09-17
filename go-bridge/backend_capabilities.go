@@ -75,6 +75,17 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 			caps = append(caps, "session_mutation")
 		}
 	}
+	// session-list parity §6.2 原子动作 capability：rename/archive 独立广告，让
+	// 「只支持 rename + delete、不支持 archive」的 backend（Grok）和「rename + pin、
+	// 无 archive/delete」的 backend（DSH Web）能诚实表达能力。旧 session_mutation
+	// 保留 AND 语义供旧客户端；新版侧栏只消费原子 capability，不做 backend 名称
+	// 特判，也不把 session_mutation 当作新版 fallback。
+	if _, ok := agent.(core.SessionRenamer); ok {
+		caps = append(caps, "session_rename")
+	}
+	if _, ok := agent.(core.SessionArchiver); ok {
+		caps = append(caps, "session_archive")
+	}
 	// §6.2: A-class static positive capabilities (content_chunking for claude,
 	// claude question_reply, external_turn_streaming, opencode todos 兜底) migrated
 	// out of id-keyed checks into the driver's WireDescriptor.StaticCapabilities
