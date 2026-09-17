@@ -2368,6 +2368,54 @@ A backend advertises `session_pin` in `capabilities` when its agent implements t
 interface (independent of `session_mutation` / `session_delete`). It is advertised for Claude,
 Codex, and OpenCode. Clients MUST gate pin/unpin on `session_pin`, not on `session_mutation`.
 
+## Session Preview (`session_preview_v1`)
+
+The `session_preview_v1` capability backs read-only latest-turn previews for the session list
+(session-list parity plan §6.3 / Phase 4). It is advertised for exactly the projection-backed
+backends (`backendSupportsProjectionHydrate`: claude/claudecode, codex/codex-web/codex-remote,
+opencode/opencode-web, grokbuild, deepseek, dsh-web). Backends without it answer `not_supported`
+fail-closed.
+
+### RPC: `get_session_preview`
+
+```json
+// request
+{ "backendId": "claudecode", "sessionId": "…", "directory"?: "…" }
+// response data
+{
+  "sessionId": "…",
+  "headRev": 42,
+  "latestTurn"?: BridgeTurnProjection,
+  "truncated": false
+}
+```
+
+- `latestTurn` reuses the canonical `BridgeTurnProjection` shape (schema
+  `bridge-v1.types.ts`; Go `TurnProjection`; iOS `SessionTurnProjection`). No second turn
+  content shape exists. It carries the existing detail SUMMARY fields
+  (`detailLoadState`/`detailManifestRev`/…) but the handler never fetches detail chunks.
+- `headRev` is the Projection Kernel head revision at preview generation and is FROZEN to equal
+  `SessionProjection.syncRev` of the committed source projection (same value, envelope-only
+  name). Tests lock this invariant.
+- Data source is ONLY the committed Projection Kernel; a cold session joins the existing
+  single-flight hydrate (`projection.hydrating` is a retryable answer). The handler never falls
+  back to legacy history, never calls `subscribeConnToSession`, never starts a live relay, and
+  never changes timeline writer ownership.
+- Empty projection (no turns): `latestTurn` key is absent — the handler never fabricates a
+  summary.
+- Budget: the serialized `latestTurn` is capped at 128 KiB. When over budget, whole parts
+  (projection items) are dropped from the OLDER content forward (user parts → system parts →
+  assistant parts) and `truncated:true` is set. JSON is never cut mid-part and tool state is
+  never fabricated.
+- Errors: `projection.hydrating` (retryable), `projection.not_found`,
+  `projection.not_migrated`, `projection.hydrate_failed` — same semantics as the projection
+  pull path.
+
+Retrieval decisions (recorded for reviewers): `turn_detail_lazy_v1` / `turn_detail_chunks_v1`
+(`session_turn_items`) serve per-turn detail expansion for already-loaded turns and cannot find
+"latest turn by session ID"; `get_session_projection` is the live-subscription pull path.
+Neither is reused as the preview entry (plan §6.3).
+
 ## Recent Session Catalog (`session_catalog_recent`)
 
 The `session_catalog_recent` capability backs the time-ordered session list mode

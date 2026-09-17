@@ -108,6 +108,13 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 	if provider, ok := agent.(core.RecentCatalogProvider); ok && provider.SupportsRecentCatalog() {
 		caps = append(caps, "session_catalog_recent")
 	}
+	// session_preview_v1（session-list parity 方案 §6.3 / Phase 4）：get_session_preview
+	// 只读 Projection Kernel 的最后一个 turn。数据源与 projection hydrate 支持集完全
+	// 同源（backendSupportsProjectionHydrate），故按同一判定广告；未迁移 backend 请求
+	// 时 handler fail-closed 返回 not_supported。
+	if backendSupportsProjectionHydrate(id) {
+		caps = append(caps, "session_preview_v1")
+	}
 	// SessionPermissionResponder is the truthful agent-level path used when a client is
 	// observing a Mac-originated turn without a live bridge AgentSession. Prefer that
 	// explicit capability over legacy ToolAuthorizer inference. The old codex/opencode

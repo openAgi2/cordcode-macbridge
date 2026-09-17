@@ -897,6 +897,19 @@ export interface BridgeMessageProjection {
 
 export type BridgeTurnStatus = "pending" | "running" | "completed" | "aborted" | "error";
 
+/**
+ * Session Preview response (`get_session_preview`, capability `session_preview_v1`).
+ * `headRev` FROZEN to equal the committed source projection's `syncRev`.
+ * `latestTurn` absent when the projection has no turns (never fabricated).
+ * `truncated` true when the 128 KiB item-boundary budget dropped older parts.
+ */
+export interface SessionPreviewResult {
+  sessionId: string;
+  headRev: number;
+  latestTurn?: BridgeTurnProjection;
+  truncated: boolean;
+}
+
 export interface BridgeTurnProjection {
   /** Codex rollout: stable lifecycle turn_id (event_msg.turn_id), carried by turn_started/turn_completed. */
   turnId: string;

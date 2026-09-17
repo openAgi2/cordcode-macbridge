@@ -1883,6 +1883,8 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		})
 	case "archive_session":
 		h.handleArchiveSession(conn, msg, agent)
+	case "get_session_preview":
+		h.handleGetSessionPreview(conn, msg, agent)
 	case "set_session_pinned":
 		h.handleSetSessionPinned(conn, msg, agent)
 	case "list_pinned_sessions":
