@@ -111,6 +111,45 @@ func TestWebPushStoreDeleteDeviceRollsBackOnPersistFailure(t *testing.T) {
 	}
 }
 
+// registerLocked 替换失败恢复旧记录（评审 r4§4）：同 device 换 endpoint 注册
+// 落盘失败时，内存必须恢复旧记录（磁盘仍是旧记录），不得清空。
+func TestWebPushStoreRegisterReplacementRollsBackOnPersistFailure(t *testing.T) {
+	dir := t.TempDir()
+	s, err := LoadWebPushStore(dir)
+	if err != nil {
+		t.Fatalf("LoadWebPushStore: %v", err)
+	}
+	first, err := s.Register("dev_reg", testSubscriptionRecord("https://example.com/push/dev_reg/first"))
+	if err != nil {
+		t.Fatalf("first Register: %v", err)
+	}
+
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod store dir read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	if _, err := s.Register("dev_reg", testSubscriptionRecord("https://example.com/push/dev_reg/second")); err == nil {
+		t.Fatal("replacement Register succeeded despite unwritable store dir, want persist error")
+	}
+	subs := s.Subscriptions()
+	if len(subs) != 1 || subs[0].SubscriptionID != first {
+		t.Fatalf("memory must restore the old record after replacement failure: %+v", subs)
+	}
+
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatalf("chmod restore: %v", err)
+	}
+	reloaded, err := LoadWebPushStore(dir)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	subs = reloaded.Subscriptions()
+	if len(subs) != 1 || subs[0].SubscriptionID != first {
+		t.Fatalf("disk must still hold the old record: %+v", subs)
+	}
+}
+
 func TestWebPushStoreFirstCreateGeneratesKeyPair(t *testing.T) {
 	dir := t.TempDir()
 	s, err := LoadWebPushStore(dir)

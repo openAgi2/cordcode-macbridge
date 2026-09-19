@@ -42,10 +42,17 @@ B3：旧实现复用 `scanClaudeRelayEntriesFromReader` 物化全量 entry，64M
 404/410 清理语义已经 r2 复审报告 §4 追认，`webPushExpirySemanticsProven` 置 true
 （前置失败路径已修：`MarkSubscriptionExpired` 持久化失败回滚内存；账本只在删除
 落盘后记 expired，失败记 expiry_cleanup_failed 并保留订阅自愈重试清理）。
-`DeleteDevice`/`Unregister` 同形修复（r3 评审 B2，发布阻断）：subscription 删除
-先落盘、失败回滚内存——旧实现磁盘失败时内存已删、重启后被撤销设备的订阅复活
-并继续收到 Web Push（Apple endpoint 对活订阅可能 2xx，不能指望 404/410 兜底）；
-badge 清理独立失败后置；撤销 API 响应带 `pushCleanupError` 如实暴露。
+`DeleteDevice`/`Unregister`/`registerLocked` 存储一致性修复（r3 评审 B2 + r4§4）：
+subscription 删除/替换先落盘、失败回滚内存（替换失败恢复旧记录）——磁盘失败时
+不得留下「内存已删、磁盘仍在」的假成功；badge 清理独立失败后置；撤销 API 响应
+带 `pushCleanupError` 如实暴露。**r4 评审 B1 教训（发布阻断）：存储一致性 ≠
+投递授权**——回滚把订阅放回 dispatcher 可见集合，而 dispatcher 不查 revoke
+状态，已撤销设备照样收到推送（重启后磁盘旧记录再加载，行为不变）。修复 =
+dispatcher fan-out 前按**持久 trusted-device revoke 状态**过滤（`DeviceRevoked`
+注入；撤销先于清理失败落盘，FileDeviceStore 跨重启仍 revoked → fail closed），
+跳过时顺带重试物理删除（存储恢复后下一次 fan-out 完成清理）；查不到记录
+fail open（订阅 deviceID 与 DeviceStore 一一对应，missing ≠ revoked）。三阶段
+验收测试：同进程不投递 / 重载形状不投递 / 恢复后完成清理。
 continuity cache v3（有界 FIFO + defensive copy + 读盘计数 + 同指纹并发 miss
 singleflight 合并，并发测试断言恰好一次真实读）已提交。
 

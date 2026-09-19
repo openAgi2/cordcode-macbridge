@@ -285,7 +285,8 @@ func (s *WebPushStore) registerLocked(deviceID string, record PushSubscriptionRe
 	record.SubscriptionID = subscriptionID
 	record.DeviceID = deviceID
 	now := time.Now().UTC().UnixMilli()
-	if existing, ok := s.byDeviceID[deviceID]; ok && existing.SubscriptionID == subscriptionID {
+	existing, hadExisting := s.byDeviceID[deviceID]
+	if hadExisting && existing.SubscriptionID == subscriptionID {
 		record.CreatedAt = existing.CreatedAt // 幂等 upsert 保留首注册时间
 	}
 	record.UpdatedAt = now
@@ -294,7 +295,13 @@ func (s *WebPushStore) registerLocked(deviceID string, record PushSubscriptionRe
 	}
 	s.byDeviceID[deviceID] = record
 	if err := s.persistSubscriptionsLocked(); err != nil {
-		delete(s.byDeviceID, deviceID)
+		// 回滚内存状态（评审 r4§4）：替换既有 device subscription 失败时恢复
+		// 旧记录，不得留下「内存为空、磁盘仍是旧记录」的不一致。
+		if hadExisting {
+			s.byDeviceID[deviceID] = existing
+		} else {
+			delete(s.byDeviceID, deviceID)
+		}
 		return "", &webPushValidationError{code: WebPushErrStorageFailed, message: err.Error(), retryable: true}
 	}
 	return subscriptionID, nil

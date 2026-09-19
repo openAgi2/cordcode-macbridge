@@ -310,7 +310,11 @@ func Main() {
 	if webPushPipeline != nil {
 		webPushPipeline.SetBridgeID(bridgeID)
 		// §8.4：固定 worker 数消费有界队列；发送全在锁外。
-		webPushDispatcher := NewWebPushDispatcher(globalWebPushStore, webPushPipeline, WebPushDispatcherConfig{})
+		// DeviceRevoked（评审 R4-B1）：fan-out 前按持久 trusted-device revoke
+		// 状态过滤——撤销设备的订阅清理落盘失败时 fail closed，跨重启同样生效。
+		webPushDispatcher := NewWebPushDispatcher(globalWebPushStore, webPushPipeline, WebPushDispatcherConfig{
+			DeviceRevoked: webPushDeviceRevokedFilter,
+		})
 		// 完成通知正文预览懒刷新（owner 2026-08-27 决策对齐 Antigravity）：发送前重读
 		// authoritative kernel——intent 时刻正文可能尚未入投影（claude thinking 行终态
 		// 先于 text 行、hydrate 窗口内 committed reducer 还是旧基线）。

@@ -346,6 +346,124 @@ func TestDispatcher404CleanupFailureKeepsSubscriptionAndHonestLedger(t *testing.
 	}
 }
 
+// 撤销设备 fail closed（评审 R4-B1，发布阻断）三阶段验收：清理落盘失败后
+// ①同进程下一条 candidate 不向 revoked device 发请求；②重启形状（磁盘重载
+// store + 新 dispatcher，存储仍坏）仍不发；③存储恢复后下一次 fan-out 的清理
+// 重试完成物理删除，磁盘归零。
+func TestDispatcherRevokedDeviceFailsClosedAndRetriesCleanup(t *testing.T) {
+	h := newDispatcherHarness(t, 200) // 若误投递会 2xx 并被 requests 计数捕获
+	devices := NewMemoryDeviceStore()
+	devices.AddDevice(TrustedDeviceRecord{
+		DeviceID:    "dev_disp",
+		DisplayName:  "Test",
+		Platform:    "ios",
+		TokenHash:    "sha256:rvk",
+		CreatedAt:   time.Now(),
+		LastSeenAt:  time.Now(),
+	})
+	if err := devices.RevokeDevice("dev_disp"); err != nil {
+		t.Fatalf("RevokeDevice: %v", err)
+	}
+	revoked := func(deviceID string) bool {
+		record, err := devices.LookupByDeviceID(deviceID)
+		return err == nil && record != nil && record.RevokedAt != nil
+	}
+	newDispatcher := func(store *WebPushStore) *WebPushDispatcher {
+		return NewWebPushDispatcher(store, h.pipeline, WebPushDispatcherConfig{
+			HTTPClient:    &http.Client{Timeout: 5 * time.Second},
+			RetryDelay:    5 * time.Millisecond,
+			RetryMax:      2,
+			DeviceRevoked: revoked,
+		})
+	}
+
+	// 前提形状（R4-B1）：撤销后清理落盘失败 → subscription 回滚进可见集合。
+	if err := os.Chmod(h.store.dir, 0o500); err != nil {
+		t.Fatalf("chmod store dir read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(h.store.dir, 0o700) })
+	if err := h.store.DeleteDevice("dev_disp"); err == nil {
+		t.Fatal("DeleteDevice succeeded despite unwritable store dir, want persist error")
+	}
+	if h.store.SubscriptionCount() != 1 {
+		t.Fatalf("rollback premise broken: count = %d, want 1", h.store.SubscriptionCount())
+	}
+
+	// 阶段 1（同进程，存储仍坏）：不得向 revoked device 发任何请求。
+	h.deliverSync(t, newDispatcher(h.store), dispatcherCandidate(WebPushKindCompletion, "codex|disp-1|rv1|completed"))
+	if got := atomic.LoadInt32(&h.requests); got != 0 {
+		t.Fatalf("revoked device received %d HTTP requests, want 0 (fail closed)", got)
+	}
+
+	// 阶段 2（重启形状：磁盘重载 store + 新 dispatcher，存储仍坏）：仍不投递。
+	reloaded, err := LoadWebPushStore(h.store.dir)
+	if err != nil {
+		t.Fatalf("reload store: %v", err)
+	}
+	h.deliverSync(t, newDispatcher(reloaded), dispatcherCandidate(WebPushKindCompletion, "codex|disp-1|rv2|completed"))
+	if got := atomic.LoadInt32(&h.requests); got != 0 {
+		t.Fatalf("revoked device received request after reload: %d, want 0", got)
+	}
+	if reloaded.SubscriptionCount() != 1 {
+		t.Fatalf("subscription must remain while storage is broken: count = %d", reloaded.SubscriptionCount())
+	}
+
+	// 阶段 3（存储恢复）：下一次 fan-out 的清理重试完成物理删除。
+	if err := os.Chmod(h.store.dir, 0o700); err != nil {
+		t.Fatalf("chmod restore: %v", err)
+	}
+	h.deliverSync(t, newDispatcher(reloaded), dispatcherCandidate(WebPushKindCompletion, "codex|disp-1|rv3|completed"))
+	if got := atomic.LoadInt32(&h.requests); got != 0 {
+		t.Fatalf("revoked device received request after storage recovery: %d, want 0", got)
+	}
+	if reloaded.SubscriptionCount() != 0 {
+		t.Fatalf("cleanup retry after storage recovery failed: count = %d, want 0", reloaded.SubscriptionCount())
+	}
+	// 磁盘真相：再次重载为 0（物理删除已落盘）。
+	after, err := LoadWebPushStore(h.store.dir)
+	if err != nil {
+		t.Fatalf("reload after cleanup: %v", err)
+	}
+	if after.SubscriptionCount() != 0 {
+		t.Fatalf("disk still holds revoked subscription after recovery: count = %d", after.SubscriptionCount())
+	}
+}
+
+// webPushDeviceRevokedFilter 单元行为（评审 R4-B1）：nil store 不过滤；
+// 查不到记录不过滤（fail open on missing）；仅 RevokedAt 非空才 fail closed。
+func TestWebPushDeviceRevokedFilter(t *testing.T) {
+	prev := globalDeviceStore
+	t.Cleanup(func() { globalDeviceStore = prev })
+
+	globalDeviceStore = nil
+	if webPushDeviceRevokedFilter("dev_x") {
+		t.Fatal("nil device store must not filter")
+	}
+
+	devices := NewMemoryDeviceStore()
+	devices.AddDevice(TrustedDeviceRecord{
+		DeviceID:    "dev_f",
+		DisplayName: "Test",
+		Platform:    "ios",
+		TokenHash:   "sha256:f",
+		CreatedAt:   time.Now(),
+		LastSeenAt:  time.Now(),
+	})
+	globalDeviceStore = devices
+	if webPushDeviceRevokedFilter("dev_missing") {
+		t.Fatal("missing record must not filter (fail open on missing)")
+	}
+	if webPushDeviceRevokedFilter("dev_f") {
+		t.Fatal("active device must not filter")
+	}
+	if err := devices.RevokeDevice("dev_f"); err != nil {
+		t.Fatal(err)
+	}
+	if !webPushDeviceRevokedFilter("dev_f") {
+		t.Fatal("revoked device must filter (fail closed)")
+	}
+}
+
 func TestDispatcher5xxBoundedRetryThenTemporary(t *testing.T) {
 	h := newDispatcherHarness(t, 503, 503, 503, 503)
 	d := newTestDispatcher(h)

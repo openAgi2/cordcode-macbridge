@@ -78,6 +78,28 @@ type WebPushDispatcherConfig struct {
 	RetryDelay time.Duration
 	RetryMax   int
 	Now        func() time.Time
+	// DeviceRevoked 返回 deviceID 的持久 trusted-device revoke 状态（评审
+	// R4-B1）：非 nil 时 fan-out 跳过已撤销设备的 subscription——清理落盘失败
+	// 被 store 回滚进可见集合的订阅不得投递（fail closed），跨重启同样生效
+	// （FileDeviceStore 重载后 revoke 状态仍在）。nil = 不过滤（测试默认）。
+	DeviceRevoked func(deviceID string) bool
+}
+
+// webPushDeviceRevokedFilter 按持久 trusted-device revoke 状态判断设备是否
+// 已撤销。查不到记录 ≠ 已撤销（fail open on missing）：subscription 的
+// deviceID 与 DeviceStore 记录一一对应（register 走已认证 device），仅当
+// 记录存在且 RevokedAt 非空时 fail closed。globalDeviceStore 在 dispatcher
+// 构造之后才由 main.go 的 ManagementConfig 初始化，这里在每次调用时读取。
+func webPushDeviceRevokedFilter(deviceID string) bool {
+	store := globalDeviceStore
+	if store == nil {
+		return false
+	}
+	record, err := store.LookupByDeviceID(deviceID)
+	if err != nil || record == nil {
+		return false
+	}
+	return record.RevokedAt != nil
 }
 
 // WebPushDispatcher 是有界投递 worker 组。
@@ -183,6 +205,17 @@ func (d *WebPushDispatcher) deliverCandidate(candidate WebPushCandidate) {
 		badgeKey = sessionAggregationKey(candidate)
 	}
 	for _, sub := range d.store.Subscriptions() {
+		if d.cfg.DeviceRevoked != nil && d.cfg.DeviceRevoked(sub.DeviceID) {
+			// 撤销设备 fail closed（评审 R4-B1，发布阻断）：subscription 清理
+			// 落盘失败被 store 回滚进可见集合时不得投递。顺带重试物理删除——
+			// 存储恢复后的下一次 fan-out 完成清理，订阅随之彻底消失；重试
+			// 失败则继续跳过（授权撤销优先于 store 一致性）。
+			if err := d.store.DeleteDevice(sub.DeviceID); err != nil {
+				slog.Warn("web-push: revoked device subscription still present, cleanup retry failed",
+					"devicePrefix", safeID(sub.DeviceID), "error", err.Error())
+			}
+			continue
+		}
 		var snap WebPushBadgeSnapshot
 		badged := false
 		if badgeKey != "" {
