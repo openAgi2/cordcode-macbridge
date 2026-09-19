@@ -277,6 +277,18 @@ lsof -nP -iTCP:4141 -sTCP:LISTEN
 ps aux | grep '[c]odex app-server'
 ```
 
+修改 `agent/codex`、diagnostics、capability 或测试时必须遵守（2026-09-19 自 CLAUDE.md
+「Backend runtime model」并入，原文保留）：
+
+- `RunDiagnostics` 在 `app_server` 模式下不得运行 `cli` required check；`codex not found`
+  不能让 app-server-only deployment 的 `OverallStatus` 变成 `failed`。
+- 看到 `codex CLI not found` / `codex not found` 测试失败时，先确认 backend mode。若是
+  `app_server`，优先检查诊断 gating 或 app-server 连接/stdio 启动路径，不要先让 owner 安装
+  `@openai/codex` 来“修环境”。
+- 只有 `exec` backend、明确覆盖 `codex exec` 的 integration/pagination 测试，或 stdio app-server
+  启动路径本身失败时，才把本机 `codex` 可执行文件当作相关依赖。即便如此，也要把问题描述为
+  “app-server launcher/exec backend dependency”，不要笼统写成“MacBridge 需要 codex CLI”。
+
 MacBridge Restart 只重启 Bridge runtime，不负责重启外部共享 Codex app-server。
 共享服务的启动归属和本机常驻约束见
 [BUILD_INSTALL_AND_RUNTIME.md](BUILD_INSTALL_AND_RUNTIME.md#codex-app-server-的启动归属)。
@@ -549,6 +561,14 @@ MacBridge 仍为 OpenCode 管理本地 Basic Auth：`managed_local` 的运行态
 `server_unauthenticated` 必须拒绝（`legacy_64667` 例外，标
 `legacy_insecure_unverified`）。Desktop 默认 server 配置同步到 resolved endpoint URL，并把
 `local` 项目 scope 合并到 `projects[managedURL]`，不再固定写 `64667`。
+
+排查 managed server（2026-09-19 自 CLAUDE.md「Backend runtime model」并入，原文保留）：
+
+```bash
+cat "$HOME/Library/Application Support/CordCode Link/opencode-managed-server.json"
+lsof -nP -iTCP:<managed-port> -sTCP:LISTEN
+curl -i --max-time 3 http://127.0.0.1:<managed-port>/global/health
+```
 
 ### OpenCode hybrid 路由矩阵
 
