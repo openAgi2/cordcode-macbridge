@@ -771,6 +771,13 @@ together. Canonical versions are tracked in [docs/protocol/README.md](docs/proto
   Only the documented public Relay endpoint may be committed (it's in `project.yml` Info.plist properties).
 - UI automation and real-device validation require explicit owner approval.
 - 始终用中文回复用户。
+- **方案评审循环（开发者侧纪律，2026-09-20 owner 定案）：** 当方案/设计文档已送评审，
+  开发者 agent 当轮只做文档撰写与按评审报告修订：(1) 文档送审后停下等结论，不提前实施；
+  (2) 收到「不通过 / 暂不通过 / 存在阻断项」结论时，只修订文档并重新送审，**同轮禁止修改
+  业务代码**（除非评审报告明确书面豁免）；评审中的代码类发现（缺测试、产品缺陷等）同样
+  先写进文档的「过审后实施」方案，不直接动手修；(3) 不采纳的评审意见必须在修订版逐项
+  标明理由；(4) 修订版开头声明本轮改动范围（docs-only 或获豁免条目）；(5) 过审后才按
+  已批准的文档进入实施。无论是否存在正式 supervise 会话，本纪律适用于一切方案评审循环。
 - **`AGENTS.md` 必须与本文保持同内容**：`AGENTS.md` 是本文的真实文件副本（非软链），供只加载 `AGENTS.md` 的工具（ZCode、Codex 等）读到同一份 runbook；修改本文后必须 `cp CLAUDE.md AGENTS.md` 同步并随本文一起提交。
 - 日志路径为 `~/Library/Application Support/CordCode Link/logs/go-bridge.log`（不再使用 `/tmp`，P2-8）。runtime 重启会重新打开日志文件；MacBridge 会按大小滚动（`maxLogBytes` 8MiB，保留 3 代）。日志从某时刻突然重新开始可能是 120min 定时兜底重启（`autoRestartIntervalMinutes` 默认 120），也可能是 `.starting` 卡住 60s 后的 supervisor 自愈，非必然 bug。排查时用 `tail -f ~/Library/Application\ Support/CordCode\ Link/logs/go-bridge.log | tee /tmp/evidence.log` 镜像，或临时关 `autoRestartEnabled`。
 - **CHANGELOG.md**：每轮对外可见的改动完成后，在 `[Unreleased]` 下按现有格式追加一节（日期 — 主题），记录「改了什么 / 有何提升」。发布正式版时把 `[Unreleased]` 改为版本号与日期。
