@@ -1,13 +1,12 @@
-# AGENTS.md（主规则文档；CLAUDE.md 为逐字节同步拷贝）
+# CLAUDE.md
 
 ## Cross-repository instructions (required)
 
-Reading this repository's instruction file (`AGENTS.md` / `CLAUDE.md`, identical
-content) also requires reading the adjacent iOS repository's
-`../cordcode-ios/CLAUDE.md`. The two repositories form one CordCode product
-system. For any cross-repository investigation, design, code change, test, or
-delivery, follow both instruction files; never operate on the other repository
-using only this repository's instructions.
+Reading this repository's `CLAUDE.md` also requires reading the adjacent iOS
+repository's `../cordcode-ios/CLAUDE.md`. The two repositories form one CordCode
+product system. For any cross-repository investigation, design, code change,
+test, or delivery, follow both `CLAUDE.md` files; never operate on the other
+repository using only this repository's instructions.
 
 `../cordcode-ios/` 只是默认的逻辑仓库位置，**不能**证明当前工作树应与该目录下的具体 iOS
 工作树配对。存在多个工作树时，必须先按下方 P0 来源门解析同一功能分支族，再读取源码或
@@ -18,15 +17,17 @@ using only this repository's instructions.
 本节是发布阻断级规则，优先于跨仓自主修改授权，也优先于“改完代码后自动构建、安装或重启
 运行时”等规则。来源未证明时，必须在编辑、构建、安装、合并或重启之前立即停止。
 
-### 2026-08-24 事故摘要
+### 2026-08-24 事故与裁决
 
-一次 Codex Web 排障中，Mac 侧结论取自 `codex/codex-web-backend` 工作树，而 iOS 修改与
-真机安装错误地取自默认 `main` 工作树；`main` 可编译因此构建通过未暴露错位，iOS 映射器把
-Mac 发布的两个后端类型当未知类型跳过，两个后端同时从真机消失，事后还曾试图未经授权把
-功能分支合入 `main`。根因：把仓库路径误当分支身份、跨仓评审未冻结源码来源、把编译成功
-误当产品身份验证、未经授权尝试分支集成。完整经过与裁决见
-[docs/incidents/2026-08-24-worktree-incident.md](docs/incidents/2026-08-24-worktree-incident.md)
-（处理跨仓来源问题或写事故复盘时必须先读）。
+一次 Codex Web 排障中，Mac 任务依据的是 `codex/codex-web-backend` 工作树及其设计文档，
+但 iOS 修改和真机安装错误地来自默认 `main` 工作树，而不是配套的
+`codex/codex-web-backend-ios` 工作树。`main` 本身是可编译的完整应用，因此构建通过没有
+暴露错误；但它不含独立的 `codex-web` / `opencode-web` 后端类型，iOS 映射器将 Mac 发布的
+两个类型当作未知类型跳过，最终两个后端同时从真机消失。随后又曾试图未经用户授权把功能
+分支合入 `main`，把一次来源选择错误扩大成分支管理事故。
+
+该事故不是 Git、Xcode 或协议歧义造成的，而是把仓库路径误当分支身份、跨仓评审没有冻结
+源码来源、把“编译成功”误当产品身份验证，并在没有用户授权时尝试分支集成造成的。
 
 ### 强制来源清单
 
@@ -106,11 +107,13 @@ Codex Web 测试产物必须包含独立 `codex-web` 身份；若声明为同时
 
 ### 部署后运行态验证（2026-08-25 事故）
 
-替换包 ≠ 部署完成：磁盘产物（`-version`、codesign、zip、strings）只能证明"新包的
-内容"，不能证明"新包正在运行"。2026-08-25 事故中 `killall CordCodeLink` 匹配不到内嵌
-runtime（独立进程 `cordcode-bridge-runtime`，常驻 PPID=1 daemon），旧进程占住 8777 端口
-导致新 runtime 起不来，"修复无效"实为"没跑到"。完整经过见
-[docs/incidents/2026-08-25-runtime-restart.md](docs/incidents/2026-08-25-runtime-restart.md)。
+替换包 ≠ 部署完成。磁盘产物（`-version`、codesign、zip、strings）只能证明"新包的
+内容"，不能证明"新包正在运行"。2026-08-25 codex-web 审批修复两次"部署成功"实际
+都在跑早前启动的旧 runtime：`killall CordCodeLink` 只按主 app 进程名匹配，内嵌
+runtime 是独立进程 `cordcode-bridge-runtime`（常驻 PPID=1 daemon），killall 匹配
+不到它；`cp -R` 覆盖正在运行的程序文件在 macOS 上会成功，但旧进程继续占 8777
+端口，新 runtime 起不来。由此把"修复无效"当作结论、把独立测试进程的实验当作
+"生产路径已验证"，造成多轮误判。
 
 部署后必须逐项核验（缺一不可）：
 
@@ -139,6 +142,8 @@ runtime（独立进程 `cordcode-bridge-runtime`，常驻 PPID=1 daemon），旧
 5. 破坏性清理或分支集成必须等待用户明确指令。
 
 试图通过把缺失功能合进 `main` 来“修复”错分支修改，本身就是 P0 违规。
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What this repo is
 
@@ -184,9 +189,6 @@ and `deepseek` drivers remain in-tree but are off the product lineup
 - 排查 Claude/Codex/OpenCode/Grok/DeepSeek 任一 backend 的 session、history、live stream、
   执行态、列表分页或端到端同步异常：必须先检索本仓 `think.md` 和相邻 iOS 仓
   `../cordcode-ios/think.md`，复用已有复盘结论；不要在已有结论覆盖的问题上从零重复调查。
-- 2026-09-19 指令文件瘦身迁移（叙述/runbook 外置到 docs/ 与根目录活文档，规则原文全部
-  保留）前的完整备份在 `docs/archive/2026-09-19-instruction-pre-slim/`，仅供人工追溯；
-  agent **不要阅读或加载备份**，现行规则一律以本文件为准。
 
 这些是持续更新的架构/运维真值；`docs/YYYY-MM-DD-*.md` 主要是方案、评审和完成报告，
 不能代替根目录活文档。`think.md` 是已知问题与复盘经验库，排障时作为活文档入口的一部分。
@@ -403,18 +405,62 @@ tail -n 100 "$HOME/Library/Application Support/CordCode Link/logs/go-bridge.log"
 
 `relay-server/` is the public encrypted relay (`wss://relay.byteseek.uk:8443`, end-to-end
 HPKE). It runs on a VPS as a **separate deployment chain** from the Mac app — committing code
-here does **not** update the running relay; code changes take effect only after a binary
-update on the VPS.
+here does **not** update the running relay. Code changes to `relay-server/` take effect only
+after a binary update on the VPS.
 
-完整 runbook（凭据与 ssh 别名、首次 VPS 布局、构建、日常部署、验证与回滚）见
-[RELAY_SERVER_OPERATIONS.md](RELAY_SERVER_OPERATIONS.md)——改 `relay-server/` 或执行部署前
-必须先读。常驻硬规则：
+### Credentials & access (one-time machine setup)
 
-- **Never commit** the VPS host / user / password / route id / provisioning token；凭据只在
-  `~/.zshrc` 环境变量（`CORDCODE_RELAY_VPS_*`）与 `~/.ssh/config` 别名 `cccode-relay-prod`。
-- 日常二进制更新：交叉编译 linux/amd64 后跑 `scripts/deploy-relay-vps.sh`（只读核查 →
-  备份 → 上传 → SHA 校验 → 原子替换 → 重启 → 健康检查，并打印带时间戳备份的回滚命令）。
-- 重启后 Mac 的 `RelayBridgeClient` 自动重连（PR-1 P0-B）；iOS 客户端有短暂「连接中」。
+The VPS host/user/password live in **environment variables in `~/.zshrc`** (local to the dev
+machine, never committed):
+
+```bash
+export CORDCODE_RELAY_VPS_HOST='<host>'
+export CORDCODE_RELAY_VPS_USER='<user>'
+export CORDCODE_RELAY_VPS_PASS='<password>'
+```
+
+An ssh alias is also expected in `~/.ssh/config`:
+
+```
+Host cccode-relay-prod
+    HostName <host>
+    User <user>
+    PreferredAuthentications password
+    PubkeyAuthentication no
+```
+
+The deploy script reads `CORDCODE_RELAY_VPS_PASS` and feeds it via `sshpass -e` (set `SSHPASS`)
+so deployment is non-interactive. **Never commit the password** or any VPS credential.
+
+> ⚠️ This VPS's sshd has slow banner exchange (UseDNS reverse lookup + intermittent network).
+> The deploy script retries ssh/scp automatically with `ConnectTimeout`/`ConnectionAttempts`.
+> Manual ssh may need a few tries; `source ~/.zshrc` first if creds are not in the shell env.
+
+### First-time VPS setup
+
+Full install (system user, dirs, systemd unit, nginx TLS, firewall) is documented in
+[RELAY_SERVER_OPERATIONS.md](RELAY_SERVER_OPERATIONS.md). The relay listens on
+`127.0.0.1:8780`, fronted by nginx `:8443` (TLS) for the public `wss://` endpoint.
+The older FRP service is a separate historical deployment and must not be modified as part of
+a Relay deploy.
+
+### Routine binary update (after code changes)
+
+```bash
+# 1. 交叉编译 linux/amd64
+(cd relay-server && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+  go build -trimpath -ldflags='-s -w' -o /tmp/cordcode-relay-server ./cmd/relay-server)
+
+# 2. 安全部署：只读核查 → 备份 → 上传 → SHA 校验 → 原子替换 → 重启 → 健康检查
+scripts/deploy-relay-vps.sh
+```
+
+`scripts/deploy-relay-vps.sh` preserves the existing binary's owner:group/mode, verifies the
+uploaded SHA-256 matches the local build, and prints a one-line rollback command pointing at
+the timestamped backup (`/opt/cordcode-relay/bin/relay-server.bak.<UTC>`).
+
+After restart, the Mac's `RelayBridgeClient` reconnects automatically (PR-1 P0-B); expect a
+brief `连接中` blip on iOS clients.
 
 ## Component map
 
@@ -439,13 +485,6 @@ update on the VPS.
 
 涉及 iOS 连接、配对、重连或 session 同步时，同时读取相邻
 `../cordcode-ios/IOS_MAC_INTERACTION_FLOW.md`；不要只看 Mac 侧推断客户端行为。
-
-## 指令文件增长门槛（2026-09-19 起）
-
-新增规则或叙述默认写入 `docs/` 或根目录活文档，并在本文件留一行「触发条件 + 指针」，
-不直接追加进本文件。只有同时满足「触发时刻 agent 不自知（任务开头、跑测试、构建、
-部署）」且「违规代价高」的规则才允许常驻本文件。本文件总量回到 50KB 以上时，重审一次
-分层。
 
 ## 上游源码优先门（必须）
 
@@ -578,18 +617,54 @@ GO_BRIDGE_ARCHITECTURE.md 对应节）：
 
 ### Codex app-server（legacy `codex` backend，产品 lineup 已退役）
 
-> 2026-08-25 owner 裁决退役（codex-web 验收后 app_server 驱动不再启动；codex-web 本身
-> 亦已于 2026-09-04 退役，见上）；本节仅在显式把 `codex` 加回 drivers 的回滚场景适用。
-> 产品 Codex 面由 `codex-remote`（Codex Desktop / Remote Control）承接，复用同一套
-> app-server JSON-RPC 语义但走 Remote Control 链路。
+> 2026-08-25 owner 裁决：codex-web 通过 owner 矩阵验收后，app_server 驱动不再启动
+> （codex-web 本身亦已于 2026-09-04 退役，见上）；
+> 本节适用于显式把 `codex` 加回 drivers 的场景（回滚 = 加回该 id）。产品 Codex 面由
+> `codex-remote`（Codex Desktop / Remote Control）承接，
+> 后者复用同一套 app-server JSON-RPC 语义但走 Remote Control 链路。
 
-挂载时 `RuntimeConfig` 默认传 `-codex-backend app_server`（stdio 启动 `codex app-server`；
-显式 `-codex-app-server-url` 才连共享 WebSocket service）。**不要把 Codex backend 误判成
-“必须安装/查找 `codex exec` CLI”**——只有 exec backend 才需要 CLI required 检查。诊断
-gating 规则（`RunDiagnostics` 在 app_server 模式不得跑 cli required check、
-`codex not found` 先查 mode 再动环境）、共享/stdio 排查命令与 lazy create `pending-*`
-rebind 见 [GO_BRIDGE_ARCHITECTURE.md](GO_BRIDGE_ARCHITECTURE.md) 的「Codex」节
-（2026-09-19 起诊断规则与排查命令已并入该节）。
+挂载该 backend 时 `RuntimeConfig` 默认传：
+
+```text
+-codex-backend app_server
+```
+
+不要把 Codex backend 误判成“必须安装/查找 `codex exec` CLI”。当前有两个不同概念：
+
+- **app-server backend（挂载时默认）**：Bridge 讲 JSON-RPC app-server 协议。未显式配置
+  `-codex-app-server-url` 时使用 stdio transport 启动 `codex app-server`；显式 URL 时连接已有
+  共享 WebSocket service。
+- **exec backend（历史/显式模式）**：Bridge 才运行 `codex exec --json`，这一路才需要把
+  `exec.LookPath("codex")` / `codex --version` 作为 required CLI 检查。
+
+因此，后续 agent 修改 `agent/codex`、diagnostics、capability 或测试时必须遵守：
+
+- `RunDiagnostics` 在 `app_server` 模式下不得运行 `cli` required check；`codex not found` 不能让
+  app-server-only deployment 的 `OverallStatus` 变成 `failed`。
+- 看到 `codex CLI not found` / `codex not found` 测试失败时，先确认 backend mode。若是
+  `app_server`，优先检查诊断 gating 或 app-server 连接/stdio 启动路径，不要先让 owner 安装
+  `@openai/codex` 来“修环境”。
+- 只有 `exec` backend、明确覆盖 `codex exec` 的 integration/pagination 测试，或 stdio app-server
+  启动路径本身失败时，才把本机 `codex` 可执行文件当作相关依赖。即便如此，也要把问题描述为
+  “app-server launcher/exec backend dependency”，不要笼统写成“MacBridge 需要 codex CLI”。
+
+若显式配置共享 URL，则产品态期待 Mac 上已有共享 Codex app-server，Bridge 是客户端和被动订阅者，
+不应再启动第二个竞争性的 TCP app-server。排查共享模式：
+
+```bash
+lsof -nP -iTCP:4141 -sTCP:LISTEN
+ps aux | grep '[c]odex app-server'
+```
+
+排查 stdio app-server 启动路径时才检查 launcher：
+
+```bash
+command -v codex
+codex app-server --help >/dev/null 2>&1 || true
+```
+
+Codex lazy create 可能先返回
+`pending-*`，第一次 send 后必须把 registry 与订阅 rebind 到真实 thread id。
 
 ### OpenCode server（legacy `opencode` backend，产品 lineup 已退役）
 
@@ -598,12 +673,24 @@ rebind 见 [GO_BRIDGE_ARCHITECTURE.md](GO_BRIDGE_ARCHITECTURE.md) 的「Codex」
 > 移除（代码保留，回滚 = 加回 id）。产品 OpenCode 面由 `opencode-web` 承接：读独立
 > 配置键 `opencode_web_url/user/pass`，绝不复用下面这套 `-opencode-url` 来源。
 
-新装默认 managed_local：CordCode Link 自己启动并保活 loopback-only `opencode serve`
-（`4096...4196` 端口、随机 Basic Auth、`opencode-managed-server.json` `0600`）；没有
-resolved URL 时 backend 报 `not_configured`，**不得回落硬连 64667**。Server Source 模型、
-`credentials.json` 语义、401/200 认证判定、排查命令与 proxy/SSE 分工见
-[GO_BRIDGE_ARCHITECTURE.md](GO_BRIDGE_ARCHITECTURE.md) 的「OpenCode」节（2026-09-19 起
-排查命令已并入该节）。
+新装默认 **Automatic / managed_local**：CordCode Link 自己启动并保活
+loopback-only `opencode serve`，从 `4096...4196` 选择端口，生成随机 Basic Auth，
+写入 data dir 的 `opencode-managed-server.json`（`0600`），并同步 OpenCode Desktop
+配置。存量 `credentials.json` 只用于用户显式 source、外部 URL 和 legacy `64667`
+兼容迁移。Bridge runtime 只接收 Swift 端解析出的 `-opencode-url` 与凭据；没有 resolved
+URL 时 backend 报 `not_configured`，不得回落硬连 64667。排查：
+
+```bash
+cat "$HOME/Library/Application Support/CordCode Link/opencode-managed-server.json"
+lsof -nP -iTCP:<managed-port> -sTCP:LISTEN
+curl -i --max-time 3 http://127.0.0.1:<managed-port>/global/health
+```
+
+no-auth `/global/health` 返回 `401` 表示 server 要求认证，可继续做 authed 校验；
+no-auth `200` 的 OpenCode server 会被判为 `server_unauthenticated` 并拒绝
+（`legacy_64667` 例外，但会标 `legacy_insecure_unverified`）。OpenCode 的
+create/resume/get/abort/list projects 等 server 专属语义仍可走
+`go-bridge/opencode-proxy.go`，实时外部事件走 `agent/opencode/sse_subscriber.go`。
 
 ### Claude Code
 
@@ -684,6 +771,6 @@ together. Canonical versions are tracked in [docs/protocol/README.md](docs/proto
   Only the documented public Relay endpoint may be committed (it's in `project.yml` Info.plist properties).
 - UI automation and real-device validation require explicit owner approval.
 - 始终用中文回复用户。
-- **`AGENTS.md` 是本文件的主源，`CLAUDE.md` 是其逐字节同步拷贝**（不用 symlink——部分 harness 不识别 symlink，会把规则文档读成空文件；2026-09-19 owner 定案）。修改规则只编辑 `AGENTS.md`，改完立即 `cp AGENTS.md CLAUDE.md` 并 `cmp` 校验一致，随同提交；只加载 `AGENTS.md` 的工具（ZCode、Codex 等）与 Claude Code 读到同一份 runbook。
+- **`AGENTS.md` 必须与本文保持同内容**：`AGENTS.md` 是本文的真实文件副本（非软链），供只加载 `AGENTS.md` 的工具（ZCode、Codex 等）读到同一份 runbook；修改本文后必须 `cp CLAUDE.md AGENTS.md` 同步并随本文一起提交。
 - 日志路径为 `~/Library/Application Support/CordCode Link/logs/go-bridge.log`（不再使用 `/tmp`，P2-8）。runtime 重启会重新打开日志文件；MacBridge 会按大小滚动（`maxLogBytes` 8MiB，保留 3 代）。日志从某时刻突然重新开始可能是 120min 定时兜底重启（`autoRestartIntervalMinutes` 默认 120），也可能是 `.starting` 卡住 60s 后的 supervisor 自愈，非必然 bug。排查时用 `tail -f ~/Library/Application\ Support/CordCode\ Link/logs/go-bridge.log | tee /tmp/evidence.log` 镜像，或临时关 `autoRestartEnabled`。
 - **CHANGELOG.md**：每轮对外可见的改动完成后，在 `[Unreleased]` 下按现有格式追加一节（日期 — 主题），记录「改了什么 / 有何提升」。发布正式版时把 `[Unreleased]` 改为版本号与日期。
