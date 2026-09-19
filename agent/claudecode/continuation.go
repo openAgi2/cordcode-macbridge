@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -28,36 +31,155 @@ type TranscriptContinuity struct {
 	BoundaryIDs []string
 }
 
-// InspectTranscriptContinuity reads bounded head/tail windows. Compact
-// continuation evidence is necessarily at the parent's tail and child's head,
-// so listing sessions does not need to rescan arbitrarily large transcripts.
+// claudeContinuityCacheEntry 是按 path 缓存的最近一次连续性检查结果。指纹
+// （size+mtime）不匹配即失效重读。**必须按 path 单键、指纹只做校验值**：
+// 活跃 session 频繁追加即频繁换指纹，按指纹做键会让缓存条目随时间无界增长。
+//
+// 效果边界（评审 B4，诚实表述）：本缓存消除的是**同一进程内未变化文件的
+// 重复头尾扫描**（warm 收敛）。冷启动首轮、以及指纹变化后的首次访问仍要
+// 真实读盘（cold miss，每指纹一次——并发 miss 由 flights 合并为一次，见
+// claudeContinuityFlight）；进程冷启动后的第一次 catalog/rich-history
+// 扫描仍会遍历项目目录全部 JSONL。缓存有严格容量上限 + FIFO 逐出，条目数
+// 不随历史访问过的路径（删除/重命名/迁移后的残留）无界增长。
+type claudeContinuityCacheEntry struct {
+	size    int64
+	modNano int64
+	info    TranscriptContinuity
+}
+
+// claudeContinuityCacheDefaultCapacity：619 个现存 transcript 留 >6x 余量；
+// 逐出只是退化为重读（自愈），代价可接受。
+const claudeContinuityCacheDefaultCapacity = 4096
+
+// claudeContinuityFlight 合并同一 (path, size, mtime) 指纹的并发 cold miss
+// （评审 R2-B2）：第一个到达者成为 leader 真实读盘，并发等待者在 done 关闭
+// 后复用同一结果，同一指纹恰好一次真实读。键含完整指纹而不是只含 path——
+// 扫描期间文件被追加时，新指纹的调用者立即开自己的 flight，不被旧指纹
+// 阻塞；也避免持全局 mutex 扫盘把不同 transcript 的 cold seed 串行化。
+type claudeContinuityFlight struct {
+	done chan struct{}
+	info TranscriptContinuity
+}
+
+func claudeContinuityFlightKey(path string, size, modNano int64) string {
+	return fmt.Sprintf("%s\x00%d\x00%d", path, size, modNano)
+}
+
+type claudeContinuityCacheStruct struct {
+	mu       sync.Mutex
+	entries  map[string]*claudeContinuityCacheEntry
+	flights  map[string]*claudeContinuityFlight
+	order    []string // FIFO 逐出序（插入顺序）
+	capacity int
+}
+
+var claudeContinuityCache = &claudeContinuityCacheStruct{
+	entries:  make(map[string]*claudeContinuityCacheEntry),
+	flights:  make(map[string]*claudeContinuityFlight),
+	capacity: claudeContinuityCacheDefaultCapacity,
+}
+
+// claudeContinuityFileReads 统计真实读盘次数（cold miss）；当前仅测试用它
+// 区分 warm hit（计数不变）与 cold miss（计数递增）。
+var claudeContinuityFileReads atomic.Int64
+
+func resetClaudeContinuityCacheForTest() {
+	claudeContinuityCache = &claudeContinuityCacheStruct{
+		entries:  make(map[string]*claudeContinuityCacheEntry),
+		flights:  make(map[string]*claudeContinuityFlight),
+		capacity: claudeContinuityCacheDefaultCapacity,
+	}
+	claudeContinuityFileReads.Store(0)
+}
+
+func setClaudeContinuityCacheCapacityForTest(capacity int) {
+	claudeContinuityCache.mu.Lock()
+	defer claudeContinuityCache.mu.Unlock()
+	claudeContinuityCache.capacity = capacity
+}
+
+func (c *claudeContinuityCacheStruct) put(path string, size, modNano int64, info TranscriptContinuity) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, exists := c.entries[path]; !exists {
+		c.order = append(c.order, path)
+		for len(c.order) > c.capacity {
+			delete(c.entries, c.order[0])
+			c.order[0] = "" // 释放被逐出 path 的字符串引用
+			c.order = c.order[1:]
+		}
+	}
+	c.entries[path] = &claudeContinuityCacheEntry{size: size, modNano: modNano, info: info}
+}
+
+// claudeContinuityClone 解除返回值与缓存内部切片的 alias（评审 N1）：
+// InspectTranscriptContinuity 是跨包 exported API，调用方原地修改不得污染
+// 全局缓存。Boundary ID 数量很小，这点 copy 不会重新制造解析波。
+func claudeContinuityClone(info TranscriptContinuity) TranscriptContinuity {
+	clone := info
+	clone.BoundaryIDs = append([]string(nil), info.BoundaryIDs...)
+	return clone
+}
+
+// InspectTranscriptContinuity reads bounded head/tail windows, cached per
+// (size, mtime) fingerprint. Compact continuation evidence is necessarily at
+// the parent's tail and child's head, so listing sessions does not need to
+// rescan arbitrarily large transcripts. Concurrent misses of the same
+// fingerprint merge into a single real read (claudeContinuityFlight).
 func InspectTranscriptContinuity(path string) TranscriptContinuity {
 	info := TranscriptContinuity{
 		Path:      path,
 		SessionID: strings.TrimSuffix(filepath.Base(path), ".jsonl"),
 	}
-	file, err := os.Open(path)
+	stat, err := os.Stat(path)
 	if err != nil {
 		return info
 	}
-	defer file.Close()
-	stat, err := file.Stat()
-	if err != nil {
-		return info
+	size, modNano := stat.Size(), stat.ModTime().UnixNano()
+
+	// 缓存命中与 flight 查找必须在同一临界区内判定：leader 的 put 与
+	// flight 删除之间不存在「两者都 miss」的窗口，等待者不会重复扫盘。
+	claudeContinuityCache.mu.Lock()
+	if entry, ok := claudeContinuityCache.entries[path]; ok && entry.size == size && entry.modNano == modNano {
+		cached := entry.info
+		claudeContinuityCache.mu.Unlock()
+		return claudeContinuityClone(cached)
+	}
+	key := claudeContinuityFlightKey(path, size, modNano)
+	if flight, ok := claudeContinuityCache.flights[key]; ok {
+		claudeContinuityCache.mu.Unlock()
+		<-flight.done
+		return claudeContinuityClone(flight.info)
+	}
+	flight := &claudeContinuityFlight{done: make(chan struct{})}
+	claudeContinuityCache.flights[key] = flight
+	claudeContinuityCache.mu.Unlock()
+
+	claudeContinuityFileReads.Add(1)
+	if file, err := os.Open(path); err == nil {
+		boundaries := make(map[string]struct{})
+		scanClaudeContinuityWindow(file, 0, minInt64(size, claudeContinuityWindowBytes), false, &info, boundaries)
+		if size > claudeContinuityWindowBytes {
+			start := size - claudeContinuityWindowBytes
+			scanClaudeContinuityWindow(file, start, size-start, true, &info, boundaries)
+		}
+		info.BoundaryIDs = make([]string, 0, len(boundaries))
+		for boundaryID := range boundaries {
+			info.BoundaryIDs = append(info.BoundaryIDs, boundaryID)
+		}
+		sort.Strings(info.BoundaryIDs)
+		claudeContinuityCache.put(path, size, modNano, info)
+		file.Close()
 	}
 
-	boundaries := make(map[string]struct{})
-	scanClaudeContinuityWindow(file, 0, minInt64(stat.Size(), claudeContinuityWindowBytes), false, &info, boundaries)
-	if stat.Size() > claudeContinuityWindowBytes {
-		start := stat.Size() - claudeContinuityWindowBytes
-		scanClaudeContinuityWindow(file, start, stat.Size()-start, true, &info, boundaries)
-	}
-	info.BoundaryIDs = make([]string, 0, len(boundaries))
-	for boundaryID := range boundaries {
-		info.BoundaryIDs = append(info.BoundaryIDs, boundaryID)
-	}
-	sort.Strings(info.BoundaryIDs)
-	return info
+	// 读盘失败（open 出错）不写缓存：flight 照常完成，等待者拿到与自行
+	// 失败一致的空结果；下一个调用者重新真实读盘（自愈），不缓存假阴性。
+	claudeContinuityCache.mu.Lock()
+	delete(claudeContinuityCache.flights, key)
+	flight.info = info
+	claudeContinuityCache.mu.Unlock()
+	close(flight.done)
+	return claudeContinuityClone(info)
 }
 
 func scanClaudeContinuityWindow(

@@ -27,9 +27,9 @@ import (
 //
 // 状态机（§8.4）：
 //   2xx → accepted（不声称设备已展示）；
-//   404/410 → WP-RESP-2 样本已归档、翻转待 owner 显式追认：追认前不写稳定
-//     产品语义，只记 expiry_unverified + 脱敏诊断 + 样本捕获，不删 subscription；
-//     追认后（webPushExpirySemanticsProven 置 true）删除 subscription 并记 expired；
+//   404/410 → 删除 subscription 并记 expired（webPushExpirySemanticsProven=true，
+//     r2 复审报告 §4 追认）；删除持久化失败时保留 subscription、记
+//     expiry_cleanup_failed（不假装已清理，后续投递自愈重试清理）；
 //   429 → 尊重有效 Retry-After，否则有界退避，总重试不超过 TTL；
 //   5xx/网络错误 → TTL 内有界退避（temporary_failed）；
 //   400/401/403 → permanent_failed，暴露 VAPID/payload 脱敏 diagnostic，
@@ -62,11 +62,13 @@ const (
 
 // webPushExpirySemanticsProven：WP-RESP-2 样本已归档（2026-09-19，数据目录
 // web-push-samples/WP-RESP-2.jsonl——三个 Apple 端点持续 410 Gone，与
-// docs/2026-09-12-remote-web-push-badge-and-collapse-plan.md §9 的预言一致），
-// **翻转仍待 owner 显式追认**（原门：归档后"由 owner 显式置 true"）。追认前
-// 保持 false：404/410 不删 subscription、记 expiry_unverified + 样本捕获。
-// 2026-09-19 评审 B5 裁定：agent 不得以"owner 在场提出相关问题"替代该授权。
-var webPushExpirySemanticsProven = false
+// docs/2026-09-12-remote-web-push-badge-and-collapse-plan.md §9 的预言一致）。
+// owner 于 2026-09-19 内存复盘任务中把 404/410 清理语义交由评审裁决；复审报告
+// docs/2026-09-19-bridge-runtime-memory-footprint-review-report-r2.md §4
+// 追认该产品语义（404/410 = subscription 不再可用，应删除），并要求启用前先修
+// 持久化失败路径（MarkSubscriptionExpired 回滚 + 仅删除落盘后才记 expired）。
+// 两者均已实现并有定向测试，据此置 true。
+var webPushExpirySemanticsProven = true
 
 // WebPushDispatcherConfig 汇总可注入项（测试用 httptest client + 短退避）。
 type WebPushDispatcherConfig struct {
@@ -335,8 +337,13 @@ func (d *WebPushDispatcher) deliverToSubscription(
 				if webPushExpirySemanticsProven {
 					if delErr := d.store.MarkSubscriptionExpired(sub.SubscriptionID); delErr != nil {
 						slog.Warn("web-push: expired subscription cleanup failed", "error", delErr.Error())
+						// 删除未落盘：subscription 保留（store 已回滚，内存与磁盘
+						// 一致），账本记录真实状态——不得写 expired 假装已清理
+						// （评审 r2§4）。后续通知会再次触发清理，自愈。
+						d.store.LedgerRecord(keyHash, candidate.EventID, sub.SubscriptionID, "expiry_cleanup_failed")
+					} else {
+						d.store.LedgerRecord(keyHash, candidate.EventID, sub.SubscriptionID, "expired")
 					}
-					d.store.LedgerRecord(keyHash, candidate.EventID, sub.SubscriptionID, "expired")
 				} else {
 					// WP-RESP-2 样本未归档：只记录观察，不写稳定产品语义。
 					d.store.LedgerRecord(keyHash, candidate.EventID, sub.SubscriptionID, "expiry_unverified")

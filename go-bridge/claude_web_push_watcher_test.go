@@ -434,3 +434,67 @@ func TestClaudeWebPushWatcherEnrollmentAfterDisabledPeriodDoesNotReplayHistory(t
 		t.Fatalf("candidate = %+v, want session %s with fresh answer", got[0], sessionID)
 	}
 }
+
+// 评审 R2-B3：enrollment 时已进行中、之后才完成的 turn 必须通知。
+// 真实时序：未完成 turn（只有 user 行）写在 enrollment sweep 之前；enrollment
+// 之后只追加 terminal 行。实现路径 = consumeGrowth 的
+// lastClaudeUserIdentityFromPath 回溯认领基线前的 user 行。
+func TestClaudeWebPushWatcherEnrollmentRetainsLiveTurnCompletingAfter(t *testing.T) {
+	enableKindGateForTest(t, WebPushKindCompletion)
+	projectsDir := t.TempDir()
+	workspace := catalogFixtureWorkspace(t, projectsDir, "push-enroll-live")
+	projectDir := filepath.Join(projectsDir, "-tmp-push-enroll-live")
+	if err := os.Mkdir(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := "enroll-live-session"
+	transcript := filepath.Join(projectDir, sessionID+".jsonl")
+	// enrollment 之前：一个已完成的历史 turn + 一个只写了 user 行的进行中 turn。
+	preEnrollment := `{"uuid":"u-old","type":"user","timestamp":"2026-09-12T00:00:00Z","cwd":"` + workspace + `","message":{"role":"user","content":"old"}}` + "\n" +
+		`{"uuid":"a-old","parentUuid":"u-old","type":"assistant","timestamp":"2026-09-12T00:00:01Z","cwd":"` + workspace + `","message":{"role":"assistant","content":[{"type":"text","text":"old reply"}],"stop_reason":"end_turn"}}` + "\n" +
+		`{"uuid":"u-live4","parentUuid":"a-old","type":"user","timestamp":"2026-09-12T00:01:00Z","cwd":"` + workspace + `","message":{"role":"user","content":"in flight"}}` + "\n"
+	if err := os.WriteFile(transcript, []byte(preEnrollment), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewHandlers()
+	h.claudeSessions = newClaudeSessionCatalog(projectsDir)
+	store := newTestWebPushStore(t)
+	pipeline := NewWebPushCandidatePipeline(store)
+	pipeline.SetBridgeID("brg_enroll_live")
+	h.SetWebPushStore(store)
+	h.SetWebPushPipeline(pipeline)
+	// 生产形状：startedAt = 构造时刻；先经历无订阅期。
+	watcher := &claudeWebPushWatcher{h: h, states: make(map[claudeSessionKey]*claudeWebPushWatchState), startedAt: time.Now().UTC().Add(-time.Hour)}
+	watcher.sweep() // disabled：重置基线
+
+	if _, err := store.Register("dev_enroll_live", testSubscriptionRecord("https://push.example.com/enroll-live")); err != nil {
+		t.Fatal(err)
+	}
+	watcher.sweep() // enrollment：以当下为 cut（全部已有行都在 cut 之前）
+	if got := pipeline.Drain(); len(got) != 0 {
+		t.Fatalf("enrollment replayed %d historical candidates", len(got))
+	}
+
+	// enrollment 之后只追加 terminal 行：进行中 turn 的完成。
+	terminal := `{"uuid":"a-live4","parentUuid":"u-live4","type":"assistant","timestamp":"2026-09-12T00:02:00Z","cwd":"` + workspace + `","message":{"role":"assistant","content":[{"type":"text","text":"late completion"}],"stop_reason":"end_turn"}}` + "\n"
+	f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(terminal); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	watcher.sweep()
+	got := pipeline.Drain()
+	if len(got) != 1 {
+		t.Fatalf("live-at-enrollment completion candidates = %d, want 1", len(got))
+	}
+	if got[0].SessionID != sessionID || got[0].ContentPreview != "late completion" {
+		t.Fatalf("candidate = %+v, want session %s with late completion", got[0], sessionID)
+	}
+}

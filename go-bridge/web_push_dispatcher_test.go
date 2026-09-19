@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"sync"
 	"sync/atomic"
@@ -314,6 +315,34 @@ func TestDispatcher404PostSampleDeletes(t *testing.T) {
 	}
 	if h.store.SubscriptionCount() != 0 {
 		t.Fatalf("expired subscription not cleaned: count = %d", h.store.SubscriptionCount())
+	}
+}
+
+// 404 清理失败路径（评审 r2§4）：删除持久化失败时 subscription 必须保留
+// （store 回滚，内存与磁盘一致），账本记 expiry_cleanup_failed 而不是
+// expired——不得把未落盘的删除写成已清理。
+func TestDispatcher404CleanupFailureKeepsSubscriptionAndHonestLedger(t *testing.T) {
+	prev := webPushExpirySemanticsProven
+	webPushExpirySemanticsProven = true
+	t.Cleanup(func() { webPushExpirySemanticsProven = prev })
+
+	h := newDispatcherHarness(t, 404)
+	// 注册已落盘后破坏持久化：store 目录去写权限 → atomic write 建临时文件失败。
+	if err := os.Chmod(h.store.dir, 0o500); err != nil {
+		t.Fatalf("chmod store dir read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(h.store.dir, 0o700) })
+
+	d := newTestDispatcher(h)
+	key := "codex|disp-1|t404f|completed"
+	h.deliverSync(t, d, dispatcherCandidate(WebPushKindCompletion, key))
+
+	status, ok := ledgerStatusOf(t, h.store, key)
+	if !ok || status != "expiry_cleanup_failed" {
+		t.Fatalf("ledger = (%q,%v), want expiry_cleanup_failed (deletion not persisted must not record expired)", status, ok)
+	}
+	if h.store.SubscriptionCount() != 1 {
+		t.Fatalf("subscription lost despite persist failure: count = %d, want 1 (memory rollback)", h.store.SubscriptionCount())
 	}
 }
 

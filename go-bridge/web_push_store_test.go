@@ -35,6 +35,45 @@ func testSubscriptionRecord(endpoint string) PushSubscriptionRecord {
 	}
 }
 
+// MarkSubscriptionExpired 持久化失败必须回滚内存删除（评审 r2§4）：磁盘仍是
+// 旧记录时内存不得假装已清理；恢复写权限后重载，订阅必须还在磁盘上。
+func TestWebPushStoreMarkExpiredRollsBackOnPersistFailure(t *testing.T) {
+	dir := t.TempDir()
+	s, err := LoadWebPushStore(dir)
+	if err != nil {
+		t.Fatalf("LoadWebPushStore: %v", err)
+	}
+	subID, err := s.Register("dev_exp", testSubscriptionRecord("https://example.com/push/dev_exp"))
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// 破坏持久化：目录去写权限 → atomic write 建临时文件失败。
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod store dir read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) // LIFO：先于 TempDir 清理恢复
+
+	if err := s.MarkSubscriptionExpired(subID); err == nil {
+		t.Fatal("MarkSubscriptionExpired succeeded despite unwritable store dir, want persist error")
+	}
+	if s.SubscriptionCount() != 1 {
+		t.Fatalf("memory deleted without persisted rollback: count = %d, want 1", s.SubscriptionCount())
+	}
+
+	// 恢复写权限后重载：磁盘旧记录必须仍包含该订阅（未假装清理）。
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatalf("chmod restore: %v", err)
+	}
+	reloaded, err := LoadWebPushStore(dir)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.SubscriptionCount() != 1 {
+		t.Fatalf("reloaded store count = %d, want 1 (disk must still hold the subscription)", reloaded.SubscriptionCount())
+	}
+}
+
 func TestWebPushStoreFirstCreateGeneratesKeyPair(t *testing.T) {
 	dir := t.TempDir()
 	s, err := LoadWebPushStore(dir)

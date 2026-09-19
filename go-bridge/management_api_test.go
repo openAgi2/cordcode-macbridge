@@ -1260,3 +1260,38 @@ func TestTopologySnapshotRejectsNoAuth(t *testing.T) {
 		t.Fatalf("status = %d, want 401", rec.Code)
 	}
 }
+
+// /internal/diagnostics/runtime 的 memory 对象 shape 契约（评审 r2§5）：
+// 核心键存在且 sysMinusHeapReleased == sys - heapReleased，防止未来 JSON
+// shape 漂移破坏 retained/released/footprint 对账口径。
+func TestMgmtRuntimeDiagnosticsMemoryShape(t *testing.T) {
+	srv := newTestMgmtServer(nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, authRequest(http.MethodGet, "/internal/diagnostics/runtime"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var result map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal diagnostics: %v", err)
+	}
+	raw, ok := result["memory"]
+	if !ok {
+		t.Fatal("memory section missing from runtime diagnostics")
+	}
+	var memory map[string]uint64
+	if err := json.Unmarshal(raw, &memory); err != nil {
+		t.Fatalf("unmarshal memory: %v", err)
+	}
+	for _, key := range []string{
+		"sys", "heapSys", "heapInuse", "heapIdle", "heapReleased",
+		"sysMinusHeapReleased", "heapObjects", "stackSys", "numGC",
+	} {
+		if _, ok := memory[key]; !ok {
+			t.Fatalf("memory.%s missing (shape drift?): keys = %v", key, memory)
+		}
+	}
+	if want := memory["sys"] - memory["heapReleased"]; memory["sysMinusHeapReleased"] != want {
+		t.Fatalf("memory.sysMinusHeapReleased = %d, want sys-heapReleased = %d", memory["sysMinusHeapReleased"], want)
+	}
+}

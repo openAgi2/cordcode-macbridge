@@ -1,5 +1,5 @@
 
-## 2026-09-19 bridge runtime "内存 2G+"：不是泄漏，是 macOS 压缩器扣住的死页；LLDB 直读 gcController 取证法
+## 2026-09-19 bridge runtime "内存 2G+"：已证明不是 2.5GB 可达 Go heap；swapped/retained 页状态与压缩器机制待一致遥测；LLDB 直读 gcController 取证法
 
 现象：`cordcode-bridge-runtime` 活动监视器显示 2.5G（峰值 3.8G），owner 质疑泄漏。
 vmmap 显示 2.4G 全是 swapped-out 脏页（9 个 128MB Go 堆 arena 整块换出、0K 常驻），
@@ -31,19 +31,24 @@ SubscriptionCount 检查之前），活跃 transcript 指纹每轮都变→每 3
 `resolveClaudeContinuationPaths` 每次历史加载扫项目目录全部 jsonl 的 512KiB 头尾；
 ③iOS 27h 重连 91 次，每次重拉全量投影快照；④codex-remote 轮询 p50 9.5s 持续超时。
 
-**修复（v2 状态）**：默认 GOMEMLIMIT 512MiB（env 覆盖；Go runtime 管理内存的
+**修复（v3 状态，r2 复审处置后）**：默认 GOMEMLIMIT 512MiB（env 覆盖；Go runtime 管理内存的
 软限额，provisional）；watcher 无订阅跳过 refresh + 禁用期**无条件**重置基线
 （v1 只在"曾见过订阅"时重置，漏掉"启动时无订阅、稍后首订"的回放——评审 B3；
-`startedAt` 预设值仍须尊重，FirstVisible 测试回归过一次）；WP-RESP-2 归档 +
-404/410 样本捕获保留，但 `webPushExpirySemanticsProven` **回退 false 待 owner
-显式追认**（v1 越权翻转且注释谎称已授权——评审 B5；追认前死订阅不删，
-SubscriptionCount 恒>0 会削弱门控收益，这是已知代价）。continuity cache v2
-（有界 FIFO + defensive copy + 读盘计数）待复审后提交。
+`startedAt` 预设值仍须尊重，FirstVisible 测试回归过一次；enrollment 时已进行中
+turn 的保留语义由 `lastClaudeUserIdentityFromPath` 回溯认领，有真实时序测试钉死）。
+404/410 清理语义已经 r2 复审报告 §4 追认，`webPushExpirySemanticsProven` 置 true
+（前置失败路径已修：`MarkSubscriptionExpired` 持久化失败回滚内存；账本只在删除
+落盘后记 expired，失败记 expiry_cleanup_failed 并保留订阅自愈重试清理）。
+continuity cache v3（有界 FIFO + defensive copy + 读盘计数 + 同指纹并发 miss
+singleflight 合并，并发测试断言恰好一次真实读）待本轮提交。
 
 **遗留坑**：本机 `GOSUMDB=off` + go.mod `toolchain go1.26.6` → 任何 go 命令在该仓
 静默失败（只剩一行 toolchain 警告），**且 `go build | head` 管道会吃掉退出码造成
-假成功**——必须 `GOTOOLCHAIN=local` 或修 GOSUMDB，且管道要 pipefail。后续候选：
-continuity 扫描按 catalog 指纹缓存（最大单波）；Management API 挂 pprof heap 端点。
+假成功**——必须 `GOTOOLCHAIN=local` 或修 GOSUMDB，且管道要 pipefail。后续候选
+（metrics-first 顺序）：部署后按 v2 计划采集一致内存遥测（Sys/HeapReleased 与
+footprint 对齐）优先于一切；continuity 指纹缓存已实现（见上，warm-only 收敛，
+cold 首轮全目录扫描仍在）；pprof heap 端点排在 runtime metrics 之后，不是当前
+优先项。
 
 ## 2026-09-16 dsh-web 活会话尾 turn 测试失败：86df3f1 之后「gate 等待」断言过时，不是回归
 

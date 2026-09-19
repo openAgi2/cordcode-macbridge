@@ -396,13 +396,20 @@ func (s *WebPushStore) LastResetInfo() (int64, string) {
 }
 
 // MarkSubscriptionExpired 删除过期 subscription（WP-RESP-2 样本门后的 404/410 路径）。
+// 持久化失败时回滚内存删除并返回错误（与 registerLocked/Unregister 同一纪律，
+// 评审 r2§4）：磁盘失败不得假装已清理——否则重启后订阅从旧文件复活。
 func (s *WebPushStore) MarkSubscriptionExpired(subscriptionID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for deviceID, record := range s.byDeviceID {
 		if record.SubscriptionID == subscriptionID {
 			delete(s.byDeviceID, deviceID)
-			return s.persistSubscriptionsLocked()
+			if err := s.persistSubscriptionsLocked(); err != nil {
+				// 回滚内存状态：磁盘仍是旧记录，内存必须与磁盘一致。
+				s.byDeviceID[deviceID] = record
+				return err
+			}
+			return nil
 		}
 	}
 	return nil
