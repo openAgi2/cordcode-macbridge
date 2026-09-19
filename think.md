@@ -11,10 +11,12 @@ swapped 26.1M，`sysMinusHeapReleased` 23.7MB，numGC 4877——**单点观测**
 「单次 GC 代价小」「512MiB 无需下调」四项动态/配置结论已按 Round 1 评审（报告
 `docs/2026-09-20-memory-followups-review-report.md`，B2）撤回——单点 gauge 证不了
 活跃性、无 TotalAlloc 计数算不出分配率、14.6 分钟窗口裁不了 GOMEMLIMIT 默认值。
-复采改按**多代际监测**设计（默认 120 分钟自动重启；identity A→采集→identity B
-原子采样事务防混代，负载覆盖用 runtime 自身计数器而非整机 load，256MiB/300MB 仅
-provisional 告警线——未越线不构成任何治理结论），受控长窗口（关自动重启）默认
-不采纳。详见 `docs/2026-09-20-memory-followups.md`（v3）。
+复采改按**多代际监测**设计（默认 120 分钟自动重启；management URL 以 runtime.json
+bootstrap 而非 lsof 猜端口，identity A→采集→identity B 原子采样事务防混代，负载
+覆盖用 runtime 自身计数器而非整机 load；告警为绝对越线 / footprint lifetime 峰值 /
+趋势三类**独立 OR** 触发的 provisional 线——覆盖「单次分配波后高位持平」的原事故
+形状，未越线不构成任何治理结论），受控长窗口（关自动重启）默认不采纳。详见
+`docs/2026-09-20-memory-followups.md`（v4）。
 
 ## 2026-09-19 bridge runtime "内存 2G+"：已证明不是 2.5GB 可达 Go heap；swapped/retained 页状态与压缩器机制待一致遥测；LLDB 直读 gcController 取证法
 
