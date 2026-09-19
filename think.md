@@ -1,4 +1,19 @@
 
+## 2026-09-20 内存治理 r6 后续三项落地：零值拒绝态 + 撤销清理警告 + 首采单点观测（动态结论已按评审撤回）
+
+r6 通过（代码 `ee43c8f`）后 owner 指示落地三项非阻断后续，业务提交 `124b73d`：
+①授权枚举零值从 Active 改为 `WebPushDeviceUnspecified`（拒绝投递但不清理订阅——
+「不知道」只 deny 不删）；②Mac UI 撤销设备成功但 web push 订阅清理失败时弹
+pushCleanupError 警告（不视为撤销失败）；③内存对账首采。首采（ee43c8f 代际
+PID 12110，2026-09-20T01:55+0800，运行 14m38s）：vmmap footprint 47.5M /
+swapped 26.1M，`sysMinusHeapReleased` 23.7MB，numGC 4877——**单点观测**，只证明
+遥测管线可用与当时健康；v1 曾写的「scavenger 活跃归还」「分配率 50–60MB/s」
+「单次 GC 代价小」「512MiB 无需下调」四项动态/配置结论已按 Round 1 评审（报告
+`docs/2026-09-20-memory-followups-review-report.md`，B2）撤回——单点 gauge 证不了
+活跃性、无 TotalAlloc 计数算不出分配率、14.6 分钟窗口裁不了 GOMEMLIMIT 默认值。
+复采改按**多代际监测**设计（默认 120 分钟自动重启 → 结论限定「代际内上界」），
+受控长窗口（关自动重启）默认不采纳。详见 `docs/2026-09-20-memory-followups.md`（v2）。
+
 ## 2026-09-19 bridge runtime "内存 2G+"：已证明不是 2.5GB 可达 Go heap；swapped/retained 页状态与压缩器机制待一致遥测；LLDB 直读 gcController 取证法
 
 现象：`cordcode-bridge-runtime` 活动监视器显示 2.5G（峰值 3.8G），owner 质疑泄漏。
