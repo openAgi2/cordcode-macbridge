@@ -1,13 +1,13 @@
-# 2026-09-19 bridge runtime「内存 2G+」诊断与修复（评审稿 v5，待复审）
+# 2026-09-19 bridge runtime「内存 2G+」诊断与修复（评审稿 v6，待复审）
 
-> 状态：**修订 v5，待复审**。v1（`685646d`）经 r1（`0469d9c`）不通过（5 阻断项）；v2（`bc328df`）
-> 经 r2（`743bde8`）不通过（4 阻断项 + §4 追认）；v3（`f1ed656`）经 r3（`d4fa165`）不通过（4 新
-> 阻断项）；v4（`28e4588`）经 r4（`8d750b31872c776c589528d4b788dcbb27a75f18`）不通过（剩 1 发布
-> 阻断项 R4-B1 + 2 非阻断）。本版处置 R4-B1（撤销设备投递授权 fail closed）与 r4§4 非阻断项。
-> **本轮业务代码有变化（`3218cb5`），已按 r4 准入条件 5 重新 Release 构建、覆盖安装并验证新
-> 代际——部署证据在部署完成后写入本稿，见 §5。**
+> 状态：**修订 v6，待复审**。v1（`685646d`）经 r1（`0469d9c`）不通过；v2（`bc328df`）经 r2（`743bde8`）
+> 不通过；v3（`f1ed656`）经 r3（`d4fa165`）不通过；v4（`28e4588`）经 r4（`8d750b3`）不通过（剩 R4-B1）；
+> v5（`12e83c3`）经 r5（`40dace132239e5fdb88b01de8e769c64a9ed31e9`）不通过（剩 R5-B1：fail-open 洞）。
+> 本版处置 R5-B1（只有显式 active 才投递，deny by default）。**本轮业务代码有变化（`ee43c8f`），
+> 已按 r5 准入条件 6 重新 Release 构建、覆盖安装并验证新代际——部署证据在部署完成后写入本稿，
+> 见 §5。**
 
-## 1. 来源清单（P0，v5 补全）
+## 1. 来源清单（P0，v6 补全）
 
 ```text
 仓库路径=/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline
@@ -20,11 +20,13 @@ v3 代码修订提交=ca4e56d8a34b890990cad7c41e2051fe4260ec4e；v3 评审稿提
 r3 复审报告提交=d4fa165911d5bd820977cdc18262c6df48a7d409
 v4 代码修订提交=f45ac93f1f48e28e2b8639fa38d55e608b21264d；v4 评审稿提交=28e45884a342a11b9bbc602474f82343e10b12ef
 r4 复审报告提交=8d750b31872c776c589528d4b788dcbb27a75f18
-v5 代码修订提交=3218cb51e8ec7d5f7910437cf6057ed73e9fa7cd（dispatcher DeviceRevoked fail-closed 过滤 + 清理重试、registerLocked 替换回滚、三阶段验收测试、think.md/CHANGELOG v5 状态）
-未提交状态=本稿为 docs-only 提交；代码工作树在 3218cb5 后无其他未提交修改
+v5 代码修订提交=3218cb51e8ec7d5f7910437cf6057ed73e9fa7cd；v5 评审稿提交=12e83c366772d50253cc278792d463b9e6bef099
+r5 复审报告提交=40dace132239e5fdb88b01de8e769c64a9ed31e9
+v6 代码修订提交=ee43c8f783710f826817c7a60109691e24689df7（三态授权判定 deny by default、DeviceStore 先于 dispatcher 创建并直接注入、ReplaceDevice 联动清理、生产形状测试、think.md/CHANGELOG v6 状态）
+未提交状态=本稿为 docs-only 提交；代码工作树在 ee43c8f 后无其他未提交修改
 任务预期分支=feat/ios-native-message-timeline
-配套仓库路径/分支/提交=/Users/jacklee/Projects/cordcode-ios-native-message-timeline / feat/ios-native-message-timeline / 5ea9799d3701a4ba4d0ac9cfe19b16153c2f4254（r4 报告 §1 记录的当前状态；本任务无 iOS 代码声明或改动）
-预期产品特性=512MiB runtime-managed 软限额；无订阅 watcher 门控；enrollment 不回放且以 O(1) 条目内存保留进行中 turn；404/410 事务性清理；设备撤销后立即且跨重启从 fan-out fail closed；有界 continuity warm cache 与同指纹并发合并；一致内存遥测
+配套仓库路径/分支/提交=/Users/jacklee/Projects/cordcode-ios-native-message-timeline / feat/ios-native-message-timeline / 8983700d9e820dfdb0f504226bd23bf05a935112（r5 报告 §1 记录的当前状态；本任务无 iOS 代码声明或改动）
+预期产品特性=512MiB runtime-managed 软限额；无订阅 watcher 门控；enrollment 不回放且以 O(1) 条目内存保留进行中 turn；404/410 事务性清理；只有当前有效 trusted device 才能进入 Web Push fan-out（deny by default）；有界 continuity warm cache 与同指纹并发合并；一致内存遥测
 ```
 
 诊断时运行中的生产二进制身份（`-version` 核对）：
@@ -132,7 +134,7 @@ swapped/retained 页的具体状态（已归还未重取 vs 仍被 runtime 持�
 3. iOS 27h 重连 91 次，每次重连重拉全量投影快照。
 4. codex-remote 轮询 p50 9.5s 持续超时重试（上游慢，已有退避）。
 
-## 4. 修复方案（v5 状态）
+## 4. 修复方案（v6 状态）
 
 ### 修复 1：runtime 默认 GOMEMLIMIT 512MiB【r1 N2/Q1 裁决保留】
 
@@ -171,40 +173,51 @@ dispatcher 仅删除落盘成功记 `expired`，失败记 `expiry_cleanup_failed
 效果边界：warm 收敛；冷启动首轮与指纹变化后首次访问仍真实读盘。测试 6 条 +
 race ×3 全绿。
 
-### 修复 5：设备撤销/注销的订阅删除——**两个不变量分开实现**【R3-B2 + R4-B1】
+### 修复 5：设备撤销/注销的订阅删除——**两个不变量分开实现**【R3-B2 + R4-B1 + R5-B1】
 
-r4 裁决明确：**subscription 存储一致性与授权投递过滤是两个不同不变量**，v4 只
-做了前者。v5 两者齐备：
+r4 裁决：**subscription 存储一致性与授权投递过滤是两个不同不变量**。r5 裁决：
+**授权过滤必须 deny by default——只有显式 active 才投递**。v6 两者齐备：
 
-**不变量 A——存储一致性**（R3-B2，v4 已落地）：`DeleteDevice`/`Unregister`/
+**不变量 A——存储一致性**（R3-B2 + r4§4）：`DeleteDevice`/`Unregister`/
 `registerLocked` 的 subscription 删除/替换先落盘、失败回滚内存（替换失败恢复
-旧记录，r4§4）；badge 清理独立失败后置；撤销 API 清理失败时响应返回
+旧记录）；badge 清理独立失败后置；撤销 API 清理失败时响应返回
 `pushCleanupError`。磁盘失败时不产生「内存已删、磁盘仍在」的假成功。
 
-**不变量 B——授权投递过滤**（R4-B1，v5 落地）：dispatcher fan-out 前按**持久
-trusted-device revoke 状态**过滤（`WebPushDispatcherConfig.DeviceRevoked`，
-main.go 经 `webPushDeviceRevokedFilter` 接线）：
+**不变量 B——授权投递过滤（deny by default）**（R4-B1 + R5-B1）：
 
-- **立即 fail closed**：清理落盘失败被回滚进可见集合的订阅，下一条 candidate
-  即被跳过——撤销先于清理失败落盘（`RevokeDevice` 成功在前），revoke 状态
-  是权威投递授权。
-- **跨重启 fail closed**：FileDeviceStore 重载后 revoke 状态仍在；磁盘旧
-  subscription 记录即使重新加载也被过滤。
-- **查不到记录 fail open**：subscription 的 deviceID 与 DeviceStore 记录一一
-  对应（register 走已认证 device），missing ≠ revoked；nil store（未初始化）
-  不过滤。
-- **清理重试**：跳过撤销设备订阅时顺带重试 `DeleteDevice`——存储恢复后的
-  下一次 fan-out 完成物理删除，订阅随之彻底消失；重试失败继续跳过（授权
-  撤销优先于 store 一致性）。
-- **验收测试（r4 要求的三形状）**：
-  `TestDispatcherRevokedDeviceFailsClosedAndRetriesCleanup`——①同进程：清理
-  落盘失败后下一条 candidate 0 次 HTTP 请求；②重启形状：磁盘重载 store +
-  新 dispatcher（存储仍坏）仍 0 次请求；③存储恢复：下一次 fan-out 完成物理
-  删除，再次重载磁盘归零。另有 `TestWebPushDeviceRevokedFilter`（nil store /
-  missing / active / revoked 四分支）。
-- **诚实边界**：Mac UI 当前不展示 `pushCleanupError`（客户端丢弃成功响应体）；
-  r4 裁决明确「仅展示 warning 不够，不能阻止未授权投递」——投递阻断由本过滤
-  承担，UI 展示作为可观测性补充另行处理（不在本轮阻断项内）。
+- **三态授权判定** `WebPushAuthorizationDecision`：
+  - `WebPushDeviceActive`：记录存在且未撤销——**唯一允许投递的状态**；
+  - `WebPushDeviceDenied`：明确 revoked / 记录缺失（含替换 orphan）——拒绝
+    并在 fan-out 内重试物理清理（存储恢复后订阅彻底消失）；
+  - `WebPushDeviceUnknown`：lookup 错误、devices.json 加载失败（degraded
+    store）等暂时状态——拒绝本次投递但**不删订阅**（设备可能仍 active；
+    devices.json 恢复重启后订阅仍可用）。
+  - dispatcher 调用点对任何非 Active 判定（含未来新增值）默认拒绝。
+- **消除晚初始化窗口**（R5-B1）：DeviceStore 在 dispatcher 构造**之前**创建
+  （`newTrustedDeviceStoreChecked`，同时返回 degraded 标志），授权过滤直接
+  持有该冻结引用（`webPushDeviceAuthorization(trustedDevices, devicesDegraded)`）
+  ——不再读全局变量，无 fail-open 窗口、无全局 interface 未同步读写；
+  ManagementConfig 复用同一实例。
+- **degraded 语义**（r5 要求 5）：devices.json 加载失败退回空 store 时，全部
+  记录缺失按 Unknown 处理——投递全拒（与 direct auth 同宽，**不让旧订阅获得
+  更宽授权**），但订阅保留。
+- **ReplaceDevice 联动清理**（r5 要求 3）：配对批准路径对 `ReplaceDevice`
+  返回的旧 deviceID 逐个调用 `DeleteDevice`（失败 WARN 如实暴露）；即使清理
+  失败，orphan 订阅也被 missing=Denied 拒绝并自愈。
+- **测试（r5 要求 4 的全部形状）**：
+  - `TestWebPushDeviceAuthorizationDecisions`：active / revoked /
+    missing-healthy（orphan→Denied）/ missing-degraded（→Unknown）/
+    lookup-error（→Unknown）五分支；
+  - `TestDispatcherAuthorizationMissingOrphanAndUnknown`：orphan 0 请求 +
+    自愈清理；Unknown 0 请求 + 订阅保留；
+  - `TestDispatcherDeviceAuthorizationFileStoreReload`：**真实 devices.json +
+    web-push-subscriptions.json 双重重载**——持久 revoke 后两 store 从磁盘重载，
+    revoked 订阅仍 0 请求（跨重启 fail closed），active 设备正常投递（每阶段
+    恰好 +1 请求），存储恢复后物理清理完成、磁盘只剩 active；
+  - `TestDispatcherRevokedDeviceFailsClosedAndRetriesCleanup`（r4 三阶段，
+    已改用生产授权判定）：同进程 / 重载形状 / 恢复后清理。
+- **诚实边界**：Mac UI 当前不展示 `pushCleanupError`（r4/r5 均裁定为可观测性
+  补充、非阻断）；投递阻断由授权过滤承担。
 
 ### 新增：`/internal/diagnostics/runtime` 一致内存遥测 + shape 契约【r1 Q6 优先级 1；r2 §5】
 
@@ -212,31 +225,31 @@ main.go 经 `webPushDeviceRevokedFilter` 接线）：
 heapReleased / sysMinusHeapReleased / heapObjects / stackSys / numGC`。
 `TestMgmtRuntimeDiagnosticsMemoryShape` 断言核心键存在且恒等式成立。
 
-## 5. 交付与部署证据（v5，部署完成后写入）
+## 5. 交付与部署证据（v6，部署完成后写入）
 
 ### 5.1 构建来源门（实际执行构建的工作目录）
 
 ```text
 构建工作目录=/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline
 分支=feat/ios-native-message-timeline
-构建时提交=3218cb51e8ec7d5f7910437cf6057ed73e9fa7cd
+构建时提交=ee43c8f783710f826817c7a60109691e24689df7
 构建前未提交状态=干净（git status --short 无输出）
 构建命令=GOSUMDB=sum.golang.org ./scripts/build-unsigned-release.sh（GOSUMDB 前缀规避本机 GOSUMDB=off + toolchain go1.26.6 的静默失败坑，见 think.md）
 产物路径=build/unsigned-release/Build/Products/Release/CordCodeLink.app
-runtime 版本元数据=cordcode-bridge-runtime 0.1.0 (commit: 3218cb51e8ec, built: 2026-09-19T16:01:30Z)
-产物符号核验=nm 确认 webPushDeviceRevokedFilter 在（本轮新增特征符号）
+runtime 版本元数据=cordcode-bridge-runtime 0.1.0 (commit: ee43c8f78371, built: 2026-09-19T17:39:57Z)
+产物符号核验=nm 确认 webPushDeviceAuthorization 在（本轮新增特征符号）
 dist 产物=dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip（脚本生成）
 ```
 
 ### 5.2 安装与运行态（部署后实测）
 
 ```text
-安装时间=2026-09-20T00:03:05+0800（killall + rm -rf /Applications/CordCodeLink.app + cp -R + open）
-GUI 进程=PID 53136（/Applications/CordCodeLink.app/Contents/MacOS/CordCodeLink）
-runtime 进程=PID 53227（/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime，-port 8777 …）
-8777 listener=lsof 确认由 PID 53227 LISTEN
-特征日志=time=2026-09-20T00:03:10.934+08:00 level=INFO msg="go-bridge: default memory limit applied" limitBytes=536870912
-启动 RSS=85680KB（仅记录，不作为内存效果验证——效果验证依赖新遥测的长期/负载数据）
+安装时间=2026-09-20T01:41:50+0800（killall + rm -rf /Applications/CordCodeLink.app + cp -R + open）
+GUI 进程=PID 12024（/Applications/CordCodeLink.app/Contents/MacOS/CordCodeLink）
+runtime 进程=PID 12110（/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime，-port 8777 …）
+8777 listener=lsof 确认由 PID 12110 LISTEN
+特征日志=time=2026-09-20T01:41:57.161+08:00 level=INFO msg="go-bridge: default memory limit applied" limitBytes=536870912
+启动 RSS=36416KB（仅记录，不作为内存效果验证——效果验证依赖新遥测的长期/负载数据）
 ```
 
 ### 5.3 部署历史（本任务全部代际）
@@ -246,15 +259,16 @@ runtime 进程=PID 53227（/Applications/CordCodeLink.app/Contents/Resources/cor
 | 诊断对象 | 87b32a1d9556（2026-09-17 构建） | — | 已退出（诊断期运行 26h50m） |
 | 修复 1–3 | f7cd91d | 2026-09-19 早些时候 | 已被替换（含 v1 410 翻转与 B3 enrollment 漏洞） |
 | v3 代码 | f1ed656af43e（built 15:27:18Z） | 2026-09-19T23:29+0800（GUI 33250 / runtime 33343） | 已被替换（含 R3-B2/B3 缺陷） |
-| v4 代码 | f45ac93f1f48（built 15:46:29Z） | 2026-09-19T23:48:0900+0800（GUI 44119 / runtime 44215） | 已被替换（含 R4-B1 投递授权缺口） |
-| **v5 代码（当前）** | **3218cb51e8ec（built 16:01:30Z）** | **2026-09-20T00:03:05+0800（GUI 53136 / runtime 53227）** | **运行中** |
+| v4 代码 | f45ac93f1f48（built 15:46:29Z） | 2026-09-19T23:48:09+0800（GUI 44119 / runtime 44215） | 已被替换（含 R4-B1 投递授权缺口） |
+| v5 代码 | 3218cb51e8ec（built 16:01:30Z） | 2026-09-20T00:03:05+0800（GUI 53136 / runtime 53227） | 已被替换（含 R5-B1 fail-open 洞） |
+| **v6 代码（当前）** | **ee43c8f78371（built 17:39:57Z）** | **2026-09-20T01:41:50+0800（GUI 12024 / runtime 12110）** | **运行中** |
 
 ### 5.4 验证状态
 
 | 项 | 状态 |
 | --- | --- |
-| 定向测试 | go-bridge：relay 扫描族、watcher 全组、identity 流式（含堆上界）、dispatcher 全组（404 正反 + 失败路径 + **revoked fail-closed 三阶段** + filter 单测）、store 全组（MarkExpired/DeleteDevice/Register 替换回滚）、revoke 暴露、memory limit、diagnostics shape——全绿；claudecode 全包全绿 |
-| race | go-bridge（watcher/identity/dispatcher/store/revoke/filter/diagnostics 组）+ claudecode（continuity ×3）通过；`go vet` 两包干净 |
+| 定向测试 | go-bridge：relay 扫描族、watcher 全组、identity 流式（含堆上界）、dispatcher 全组（404 正反 + 失败路径 + revoked 三阶段 + **授权判定/orphan/Unknown/FileStore 双重重载**）、store 全组（MarkExpired/DeleteDevice/Register 替换回滚）、revoke 暴露、memory limit、diagnostics shape——全绿；claudecode 全包全绿 |
+| race | go-bridge（watcher/identity/dispatcher/store/revoke/授权判定/diagnostics 组）+ claudecode（continuity ×3）通过；`go vet` 两包干净 |
 | 部署 | 见 §5.2（部署后写入，非预先声明） |
 
 ## 6. 预期效果（措辞与证据等级对齐；两个不变量分开表述）
@@ -268,11 +282,12 @@ runtime 进程=PID 53227（/Applications/CordCodeLink.app/Contents/Resources/cor
 - 死订阅清理：404/410 即删（落盘成功）；持久化失败时保留订阅自愈重试，
   账本如实记录。
 - 设备撤销/注销——**两个不变量**：存储一致性（删除/替换落盘成功才改内存，
-  失败回滚，无假成功）与授权投递过滤（撤销设备的订阅立即且跨重启从 fan-out
-  中 fail closed；存储恢复后下一次 fan-out 完成物理清理）。**存储一致性不
-  单独保证「不投递」，投递授权由 revoke 状态过滤保证。**
+  失败回滚，无假成功）与授权投递过滤（**只有显式 active 的 trusted device 才
+  投递**：revoked/missing/orphan 拒绝并自愈清理；lookup 错误与 degraded store
+  拒绝但保留订阅；跨重启由 devices.json 持久状态保证）。**存储一致性不单独
+  保证「不投递」；投递授权由 deny-by-default 过滤保证。**
 
-## 7. 遗留与开放问题（v5 更新）
+## 7. 遗留与开放问题（v6 更新）
 
 1. ~~owner 追认 410 翻转~~——已由 r2 §4 追认并启用（失败路径已修）。
 2. **根因定论**（§3.4）：部署新遥测后在真实负载下对齐 `Sys/HeapReleased` 与
@@ -283,19 +298,20 @@ runtime 进程=PID 53227（/Applications/CordCodeLink.app/Contents/Resources/cor
 5. pprof：r1 Q6 裁决「不应先于低暴露面的 runtime metrics」——metrics 已加，
    pprof 顺位其后，暂不做。
 6. 有订阅时单个变化文件的 3s 有界扫描（512KiB 上限）：评审裁定暂不优先。
-7. ~~`DeleteDevice` 同形缺口~~——R3-B2 已修；~~投递授权缺口~~——R4-B1 已修
-   （本稿修复 5 不变量 B）。
-8. Mac UI 展示 `pushCleanupError`（可观测性补充，r4 明确非阻断）：不在本轮
-   范围，留待 UI 任务。
+7. ~~`DeleteDevice` 同形缺口~~（R3-B2 已修）；~~投递授权缺口~~（R4-B1/R5-B1
+   已修：deny by default + 直接注入 + ReplaceDevice 联动清理）。
+8. Mac UI 展示 `pushCleanupError`（可观测性补充，r4/r5 均裁定非阻断）：不在
+   本轮范围，留待 UI 任务。
 
-## 8. 元复盘（v2 增补，v3/v4/v5 补教训）
+## 8. 元复盘（v2 增补，v3–v6 补教训）
 
 owner 元批评（「先用省事的临时办法糊弄」）与历轮评审教训一致。历轮新增：
 **复用现成 helper 而不审其内存形状**（R3-B3）；**完成报告先于事实**（R3-B1）；
-**把存储一致性当成授权语义**（R4-B1——回滚让数据结构自洽了，但「谁有权
-收到推送」是另一个问题：撤销必须切断投递授权，而不是只把删除做事务化）。
-v5 的处置原则追加：**安全语义要按「授权」与「一致性」分别证明；每个不变量
-有自己的测试。**
+**把存储一致性当成授权语义**（R4-B1）；**fail-open 的洞比想象大**（R5-B1——
+「查不到 = active」在晚初始化、加载失败、替换 orphan 三个真实生产状态全部
+放行；安全过滤的默认值必须是 deny，例外才需要证明）。v6 的处置原则追加：
+**授权判定用显式三态（Active/Denied/Unknown），默认拒绝；依赖注入先于消费方
+启动；每个生产可达的异常状态都要有对应测试形状。**
 
 ## 9. 阻断项 → 处置映射（供复审）
 
@@ -335,7 +351,14 @@ v5 的处置原则追加：**安全语义要按「授权」与「一致性」分
 
 | 评审项 | 处置 | 位置 |
 | --- | --- | --- |
-| R4-B1 revoked device 仍在投递集合（发布阻断） | dispatcher fan-out 前按持久 trusted-device revoke 状态过滤（`DeviceRevoked` 注入，立即 + 跨重启 fail closed；missing fail open）；跳过时重试物理删除（存储恢复后下一次 fan-out 完成清理）；三阶段验收测试（同进程 0 请求 / 重载形状 0 请求 / 恢复后磁盘归零）+ filter 单测 | 修复 5 不变量 B |
-| r4§4 registerLocked 替换失败不恢复旧记录 | 保存 existing 并在失败时恢复；replacement failure 测试（内存恢复旧记录 + 重载磁盘仍旧记录） | 修复 5 不变量 A |
-| r4§6.2 文档「重启无复活」错误结论 | §6 改为两个不变量分开表述：存储一致性 ≠ 投递授权；本稿修复 5 明确分层 | 修复 5、§6 |
-| r4§4 措辞「同一纪律」不准确 | registerLocked 修复后真正一致；v5 措辞改为「存储一致性（不变量 A）」 | 修复 5 |
+| R4-B1 revoked device 仍在投递集合（发布阻断） | v5 加 revoke 过滤（r5 又发现 fail-open 洞 → R5-B1 终态见下） | 修复 5 不变量 B |
+| r4§4 registerLocked 替换失败不恢复旧记录 | 保存 existing 并在失败时恢复；replacement failure 测试 | 修复 5 不变量 A |
+| r4§6.2 文档「重启无复活」错误结论 | §6 两个不变量分开表述 | 修复 5、§6 |
+
+### Round 5（报告 commit `40dace1`）
+
+| 评审项 | 处置 | 位置 |
+| --- | --- | --- |
+| R5-B1 fail-open 洞（发布阻断）：晚初始化窗口 / devices.json 加载失败全 missing 放行 / ReplaceDevice orphan / lookup error 与 missing 均当 active | **只有显式 active 才投递**（deny by default）：三态判定 `WebPushDeviceActive/Denied/Unknown`，调用点默认拒绝；DeviceStore 先于 dispatcher 创建并直接注入冻结引用（`newTrustedDeviceStoreChecked` 返回 degraded 标志，ManagementConfig 复用同实例）；degraded store 下 missing → Unknown（拒绝但保留订阅，不比 direct auth 宽）；ReplaceDevice 旧 ID 联动清理订阅；测试覆盖 r5 要求全部形状（判定五分支单测、orphan/Unknown dispatcher 行为、真实 devices.json + web-push-subscriptions.json 双重重载：revoked 跨重启 0 请求 + active 正常投递 + 恢复后物理清理） | 修复 5 不变量 B |
+| r5§4 v5 时间戳笔误 `23:48:0900+0800` | §5.3 已改为 `2026-09-19T23:48:09+0800` | §5.3 |
+| r5§4 二态 API 易把「未知」折叠成 active | 改为正向三态 `DeviceAuthorized func(deviceID string) WebPushAuthorizationDecision`，默认 deny | 修复 5 不变量 B |
