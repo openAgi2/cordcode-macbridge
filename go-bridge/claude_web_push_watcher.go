@@ -72,11 +72,13 @@ func (w *claudeWebPushWatcher) sweep() {
 	// CPU/分配源之一）。
 	enabled := w.h.webPush != nil && w.h.webPush.SubscriptionCount() > 0
 	if !enabled {
-		if w.subscriptionsObserved {
-			w.states = make(map[claudeSessionKey]*claudeWebPushWatchState)
-			w.startedAt = time.Time{}
-			w.subscriptionsObserved = false
-		}
+		// 无订阅期间不保留任何基线（评审 B3）：startedAt 必须无条件置零。
+		// 只在"曾见过订阅"时重置的话，"进程启动时无订阅、数小时后首次
+		// 订阅"会沿用进程启动时刻为首见 cut，回放订阅前的历史完成通知。
+		// states 同步清空；两者在下次启用（enrollment）时以当下重建。
+		w.states = make(map[claudeSessionKey]*claudeWebPushWatchState)
+		w.startedAt = time.Time{}
+		w.subscriptionsObserved = false
 		return
 	}
 	if !w.subscriptionsObserved {

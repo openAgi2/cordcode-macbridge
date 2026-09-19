@@ -36,12 +36,14 @@ import (
 
 const defaultDrivers = "claude,codex,codex-web,grokbuild,dsh-web,opencode-web"
 
-// defaultBridgeMemoryLimitBytes 是未显式设置 GOMEMLIMIT env 时的 runtime 软内存
-// 上限。2026-09-19 复盘：bridge 的瞬态分配波（claude transcript 全量解析、投影
-// 快照序列化、continuity 扫描）把 Go 堆推到 GB 级高水位；GC 后死页在整机内存
-// 压力下被 macOS 压缩器扣住不还，physical footprint 长期挂在波峰值（实测
-// 2.5G / 峰值 3.8G，而活堆仅 ~20MB）。软上限把波峰钉在数百 MB，用户可见内存
-// 从"数 G"回到"低几百 MB"。软上限不 OOM：真需要更多时 GC 加频而非失败。
+// defaultBridgeMemoryLimitBytes 是未显式设置 GOMEMLIMIT env 时的默认值。
+// 语义（Go 1.26.6 runtime/debug/garbage.go）：这是 **Go runtime 管理内存的
+// 软限额**——runtime 通过提高 GC/归还力度尝试维持 MemStats.Sys -
+// HeapReleased 不超过该值；进程总 footprint 仍可能超过它（OS 代持、非 Go
+// 内存、mmap 不在管辖内），过低时可能接近持续 GC，系统级 OOM 也不因此
+// 被排除。数值 provisional：512MiB 相对当前活堆（~20MB）有余量，待真实
+// 大历史 cold/warm 负载数据复核。背景（2026-09-19 复盘）：瞬态分配波把
+// 堆高水位推到 GB 级，实测 footprint 2.5G/峰值 3.8G 而活堆仅 ~20MB。
 const defaultBridgeMemoryLimitBytes int64 = 512 << 20
 
 func Main() {

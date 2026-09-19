@@ -319,7 +319,9 @@ func TestClaudeWebPushWatcherSkipsCatalogRefreshWithoutSubscriptions(t *testing.
 	pipeline.SetBridgeID("brg_nosub")
 	h.SetWebPushStore(store)
 	h.SetWebPushPipeline(pipeline)
-	watcher := &claudeWebPushWatcher{h: h, states: make(map[claudeSessionKey]*claudeWebPushWatchState)}
+	// 生产构造形状：StartClaudeWebPushWatcher 在构造时设置 startedAt（评审 B3：
+	// 零值构造会绕开"进程启动时无订阅、稍后首次订阅"的真实路径）。
+	watcher := &claudeWebPushWatcher{h: h, states: make(map[claudeSessionKey]*claudeWebPushWatchState), startedAt: time.Now().UTC().Add(-time.Hour)}
 
 	watcher.sweep()
 	if h.claudeSessions.snapshot != nil {
@@ -344,6 +346,74 @@ func TestClaudeWebPushWatcherSkipsCatalogRefreshWithoutSubscriptions(t *testing.
 	// 订阅后的新完成仍要通知（门控不得吞正常路径）。
 	live := `{"uuid":"u-live2","parentUuid":"a-old","type":"user","timestamp":"2026-09-12T00:02:00Z","cwd":"` + workspace + `","message":{"role":"user","content":[{"type":"text","text":"new"}]}}` + "\n" +
 		`{"uuid":"a-live2","parentUuid":"u-live2","type":"assistant","timestamp":"2026-09-12T00:02:01Z","cwd":"` + workspace + `","message":{"role":"assistant","content":[{"type":"text","text":"fresh answer"}],"stop_reason":"end_turn"}}` + "\n"
+	f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(live); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	watcher.sweep()
+	got := pipeline.Drain()
+	if len(got) != 1 {
+		t.Fatalf("post-enrollment live candidates = %d, want 1", len(got))
+	}
+	if got[0].SessionID != sessionID || got[0].ContentPreview != "fresh answer" {
+		t.Fatalf("candidate = %+v, want session %s with fresh answer", got[0], sessionID)
+	}
+}
+
+// 评审 B3 回归：生产构造形状（startedAt 在构造时设置）+ 进程启动时无订阅 +
+// 稍后首次订阅。enrollment 前已完成的历史不得回放为通知；enrollment 时进行中、
+// 之后完成的 turn 会通知（由 claudeFirstVisibleLiveCut 的 enrollment cut 规则固定）。
+func TestClaudeWebPushWatcherEnrollmentAfterDisabledPeriodDoesNotReplayHistory(t *testing.T) {
+	enableKindGateForTest(t, WebPushKindCompletion)
+	projectsDir := t.TempDir()
+	workspace := catalogFixtureWorkspace(t, projectsDir, "push-enroll-late")
+	projectDir := filepath.Join(projectsDir, "-tmp-push-enroll-late")
+	if err := os.Mkdir(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := "enroll-late-session"
+	transcript := filepath.Join(projectDir, sessionID+".jsonl")
+	// 历史完成：发生在"进程启动"之后、"enrollment"之前——正是 B3 会回放的区间。
+	history := `{"uuid":"u-hist","type":"user","timestamp":"2026-09-12T00:00:00Z","cwd":"` + workspace + `","message":{"role":"user","content":"hist"}}` + "\n" +
+		`{"uuid":"a-hist","parentUuid":"u-hist","type":"assistant","timestamp":"2026-09-12T00:00:01Z","cwd":"` + workspace + `","message":{"role":"assistant","content":[{"type":"text","text":"hist reply"}],"stop_reason":"end_turn"}}` + "\n"
+	if err := os.WriteFile(transcript, []byte(history), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewHandlers()
+	h.claudeSessions = newClaudeSessionCatalog(projectsDir)
+	store := newTestWebPushStore(t)
+	pipeline := NewWebPushCandidatePipeline(store)
+	pipeline.SetBridgeID("brg_enroll_late")
+	h.SetWebPushStore(store)
+	h.SetWebPushPipeline(pipeline)
+	// 生产形状：startedAt = 进程启动时刻（1 小时前），先经历无订阅期。
+	watcher := &claudeWebPushWatcher{h: h, states: make(map[claudeSessionKey]*claudeWebPushWatchState), startedAt: time.Now().UTC().Add(-time.Hour)}
+
+	watcher.sweep() // disabled：不 refresh，且必须清空 startedAt（B3 修复点）
+	if h.claudeSessions.snapshot != nil {
+		t.Fatal("disabled sweep refreshed the catalog")
+	}
+
+	// 数小时后首次注册订阅 → enrollment。
+	if _, err := store.Register("dev_enroll_late", testSubscriptionRecord("https://push.example.com/enroll-late")); err != nil {
+		t.Fatal(err)
+	}
+	watcher.sweep() // 首个 enabled sweep：以 enrollment 时刻重基线
+	if got := pipeline.Drain(); len(got) != 0 {
+		t.Fatalf("enrollment replayed %d historical candidates (B3: startedAt must re-baseline at enrollment)", len(got))
+	}
+
+	// enrollment 时进行中、之后完成的 turn：通知（规则固定）。
+	live := `{"uuid":"u-live3","parentUuid":"a-hist","type":"user","timestamp":"2026-09-12T00:01:00Z","cwd":"` + workspace + `","message":{"role":"user","content":"new"}}` + "\n" +
+		`{"uuid":"a-live3","parentUuid":"u-live3","type":"assistant","timestamp":"2026-09-12T00:01:01Z","cwd":"` + workspace + `","message":{"role":"assistant","content":[{"type":"text","text":"fresh answer"}],"stop_reason":"end_turn"}}` + "\n"
 	f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		t.Fatal(err)

@@ -8,16 +8,22 @@ vmmap 显示 2.4G 全是 swapped-out 脏页（9 个 128MB Go 堆 arena 整块换
 **取证法（无 pprof 时的判定路径，可复用）**：二进制带符号表（`-trimpath` 不去符号），
 `nm` 找 `runtime.gcController`（Go 1.26 布局：`heapLive`@+104、`heapMarked`@+152、
 `gcPercent`@+0 可当校验位=100），ASLR 基址取 vmmap 的 Load Address，`lldb -p <pid>
---batch -o "memory read -s 8 -f u -c 20 <addr>" -o detach` 只读读出。`memstats.heapStats`
-三代环形缓冲（delta 1168B）里 `committed` 是当前值、`released` 是累计计数器
-（= `gcController.heapReleased`）。
+--batch -o "memory read -s 8 -f u -c 20 <addr>" -o detach` 只读读出。
 
-**结论**：heapLive 20MB、committed 49.5MB、released 累计 3.86GB——活数据极小，
-Go 已把波峰全部 madvise（Darwin 用 `MADV_FREE_REUSABLE`，mem_darwin.go），但整机
-压力下 macOS 压缩器把死页压缩扣住不还，footprint 挂在波峰值直到进程退出。**逐个
-排除应用层缓存全是白费**（Kernel 27h 只写 2.4MB checkpoint、LiveFrameBuffer 有硬
-上限、catalog 只存元数据、watcher accumulator 512B 封顶）——应先读 runtime 计数器
-再审计缓存。
+**09-19 评审 B2 教训（v1 误读，已撤回）**：`memstats.heapStats` 是三代
+`heapStatsDelta` 环形缓冲，**单槽不是一致快照**——reader 必须旋转三代并 merge
+（mstats.go:716-745），且 `HeapReleased` 是「已归还未重取」的**当前量**而非累计
+（mstats.go:168-172）。v1 把单槽读成 committed=49.5MB / released 累计 3.86GB 并
+据此断言「scavenger 已全部归还、压缩器扣住」，评审驳回。正确做法：单次 attach
+读全三代 + gen 求和（或直接用 `runtime.ReadMemStats`——已加入
+`/internal/diagnostics/runtime` 的 `memory` 节）。**gcController 的普通原子字段
+（heapLive 等）不受此影响**，校验位全过，仍是可靠证据。
+
+**结论（v2 证据等级）**：heapLive 20MB（gcController，可靠）与 footprint 2.5G、
+2.4G swapped 整块冰冷 arena 并存（vmmap，可靠）——「死页滞留」成立；「已归还页被
+macOS 压缩器扣住」降级为候选解释（待一致遥测对齐 Sys/HeapReleased 与 footprint）。
+**先读 runtime 计数器再审计缓存**的顺序仍然正确（Kernel 27h 只写 2.4MB checkpoint、
+LiveFrameBuffer 有硬上限、catalog 只存元数据——应用层排除结论未变）。
 
 **波峰源头**（采样：`scanClaudeSessionMetadata`→`InspectTranscriptContinuity` 占大头）：
 ①claudeWebPushWatcher 每 3s sweep 且**无条件**驱动 catalog refresh（refresh 在
@@ -25,11 +31,14 @@ SubscriptionCount 检查之前），活跃 transcript 指纹每轮都变→每 3
 `resolveClaudeContinuationPaths` 每次历史加载扫项目目录全部 jsonl 的 512KiB 头尾；
 ③iOS 27h 重连 91 次，每次重拉全量投影快照；④codex-remote 轮询 p50 9.5s 持续超时。
 
-**修复（本 commit）**：默认 GOMEMLIMIT 512MiB（env 覆盖）；watcher 无订阅跳过
-refresh（重启用重基线——注意 `startedAt` 预设值必须尊重，FirstVisible 测试回归过
-一次）；WP-RESP-2 归档后翻转 `webPushExpirySemanticsProven`（死订阅 410 删除，否则
-SubscriptionCount 恒>0、门控永不生效——404/410 分支此前不写样本文件，证据门只能靠
-runtime 日志手工归档，已补捕获）。
+**修复（v2 状态）**：默认 GOMEMLIMIT 512MiB（env 覆盖；Go runtime 管理内存的
+软限额，provisional）；watcher 无订阅跳过 refresh + 禁用期**无条件**重置基线
+（v1 只在"曾见过订阅"时重置，漏掉"启动时无订阅、稍后首订"的回放——评审 B3；
+`startedAt` 预设值仍须尊重，FirstVisible 测试回归过一次）；WP-RESP-2 归档 +
+404/410 样本捕获保留，但 `webPushExpirySemanticsProven` **回退 false 待 owner
+显式追认**（v1 越权翻转且注释谎称已授权——评审 B5；追认前死订阅不删，
+SubscriptionCount 恒>0 会削弱门控收益，这是已知代价）。continuity cache v2
+（有界 FIFO + defensive copy + 读盘计数）待复审后提交。
 
 **遗留坑**：本机 `GOSUMDB=off` + go.mod `toolchain go1.26.6` → 任何 go 命令在该仓
 静默失败（只剩一行 toolchain 警告），**且 `go build | head` 管道会吃掉退出码造成

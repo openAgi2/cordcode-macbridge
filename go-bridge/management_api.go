@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -338,6 +339,24 @@ func (s *ManagementServer) handleRuntimeDiagnostics(w http.ResponseWriter) {
 	result := map[string]interface{}{}
 	if s.cfg.Handlers != nil {
 		result = s.cfg.Handlers.runtimeDiagnostics.snapshot()
+	}
+	// 一致内存快照（2026-09-19 评审 Q6 优先级 1）：ReadMemStats 在 runtime 内
+	// 完成三代 ring 的旋转+聚合，是唯一一致视图（单槽直读不是快照）。字段
+	// 覆盖 retained/released/footprint 对账：GOMEMLIMIT 管辖的正是
+	// sys-heapReleased（runtime 从 OS 获取且尚未归还的内存）；进程总
+	// footprint 另含非 Go runtime 管理的部分。
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	result["memory"] = map[string]uint64{
+		"sys":                  ms.Sys,
+		"heapSys":              ms.HeapSys,
+		"heapInuse":            ms.HeapInuse,
+		"heapIdle":             ms.HeapIdle,
+		"heapReleased":         ms.HeapReleased,
+		"sysMinusHeapReleased": ms.Sys - ms.HeapReleased,
+		"heapObjects":          ms.HeapObjects,
+		"stackSys":             ms.StackSys,
+		"numGC":                uint64(ms.NumGC),
 	}
 	for backendID, agent := range s.cfg.Agents {
 		provider, ok := agent.(backgroundTaskScanMetricsProvider)

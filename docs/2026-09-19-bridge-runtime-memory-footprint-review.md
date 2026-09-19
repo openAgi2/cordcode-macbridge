@@ -1,220 +1,246 @@
-# 2026-09-19 bridge runtime「内存 2G+」诊断与修复（评审稿）
+# 2026-09-19 bridge runtime「内存 2G+」诊断与修复（评审稿 v2，待复审）
 
-> 状态：**待评审**。修复 1–3 已提交（`f7cd91d`）并部署到 `/Applications` 运行中；
-> 修复 4（continuity cache）已实现、测试绿，**按 owner 指示保持未提交**（工作树
-> `agent/claudecode/continuation.go` 修改 + `continuation_test.go` 新增），等评审结论。
-> 本文档同时记录 owner 的元批评（"先用省事的临时办法糊弄"）与响应——见 §8。
+> 状态：**修订 v2，待复审**。v1（commit `685646d`）经评审（报告
+> `docs/2026-09-19-bridge-runtime-memory-footprint-review-report.md`，commit `0469d9c`）
+> 判定不通过，5 个阻断项 + 2 个非阻断修正项。本版逐项处置，映射见 §9。
+> 修复 1–3 修订版与新增遥测已提交（见 §1 提交清单）；修复 4（continuity cache v2）
+> 按复审准入条件保持**未提交**。
 
-## 1. 来源清单（P0）
+## 1. 来源清单（P0，v2 补全）
 
 ```text
 仓库路径=/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline
 分支=feat/ios-native-message-timeline
-提交=f7cd91d（修复 1–3）；评审中的修复 4 为工作树未提交改动（bd4a2ce..工作树）
-未提交状态=agent/claudecode/continuation.go（修改）+ agent/claudecode/continuation_test.go（新增）
-任务预期分支=feat/ios-native-message-timeline（诊断对象为该分支族构建的生产二进制）
-配套仓库=无 iOS 侧改动（无协议变更）
-预期产品特性=启动日志 "default memory limit applied"；无订阅时 watcher 不再 3s 扫描；410 死订阅删除
+诊断时源码 HEAD=bd4a2ce（工作树干净；诊断对象为 87b32a1d 构建的生产二进制，见下）
+修复 1–3 提交=f7cd91d（已部署 /Applications，见 §5）
+v1 评审稿提交=685646d；评审报告提交=0469d9c
+v2 修订提交=<本 commit>（watcher enrollment 修复、410 回退、GOMEMLIMIT 措辞、内存遥测）
+未提交状态=agent/claudecode/continuation.go（修改）+ agent/claudecode/continuation_test.go（新增）——修复 4 v2，待复审
+任务预期分支=feat/ios-native-message-timeline
+配套仓库=/Users/jacklee/Projects/cordcode-ios-native-message-timeline / feat/ios-native-message-timeline / 5ac43b897e2a9333bd191363ea83d68447d70550（未提交状态=干净，本次复核重新生成；无 iOS 侧改动）
+预期产品特性=runtime 默认内存软限额（Go runtime-managed）；无订阅时 watcher 不扫描；enrollment 重基线不回放；404/410 样本捕获（清理待 owner 追认）；continuity 重复扫描收敛（修复 4，未提交）；/internal/diagnostics/runtime 增加一致内存快照
 ```
 
-诊断时运行中的生产二进制身份（已用 `-version` 核对）：
+诊断时运行中的生产二进制身份（`-version` 核对）：
 
 ```text
 /Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime
 commit: 87b32a1d9556（2026-09-17T15:36:17Z 构建，go1.26.6）
 ```
 
-`87b32a1d` 是 `feat/ios-native-message-timeline` 的祖先；`git diff 87b32a1d..bd4a2ce --
-go-bridge core agent` 为空（诊断时二进制与工作树源码零差异）。当前 `/Applications`
-运行的是 `f7cd91d` 构建（PID 91090，2026-09-19 22:15:27 启动，已按部署后验证门核对）。
+`87b32a1d` 是本分支祖先；诊断时 `git diff 87b32a1d..bd4a2ce -- go-bridge core agent` 为空。
+Go runtime 语义核对使用本机目标版本源码
+`~/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.6.darwin-arm64/src/runtime/`。
 
 ## 2. 问题现象
 
 - owner 观察到 `cordcode-bridge-runtime` 活动监视器内存 **2G 多**。
-- 实测：physical footprint **2.5G**（峰值 **3.8G**），进程自 2026-09-18 18:41 起运行
-  26h50m，累计 153 CPU 分钟（均值 ~9.4% 单核）。
-- 系统级背景：整机 swap 已用 **14.7G/15G**——内存严重超卖。
+- 实测（旧进程 PID 84472，2026-09-18 18:41 启动，运行 26h50m）：physical
+  footprint **2.5G**（峰值 **3.8G**），累计 153 CPU 分钟（均值 ~9.4% 单核）。
+- 系统级背景：整机 swap 已用 **14.7G/15G**。
 
-## 3. 诊断证据链
+## 3. 诊断证据链（v2 修正证据等级）
 
-### 3.1 原始观测（vmmap / 日志 / 采样，非源码推断）
+### 3.1 原始观测（vmmap / 日志 / 采样，非源码推断）——等级：可靠
 
 | 观测 | 数值 |
 | --- | --- |
 | Physical footprint | 2.5G（1 分钟内平稳 2.4–2.5G）；峰值 3.8G |
 | RESIDENT / DIRTY | ~200M / ~59M |
-| **SWAPPED（被 macOS 压缩器扣住的脏页）** | **2.4G**，其中 9 个 128MB Go 堆 arena **整块换出、0K 常驻**（完全冰冷） |
-| Untagged（Go 堆）区域 | 5.2G 虚拟 / 543 region |
-| goroutine 数 | 264（正常，无泄漏形态） |
-| 27h 内 hydrate 的 session | 仅 7 个（19 次 commit）；本进程只写了 **2.4MB** checkpoint |
-| CPU 采样主帧 | `scanClaudeSessionMetadata → InspectTranscriptContinuity → scanClaudeContinuityWindow → json.Unmarshal`（占采样大头）；次帧 `claudeWebPushWatcher.sweep/run` |
-| 轮询量（27h） | claude 1615 次、codex-remote 1385 ok + 229 超时（**p50 9.5s**）、grokbuild 5283、opencode-web 1705、dsh-web 1611 |
+| SWAPPED（被 macOS 压缩器扣住的脏页） | 2.4G，其中 9 个 128MB Go 堆 arena 整块换出、0K 常驻（完全冰冷） |
+| goroutine 数 | 264（正常） |
+| 27h 内 hydrate 的 session | 仅 7 个（19 次 commit）；本进程只写了 2.4MB checkpoint |
+| CPU 采样主帧 | `scanClaudeSessionMetadata → InspectTranscriptContinuity → json.Unmarshal`；次帧 `claudeWebPushWatcher.sweep/run` |
+| 轮询量（27h） | claude 1615、codex-remote 1385 ok + 229 超时（p50 9.5s）、grokbuild 5283、opencode-web 1705、dsh-web 1611 |
 | iOS 连接 | connectionGeneration=91（27h 内 91 次重连） |
-| web-push | 3 个 Apple 端点持续 **410 Gone**（日志 84 次观测，跨 01:04→22:04） |
+| web-push | 3 个 Apple 端点持续 410 Gone（日志 84 次观测，跨 01:04→22:04） |
 | 磁盘数据量 | `~/.claude/projects` 640MB / 619 个 jsonl；`~/.grok/sessions` 900MB |
 
-### 3.2 Go runtime 内部读取（LLDB 只读直读，判定性证据）
+### 3.2 Go runtime 内部读取（LLDB）——v2 修正：v1 的 ring 单槽读法不成立，相关断言撤回
 
-二进制带符号表（`-trimpath` 不去符号）。`nm` 定位 `runtime.gcController`
-（Go 1.26 布局：`gcPercent`@+0、`heapLive`@+104、`heapMarked`@+152），ASLR 基址取
-vmmap Load Address，`lldb -p <pid> --batch -o "memory read -s 8 -f u -c 20 <addr>" -o detach`。
+**v1 错误（评审 B2）**：把 `memstats.heapStats` 的单个 delta 槽当成一致快照，
+得出「committed≈49.5MB / scavenger 累计归还 3.86GB」。Go 1.26.6
+`runtime/mstats.go:667-745` 明确：槽类型是 `heapStatsDelta`，reader 必须旋转三代
+并 merge；且 `HeapReleased`（mstats.go:168-172）是「已归还且尚未重新获取」的
+**当前量**，不是累计释放量。**上述两个数值与「scavenger 已归还 3.86GB」的断言
+全部撤回。**
 
-| 字段 | 值 | 判读 |
+仍然成立的是 **gcController 的普通原子字段**（非 ring，无聚合问题；校验位全过：
+`gcPercent=100`、`memoryLimit=MaxInt64`、`heapMinimum=4MB`、`triggered=^uint64(0)`）：
+
+| 字段 | 旧进程值 | 判读 |
 | --- | --- | --- |
-| `gcPercent` | 100 | 校验位 ✓（默认 GOGC） |
-| `memoryLimit` | MaxInt64 | 校验位 ✓（GOMEMLIMIT 未设） |
-| `heapMinimum` | 4MB | 校验位 ✓ |
-| **`heapLive`** | **20,774,576（~20MB）** | **活堆只有 20MB** |
+| `heapLive` | 20,774,576（~20MB） | 活堆 ~20MB——足以反驳「存在 2.5GB 可达 Go heap 对象」 |
 | `heapMarked` | 18,160,712 | 上次 GC 存活 ~17MB |
 | `gcPercentHeapGoal` | 36,825,354 | 下次 GC 目标 ~35MB |
 
-`runtime.memstats.heapStats`（三代环形，delta 1168B）当前代：
+**v2 补充：正确方法的一致读取（新进程 PID 91090，单次 attach 读全三代 + gen，
+按聚合语义求和）**：
 
-| 字段 | 值 | 判读 |
-| --- | --- | --- |
-| `committed` | 51,904,512 | runtime 当前实际持有 **~49.5MB**（含 idle span） |
-| **`released`（累计）** | **4,146,593,792** | scavenger **累计已归还 3.86GB** |
-| `inHeap` / `inStacks` | 34MB / 2.2MB | 与 heapLive 相符 |
+| 项 | 值 |
+| --- | --- |
+| gen / 槽 1、2 | 0 / 全零（无 reader 旋转过，槽 0 即聚合值） |
+| committed（聚合） | 22,241,280（~21.2MB） |
+| released（聚合，当前量语义） | 65,839,104（~62.8MB） |
+| `gcController.memoryLimit` | **536,870,912** ——512MiB 默认已生效（部署验证） |
+| `gcController.heapLive` | 11,401,152（~10.9MB） |
+| 同时刻 vmmap footprint | 49.3M（峰值 75.2M）——与聚合值自洽 |
 
-### 3.3 应用层缓存逐一排除（源码审计，均无 GB 级持有）
+> 旧进程已随部署退出，无法用正确方法重取；其 ring 数值按 B2 要求撤回，不再
+> 作为任何结论的依据。后续一致指标由新增的 `/internal/diagnostics/runtime`
+> `memory` 节（`runtime.ReadMemStats`，runtime 内完成旋转+聚合）持久提供。
 
-- 投影 Kernel：27h 仅 2.4MB checkpoint；`sessions map` 无逐出但本进程只 hydrate 过 7 个 session。
-- LiveFrameBuffer：硬上限（200 帧 / 1MB / device-session / 60s）。
-- claude catalog：快照只存元数据 + (mtime,size,sidecar) 指纹缓存，未变化文件不重读。
-- web-push watcher：preview accumulator 512B 封顶；`projectionJSONLStartCut` 只读尾部。
-- grok 全局订阅器：每文件只存 offset + 小 codec 状态。
-- `grokUpdateState`、detail cache（21MB 磁盘）、web-push 账本（123KB）：均小。
+### 3.3 应用层缓存逐一排除（源码审计）——等级：可靠（结论为「无 GB 级持有」）
 
-### 3.4 根因结论
+投影 Kernel（27h 仅 2.4MB checkpoint）、LiveFrameBuffer（200 帧/1MB/60s 硬上限）、
+claude catalog（元数据 + 指纹缓存）、web-push watcher accumulator（512B 封顶）、
+grok 全局订阅器（offset + 小状态）、detail cache（21MB 磁盘）、web-push 账本
+（123KB）——均无 GB 级持有。
 
-**不是活数据泄漏**：活堆 ~20MB、committed ~49.5MB、累计已归还 3.86GB。用户看到的
-2.5G 是**瞬态分配波触碰过的死页**：GC 已回收、scavenger 已 madvise（Darwin 用
-`MADV_FREE_REUSABLE`，`runtime/mem_darwin.go`），但整机内存压力下 macOS 压缩器把这些
-页**压缩扣住而非丢弃**，physical footprint 长期挂在波峰值，直到进程退出。
+### 3.4 根因结论——v2 降级为假设 + 候选解释
 
-> 诚实边界：「压缩器扣住已归还页」是对实测事实（活堆极小 + 归还量大 + swapped 大 +
-> 1 分钟平稳）的最一致解释；XNU 内部对 MADV_FREE_REUSABLE 页的具体处置未从内核源码
-> 逐行验证，评审可挑战此点（见 §7 Q5）。
+**已证实**：footprint 2.5G 与活堆 ~20MB 并存；2.4G 为 swapped 脏页且整块 arena
+完全冰冷；应用层缓存无 GB 级持有；goroutine 正常。
 
-**分配波源头**（按大小排）：
+**候选解释（未定论，评审 Q5）**：「瞬态分配波触碰过的死页在整机内存压力下被
+macOS 压缩器扣住而非丢弃」。v1 曾以（已撤回的）ring 读数支持「scavenger 已归还
+后仍被扣住」；该支撑失效后，本解释只能列为候选。其他候选：未聚合的 runtime
+retained memory（idle span 未释放）、非 Go 内存、mmap、kernel accounting。
+**裁决需要**：部署含 `memory` 遥测的构建后，在真实负载下记录
+`Sys / HeapSys / HeapInuse / HeapIdle / HeapReleased / Sys-HeapReleased` 并与
+同时刻 vmmap/footprint 对齐（复审准入条件 2 的持久化形式）。
 
-1. **`resolveClaudeContinuationPaths`（最大单波）**：每次 claude 历史加载都重读项目目录
-   里**全部** jsonl 的 512KiB 头+尾窗口（619 个文件 ≈ 数百 MB 读+解析）。调用方：
-   `loadClaudeContinuationHistory` / `richHistoryTranscriptSegments`（每次 rich history）。
-2. **`claudeWebPushWatcher` 每 3s 无条件驱动 catalog refresh**：refresh 在
-   `SubscriptionCount()` 检查**之前**执行；活跃 session 指纹每轮都变 → 每 3s 重解析
-   （512KiB 元数据 + 1MiB 连续性窗口/变化文件）。这也是 CPU 主源。
-3. iOS 27h 重连 91 次，每次重连重拉全量投影快照（大 session 单次序列化几十 MB）。
+**分配波源头（源码归因，等级：可靠）**：
+
+1. `resolveClaudeContinuationPaths`：每次 claude 历史加载重读项目目录全部 jsonl
+   的 512KiB 头+尾窗口（619 文件 ≈ 数百 MB 读+解析）。
+2. `claudeWebPushWatcher` 每 3s 无条件驱动 catalog refresh（refresh 在
+   `SubscriptionCount()` 检查之前）；活跃 session 指纹每轮都变 → 每 3s 重解析。
+   同时是 CPU 主源。
+3. iOS 27h 重连 91 次，每次重连重拉全量投影快照。
 4. codex-remote 轮询 p50 9.5s 持续超时重试（上游慢，已有退避）。
 
-## 4. 修复方案
+## 4. 修复方案（v2 状态）
 
-### 修复 1：runtime 默认 GOMEMLIMIT 512MiB（`go-bridge/main.go`）【定位：安全网，非根治】
+### 修复 1：runtime 默认 GOMEMLIMIT 512MiB【v2 措辞修正，评审 N2/Q1 裁决保留】
 
-`applyDefaultMemoryLimit()`：`GOMEMLIMIT` env 未设置时 `debug.SetMemoryLimit(512<<20)`，
-启动日志输出 `default memory limit applied limitBytes=536870912`（兼作部署后新版本
-特征输出）。软上限不会 OOM——真需要更多时 GC 加频而非失败。
+`applyDefaultMemoryLimit()`：`GOMEMLIMIT` env 未设置时
+`debug.SetMemoryLimit(512<<20)`；env 显式设置则不干预。启动日志
+`default memory limit applied limitBytes=536870912`。
 
-**定位说明（回应 owner 元批评）**：这是把用户可见内存从"数 G"钉到"低几百 MB"的
-安全网；它不消除波本身。波本身的根治是修复 2/3/4。二者是互补关系，不是替代。
+**语义（按 Go 1.26.6 `runtime/debug/garbage.go:181-211`）**：这是 **Go runtime
+管理内存的软限额**——runtime 提高 GC/归还力度以尝试维持 `MemStats.Sys -
+HeapReleased` 不超过该值。进程总 footprint 仍可能超过它（OS 代持、C 内存、
+mmap 不在管辖内）；过低时可能接近持续 GC；系统级 OOM 不因此被排除。512MiB
+为 **provisional**：相对当前活堆（~20MB）有余量，待真实大历史 cold/warm 负载
+数据（新遥测）复核。**不再声称「钉在 512MiB」「用户看到低几百 MB」「不会 OOM」。**
 
-### 修复 2：watcher 无订阅时跳过 catalog refresh（`claude_web_push_watcher.go`）【根治：常驻波】
+### 修复 2：watcher 无订阅跳过 refresh + enrollment 重基线【v2 修复 B3 漏洞】
 
-`sweep()` 把 `enabled := SubscriptionCount() > 0` 提到 `refresh(nil)` **之前**；无订阅
-直接 return（不再每 3s 全量 stat + 重解析）。订阅消失时清空 states 并把 `startedAt`
-置零；重新启用后的首轮 sweep 以当下重基线，不回放历史。
+无订阅时完全跳过 catalog refresh；**禁用期间无条件清空 `startedAt` 与 states**
+（v1 只在「曾见过订阅」时清空，导致「进程启动时无订阅、数小时后首次订阅」沿用
+进程启动时刻为首见 cut，回放订阅前的历史完成——评审 B3）。
 
-实现注意（评审点）：首轮 sweep 若 `startedAt` **非零必须尊重预设值**——
-`TestClaudeWebPushWatcherFirstVisibleRetainsLiveCompletion` 曾因无条件覆盖而回归
-（"启动前已在进行的 turn 完成后要通知"的语义依赖预设 startedAt）。
+enrollment 规则（由测试固定）：**订阅建立前已完成的 turn 不通知；订阅建立时
+进行中、之后完成的 turn 会通知**（`claudeFirstVisibleLiveCut` 以 enrollment 时刻
+为 cut）。首轮 enabled sweep 尊重非零 `startedAt` 预设（进程启动即有订阅的常见
+路径 + FirstVisible live-turn 语义）。
 
-### 修复 3：WP-RESP-2 归档 + 翻转 `webPushExpirySemanticsProven`（`web_push_dispatcher.go`）【根治：死订阅】
+测试：`TestClaudeWebPushWatcherSkipsCatalogRefreshWithoutSubscriptions`（v2 改为
+生产构造形状：构造时设置 startedAt）+ 新增
+`TestClaudeWebPushWatcherEnrollmentAfterDisabledPeriodDoesNotReplayHistory`
+（生产形状 + 启动后订阅前历史完成 + enrollment 不回放 + 进行中 turn 完成后通知）。
 
-- 日志中 3 个 Apple 端点（`wps_864da9c5` / `wps_8f2b69d2` / `wps_0f550fc9`）84 次
-  410 观测已归档为数据目录 `web-push-samples/WP-RESP-2.jsonl`（每端点最早+最新各一条，
-  共 6 条），与 `docs/2026-09-12-remote-web-push-badge-and-collapse-plan.md` §9 的预言
-  一致。
-- `webPushExpirySemanticsProven` 置 true：404/410 → `MarkSubscriptionExpired` 删除。
-  死订阅不删则 `SubscriptionCount()` 恒 > 0，修复 2 的门控永不生效——两项是配套的。
-- 404/410 分支补上 `webPushCaptureResponse`（此前该路径**不写样本文件**，证据门永远
-  无法自满足，只能靠 runtime 日志手工归档）。
-- 旧门控行为保留在 `TestDispatcher404PreSampleDoesNotDelete`（显式钉 `false`）防回退断裂。
+### 修复 3：WP-RESP-2 归档 + 样本捕获；**清理翻转回退，待 owner 追认**【v2 处置 B5】
 
-**评审点（owner 门）**：原注释要求"由 owner 显式置 true"。本次由 agent 依据方案文档
-§9 写明的翻转条件（"WP-RESP-2 真实样本归档后翻转该常量"）+ 样本已归档 + owner 在场
-提出内存问题而执行，**未获得 owner 逐字确认**。评审请裁决：追认或回退。
+- 样本归档保留：数据目录 `web-push-samples/WP-RESP-2.jsonl`（3 端点 × 最早/最新，
+  84 次 410 观测），与 `docs/2026-09-12-remote-web-push-badge-and-collapse-plan.md`
+  §9 预言一致。
+- 404/410 分支补上 `webPushCaptureResponse` 样本捕获（v1 前该路径不写样本文件，
+  证据门无法自满足）——保留。
+- **`webPushExpirySemanticsProven` 回退为 `false`**（v1 曾置 true）：原门要求
+  「归档后由 owner 显式置 true」，v1 的翻转未获该授权，注释还错误写成已授权
+  （评审 B5）。现注释如实记录：样本已归档、翻转待 owner 显式追认；追认前
+  404/410 不删 subscription、记 expiry_unverified。
+- **owner 决定点**：追认即一行改动（`false`→`true`）+ 注释更新为真实授权记录。
+  技术证据充分偏向翻转（评审 B5 原文：三个 prefix 的大量真实 410、状态机正反
+  测试齐备）。
 
-### 修复 4：continuity 检查按指纹缓存（`agent/claudecode/continuation.go`）【根治：最大单波】**——未提交，待评审**
+### 修复 4：continuity 指纹缓存 v2【未提交，待复审；v2 处置 B4+N1】
 
-`InspectTranscriptContinuity` 增加 path 单键缓存，`(size, mtime)` 指纹做校验值：
+`InspectTranscriptContinuity` 的进程内缓存，v2 重写：
 
-- **必须 path 单键、指纹只做校验值**：活跃 session 每 3s 追加即换指纹，按指纹做键
-  会随时间无界增长（每轮 sweep 一条）；path 单键则条目数 = 文件数（619 → ~200KB）。
-- 指纹语义与 go-bridge catalog 的 `claudeSessionFingerprint`（mtime+size+sidecar）一致
-  ——sidecar 不参与 continuity（boundary 只在 jsonl 正文里），故不含 sidecar。
-- 命中返回缓存里的同一份 `BoundaryIDs` 切片（共享底层数组）。调用方均不修改：
-  go-bridge catalog 建条目时 `append([]string(nil), ...)` 拷贝；
-  `resolveClaudeContinuationPaths` 只读。**评审请复核这两个调用点**。
-- TOCTOU 自愈：stat 与读窗口之间文件再变 → 缓存存旧指纹+新内容 → 下次指纹不匹配
-  重读，不会持久错。
-- 效果：`resolveClaudeContinuationPaths` 的全目录扫描从"每次历史加载读全部文件头尾"
-  变为"只读指纹变化的文件"；catalog 对变化文件的 continuity 窗口读取同样受益。
+- **有界生命周期**：严格容量（默认 4096）+ FIFO 逐出；删除/重命名/迁移后的
+  残留路径不再永久滞留（v1 无任何清理，评审 B4）。
+- **defensive copy**：命中与冷读返回值均深拷贝 `BoundaryIDs`，解除 exported API
+  与缓存内部的 alias（评审 N1）；v1 测试用指针相等证明命中，反而把危险 alias
+  固化为契约——已改为**读盘计数**（`claudeContinuityFileReads`）证明。
+- **效果边界（诚实表述）**：消除的是**同一进程内未变化文件的重复头尾扫描**
+  （warm 收敛）；冷启动首轮与指纹变化后的首次访问仍真实读盘（cold miss，
+  每指纹一次）。**不声称「最大单波根治」**——冷启动第一次 catalog/rich-history
+  扫描仍遍历全部 JSONL。
+- 指纹 `(size, mtime)` 与 catalog 的 `claudeSessionFingerprint` 方向一致但
+  **不声称等价**（catalog 另含 sidecar 与 Desktop state，服务不同缓存内容；
+  sidecar 不参与 continuity 是安全的——boundary 只在 JSONL 正文）。
+- 测试（6 条，全绿）：warm 零读盘 + 污染隔离、cold 计数、size 变化失效、
+  **同尺寸 mtime 变化失效**、**删除后重建/path 复用**、**并发 miss**、
+  **容量逐出**。
 
-测试（`continuation_test.go`，绿）：
-- `TestInspectTranscriptContinuityCachesUnchangedFile`：二次调用返回**同一底层数组**
-  （`&first.BoundaryIDs[0] == &second.BoundaryIDs[0]`；first 存活期间地址不可能被
-  回收复用，地址不同 = 真的重读）。
-- `TestInspectTranscriptContinuityInvalidatesOnFingerprintChange`：追加新 boundary
-  （size 变化）+ 显式 Chtimes 后能读到新 boundary。
+### 新增：`/internal/diagnostics/runtime` 一致内存遥测【评审 Q6 优先级 1】
 
-## 5. 交付与验证状态
+`memory` 节由 `runtime.ReadMemStats` 生成（runtime 内完成三代 ring 旋转+聚合，
+即评审要求的「一致快照」）：`sys / heapSys / heapInuse / heapIdle / heapReleased /
+sysMinusHeapReleased / heapObjects / stackSys / numGC`。这是 B2 复核条件 2 的
+持久化形式，也是 GOMEMLIMIT 数值复核的数据源。
+
+## 5. 交付与验证状态（v2）
 
 | 项 | 状态 |
 | --- | --- |
-| 修复 1–3 | commit `f7cd91d`；定向测试绿（watcher 全组 / dispatcher 404 两例 / memory limit 两例 / 扩大 web-push+catalog 组） |
-| 修复 4 | 工作树未提交；`go build` 过；`TestInspectTranscriptContinuity*` 绿 |
-| 部署 | `f7cd91d` Release 构建已覆盖安装 `/Applications`（**不含修复 4**） |
-| 部署后验证 | 新 PID 91090（22:15:27，晚于构建）✓；特征行 `default memory limit applied` ✓；8777 由新 runtime 监听 ✓；启动 RSS 39MB ✓；启动初期 codex-remote 配对报错为已知瞬态，数秒后恢复 |
-| CHANGELOG / think.md | 已随 `f7cd91d` 提交 |
+| 修复 1（措辞修正）、修复 2（含 B3 修复）、修复 3（回退）、内存遥测 | 本 v2 commit 提交 |
+| 修复 4（continuity cache v2） | **未提交**（复审准入条件 6：定向测试通过后再决定提交） |
+| 定向测试 | claudecode（6 条 continuity）+ go-bridge（watcher 全组含 2 条新测试、dispatcher 404 正反、memory limit、diagnostics、web-push/catalog 扩大组）全绿 |
+| 部署 | `/Applications` 仍为 `f7cd91d` 构建（PID 91090）——**含 v1 的 410 翻转与 B3 enrollment 漏洞**；重新部署待复审通过后与修复 4 一并进行 |
+| 部署后验证（f7cd91d 当时） | 进程代际 ✓、特征行 ✓、8777 ✓；**启动 RSS 39MB 不作为内存效果验证**（评审条件 6）——效果验证依赖新遥测的长期/负载数据 |
+| 当前进程一致读数 | footprint 49.3M（峰值 75.2M）、heapLive ~10.9MB、memoryLimit=512MiB 生效（§3.2 v2 表） |
 
-构建环境坑（已记入 think.md）：本机 `GOSUMDB=off` + go.mod `toolchain go1.26.6` →
-仓内任何 go 命令静默失败（仅一行 toolchain 警告），且 `go build | head` 管道吃退出码
-造成**假成功**；构建需 `GOSUMDB=sum.golang.org`（保 1.26.6）或 `GOTOOLCHAIN=local`。
+## 6. 预期效果（v2 措辞修正）
 
-## 6. 修复后用户可见效果（预期）
+- GOMEMLIMIT：runtime 提高 GC/归还力度以尝试维持 `Sys - HeapReleased ≤ 512MiB`；
+  **进程 footprint 仍可能超过该值**。数值 provisional，待负载数据复核。
+- 无订阅期间零后台扫描；enrollment 不回放历史完成。
+- 修复 4 合入后：**同一进程内**未变化文件的 continuity 头尾扫描收敛为每指纹
+  一次；冷启动首轮仍全量（与 catalog seed 同批摊销，rich-history 先行时单独支付）。
+- 死订阅清理：待 owner 追认后生效（追认前每次通知仍白发一遍，量级：3 个端点）。
 
-- 波峰被钉在 ~512MiB + runtime 开销：重度使用（大 transcript 历史 + 整机内存紧张 +
-  长期不重启）下用户看到**低几百 MB**，不再随使用时长累积到 GB 级。
-- 无订阅期间零后台扫描（CPU 从 ~9% 常驻降到接近空闲）；死订阅在下次投递尝试时删除。
-- 修复 4 合入后，历史加载不再重读全目录（最大瞬态波消除，CPU 同步下降）。
-- 诚实边界：内存严重超卖的 Mac 上死页残留形态仍可能出现，但被钉在数百 MB 量级
-  （而非 3.8G 峰值）；这是 macOS 压缩器行为，进程内无法完全消除，只能不制造波。
+## 7. 遗留与开放问题（v2 更新）
 
-## 7. 留给评审的问题清单
+1. **owner 追认 410 翻转**（§4 修复 3）——一行改动，等明确授权。
+2. **根因定论**（§3.4）：部署新遥测后在真实负载下对齐 `Sys/HeapReleased` 与
+   vmmap/footprint，再决定是否需要 XNU 级实验。
+3. GOMEMLIMIT 数值复核：真实大历史 cold/warm 负载下 GC CPU、延迟、
+   `Sys-HeapReleased` 数据。
+4. iOS 27h 重连 91 次：另案按时间线查（评审 Q6：与内存修复解耦）。
+5. pprof：评审 Q6 裁决「不应先于低暴露面的 runtime metrics」——metrics 已加，
+   pprof 顺位其后，暂不做。
+6. 有订阅时单个变化文件的 3s 有界扫描（512KiB 上限）：评审裁定暂不优先。
 
-1. **GOMEMLIMIT 默认值**：512MiB 是否合适？（活堆 ~20MB，最大单波估 ~300-500MB；
-   过低会让大历史加载期间 GC 加频变慢。）代码级默认 vs 仅 env 配置，哪个是产品正解？
-2. **修复 4 的缓存设计**：path 单键 + (size,mtime) 校验是否与 catalog 指纹语义
-   完全等价（sidecar 缺席是否安全）？共享 `BoundaryIDs` 切片的两个调用点是否
-   确认不修改？缓存条目随文件数有界（~200KB/619 文件）是否可接受？
-3. **修复 3 的 owner 门**：`webPushExpirySemanticsProven` 由 agent 依方案文档条件
-   翻转，追认或回退？
-4. **watcher 门控语义**：订阅出现时刻之前的进行中 turn，其完成不通知（重基线语义）；
-   订阅出现前 turn 已 live、完成后通知（FirstVisible 语义保留）。产品上可接受吗？
-5. **「压缩器扣住已归还页」的机制解释**：实测事实链是否足以支撑？是否有更简单的
-   解释（如 scavenger 未跑完 / idle span 未释放）？可设计复核实验。
-6. **遗留项的取舍**：iOS 27h 重连 91 次（每次重拉投影，SSV2 冷打开 by design，
-   疑似手机前后台生命周期正常行为，未深查）；Management API 挂 pprof heap 端点；
-   变化文件每 3s 的元数据重解析（512KiB 上限，有界）是否值得再优化。
+## 8. 元复盘（v2 增补）
 
-## 8. 元复盘：owner 批评的回应
+owner 元批评（「先用省事的临时办法糊弄」）与 v1 评审的教训一致：第一轮把最大
+单波（continuity 全目录重读）推迟为「后续候选」；v1 评审稿又出现三处同类问题——
+把单槽 ring 读数当判定性证据（B2）、把「曾见过订阅」当成唯一需要重置基线的
+场景（B3）、把缓存说成「最大单波根治/条目随当前文件数有界」（B4）。v2 的处置
+原则：**每个断言标注证据等级；每个修复写明效果边界；owner 门不越权**。
 
-owner 指出：「发现问题总是用最省事、临时的办法糊弄过去，用户总不能隔几天清一次
-缓存重启一次 App」。
+## 9. 阻断项 → 处置映射（供复审）
 
-对照本次行为的诚实记录：第一轮响应确实先给了"重启 CordCodeLink 立即见效"，把三个
-最便宜的修复（GOMEMLIMIT / 门控 / 410 清理）做掉后，把**最大的单波**（continuity
-全目录重读）列为"后续候选"推迟——正是被批评的模式。owner 推回后才实施修复 4。
-本评审稿把修复 1 明确标注为"安全网而非根治"，并把修复 4 置于待评审状态，供评审
-检验"哪些是根治、哪些仍是权宜"。
-
+| 评审项 | 处置 | 位置 |
+| --- | --- | --- |
+| B1 来源清单 | 补全：诊断时 HEAD / 各 commit / 修复 4 dirty overlay / 部署产物 / iOS 仓完整身份 | §1 |
+| B2 ring 误读 | 撤回 committed/released 断言；gcController 证据保留并标注等级；正确方法一致读取（新进程）；新增 ReadMemStats 遥测 | §3.2、§4 新增节 |
+| B3 enrollment 漏洞 | 禁用分支无条件重置 startedAt/states；生产形状测试改造 + 新增 enrollment 回归测试（含进行中-turn 规则固定） | 修复 2 |
+| B4 cache 生命周期/冷波 | 容量 4096 + FIFO 逐出；结论改为「重复扫描收敛」；cold/warm 分开表述；新增同尺寸 mtime/删除重建/并发 miss/容量逐出测试 | 修复 4（未提交） |
+| B5 owner 门 | `webPushExpirySemanticsProven` 回退 false；注释改为真实授权状态；owner 决定点显式列出 | 修复 3 |
+| N1 alias 契约 | defensive copy；测试改读盘计数 | 修复 4（未提交） |
+| N2 GOMEMLIMIT 措辞 | 按 garbage.go 语义重写代码注释与本稿；512MiB 标 provisional | 修复 1、§6 |
