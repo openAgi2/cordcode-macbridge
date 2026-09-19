@@ -278,6 +278,12 @@ func TestDispatcherPayloadTagStablePerSession(t *testing.T) {
 }
 
 func TestDispatcher404PreSampleDoesNotDelete(t *testing.T) {
+	// 默认已翻转（WP-RESP-2 已归档，2026-09-19）；此处显式钉住旧门行为，
+	// 保证 proven=false 分支不因默认值变化而失去覆盖。
+	prev := webPushExpirySemanticsProven
+	webPushExpirySemanticsProven = false
+	t.Cleanup(func() { webPushExpirySemanticsProven = prev })
+
 	h := newDispatcherHarness(t, 404)
 	d := newTestDispatcher(h)
 	key := "codex|disp-1|t404|completed"
@@ -285,7 +291,7 @@ func TestDispatcher404PreSampleDoesNotDelete(t *testing.T) {
 
 	status, ok := ledgerStatusOf(t, h.store, key)
 	if !ok || status != "expiry_unverified" {
-		t.Fatalf("ledger = (%q,%v), want expiry_unverified (WP-RESP-2 未归档)", status, ok)
+		t.Fatalf("ledger = (%q,%v), want expiry_unverified (proven=false 门控行为)", status, ok)
 	}
 	if h.store.SubscriptionCount() != 1 {
 		t.Fatalf("subscription deleted before expiry semantics sample-proven: count = %d", h.store.SubscriptionCount())

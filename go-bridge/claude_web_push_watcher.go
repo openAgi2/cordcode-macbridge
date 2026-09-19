@@ -34,6 +34,10 @@ type claudeWebPushWatcher struct {
 	h         *Handlers
 	states    map[claudeSessionKey]*claudeWebPushWatchState
 	startedAt time.Time
+	// subscriptionsObserved 标记最近一轮 sweep 时是否存在订阅。无订阅期间
+	// sweep 完全跳过 catalog refresh（它是常驻 CPU/分配源）；订阅出现后的
+	// 首轮 sweep 以当下重新基线，不回放订阅前的历史。
+	subscriptionsObserved bool
 }
 
 func (h *Handlers) StartClaudeWebPushWatcher(ctx context.Context) {
@@ -62,14 +66,32 @@ func (w *claudeWebPushWatcher) sweep() {
 	if w == nil || w.h == nil || w.h.claudeSessions == nil {
 		return
 	}
-	if w.startedAt.IsZero() {
-		w.startedAt = time.Now().UTC()
+	// 无订阅时通知不可能投递：直接跳过 catalog refresh（它每 3s 全量 stat
+	// projects 目录、重解析有变化的 transcript；订阅长期为 0 或只剩已 410
+	// 的死订阅时，这 3s 一次的扫描全是白烧——2026-09-19 内存复盘的常驻
+	// CPU/分配源之一）。
+	enabled := w.h.webPush != nil && w.h.webPush.SubscriptionCount() > 0
+	if !enabled {
+		if w.subscriptionsObserved {
+			w.states = make(map[claudeSessionKey]*claudeWebPushWatchState)
+			w.startedAt = time.Time{}
+			w.subscriptionsObserved = false
+		}
+		return
+	}
+	if !w.subscriptionsObserved {
+		// 首轮（或重新启用后的首轮）：以当下为基线，订阅前的历史不回放。
+		// startedAt 非零时尊重预设值（watcher 构造时刻 / 测试注入的
+		// "启动前已有 live turn"场景）；禁用期会把它清零，重新启用即落到当下。
+		if w.startedAt.IsZero() {
+			w.startedAt = time.Now().UTC()
+		}
+		w.subscriptionsObserved = true
 	}
 	snapshot := w.h.claudeSessions.refresh(nil)
 	if snapshot == nil {
 		return
 	}
-	enabled := w.h.webPush != nil && w.h.webPush.SubscriptionCount() > 0
 	seen := make(map[claudeSessionKey]struct{}, len(snapshot.Sorted))
 	for _, entry := range snapshot.Sorted {
 		seen[entry.Key] = struct{}{}
@@ -101,9 +123,10 @@ func (w *claudeWebPushWatcher) sweep() {
 			w.flushAgedTerminal(entry, state)
 			continue
 		}
-		if !enabled || w.h.claudeSessionHasInteractiveRelay(entry.Key.SessionID) {
+		if w.h.claudeSessionHasInteractiveRelay(entry.Key.SessionID) {
 			// The interactive relay owns notifications for an opened session. Move
 			// this observer's cut forward so it cannot replay the same rows later.
+			// （无订阅的情况已在 sweep 开头整体跳过，这里只剩 relay 接管一种。）
 			state.offset = cut
 			state.scan = claudeRelayScanState{}
 			state.currentTurnID = ""

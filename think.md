@@ -1,4 +1,41 @@
 
+## 2026-09-19 bridge runtime "内存 2G+"：不是泄漏，是 macOS 压缩器扣住的死页；LLDB 直读 gcController 取证法
+
+现象：`cordcode-bridge-runtime` 活动监视器显示 2.5G（峰值 3.8G），owner 质疑泄漏。
+vmmap 显示 2.4G 全是 swapped-out 脏页（9 个 128MB Go 堆 arena 整块换出、0K 常驻），
+系统 swap 14.7G/15G（整机超卖是放大器）。
+
+**取证法（无 pprof 时的判定路径，可复用）**：二进制带符号表（`-trimpath` 不去符号），
+`nm` 找 `runtime.gcController`（Go 1.26 布局：`heapLive`@+104、`heapMarked`@+152、
+`gcPercent`@+0 可当校验位=100），ASLR 基址取 vmmap 的 Load Address，`lldb -p <pid>
+--batch -o "memory read -s 8 -f u -c 20 <addr>" -o detach` 只读读出。`memstats.heapStats`
+三代环形缓冲（delta 1168B）里 `committed` 是当前值、`released` 是累计计数器
+（= `gcController.heapReleased`）。
+
+**结论**：heapLive 20MB、committed 49.5MB、released 累计 3.86GB——活数据极小，
+Go 已把波峰全部 madvise（Darwin 用 `MADV_FREE_REUSABLE`，mem_darwin.go），但整机
+压力下 macOS 压缩器把死页压缩扣住不还，footprint 挂在波峰值直到进程退出。**逐个
+排除应用层缓存全是白费**（Kernel 27h 只写 2.4MB checkpoint、LiveFrameBuffer 有硬
+上限、catalog 只存元数据、watcher accumulator 512B 封顶）——应先读 runtime 计数器
+再审计缓存。
+
+**波峰源头**（采样：`scanClaudeSessionMetadata`→`InspectTranscriptContinuity` 占大头）：
+①claudeWebPushWatcher 每 3s sweep 且**无条件**驱动 catalog refresh（refresh 在
+SubscriptionCount 检查之前），活跃 transcript 指纹每轮都变→每 3s 重解析；②
+`resolveClaudeContinuationPaths` 每次历史加载扫项目目录全部 jsonl 的 512KiB 头尾；
+③iOS 27h 重连 91 次，每次重拉全量投影快照；④codex-remote 轮询 p50 9.5s 持续超时。
+
+**修复（本 commit）**：默认 GOMEMLIMIT 512MiB（env 覆盖）；watcher 无订阅跳过
+refresh（重启用重基线——注意 `startedAt` 预设值必须尊重，FirstVisible 测试回归过
+一次）；WP-RESP-2 归档后翻转 `webPushExpirySemanticsProven`（死订阅 410 删除，否则
+SubscriptionCount 恒>0、门控永不生效——404/410 分支此前不写样本文件，证据门只能靠
+runtime 日志手工归档，已补捕获）。
+
+**遗留坑**：本机 `GOSUMDB=off` + go.mod `toolchain go1.26.6` → 任何 go 命令在该仓
+静默失败（只剩一行 toolchain 警告），**且 `go build | head` 管道会吃掉退出码造成
+假成功**——必须 `GOTOOLCHAIN=local` 或修 GOSUMDB，且管道要 pipefail。后续候选：
+continuity 扫描按 catalog 指纹缓存（最大单波）；Management API 挂 pprof heap 端点。
+
 ## 2026-09-16 dsh-web 活会话尾 turn 测试失败：86df3f1 之后「gate 等待」断言过时，不是回归
 
 `TestDSHWebProjectionTrailingUnansweredWaitsWhenActive`（0a4e945 加入）自 round 8

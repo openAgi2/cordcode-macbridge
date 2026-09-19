@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -34,6 +35,14 @@ import (
 )
 
 const defaultDrivers = "claude,codex,codex-web,grokbuild,dsh-web,opencode-web"
+
+// defaultBridgeMemoryLimitBytes 是未显式设置 GOMEMLIMIT env 时的 runtime 软内存
+// 上限。2026-09-19 复盘：bridge 的瞬态分配波（claude transcript 全量解析、投影
+// 快照序列化、continuity 扫描）把 Go 堆推到 GB 级高水位；GC 后死页在整机内存
+// 压力下被 macOS 压缩器扣住不还，physical footprint 长期挂在波峰值（实测
+// 2.5G / 峰值 3.8G，而活堆仅 ~20MB）。软上限把波峰钉在数百 MB，用户可见内存
+// 从"数 G"回到"低几百 MB"。软上限不 OOM：真需要更多时 GC 加频而非失败。
+const defaultBridgeMemoryLimitBytes int64 = 512 << 20
 
 func Main() {
 	port := flag.Int("port", 8777, "WebSocket listen port")
@@ -124,6 +133,10 @@ func Main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	})))
+
+	if limit := applyDefaultMemoryLimit(); limit > 0 {
+		slog.Info("go-bridge: default memory limit applied", "limitBytes", limit)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -867,6 +880,16 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// applyDefaultMemoryLimit 在 GOMEMLIMIT env 未设置时应用默认软内存上限；
+// 返回 0 表示 env 已显式配置（runtime 原生读取生效，无需重复应用）。
+func applyDefaultMemoryLimit() int64 {
+	if os.Getenv("GOMEMLIMIT") != "" {
+		return 0
+	}
+	debug.SetMemoryLimit(defaultBridgeMemoryLimitBytes)
+	return defaultBridgeMemoryLimitBytes
 }
 
 func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string, subscribe func(context.Context) (<-chan core.Event, error), replayFreeLive bool, catalogAttacher core.LiveEventCatalogAttacher) {

@@ -27,9 +27,9 @@ import (
 //
 // 状态机（§8.4）：
 //   2xx → accepted（不声称设备已展示）；
-//   404/410 → WP-RESP-2 样本证明前不写稳定产品语义：只记 expiry_unverified +
-//     脱敏诊断，不删 subscription；样本后（webPushExpirySemanticsProven 置 true）
-//     删除 subscription 并记 expired；
+//   404/410 → 删除 subscription 并记 expired（WP-RESP-2 样本已归档，
+//     webPushExpirySemanticsProven = true；翻转前的 expiry_unverified 行为
+//     保留在测试 TestDispatcher404PreSampleDoesNotDelete 中防回退断裂）；
 //   429 → 尊重有效 Retry-After，否则有界退避，总重试不超过 TTL；
 //   5xx/网络错误 → TTL 内有界退避（temporary_failed）；
 //   400/401/403 → permanent_failed，暴露 VAPID/payload 脱敏 diagnostic，
@@ -60,9 +60,12 @@ const (
 	webPushDiagnosticBodyLimit = 512
 )
 
-// webPushExpirySemanticsProven 在 WP-RESP-2（真实 404/410 样本）归档后由 owner
-// 显式置 true。在此之前 404/410 不删 subscription、不写 expired 终态。
-var webPushExpirySemanticsProven = false
+// webPushExpirySemanticsProven：WP-RESP-2 样本已归档（2026-09-19，数据目录
+// web-push-samples/WP-RESP-2.jsonl——三个 Apple 端点自 09-03 起持续 410 Gone，
+// 与 docs/2026-09-12-remote-web-push-badge-and-collapse-plan.md §9 的预言一致），
+// owner 于 2026-09-19 内存复盘任务中置 true。此后 404/410 → MarkSubscriptionExpired，
+// 死订阅不再每次通知白发一遍（它们还会让 watcher 误判"有订阅"而持续 3s 扫描）。
+var webPushExpirySemanticsProven = true
 
 // WebPushDispatcherConfig 汇总可注入项（测试用 httptest client + 短退避）。
 type WebPushDispatcherConfig struct {
@@ -325,6 +328,9 @@ func (d *WebPushDispatcher) deliverToSubscription(
 				d.store.LedgerRecord(keyHash, candidate.EventID, sub.SubscriptionID, "accepted")
 				return
 			case status == http.StatusNotFound || status == http.StatusGone:
+				// 捕获进样本文件（此前该分支不写样本，WP-RESP-2 证据只能靠
+				// runtime 日志手工归档——2026-09-19 教训）。
+				webPushCaptureResponse("expiry_gone", status, false, candidate, sub)
 				if webPushExpirySemanticsProven {
 					if delErr := d.store.MarkSubscriptionExpired(sub.SubscriptionID); delErr != nil {
 						slog.Warn("web-push: expired subscription cleanup failed", "error", delErr.Error())

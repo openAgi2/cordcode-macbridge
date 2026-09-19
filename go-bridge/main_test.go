@@ -2,6 +2,7 @@ package gobridge
 
 import (
 	"os"
+	"runtime/debug"
 	"strings"
 	"testing"
 )
@@ -245,5 +246,31 @@ func TestLocalRelayServiceListenAddressOnlyAllowsLoopback(t *testing.T) {
 		if got, err := localRelayServiceListenAddress(input); err == nil {
 			t.Fatalf("localRelayServiceListenAddress(%q) = %q, want rejection", input, got)
 		}
+	}
+}
+
+func TestApplyDefaultMemoryLimit_DefaultsWhenEnvUnset(t *testing.T) {
+	t.Setenv("GOMEMLIMIT", "")
+	prev := debug.SetMemoryLimit(-1)
+	t.Cleanup(func() { debug.SetMemoryLimit(prev) })
+
+	if got := applyDefaultMemoryLimit(); got != defaultBridgeMemoryLimitBytes {
+		t.Fatalf("limit = %d, want %d", got, defaultBridgeMemoryLimitBytes)
+	}
+	if now := debug.SetMemoryLimit(-1); now != defaultBridgeMemoryLimitBytes {
+		t.Fatalf("runtime limit = %d, want %d", now, defaultBridgeMemoryLimitBytes)
+	}
+}
+
+func TestApplyDefaultMemoryLimit_ExplicitEnvWins(t *testing.T) {
+	t.Setenv("GOMEMLIMIT", "1GiB")
+	prev := debug.SetMemoryLimit(-1)
+	t.Cleanup(func() { debug.SetMemoryLimit(prev) })
+
+	if got := applyDefaultMemoryLimit(); got != 0 {
+		t.Fatalf("limit = %d, want 0 (env 已显式配置，不应重复应用)", got)
+	}
+	if now := debug.SetMemoryLimit(-1); now != prev {
+		t.Fatalf("runtime limit changed to %d, want unchanged %d", now, prev)
 	}
 }

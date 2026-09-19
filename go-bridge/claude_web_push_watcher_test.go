@@ -295,3 +295,72 @@ func TestClaudeWebPushWatcherTextlessTerminalUsesFallbackAfterHold(t *testing.T)
 		t.Fatalf("fallback candidate = %+v, want one with empty real preview", got)
 	}
 }
+
+func TestClaudeWebPushWatcherSkipsCatalogRefreshWithoutSubscriptions(t *testing.T) {
+	enableKindGateForTest(t, WebPushKindCompletion)
+	projectsDir := t.TempDir()
+	workspace := catalogFixtureWorkspace(t, projectsDir, "push-nosub")
+	projectDir := filepath.Join(projectsDir, "-tmp-push-nosub")
+	if err := os.Mkdir(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := "nosub-claude"
+	transcript := filepath.Join(projectDir, sessionID+".jsonl")
+	baseline := `{"uuid":"u-old","type":"user","timestamp":"2026-09-12T00:00:00Z","cwd":"` + workspace + `","message":{"role":"user","content":[{"type":"text","text":"old"}]}}` + "\n" +
+		`{"uuid":"a-old","parentUuid":"u-old","type":"assistant","timestamp":"2026-09-12T00:00:01Z","cwd":"` + workspace + `","message":{"role":"assistant","content":[{"type":"text","text":"old reply"}],"stop_reason":"end_turn"}}` + "\n"
+	if err := os.WriteFile(transcript, []byte(baseline), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewHandlers()
+	h.claudeSessions = newClaudeSessionCatalog(projectsDir)
+	store := newTestWebPushStore(t) // 不 Register：0 订阅
+	pipeline := NewWebPushCandidatePipeline(store)
+	pipeline.SetBridgeID("brg_nosub")
+	h.SetWebPushStore(store)
+	h.SetWebPushPipeline(pipeline)
+	watcher := &claudeWebPushWatcher{h: h, states: make(map[claudeSessionKey]*claudeWebPushWatchState)}
+
+	watcher.sweep()
+	if h.claudeSessions.snapshot != nil {
+		t.Fatal("sweep without subscriptions refreshed the catalog (must skip entirely)")
+	}
+	if got := pipeline.Drain(); len(got) != 0 {
+		t.Fatalf("no-subscription sweep produced %d candidates", len(got))
+	}
+
+	// 订阅出现后：首轮 sweep 恢复 refresh，且不回放订阅前的历史完成。
+	if _, err := store.Register("dev_nosub", testSubscriptionRecord("https://push.example.com/nosub")); err != nil {
+		t.Fatal(err)
+	}
+	watcher.sweep()
+	if h.claudeSessions.snapshot == nil {
+		t.Fatal("sweep with a subscription did not refresh the catalog")
+	}
+	if got := pipeline.Drain(); len(got) != 0 {
+		t.Fatalf("enrollment sweep replayed %d historical candidates", len(got))
+	}
+
+	// 订阅后的新完成仍要通知（门控不得吞正常路径）。
+	live := `{"uuid":"u-live2","parentUuid":"a-old","type":"user","timestamp":"2026-09-12T00:02:00Z","cwd":"` + workspace + `","message":{"role":"user","content":[{"type":"text","text":"new"}]}}` + "\n" +
+		`{"uuid":"a-live2","parentUuid":"u-live2","type":"assistant","timestamp":"2026-09-12T00:02:01Z","cwd":"` + workspace + `","message":{"role":"assistant","content":[{"type":"text","text":"fresh answer"}],"stop_reason":"end_turn"}}` + "\n"
+	f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(live); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	watcher.sweep()
+	got := pipeline.Drain()
+	if len(got) != 1 {
+		t.Fatalf("post-enrollment live candidates = %d, want 1", len(got))
+	}
+	if got[0].SessionID != sessionID || got[0].ContentPreview != "fresh answer" {
+		t.Fatalf("candidate = %+v, want session %s with fresh answer", got[0], sessionID)
+	}
+}
