@@ -307,13 +307,19 @@ func Main() {
 		WriteErrorFrame(RuntimeErrorConfigInvalid, err.Error())
 		os.Exit(1)
 	}
+	// DeviceStore 必须先于 dispatcher 创建并直接注入（评审 R5-B1）：fan-out
+	// 授权过滤持有冻结引用，消除晚初始化全局变量的 fail-open 窗口与对全局
+	// interface 的未同步读写。
+	trustedDevices, devicesDegraded := newTrustedDeviceStoreChecked(dataDir)
+	globalDeviceStore = trustedDevices
 	if webPushPipeline != nil {
 		webPushPipeline.SetBridgeID(bridgeID)
 		// §8.4：固定 worker 数消费有界队列；发送全在锁外。
-		// DeviceRevoked（评审 R4-B1）：fan-out 前按持久 trusted-device revoke
-		// 状态过滤——撤销设备的订阅清理落盘失败时 fail closed，跨重启同样生效。
+		// DeviceAuthorized（评审 R4-B1/R5-B1）：fan-out 前按 trusted-device
+		// 授权判定过滤——只有显式 active 才投递，revoked/missing/orphan
+		// 拒绝并自愈清理，查询失败等暂时状态拒绝但不清理。
 		webPushDispatcher := NewWebPushDispatcher(globalWebPushStore, webPushPipeline, WebPushDispatcherConfig{
-			DeviceRevoked: webPushDeviceRevokedFilter,
+			DeviceAuthorized: webPushDeviceAuthorization(trustedDevices, devicesDegraded),
 		})
 		// 完成通知正文预览懒刷新（owner 2026-08-27 决策对齐 Antigravity）：发送前重读
 		// authoritative kernel——intent 时刻正文可能尚未入投影（claude thinking 行终态
@@ -384,7 +390,9 @@ func Main() {
 			Token:              *managementToken,
 			DataDir:            dataDir,
 			PairingStore:       func() PairingSessionStore { s := NewMemoryPairingStore(); globalPairingStore = s; return s }(),
-			DeviceStore:        func() TrustedDeviceStore { s := newTrustedDeviceStore(dataDir); globalDeviceStore = s; return s }(),
+			// 复用 dispatcher 之前已创建并冻结的同一 DeviceStore 实例（评审
+			// R5-B1：不再二次构造，授权过滤与管理面同源）。
+			DeviceStore:        trustedDevices,
 			BridgeID:           bridgeID,
 			DisplayName:        displayName,
 			LocalURL:           advertisedLocalURL,
@@ -869,16 +877,20 @@ func remoteIdentityURLs(tailscaleURL, remoteURL string, includeTailscale, includ
 	return uniqueNonEmptyStrings(urls)
 }
 
-func newTrustedDeviceStore(dataDir *DataDir) TrustedDeviceStore {
+// newTrustedDeviceStoreChecked 返回设备 store 及其加载健康状态（评审
+// R5-B1）：devices.json 加载失败时退回空内存 store（direct auth 全部失效）
+// 并标记 degraded——web push 授权过滤据此把「记录缺失」按暂时状态处理
+//（拒绝投递但不删订阅，devices.json 恢复重启后订阅仍可用）。
+func newTrustedDeviceStoreChecked(dataDir *DataDir) (TrustedDeviceStore, bool) {
 	if dataDir == nil {
-		return NewMemoryDeviceStore()
+		return NewMemoryDeviceStore(), false
 	}
 	store, err := NewFileDeviceStore(dataDir.Path() + "/devices.json")
 	if err != nil {
 		slog.Error("go-bridge: devices.json 加载失败，已配对设备全部失效；iOS 端将看到 auth.invalid_token / 服务器发出错误的响应", "path", dataDir.Path()+"/devices.json", "error", err)
-		return NewMemoryDeviceStore()
+		return NewMemoryDeviceStore(), true
 	}
-	return store
+	return store, false
 }
 
 func envOr(key, fallback string) string {

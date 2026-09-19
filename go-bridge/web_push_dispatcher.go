@@ -27,6 +27,9 @@ import (
 //
 // 状态机（§8.4）：
 //   2xx → accepted（不声称设备已展示）；
+//   fan-out 授权（评审 R5-B1）：只有显式 active 的 trusted device 才投递
+//     （DeviceAuthorized 注入；revoked/missing/orphan 拒绝并自愈清理，
+//     查询失败等暂时状态拒绝但不清理——deny by default）；
 //   404/410 → 删除 subscription 并记 expired（webPushExpirySemanticsProven=true，
 //     r2 复审报告 §4 追认）；删除持久化失败时保留 subscription、记
 //     expiry_cleanup_failed（不假装已清理，后续投递自愈重试清理）；
@@ -70,6 +73,21 @@ const (
 // 两者均已实现并有定向测试，据此置 true。
 var webPushExpirySemanticsProven = true
 
+// WebPushAuthorizationDecision 表达 fan-out 前的设备授权判定（评审 R5-B1）。
+// 调用点默认 deny：只有显式 Active 才投递。
+type WebPushAuthorizationDecision uint8
+
+const (
+	// WebPushDeviceActive：记录存在且未撤销——唯一允许投递的状态。
+	WebPushDeviceActive WebPushAuthorizationDecision = iota
+	// WebPushDeviceDenied：明确 revoked / 记录缺失（含替换 orphan）——拒绝
+	// 投递并重试物理清理（存储恢复后订阅彻底消失）。
+	WebPushDeviceDenied
+	// WebPushDeviceUnknown：查询失败、DeviceStore 加载失败等暂时状态——
+	// 拒绝本次投递，但不清理（设备可能仍 active，不能因暂时错误删订阅）。
+	WebPushDeviceUnknown
+)
+
 // WebPushDispatcherConfig 汇总可注入项（测试用 httptest client + 短退避）。
 type WebPushDispatcherConfig struct {
 	Subscriber string
@@ -78,28 +96,36 @@ type WebPushDispatcherConfig struct {
 	RetryDelay time.Duration
 	RetryMax   int
 	Now        func() time.Time
-	// DeviceRevoked 返回 deviceID 的持久 trusted-device revoke 状态（评审
-	// R4-B1）：非 nil 时 fan-out 跳过已撤销设备的 subscription——清理落盘失败
-	// 被 store 回滚进可见集合的订阅不得投递（fail closed），跨重启同样生效
-	// （FileDeviceStore 重载后 revoke 状态仍在）。nil = 不过滤（测试默认）。
-	DeviceRevoked func(deviceID string) bool
+	// DeviceAuthorized 返回 deviceID 的投递授权判定（评审 R5-B1）：只有
+	// 显式 WebPushDeviceActive 才进入 fan-out——查询失败、记录缺失、已撤销
+	// 全部拒绝（deny by default）。nil = 不过滤（纯 dispatcher 单测用；产品
+	// 路径必须注入，见 main.go——先创建 DeviceStore 再启动 dispatcher）。
+	DeviceAuthorized func(deviceID string) WebPushAuthorizationDecision
 }
 
-// webPushDeviceRevokedFilter 按持久 trusted-device revoke 状态判断设备是否
-// 已撤销。查不到记录 ≠ 已撤销（fail open on missing）：subscription 的
-// deviceID 与 DeviceStore 记录一一对应（register 走已认证 device），仅当
-// 记录存在且 RevokedAt 非空时 fail closed。globalDeviceStore 在 dispatcher
-// 构造之后才由 main.go 的 ManagementConfig 初始化，这里在每次调用时读取。
-func webPushDeviceRevokedFilter(deviceID string) bool {
-	store := globalDeviceStore
-	if store == nil {
-		return false
+// webPushDeviceAuthorization 构造产品路径的授权判定（评审 R5-B1）：只有
+// 明确查到且未撤销的 trusted device 才允许投递。lookup 错误 → Unknown
+// （拒绝但不清理）；记录缺失或已撤销 → Denied（拒绝并自愈清理）。
+// devicesDegraded 表示 DeviceStore 加载失败退回了空内存 store——此时记录
+// 缺失是暂时状态而非 orphan，映射为 Unknown：拒绝投递（与 direct auth 同宽，
+// 不让旧订阅获得更宽授权），但不删订阅（devices.json 恢复重启后仍可用）。
+func webPushDeviceAuthorization(store TrustedDeviceStore, devicesDegraded bool) func(deviceID string) WebPushAuthorizationDecision {
+	return func(deviceID string) WebPushAuthorizationDecision {
+		record, err := store.LookupByDeviceID(deviceID)
+		if err != nil {
+			return WebPushDeviceUnknown
+		}
+		if record == nil {
+			if devicesDegraded {
+				return WebPushDeviceUnknown
+			}
+			return WebPushDeviceDenied
+		}
+		if record.RevokedAt != nil {
+			return WebPushDeviceDenied
+		}
+		return WebPushDeviceActive
 	}
-	record, err := store.LookupByDeviceID(deviceID)
-	if err != nil || record == nil {
-		return false
-	}
-	return record.RevokedAt != nil
 }
 
 // WebPushDispatcher 是有界投递 worker 组。
@@ -205,16 +231,26 @@ func (d *WebPushDispatcher) deliverCandidate(candidate WebPushCandidate) {
 		badgeKey = sessionAggregationKey(candidate)
 	}
 	for _, sub := range d.store.Subscriptions() {
-		if d.cfg.DeviceRevoked != nil && d.cfg.DeviceRevoked(sub.DeviceID) {
-			// 撤销设备 fail closed（评审 R4-B1，发布阻断）：subscription 清理
-			// 落盘失败被 store 回滚进可见集合时不得投递。顺带重试物理删除——
-			// 存储恢复后的下一次 fan-out 完成清理，订阅随之彻底消失；重试
-			// 失败则继续跳过（授权撤销优先于 store 一致性）。
-			if err := d.store.DeleteDevice(sub.DeviceID); err != nil {
-				slog.Warn("web-push: revoked device subscription still present, cleanup retry failed",
-					"devicePrefix", safeID(sub.DeviceID), "error", err.Error())
+		if d.cfg.DeviceAuthorized != nil {
+			switch d.cfg.DeviceAuthorized(sub.DeviceID) {
+			case WebPushDeviceActive:
+				// 唯一允许投递的判定。
+			case WebPushDeviceDenied:
+				// 明确 revoked / missing（含替换 orphan）：拒绝并重试物理删除
+				// ——存储恢复后的下一次 fan-out 完成清理，订阅随之彻底消失；
+				// 重试失败则继续跳过（授权撤销优先于 store 一致性）。
+				if err := d.store.DeleteDevice(sub.DeviceID); err != nil {
+					slog.Warn("web-push: denied device subscription still present, cleanup retry failed",
+						"devicePrefix", safeID(sub.DeviceID), "error", err.Error())
+				}
+				continue
+			default:
+				// WebPushDeviceUnknown 及任何未来判定值：deny by default。
+				// 查询失败/加载失败等暂时状态：拒绝本次投递，不清理。
+				slog.Warn("web-push: device authorization unknown, skipping delivery",
+					"devicePrefix", safeID(sub.DeviceID))
+				continue
 			}
-			continue
 		}
 		var snap WebPushBadgeSnapshot
 		badged := false

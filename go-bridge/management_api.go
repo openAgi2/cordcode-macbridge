@@ -975,6 +975,17 @@ func (s *ManagementServer) handlePairingApprove(w http.ResponseWriter, r *http.R
 		slog.Info("pairing: replaced previous device records",
 			"deviceID", safeID(deviceRecord.DeviceID),
 			"replaced", len(replacedDeviceIDs))
+		// 替换产生的旧 deviceID 联动删除其 web push subscription（评审
+		// R5-B1）：不让 orphan endpoint 只靠 fan-out 授权过滤兜底（missing =
+		// Denied 也会拒绝并自愈清理，但主动清理让生命周期即时收口）。
+		if globalWebPushStore != nil {
+			for _, replacedID := range replacedDeviceIDs {
+				if err := globalWebPushStore.DeleteDevice(replacedID); err != nil {
+					slog.Warn("pairing: replaced device subscription cleanup failed",
+						"devicePrefix", safeID(replacedID), "error", err.Error())
+				}
+			}
+		}
 	}
 
 	var relayResult *RelayFirstResult

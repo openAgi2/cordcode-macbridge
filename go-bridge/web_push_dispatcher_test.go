@@ -5,9 +5,11 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sync"
 	"sync/atomic"
@@ -346,34 +348,30 @@ func TestDispatcher404CleanupFailureKeepsSubscriptionAndHonestLedger(t *testing.
 	}
 }
 
-// 撤销设备 fail closed（评审 R4-B1，发布阻断）三阶段验收：清理落盘失败后
+// 撤销设备 fail closed（评审 R4-B1/R5-B1）三阶段验收：清理落盘失败后
 // ①同进程下一条 candidate 不向 revoked device 发请求；②重启形状（磁盘重载
 // store + 新 dispatcher，存储仍坏）仍不发；③存储恢复后下一次 fan-out 的清理
-// 重试完成物理删除，磁盘归零。
+// 重试完成物理删除，磁盘归零。使用生产授权判定（webPushDeviceAuthorization）。
 func TestDispatcherRevokedDeviceFailsClosedAndRetriesCleanup(t *testing.T) {
 	h := newDispatcherHarness(t, 200) // 若误投递会 2xx 并被 requests 计数捕获
 	devices := NewMemoryDeviceStore()
 	devices.AddDevice(TrustedDeviceRecord{
 		DeviceID:    "dev_disp",
-		DisplayName:  "Test",
+		DisplayName: "Test",
 		Platform:    "ios",
-		TokenHash:    "sha256:rvk",
+		TokenHash:   "sha256:rvk",
 		CreatedAt:   time.Now(),
 		LastSeenAt:  time.Now(),
 	})
 	if err := devices.RevokeDevice("dev_disp"); err != nil {
 		t.Fatalf("RevokeDevice: %v", err)
 	}
-	revoked := func(deviceID string) bool {
-		record, err := devices.LookupByDeviceID(deviceID)
-		return err == nil && record != nil && record.RevokedAt != nil
-	}
 	newDispatcher := func(store *WebPushStore) *WebPushDispatcher {
 		return NewWebPushDispatcher(store, h.pipeline, WebPushDispatcherConfig{
-			HTTPClient:    &http.Client{Timeout: 5 * time.Second},
-			RetryDelay:    5 * time.Millisecond,
-			RetryMax:      2,
-			DeviceRevoked: revoked,
+			HTTPClient:      &http.Client{Timeout: 5 * time.Second},
+			RetryDelay:      5 * time.Millisecond,
+			RetryMax:        2,
+			DeviceAuthorized: webPushDeviceAuthorization(devices, false),
 		})
 	}
 
@@ -429,38 +427,194 @@ func TestDispatcherRevokedDeviceFailsClosedAndRetriesCleanup(t *testing.T) {
 	}
 }
 
-// webPushDeviceRevokedFilter 单元行为（评审 R4-B1）：nil store 不过滤；
-// 查不到记录不过滤（fail open on missing）；仅 RevokedAt 非空才 fail closed。
-func TestWebPushDeviceRevokedFilter(t *testing.T) {
-	prev := globalDeviceStore
-	t.Cleanup(func() { globalDeviceStore = prev })
+// 授权判定的 dispatcher 行为（评审 R5-B1）：健康 store 下的 missing（orphan，
+// 含 ReplaceDevice 替换残留）→ 0 请求且订阅被自愈清理；Unknown（查询失败等
+// 暂时状态）→ 0 请求但订阅保留（不能因暂时错误删订阅）。
+func TestDispatcherAuthorizationMissingOrphanAndUnknown(t *testing.T) {
+	// missing / orphan：生产授权判定 over 空（健康）store。
+	h := newDispatcherHarness(t, 200)
+	d := NewWebPushDispatcher(h.store, h.pipeline, WebPushDispatcherConfig{
+		HTTPClient:      &http.Client{Timeout: 5 * time.Second},
+		RetryDelay:      5 * time.Millisecond,
+		RetryMax:        2,
+		DeviceAuthorized: webPushDeviceAuthorization(NewMemoryDeviceStore(), false),
+	})
+	h.deliverSync(t, d, dispatcherCandidate(WebPushKindCompletion, "codex|disp-1|orph|completed"))
+	if got := atomic.LoadInt32(&h.requests); got != 0 {
+		t.Fatalf("orphan subscription received %d HTTP requests, want 0", got)
+	}
+	if h.store.SubscriptionCount() != 0 {
+		t.Fatalf("orphan subscription must be self-healed (deleted): count = %d", h.store.SubscriptionCount())
+	}
 
-	globalDeviceStore = nil
-	if webPushDeviceRevokedFilter("dev_x") {
-		t.Fatal("nil device store must not filter")
+	// Unknown：查询失败的 store——拒绝投递但不清理。
+	h2 := newDispatcherHarness(t, 200)
+	d2 := NewWebPushDispatcher(h2.store, h2.pipeline, WebPushDispatcherConfig{
+		HTTPClient:      &http.Client{Timeout: 5 * time.Second},
+		RetryDelay:      5 * time.Millisecond,
+		RetryMax:        2,
+		DeviceAuthorized: webPushDeviceAuthorization(&failingLookupDeviceStore{}, false),
+	})
+	h2.deliverSync(t, d2, dispatcherCandidate(WebPushKindCompletion, "codex|disp-1|unk|completed"))
+	if got := atomic.LoadInt32(&h2.requests); got != 0 {
+		t.Fatalf("unknown-authorization subscription received %d HTTP requests, want 0", got)
+	}
+	if h2.store.SubscriptionCount() != 1 {
+		t.Fatalf("subscription must be retained on Unknown (transient lookup failure): count = %d", h2.store.SubscriptionCount())
+	}
+}
+
+// 真实 FileDeviceStore + WebPushStore 双重重载的生产形状测试（评审 R5-B1）：
+// 持久 revoke 后同时从 devices.json / web-push-subscriptions.json 重载，revoked
+// 订阅仍 0 请求（跨重启 fail closed），active 设备正常投递；存储恢复后完成
+// 物理清理。
+func TestDispatcherDeviceAuthorizationFileStoreReload(t *testing.T) {
+	h := newDispatcherHarness(t, 200) // dev_disp 的订阅（endpoint /push/dev_disp）
+
+	// 第二个 active 设备的订阅（endpoint /push/dev_active2）。
+	clientKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("client key: %v", err)
+	}
+	recActive := testSubscriptionRecord(h.server.URL + "/push/dev_active2")
+	recActive.P256dh = base64.RawURLEncoding.EncodeToString(elliptic.Marshal(elliptic.P256(), clientKey.PublicKey.X, clientKey.PublicKey.Y))
+	recActive.Auth = base64.RawURLEncoding.EncodeToString(make([]byte, 16))
+	if _, err := h.store.Register("dev_active2", recActive); err != nil {
+		t.Fatalf("Register dev_active2: %v", err)
+	}
+
+	// 真实 FileDeviceStore：dev_disp 撤销（持久化到 devices.json），dev_active2 active。
+	devicesPath := filepath.Join(t.TempDir(), "devices.json")
+	fileDevices, err := NewFileDeviceStore(devicesPath)
+	if err != nil {
+		t.Fatalf("NewFileDeviceStore: %v", err)
+	}
+	addDevice := func(deviceID string) {
+		t.Helper()
+		if err := fileDevices.AddDevice(TrustedDeviceRecord{
+			DeviceID:    deviceID,
+			DisplayName: "Test",
+			Platform:    "ios",
+			TokenHash:   "sha256:" + deviceID,
+			CreatedAt:   time.Now(),
+			LastSeenAt:  time.Now(),
+		}); err != nil {
+			t.Fatalf("AddDevice %s: %v", deviceID, err)
+		}
+	}
+	addDevice("dev_disp")
+	addDevice("dev_active2")
+	if err := fileDevices.RevokeDevice("dev_disp"); err != nil {
+		t.Fatalf("RevokeDevice: %v", err)
+	}
+
+	newDispatcher := func(store *WebPushStore, devices TrustedDeviceStore) *WebPushDispatcher {
+		return NewWebPushDispatcher(store, h.pipeline, WebPushDispatcherConfig{
+			HTTPClient:      &http.Client{Timeout: 5 * time.Second},
+			RetryDelay:      5 * time.Millisecond,
+			RetryMax:        2,
+			DeviceAuthorized: webPushDeviceAuthorization(devices, false),
+		})
+	}
+
+	// 阶段 1（同进程，存储破坏）：revoked 0 请求、active 投递 1 次；revoked
+	// 订阅因清理重试失败而保留（供阶段 2 重载后继续验证拒绝）。
+	if err := os.Chmod(h.store.dir, 0o500); err != nil {
+		t.Fatalf("chmod store dir read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(h.store.dir, 0o700) })
+	h.deliverSync(t, newDispatcher(h.store, fileDevices), dispatcherCandidate(WebPushKindCompletion, "codex|disp-1|fr1|completed"))
+	if got := atomic.LoadInt32(&h.requests); got != 1 {
+		t.Fatalf("requests = %d, want exactly 1 (active only; revoked must be denied)", got)
+	}
+	if h.store.SubscriptionCount() != 2 {
+		t.Fatalf("subscriptions = %d, want 2 (revoked retained while storage broken)", h.store.SubscriptionCount())
+	}
+
+	// 阶段 2（重启形状：devices.json + web-push-subscriptions.json 双重重载，
+	// 存储仍坏）：revoked 订阅从磁盘回来仍被拒，active 继续投递。
+	reloadedDevices, err := NewFileDeviceStore(devicesPath)
+	if err != nil {
+		t.Fatalf("reload devices: %v", err)
+	}
+	reloadedPush, err := LoadWebPushStore(h.store.dir)
+	if err != nil {
+		t.Fatalf("reload push store: %v", err)
+	}
+	h.deliverSync(t, newDispatcher(reloadedPush, reloadedDevices), dispatcherCandidate(WebPushKindCompletion, "codex|disp-1|fr2|completed"))
+	if got := atomic.LoadInt32(&h.requests); got != 2 {
+		t.Fatalf("requests after reload = %d, want 2 (active delivers again; revoked stays denied across real reload)", got)
+	}
+	if reloadedPush.SubscriptionCount() != 2 {
+		t.Fatalf("subscriptions after reload = %d, want 2 (cleanup retry still failing)", reloadedPush.SubscriptionCount())
+	}
+
+	// 阶段 3（存储恢复）：下一次 fan-out 完成 revoked 订阅的物理清理。
+	if err := os.Chmod(h.store.dir, 0o700); err != nil {
+		t.Fatalf("chmod restore: %v", err)
+	}
+	h.deliverSync(t, newDispatcher(reloadedPush, reloadedDevices), dispatcherCandidate(WebPushKindCompletion, "codex|disp-1|fr3|completed"))
+	if got := atomic.LoadInt32(&h.requests); got != 3 {
+		t.Fatalf("requests after recovery = %d, want 3 (active only)", got)
+	}
+	if reloadedPush.SubscriptionCount() != 1 {
+		t.Fatalf("subscriptions after recovery = %d, want 1 (revoked physically deleted; active retained)", reloadedPush.SubscriptionCount())
+	}
+	// 磁盘真相：再次重载只剩 active。
+	after, err := LoadWebPushStore(h.store.dir)
+	if err != nil {
+		t.Fatalf("reload after cleanup: %v", err)
+	}
+	if after.SubscriptionCount() != 1 {
+		t.Fatalf("disk after recovery = %d subscriptions, want 1 (active only)", after.SubscriptionCount())
+	}
+}
+
+// webPushDeviceAuthorization 判定单元行为（评审 R5-B1）：只有显式 active 才
+// 允许投递——lookup 错误 → Unknown（拒绝但不清理）；健康 store 下 missing
+//（orphan）与 revoked → Denied（拒绝并自愈清理）；degraded store（devices.json
+// 加载失败退回空 store）下 missing → Unknown（拒绝但不删订阅）。
+type failingLookupDeviceStore struct {
+	MemoryDeviceStore
+}
+
+func (f *failingLookupDeviceStore) LookupByDeviceID(string) (*TrustedDeviceRecord, error) {
+	return nil, fmt.Errorf("lookup failed")
+}
+
+func TestWebPushDeviceAuthorizationDecisions(t *testing.T) {
+	auth := webPushDeviceAuthorization(&failingLookupDeviceStore{}, false)
+	if got := auth("dev_x"); got != WebPushDeviceUnknown {
+		t.Fatalf("lookup error decision = %v, want Unknown", got)
 	}
 
 	devices := NewMemoryDeviceStore()
 	devices.AddDevice(TrustedDeviceRecord{
-		DeviceID:    "dev_f",
+		DeviceID:    "dev_a",
 		DisplayName: "Test",
 		Platform:    "ios",
-		TokenHash:   "sha256:f",
+		TokenHash:   "sha256:a",
 		CreatedAt:   time.Now(),
 		LastSeenAt:  time.Now(),
 	})
-	globalDeviceStore = devices
-	if webPushDeviceRevokedFilter("dev_missing") {
-		t.Fatal("missing record must not filter (fail open on missing)")
+	auth = webPushDeviceAuthorization(devices, false)
+	if got := auth("dev_a"); got != WebPushDeviceActive {
+		t.Fatalf("active device decision = %v, want Active", got)
 	}
-	if webPushDeviceRevokedFilter("dev_f") {
-		t.Fatal("active device must not filter")
-	}
-	if err := devices.RevokeDevice("dev_f"); err != nil {
+	if err := devices.RevokeDevice("dev_a"); err != nil {
 		t.Fatal(err)
 	}
-	if !webPushDeviceRevokedFilter("dev_f") {
-		t.Fatal("revoked device must filter (fail closed)")
+	if got := auth("dev_a"); got != WebPushDeviceDenied {
+		t.Fatalf("revoked device decision = %v, want Denied", got)
+	}
+	if got := auth("dev_missing"); got != WebPushDeviceDenied {
+		t.Fatalf("missing record on healthy store decision = %v, want Denied (orphan)", got)
+	}
+
+	// degraded store：记录缺失是暂时状态（devices.json 加载失败），不删订阅。
+	auth = webPushDeviceAuthorization(NewMemoryDeviceStore(), true)
+	if got := auth("dev_any"); got != WebPushDeviceUnknown {
+		t.Fatalf("missing record on degraded store decision = %v, want Unknown", got)
 	}
 }
 

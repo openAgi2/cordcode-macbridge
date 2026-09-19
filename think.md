@@ -45,14 +45,19 @@ B3：旧实现复用 `scanClaudeRelayEntriesFromReader` 物化全量 entry，64M
 `DeleteDevice`/`Unregister`/`registerLocked` 存储一致性修复（r3 评审 B2 + r4§4）：
 subscription 删除/替换先落盘、失败回滚内存（替换失败恢复旧记录）——磁盘失败时
 不得留下「内存已删、磁盘仍在」的假成功；badge 清理独立失败后置；撤销 API 响应
-带 `pushCleanupError` 如实暴露。**r4 评审 B1 教训（发布阻断）：存储一致性 ≠
-投递授权**——回滚把订阅放回 dispatcher 可见集合，而 dispatcher 不查 revoke
-状态，已撤销设备照样收到推送（重启后磁盘旧记录再加载，行为不变）。修复 =
-dispatcher fan-out 前按**持久 trusted-device revoke 状态**过滤（`DeviceRevoked`
-注入；撤销先于清理失败落盘，FileDeviceStore 跨重启仍 revoked → fail closed），
-跳过时顺带重试物理删除（存储恢复后下一次 fan-out 完成清理）；查不到记录
-fail open（订阅 deviceID 与 DeviceStore 一一对应，missing ≠ revoked）。三阶段
-验收测试：同进程不投递 / 重载形状不投递 / 恢复后完成清理。
+带 `pushCleanupError` 如实暴露。**r4 评审 B1 教训：存储一致性 ≠ 投递授权**——
+回滚把订阅放回 dispatcher 可见集合照样投递。**r5 评审 B1 再补刀：fail-open 的
+洞比想象大**——「查不到 = active」在三个真实生产状态放行：①dispatcher 先于
+globalDeviceStore 初始化启动（晚初始化窗口 + 全局 interface 未同步读写）；
+②devices.json 加载失败退回空 store，全部订阅变 missing 继续投递（比 direct
+auth 全拒绝更宽）；③ReplaceDevice 删旧 deviceID 不清订阅，orphan 靠 missing
+放行。终态语义 = **只有显式 active 才投递**（deny by default）：三态判定
+`WebPushDeviceActive/Denied/Unknown`——revoked/missing（orphan）→ Denied（拒绝
++ fan-out 内自愈清理重试）；lookup 错误、degraded store（加载失败）→ Unknown
+（拒绝但不删订阅，恢复重启后仍可用）；DeviceStore 在 dispatcher 启动**前**创建
+并直接注入冻结引用（不再读全局）；ReplaceDevice 返回旧 ID 联动清订阅。测试用
+真实 devices.json + web-push-subscriptions.json 双重重载证明跨重启拒绝 + active
+正常投递。
 continuity cache v3（有界 FIFO + defensive copy + 读盘计数 + 同指纹并发 miss
 singleflight 合并，并发测试断言恰好一次真实读）已提交。
 
