@@ -111,6 +111,17 @@ struct WorkspaceView: View {
             Text(L10n.devicesRevokeMessage)
         }
         .alert(
+            L10n.devicesPushCleanupWarningTitle,
+            isPresented: Binding(
+                get: { deviceStore.revokeCleanupWarning != nil },
+                set: { if !$0 { deviceStore.dismissRevokeCleanupWarning() } }
+            )
+        ) {
+            Button(L10n.ok, role: .cancel) { deviceStore.dismissRevokeCleanupWarning() }
+        } message: {
+            Text(deviceStore.revokeCleanupWarning ?? "")
+        }
+        .alert(
             L10n.codexRestartSharedService,
             isPresented: Binding(
                 get: { codexRestartMessage != nil },

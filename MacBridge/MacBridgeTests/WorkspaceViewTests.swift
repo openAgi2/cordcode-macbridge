@@ -182,5 +182,7 @@ private final class DeviceAPIStubForWorkspace: DeviceAPIProviding {
     let devices: [TrustedDevice]
     init(devices: [TrustedDevice]) { self.devices = devices }
     func listDevices() async throws -> [TrustedDevice] { devices }
-    func revokeDevice(_ deviceId: String) async throws {}
+    func revokeDevice(_ deviceId: String) async throws -> DeviceRevocation {
+        DeviceRevocation(pushCleanupError: nil)
+    }
 }

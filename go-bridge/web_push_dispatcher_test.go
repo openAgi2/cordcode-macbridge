@@ -462,6 +462,26 @@ func TestDispatcherAuthorizationMissingOrphanAndUnknown(t *testing.T) {
 	if h2.store.SubscriptionCount() != 1 {
 		t.Fatalf("subscription must be retained on Unknown (transient lookup failure): count = %d", h2.store.SubscriptionCount())
 	}
+
+	// 零值判定（评审 r6 API 硬化）：未显式赋值的枚举默认拒绝——0 请求，
+	// 且不触发清理（「不知道」只 deny，不删订阅）。
+	h3 := newDispatcherHarness(t, 200)
+	d3 := NewWebPushDispatcher(h3.store, h3.pipeline, WebPushDispatcherConfig{
+		HTTPClient:      &http.Client{Timeout: 5 * time.Second},
+		RetryDelay:      5 * time.Millisecond,
+		RetryMax:        2,
+		DeviceAuthorized: func(string) WebPushAuthorizationDecision {
+			var zero WebPushAuthorizationDecision
+			return zero
+		},
+	})
+	h3.deliverSync(t, d3, dispatcherCandidate(WebPushKindCompletion, "codex|disp-1|zero|completed"))
+	if got := atomic.LoadInt32(&h3.requests); got != 0 {
+		t.Fatalf("zero-value decision received %d HTTP requests, want 0 (deny by default)", got)
+	}
+	if h3.store.SubscriptionCount() != 1 {
+		t.Fatalf("zero-value decision must not trigger cleanup: count = %d, want 1", h3.store.SubscriptionCount())
+	}
 }
 
 // 真实 FileDeviceStore + WebPushStore 双重重载的生产形状测试（评审 R5-B1）：

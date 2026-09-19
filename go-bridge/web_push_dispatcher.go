@@ -78,8 +78,11 @@ var webPushExpirySemanticsProven = true
 type WebPushAuthorizationDecision uint8
 
 const (
+	// WebPushDeviceUnspecified 是零值（评审 r6 API 硬化建议）：未显式赋值
+	// 的判定默认拒绝投递，但不触发物理清理——「不知道」只 deny，不删订阅。
+	WebPushDeviceUnspecified WebPushAuthorizationDecision = iota
 	// WebPushDeviceActive：记录存在且未撤销——唯一允许投递的状态。
-	WebPushDeviceActive WebPushAuthorizationDecision = iota
+	WebPushDeviceActive
 	// WebPushDeviceDenied：明确 revoked / 记录缺失（含替换 orphan）——拒绝
 	// 投递并重试物理清理（存储恢复后订阅彻底消失）。
 	WebPushDeviceDenied

@@ -10,6 +10,7 @@ final class DeviceStoreTests: XCTestCase {
         var devices: [TrustedDevice]
         var error: Error?
         var revokeError: Error?
+        var pushCleanupError: String?
         private(set) var revokedDeviceIds: [String] = []
 
         init(devices: [TrustedDevice], error: Error? = nil, revokeError: Error? = nil) {
@@ -23,10 +24,11 @@ final class DeviceStoreTests: XCTestCase {
             return devices
         }
 
-        func revokeDevice(_ deviceId: String) async throws {
+        func revokeDevice(_ deviceId: String) async throws -> DeviceRevocation {
             revokedDeviceIds.append(deviceId)
             if let revokeError { throw revokeError }
             devices.removeAll { $0.deviceId == deviceId }
+            return DeviceRevocation(pushCleanupError: pushCleanupError)
         }
     }
 
@@ -101,5 +103,41 @@ final class DeviceStoreTests: XCTestCase {
 
         XCTAssertNotNil(store.devicesError)
         XCTAssertFalse(store.isRevoking)
+    }
+
+    // 撤销成功但订阅清理失败（pushCleanupError）：发布警告、不算撤销失败，
+    // 且 dismiss 可清除。
+    func testRevokeCleanupFailurePublishesWarningWithoutError() async throws {
+        let d1 = TrustedDevice(deviceId: "d1", displayName: nil, platform: "ios", createdAt: nil, lastSeenAt: nil)
+        let stub = DeviceAPIStub(devices: [d1])
+        stub.pushCleanupError = "persist failed: disk full"
+        let store = DeviceStore()
+        store.configure(apiClient: stub)
+
+        await store.loadDevices()
+        await store.revokeDevice(d1)
+
+        XCTAssertNil(store.devicesError, "撤销本身成功，不应设置 devicesError")
+        XCTAssertTrue(store.devices.isEmpty, "撤销成功后设备应从列表消失")
+        let warning = try XCTUnwrap(store.revokeCleanupWarning)
+        XCTAssertTrue(warning.contains("persist failed: disk full"), "警告应包含服务端错误详情：\(warning)")
+        XCTAssertFalse(store.isRevoking)
+
+        store.dismissRevokeCleanupWarning()
+        XCTAssertNil(store.revokeCleanupWarning)
+    }
+
+    // 清理成功的撤销：不发布警告。
+    func testRevokeCleanSuccessKeepsWarningNil() async {
+        let d1 = TrustedDevice(deviceId: "d1", displayName: nil, platform: "ios", createdAt: nil, lastSeenAt: nil)
+        let stub = DeviceAPIStub(devices: [d1])
+        let store = DeviceStore()
+        store.configure(apiClient: stub)
+
+        await store.loadDevices()
+        await store.revokeDevice(d1)
+
+        XCTAssertNil(store.revokeCleanupWarning)
+        XCTAssertNil(store.devicesError)
     }
 }

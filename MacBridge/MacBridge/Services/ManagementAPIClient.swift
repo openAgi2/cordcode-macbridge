@@ -12,11 +12,18 @@ protocol PairingAPIProviding {
     func rejectPairing(_ pairingId: String) async throws
 }
 
+/// 撤销结果：撤销本身成功，但 web push 订阅清理可能失败（服务端响应的
+/// pushCleanupError——r4/r5 评审：投递授权由服务端 deny-by-default 过滤兜底，
+/// 这里只做可观测性提示，不影响撤销成功语义）。
+struct DeviceRevocation: Sendable {
+    let pushCleanupError: String?
+}
+
 /// 设备列表与撤销的 API 抽象。`DeviceStore` 依赖此协议以便单元测试注入 stub，
 /// 同时让 `ManagementAPIClient` 在生产中实现。
 protocol DeviceAPIProviding {
     func listDevices() async throws -> [TrustedDevice]
-    func revokeDevice(_ deviceId: String) async throws
+    func revokeDevice(_ deviceId: String) async throws -> DeviceRevocation
 }
 
 // MARK: - Management API 数据模型
@@ -58,6 +65,13 @@ struct TrustedDevice: Codable, Identifiable {
     let createdAt: String?
     let lastSeenAt: String?
     var id: String { deviceId }
+}
+
+/// POST /internal/devices/{id}/revoke 响应（pushCleanupError 仅在 web push
+/// 订阅清理失败时出现，见 go-bridge handleRevokeDevice）。
+private struct RevokeDeviceResponse: Decodable {
+    let revoked: Bool?
+    let pushCleanupError: String?
 }
 
 /// GET /internal/remote/status 响应
@@ -343,8 +357,11 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
         return try JSONDecoder().decode([TrustedDevice].self, from: data)
     }
 
-    func revokeDevice(_ deviceId: String) async throws {
-        _ = try await performRequest("/internal/devices/\(deviceId)/revoke", method: "POST")
+    func revokeDevice(_ deviceId: String) async throws -> DeviceRevocation {
+        let data = try await performRequest("/internal/devices/\(deviceId)/revoke", method: "POST")
+        // 撤销已在 HTTP 层成功；响应体解码失败不回滚撤销，只丢失清理提示。
+        let response = try? JSONDecoder().decode(RevokeDeviceResponse.self, from: data)
+        return DeviceRevocation(pushCleanupError: response?.pushCleanupError)
     }
 
     // MARK: - Logs

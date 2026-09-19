@@ -18,6 +18,9 @@ final class DeviceStore: ObservableObject {
 
     /// 撤销操作是否进行中（供 UI 禁用重复动作）。
     @Published private(set) var isRevoking = false
+    /// 最近一次撤销成功、但 web push 订阅清理失败的提示；无则 nil（r4/r5
+    /// 评审：投递授权由服务端 deny-by-default 过滤兜底，这里只做可观测性）。
+    @Published private(set) var revokeCleanupWarning: String?
 
     private var apiClient: DeviceAPIProviding?
 
@@ -43,7 +46,8 @@ final class DeviceStore: ObservableObject {
         }
     }
 
-    /// 撤销一台设备；成功后刷新列表。失败时设置 `devicesError`。
+    /// 撤销一台设备；成功后刷新列表。失败时设置 `devicesError`；撤销成功但
+    /// 订阅清理失败时设置 `revokeCleanupWarning`（不视为撤销失败）。
     func revokeDevice(_ device: TrustedDevice) async {
         guard let client = apiClient else {
             devicesError = L10n.errorCannotConnect
@@ -52,10 +56,20 @@ final class DeviceStore: ObservableObject {
         isRevoking = true
         defer { isRevoking = false }
         do {
-            try await client.revokeDevice(device.deviceId)
+            let revocation = try await client.revokeDevice(device.deviceId)
             await loadDevices()
+            if let cleanupError = revocation.pushCleanupError {
+                revokeCleanupWarning = String(format: L10n.devicesPushCleanupWarning, cleanupError)
+            } else {
+                revokeCleanupWarning = nil
+            }
         } catch {
             devicesError = String(format: L10n.errorRemoveDevice, error.localizedDescription)
         }
+    }
+
+    /// 用户确认清理警告后清除提示。
+    func dismissRevokeCleanupWarning() {
+        revokeCleanupWarning = nil
     }
 }

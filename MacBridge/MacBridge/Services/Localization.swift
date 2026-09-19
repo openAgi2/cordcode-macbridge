@@ -295,6 +295,8 @@ enum L10n {
     static var devicesRevokeAuthorization: String { tr("devices_revoke_authorization") }
     static var devicesRevokeConfirm: String { tr("devices_revoke_confirm") }
     static var devicesRevokeMessage: String { tr("devices_revoke_message") }
+    static var devicesPushCleanupWarningTitle: String { tr("devices_push_cleanup_warning_title") }
+    static var devicesPushCleanupWarning: String { tr("devices_push_cleanup_warning") }
     static var devicesActions: String { tr("devices_actions") }
     static var devicesUnknownDevice: String { tr("devices_unknown_device") }
 
@@ -729,6 +731,8 @@ enum L10n {
             "devices_revoke_authorization": "Revoke Authorization...",
             "devices_revoke_confirm": "Revoke authorization for “%@”?",
             "devices_revoke_message": "The device will disconnect immediately and must pair again before its next use.",
+            "devices_push_cleanup_warning_title": "Push Subscription Cleanup Incomplete",
+            "devices_push_cleanup_warning": "The device was revoked, but cleaning up its push subscription failed: %@. Push delivery to this device stays blocked; you can retry revoking or check the runtime log.",
             "devices_actions": "Device actions",
             "devices_unknown_device": "Device",
             "refresh_all": "Refresh All",
@@ -1125,6 +1129,8 @@ enum L10n {
             "devices_revoke_authorization": "撤销授权…",
             "devices_revoke_confirm": "撤销“%@”的授权？",
             "devices_revoke_message": "该设备将立即断开，下次使用需要重新配对。",
+            "devices_push_cleanup_warning_title": "推送订阅清理未完成",
+            "devices_push_cleanup_warning": "设备已撤销，但其推送订阅清理失败：%@。对该设备的推送投递已被阻断；可重试撤销或查看 runtime 日志。",
             "devices_actions": "设备操作",
             "devices_unknown_device": "设备",
             "refresh_all": "全部刷新",
