@@ -6,10 +6,10 @@
 - 涉及仓库：Mac `cordcode-macbridge-codex-web`；iOS `cordcode-ios-codex-web-backend` 仅作协议边界引用，本阶段不改。
 - 架构护栏：Session Sync v2。timeline 真相 owner 仍是 Projection Kernel；诊断只属于 control plane，不得写 timeline、增加 writer、改变官方 daemon 生命周期或推进 projection revision。
 - 评审链：
-  - [v1 评审](./2026-08-24-codex-web-topology-split-and-sync-monitor-analysis-review.md)
-  - [v2 复审](./2026-08-24-codex-web-topology-split-and-sync-monitor-analysis-v2-review.md)
-  - [v3 复审](./2026-08-24-codex-web-topology-split-and-sync-monitor-analysis-v3-review.md)
-  - [v4 复审](./2026-08-24-codex-web-topology-split-and-sync-monitor-analysis-v4-review.md)
+  - [v1 评审](archive/2026-08-24-codex-web-topology-split-and-sync-monitor-analysis-review.md)
+  - [v2 复审](archive/2026-08-24-codex-web-topology-split-and-sync-monitor-analysis-v2-review.md)
+  - [v3 复审](archive/2026-08-24-codex-web-topology-split-and-sync-monitor-analysis-v3-review.md)
+  - [v4 复审](archive/2026-08-24-codex-web-topology-split-and-sync-monitor-analysis-v4-review.md)
 
 ## 0. v5 修订裁决
 

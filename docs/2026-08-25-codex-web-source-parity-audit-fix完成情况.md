@@ -2,7 +2,7 @@
 
 - 日期：2026-08-25 起
 - 驱动：owner 监工指令（codex-web 源码对齐审计修复）
-- 审计文档（豁免卡登记簿 + 事实基准）：[2026-08-25-codex-web-source-parity-audit.md](2026-08-25-codex-web-source-parity-audit.md)
+- 审计文档（豁免卡登记簿 + 事实基准）：[2026-08-25-codex-web-source-parity-audit.md](archive/2026-08-25-codex-web-source-parity-audit.md)
 - 纪律：每个修复先在本文档写明「官方实现位置 + 我方实现的第一处分歧」再动代码（设计 §3.4）；代码注释带上游锚点或豁免卡编号；每批定向测试 + go test ./... + go vet 通过后进下一批。
 - 部署与 owner 验收（2026-08-25 晚）：Mac Release runtime d18c6eccc29b（PID 1980, 23:45:21, port 8777，二进制含三处审计标记）+ iOS 真机 b700932 已部署；**A2 审批收口 / A3 停止外部 turn 两项 owner 真机验收 PASS**。剩余 owner 决定：§0.3 修订案批准与否（§3b 草案）。
 

@@ -4,10 +4,10 @@
 - 状态：**v2.0 topology-first 施工合同；取代 v1.5–v1.7 中“Terminal Gate 可单独放行产品实施”的冲突规则。Desktop 与 CordCode 连接同一官方 daemon 是产品代码开工和继续扩面的共同硬门；任何 PARTIAL、独立 runtime 或 managed-loopback 结果均不得放行。**
 - 执行进度（2026-08-25 晚）：**全部完成（111/111 done 均 proven）。** Phase 0–5 与 owner 真机矩阵（模型目录 parity + 交互回归，双拓扑）于 2026-08-25 验收，缺陷修复链 Mac 0f524d7..202b41c / iOS aeb13d5。Phase 6：owner 明示放弃观察窗直接退役——Mac drivers 移除 `codex`（980d358）、iOS `BackendKind.codex` isDeprecated + 退出 serverCreationCases（b700932），代码保留；部署验证 = runtime drivers 无 codex + 真机安装；**owner 退役后真机复测 PASS（codex 消失、codex-web 正常）。** 完成报告见 [2026-08-21-codex-web-backend-design完成情况.md](2026-08-21-codex-web-backend-design完成情况.md)；持久化真相见 `.exec-plan/state/plan-c48486da6336.json`。
 - 参考方案：[2026-08-16-dsh-web-backend-design.md](2026-08-16-dsh-web-backend-design.md)
-- 一轮评审：[2026-08-21-codex-web-backend-design-review.md](2026-08-21-codex-web-backend-design-review.md)
-- 二轮评审：[2026-08-21-codex-web-backend-design-review-r2.md](2026-08-21-codex-web-backend-design-review-r2.md)
-- 三轮评审：[2026-08-21-codex-web-backend-design-review-r3.md](2026-08-21-codex-web-backend-design-review-r3.md)
-- 四轮确认评审：[2026-08-21-codex-web-backend-design-review-r4.md](2026-08-21-codex-web-backend-design-review-r4.md)
+- 一轮评审：[2026-08-21-codex-web-backend-design-review.md](archive/2026-08-21-codex-web-backend-design-review.md)
+- 二轮评审：[2026-08-21-codex-web-backend-design-review-r2.md](archive/2026-08-21-codex-web-backend-design-review-r2.md)
+- 三轮评审：[2026-08-21-codex-web-backend-design-review-r3.md](archive/2026-08-21-codex-web-backend-design-review-r3.md)
+- 四轮确认评审：[2026-08-21-codex-web-backend-design-review-r4.md](archive/2026-08-21-codex-web-backend-design-review-r4.md)
 - 历史前置分析（仅作问题来源，已降级，不授权实施）：[2026-08-21-codex-web-backend-feasibility-analysis.md](2026-08-21-codex-web-backend-feasibility-analysis.md)
 - **连续性合同（v2.0 拓扑之后、禁止按现象单修）**：[2026-08-22-codex-web-continuity-architecture.md](2026-08-22-codex-web-continuity-architecture.md)
 - **拓扑可观测性后续计划（已完成，不替代 Phase 6 owner 门）**：[2026-08-24-codex-web-topology-sync-monitor-implementation-plan完成情况.md](2026-08-24-codex-web-topology-sync-monitor-implementation-plan完成情况.md)
@@ -100,7 +100,7 @@ codex-web 的冷用量（已加载 thread 的当前 context 占用）读取，�
 
 除本豁免外，§0.3「官方 API 唯一数据面」红线对其余全部用量事实仍然生效。
 
-> 落款：owner 批准 2026-08-26；源码对齐审计 §3.3-C1（[2026-08-25-codex-web-source-parity-audit.md](2026-08-25-codex-web-source-parity-audit.md)）；监工指令 2 号。
+> 落款：owner 批准 2026-08-26；源码对齐审计 §3.3-C1（[2026-08-25-codex-web-source-parity-audit.md](archive/2026-08-25-codex-web-source-parity-audit.md)）；监工指令 2 号。
 
 ## 1. CordCode 初衷如何约束本设计
 
@@ -997,7 +997,7 @@ T0/T1 任一失败立即冻结后续能力。adapter 内部测试只能证明翻
 ## 18. 一轮评审采纳记录
 
 对应评审文档：
-[2026-08-21-codex-web-backend-design-review.md](2026-08-21-codex-web-backend-design-review.md)。
+[2026-08-21-codex-web-backend-design-review.md](archive/2026-08-21-codex-web-backend-design-review.md)。
 
 | 评审项 | 处理 | 设计修订 / 未采纳理由 |
 |---|---|---|
@@ -1020,7 +1020,7 @@ Desktop/VS Code 覆盖面或第三方 provider 行为已经实测通过。
 ## 19. 二轮评审采纳记录
 
 对应评审文档：
-[2026-08-21-codex-web-backend-design-review-r2.md](2026-08-21-codex-web-backend-design-review-r2.md)。
+[2026-08-21-codex-web-backend-design-review-r2.md](archive/2026-08-21-codex-web-backend-design-review-r2.md)。
 
 | 评审项 | 处理 | 设计修订 / 未采纳理由 |
 |---|---|---|
@@ -1035,7 +1035,7 @@ Phase 0 的文档前置条件；“满足文档前置”不代表 `config.additi
 ## 20. 三轮评审采纳记录
 
 对应评审文档：
-[2026-08-21-codex-web-backend-design-review-r3.md](2026-08-21-codex-web-backend-design-review-r3.md)。
+[2026-08-21-codex-web-backend-design-review-r3.md](archive/2026-08-21-codex-web-backend-design-review-r3.md)。
 
 | 评审项 | 处理 | 设计修订 / 未采纳理由 |
 |---|---|---|
@@ -1056,7 +1056,7 @@ PASS/PARTIAL/FAIL 口径”只描述当时决策，已被 v2.0 §8.2 的 PASS/EV
 > 因而由 v2.0 取代。以下内容只用于追溯当时决策。
 
 对应确认报告：
-[2026-08-21-codex-web-backend-design-review-r4.md](2026-08-21-codex-web-backend-design-review-r4.md)。
+[2026-08-21-codex-web-backend-design-review-r4.md](archive/2026-08-21-codex-web-backend-design-review-r4.md)。
 
 | 评审项 | 处理 | 冻结结论 |
 |---|---|---|

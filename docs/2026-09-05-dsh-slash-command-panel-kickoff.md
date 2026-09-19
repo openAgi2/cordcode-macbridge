@@ -31,7 +31,7 @@ iOS 分支=plan/approval-layer-ios
 配套只读：
 
 - 调研终版 `docs/2026-09-04-slash-command-skill-cross-backend-survey.md` v1.2
-- 评审 `docs/2026-09-05-dsh-slash-command-panel-implementation-review.md`（含 §8 复评）
+- 评审 `docs/archive/2026-09-05-dsh-slash-command-panel-implementation-review.md`（含 §8 复评）
 
 **开工动作（按这个顺序，不要先改业务代码）：**
 

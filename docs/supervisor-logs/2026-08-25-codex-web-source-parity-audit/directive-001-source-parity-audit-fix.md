@@ -1,7 +1,7 @@
 # 监工指令 1 号：codex-web 源码对齐审计修复（六批次）
 
 > **下发时间**：2026-08-25（经 owner 会话转发给开发 agent；本文件为 skill 流程补录，全文与下发原文一致）
-> **依据文档**：`docs/2026-08-25-codex-web-source-parity-audit.md`（下称"审计文档"）
+> **依据文档**：`docs/archive/2026-08-25-codex-web-source-parity-audit.md`（下称"审计文档"）
 > **kind**: implementation
 
 ---

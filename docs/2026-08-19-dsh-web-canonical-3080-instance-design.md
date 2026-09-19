@@ -198,7 +198,7 @@ v1 写「hello_ack 的 InstanceStatus 只镜像启动时结果」归因过窄。
 2. **恢复**:3080 已在听的话,杀掉 3096 上的 `dsh`(当晚 pid 1406)——进行中 iOS turn 随 3096 死;流还连着则约 **2s** 重连即重绑 3080(评审 M1 连带修正:v1 写「等下一个 60s tick」偏慢,实际是任一 Resolve——流/RPC/tick——先到先重解析)。或先保证 3080 起来再重启 CordCode Link(新进程第一步探权威端口)。
 3. **不要先重启 3080 当修复**:3096 孤儿活着,resolver 永不回头。
 
-## 11. 一轮评审采纳记录(v2 对照 `2026-08-19-dsh-web-canonical-3080-instance-design-review.md`)
+## 11. 一轮评审采纳记录(v2 对照 `archive/2026-08-19-dsh-web-canonical-3080-instance-design-review.md`)
 
 结论「修改后通过」;必改 M1–M6、建议 S1–S10 **全部采纳,无不采纳项**。逐项落点:
 

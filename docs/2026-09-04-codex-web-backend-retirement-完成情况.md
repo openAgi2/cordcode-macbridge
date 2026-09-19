@@ -109,7 +109,7 @@ LaunchAgent（RunAtLoad+KeepAlive）常驻运行
 设计要点 #2「不再写 launchd env」的结论在 launchd 层不成立，直至本次清理。
 
 与现役链路无耦合的证据：脚本与 plist 均不在仓库（git 全历史无记录，仅
-`docs/2026-08-24-codex-web-topology-split-and-sync-monitor-analysis-v2-review.md`
+`docs/archive/2026-08-24-codex-web-topology-split-and-sync-monitor-analysis-v2-review.md`
 提及）；`agent/codex-remote` 对 `app-server-control.sock` 零引用；被保活的
 standalone codex daemon 34.5h 累计 CPU 仅 6:30、当前 0%，socketpair 对端无活进程。
 

@@ -582,7 +582,7 @@ CLAUDE.md「上游源码优先门」表格建议同步补一行（版本锚三�
 
 ## 11. 评审采纳记录（v1 → v2，2026-09-04）
 
-评审报告：`docs/2026-09-04-claudecode-official-capability-upgrade-design-review.md`
+评审报告：`docs/archive/2026-09-04-claudecode-official-capability-upgrade-design-review.md`
 （结论：修改后通过）。本轮修订**全部采纳，无不采纳项**；逐项落点：
 
 ### 11.1 阻断问题
@@ -635,7 +635,7 @@ CLAUDE.md「上游源码优先门」表格建议同步补一行（版本锚三�
 ### 11.6 第二轮评审（r2）采纳记录（v2 → v2.1，2026-09-04）
 
 r2 结论：**通过（APPROVE）**，不阻塞进入 Phase 0；报告
-`docs/2026-09-04-claudecode-official-capability-upgrade-design-review-r2.md`。
+`docs/archive/2026-09-04-claudecode-official-capability-upgrade-design-review-r2.md`。
 v2.1 全部采纳，无不采纳项：
 
 | 项 | 内容 | 落点 |
@@ -651,7 +651,7 @@ v2.1 全部采纳，无不采纳项：
 ### 11.7 第三轮评审（r3）采纳记录（v2.1 → v2.2，2026-09-04）
 
 r3 结论：**通过（APPROVE），设计层可以停，下一步是 Phase 0 证据包**；报告
-`docs/2026-09-04-claudecode-official-capability-upgrade-design-review-r3.md`。
+`docs/archive/2026-09-04-claudecode-official-capability-upgrade-design-review-r3.md`。
 v2.2 全部采纳，无不采纳项；按 r3 §2 要求**不追**瞬时 sqlite 计数（文档已声明
 漂移，haiku 多映射事实为锚）：
 

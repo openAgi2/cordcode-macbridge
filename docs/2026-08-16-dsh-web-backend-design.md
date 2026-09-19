@@ -236,7 +236,7 @@ exec-plan 状态：`.exec-plan/state/plan-a46e4391b790.json`。§8-1…§8-8 及
 7. wire descriptor/canonical 协议 pack + iOS `BackendKind` case 与 ~11 处穷举归组 + mirror；
 8. Mac App drivers 默认列 + Release 安装 + 真机验收矩阵。
 
-## 9. 评审采纳记录（v2 对照 `docs/2026-08-16-dsh-web-backend-design-review.md`）
+## 9. 评审采纳记录（v2 对照 `docs/archive/2026-08-16-dsh-web-backend-design-review.md`）
 
 | 项 | 处置 | 落点 |
 |---|---|---|
@@ -262,7 +262,7 @@ exec-plan 状态：`.exec-plan/state/plan-a46e4391b790.json`。§8-1…§8-8 及
 
 **坑 4 闭环状态更新**：评审判「未闭环」→ v2 经 §4.3.2 SessionActivityProbing 设计收口；坑 7/8 测试面经 §6 专项补齐。
 
-## 10. 二轮评审采纳记录（v3 对照 `docs/2026-08-16-dsh-web-backend-design-review-r2.md`）
+## 10. 二轮评审采纳记录（v3 对照 `docs/archive/2026-08-16-dsh-web-backend-design-review-r2.md`）
 
 二轮结论 **APPROVE**；B1/M1-M4/S1-S14 处置全部经独立复核有效（含 M3 部分不采纳理由核验成立）。6 条建议级尾项**全采纳**：
 
@@ -277,7 +277,7 @@ exec-plan 状态：`.exec-plan/state/plan-a46e4391b790.json`。§8-1…§8-8 及
 
 三项遗留评审项终态（二轮判定）：坑 4 后半 **闭环**（M1+三态测试）；坑 7 **闭环**（透传断言专项）；坑 8 **闭环**（审批升格一期必接消除挂起路径）。
 
-## 11. 三轮评审采纳记录（v3.1 对照 `docs/2026-08-16-dsh-web-backend-design-review-r3.md`）
+## 11. 三轮评审采纳记录（v3.1 对照 `docs/archive/2026-08-16-dsh-web-backend-design-review-r3.md`）
 
 三轮结论：修改后通过（R3-1/R3-2 必改）；四条纯文字修订（R2-3/4/5/6）复核合格；M3 部分不采纳理由复核维持。两条必改**全采纳**——均为 v3 落实二轮建议时**未查源码臆造机制**（§2.3 纪律 1 在修订动作里复发，已在纪律条款中显式封堵）：
 
@@ -288,7 +288,7 @@ exec-plan 状态：`.exec-plan/state/plan-a46e4391b790.json`。§8-1…§8-8 及
 
 §4.3.4 全段源码对照自查（评审建议）：其余断言（create/prompt queue/resume 语义、cancel、approval outcome 集、/api/respond rpcId 回显、resolved 帧全员广播先答者得、registry 判据）均有三轮内源码/活体证据在案，未再发现失实项。三项遗留评审项闭环判定维持（R3-1 修正消除了坑 8 的新击穿路径）。
 
-## 12. 四轮评审采纳记录（v3.2 对照 `docs/2026-08-16-dsh-web-backend-design-review-r4.md`）
+## 12. 四轮评审采纳记录（v3.2 对照 `docs/archive/2026-08-16-dsh-web-backend-design-review-r4.md`）
 
 四轮结论 **APPROVE（可交付 owner 终审）**；R3-1/R3-2 修正逐点核验合格，纪律封堵与 §4.3.4 自查复核通过。本轮 3 条建议级收尾**全采纳**（§4.3.4 批作答段落补三条）：S-1 批 resolved 展开机制（帧无逐题数据，dshweb 按批状态展开 N 个）；S-2 断线边界如实（重放恢复成立 + web 已答批不重放、冷开自愈）；S-3 重复提交按题 id 覆盖幂等。
 

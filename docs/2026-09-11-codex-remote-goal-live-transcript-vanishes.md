@@ -5,9 +5,9 @@
 读者：后续接手的 agent。先读截图和 §1–§2，再读 §4.3（优先 `[TurnDetailDedupe]` + 入口 item 的 `blocks`）；不要从 collab 状态映射、wait_threads 叠卡、直接改 `hideDetailProcessRows`、或只改 Mac `StartedAt` 排序开工。  
 评审对照（只读，均未改代码）：
 
-- 第一轮：`docs/2026-09-11-codex-remote-goal-live-transcript-vanishes-review.md`
-- 第二轮：`docs/2026-09-11-codex-remote-goal-live-transcript-vanishes-review-r2.md`
-- 第三轮：`docs/2026-09-11-codex-remote-goal-live-transcript-vanishes-review-r3.md`
+- 第一轮：`docs/archive/2026-09-11-codex-remote-goal-live-transcript-vanishes-review.md`
+- 第二轮：`docs/archive/2026-09-11-codex-remote-goal-live-transcript-vanishes-review-r2.md`
+- 第三轮：`docs/archive/2026-09-11-codex-remote-goal-live-transcript-vanishes-review-r3.md`
 
 ## 0. 来源清单（本分析冻结；第三轮复核）
 

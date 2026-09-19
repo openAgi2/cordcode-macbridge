@@ -43,7 +43,7 @@
 - [跨 backend 调研 §6](2026-09-04-slash-command-skill-cross-backend-survey.md)：三集合区分仍适用；其中“不可行”指官方目录/执行透传，本案选择其 §6.5 C 的客户端动作映射，未声称发现了新官方 slash 接口。
 - 根目录 [GO_BRIDGE_ARCHITECTURE.md](../GO_BRIDGE_ARCHITECTURE.md)、双仓 CLAUDE.md 和 think.md；实施前再读实际配对 iOS 的 `IOS_MAC_INTERACTION_FLOW.md`。
 - [官方 App Server 文档](https://learn.chatgpt.com/docs/app-server)：确认压缩请求立即应答、过程经 turn/item 通知。官方 [Commands 页面](https://learn.chatgpt.com/docs/reference/commands) 是产品操作参考，不能当目标 Desktop 私有 JS 菜单或 Remote RPC 的样本证明。读取日期 2026-09-07。
-- [本案样本审计报告](2026-09-07-codex-remote-slash-command-panel-implementation-audit.md)：登记本轮实际 dump、目标代际缺口与修订优先级；它是判断能否跳过 P0 的证据索引。
+- [本案样本审计报告](archive/2026-09-07-codex-remote-slash-command-panel-implementation-audit.md)：登记本轮实际 dump、目标代际缺口与修订优先级；它是判断能否跳过 P0 的证据索引。
 
 ### 0.4 交接判定与下一 agent 启动合同
 

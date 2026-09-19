@@ -4,7 +4,7 @@
 - 性质：**实施方案**。事实基线 =
   [docs/2026-09-04-slash-command-skill-cross-backend-survey.md](2026-09-04-slash-command-skill-cross-backend-survey.md)
   **v1.2 @ `900664f`**（两轮独立评审通过，可全文引用）。本文不另造协议假设。
-- 评审：[docs/2026-09-05-dsh-slash-command-panel-implementation-review.md](2026-09-05-dsh-slash-command-panel-implementation-review.md)
+- 评审：[docs/archive/2026-09-05-dsh-slash-command-panel-implementation-review.md](archive/2026-09-05-dsh-slash-command-panel-implementation-review.md)
   §8 复评：**通过（无条件），可开工**。v1.1 落实全部 P0/P1/P2；D1–D5 **维持、无一推翻**。
 - 范围：**仅 DeepSeek Harness（`dsh-web`）host 命令面板**。iPhone 输入框 `/` 按钮 →
   官方 `commands/list` → 点选走 `commands/execute`。含 `/plan`（进计划模式；后续
@@ -83,7 +83,7 @@
   协议/事件形状仍钉 tag dsh-v0.1.1-rc.2（b150a551b8）；master 前进不影响本项
 目标二进制=本机 dsh 0.1.1-rc.2；活体座位 127.0.0.1:3080 pid 1055（与调研/评审同座位）
 调研终版=docs/2026-09-04-slash-command-skill-cross-backend-survey.md v1.2 @ 900664f
-评审=docs/2026-09-05-dsh-slash-command-panel-implementation-review.md
+评审=docs/archive/2026-09-05-dsh-slash-command-panel-implementation-review.md
 ```
 
 ## 0.1 开工源码优先门（不读不许写 CordCode）

@@ -5,7 +5,7 @@
 - 适用仓库：MacBridge 本文件为权威；iOS 仓 `docs/` 下同名文件是给 iOS workspace agent 的工作镜像，冲突以本文件为准
 - 前置合同：[2026-08-21-codex-web-backend-design.md](2026-08-21-codex-web-backend-design.md)（v2.0 topology-first）
 - 问题来源：[2026-08-22-codex-web-desktop-bidirectional-handoff-gap.md](2026-08-22-codex-web-desktop-bidirectional-handoff-gap.md)
-- 评审：一轮 [2026-08-23-codex-web-continuity-architecture-review.md](2026-08-23-codex-web-continuity-architecture-review.md)；二轮 [2026-08-23-codex-web-continuity-architecture-review-r2.md](2026-08-23-codex-web-continuity-architecture-review-r2.md)。修订处置见本文 §10 / §11
+- 评审：一轮 [2026-08-23-codex-web-continuity-architecture-review.md](archive/2026-08-23-codex-web-continuity-architecture-review.md)；二轮 [2026-08-23-codex-web-continuity-architecture-review-r2.md](archive/2026-08-23-codex-web-continuity-architecture-review-r2.md)。修订处置见本文 §10 / §11
 - 活体复盘：MacBridge `think.md` 2026-08-22 条目
 - 不变约束：CordCode 初衷 + SSV2 十二条 + 官方 Desktop 不可改 asar
 
@@ -446,7 +446,7 @@ go-bridge 侧 `set_observation_scope` 会触发三件事，**不要从零再造�
 阅读顺序：
 
 1. 本文全文（合同）与 §10 / §11 评审处置
-2. 一轮 [2026-08-23-codex-web-continuity-architecture-review.md](2026-08-23-codex-web-continuity-architecture-review.md)、二轮 [2026-08-23-codex-web-continuity-architecture-review-r2.md](2026-08-23-codex-web-continuity-architecture-review-r2.md)（源码行号以当时工作树为准，施工前应再核）
+2. 一轮 [2026-08-23-codex-web-continuity-architecture-review.md](archive/2026-08-23-codex-web-continuity-architecture-review.md)、二轮 [2026-08-23-codex-web-continuity-architecture-review-r2.md](archive/2026-08-23-codex-web-continuity-architecture-review-r2.md)（源码行号以当时工作树为准，施工前应再核）
 3. v2.0 设计 §0 与 §6.1（拓扑，不可退回 managed-loopback）
 4. `think.md` 2026-08-22 Desktop stdio 锁与 CLI patch 偏差
 5. 再读源码：`RuntimeManager.swift` 座位、`handlers.go` `set_observation_scope`（注意 `go AttachLiveThread` 与无条件 Ok）、`resubscribeObservationSessions`、`agent/codex-web/events.go` 观察泵 vs `dispatchEvent` 与 `obsClient==nil`、`main.go` `HasSessionSubscriber` 门、`handlers_relay.go` durable mailbox、`live_frame_buffer.go` 回放白名单、iOS `setObservationForeground` / `applyPresentationChangeSet` / `activateGenerationIfNeeded`
@@ -477,7 +477,7 @@ go-bridge 侧 `set_observation_scope` 会触发三件事，**不要从零再造�
 
 ## 10. 评审处置（2026-08-23）
 
-对象：[2026-08-23-codex-web-continuity-architecture-review.md](2026-08-23-codex-web-continuity-architecture-review.md)。
+对象：[2026-08-23-codex-web-continuity-architecture-review.md](archive/2026-08-23-codex-web-continuity-architecture-review.md)。
 「采纳」= 写入本合同。「不采纳 / 部分采纳」必须有理由，避免实施 agent 把评审原文当第二合同。
 
 | 评审项 | 处置 | 理由 |
@@ -501,7 +501,7 @@ go-bridge 侧 `set_observation_scope` 会触发三件事，**不要从零再造�
 
 ## 11. 二轮评审处置（2026-08-23 r2）
 
-对象：[2026-08-23-codex-web-continuity-architecture-review-r2.md](2026-08-23-codex-web-continuity-architecture-review-r2.md)（评审对象为修订版合同 `cc61709`）。
+对象：[2026-08-23-codex-web-continuity-architecture-review-r2.md](archive/2026-08-23-codex-web-continuity-architecture-review-r2.md)（评审对象为修订版合同 `cc61709`）。
 
 | 评审项 | 处置 | 理由 |
 |---|---|---|

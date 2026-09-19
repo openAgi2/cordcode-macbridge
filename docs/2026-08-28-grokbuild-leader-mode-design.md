@@ -11,16 +11,16 @@
   [§21](#21-九轮机械闭合复核采纳记录2026-08-29最终有限清单) /
   [§22](#22-十轮机械复核结论approve2026-08-29)。**§15 Owner 裁决门已于 2026-08-28 签署**：
   D-1 批准 D-G1、D-2 否决现状并采纳 D-G2、D-3 接受、D-4 接受。行数以文件现状为准。）
-- 评审报告：[一轮](2026-08-28-grokbuild-leader-mode-design-review.md) /
-  [二轮](2026-08-28-grokbuild-leader-mode-design-review-r2.md) /
-  [三轮](2026-08-28-grokbuild-leader-mode-design-review-r3.md) /
-  [四轮](2026-08-28-grokbuild-leader-mode-design-review-r4.md) /
-  [五轮](2026-08-29-grokbuild-leader-mode-design-review-r5.md) /
-  [六轮](2026-08-29-grokbuild-leader-mode-design-review-r6.md) /
-  [七轮](2026-08-29-grokbuild-leader-mode-design-review-r7.md) /
-  [八轮](2026-08-29-grokbuild-leader-mode-design-review-r8.md) /
-  [九轮](2026-08-29-grokbuild-leader-mode-design-review-r9.md) /
-  [十轮](2026-08-29-grokbuild-leader-mode-design-review-r10.md)
+- 评审报告：[一轮](archive/2026-08-28-grokbuild-leader-mode-design-review.md) /
+  [二轮](archive/2026-08-28-grokbuild-leader-mode-design-review-r2.md) /
+  [三轮](archive/2026-08-28-grokbuild-leader-mode-design-review-r3.md) /
+  [四轮](archive/2026-08-28-grokbuild-leader-mode-design-review-r4.md) /
+  [五轮](archive/2026-08-29-grokbuild-leader-mode-design-review-r5.md) /
+  [六轮](archive/2026-08-29-grokbuild-leader-mode-design-review-r6.md) /
+  [七轮](archive/2026-08-29-grokbuild-leader-mode-design-review-r7.md) /
+  [八轮](archive/2026-08-29-grokbuild-leader-mode-design-review-r8.md) /
+  [九轮](archive/2026-08-29-grokbuild-leader-mode-design-review-r9.md) /
+  [十轮](archive/2026-08-29-grokbuild-leader-mode-design-review-r10.md)
 - 状态：**设计稿 v10（终版，2026-08-29 十轮机械复核 **APPROVE**）。R9 最终有限清单
   （fence 四类状态变化及 G7/G8 缓存回归、releasePassiveClaim typed outcome、T1–T33 与
   unknown 第四状态术语、连续负样本不重置锚点、T31–T33 manifest 登记）已逐行核对全部
@@ -1500,10 +1500,10 @@ runtime 日志 `~/Library/Application Support/CordCode Link/logs/go-bridge.log`�
 - 历史 CLI 兼容证据：[2026-07-12-grok-cli-compatibility-evidence.md](2026-07-12-grok-cli-compatibility-evidence.md)、
   [2026-07-12-grok-driver-design.md](2026-07-12-grok-driver-design.md)
 - 路线裁决背景（四路径对比）：2026-08-28 跨仓源码评审（本文 §0 摘要）
-- 评审记录：[一轮](2026-08-28-grokbuild-leader-mode-design-review.md)（§12）、
-  [二轮](2026-08-28-grokbuild-leader-mode-design-review-r2.md)（§13）、
-  [三轮](2026-08-28-grokbuild-leader-mode-design-review-r3.md)（§14）、
-  [四轮](2026-08-28-grokbuild-leader-mode-design-review-r4.md)（§16）
+- 评审记录：[一轮](archive/2026-08-28-grokbuild-leader-mode-design-review.md)（§12）、
+  [二轮](archive/2026-08-28-grokbuild-leader-mode-design-review-r2.md)（§13）、
+  [三轮](archive/2026-08-28-grokbuild-leader-mode-design-review-r3.md)（§14）、
+  [四轮](archive/2026-08-28-grokbuild-leader-mode-design-review-r4.md)（§16）
 
 ---
 
@@ -1555,7 +1555,7 @@ runtime 日志 `~/Library/Application Support/CordCode Link/logs/go-bridge.log`�
 > 其中含已被后续轮次废弃的方案（多数附 vN 注指向后续修正），**不得作为实现要求**，
 > 也不得从历史表格拾取旧实现。
 
-对应评审报告：[2026-08-28-grokbuild-leader-mode-design-review.md](2026-08-28-grokbuild-leader-mode-design-review.md)。
+对应评审报告：[2026-08-28-grokbuild-leader-mode-design-review.md](archive/2026-08-28-grokbuild-leader-mode-design-review.md)。
 四项 B 级断言均经设计方在 pin 提交上独立复核确认后采纳。
 
 | 评审项 | 处理 | 设计修订 / 未采纳理由 |
@@ -1578,7 +1578,7 @@ runtime 日志 `~/Library/Application Support/CordCode Link/logs/go-bridge.log`�
 
 ## 13. 二轮评审采纳记录（2026-08-28）
 
-对应评审报告：[2026-08-28-grokbuild-leader-mode-design-review-r2.md](2026-08-28-grokbuild-leader-mode-design-review-r2.md)
+对应评审报告：[2026-08-28-grokbuild-leader-mode-design-review-r2.md](archive/2026-08-28-grokbuild-leader-mode-design-review-r2.md)
 （总结论：退回）。四项 R2-B 断言均经设计方在 pin 提交上独立复核确认后采纳；r3 已确认
 四项事实阻断闭合。
 
@@ -1604,7 +1604,7 @@ runtime 日志 `~/Library/Application Support/CordCode Link/logs/go-bridge.log`�
 
 ## 14. 三轮评审采纳记录（2026-08-28）
 
-对应评审报告：[2026-08-28-grokbuild-leader-mode-design-review-r3.md](2026-08-28-grokbuild-leader-mode-design-review-r3.md)
+对应评审报告：[2026-08-28-grokbuild-leader-mode-design-review-r3.md](archive/2026-08-28-grokbuild-leader-mode-design-review-r3.md)
 （总结论：退回）。R3-B1/B2 的替代证据与 R3-B1 的依赖选型均经设计方在 pin 源码与上游
 仓库独立核实后采纳；r4 已确认全部实质闭合。
 
@@ -1644,7 +1644,7 @@ runtime 日志 `~/Library/Application Support/CordCode Link/logs/go-bridge.log`�
 
 ## 16. 四轮评审采纳记录（2026-08-28）
 
-对应评审报告：[2026-08-28-grokbuild-leader-mode-design-review-r4.md](2026-08-28-grokbuild-leader-mode-design-review-r4.md)
+对应评审报告：[2026-08-28-grokbuild-leader-mode-design-review-r4.md](archive/2026-08-28-grokbuild-leader-mode-design-review-r4.md)
 （总结论：**修改后通过**）。五项必改全部采纳；B1/B2 的源码事实（`grokbuild.go` 拿不到
 session/load 时点、relay per-session key 与 `context.Background()`、`codexSessionHasSubscriber`
 先例、`GROK_LOG_FILE` append 模式）均经设计方在 pin 提交独立复核确认。
@@ -1664,7 +1664,7 @@ session/load 时点、relay per-session key 与 `context.Background()`、`codexS
 
 ## 17. 五轮复审采纳记录（2026-08-29）
 
-对应评审报告：[2026-08-29-grokbuild-leader-mode-design-review-r5.md](2026-08-29-grokbuild-leader-mode-design-review-r5.md)
+对应评审报告：[2026-08-29-grokbuild-leader-mode-design-review-r5.md](archive/2026-08-29-grokbuild-leader-mode-design-review-r5.md)
 （总结论：**修改后通过**；定向复核范围 = R4 五项必改 + §15 回填）。四项必改全部采纳；
 R5-B1 的持久化链路经设计方在 pin 源码独立复核确认（`handlers.go:2923-2935` 的
 `Offline: IsDurableMilestone`、`event_publisher.go:782-831` 的"先进 Projection Kernel
@@ -1681,7 +1681,7 @@ R5-B1 的持久化链路经设计方在 pin 源码独立复核确认（`handlers
 
 ## 18. 六轮复审采纳记录（2026-08-29）
 
-对应评审报告：[2026-08-29-grokbuild-leader-mode-design-review-r6.md](2026-08-29-grokbuild-leader-mode-design-review-r6.md)
+对应评审报告：[2026-08-29-grokbuild-leader-mode-design-review-r6.md](archive/2026-08-29-grokbuild-leader-mode-design-review-r6.md)
 （总结论：**修改后通过**；定向复核范围 = R5 四项必改）。两项必改 + 一项建议全部采纳；
 R6-B1 的 sticky-running 链路与 R6-M1 的区间推导均经设计方在 pin 源码/数学上独立复核
 确认（registry 两态 + catalog 无 runningMap 回退 + enrich never mutates registry +
@@ -1700,7 +1700,7 @@ R6-B1 的 sticky-running 链路与 R6-M1 的区间推导均经设计方在 pin �
 
 ## 19. 七轮复审采纳记录（2026-08-29）
 
-对应评审报告：[2026-08-29-grokbuild-leader-mode-design-review-r7.md](2026-08-29-grokbuild-leader-mode-design-review-r7.md)
+对应评审报告：[2026-08-29-grokbuild-leader-mode-design-review-r7.md](archive/2026-08-29-grokbuild-leader-mode-design-review-r7.md)
 （总结论：**修改后通过**；定向复核范围 = R6-B1 unknown 收口 + R6-M1 计时锚点）。
 R6-M1 计时项已通过复核、算法不再改动；唯一阻断项 R7-B1 与建议项 R7-S1 全部采纳。
 R7-B1 的四条子论据（局部 bool 非所有权、正常终态后 defer 覆盖、`!isIdle` 把 unknown
@@ -1722,7 +1722,7 @@ synthetic 行回收）；R6-M1 计时项及此前已闭合项无需重审。
 
 ## 20. 八轮复审采纳记录（2026-08-29，有限闭合清单）
 
-对应评审报告：[2026-08-29-grokbuild-leader-mode-design-review-r8.md](2026-08-29-grokbuild-leader-mode-design-review-r8.md)
+对应评审报告：[2026-08-29-grokbuild-leader-mode-design-review-r8.md](archive/2026-08-29-grokbuild-leader-mode-design-review-r8.md)
 （总结论：**修改后通过；v8 暂不能直接交开发 agent**）。2B + 8M + 2S 共 12 项全部采纳；
 两项阻断的事实链（catalog 10 分钟富化快照、`closing` 已声明状态）与 M1 的终态事实/
 行号修正均经设计方在 pin 源码独立核实（`types.go:226-230` 三态、
@@ -1755,7 +1755,7 @@ Phase 0。（该机械复核已由第九轮执行：12 项中 7 项闭合，fenc
 
 ## 21. 九轮机械闭合复核采纳记录（2026-08-29，最终有限清单）
 
-对应评审报告：[2026-08-29-grokbuild-leader-mode-design-review-r9.md](2026-08-29-grokbuild-leader-mode-design-review-r9.md)
+对应评审报告：[2026-08-29-grokbuild-leader-mode-design-review-r9.md](archive/2026-08-29-grokbuild-leader-mode-design-review-r9.md)
 （总结论：**修改后通过；暂不交开发 agent、不启动 Phase 0**）。1B + 4M 全部采纳；R9-B1
 的事实依据（真 source 断开的 F-7 defer 同样执行 registry `markIdle`，
 `handlers_relay.go:225-243`）沿用本设计此前各轮在 pin 源码的核实结论。
@@ -1777,7 +1777,7 @@ Phase 0。（该机械复核已由第九轮执行：12 项中 7 项闭合，fenc
 
 ## 22. 十轮机械复核结论（APPROVE，2026-08-29）
 
-对应评审报告：[2026-08-29-grokbuild-leader-mode-design-review-r10.md](2026-08-29-grokbuild-leader-mode-design-review-r10.md)
+对应评审报告：[2026-08-29-grokbuild-leader-mode-design-review-r10.md](archive/2026-08-29-grokbuild-leader-mode-design-review-r10.md)
 （评审对象：本设计 v10 规范正文，SHA-256
 `886fc4e76a7c361942cc7b45f5bbeb99277abeb9e8e82ef02ef4626e79ac1e17`；两仓 HEAD 与冻结
 来源一致，无来源漂移）。

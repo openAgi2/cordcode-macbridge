@@ -1,6 +1,6 @@
 # codex-web topology monitor —— 产品 implementation plan（v2）
 
-日期：2026-08-24（v2，按 [v1 评审报告](./2026-08-24-codex-web-topology-sync-monitor-implementation-plan-review.md) 修订）
+日期：2026-08-24（v2，按 [v1 评审报告](archive/2026-08-24-codex-web-topology-sync-monitor-implementation-plan-review.md) 修订）
 依据：v5 分析 §4/§5/§7.4；证据 verdict 二版；v1 评审 8×P1 + 4×P2。
 v2 裁决（先冻结，避免实现 agent 临场决定）：
 - **Phase 1 仅实现 topology monitor**（P1-7 选优：改名，标题不再承诺 sync monitor）；catalog/per-transport health 依据 verdict run3 判定（低频 updatedAt churn 不为故障、不改 fingerprint）→ **另立证据与计划**，本计划不含其任务。

@@ -16,12 +16,12 @@
   设计评审本身已收敛（audit-r4 终审 + r5 合规核验 + r6 最终评审闭环；后续新问题仅由
   fixture、定向测试或真机证据触发并在对应 gate 内修复）。
 - 上下游：母方案 = [2026-08-26-codex-remote-backend-implementation-plan.md](2026-08-26-codex-remote-backend-implementation-plan.md)（已 proved-complete；本方案建立在其 Phase 0/1 的配对、WSS、envelope、live 投影基础设施上）。**下游实施真值** = iOS 仓 `docs/2026-08-31-chatgpt-message-stream-reasoning-architecture-convergence.md`（收敛计划，本文 G1/G2/G3 的实施驱动队列）。
-- 评审报告：[r1](2026-08-30-codex-remote-lazy-history-plan-audit.md) /
-  [r2](2026-08-30-codex-remote-lazy-history-plan-audit-r2.md) /
-  [r3](2026-08-30-codex-remote-lazy-history-plan-audit-r3.md) /
-  [r4 终审](2026-08-30-codex-remote-lazy-history-plan-audit-r4.md) /
-  [r5 合规与源码可行性核验](2026-08-30-codex-remote-lazy-history-r5-compliance-source-check.md) /
-  [r6 最终评审](2026-08-30-codex-remote-lazy-history-plan-final-audit-r6.md)
+- 评审报告：[r1](archive/2026-08-30-codex-remote-lazy-history-plan-audit.md) /
+  [r2](archive/2026-08-30-codex-remote-lazy-history-plan-audit-r2.md) /
+  [r3](archive/2026-08-30-codex-remote-lazy-history-plan-audit-r3.md) /
+  [r4 终审](archive/2026-08-30-codex-remote-lazy-history-plan-audit-r4.md) /
+  [r5 合规与源码可行性核验](archive/2026-08-30-codex-remote-lazy-history-r5-compliance-source-check.md) /
+  [r6 最终评审](archive/2026-08-30-codex-remote-lazy-history-plan-final-audit-r6.md)
 - 开工指令：[2026-08-30-codex-remote-lazy-history-kickoff-directive.md](2026-08-30-codex-remote-lazy-history-kickoff-directive.md)
 - 母方案：[2026-08-26-codex-remote-backend-implementation-plan.md](2026-08-26-codex-remote-backend-implementation-plan.md)（其 Phase 0/1 的配对、WSS、envelope、live 投影基础设施已交付并多轮真机验证）
 - 目标仓库：`cordcode-macbridge`（`agent/codex-remote` + `go-bridge`）、`cordcode-ios`（配套工作树）
@@ -928,7 +928,7 @@ control inventory 改为**链路后暖态重试**（turns/items 分页链已把�
 
 ## 9. 评审采纳记录（四轮评审 + 合规核验 + 最终定向评审，含不采纳项理由）
 
-### r1 轮（对 [r1 评审](2026-08-30-codex-remote-lazy-history-plan-audit.md)）
+### r1 轮（对 [r1 评审](archive/2026-08-30-codex-remote-lazy-history-plan-audit.md)）
 
 | 编号 | 建议 | 处置 | 理由 |
 | --- | --- | --- | --- |
@@ -936,21 +936,21 @@ control inventory 改为**链路后暖态重试**（turns/items 分页链已把�
 | R1 | P0-2 方案 B：per-turn detail probe（先探针判断是否有明细） | **不采纳** | 每回合一次探针 RPC 会重新引入本方案要消除的请求重量（N 个回合 = N 次探针）；且评审自己标注"真实、便宜且有样本证明"为前提，当前无证据满足。方案 A（统一入口 + `detailLoadState`，空明细展示"无详细过程"）语义等价且零额外请求 |
 | R2 | 逐页渐进渲染 | **搁置（部分采纳）** | 主路径定为 Mac 整回合拉 EOF 原子提交：半页状态与投影原子性冲突、partial 语义复杂。超长回合的处理走资源门（G0 裁决 maxPages/maxBytes/timeout，超限 fail-closed + owner 裁决），而不是预先设计 cursor 下放的渐进扩展；当前无数据支撑 |
 
-### r2 轮（对 [r2 复评](2026-08-30-codex-remote-lazy-history-plan-audit-r2.md)）
+### r2 轮（对 [r2 复评](archive/2026-08-30-codex-remote-lazy-history-plan-audit-r2.md)）
 
 | 编号 | 建议 | 处置 | 理由 |
 | --- | --- | --- | --- |
 | — | P0-r2-1/2/3、P1-1～P1-6、P2-1～P2-4 | **全部采纳** | audit-r3 §2 复核确认全部 🟢 关闭；两处二选一均选复评建议分支（P1-3 owner 裁决删主张；P0-r2-3 专用 replace_parts 而非重构 FlushPatch） |
 | （重分类） | r2 稿 §9-R3 "initialTurnsPage 进产品路径不采纳" | **改为"维持评审结论"** | r1 评审本就裁定 initialTurnsPage 可选且不阻塞；属确认而非否决，不应列在"不采纳"下 |
 
-### r3 轮（对 [r3 复评](2026-08-30-codex-remote-lazy-history-plan-audit-r3.md)）
+### r3 轮（对 [r3 复评](archive/2026-08-30-codex-remote-lazy-history-plan-audit-r3.md)）
 
 | 编号 | 建议 | 处置 | 理由 |
 | --- | --- | --- | --- |
 | — | P0-r3-1、P1-r3-1/2/3、P2-r3-1/2 | **全部采纳** | audit-r4 §2 复核全部 🟢；落点为 §2.4 + T2.0、§3.2.0 状态机与 fence、回退红线、mapped variants、detailLoadState 层级 |
 | R4 | P0-r3-1 的范围替代项："仅首 30 回合为本版范围"（更早历史不可访问，由 owner 接受为产品回归） | **不采纳** | audit-r3 自己明确不建议该裁决：(a) 把"懒加载"实施成"历史截断"，是对现有 full-read 行为的产品回归；(b) iOS 窗口机器已是生产路径，截断版不减少 iOS 侧工作；(c) 剩余成本集中在 Mac producer admission 一层，与"历史永久丢失"的代价不成比例。若 owner 在 G0 数据出来后仍要求缩减，须作为显式产品回归记录并重新过评审 |
 
-### r4 轮（对 [r4 终审](2026-08-30-codex-remote-lazy-history-plan-audit-r4.md)）
+### r4 轮（对 [r4 终审](archive/2026-08-30-codex-remote-lazy-history-plan-audit-r4.md)）
 
 | 编号 | 建议 | 处置 | 理由 |
 | --- | --- | --- | --- |
@@ -958,14 +958,14 @@ control inventory 改为**链路后暖态重试**（turns/items 分页链已把�
 | （定案记录 1） | P1-r4-1-2 失败 ack 形状二选一 | **选 success-shaped failed ack** | 与 ack-only 单写者设计自洽：failed commit 本身产生 syncRev，failed ack 直接携带它，iOS 用同一 `appliedRev >= syncRev` 条件处理成败两态；WireError 路径要求 iOS 另行获取失败 commit 的 syncRev，徒增协议复杂度。WireError 仅保留给请求级错误 |
 | （定案记录 2） | P1-r4-2 stale token 算法二选一 | **选持久化 per-turn generation**（备选：completed-turn fingerprint） | generation 是 O(1) 整数比较，schema bump 与 detailLoadState/per-turn 持久化工作顺路；fingerprint 需定义 canonical 序列化与哈希、比较成本高且对"回合被修正"的语义间接。两条路线都满足 audit 的"目标 turn 改变→stale、其他 turn 更新→不受影响"测试要求，取实现更简单者 |
 
-### r5 合规核验轮（对 [r5 合规与官方源码可行性核验](2026-08-30-codex-remote-lazy-history-r5-compliance-source-check.md)）
+### r5 合规核验轮（对 [r5 合规与官方源码可行性核验](archive/2026-08-30-codex-remote-lazy-history-r5-compliance-source-check.md)）
 
 | 编号 | 建议 | 处置 | 理由 |
 | --- | --- | --- | --- |
 | — | P0（sparse upsertTurns 修正）、P1（证据边界措辞）、官方复用清单、initialTurnsPage 候选、legacy 分层矩阵、完整思考承诺措辞 | **全部采纳** | 落点见 §0.1 r6 表 |
 | （定案记录 3） | sparse `upsertTurns` 修正二选一（完整 turn upsert vs 专用 turn-state op） | **选新增专用 `turnStateOps` patch op** | 方案 A（发完整 turn upsert）会被现有 `ProjectionReplica` 标 `orderChanged=true`、经 `merged(with:)` 完整合并——触碰共享 merge/顺序语义，恰好违反本方案 live 零改动红线（§7-8）；方案 B 与既有 `partOps`/`replace_parts` 的专用 op 风格对称，向后兼容解码简单（旧 patch 无字段即忽略），不动任何共享 live 路径。核验自己也标注 B 为"更干净方案" |
 
-### r6 最终定向评审（对 [最终评审](2026-08-30-codex-remote-lazy-history-plan-final-audit-r6.md)）
+### r6 最终定向评审（对 [最终评审](archive/2026-08-30-codex-remote-lazy-history-plan-final-audit-r6.md)）
 
 | 编号 | 建议 | 处置 | 落点 |
 | --- | --- | --- | --- |

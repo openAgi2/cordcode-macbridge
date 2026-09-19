@@ -722,7 +722,7 @@ InstanceStatus() (available bool, detail string)
 
 ---
 
-## 10. 评审采纳记录（v3 对照 `2026-08-18-opencode-web-backend-design-review.md`）
+## 10. 评审采纳记录（v3 对照 `archive/2026-08-18-opencode-web-backend-design-review.md`）
 
 评审结论：修改后通过（3 必改 + 9 建议；无阻断）。§3 全部关键断言经活体+源码双重证实（载波 HTTP+SSE、双代 API 表 1.18 列、占用公式与回落、权限 v2 字面量、十三坑事实引用）。必改全为接线表补行——dsh-web M4 病的变体，且因 if 比较型无编译器兜底而更隐蔽。
 
@@ -745,7 +745,7 @@ InstanceStatus() (available bool, detail string)
 
 ---
 
-## 11. 二轮评审采纳记录（v3.1 对照 `2026-08-18-opencode-web-backend-design-review-r2.md`）
+## 11. 二轮评审采纳记录（v3.1 对照 `archive/2026-08-18-opencode-web-backend-design-review-r2.md`）
 
 二轮结论 **APPROVE（可交付 owner 终审）**：v3 diff 逐项核验通过；**S7 亲核修正经独立源码复核属实**（`catalogCapabilityRequiredFor` 唯一调用点 `handlers.go:1011`，门控 list_sessions 对未协商 v2 旧客户端、返回显式 `protocol.capability_required`——「落实修订时亲核源码」的正面示范）；audit-plan 背书盘点通过（v3 全部内容形状断言均有活体/源码证据，无「描述了但无样本」项）。十三坑全数完整闭环；一轮 3 必改 + 9 建议全部闭环。
 

@@ -18,12 +18,12 @@
 
 - **v1.0（2026-09-04 调研/成文）**：初版，commit `b1b08e8` 入库。
 - **v1.1（2026-09-04）**：按独立评审报告
-  [docs/2026-09-04-slash-command-skill-cross-backend-survey-review.md](2026-09-04-slash-command-skill-cross-backend-survey-review.md)
+  [docs/archive/2026-09-04-slash-command-skill-cross-backend-survey-review.md](archive/2026-09-04-slash-command-skill-cross-backend-survey-review.md)
   （结论：**有条件通过**——主结论全部独立坐实，作立项基线前须修 2 条 A 级）修订。评审全部
   14 项（A1/A2 + B1–B12）与未核实 #3 的收口建议，本轮**逐项亲验后全部采纳，无不采纳项**；
   亲验方式与逐项处置见下表。
 - **v1.2（2026-09-04）**：第二轮评审
-  [docs/2026-09-04-slash-command-skill-cross-backend-survey-review-r2.md](2026-09-04-slash-command-skill-cross-backend-survey-review-r2.md)
+  [docs/archive/2026-09-04-slash-command-skill-cross-backend-survey-review-r2.md](archive/2026-09-04-slash-command-skill-cross-backend-survey-review-r2.md)
   （结论：**通过**——上一轮 14 项逐项复核均已落到正文而非仅修订表，可作立项事实输入；无新必改）。
   建议级 2 项**采纳**：R2-S1 `command/index.ts:46` 精确为 `export const Default = {` 起始行（INIT/REVIEW
   值在 :47-48）；R2-S2 `parseCommand` 正则补全前瞻断言（本轮亲验 `index.ts:119`，见 §3.2——`/plan`

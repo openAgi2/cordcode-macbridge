@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 IOS = ROOT.parent / "cordcode-ios"
-DOC = ROOT / "docs/2026-08-22-codex-web-ios-impact-audit.md"
+DOC = ROOT / "docs/archive/2026-08-22-codex-web-ios-impact-audit.md"
 HEAD = "2cdb490f17ce98b36a03c6f3cf59c86e3257feda"
 
 

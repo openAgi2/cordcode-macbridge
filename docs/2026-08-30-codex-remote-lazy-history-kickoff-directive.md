@@ -32,7 +32,7 @@ Mac worktree 当前预期存在以下文档改动，它们是本计划的正式�
 
 ```text
 M  docs/2026-08-30-codex-remote-lazy-history-implementation-plan.md
-?? docs/2026-08-30-codex-remote-lazy-history-plan-final-audit-r6.md
+?? docs/archive/2026-08-30-codex-remote-lazy-history-plan-final-audit-r6.md
 ?? docs/2026-08-30-codex-remote-lazy-history-kickoff-directive.md
 ```
 

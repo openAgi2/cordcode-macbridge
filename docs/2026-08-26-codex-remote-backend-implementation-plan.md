@@ -7,8 +7,8 @@
 - 停工说明：[2026-08-28-codex-remote-phase0-fail-blocked.md](2026-08-28-codex-remote-phase0-fail-blocked.md)
 - 目标仓库：`cordcode-macbridge`，后续涉及 `cordcode-ios`
 - 相关既有方案：[2026-08-21-codex-web-backend-design.md](2026-08-21-codex-web-backend-design.md)
-- 评审报告：[2026-08-26-codex-remote-backend-implementation-plan-audit.md](2026-08-26-codex-remote-backend-implementation-plan-audit.md)
-- 第二轮评审：[2026-08-26-codex-remote-backend-implementation-plan-audit-r2.md](2026-08-26-codex-remote-backend-implementation-plan-audit-r2.md)
+- 评审报告：[2026-08-26-codex-remote-backend-implementation-plan-audit.md](archive/2026-08-26-codex-remote-backend-implementation-plan-audit.md)
+- 第二轮评审：[2026-08-26-codex-remote-backend-implementation-plan-audit-r2.md](archive/2026-08-26-codex-remote-backend-implementation-plan-audit-r2.md)
 - 上游官方源码：`/Users/jacklee/Projects/codex`
 
 > [!IMPORTANT]
@@ -786,7 +786,7 @@ fake relay、共享 store 或独立 standalone app-server冒充 Desktop Remote �
 
 ### 14.1 第一轮评审
 
-评审依据：[2026-08-26-codex-remote-backend-implementation-plan-audit.md](2026-08-26-codex-remote-backend-implementation-plan-audit.md)，
+评审依据：[2026-08-26-codex-remote-backend-implementation-plan-audit.md](archive/2026-08-26-codex-remote-backend-implementation-plan-audit.md)，
 结论为“有条件通过，无 P0，1 处内容形状需修正，1 处版本基线需显式化，4 条 P2 补强”。
 
 | 评审项 | 处置 | 回写位置 | 理由 |
@@ -804,7 +804,7 @@ fake relay、共享 store 或独立 standalone app-server冒充 Desktop Remote �
 
 ### 14.2 第二轮评审
 
-第二轮依据：[2026-08-26-codex-remote-backend-implementation-plan-audit-r2.md](2026-08-26-codex-remote-backend-implementation-plan-audit-r2.md)，
+第二轮依据：[2026-08-26-codex-remote-backend-implementation-plan-audit-r2.md](archive/2026-08-26-codex-remote-backend-implementation-plan-audit-r2.md)，
 结论为“通过，可进入 Phase 0”；第一轮全部处置逐行闭环，未发现新未证实声明。
 
 | 第二轮观察 | 处置 | 回写位置 | 理由 |
