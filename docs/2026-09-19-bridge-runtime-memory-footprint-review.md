@@ -1,11 +1,19 @@
-# 2026-09-19 bridge runtime「内存 2G+」诊断与修复（评审稿 v6，待复审）
+# 2026-09-19 bridge runtime「内存 2G+」诊断与修复（评审稿 v6，**已通过**）
 
-> 状态：**修订 v6，待复审**。v1（`685646d`）经 r1（`0469d9c`）不通过；v2（`bc328df`）经 r2（`743bde8`）
-> 不通过；v3（`f1ed656`）经 r3（`d4fa165`）不通过；v4（`28e4588`）经 r4（`8d750b3`）不通过（剩 R4-B1）；
-> v5（`12e83c3`）经 r5（`40dace132239e5fdb88b01de8e769c64a9ed31e9`）不通过（剩 R5-B1：fail-open 洞）。
-> 本版处置 R5-B1（只有显式 active 才投递，deny by default）。**本轮业务代码有变化（`ee43c8f`），
-> 已按 r5 准入条件 6 重新 Release 构建、覆盖安装并验证新代际——部署证据在部署完成后写入本稿，
-> 见 §5。**
+> 状态：**v6 已通过复审（Round 6，报告
+> `docs/2026-09-20-bridge-runtime-memory-footprint-review-report-r6.md`，commit
+> `35a1b8062fee8853180eb67f5572637731003fde`）——无发布阻断项。** 历轮：v1（`685646d`）经 r1
+>（`0469d9c`）不通过；v2（`bc328df`）经 r2（`743bde8`）不通过；v3（`f1ed656`）经 r3（`d4fa165`）
+> 不通过；v4（`28e4588`）经 r4（`8d750b3`）不通过（剩 R4-B1）；v5（`12e83c3`）经 r5（`40dace1`）
+> 不通过（剩 R5-B1：fail-open 洞）；v6（代码 `ee43c8f` + 本稿 `264e5c6`）经 r6 **通过**。
+> r6 确认：定向测试、race、claudecode 全包、go vet 通过；`/Applications` 运行 `ee43c8f78371`
+>（PID 12110，8777 listener，512MiB 特征日志）；Management API 内存恒等式验证通过。
+>
+> **非阻断后续**（r6 记录，另行开题）：
+> 1. 真实负载 metrics-first 内存对账（`Sys/HeapReleased` 与 vmmap/footprint 对齐，§7.2/§7.3）；
+> 2. Mac UI 展示 `pushCleanupError`（可观测性补充）；
+> 3. API 硬化建议：未来可将授权枚举零值改为拒绝态（当前 `WebPushDeviceActive` 为零值，
+>    显式赋值路径已全覆盖，属防御性改进）。
 
 ## 1. 来源清单（P0，v6 补全）
 
