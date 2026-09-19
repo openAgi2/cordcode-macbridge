@@ -31,16 +31,23 @@ SubscriptionCount 检查之前），活跃 transcript 指纹每轮都变→每 3
 `resolveClaudeContinuationPaths` 每次历史加载扫项目目录全部 jsonl 的 512KiB 头尾；
 ③iOS 27h 重连 91 次，每次重拉全量投影快照；④codex-remote 轮询 p50 9.5s 持续超时。
 
-**修复（v3 状态，r2 复审处置后）**：默认 GOMEMLIMIT 512MiB（env 覆盖；Go runtime 管理内存的
+**修复（v4 状态，r3 复审处置后）**：默认 GOMEMLIMIT 512MiB（env 覆盖；Go runtime 管理内存的
 软限额，provisional）；watcher 无订阅跳过 refresh + 禁用期**无条件**重置基线
 （v1 只在"曾见过订阅"时重置，漏掉"启动时无订阅、稍后首订"的回放——评审 B3；
 `startedAt` 预设值仍须尊重，FirstVisible 测试回归过一次；enrollment 时已进行中
-turn 的保留语义由 `lastClaudeUserIdentityFromPath` 回溯认领，有真实时序测试钉死）。
+turn 的保留语义由 `lastClaudeUserIdentityFromReader` **流式**回溯认领——r3 评审
+B3：旧实现复用 `scanClaudeRelayEntriesFromReader` 物化全量 entry，64MB transcript
+会整段进堆；现 O(1) 条目内存，过滤状态机与旧实现逐条对齐，大 transcript 堆上界
+测试（周期 GC 采样，旧实现实测超基线 30MB、新实现 <4MB）钉死）。
 404/410 清理语义已经 r2 复审报告 §4 追认，`webPushExpirySemanticsProven` 置 true
 （前置失败路径已修：`MarkSubscriptionExpired` 持久化失败回滚内存；账本只在删除
 落盘后记 expired，失败记 expiry_cleanup_failed 并保留订阅自愈重试清理）。
+`DeleteDevice`/`Unregister` 同形修复（r3 评审 B2，发布阻断）：subscription 删除
+先落盘、失败回滚内存——旧实现磁盘失败时内存已删、重启后被撤销设备的订阅复活
+并继续收到 Web Push（Apple endpoint 对活订阅可能 2xx，不能指望 404/410 兜底）；
+badge 清理独立失败后置；撤销 API 响应带 `pushCleanupError` 如实暴露。
 continuity cache v3（有界 FIFO + defensive copy + 读盘计数 + 同指纹并发 miss
-singleflight 合并，并发测试断言恰好一次真实读）待本轮提交。
+singleflight 合并，并发测试断言恰好一次真实读）已提交。
 
 **遗留坑**：本机 `GOSUMDB=off` + go.mod `toolchain go1.26.6` → 任何 go 命令在该仓
 静默失败（只剩一行 toolchain 警告），**且 `go build | head` 管道会吃掉退出码造成

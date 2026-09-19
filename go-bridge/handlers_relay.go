@@ -1718,20 +1718,63 @@ func lastClaudeUserIdentityFromPath(sessPath string, completeCut int64) string {
 		return ""
 	}
 	defer f.Close()
-	entries, err := scanClaudeRelayEntriesFromReader(io.LimitReader(f, completeCut))
-	if err != nil {
-		return ""
-	}
-	for i := len(entries) - 1; i >= 0; i-- {
-		e := entries[i]
-		if e.Type != "user" || isClaudeUserInterruptRelayEntry(e) {
+	return lastClaudeUserIdentityFromReader(io.LimitReader(f, completeCut))
+}
+
+// lastClaudeUserIdentityFromReader 流式维护「最后一个合格 user identity」
+// （评审 R3-B3）：不累积 entry slice——旧实现复用 scanClaudeRelayEntriesFromReader
+// 把 completeCut 内全部 meaningful entry 连同 RawMessage 内容物化进堆，64MB
+// transcript 会整段驻留，重新制造本次内存治理要消除的分配波。过滤状态机与
+// scanClaudeRelayEntriesFromReader 逐条对齐（compaction boundary / internal
+// compact / task notification / resume meta + no-response 跳过），同一输入下
+// 选中的 identity 与旧实现的倒序查找一致；任意时刻只保留一个 identity 字符串。
+func lastClaudeUserIdentityFromReader(r io.Reader) string {
+	skipNextResumeNoResponse := false
+	lastIdentity := ""
+	scanner := bufio.NewScanner(r)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024*16)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
 			continue
 		}
-		if id := claudeEntryTurnIdentity(e); id != "" {
-			return id
+		var entry claudeTranscriptRelayEntry
+		if err := json.Unmarshal(line, &entry); err != nil {
+			continue
+		}
+		if isClaudeCompactionBoundaryRelayEntry(entry) {
+			continue
+		}
+		if isClaudeInternalCompactRelayEntry(entry) || entry.Message == nil {
+			continue
+		}
+		if isClaudeTaskNotificationRelayEntry(entry) {
+			continue
+		}
+		if isClaudeResumeMetaRelayEntry(entry) {
+			skipNextResumeNoResponse = true
+			continue
+		}
+		if skipNextResumeNoResponse {
+			if isClaudeResumeNoResponseRelayEntry(entry) {
+				skipNextResumeNoResponse = false
+				continue
+			}
+			skipNextResumeNoResponse = false
+		}
+		// 旧实现的倒序查找取「最后一条非 interrupt、identity 非空的 user 行」；
+		// 正向流式等价：空 identity 的 user 行不覆盖已记录值。
+		if entry.Type == "user" && !isClaudeUserInterruptRelayEntry(entry) {
+			if id := claudeEntryTurnIdentity(entry); id != "" {
+				lastIdentity = id
+			}
 		}
 	}
-	return ""
+	if err := scanner.Err(); err != nil {
+		return ""
+	}
+	return lastIdentity
 }
 
 type claudeTranscriptRelayTextBlock struct {

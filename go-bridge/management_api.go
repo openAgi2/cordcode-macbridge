@@ -810,18 +810,26 @@ func (s *ManagementServer) handleRevokeDevice(w http.ResponseWriter, r *http.Req
 		})
 		return
 	}
-	writeMgmtJSON(w, http.StatusOK, map[string]interface{}{"revoked": true, "deviceId": deviceID})
-
 	// 主动断开被撤销设备的所有 WebSocket 连接
 	globalDeviceConnRegistry.DisconnectDevice(deviceID)
 
 	// 撤销联动：同一撤销动作删除该 device 的 web push subscription（§10 生命周期不变量）。
-	// 失败只记日志不回滚撤销——授权已收回，残留订阅在下次 dispatcher 404/410 时也会被清除。
+	// 删除失败不回滚撤销（授权已收回、连接已断开），但必须如实暴露：store 内
+	// subscription 保持内存与磁盘一致（DeleteDevice 失败即回滚），Apple endpoint
+	// 对活订阅仍可能返回 2xx，不能指望 404/410 兜底——响应带 pushCleanupError
+	// 供操作端排查/重试（评审 R3-B2）。
+	pushCleanupErr := ""
 	if globalWebPushStore != nil {
 		if err := globalWebPushStore.DeleteDevice(deviceID); err != nil {
 			slog.Warn("management: web push subscription cleanup after revoke failed", "devicePrefix", safeID(deviceID), "error", err)
+			pushCleanupErr = err.Error()
 		}
 	}
+	response := map[string]interface{}{"revoked": true, "deviceId": deviceID}
+	if pushCleanupErr != "" {
+		response["pushCleanupError"] = pushCleanupErr
+	}
+	writeMgmtJSON(w, http.StatusOK, response)
 }
 
 // ── POST /internal/pairing/create ────────────────────────────────────────────

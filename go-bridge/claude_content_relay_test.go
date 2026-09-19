@@ -2,7 +2,10 @@ package gobridge
 
 import (
 	"context"
+	"io"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -328,5 +331,109 @@ func TestClaudeFileRelayEmitsAssistantContentBlocks(t *testing.T) {
 	msgs = client.readEvents(t, 3)
 	if msgs[0]["event"] != "text_delta" || msgs[1]["event"] != "turn_completed" || msgs[2]["event"] != "session_state_changed" {
 		t.Fatalf("final assistant events = %v, want [text_delta, turn_completed, session_state_changed]", msgs)
+	}
+}
+
+// TestLastClaudeUserIdentityFromReaderFiltersAndOrder（评审 R3-B3）：流式实现
+// 与旧 slice 扫描的过滤语义逐条对齐——interrupt / 空 identity / resume meta +
+// no-response / task notification / compaction boundary 不参与选取，最后一条
+// 合格 user 行胜出（message.id 优先于 uuid）；completeCut 截断时取截断前的
+// 最后合格行。
+func TestLastClaudeUserIdentityFromReaderFiltersAndOrder(t *testing.T) {
+	content := `{"type":"user","uuid":"u-1","message":{"role":"user","content":"first"}}` + "\n" +
+		// assistant 行：不参与选取。
+		`{"type":"assistant","uuid":"a-1","message":{"id":"a-1","role":"assistant","content":[{"type":"text","text":"answer"}]}}` + "\n" +
+		// interrupt user 行：跳过。
+		`{"type":"user","uuid":"u-int","message":{"role":"user","content":"[Request interrupted by user for tool use]"}}` + "\n" +
+		// 空 identity（无 message.id 且无 uuid）的 user 行：不覆盖已记录值。
+		`{"type":"user","message":{"role":"user","content":"anonymous"}}` + "\n" +
+		// resume meta + no-response 对：跳过。
+		`{"type":"user","uuid":"u-meta","isMeta":true,"message":{"role":"user","content":"Continue from where you left off."}}` + "\n" +
+		`{"type":"assistant","uuid":"a-nr","message":{"id":"a-nr","role":"assistant","content":[{"type":"text","text":"No response requested."}]}}` + "\n" +
+		// task notification user 行：跳过。
+		`{"type":"user","uuid":"u-task","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>done</task-notification>"}}` + "\n" +
+		// compaction boundary system 行：不参与选取。
+		`{"type":"system","subtype":"compact_boundary","uuid":"bnd-1"}` + "\n" +
+		// 最后一条合格 user 行：胜出（message.id 优先于 uuid）。
+		`{"type":"user","uuid":"u-final-uuid","message":{"id":"u-final","role":"user","content":"last"}}` + "\n"
+
+	if got := lastClaudeUserIdentityFromReader(strings.NewReader(content)); got != "u-final" {
+		t.Fatalf("identity = %q, want u-final (last qualifying user row, message.id preferred)", got)
+	}
+
+	// completeCut 截断在最后一条 user 行之前：取更早的合格行（u-1）。
+	cut := int64(strings.Index(content, `"uuid":"u-final-uuid"`))
+	if cut <= 0 {
+		t.Fatal("fixture cut index invalid")
+	}
+	if got := lastClaudeUserIdentityFromReader(io.LimitReader(strings.NewReader(content), cut)); got != "u-1" {
+		t.Fatalf("truncated identity = %q, want u-1 (last qualifying row before cut)", got)
+	}
+}
+
+// gcHeapSamplingReader 在读取过程中周期性强制 GC 并采样 heapAlloc（评审
+// R3-B3 测试基建）：GC 后仍存活的堆即真实驻留——旧 slice 实现的 entry 累积
+// 会随读取增长到整个 transcript 大小，流式实现应保持基线附近。
+type gcHeapSamplingReader struct {
+	r          io.Reader
+	bytesSince int
+	maxHeap    uint64
+}
+
+func (g *gcHeapSamplingReader) Read(p []byte) (int, error) {
+	n, err := g.r.Read(p)
+	g.bytesSince += n
+	if g.bytesSince >= 512*1024 {
+		runtime.GC()
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		if ms.HeapAlloc > g.maxHeap {
+			g.maxHeap = ms.HeapAlloc
+		}
+		g.bytesSince = 0
+	}
+	return n, err
+}
+
+// TestLastClaudeUserIdentityFromReaderBoundedMemoryOnLargeTranscript（评审
+// R3-B3）：~12MB transcript 上流式回溯的堆驻留必须有界——读取期间周期性 GC
+// 后采样，峰值不得超过基线 + 4MB；旧实现（物化全量 entry slice）会驻留整个
+// transcript 大小。同时验证大文件下的选取正确性。
+func TestLastClaudeUserIdentityFromReaderBoundedMemoryOnLargeTranscript(t *testing.T) {
+	// 基线：测试进程当前存活堆（fixture 尚未生成）。
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+
+	var sb strings.Builder
+	sb.WriteString(`{"type":"user","uuid":"u-big-first","message":{"id":"u-big-first","role":"user","content":"start"}}` + "\n")
+	pad := strings.Repeat("x", 96)
+	line := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"` + pad + `"}]}}` + "\n"
+	const lines = 80000
+	for i := 0; i < lines; i++ {
+		sb.WriteString(line)
+	}
+	sb.WriteString(`{"type":"user","uuid":"u-big-last","message":{"id":"u-big-last","role":"user","content":"end"}}` + "\n")
+
+	path := filepath.Join(t.TempDir(), "big-transcript.jsonl")
+	if err := os.WriteFile(path, []byte(sb.String()), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	sb.Reset() // fixture 已落盘，释放生成期字符串，扫描输入只剩文件。
+
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open fixture: %v", err)
+	}
+	defer f.Close()
+	wrapper := &gcHeapSamplingReader{r: f}
+	got := lastClaudeUserIdentityFromReader(wrapper)
+	if got != "u-big-last" {
+		t.Fatalf("identity = %q, want u-big-last", got)
+	}
+
+	const allowance = 4 * 1024 * 1024
+	if wrapper.maxHeap > before.HeapAlloc+allowance {
+		t.Fatalf("streaming scan heap peak = %d bytes (baseline %d), exceeds +4MB bound — full-transcript materialization regression?", wrapper.maxHeap, before.HeapAlloc)
 	}
 }

@@ -302,6 +302,8 @@ func (s *WebPushStore) registerLocked(deviceID string, record PushSubscriptionRe
 
 // Unregister 幂等删除当前 device 自己的记录；返回是否删除了记录。
 // 不依赖 VAPID 私钥——misconfigured 下仍可调用（恢复路径）。
+// subscription 删除先落盘、失败回滚（评审 R3-B2 同形复核）；badge 清理
+// 可独立失败、无投递权限影响，放在落盘之后。
 func (s *WebPushStore) Unregister(deviceID, subscriptionID string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -314,26 +316,34 @@ func (s *WebPushStore) Unregister(deviceID, subscriptionID string) (bool, error)
 		return false, nil
 	}
 	delete(s.byDeviceID, deviceID)
-	s.deleteBadgeStateLocked(deviceID)
 	if err := s.persistSubscriptionsLocked(); err != nil {
+		// 回滚内存状态：磁盘仍是旧记录，内存必须与磁盘一致。
 		s.byDeviceID[deviceID] = existing
 		return false, &webPushValidationError{code: WebPushErrStorageFailed, message: err.Error(), retryable: true}
 	}
+	s.deleteBadgeStateLocked(deviceID)
 	return true, nil
 }
 
 // DeleteDevice 撤销/删除 trusted device 时联动删除其 subscription（§5.1/§10）。
+// subscription 删除先落盘，持久化失败回滚内存（评审 R3-B2，发布阻断：磁盘
+// 失败时不得让已撤销设备的订阅在 runtime 重启后复活并继续收到 Web Push——
+// Apple endpoint 对活订阅仍可能返回 2xx，不能指望 404/410 兜底）。badge 清理
+// 可独立失败、无投递权限影响，放在 subscription 落盘之后。
 func (s *WebPushStore) DeleteDevice(deviceID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.byDeviceID[deviceID]; !ok {
+	record, ok := s.byDeviceID[deviceID]
+	if !ok {
 		return nil
 	}
 	delete(s.byDeviceID, deviceID)
-	s.deleteBadgeStateLocked(deviceID)
 	if err := s.persistSubscriptionsLocked(); err != nil {
+		// 回滚内存状态：磁盘仍是旧记录，内存必须与磁盘一致。
+		s.byDeviceID[deviceID] = record
 		return err
 	}
+	s.deleteBadgeStateLocked(deviceID)
 	slog.Info("web-push: subscription removed with device", "devicePrefix", safeID(deviceID))
 	return nil
 }

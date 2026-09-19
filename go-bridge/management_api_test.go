@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -507,6 +508,71 @@ func TestMgmtRevokeDevice_NotFound(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+// 撤销联动清理失败路径（评审 R3-B2）：subscription 删除持久化失败时，撤销本身
+// 成功（200 + revoked=true），但响应必须暴露 pushCleanupError，且 store 内订阅
+// 保持内存与磁盘一致——不产生「内存已删、磁盘仍在」的假成功。
+func TestMgmtRevokeDeviceWebPushCleanupFailureExposed(t *testing.T) {
+	prevStore := globalWebPushStore
+	t.Cleanup(func() { globalWebPushStore = prevStore })
+
+	dir := t.TempDir()
+	pushStore, err := LoadWebPushStore(dir)
+	if err != nil {
+		t.Fatalf("LoadWebPushStore: %v", err)
+	}
+	if _, err := pushStore.Register("dev_rev_push", testSubscriptionRecord("https://example.com/push/dev_rev_push")); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	// 注册落盘后破坏持久化：目录去写权限 → atomic write 建临时文件失败。
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod store dir read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	globalWebPushStore = pushStore
+
+	deviceStore := NewMemoryDeviceStore()
+	deviceStore.AddDevice(TrustedDeviceRecord{
+		DeviceID:    "dev_rev_push",
+		DisplayName: "Test",
+		Platform:    "ios",
+		TokenHash:   "sha256:xyz",
+		CreatedAt:   time.Now(),
+		LastSeenAt:  time.Now(),
+	})
+	cfg := ManagementConfig{
+		Handlers:     NewHandlers(),
+		Token:        testMgmtToken,
+		PairingStore: NewMemoryPairingStore(),
+		DeviceStore:  deviceStore,
+		BridgeID:     "brg_test",
+		DisplayName:  "Test",
+		LocalURL:     "ws://127.0.0.1:8777",
+		Agents:       map[string]core.Agent{"claude": &mgmtFakeAgent{name: "claudecode"}},
+	}
+	srv := NewManagementServer(cfg)
+
+	rec := httptest.NewRecorder()
+	req := authRequest(http.MethodPost, "/internal/devices/dev_rev_push/revoke")
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (revoke itself succeeds), body: %s", rec.Code, rec.Body.String())
+	}
+	var response map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if response["revoked"] != true {
+		t.Fatalf("revoked = %v, want true", response["revoked"])
+	}
+	if _, ok := response["pushCleanupError"]; !ok {
+		t.Fatal("pushCleanupError missing from response (cleanup failure must be exposed, not silently downgraded)")
+	}
+	if pushStore.SubscriptionCount() != 1 {
+		t.Fatalf("subscription lost despite persist failure: count = %d, want 1 (memory rollback)", pushStore.SubscriptionCount())
 	}
 }
 
