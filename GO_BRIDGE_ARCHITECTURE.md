@@ -289,6 +289,9 @@ ps aux | grep '[c]odex app-server'
   启动路径本身失败时，才把本机 `codex` 可执行文件当作相关依赖。即便如此，也要把问题描述为
   “app-server launcher/exec backend dependency”，不要笼统写成“MacBridge 需要 codex CLI”。
 
+排查 stdio app-server 启动路径时才检查 launcher：`command -v codex`、
+`codex app-server --help >/dev/null 2>&1 || true`。
+
 MacBridge Restart 只重启 Bridge runtime，不负责重启外部共享 Codex app-server。
 共享服务的启动归属和本机常驻约束见
 [BUILD_INSTALL_AND_RUNTIME.md](BUILD_INSTALL_AND_RUNTIME.md#codex-app-server-的启动归属)。
