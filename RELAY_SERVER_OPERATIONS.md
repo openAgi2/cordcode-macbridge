@@ -65,6 +65,22 @@ export CORDCODE_RELAY_VPS_PASS='<password>'
 
 仓库的 `.zshrc` 示例值不是配置文件；不得提交真实密码。
 
+`~/.ssh/config` 需有部署别名（`scripts/deploy-relay-vps.sh` 与手动 ssh 都用它；2026-09-19
+自 CLAUDE.md「Deploying relay-server to the VPS」节并入）：
+
+```
+Host cccode-relay-prod
+    HostName <host>
+    User <user>
+    PreferredAuthentications password
+    PubkeyAuthentication no
+```
+
+部署脚本读 `CORDCODE_RELAY_VPS_PASS` 并经 `sshpass -e`（读 `SSHPASS`）做非交互认证。该
+VPS 的 sshd 有慢 banner 交换（UseDNS 反查 + 间歇网络）：脚本已自动带
+`ConnectTimeout`/`ConnectionAttempts` 重试；手动 ssh 可能需要多试几次，凭据不在当前
+shell 时先 `source ~/.zshrc`。
+
 ## 构建
 
 `relay-server/` 是独立 module（`module cordcode-relay`）：
