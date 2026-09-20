@@ -642,7 +642,12 @@ func TestListProjectsMapsWorktree(t *testing.T) {
 	if len(projects) != 1 {
 		t.Fatalf("worktrees missing on disk are hidden by the visibility overlay, got %+v", projects)
 	}
-	if projects[0].Directory != realProj || projects[0].Name != filepath.Base(realProj) || projects[0].ID != "prj_1" {
+	// 2026-09-21 membership resolver: suggestions come from the unified
+	// membership view, so the ID is the directory for every entry — matching
+	// the desktop-persist branch production has always used (the iOS bucket
+	// keys on Directory; the serve entry id never reached the wire in the
+	// persist case).
+	if projects[0].Directory != realProj || projects[0].Name != filepath.Base(realProj) || projects[0].ID != realProj {
 		t.Fatalf("mapping = %+v", projects[0])
 	}
 	// C2 strict decoder: a row missing required worktree fails the whole

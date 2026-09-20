@@ -8,20 +8,20 @@ import (
 	"testing"
 )
 
-func TestParseDesktopOpenedWorktreesMatchesServerURL(t *testing.T) {
+func TestParseDesktopHomeStateMatchesServerURL(t *testing.T) {
 	blob := []byte(`{
 		"server": "{\"projects\":{\"http://127.0.0.1:4096\":[{\"worktree\":\"/Users/jacklee/Projects/cordcode-macbridge\",\"expanded\":true},{\"worktree\":\"/Users/jacklee/Projects/Chat\",\"expanded\":true}],\"local\":[{\"worktree\":\"/Users/jacklee/Projects/Chat\"}]}}"
 	}`)
-	got := parseDesktopOpenedWorktrees(blob, "http://127.0.0.1:4096/")
-	if len(got) != 2 || got[0] != "/Users/jacklee/Projects/cordcode-macbridge" || got[1] != "/Users/jacklee/Projects/Chat" {
-		t.Fatalf("4096 open-set = %v", got)
+	state, got := parseDesktopHomeState(blob, "http://127.0.0.1:4096/")
+	if state != desktopHomeRowPresent || len(got) != 2 || got[0] != "/Users/jacklee/Projects/cordcode-macbridge" || got[1] != "/Users/jacklee/Projects/Chat" {
+		t.Fatalf("4096 home state=%d open-set = %v", state, got)
 	}
-	local := parseDesktopOpenedWorktrees(blob, "local")
-	if len(local) != 1 || local[0] != "/Users/jacklee/Projects/Chat" {
-		t.Fatalf("local open-set = %v", local)
+	state, local := parseDesktopHomeState(blob, "local")
+	if state != desktopHomeRowPresent || len(local) != 1 || local[0] != "/Users/jacklee/Projects/Chat" {
+		t.Fatalf("local home state=%d open-set = %v", state, local)
 	}
-	if miss := parseDesktopOpenedWorktrees(blob, "http://127.0.0.1:9999"); miss != nil && len(miss) != 0 {
-		t.Fatalf("unknown URL must not inherit another scope, got %v", miss)
+	if state, miss := parseDesktopHomeState(blob, "http://127.0.0.1:9999"); state != desktopHomeRowMissing || miss != nil {
+		t.Fatalf("unknown URL must be row-missing without inheriting another scope, state=%d dirs=%v", state, miss)
 	}
 }
 
@@ -36,9 +36,12 @@ func TestReadDesktopOpenedWorktreesUsesInjectedPersist(t *testing.T) {
 	desktopPersistLookup = func() []string { return []string{path} }
 	t.Cleanup(func() { desktopPersistLookup = prev })
 
-	got, src := readDesktopOpenedWorktrees("http://127.0.0.1:4096")
-	if src != path {
-		t.Fatalf("source = %q", src)
+	state, got, src, err := readDesktopOpenedWorktrees("http://127.0.0.1:4096")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != desktopHomeRowPresent || src != path {
+		t.Fatalf("state=%d source = %q", state, src)
 	}
 	if len(got) != 2 {
 		t.Fatalf("opened = %v", got)

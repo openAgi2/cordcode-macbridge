@@ -2168,7 +2168,14 @@ func (h *Handlers) handleListProjects(conn Connection, msg WireMessage, agent co
 		// return empty and iOS falls back to session.directory grouping plus
 		// its local directory service (dsh-web design §4.3.7).
 		if lister, ok := agent.(core.ProjectLister); ok {
-			suggestions, err := lister.ListProjectSuggestions(h.ctx)
+			// list_projects carries an explicit end-to-end budget (phase-1 plan
+			// §5): it must never inherit the bridge lifecycle h.ctx and wait
+			// out the http.Client 30 s fallback. 5 s covers the opencode-web
+			// membership resolver (3 s) plus margin; a timeout surfaces as the
+			// normal wire error, not a hang.
+			listCtx, cancel := context.WithTimeout(h.ctx, 5*time.Second)
+			defer cancel()
+			suggestions, err := lister.ListProjectSuggestions(listCtx)
 			if err != nil {
 				conn.SendResult(msg.RequestID, nil, listWireError(err))
 				return

@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -40,6 +44,19 @@ type ocwProjectEntry struct {
 // deleted → signalCatalogRefresh → invalidateProjectCache)，so a desktop-
 // created session surfaces via discovery within signal latency, not just TTL.
 const projectCacheTTL = 15 * time.Second
+
+// Membership budgets (phase-1 plan §5). The resolver deadline bounds the
+// whole home+window+proof resolution; per-tab proofs get their own shorter
+// timeout so a wedged directory instance (Q-type) only starves its own tab.
+// Measured baselines (2026-09-20, fixed 4096): by-ID 12–24 ms, scoped
+// 15–79 ms, discovery 96–335 ms — the budgets are generous against reality
+// while keeping the worst case far below the caller deadlines (recent/
+// discovery 8 s, list_projects 5 s).
+const (
+	membershipResolveTimeout = 3 * time.Second
+	tabProofTimeout          = 2 * time.Second
+	tabProofConcurrency      = 4
+)
 
 func (a *Agent) fetchProjects(ctx context.Context, c *Client) ([]ocwProjectEntry, error) {
 	if c.Generation() == generationV2 {
@@ -112,17 +129,18 @@ func visibleProjectDir(dir string) (string, bool) {
 	return clean, true
 }
 
-// projectWorktreeDirs returns the deduped serve-truth worktree list used by
-// the OD-2 global aggregation, cached briefly on SUCCESS only (TTL + SSE
-// catalog-signal invalidation). A /project fetch/decode failure is returned
-// as an error — a stale cached view must never impersonate this round's
-// registry (directive-003). An empty registry is an empty list, not a
-// fallback target. The missing-worktree visibility overlay (visibleProjectDir)
-// applies HERE only: / is the serve's global pseudo-project, non-absolute
-// paths, duplicates, and worktrees that no longer exist on disk are not
-// listable CordCode workspaces. This is a CordCode catalog visibility/safety
-// overlay — the serve remains the registry fact owner and rows stay on the
-// server; nothing is deleted or rewritten server-side.
+// projectWorktreeDirs returns the deduped membership worktree list used by
+// the OD-2 global aggregation (home ∪ proof-authorized tab directories,
+// phase-1 plan §3), cached briefly on SUCCESS only (TTL + SSE catalog-signal
+// invalidation). A persist/proof-resolution failure is returned as an error —
+// a stale cached view must never impersonate this round's registry
+// (directive-003). An empty membership set is an empty list, not a fallback
+// target. The missing-worktree visibility overlay (visibleProjectDir) applies
+// HERE only: / is the serve's global pseudo-project, non-absolute paths,
+// duplicates, and worktrees that no longer exist on disk are not listable
+// CordCode workspaces. This is a CordCode catalog visibility/safety overlay —
+// the serve remains the registry fact owner and rows stay on the server;
+// nothing is deleted or rewritten server-side.
 func (a *Agent) projectWorktreeDirs(ctx context.Context, c *Client) ([]string, error) {
 	a.projectsMu.Lock()
 	if a.projectDirs != nil && time.Since(a.projectDirsAt) < projectCacheTTL {
@@ -132,11 +150,11 @@ func (a *Agent) projectWorktreeDirs(ctx context.Context, c *Client) ([]string, e
 	}
 	a.projectsMu.Unlock()
 
-	dirs, source, err := a.loadHomeProjectDirs(ctx, c)
+	dirs, source, err := a.loadMemberProjectDirs(ctx, c)
 	if err != nil {
 		return nil, err
 	}
-	slog.Info("opencode-web: home project list", "source", source, "count", len(dirs), "url", c.baseURL)
+	slog.Info("opencode-web: membership directory list", "source", source, "count", len(dirs), "url", c.baseURL)
 
 	a.projectsMu.Lock()
 	a.projectDirs = dirs
@@ -145,17 +163,133 @@ func (a *Agent) projectWorktreeDirs(ctx context.Context, c *Client) ([]string, e
 	return append([]string(nil), dirs...), nil
 }
 
-// loadHomeProjectDirs prefers Desktop's opened-tab persist (official home
-// sidebar). GET /project is the serve registry of every worktree ever seen —
-// using it as the iOS session-list grouping is why Desktop showed 6 tabs and
-// iPhone showed ~17. Fallback to GET /project only when persist has no row
-// for this serve URL (no Desktop install / different machine).
+// loadMemberProjectDirs resolves the membership set (phase-1 plan §3):
+// Desktop home projects ∪ registered-window active SessionTab directories
+// that pass the by-ID proof. Home follows the four-state table (§8); window
+// parsing is independent of the home state. Proof failures are per-tab skips
+// (logged, never amplified — a usable home-only catalog stays usable); only
+// membership parse failures (corrupt persist, over-limit input) are errors.
+func (a *Agent) loadMemberProjectDirs(ctx context.Context, c *Client) ([]string, string, error) {
+	home, homeSource, err := a.loadHomeProjectDirs(ctx, c)
+	if err != nil {
+		return nil, "", err
+	}
+	tabs, err := readDesktopWindowTabs()
+	if err != nil {
+		return nil, "", err
+	}
+	var tabDirs []string
+	if len(tabs) > 0 {
+		tabDirs = a.authorizeTabDirectories(ctx, c, tabs)
+	}
+	merged := visibleDirsFromWorktrees(append(append([]string(nil), home...), tabDirs...))
+	if len(merged) > maxDesktopDedupedDirs {
+		return nil, "", fmt.Errorf("opencode-web: membership directory count %d exceeds limit %d", len(merged), maxDesktopDedupedDirs)
+	}
+	source := homeSource
+	if len(tabDirs) > 0 {
+		source += "+window-tabs"
+	}
+	return merged, source, nil
+}
+
+// authorizeTabDirectories runs the per-tab by-ID proof with bounded
+// concurrency inside the resolver deadline. Tabs whose proof has not
+// completed when the deadline hits are skipped (logged) — never an error
+// (plan §4: proof failure must not turn a usable catalog global).
+func (a *Agent) authorizeTabDirectories(ctx context.Context, c *Client, tabs []desktopSessionTab) []string {
+	resolveCtx, cancel := context.WithTimeout(ctx, membershipResolveTimeout)
+	defer cancel()
+
+	sem := make(chan struct{}, tabProofConcurrency)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	dirs := make([]string, 0, len(tabs))
+	for _, tab := range tabs {
+		wg.Add(1)
+		go func(t desktopSessionTab) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-resolveCtx.Done():
+				slog.Warn("opencode-web: membership tab proof skipped (resolver deadline)", "sessionId", t.SessionID, "server", t.Server)
+				return
+			}
+			dir, ok := a.proveTabDirectory(resolveCtx, c, t)
+			if !ok {
+				return
+			}
+			mu.Lock()
+			dirs = append(dirs, dir)
+			mu.Unlock()
+		}(tab)
+	}
+	wg.Wait()
+	return dirs
+}
+
+// proveTabDirectory fetches GET /session/<id> on the TARGET server with the
+// tab's own info directory as the routing header (a wedged directory
+// instance then only starves its own tab). The proof is type-blind by
+// construction: child/archived/out-of-window sessions are all by-ID
+// fetchable, so no per-type identity gate exists (plan §3.2). The response
+// directory is the server truth; a mismatch with the Desktop-recorded info
+// directory is logged and the response wins.
+func (a *Agent) proveTabDirectory(ctx context.Context, c *Client, tab desktopSessionTab) (string, bool) {
+	proofCtx, cancel := context.WithTimeout(ctx, tabProofTimeout)
+	defer cancel()
+	routeDir := tab.InfoDirectory
+	if routeDir == "" {
+		routeDir = a.GetWorkDir()
+	}
+	code, raw, err := c.doRequest(proofCtx, http.MethodGet, c.endpoint(c.apiPath("/session/")+url.PathEscape(tab.SessionID)), nil, routeDir, true)
+	if err != nil {
+		slog.Warn("opencode-web: membership tab proof failed (transport)", "sessionId", tab.SessionID, "error", err)
+		return "", false
+	}
+	if code != http.StatusOK {
+		slog.Warn("opencode-web: membership tab proof failed (http)", "sessionId", tab.SessionID, "code", code)
+		return "", false
+	}
+	var entry ocwSessionEntry
+	if err := json.Unmarshal(unwrapDataEnvelope(raw), &entry); err != nil || entry.ID == "" || entry.ID != tab.SessionID {
+		slog.Warn("opencode-web: membership tab proof failed (shape)", "sessionId", tab.SessionID)
+		return "", false
+	}
+	dir := strings.TrimSpace(entry.Directory)
+	if dir == "" {
+		slog.Warn("opencode-web: membership tab proof response missing directory", "sessionId", tab.SessionID)
+		return "", false
+	}
+	if tab.InfoDirectory != "" && filepath.Clean(tab.InfoDirectory) != filepath.Clean(dir) {
+		slog.Warn("opencode-web: membership tab info directory mismatch (server truth wins)",
+			"sessionId", tab.SessionID, "infoDirectory", tab.InfoDirectory, "serverDirectory", dir)
+	}
+	return dir, true
+}
+
+// loadHomeProjectDirs resolves the Desktop home sidebar per the four-state
+// table (phase-1 plan §8): file/row missing → fallback to the serve registry
+// (GET /project); row authoritatively empty → empty home, NO fallback;
+// corrupt persist is an error (handled by readDesktopOpenedWorktrees).
 func (a *Agent) loadHomeProjectDirs(ctx context.Context, c *Client) ([]string, string, error) {
-	if opened, src := readDesktopOpenedWorktrees(c.baseURL); len(opened) > 0 {
+	state, opened, src, err := readDesktopOpenedWorktrees(c.baseURL)
+	if err != nil {
+		return nil, "", err
+	}
+	switch state {
+	case desktopHomeRowPresent:
 		dirs := visibleDirsFromWorktrees(opened)
 		if len(dirs) > 0 {
 			return dirs, "desktop-persist:" + src, nil
 		}
+		// All rows filtered by the visibility overlay (deleted dirs) — the
+		// row is still authoritative; fall through to empty home, no fallback.
+		return []string{}, "desktop-persist:" + src, nil
+	case desktopHomeRowEmpty:
+		// Authoritative empty home: an empty list, never a registry fallback.
+		return []string{}, "desktop-persist:" + src, nil
 	}
 	entries, err := a.fetchProjects(ctx, c)
 	if err != nil {
@@ -193,44 +327,28 @@ func (a *Agent) invalidateProjectCache() {
 }
 
 // ListProjectSuggestions implements core.ProjectLister: the iOS directory
-// chooser gets the serve's own project registry (official parity — the same
-// entries the desktop's directory switcher shows).
+// chooser gets the same membership set the catalog aggregation uses (home ∪
+// proof-authorized tab directories, phase-1 plan §3.4) — one resolver, one
+// cache, so opening the chooser never re-runs a proof fan-out against a
+// different view. The caller owns the deadline (go-bridge wraps this in an
+// explicit 5 s budget).
 func (a *Agent) ListProjectSuggestions(ctx context.Context) ([]core.ProjectSuggestion, error) {
 	c, err := a.clientFor(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if opened, _ := readDesktopOpenedWorktrees(c.baseURL); len(opened) > 0 {
-		dirs := visibleDirsFromWorktrees(opened)
-		out := make([]core.ProjectSuggestion, 0, len(dirs))
-		for _, dir := range dirs {
-			out = append(out, core.ProjectSuggestion{
-				ID:        dir,
-				Directory: dir,
-				Name:      filepath.Base(dir),
-			})
-		}
-		return out, nil
-	}
-	entries, err := a.fetchProjects(ctx, c)
+	dirs, err := a.projectWorktreeDirs(ctx, c)
 	if err != nil {
 		return nil, err
 	}
-	seen := make(map[string]bool, len(entries))
-	out := make([]core.ProjectSuggestion, 0, len(entries))
-	for _, entry := range entries {
-		clean, ok := visibleProjectDir(entry.Worktree)
-		if !ok || seen[clean] {
-			continue
-		}
-		seen[clean] = true
+	out := make([]core.ProjectSuggestion, 0, len(dirs))
+	for _, dir := range dirs {
 		out = append(out, core.ProjectSuggestion{
-			ID:        entry.ID,
-			Directory: clean,
-			Name:      filepath.Base(clean),
+			ID:        dir,
+			Directory: dir,
+			Name:      filepath.Base(dir),
 		})
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Directory < out[j].Directory })
 	return out, nil
 }
 
