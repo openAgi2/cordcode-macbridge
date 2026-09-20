@@ -52,6 +52,7 @@
 		AC945C234156C14E25E92A47 /* TOML in Frameworks */ = {isa = PBXBuildFile; productRef = 2D15A4CC7C3D0B8F9B9CD787 /* TOML */; };
 		AFEC8A31F38FA1DBCF600898 /* DeviceStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 974E6D4F31954BBCE23287AF /* DeviceStoreTests.swift */; };
 		B1A14832A89E0CFE69246452 /* LayoutConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 816D0925391B834EE9F44199 /* LayoutConstants.swift */; };
+		BFCEE4A83E01B648DDB162E0 /* ManagementAPIClientRevokeDecodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A30F1DC335ECE32B9287C2D /* ManagementAPIClientRevokeDecodeTests.swift */; };
 		C156B2FA00015BBD640265B4 /* BridgeStatusViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F2414D249C8A25F8F5F81D5 /* BridgeStatusViewModel.swift */; };
 		C391C7E4C937E896A9A97002 /* DiagnosticsSheetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11D8DA34EB3F19A2A8810355 /* DiagnosticsSheetTests.swift */; };
 		C451F091B0FC627C0F7E31DE /* TopologyMonitorStatusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8197EF3067C37980C65B8B65 /* TopologyMonitorStatusStore.swift */; };
@@ -113,6 +114,7 @@
 		55AD0E5417D58D858A510711 /* GrokLeaderModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokLeaderModeTests.swift; sourceTree = "<group>"; };
 		59ACDDE8C5E5047CD28C7B85 /* AgentStatusRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStatusRow.swift; sourceTree = "<group>"; };
 		684E9C0C288ED1ED58423396 /* CordCodeLinkTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CordCodeLinkTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		7A30F1DC335ECE32B9287C2D /* ManagementAPIClientRevokeDecodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementAPIClientRevokeDecodeTests.swift; sourceTree = "<group>"; };
 		816D0925391B834EE9F44199 /* LayoutConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutConstants.swift; sourceTree = "<group>"; };
 		8197EF3067C37980C65B8B65 /* TopologyMonitorStatusStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopologyMonitorStatusStore.swift; sourceTree = "<group>"; };
 		907DBA7297AA1E62F927C199 /* OpenCodeManagedServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeManagedServer.swift; sourceTree = "<group>"; };
@@ -233,6 +235,7 @@
 				55AD0E5417D58D858A510711 /* GrokLeaderModeTests.swift */,
 				2F173AAE61BE3560D237E35B /* LayoutConstantsTests.swift */,
 				AC64B170A23E565E7D8F8251 /* MacBridgeBehaviorTests.swift */,
+				7A30F1DC335ECE32B9287C2D /* ManagementAPIClientRevokeDecodeTests.swift */,
 				DC2125905A5A283AE86C6A43 /* ManagementAPIClientTimeoutTests.swift */,
 				49E751A7558843194506DCEC /* ManagementV1CodecTests.swift */,
 				07A6B4332BC9879A154F32C8 /* ManagementV1ProducerFixtureTests.swift */,
@@ -435,6 +438,7 @@
 				F8A16AA29D8179DD134B5A26 /* GrokLeaderModeTests.swift in Sources */,
 				D569470390299186BBFDE5C6 /* LayoutConstantsTests.swift in Sources */,
 				7F1302ED24887EA2D603700C /* MacBridgeBehaviorTests.swift in Sources */,
+				BFCEE4A83E01B648DDB162E0 /* ManagementAPIClientRevokeDecodeTests.swift in Sources */,
 				4B50BCF0B76C6FCCD9AEA84C /* ManagementAPIClientTimeoutTests.swift in Sources */,
 				F2C2A5C336B3D22C91BE32D7 /* ManagementV1CodecTests.swift in Sources */,
 				E75CD0B17C760CD64FA50E8F /* ManagementV1ProducerFixtureTests.swift in Sources */,

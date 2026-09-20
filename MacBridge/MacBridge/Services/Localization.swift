@@ -297,6 +297,12 @@ enum L10n {
     static var devicesRevokeMessage: String { tr("devices_revoke_message") }
     static var devicesPushCleanupWarningTitle: String { tr("devices_push_cleanup_warning_title") }
     static var devicesPushCleanupWarning: String { tr("devices_push_cleanup_warning") }
+    static var devicesPushCleanupPending: String { tr("devices_push_cleanup_pending") }
+    static var devicesPushCleanupPendingResponse: String { tr("devices_push_cleanup_pending_response") }
+    static var devicesPushCleanupUnknown: String { tr("devices_push_cleanup_unknown") }
+    static var devicesPushCleanupInconsistent: String { tr("devices_push_cleanup_inconsistent") }
+    static var devicesPushCleanupInconsistentDetail: String { tr("devices_push_cleanup_inconsistent_detail") }
+    static var devicesPushCleanupUnknownDetail: String { tr("devices_push_cleanup_unknown_detail") }
     static var devicesActions: String { tr("devices_actions") }
     static var devicesUnknownDevice: String { tr("devices_unknown_device") }
 
@@ -732,7 +738,13 @@ enum L10n {
             "devices_revoke_confirm": "Revoke authorization for “%@”?",
             "devices_revoke_message": "The device will disconnect immediately and must pair again before its next use.",
             "devices_push_cleanup_warning_title": "Push Subscription Cleanup Incomplete",
-            "devices_push_cleanup_warning": "The device was revoked, but cleaning up its push subscription failed: %@. Push delivery to this device stays blocked; you can retry revoking or check the runtime log.",
+            "devices_push_cleanup_warning": "The device was revoked, but cleaning up its push subscription failed: %@. Push delivery to this device stays blocked; the runtime retries the cleanup automatically on later notifications. Check the runtime log if it keeps failing.",
+            "devices_push_cleanup_pending": "The device no longer appears in the authorized list, so the revocation is confirmed. The cleanup result of its push subscription is unknown; if it is still pending, the runtime retries it automatically on later notifications. Check the runtime log if needed.",
+            "devices_push_cleanup_pending_response": "The runtime confirmed the revocation. The cleanup result of this device's push subscription is unknown; if it is still pending, the runtime retries it automatically on later notifications. The device list could not be refreshed; refresh it later to verify. Check the runtime log if needed.",
+            "devices_push_cleanup_unknown": "The revocation outcome could not be confirmed, and the cleanup result of this device's push subscription is also unknown. Refresh the device list: if the device still appears, the revoke may not have taken effect — check the runtime log; if it has disappeared, the runtime retries any pending cleanup automatically on later notifications.",
+            "devices_push_cleanup_inconsistent": "The runtime confirmed the revocation, but this device still appears in the authorized list. Refresh the list; if it persists, check the runtime log.",
+            "devices_push_cleanup_inconsistent_detail": " Its push subscription cleanup also failed: %@. Push delivery to this device stays blocked; the runtime retries the cleanup automatically on later notifications.",
+            "devices_push_cleanup_unknown_detail": " The cleanup result of its push subscription is unknown; if it is still pending, the runtime retries it automatically on later notifications.",
             "devices_actions": "Device actions",
             "devices_unknown_device": "Device",
             "refresh_all": "Refresh All",
@@ -1130,7 +1142,13 @@ enum L10n {
             "devices_revoke_confirm": "撤销“%@”的授权？",
             "devices_revoke_message": "该设备将立即断开，下次使用需要重新配对。",
             "devices_push_cleanup_warning_title": "推送订阅清理未完成",
-            "devices_push_cleanup_warning": "设备已撤销，但其推送订阅清理失败：%@。对该设备的推送投递已被阻断；可重试撤销或查看 runtime 日志。",
+            "devices_push_cleanup_warning": "设备已撤销，但其推送订阅清理失败：%@。对该设备的推送投递已被阻断；runtime 会在后续通知投递时自动重试清理；若持续失败，可查看 runtime 日志。",
+            "devices_push_cleanup_pending": "该设备已从已授权列表消失，撤销已确认。其推送订阅的清理结果未知；若仍待清理，runtime 会在后续通知投递时自动重试；必要时可查看 runtime 日志。",
+            "devices_push_cleanup_pending_response": "runtime 已确认撤销该设备。其推送订阅的清理结果未知；若仍待清理，runtime 会在后续通知投递时自动重试。设备列表刷新失败，可稍后刷新确认；必要时可查看 runtime 日志。",
+            "devices_push_cleanup_unknown": "撤销结果无法确认，该设备推送订阅的清理结果也未知。请刷新设备列表：若设备仍显示在列表中，撤销可能未生效，请查看 runtime 日志；若已消失，仍待清理的订阅由 runtime 在后续通知投递时自动重试。",
+            "devices_push_cleanup_inconsistent": "runtime 已确认撤销，但该设备仍出现在已授权列表中。请刷新列表；若持续显示，请查看 runtime 日志。",
+            "devices_push_cleanup_inconsistent_detail": "其推送订阅清理失败：%@。对该设备的推送投递已被阻断；runtime 会在后续通知投递时自动重试清理。",
+            "devices_push_cleanup_unknown_detail": "其推送订阅的清理结果未知；若仍待清理，runtime 会在后续通知投递时自动重试。",
             "devices_actions": "设备操作",
             "devices_unknown_device": "设备",
             "refresh_all": "全部刷新",

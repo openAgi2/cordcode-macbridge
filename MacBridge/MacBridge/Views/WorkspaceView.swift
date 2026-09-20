@@ -113,7 +113,7 @@ struct WorkspaceView: View {
         .alert(
             L10n.devicesPushCleanupWarningTitle,
             isPresented: Binding(
-                get: { deviceStore.revokeCleanupWarning != nil },
+                get: { deviceStore.isRevokeCleanupWarningPresented },
                 set: { if !$0 { deviceStore.dismissRevokeCleanupWarning() } }
             )
         ) {

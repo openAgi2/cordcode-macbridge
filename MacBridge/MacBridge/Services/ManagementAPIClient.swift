@@ -12,18 +12,51 @@ protocol PairingAPIProviding {
     func rejectPairing(_ pairingId: String) async throws
 }
 
-/// 撤销结果：撤销本身成功，但 web push 订阅清理可能失败（服务端响应的
-/// pushCleanupError——r4/r5 评审：投递授权由服务端 deny-by-default 过滤兜底，
-/// 这里只做可观测性提示，不影响撤销成功语义）。
-struct DeviceRevocation: Sendable {
-    let pushCleanupError: String?
+/// 撤销尝试的 API 边界契约（followups v9 §4.3.2）：四类 response class +
+/// 可诊断原因（不泄漏响应正文），跨过 DeviceAPIProviding → DeviceStore 边界。
+/// 任何结果都必须继续 typed reload（不能因 throw 提前跳过）。
+enum RevokeAttemptOutcome: Sendable, Equatable {
+    case confirmedClean
+    case confirmedCleanupFailure(pushCleanupError: String)
+    /// revoked:true 但 pushCleanupError 字段不可信（类型错/空串/纯空白）——
+    /// 保留撤销证据（服务端只有成功持久化才返回 true），cleanup 信息未知。
+    case confirmedCleanupUnknown
+    case protocolUnknown(RevokeProtocolIssue)
+    case transportOrHTTPFailure(RevokeTransportIssue)
+}
+
+/// protocolUnknown 的可诊断原因（2xx 体的形状，按 §4.3.2 分类表固定优先级）。
+enum RevokeProtocolIssue: Sendable, Equatable {
+    case emptyBody            // 200 但体零字节或纯空白
+    case malformedJSON        // 非 JSON 体
+    case revokedTypeMismatch  // 顶层非 object，或 revoked 值非布尔（含 null）
+    case missingRevokedKey    // 顶层 object 无 revoked 键
+    case revokedFalse         // revoked == false
+}
+
+/// transport/HTTP 失败的可诊断载体（§4.3.2）。
+enum RevokeTransportIssue: Sendable, Equatable {
+    case networkError(RevokeNetworkFailureCategory)
+    case httpStatus(status: Int, serverErrorCode: String?)
+    /// 响应体超过 64KiB 读取上限（流式累计第 65,537 byte 主动 cancel）。
+    case responseTooLarge
+}
+
+/// 稳定、可本地化、非敏感的网络失败类别（不把服务器正文或本地路径进 UI）。
+enum RevokeNetworkFailureCategory: String, Sendable, Equatable {
+    case offline
+    case timedOut
+    case cannotConnectToHost
+    case cancelled
+    case other
 }
 
 /// 设备列表与撤销的 API 抽象。`DeviceStore` 依赖此协议以便单元测试注入 stub，
-/// 同时让 `ManagementAPIClient` 在生产中实现。
+/// 同时让 `ManagementAPIClient` 在生产中实现。`revokeDevice` 为 non-throwing
+/// （§4.3.2 签名写死）：所有失败含 cancellation 映射进 outcome。
 protocol DeviceAPIProviding {
     func listDevices() async throws -> [TrustedDevice]
-    func revokeDevice(_ deviceId: String) async throws -> DeviceRevocation
+    func revokeDevice(_ deviceId: String) async -> RevokeAttemptOutcome
 }
 
 // MARK: - Management API 数据模型
@@ -65,13 +98,6 @@ struct TrustedDevice: Codable, Identifiable {
     let createdAt: String?
     let lastSeenAt: String?
     var id: String { deviceId }
-}
-
-/// POST /internal/devices/{id}/revoke 响应（pushCleanupError 仅在 web push
-/// 订阅清理失败时出现，见 go-bridge handleRevokeDevice）。
-private struct RevokeDeviceResponse: Decodable {
-    let revoked: Bool?
-    let pushCleanupError: String?
 }
 
 /// GET /internal/remote/status 响应
@@ -350,21 +376,116 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
         _ = try await performRequest("/internal/pairing/\(pairingId)/reject", method: "POST", using: pairingSession)
     }
 
-    // MARK: - Devices
+// MARK: - Devices
 
-    func listDevices() async throws -> [TrustedDevice] {
-        let data = try await performRequest("/internal/devices")
-        return try JSONDecoder().decode([TrustedDevice].self, from: data)
+func listDevices() async throws -> [TrustedDevice] {
+    let data = try await performRequest("/internal/devices")
+    return try JSONDecoder().decode([TrustedDevice].self, from: data)
+}
+
+/// 撤销尝试（§4.3.2）：专用 raw 请求路径（不修改 performRequest/其他调用方），
+/// 有界流式读取（64KiB），non-throwing——所有失败含 cancellation 映射进
+/// outcome。任何 outcome 都由 DeviceStore 继续 typed reload。
+func revokeDevice(_ deviceId: String) async -> RevokeAttemptOutcome {
+    var req = request("/internal/devices/\(deviceId)/revoke", method: "POST")
+    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    req.httpBody = Data()
+
+    let delegate = RevokeBoundedDelegate(bodyLimit: Self.revokeBodyLimit)
+    let config = URLSessionConfiguration.ephemeral
+    config.timeoutIntervalForRequest = 2
+    config.timeoutIntervalForResource = 5
+    config.waitsForConnectivity = false
+    let session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+    defer { session.finishTasksAndInvalidate() }
+
+    let raw = await delegate.perform(req, session: session)
+    switch raw {
+    case .tooLarge:
+        return .transportOrHTTPFailure(.responseTooLarge)
+    case .network(let error):
+        return .transportOrHTTPFailure(.networkError(Self.categorizeNetworkFailure(error)))
+    case .body(let status, let data):
+        guard (200...299).contains(status) else {
+            return .transportOrHTTPFailure(.httpStatus(status: status, serverErrorCode: Self.decodeServerErrorCode(data)))
+        }
+        return Self.classifyRevokeBody(data)
     }
+}
 
-    func revokeDevice(_ deviceId: String) async throws -> DeviceRevocation {
-        let data = try await performRequest("/internal/devices/\(deviceId)/revoke", method: "POST")
-        // 撤销已在 HTTP 层成功；响应体解码失败不回滚撤销，只丢失清理提示。
-        let response = try? JSONDecoder().decode(RevokeDeviceResponse.self, from: data)
-        return DeviceRevocation(pushCleanupError: response?.pushCleanupError)
+/// 撤销响应体读取上限（§4.3.2：网络读取阶段硬上限，非事后断言）。
+private static let revokeBodyLimit = 65_536
+
+/// 2xx 体的分类表（§4.3.2：无重叠、全覆盖、固定优先级，按序判定先命中先归属）。
+private static func classifyRevokeBody(_ data: Data) -> RevokeAttemptOutcome {
+    // 1. 零字节或纯空白 → emptyBody（含空 Data）。
+    if data.allSatisfy({ $0 == 0x20 || $0 == 0x09 || $0 == 0x0A || $0 == 0x0D }) {
+        return .protocolUnknown(.emptyBody)
     }
+    // 2. JSON 语法非法 → malformedJSON。fragmentsAllowed：顶层标量（null/string/
+    //    number/bool）是合法 JSON，须解析成功后由第 3 步判 revokedTypeMismatch，
+    //    不得误归 malformedJSON。
+    guard let payload = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) else {
+        return .protocolUnknown(.malformedJSON)
+    }
+    // 3. 顶层非 object（null/array/string/number/bool）→ revokedTypeMismatch。
+    guard let dict = payload as? [String: Any] else {
+        return .protocolUnknown(.revokedTypeMismatch)
+    }
+    // 4. 无 revoked 键 → missingRevokedKey。
+    guard dict.keys.contains("revoked") else {
+        return .protocolUnknown(.missingRevokedKey)
+    }
+    // 5. revoked 值非布尔（含 null/数字/字符串）→ revokedTypeMismatch。
+    //    NSNumber-Bool 桥接会把数字 1 当 true，须按 CFBoolean 类型判定真 JSON 布尔。
+    guard let number = dict["revoked"] as? NSNumber,
+          CFGetTypeID(number) == CFBooleanGetTypeID() else {
+        return .protocolUnknown(.revokedTypeMismatch)
+    }
+    let revoked = number.boolValue
+    // 6. revoked == false → revokedFalse。
+    guard revoked else {
+        return .protocolUnknown(.revokedFalse)
+    }
+    // 7-9. revoked == true。
+    guard let cleanup = dict["pushCleanupError"] else {
+        return .confirmedClean
+    }
+    if let message = cleanup as? String {
+        // 8. 非空非空白 string → confirmedCleanupFailure。
+        if !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .confirmedCleanupFailure(pushCleanupError: message)
+        }
+    }
+    // 9. 类型错误（非 string，含 null）或空串/纯空白 → confirmedCleanupUnknown。
+    return .confirmedCleanupUnknown
+}
 
-    // MARK: - Logs
+/// 非 2xx 时尽力解码体 {"error": ...} 作为 serverErrorCode（非 string 或缺失 → nil）。
+private static func decodeServerErrorCode(_ data: Data?) -> String? {
+    guard let data, let payload = try? JSONSerialization.jsonObject(with: data) else { return nil }
+    guard let dict = payload as? [String: Any] else { return nil }
+    return dict["error"] as? String
+}
+
+/// URLError → 稳定可本地化非敏感类别（§4.3.2；不进服务器正文/本地路径）。
+private static func categorizeNetworkFailure(_ error: Error) -> RevokeNetworkFailureCategory {
+    guard let urlError = error as? URLError else { return .other }
+    switch urlError.code {
+    case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed:
+        return .offline
+    case .timedOut:
+        return .timedOut
+    case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+        return .cannotConnectToHost
+    case .cancelled:
+        return .cancelled
+    default:
+        return .other
+    }
+}
+
+// MARK: - Logs
 
     func getRecentLogs() async throws -> [String] {
         let data = try await performRequest("/internal/logs/recent")
@@ -411,9 +532,100 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
         return try TopologyMonitorStatusCodec.decode(data)
     }
 
-    enum ManagementError: Error {
-        case httpError(Int)
-        case invalidURL
+enum ManagementError: Error {
+    case httpError(Int)
+    case invalidURL
+}
+}
+
+// MARK: - 撤销 raw 请求的有界 delegate（§4.3.2）
+
+/// 撤销 raw 请求结果：body ≤ 上限；tooLarge = 流式累计超过上限（主动 cancel）；
+/// network = 传输失败（含 cancellation）。
+private enum RawRevokeResult {
+    case body(status: Int, data: Data)
+    case tooLarge
+    case network(Error)
+}
+
+/// 撤销请求的专用 delegate（每次请求新建一个实例）：
+/// - 流式累计响应体，第 65,537 byte **立即 cancel**（网络读取阶段硬上限，
+///   不是 `URLSession.data(for:)` 收完再查的事后断言）；
+/// - 主动超限 cancel 产生的 `URLError.cancelled` **不覆盖已锁定的
+///   `responseTooLarge`**（R8-B3：didComplete 先查 tooLarge 再查 error）；
+/// - `Content-Length` 超限可提前拒绝（`.cancel` disposition），但流式上限
+///   兜底无 Content-Length 的 chunked 响应（不单独依赖 header）；
+/// - 拒绝 redirect（Authorization 绝不转发到 Location）。
+private final class RevokeBoundedDelegate: NSObject, URLSessionDataDelegate {
+    private let bodyLimit: Int
+    private var continuation: CheckedContinuation<RawRevokeResult, Never>?
+    private var buffer = Data()
+    private var response: URLResponse?
+    private var tooLarge = false
+
+    init(bodyLimit: Int) {
+        self.bodyLimit = bodyLimit
+        super.init()
+    }
+
+    func perform(_ request: URLRequest, session: URLSession) async -> RawRevokeResult {
+        await withCheckedContinuation { cont in
+            self.continuation = cont
+            session.dataTask(with: request).resume()
+        }
+    }
+
+    // 拒绝 redirect：不把 Authorization 转发到 Location。
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        self.response = response
+        buffer = Data()
+        if let http = response as? HTTPURLResponse,
+           let raw = http.value(forHTTPHeaderField: "Content-Length"),
+           let length = Int(raw), length > bodyLimit {
+            tooLarge = true
+            completionHandler(.cancel)
+            return
+        }
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        guard !tooLarge else { return }
+        buffer.append(data)
+        if buffer.count > bodyLimit {
+            // 第 65,537 byte：先锁定 tooLarge 再 cancel——cancel 产生的
+            // URLError.cancelled 不得覆盖该 reason（R8-B3）。
+            tooLarge = true
+            dataTask.cancel()
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        guard let cont = continuation else { return }
+        continuation = nil
+        if tooLarge {
+            cont.resume(returning: .tooLarge)
+        } else if let error {
+            cont.resume(returning: .network(error))
+        } else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            cont.resume(returning: .body(status: status, data: buffer))
+        }
     }
 }
 
