@@ -840,7 +840,7 @@ class Monitor:
         self.current_gen_key: Optional[str] = None
         self.milestone_reached = False
         self.run_start_ts: Optional[float] = None
-        self.successful_samples_this_run = 0
+        self.successful_transactions_this_run = 0
         self.idle_checks_this_run = 0
 
     # -- 路径 --
@@ -921,9 +921,13 @@ class Monitor:
             kind = record.get("recordKind")
             if kind == RECORD_SAMPLE:
                 gen_key = "%s:%s" % (record.get("pid"), record.get("epoch"))
+                sample = record.get("sample") or {}
                 gen = self.state["generations"].setdefault(gen_key, {
-                    "startedAt": record.get("startedAt"),
-                    "slots": {}, "tier": None})
+                    "startedAt": sample.get("startedAt"),
+                    "startedAtTs": self._parse_rfc3339(
+                        sample.get("startedAt") or ""),
+                    "slots": {}, "tier": None,
+                    "pid": record.get("pid"), "epoch": record.get("epoch")})
                 slot = record.get("slot")
                 if slot is not None and slot not in gen["slots"]:
                     gen["slots"][str(slot)] = record
@@ -1004,7 +1008,8 @@ class Monitor:
             return
         if self.now() - self.run_start_ts < DISCOVERY_INTERVAL_S:
             return
-        if self.successful_samples_this_run < 1 and self.idle_checks_this_run < 1:
+        if self.successful_transactions_this_run < 1 \
+                and self.idle_checks_this_run < 1:
             return
         self._clear_dirty_marker()
         self.state["transientCount"] = 0
@@ -1068,6 +1073,7 @@ class Monitor:
                                   slot=self._current_slot_hint(gen, now_ts))
             self._snapshot_state()
             return
+        self.successful_transactions_this_run += 1
         sample = result.sample
         if started_at is None:
             gen["startedAt"] = started_at_value
@@ -1089,7 +1095,7 @@ class Monitor:
         gen["slots"][str(slot)] = sample
         self._record(RECORD_SAMPLE, pid=sample["pid"], epoch=sample["epoch"],
                      slot=slot, sample=sample)
-        self.successful_samples_this_run += 1
+        self.successful_transactions_this_run += 1
         # 代际 tier 重算（首末有效样本）
         samples = [gen["slots"][k] for k in sorted(gen["slots"], key=int)]
         if len(samples) >= 2:
@@ -1240,6 +1246,7 @@ class Monitor:
             self._record_rejected(result.reason)
             self._snapshot_state()
             return
+        self.successful_transactions_this_run += 1
         sample = result.sample
         gen_key = self._generation_from_sample(sample)
         started_at_ts = self._parse_rfc3339(started_at_value or "")
@@ -1247,6 +1254,11 @@ class Monitor:
             "startedAt": started_at_value, "startedAtTs": started_at_ts,
             "slots": {}, "tier": None, "pid": sample["pid"],
             "epoch": sample["epoch"]})
+        if gen.get("startedAtTs") is None and started_at_ts is not None:
+            # 恢复路径：journal 重放缺 startedAtTs 的旧代际在此回填，
+            # 否则后续 slot 事务全部误判 out_of_slot。
+            gen["startedAt"] = started_at_value
+            gen["startedAtTs"] = started_at_ts
         self.current_gen_key = gen_key
         now_ts = self.now()
         slot = slot_for_timestamp(started_at_ts, now_ts) if started_at_ts else None
@@ -1261,7 +1273,7 @@ class Monitor:
             gen["slots"][str(slot)] = sample
             self._record(RECORD_SAMPLE, pid=sample["pid"],
                          epoch=sample["epoch"], slot=slot, sample=sample)
-            self.successful_samples_this_run += 1
+            self.successful_transactions_this_run += 1
         self._mark_missed_slots(gen, started_at_ts, now_ts) if started_at_ts else None
         self._snapshot_state()
 

@@ -682,6 +682,20 @@ class JournalCrashPointTests(unittest.TestCase):
         mon.recover_from_journal()
         self.assertTrue(mon.state["alertStop"])
 
+    def test_restart_mid_generation_restores_slot_scheduling(self):
+        # 回归：journal 重放必须从嵌套 sample 恢复 startedAt/startedAtTs，
+        # 否则重启后该代际后续 slot 事务全部误判 out_of_slot。
+        self.journal.append_record(self.sample_record)
+        mon = self.make_monitor()
+        mon.recover_from_journal()
+        gen = mon.state["generations"]["41028:12345"]
+        self.assertEqual(gen["startedAt"], "2026-09-20T03:19:24Z")
+        self.assertIsNotNone(gen["startedAtTs"])
+        # 恢复的 startedAtTs 能正确归属后续 slot（t_1 = startedAt+30min）
+        slot = monitor.slot_for_timestamp(gen["startedAtTs"],
+                                          gen["startedAtTs"] + monitor.SLOT_SPACING_S)
+        self.assertEqual(slot, 1)
+
     def test_transient_count_recovered(self):
         self.journal.append_record({
             "recordKind": "transient_crash", "pid": 0, "epoch": 0, "slot": -1,
@@ -869,7 +883,7 @@ class MilestoneTests(SubprocessTestBase):
         self.assertTrue(os.path.exists(self.mon.dirty_marker_path))
         self.mon.state["transientCount"] = 3   # 模拟此前累计
         self.mon.run_start_ts = self.mon.now()
-        self.mon.successful_samples_this_run = 1
+        self.mon.successful_transactions_this_run = 1
         self.fake_now[0] += monitor.DISCOVERY_INTERVAL_S + 1
         self.mon.check_healthy_milestone()
         self.assertFalse(os.path.exists(self.mon.dirty_marker_path))
@@ -889,7 +903,7 @@ class MilestoneTests(SubprocessTestBase):
         self.mon.journal.open_for_append()
         self.mon.enter_run()
         self.mon.run_start_ts = self.mon.now()
-        self.mon.successful_samples_this_run = 1
+        self.mon.successful_transactions_this_run = 1
         self.fake_now[0] += 10   # 不足 60s
         self.mon.check_healthy_milestone()
         self.assertTrue(os.path.exists(self.mon.dirty_marker_path))
