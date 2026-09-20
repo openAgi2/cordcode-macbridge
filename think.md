@@ -31,7 +31,19 @@ inode**（state 快照 tmp+rename 与 JSONL append 分开，rename 替换的文�
 cancel，`responseTooLarge`）；pending 文案按 response-confirmed / reload-absent
 拆分，reload failed 不得声称「已从列表消失」；operation token 统一递增且 revoke
 期间 refresh 合并进强制 reload，`isRevoking` 纳入同一原子提交与 stale guard。
-详见 `docs/2026-09-20-memory-followups.md`（v8）。
+详见 `docs/2026-09-20-memory-followups.md`（v8）。Round 8 补：JSONL 为唯一
+durable truth（唯一键 `(pid,epoch,slot,recordKind)`，持锁 append+fsync 后才写
+state 快照，启动重放重建 state、重复行确定性去重）；连续 crash 计数改 **dirty-run
+协议**（启动先写 run_in_progress，达成 healthy milestone（存活一个完整 discovery
+cycle + 一次成功采样/idle 检查）才清除；重启见未清 marker 计一次 transient；
+fatal/clean 先写各自 marker 清 dirty 再 exit 0）；`responseTooLarge` 无特例机械
+走 13/14/15 行（主动超限 cancel 不被 URLError.cancelled 覆盖 reason）；并发
+revoke/revoke 在 store 层拒绝（isRevoking 时第二次调用 busy 返回、不发网络请求
+不递增 token），强制 reload 走内部 forced 路径不被 refresh 合并；UserDefaults 缺
+键按源码默认值记 `source=code_default`（本机 autoRestartIntervalMinutes 即缺键
+形状）；数据根不可信时启动前安全失败 exit 0+stderr 最小诊断（不承诺 fatal.json
+可写），open 一律 O_NOFOLLOW+事后 fstat。详见
+`docs/2026-09-20-memory-followups.md`（v9）。
 
 ## 2026-09-19 bridge runtime "内存 2G+"：已证明不是 2.5GB 可达 Go heap；swapped/retained 页状态与压缩器机制待一致遥测；LLDB 直读 gcController 取证法
 
