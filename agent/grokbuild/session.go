@@ -72,6 +72,12 @@ type grokSession struct {
 	// meta.rs user_message_chunk_meta stamps only promptIndex). Guarded by
 	// pendingPermsMu: written by readLoop (emitTurnScoped), cleared by Send.
 	pendingUserEcho string
+	// userEchoEmitted marks that this turn already flushed a user_message
+	// (2026-09-20: real-device logs show the CLI never echoes user_message_chunk
+	// on the stdio session wire — only journal/leader broadcast — so Send seeds
+	// pendingUserEcho from its own prompt; the flag drops any late upstream echo
+	// to prevent a duplicate user turn). Reset by dispatchTurn each turn.
+	userEchoEmitted bool
 	pendingPerms    map[string][]permissionOption
 	// pendingPlans registers driver-rail x.ai/exit_plan_mode reverse-requests
 	// (iOS-originated turns on the --no-leader actor). Leader-rail plans are
@@ -585,8 +591,22 @@ func (s *grokSession) Send(prompt string, images []core.ImageAttachment, files [
 	// Fire-and-forget from the caller's perspective: the terminal event is
 	// emitted by whichever rail settles the dispatcher first (response /
 	// cancel notification / EOF), exactly once (§8 单次结算).
-	_, err := s.dispatchTurn(content)
-	return err
+	if _, err := s.dispatchTurn(content); err != nil {
+		return err
+	}
+	// Seed the user echo from the prompt we just authored (2026-09-20 真机取证：
+	// 上游 CLI 不向 stdio 会话线回显 user_message_chunk —— 只写 journal/广播
+	// leader；等上游回显导致自有 turn 的 user_message 全天 0 次发出，SSV2 下
+	// iPhone 的乐观气泡在投影推进后被抹掉）。桥是这条 prompt 的作者，文本
+	// source-proven；首个带 promptId 的事件到达时由 emitTurnScoped 补身份发出。
+	if text := strings.TrimSpace(prompt); text != "" {
+		s.pendingPermsMu.Lock()
+		if !s.userEchoEmitted {
+			s.pendingUserEcho = text
+		}
+		s.pendingPermsMu.Unlock()
+	}
+	return nil
 }
 
 // CancelTurn implements core.TurnCanceler by sending ACP session/cancel.
@@ -1181,11 +1201,14 @@ func (s *grokSession) handleNotification(notif *agentNotification) {
 // single writer of this path; Send clears the buffer for the next turn.
 func (s *grokSession) emitTurnScoped(ev core.Event) {
 	if ev.Type == core.EventUserMessage && ev.TurnID == "" {
-		if text := strings.TrimSpace(ev.Content); text != "" {
-			s.pendingPermsMu.Lock()
-			s.pendingUserEcho = text
-			s.pendingPermsMu.Unlock()
+		// 已发出过（Send 种子已 flush）：丢弃迟到的上游回显，防同 turn 重复用户行。
+		s.pendingPermsMu.Lock()
+		if !s.userEchoEmitted {
+			if text := strings.TrimSpace(ev.Content); text != "" {
+				s.pendingUserEcho = text
+			}
 		}
+		s.pendingPermsMu.Unlock()
 		return
 	}
 	s.pendingPermsMu.Lock()
@@ -1194,6 +1217,7 @@ func (s *grokSession) emitTurnScoped(ev core.Event) {
 	if echo != "" && ev.TurnID != "" {
 		s.pendingPermsMu.Lock()
 		s.pendingUserEcho = ""
+		s.userEchoEmitted = true
 		s.pendingPermsMu.Unlock()
 		s.emit(core.Event{
 			Type:    core.EventUserMessage,

@@ -146,3 +146,51 @@ func TestEmitTurnScoped_IdentitylessEchoWithoutFollowUpStaysBuffered(t *testing.
 		t.Fatalf("buffer content mismatch: %q", buffered)
 	}
 }
+
+// 2026-09-20 真机取证：上游 CLI 从不向 stdio 会话线回显 user_message_chunk
+//（全天 user_message 转发 0 次），Send 必须自己种 echo——桥是 prompt 作者。
+func TestSend_SeedsEchoWhenUpstreamNeverEchoes(t *testing.T) {
+	s := newEchoTestSession()
+	if err := s.Send("浩克和黑矮星谁厉害", nil, nil); err != nil {
+		t.Fatalf("Send failed: %v", err)
+	}
+	// 首个带 promptId 的事件到达 → 种子 echo 先补身份发出。
+	feedUpdate(t, s, `{"sessionId":"sess-echo","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"思考"}},"_meta":{"promptId":"turn-seed"}}`)
+
+	events := drainEchoEvents(t, s)
+	// Send 也会产生 turn_started（dispatchTurn emit）；过滤后必须有带身份的 user_message。
+	var userMsgs []core.Event
+	for _, ev := range events {
+		if ev.Type == core.EventUserMessage {
+			userMsgs = append(userMsgs, ev)
+		}
+	}
+	if len(userMsgs) != 1 {
+		t.Fatalf("expected exactly one seeded user_message, got %d (%+v)", len(userMsgs), events)
+	}
+	if userMsgs[0].TurnID != "turn-seed" || userMsgs[0].Content != "浩克和黑矮星谁厉害" {
+		t.Fatalf("seeded echo must carry turn identity and prompt text, got %+v", userMsgs[0])
+	}
+}
+
+// 种子已 flush 后，迟到的上游回显不得制造第二条用户行。
+func TestSend_LateUpstreamEchoDoesNotDuplicate(t *testing.T) {
+	s := newEchoTestSession()
+	if err := s.Send("第一次提问", nil, nil); err != nil {
+		t.Fatalf("Send failed: %v", err)
+	}
+	feedUpdate(t, s, `{"sessionId":"sess-echo","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"思考"}},"_meta":{"promptId":"turn-dup"}}`)
+	feedUpdate(t, s, `{"sessionId":"sess-echo","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"第一次提问"}}}`)
+	feedUpdate(t, s, `{"sessionId":"sess-echo","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"回答"}},"_meta":{"promptId":"turn-dup"}}`)
+
+	events := drainEchoEvents(t, s)
+	count := 0
+	for _, ev := range events {
+		if ev.Type == core.EventUserMessage {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("late upstream echo must not duplicate the user row, got %d user_message events: %+v", count, events)
+	}
+}

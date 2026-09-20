@@ -288,6 +288,7 @@ func (s *grokSession) dispatchTurnWithStart(content []contentBlock, onStart func
 	// (their wire ids are already dead — upstream drops late responses).
 	s.pendingPermsMu.Lock()
 	s.pendingUserEcho = ""
+	s.userEchoEmitted = false
 	staleQuestions := make([]string, 0, len(s.pendingQuestions))
 	for toolCallID := range s.pendingQuestions {
 		staleQuestions = append(staleQuestions, toolCallID)
