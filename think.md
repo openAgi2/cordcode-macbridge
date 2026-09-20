@@ -1,3 +1,18 @@
+## 2026-09-20 opencode-web 目录查询挂死：空 .opencode + 全局 plugin + 代理挂起 npm（已修复，未改代码）
+
+现象：目标 worktree 的 scoped query 0 字节挂死（>15s），health 20ms，其它目录毫秒级；driver 每轮
+discovery 8s 超时 no-broadcast（owner iPhone 列表报错/停更的直接原因）。根因（上游 1.18.20
+`a9cac91d` 源码链）：实例 boot 对每个含 `.opencode/` 的目录 fork `npm install @opencode-ai/plugin`
+（`config.ts:425-447`），目录无 `node_modules` 时 Arborist 真实网络安装（`npm.ts`），npm tarball 经
+代理 fake-IP（198.18.x.x）永久挂起且全链无超时；全局 config（当日 19:59 加 plugin 条目）使
+`plugin.init` 的 `waitForDependencies`（`config.ts:618` join deps）永久等待 → InstanceStore 按目录
+Deferred 永不 resolve。修复：`.opencode/` 离线补装 plugin/sdk/zod（两个短路门均为存在性检查）+
+SIGTERM 重启。完整报告见 iOS 仓 `docs/2026-09-20-opencode-web-directory-query-hang-phase0-report.md`。
+教训：①opencode server 的 boot 日志在 `logs/opencode-managed-server.err.log`，可直接定位挂点，
+时间戳 UTC；②「health 200」不代表实例层健康——目录级楔子要按目录探针（`/project/current?directory=`）；
+③`ensureRunning` 会收养健康进程，重启前必须先杀旧 server 再触发 go-bridge 重拉；④任何项目目录
+出现空 `.opencode/`（无 node_modules）都会以同机制挂死，含 Desktop sidecar 重启后。
+
 
 ## 2026-09-20 内存治理 r6 后续三项落地：零值拒绝态 + 撤销清理警告 + 首采单点观测（动态结论已按评审撤回）
 
