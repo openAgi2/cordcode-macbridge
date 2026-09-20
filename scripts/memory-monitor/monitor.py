@@ -1166,6 +1166,16 @@ class Monitor:
             sys.stderr.write("memory-monitor: pre-startup safe failure: %s\n"
                              % exc.args[0])
             return 0
+        # launchd 在脚本校验前已创建 monitor.log（默认 umask）；目录 0700 之外
+        # 再把文件本身收紧到 0600（§2.3.1 归档权限）。
+        log_path = os.path.join(self.data_root, "monitor.log")
+        try:
+            log_stat = os.lstat(log_path)
+            if stat.S_ISREG(log_stat.st_mode) and log_stat.st_uid == os.geteuid() \
+                    and log_stat.st_mode & 0o077:
+                os.chmod(log_path, 0o600)
+        except OSError:
+            pass
         if not self.acquire_lock():
             sys.stderr.write("memory-monitor: another instance holds the lock\n")
             return 0
