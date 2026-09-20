@@ -11,15 +11,17 @@ swapped 26.1M，`sysMinusHeapReleased` 23.7MB，numGC 4877——**单点观测**
 「单次 GC 代价小」「512MiB 无需下调」四项动态/配置结论已按 Round 1 评审（报告
 `docs/2026-09-20-memory-followups-review-report.md`，B2）撤回——单点 gauge 证不了
 活跃性、无 TotalAlloc 计数算不出分配率、14.6 分钟窗口裁不了 GOMEMLIMIT 默认值。
-复采改按**多代际监测**设计（默认 120 分钟自动重启；management URL 以 runtime.json
-bootstrap 而非 lsof 猜端口；epoch 核对须把 runtime.json 的 UUID 经 SHA-256 前 8
-字节 big-endian uint64（零值→1，与 go-bridge `managementBridgeEpoch` 逐字节同源）
-后再与 /internal/status 比较——两种 wire 表示不能直接相等；identity A→采集→
-identity B→重读 bootstrap 的原子采样事务防混代，负载覆盖用 runtime 自身计数器
-而非整机 load；告警为绝对越线 / footprint lifetime 峰值 / 趋势三类**独立 OR**
-触发的 provisional 线——趋势=4 样本 3 步每步 ≥8MiB（provisional 启发式，非实测
-噪声界），未越线不构成任何治理结论），受控长窗口（关自动重启）默认不采纳。详见
-`docs/2026-09-20-memory-followups.md`（v5）。
+复采改按**多代际监测**设计（默认 120 分钟自动重启；management URL 与鉴权以
+runtime.json + management-token bootstrap——Bearer header，401/403 记独立 rejected
+原因码，token 每次 launch 被 runtime 原子重写故纳入事务末重读——而非 lsof 猜
+端口；epoch 核对须把 runtime.json 的 UUID 经 SHA-256 前 8 字节 big-endian uint64
+（零值→1，与 go-bridge `managementBridgeEpoch` 逐字节同源）后再与 /internal/status
+比较——两种 wire 表示不能直接相等；identity A→采集→identity B→重读 bootstrap
+的原子采样事务防混代，负载覆盖用 runtime 自身计数器而非整机 load；告警为绝对
+越线 / footprint lifetime 峰值 / 趋势三类**独立 OR** 触发的 provisional 线——
+趋势=4 样本 3 步每步 ≥8MiB（provisional 启发式，非实测噪声界），未越线不构成
+任何治理结论），受控长窗口（关自动重启）默认不采纳。详见
+`docs/2026-09-20-memory-followups.md`（v6）。
 
 ## 2026-09-19 bridge runtime "内存 2G+"：已证明不是 2.5GB 可达 Go heap；swapped/retained 页状态与压缩器机制待一致遥测；LLDB 直读 gcController 取证法
 
