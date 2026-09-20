@@ -26,9 +26,11 @@ off-home membership（方案 M，阶段 2）的 parser 测试。与
 | 文件 | 对应真实文件 | 内容 |
 | --- | --- | --- |
 | `samples/settings.json` | `opencode.settings` | 1 个注册窗口 ID + defaultServerUrl |
-| `samples/window-registered.json` | `opencode.window.<uuid>.dat` | 3 active sidecar tab + tabs.info（tabKey 重算）+ tabs.recent + tabs.closed（full-URL server 形状） |
+| `samples/window-registered.json` | `opencode.window.<uuid>.dat`（23:30 采集） | 3 active sidecar tab + tabs.info（tabKey 重算）+ tabs.recent + tabs.closed（full-URL server 形状） |
+| `samples/window-fullurl-archived-tab.json` | 同上（23:58 采集） | 4 active tab：3 sidecar + **1 个 full-URL server tab，其 session 已归档**（非 Desktop 客户端按产品同款 `PATCH /session/:id {time:{archived}}` 归档后，Desktop 不删 tab——实测保留） |
 | `samples/window-orphan.json` | orphan 窗口文件 | `{"tabs":"[]"}`（不在 windowIds） |
-| `samples/global-home.json` | `opencode.global.dat` | server 行：list（凭据 REDACTED）+ projects（4096 → 8 worktree）+ recentlyClosed |
+| `samples/global-home.json` | `opencode.global.dat`（23:30 采集） | server 行：list（凭据 REDACTED）+ projects（4096 → 8 worktree）+ recentlyClosed |
+| `samples/global-home-offhome.json` | 同上（23:58 采集） | **M 状态活体**：home 行 7 worktree（无 ios-worktree），而 window fixture 的 2 个 sidecar tab 指向该目录——原始事故场景自然重现（discovery sessionCount 174→172 实证） |
 
 ## 脱敏策略（确定性映射，形状全保留）
 
@@ -51,15 +53,24 @@ off-home membership（方案 M，阶段 2）的 parser 测试。与
   `tabs.info` keys exact join 相等；断言双重编码保留、脱敏无泄漏、orphan
   语义保留。两方法结果一致（2026-09-20 执行记录见阶段 1 方案文档 §样本）。
 
-## 待补样本（owner 动作后追加）
+## 样本状态（2026-09-20 23:58 更新）
 
-阶段 1 方案要求四类 active-tab 样本；本目录当前含 happy path（3 sidecar
-root/unarchived）。以下三类待 owner 在 Desktop 手动制造后追加同规 fixture：
+四类 active-tab 样本中三类已有活体采集（本目录）：
 
-1. `window-archived-tab.json`——active tab 指向已归档 session（多窗口路径）；
-2. `window-overlimit-old-tab.json`——目录 root 数 >100 且 tab 指向返回窗口
-   外老 session；
-3. `window-fullurl-active-tab.json`——active tab 的 server 为完整 URL。
+1. happy path（3 sidecar root/unarchived tab）——`window-registered.json`；
+2. **active full-URL server tab**——owner 在默认 server（4096）下自然新建
+   session 产生，`window-fullurl-archived-tab.json` 第 4 个 tab；
+3. **active archived tab**——同一 tab：非 Desktop 客户端按产品同款
+   `PATCH /session/:id {"time":{"archived":ms}}`（与 CordCode iOS 左滑归档
+   同一 wire，`agent/opencode-web/sessions.go ArchiveSession`）归档后，
+   Desktop **不删 tab**（实测保留；源码依据：tab 移除仅由 Desktop 自身 UI
+   归档动作触发）。注：1.18.20 全客户端（Desktop/TUI/HTTP API）无 unarchive
+   路径，归档不可逆——样本目标为 owner 当日创建的一次性测试 session；
+4. child tab（session 有 parentID）——源码证明官方 UI 全路径不可达（方案
+   文档 §2.2），不设 fixture；算法按 by-ID proof 自然覆盖。
 
-child tab（session 有 parentID）经源码证明在当前官方 UI 全路径不可达（见
-方案文档 §合法 tab 裁决），不设 fixture；算法按 by-ID proof 自然覆盖。
+**未采集**：超限 old tab 的活体 persist（需在 Desktop 命令面板搜索打开一个
+窗口外老 session；owner 已明确不愿执行手动测试步骤）。其技术声明已用活体
+证据验证：目标老 session（Chat rank 105）by-ID 取回 200、窗口实测见方案
+文档 §1.3、palette 可达性源码锚点见 §2.3。若未来自然产生该状态，按本
+README 同规补 `window-overlimit-old-tab.json`。
