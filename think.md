@@ -23,8 +23,15 @@ runtime.json 的 UUID 经 SHA-256 前 8 字节 big-endian uint64（零值→1，
 scan-evidenced / cpu-active-only / idle 三层（CPU 60s 为 provisional，cpu-only 不
 算真实负载）；告警为绝对越线 / footprint lifetime 峰值 / 趋势三类**独立 OR**
 触发的 provisional 线——趋势=4 样本 3 步每步 ≥8MiB，未越线不构成任何治理结论），
-受控长窗口（关自动重启）默认不采纳。详见 `docs/2026-09-20-memory-followups.md`
-（v7）。
+受控长窗口（关自动重启）默认不采纳。Round 7 补：单实例锁用**独立稳定 lock
+inode**（state 快照 tmp+rename 与 JSONL append 分开，rename 替换的文件上 flock
+锁不住）；launchd 载体固定 `/usr/bin/python3` + 仓内系统标准库脚本，app domain
+`org.openagi.cordcode.link`，退出语义分 transient crash / fatal marker+exit 0 /
+告警 clean stop 三类；64KiB 为**网络读取阶段流式硬上限**（第 65,537 byte 立即
+cancel，`responseTooLarge`）；pending 文案按 response-confirmed / reload-absent
+拆分，reload failed 不得声称「已从列表消失」；operation token 统一递增且 revoke
+期间 refresh 合并进强制 reload，`isRevoking` 纳入同一原子提交与 stale guard。
+详见 `docs/2026-09-20-memory-followups.md`（v8）。
 
 ## 2026-09-19 bridge runtime "内存 2G+"：已证明不是 2.5GB 可达 Go heap；swapped/retained 页状态与压缩器机制待一致遥测；LLDB 直读 gcController 取证法
 
