@@ -343,7 +343,9 @@ app domain（restart policy 只读探测）=org.openagi.cordcode.link（project.
   `autoRestartIntervalMinutes=120`，`RuntimeManager.swift:622-624` 同源）并标
   `source=code_default`——**缺键不是采集错误**（本机实测 `defaults read` 对缺键
   返回错误而非默认值，脚本不得把「命令成功」当唯一有效形状）；
-- domain 不存在/命令失败/类型错误 → 该时点标 `unavailable`（**不得修改偏好**）；
+- domain 不存在 → 等价于两个键均缺 → `code_default`；命令失败/类型错误 → 该时点
+  标 `unavailable`，**同时记录运行时代码实际采用的 fallback effective value
+  （`source=invalid_type_fallback`，Round 9 终审注记 2）**（**不得修改偏好**）；
 - fixtures：present / missing / wrong-type 三形状。
 
 **调度/恢复测试（fake clock/state store）**：重启恢复、sleep 跳槽、重复唤醒、
@@ -620,8 +622,9 @@ lost-response 对账，呈现 reload-absent pending 文案；present → 14；fa
     **不递增 token**，返回明确的 busy 结果（`RevokeFlowResult.busy` 或等价
     typed 返回；测试可断言，不静默覆盖）——第一个 revoke 的 outcome、强制
     reload 与 cleanup warning 完整保留提交，不被 stale 丢弃。
-- 若 refresh/revoke 已在飞行中而新 revoke 开始：新 revoke 递增 gen → 旧 refresh
-  结果变 stale 被丢弃。
+- 若 refresh 已在飞行中而新 revoke 开始：新 revoke 递增 gen → 旧 refresh 结果变
+  stale 被丢弃。**（Round 9 终审注记 1 勘误：只有飞行中的 refresh 可被判 stale；
+  飞行中的 revoke 遇到第二笔 revoke 一律按上条 busy 拒绝，不递增 token。）**
 - **强制 reload 走内部 forced 路径**（`DeviceStore` 私有
   `performForcedReload()`，即 typed outcome 包装）——**不调用公开
   `loadDevices()`**（后者在 `isRevoking == true` 时会被当作普通 refresh 合并掉，
