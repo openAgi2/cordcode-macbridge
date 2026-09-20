@@ -735,3 +735,77 @@ UI 面积。
 | 3 | `responseTooLarge` 统一走 13/14/15 行；oversize × 三类 reload；主动超限 reason 不被 cancelled 覆盖 | §4.3.2（主动超限 cancel 不覆盖 reason）+ §4.3.3 特例（oversize 无特例，机械走 13/14/15；仅 404-not_found × absent 保留无警告特例） | §4.3.5 fixtures 4（三边界+任务取消+归类）+ 测试 5（oversize × absent/present/failed，absent 用 reload-absent pending） |
 | 4 | 并发 revoke/revoke 串行或拒绝；warning/dismiss generation 规则；强制 reload 内部路径；重叠 revoke 测试 | §4.3.6（store 层拒绝 busy、不递增 token；warning 生命周期三规则含 warning-generation；performForcedReload 内部路径不被 refresh 合并） | §4.3.5 测试 6（重叠 revoke：busy/网络次数=1/第一笔 warning 保留 + 全状态与 reload 次数断言） |
 | 5 | 缺键 UserDefaults effective-default 规则；数据根不可信时 fatal 诊断安全路径 | §2.3.3 实际 restart policy 记录（{rawPresence, effectiveValue, source}，缺键=code_default；present/missing/wrong-type fixture）+ §2.3.1 N2（启动前安全失败 exit 0+stderr，不承诺 fatal.json；O_NOFOLLOW+fstat） | §2.3.3 N1 三形状 fixture + §2.3.1 权限规则测试 |
+
+## 9. 开发阶段实施证据（2026-09-20，Round 9 通过后一次完成）
+
+### 9.1 B4 撤销管线（§4.3 全量）→ `fb8bed9`
+
+- `ManagementAPIClient.swift`：`RevokeAttemptOutcome` 五类契约；非抛出
+  raw request + per-request `URLSession` + `RevokeBoundedDelegate` 流式
+  64KiB 硬上限（读取阶段 cancel；Content-Length 预拒绝非唯一路径；主动超限
+  reason 不被 `URLError.cancelled` 覆盖）；9 行 2xx 分类表；非 2xx 尽力解码
+  error code；拒绝重定向。
+- `DeviceStore.swift`：operation coordinator（统一 generation、busy 拒绝、
+  refresh 合并、`performForcedReload` 内部路径、15 行 reducer、404 特例、
+  warning/dismissed generation、isRevoking 原子提交）。
+- `Localization.swift`：warning 副本更新（移除「可重试撤销」）+ 6 新键（en+zh）；
+  `WorkspaceView.swift`：presentation seam 绑定。
+- 测试：`ManagementAPIClientRevokeDecodeTests`（NWListener wire fixtures：
+  2xx 分类 19 形状/非 2xx/64KiB 三边界/lost response）+ `DeviceStoreTests`
+  重写（15 行矩阵/404 特例/busy/refresh 合并/stale refresh/dismiss）+
+  `WorkspaceViewTests` stub 适配——**31/31 定向通过**（watchdog 模式，复用
+  `build/test-derived-data`）。
+- 实施中修复的两个分类 bug（wire 测试暴露）：顶层 JSON 标量
+  （null/string/number/bool）需 `fragmentsAllowed` 才能正确归
+  `revokedTypeMismatch` 而非 `malformedJSON`；`{"revoked":1}` 的 NSNumber-Bool
+  桥接会把数字 1 当 true，改用 CFBoolean 类型判定真 JSON 布尔。
+- xcodegen 重生成工程纳入新测试文件。
+
+### 9.2 监测脚本（§2.3 全量）→ `292f42b` + `dabefb8` + `d95049e`
+
+- `scripts/memory-monitor/monitor.py`（单文件、仅标准库、/usr/bin/python3）+
+  `test_monitor.py`——**64/64 通过**：epoch 转换（活体 fixture
+  `68fef32a-…→2011574066258607221` + 零值分支）、URL 白名单、vmmap/ps
+  真实归档 fixture、payload/counter schema、告警三边界（恰等 8MiB/差 1byte/
+  非严格/步数不足）、slot 边界、crash point ×4、真实双进程锁（含 state
+  rename 替换 + kill -9）、dirty-run 子进程（kill -9 累计/五次升级 fatal/
+  milestone 重置/fatal-clean 不计入）、plist 契约、defaults 三形状、token
+  不出现在 stdout/stderr/JSONL/异常文本。
+- 活体 `probe` 验证：六步事务对真实 runtime 完整走通（epoch 派生与
+  `/internal/status` uint64 一致；vmmap/ps/scan counter 真实解析）。
+- 活体验证暴露并修复两个生产 bug（`d95049e`）：journal 重放从记录顶层读
+  startedAt（实际嵌在 sample 内）→ 代际中途重启后 slot 调度全丢；milestone
+  只数新样本 → 重启后首笔 duplicate（六步事务本身成功）永远达不到
+  milestone。均补回归测试。
+
+### 9.3 Release 重建 + 覆盖安装 + 新代际核验
+
+- `GOSUMDB=sum.golang.org ./scripts/build-unsigned-release.sh` →
+  `** BUILD SUCCEEDED **`，runtime `0.1.0 (commit: 292f42b004c3)`；
+  killall → 替换 `/Applications/CordCodeLink.app` → 重启。
+- 新代际：pid `54537`、bridgeEpoch UUID `c67e7b9b-…`、management 端口
+  `61736`；`probe` 对新代际 valid（sysMinusHeapReleased 21.3MB、footprint
+  current 49.7MB / peak 78.3MB、scan counter 全零——新进程初始态）。
+
+### 9.4 launchd 监测安装 + 首周期验证
+
+- `monitor.py install`：安装副本 + plist（`/usr/bin/python3` + 绝对路径、
+  KeepAlive SuccessfulExit:false、ThrottleInterval 30）+
+  `launchctl bootstrap` 成功。
+- 首周期实测：数据根 0700 / 文件 0600（launchd 预创建的 monitor.log 由
+  脚本启动时收紧，`dabefb8`）；锁 PID 写入；`restart_policy` 记录
+  **owner 实际配置：`autoRestartEnabled` user_set false、
+  `autoRestartIntervalMinutes` code_default 120**；slot 0 首样本（全指标）；
+  kickstart 升级后 discovery 正确产出 `duplicate`（slot 去重保留首条）；
+  healthy milestone 达成（marker 清除、transientCount 0）；elapsed/calendarDays
+  累计中。
+- **运行预期提示**：owner 的 `autoRestartEnabled=false` 意味着代际只在
+  runtime 自然重启（手动重启 App / Mac 重启 / 崩溃）时更替。完成门
+  「≥20 有效代际 + ≥8 scan-evidenced」的达成节奏取决于自然重启频率；
+  168h/7 日历日先到而代际数不足时按 §2.3.6 延长窗口并记录原因，不降门槛。
+
+### 9.5 剩余（§7.2/§7.3）
+
+- §7.2 监测执行中（launchd 常驻，完成条件见 §2.3.6；最终报告回填 §2.4）。
+- §7.3 owner 验收待做：正常撤销自然路径（设备消失、无警告）；异常态已由
+  deterministic 测试覆盖（§9.1）。
