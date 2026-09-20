@@ -1,14 +1,13 @@
-# 2026-09-20 内存治理 r6 通过后的三项后续（评审稿 v8，待 Round 8 终审）
+# 2026-09-20 内存治理 r6 通过后的三项后续（评审稿 v9，待 Round 9 终审）
 
-> 状态：**待 Round 8 终审（checklist verification）**。v7（`908444f7a83c1f10787ea1afe90578c1cbe768cd`）
-> 经 Round 7 终审（报告 `docs/2026-09-20-memory-followups-review-report-r7.md`，
-> commit `2ecad95f28bb55cfb92a2064022690801d12e8bd`）判定：Round 6 的 9 项准入
-> 均有处置，但 v7 具体化时引入 5 个实现级阻断（R7-B1 rename 上的 flock /
-> R7-B2 launchd 载体未定 / R7-B3 64KiB 只是事后断言 / R7-B4 第 9 行文案声称
-> 未观测事实 / R7-B5 generation 优先级与 `isRevoking` 缺失）+ 3 个非阻断项
-> （N1 counter schema / N2 时钟前跳 / N3 权限规则）。**v8 为 docs-only 修订：
-> 本轮零代码改动**，按 §8 的 Round 8 七条准入清单逐项关闭；Round 1–6 已通过
-> 裁决不再重开。
+> 状态：**待 Round 9 终审（checklist verification）**。v8（`b1c5ff70269ac3408fb2ad942df075c63659ffe6`）
+> 经 Round 8 终审（报告 `docs/2026-09-20-memory-followups-review-report-r8.md`，
+> commit `b20b651121a57bd756a7e23b6fe2593a418fff85`）判定：Round 7 的 5 阻断 +
+> 3 非阻断均已正面处置；剩 4 个 v8 机制推演出的闭合缺口（R8-B1 双文件崩溃
+> 一致性 / R8-B2 异常终止无法自记 crash 次数 / R8-B3 oversize 漏第 13 行 /
+> R8-B4 并发 revoke 未定义）+ 2 个同期修正（N1 缺键默认值 / N2 不可信数据根）。
+> **v9 为 docs-only 修订：本轮零代码改动**，按 §8 的 Round 9 五项 checklist
+> 逐项关闭；Round 1–7 已通过裁决冻结不重开。
 >
 > 历史背景：r6 复审（报告 commit `35a1b8062fee8853180eb67f5572637731003fde`）
 > 通过主修复（代码 `ee43c8f783710f826817c7a60109691e24689df7`）后记录三项非阻断
@@ -26,21 +25,21 @@ v1 的 iOS 旧身份复用与 `124b73d` 误含 think.md 已于 v2 更正（think
 归属误写已于 v4 更正（`d3c7404d72dedae981b71e6482218a366818c849` 只改 think.md、
 `c976ef41ff9c0e88aaaf42e15f3fa02271812c41` 只改 followups 文档）。
 
-### 1.2 本任务（v8 轮）三门点清单（全部完整哈希）
+### 1.2 本任务（v9 轮）三门点清单（全部完整哈希）
 
 ```text
 仓库路径=/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline
 分支=feat/ios-native-message-timeline
-门点1（读取源码/文档分析前）提交=2ecad95f28bb55cfb92a2064022690801d12e8bd（Round 7 终审报告提交；工作树干净，git status --porcelain 无输出）
-门点2（第一次修改文件前）提交=2ecad95f28bb55cfb92a2064022690801d12e8bd（干净；本轮只改 think.md 与本文档，无业务代码修改）
+门点1（读取源码/文档分析前）提交=b20b651121a57bd756a7e23b6fe2593a418fff85（Round 8 终审报告提交；工作树干净，git status --porcelain 无输出）
+门点2（第一次修改文件前）提交=b20b651121a57bd756a7e23b6fe2593a418fff85（干净；本轮只改 think.md 与本文档，无业务代码修改）
 门点3（构建/部署前）=不适用——本轮 docs-only（D0），无构建、无安装、无部署
-本轮源码核读=MacBridge/CordCodeLink.xcodeproj/project.pbxproj:524（PRODUCT_BUNDLE_IDENTIFIER=org.openagi.cordcode.link，与 Round 7 评审核验一致）、RuntimeManager.swift:622-624 / main.go:766-775/815-822 / runtime_startup.go（前轮已核读部分复核），只读取证用于规格对齐，未修改
-v7 历史来源事实=本文档 v7 提交 908444f7a83c1f10787ea1afe90578c1cbe768cd；同轮 think.md 提交 8938a018a74ccda3f478401ffd2b82789dfec1c2
-think.md 同轮提交（v8 轮）=5626248941ce88fa3ea85720a7fca96fa21b4671（只改 think.md）
-本文档（v8）提交=本提交（只改 docs/2026-09-20-memory-followups.md；最终哈希在送审说明中给出，不在正文构造自引用）
+本轮只读核验=defaults read org.openagi.cordcode.link autoRestartIntervalMinutes → "Could not find key"（缺键形状本机复现，与 Round 8 评审 N1 一致）；前轮源码核读部分未变化
+v8 历史来源事实=本文档 v8 提交 b1c5ff70269ac3408fb2ad942df075c63659ffe6；同轮 think.md 提交 5626248941ce88fa3ea85720a7fca96fa21b4671
+think.md 同轮提交（v9 轮）=f845a3a8a77c1f8a4cae999be38f3d36817b243b（只改 think.md）
+本文档（v9）提交=本提交（只改 docs/2026-09-20-memory-followups.md；最终哈希在送审说明中给出，不在正文构造自引用）
 任务预期分支=feat/ios-native-message-timeline
-配套仓库路径/分支/提交=/Users/jacklee/Projects/cordcode-ios-native-message-timeline / feat/ios-native-message-timeline / 389a179a1b01ad2a858f24b5b11ea41058e02381（门点1 实测，干净；与 Round 4–7 评审门点一致）
-预期产品特性=本轮无产品代码变化；当前部署仍为 124b73d7b0f2（Round 7 评审实测）
+配套仓库路径/分支/提交=/Users/jacklee/Projects/cordcode-ios-native-message-timeline / feat/ios-native-message-timeline / 389a179a1b01ad2a858f24b5b11ea41058e02381（门点1 实测，干净；与 Round 4–8 评审门点一致）
+预期产品特性=本轮无产品代码变化；当前部署仍为 124b73d7b0f2（Round 8 评审实测）
 ```
 
 ### 1.3 `124b73d` 真实文件范围（9 个）
@@ -107,15 +106,14 @@ bridge epoch=未记录（采样时未采集该字段——诚实标注，不回�
 **无法补证说明**：PID 12110 已消亡，时间序列无法回溯采集；选择撤回，不以替代
 数据冒充。
 
-### 2.3 复采设计（R2–R7 修订总集）
+### 2.3 复采设计（R2–R8 修订总集）
 
 **前提**：`autoRestartEnabled` / `autoRestartIntervalMinutes` 是可变 UserDefaults
-（app domain **`org.openagi.cordcode.link`**，`project.pbxproj:524`；`RuntimeManager.swift:622-624`
-周期重读；默认 true/120 只是缺省值）——监测期间实际值必须记录（§2.3.3），不得
-以默认值冒充运行时事实。多代际监测不回答 27h 同进程累积问题（受控长窗口不
-采纳为默认，§6.2）。
+（app domain `org.openagi.cordcode.link`，`project.pbxproj:524`；`RuntimeManager.swift:622-624`
+周期重读；**缺键时源码默认 true/120**——见 §2.3.3 N1 规则）。多代际监测不回答
+27h 同进程累积问题（受控长窗口不采纳为默认，§6.2）。
 
-**端点与 bootstrap 形状（源码核读，与 Round 2–7 评审实测一致）**：
+**端点与 bootstrap 形状（源码核读，与 Round 2–8 评审实测一致）**：
 
 - `runtime.json`（`runtime_startup.go` `WriteReadyFrame` 原子写）：
   `managementUrl`、`pid`、`bridgeEpoch`（**UUID 字符串**）。
@@ -134,7 +132,7 @@ bridge epoch=未记录（采样时未采集该字段——诚实标注，不回�
 - 实测同进程监听 management（`127.0.0.1:61945`）与 bridge（`*:8777`）——lsof
   无法唯一选择 management 端口，仅作诊断交叉检查。
 
-#### 2.3.1 采集事务与安全契约（六步 + R6-B1 + R7-N3 权限确定规则）
+#### 2.3.1 采集事务与安全契约（六步 + R6-B1 + R7-N3 + R8-N2）
 
 **URL 严格校验（发任何请求之前）**：解析 `managementUrl`，要求全部满足，否则
 rejected（`bootstrap_invalid`，不崩溃）：
@@ -155,13 +153,17 @@ rejected（`bootstrap_invalid`，不崩溃）：
   Authorization 转发到 Location。
 - 错误归档只保留 status/reason code，不保留完整 request/headers。
 
-**归档权限（R7-N3 确定规则，替换 v7 的「修复或拒绝启动」二选一）**：归档目录
-0700、文件 0600；**启动时验证权限**。处置规则写死：
+**归档权限与文件打开规则（R7-N3 + R8-N2）**：归档目录 0700、文件 0600；**启动
+时验证权限**。处置规则写死：
 
 - owner 仍是当前 uid 且**仅 mode 过宽** → `chmod` 收紧后继续；
-- owner 错 / 类型错（非普通文件）/ symlink / 其他不可修复异常 → 写 fatal
-  reason 并按 §2.3.3 **永久 fatal stop** 语义退出（fatal marker + exit 0，
-  不进重启循环）；
+- **open lock/state/temp/log 一律 `O_NOFOLLOW` + open 后 `fstat` 复核**（防
+  lstat→open 的 TOCTOU 竞态）；
+- owner 错 / 类型错（非普通文件）/ symlink / 数据根不可写 / 其他不可修复异常
+  → **启动前安全失败**：**不向该数据根写任何文件（包括 fatal.json——不虚假
+  承诺 marker 可写）**，以 **exit 0 + stderr 最小诊断**结束（launchd 的
+  StandardErrorPath 在脚本校验前已打开；若该路径本身不可用，诊断丢失是可接受
+  的诚实边界，报告为「启动前安全失败，无持久诊断」）；
 - 临时文件**从创建瞬间即 0600**（以 0600 mode 创建，不得先按默认 umask 创建
   再事后 chmod）。
 
@@ -186,7 +188,7 @@ rejected（`bootstrap_invalid`，不崩溃）：
 5. **bootstrap 重读（含 token）**：再读 `runtime.json` 与 `management-token`，
    URL/pid/原始 UUID/token 内容均未变，否则 `bootstrap_rewritten`。
 6. **提交判定**：A == B 且所有命令成功且 `startedAt` 与该代已记录值一致且
-   bootstrap 重读未变 → **有效样本**（单条 JSONL append，见 §2.3.3）；否则
+   bootstrap 重读未变 → **有效样本**（按 §2.3.3 journal 协议提交）；否则
    rejected（原因码：`bootstrap_unavailable` / `bootstrap_invalid` /
    `management_token_unavailable` / `bootstrap_mismatch` / `redirect_rejected`
    / `auth_rejected` / `command_failed` / `command_timeout` / `payload_invalid`
@@ -228,7 +230,7 @@ numGC}`（数值）、`processUserCPUSeconds`/`processSystemCPUSeconds`（数值
 rejected（`payload_invalid`）。`processCPUAvailable == false` → CPU 指标标
 unavailable（负载门回落到 scan 计数器）。
 
-**`agentBackgroundScans:<backendID>` wire schema（R7-N1，完成门证据的最小契约）**：
+**`agentBackgroundScans:<backendID>` wire schema（R7-N1）**：
 
 - 对象必须为 map；`scans` / `turnItemRequests` / `scannedTurns` 为**非负整数**；
 - **缺整个对象** = 该 backend 无此证据（不是错误，不标 unavailable）；
@@ -236,13 +238,12 @@ unavailable（负载门回落到 scan 计数器）。
   `unavailable`——不按 0、不产生负 delta、**不导致整笔样本失败**；
 - 代际 `scan-evidenced` 判定：至少一个 backend 的**同名 counter** 首末可比较
   且 delta > 0（全部 unavailable 的 backend 不贡献证据）；
-- fixtures：缺字段、类型错、计数回退、多 backend 混合（一个正常一个
-  unavailable）——防完成门被 malformed optional 数据误触发。
+- fixtures：缺字段、类型错、计数回退、多 backend 混合。
 
 **fixture 分层**：**parser fixture 与纯算法 fixture 分开**——vmmap/ps 用真实
 归档输出脱敏 fixture；epoch 转换/阈值边界/counter schema 用合成 fixture。
 
-#### 2.3.3 调度与恢复模型（R6-B2 + R7-B1/B2 + R7-N2）
+#### 2.3.3 调度与恢复模型（R6-B2 + R7-B1/B2 + R8-B1/B2 + N1/N2）
 
 **代际原点**：slot k = startedAt + 30k 分钟（k=0..3）；**slot 窗口 =
 [t_k, t_k+15min)**（含左不含右），样本时间戳落入即归属该 slot；窗口外记
@@ -252,46 +253,51 @@ unavailable（负载门回落到 scan 计数器）。
 **代际发现节奏**：每 60s 检查 bootstrap（runtime.json 内容/stat）与 runtime
 存活性；变化 → 新代际发现流程（立即执行首个可用 slot 事务）。
 
-**时钟跳变（R7-N2 补前跳）**：样本时间戳 < 上一样本 → 该对不参与趋势，记
-`clock_anomaly`。完成门的 elapsed 定义：维护持久化 `last_observed_wallclock`，
-每次观测差 d：`d < 0`（回拨）→ 顺延窗口不计负；`0 ≤ d ≤ 24h` → 计入 elapsed；
-`d > 24h` → 记 `clock_anomaly_forward`，**该段不计入 elapsed**（暂停完成判定，
-防手工改时钟/NTP 异常瞬间满足 168h；正常整夜 sleep ≤24h 不受影响）。最终报告
-保留 wall-clock 起止与全部 anomaly 记录；7 个本地日历日仍为独立门。
+**时钟跳变**：样本时间戳 < 上一样本 → 该对不参与趋势，记 `clock_anomaly`。
+完成门的 elapsed 定义：维护持久化 `last_observed_wallclock`，每次观测差 d：
+`d < 0`（回拨）→ 顺延窗口不计负；`0 ≤ d ≤ 24h` → 计入 elapsed；`d > 24h` →
+记 `clock_anomaly_forward`，该段不计入 elapsed。最终报告保留 wall-clock 起止
+与全部 anomaly 记录；7 个本地日历日仍为独立门。
 
-**单实例与持久化模型（R7-B1 重写：锁与数据文件分离）**：
+**持久化 journal 协议（R8-B1 重写：JSONL 为唯一 durable truth）**：
 
-- **独立稳定 lock 文件** `monitor.lock`（§2.3.3 目录契约内）：启动时 `open`
-  后持有 `flock` 到进程退出；**生命周期内绝不 rename/unlink 该文件**——flock
-  锁的是已打开的 inode，会被 tmp+rename 替换的路径（如 state 快照）不能作为
-  锁对象。PID 只作为锁文件内的诊断字段，不代替内核锁。
-- **state 快照**（当前代际/slot 进度/完成计数器/停止标志）：独立文件
-  `state.json`，**tmp+rename 原子替换**——与锁文件分离，替换不影响锁。
-- **JSONL 样本**：`samples.jsonl` **append-only**（在同一稳定锁持有下 append）；
-  启动时检测末行完整性，不完整的尾行**截断并记 `corrupt_line`**。append 与
-  state 的 atomic snapshot 是**两个分开描述的模型**（v7 把两者叠在一句的写法
-  作废）。
-- **真实双进程测试**（仅 fake state store 的单进程测试不能证明该性质）：持锁
-  进程反复 rename 替换 state 文件时，第二进程**始终无法取得锁**；持锁进程
-  异常退出（kill -9）后第二进程才能取得锁。
+- **单一真相**：`samples.jsonl` 是 write-ahead / source-of-truth；每条记录含
+  **稳定唯一键 `(pid, epoch, slot, recordKind)`**（recordKind ∈ {sample,
+  rejected, missed, duplicate, …}）。
+- **写入顺序（持锁下）**：append 完整 JSONL 行 → **flush + fsync** → 再写
+  `state.json` 快照（tmp+rename）。state 只是**可丢弃的加速快照**，绝不能覆盖
+  日志中更晚的已提交事实。
+- **启动恢复**：先截断 partial tail（记 `corrupt_line`）→ **重放 JSONL** →
+  以唯一键重建/校正 state（slot 进度、代际、完成计数、告警停止标志）→ 重复
+  完整行**确定性去重**（保留首条、计数 `duplicate`）。
+- **不丢不重证明边界**：先 append 后 state 崩溃 → 重放恢复该 slot（不重复
+  采样）；先 state 后 append 崩溃 → 不可能（顺序固定 append 在前）；append
+  未落盘而 state 已替换 → fsync 在 state 前完成，排除该形状。
+- **crash-recovery 测试（注入 ≥4 个 crash point）**：①append 前；②完整
+  append 后 / state 前；③state temp 写后 / rename 前；④state rename 后——
+  每点重启恢复后断言**同一 slot 恰好一个有效事实、完成计数一致、告警 stop 不
+  丢失**。真实双进程锁测试保留，但不替代这组测试。
 
-**launchd 运行单元（R7-B2 完整确定规格）**：
+**单实例与锁**：独立稳定 `monitor.lock`（启动 open 后 flock 到进程退出，生命
+周期内绝不 rename/unlink；PID 只是锁文件内诊断字段）。**真实双进程测试**：
+持锁进程反复 rename 替换 state 文件时第二进程始终无法取得锁；kill -9 后才能
+取得。
 
-- **实现载体（择一写死）**：仓内单文件 Python 3 脚本（`scripts/memory-monitor/monitor.py`，
-  随本任务交付、仓库拥有），只用**系统标准库**（http.client——不自动跟随
-  redirect、可流式有界读取；hashlib；fcntl；json/plist 无关），由绝对路径
-  **`/usr/bin/python3`** 执行——不依赖交互 shell 的 PATH、pyenv/Homebrew 或
-  Codex 会话。
-- **绝对路径契约**（安装后稳定存在）：
+**launchd 运行单元（R7-B2 + R8-B2）**：
+
+- **实现载体**：仓内单文件 Python 3 脚本（`scripts/memory-monitor/monitor.py`），
+  只用系统标准库，由绝对路径 **`/usr/bin/python3`** 执行。
+- **绝对路径契约**：
 
 ```text
 脚本（仓内）=<repo>/scripts/memory-monitor/monitor.py
 脚本（安装副本）=$HOME/Library/Application Support/CordCode Link/memory-monitor/monitor.py
 数据根目录=$HOME/Library/Application Support/CordCode Link/memory-monitor/
   monitor.lock（稳定锁 inode，绝不 rename/unlink）
-  state.json（tmp+rename 原子快照）
-  samples.jsonl（append-only）
-  fatal.json（永久 fatal marker，含 reason）
+  samples.jsonl（append-only durable truth，唯一键 (pid, epoch, slot, recordKind)）
+  state.json（tmp+rename 加速快照，可由 JSONL 重放重建）
+  run_in_progress（dirty-run marker，见下）
+  fatal.json（永久 fatal marker，含 reason；仅数据根可信时可写，见 §2.3.1 N2）
   stop.json（告警停止标志）
 plist=$HOME/Library/LaunchAgents/org.openagi.cordcode.link.memory-monitor.plist
 Label=org.openagi.cordcode.link.memory-monitor
@@ -303,27 +309,42 @@ ThrottleInterval=30（重启节流）
 app domain（restart policy 只读探测）=org.openagi.cordcode.link（project.pbxproj:524 实证）
 ```
 
-- **安装/卸载**：安装 = 复制脚本到安装副本路径 + 生成 plist + `launchctl
-  bootstrap gui/$(id -u) <plist>`；卸载/停止 = `launchctl bootout gui/$(id -u)
-  <plist>` + 删除数据根（owner 决定）；升级 = 替换安装副本后 `launchctl
-  kickstart -k gui/$(id -u)/<Label>`。
-- **退出语义（三类，写死）**：
-  1. **transient crash**（意外异常，非零退出）→ launchd 按 KeepAlive 重启
-     （ThrottleInterval=30 节流）；脚本在 state 中维护**连续 transient 计数**，
-     连续 ≥5 次 transient → 升级为 fatal（写 fatal.json + exit 0，防重启风暴）。
-  2. **fatal stop**（永久配置/权限/依赖错误，含 R7-N3 的不可修复权限异常）→
-     写 `fatal.json`（含 reason）+ **exit 0**（launchd 不重启）；恢复 = owner
-     修复后删除 marker 并 `launchctl kickstart`。
-  3. **clean stop**（provisional 告警触发）→ 写 `stop.json` + exit 0；重启后
-     读到标志立即退出，不悄悄继续采集；恢复 = owner 评估升级后清除标志重启。
-- **测试**（无需等待 7 天、无需 UI automation）：最小 plist 生成校验（路径/
-  Label/ProgramArguments/KeepAlive/ThrottleInterval）；缺依赖/坏权限 → fatal
-  marker + exit 0（不形成重启风暴）；告警 stop 与 fatal stop 的恢复方式；连续
-  transient ≥5 升级 fatal。
+- **安装/卸载**：安装 = 复制脚本 + 生成 plist + `launchctl bootstrap gui/$(id -u)
+  <plist>`；卸载/停止 = `launchctl bootout gui/$(id -u) <plist>` + 删除数据根
+  （owner 决定）；升级 = 替换安装副本后 `launchctl kickstart -k gui/$(id -u)/<Label>`。
+- **退出语义（三类）+ 跨实例 crash 计数（R8-B2 dirty-run 协议）**：
+  1. **transient crash**（非零退出，含 SIGKILL/解释器崩溃/掉电——死亡进程无法
+     写遗言）：launchd 按 KeepAlive 重启（ThrottleInterval=30 节流）。连续
+     transient 计数由 **dirty-run 协议**实现：每次启动**进入主循环前**原子写
+     `run_in_progress`（run generation）；只有达到 **healthy milestone**——
+     **存活一个完整 discovery cycle（≥60s）且完成至少一次成功采样事务或一次
+     完整 idle 检查**（不是「启动成功一瞬间」）——才清除 marker 并重置连续
+     失败计数。重启发现**未清除的 dirty marker** → 前一 run 计一次 transient；
+     连续 ≥5 次 → 升级 fatal（写 fatal.json + 清 dirty marker + exit 0）。
+     每 31s 崩一次的循环永远达不到 milestone → 计数持续累计 → 5 次后 fatal。
+  2. **fatal stop**（永久配置/权限/依赖错误）：**先写 `fatal.json`（含
+     reason）→ 清 dirty marker → exit 0**（launchd 不重启，也不被下次启动误算
+     为 crash）；恢复 = owner 修复后删除 marker 并 `launchctl kickstart`。数据
+     根不可信时按 §2.3.1 N2 启动前安全失败（不承诺 marker 写成）。
+  3. **clean stop**（provisional 告警触发）：**先写 `stop.json` → 清 dirty
+     marker → exit 0**；重启后读到标志立即退出，不悄悄继续采集；恢复 = owner
+     评估升级后清除标志重启。
+- **测试**：最小 plist 生成校验；缺依赖/坏权限 → 启动前安全失败（exit 0 +
+  stderr 最小诊断，不形成重启风暴）；**kill -9 后重启累计 transient、连续五次
+  升级 fatal、达到 healthy milestone 后重置、fatal/clean exit 不计入 transient**；
+  crash point ×4 的 restart-recovery（见上）；告警 stop 与 fatal stop 的恢复
+  方式。
 
-**实际 restart policy 记录**：监测开始与每次检测到变化时，只读探测
-`defaults read org.openagi.cordcode.link autoRestartEnabled /
-autoRestartIntervalMinutes`（**不得修改**）；最终报告含各时点实际值。
+**实际 restart policy 记录（R8-N1：缺键=有效配置）**：监测开始与每次检测到
+变化时只读探测，记录 **`{rawPresence, effectiveValue, source}`**：
+
+- 键存在 → 严格解析类型与值（`source=user_set`）；
+- **键缺失 → 使用与源码一致的默认值**（`autoRestartEnabled=true` /
+  `autoRestartIntervalMinutes=120`，`RuntimeManager.swift:622-624` 同源）并标
+  `source=code_default`——**缺键不是采集错误**（本机实测 `defaults read` 对缺键
+  返回错误而非默认值，脚本不得把「命令成功」当唯一有效形状）；
+- domain 不存在/命令失败/类型错误 → 该时点标 `unavailable`（**不得修改偏好**）；
+- fixtures：present / missing / wrong-type 三形状。
 
 **调度/恢复测试（fake clock/state store）**：重启恢复、sleep 跳槽、重复唤醒、
 部分写入（corrupt_line 截断）、告警后恢复、晚发现、slot 边界。
@@ -353,17 +374,17 @@ autoRestartIntervalMinutes`（**不得修改**）；最终报告含各时点实�
 
 - 三者互不替代、独立 OR；③不要求与①同时成立。
 - 8MiB/256MiB/300MiB 均为 **provisional 运维启发式**；预固定，变更须修订本文档。
-- **语义**：触发 → 仅「写 stop.json + clean stop + 评估升级取证（§6.2，需
-  owner 授权）」；**未触发不能推出任何结论**。「未触发趋势」必须同时报告可
-  评估分母（§2.4）。
+- **语义**：触发 → 仅「写 stop.json + 清 dirty marker + clean stop + 评估升级
+  取证（§6.2，需 owner 授权）」；**未触发不能推出任何结论**。「未触发趋势」
+  必须同时报告可评估分母（§2.4）。
 - **能力边界**：无 GC pause/alloc counter，不能裁决 GOGC 或 512MiB 最优值。
 - **③边界 fixtures**：delta 恰等于 8,388,608 B（触发）/ 差 1 byte（不触发）/
   非严格上升（不触发）/ 步数不足（不触发）。
 
 #### 2.3.6 完成条件（预固定；变更须修订本文档）
 
-监测**完成**当且仅当：①elapsed 满足 §2.3.3 定义（**按 ≤24h 观测段累计的
-前向墙钟 ≥168h**，回拨顺延、前跳 >24h 不计入 + ≥7 个本地日历日）；②有效代际
+监测**完成**当且仅当：①elapsed 满足 §2.3.3 定义（按 ≤24h 观测段累计的
+前向墙钟 ≥168h，回拨顺延、前跳 >24h 不计入 + ≥7 个本地日历日）；②有效代际
 （≥3 有效样本）≥ **20 个**；③**scan-evidenced 代际 ≥ 8 个**。
 
 - **提前终止**：任一 provisional 告警触发 → 写停止标志并升级（§6.2）。
@@ -377,41 +398,41 @@ autoRestartIntervalMinutes`（**不得修改**）；最终报告含各时点实�
 - **覆盖度分母**：有效代际数（≥3 样本）；**趋势可评估代际数**（完整 4 slot）；
   current/peak 指标可评估样本数及 parser `unavailable` 数；三层负载分母
   （scan-evidenced / cpu-active-only / idle）。
-- **restart policy 记录**：各时点实际 `autoRestartEnabled` /
-  `autoRestartIntervalMinutes`（只读探测值）。
+- **restart policy 记录**：各时点 `{rawPresence, effectiveValue, source}`（含
+  `code_default` 与 `unavailable` 形状）。
 - rejected/missed 样本数与原因分布、告警触发记录（含② lifetime peak）、
   **wall-clock 起止与 clock anomaly 记录**（含前跳）。
 - 结论措辞限定为描述性；**不写**「治理有效」「512MiB 合理」「GOGC 应调」；
   附 §2.3.5 能力边界声明。
 
-## 3. API 硬化（r6 后续 2；已完成，Round 1–7 评审已独立复核通过）
+## 3. API 硬化（r6 后续 2；已完成，Round 1–8 评审已独立复核通过）
 
 `WebPushAuthorizationDecision` 零值从 `WebPushDeviceActive` 改为
 `WebPushDeviceUnspecified`（拒绝但不清理）。dispatcher `default` 分支天然覆盖
 零值。测试零值用例：0 次 HTTP 请求 + 订阅保留。本轮无变化。
 
-## 4. Mac UI 展示 pushCleanupError（r6 后续 3；B4 方案 v8）
+## 4. Mac UI 展示 pushCleanupError（r6 后续 3；B4 方案 v9）
 
 ### 4.1 已交付（`124b73d`）
 
 `DeviceRevocation`/`revokeCleanupWarning`/`.alert`/双语 L10n/`DeviceStoreTests`
 2 条新用例 + `WorkspaceViewTests` stub（Swift 定向 21 条全绿）。
 
-### 4.2 评审发现的问题（Round 1–7 累计，全部成立；1–10 已于 v2–v7 处置）
+### 4.2 评审发现的问题（Round 1–8 累计，全部成立；1–15 已于 v2–v8 处置）
 
-11. **R7-B1**：v7 在会被 tmp+rename 替换的状态文件上 flock——锁的是旧 inode，
-    双实例可各自持锁。
-12. **R7-B2**：launchd 载体/绝对路径/app domain/永久错误退出语义未确定。
-13. **R7-B3**：64KiB 上限用 `URLSession.data(for:)` 只是事后断言——系统先收
-    完整 body，失去限制分配的意义；无 oversize outcome。
-14. **R7-B4**：矩阵第 9 行（confirmedCleanupUnknown × reload failed）无列表
-    证据，pending 文案却固定声称「设备已从已授权列表消失」。
-15. **R7-B5**：refresh/revoke 的 generation 优先级未定义；`isRevoking` 不在
-    原子提交内——旧 `defer` 可提前清除新操作的 busy 状态。
+16. **R8-B1**：samples.jsonl 与 state.json 双文件缺崩溃一致性协议——写入顺序、
+    fsync 边界、启动重放规则未定义。
+17. **R8-B2**：异常终止（SIGKILL/掉电）的进程无法自行记录「连续第几次
+    crash」——五次升级 fatal 机制不可兑现。
+18. **R8-B3**：`responseTooLarge` 属 transport 家族却显式只走第 14/15 行，漏掉
+    reload absent 的第 13 行（lost-response 对账）。
+19. **R8-B4**：coordinator 只定义 refresh/revoke，未定义两个重叠 revoke——
+    第二笔递增 token 会使第一笔 cleanup warning 丢失；v8 重写时丢失了 v7 的
+    warning 生命周期规则。
 
 ### 4.3 过审后实施方案（本轮不动代码；过审后一次实施 + 定向测试 + 重建部署）
 
-#### 4.3.1 唯一证据优先级（R4-B3 定案；Round 4–7 已核验）
+#### 4.3.1 唯一证据优先级（R4-B3 定案；Round 4–8 已核验）
 
 **服务端事实**：`handleRevokeDevice` 只有在 `DeviceStore.RevokeDevice` **成功
 持久化**后才返回 `revoked:true`（失败 404，体含 `{"error":"not_found",...}`）；
@@ -428,27 +449,28 @@ autoRestartIntervalMinutes`（**不得修改**）；最终报告含各时点实�
 4. **`revoked:true` + 坏 cleanup 字段**：保留撤销证据，`confirmedCleanupUnknown`。
 5. **无 confirmed response** 时 reload 是唯一当前证据：`present` → 未生效/倾向
    未生效；`absent` → 已撤销（对账）；`failed` → 未知。
-6. **reload `failed` 永远不从旧 `devices` 数组推断任何结论**——**也不得在
-   呈现中声称只有 reload 才能证明的事实**（R7-B4：第 9 行不得声称「已从列表
-   消失」）。
+6. **reload `failed` 永远不从旧 `devices` 数组推断任何结论**——也不得在呈现
+   中声称只有 reload 才能证明的事实（第 9 行不得声称「已从列表消失」）。
 
-#### 4.3.2 API 边界契约（R6-B3 + R7-B3）
+#### 4.3.2 API 边界契约（R6-B3 + R7-B3 + R8-B3）
 
 **非 2xx body 获取**：`ManagementAPIClient` 为 revoke 增加私有 raw 请求路径，
 返回 `(status: Int, data: Data)`——不修改 `performRequest` 与其他调用方。原
 body 不写日志；只有类型校验通过的 `error` code 字符串进入 outcome。测试必须
 经真实 HTTP client 层（StubHTTPServer），不得在 DeviceStore stub 伪造 code。
 
-**64KiB 读取阶段硬上限（R7-B3 重写）**：
+**64KiB 读取阶段硬上限（R7-B3）**：
 
 - **流式累计**：用 delegate/bytes 流式读取并累计；**累计到第 65,537 byte 立即
   cancel 任务**（或等价有界 loader）——不是 `URLSession.data(for:)` 收完再
-  检查 `data.count` 的事后断言。
+  检查的事后断言。
 - `Content-Length > 65536` 可提前拒绝，但**不得单独依赖 header**（无
   Content-Length 的 chunked/流式响应必须被流式上限截获）。
-- **oversize outcome**：`RevokeTransportIssue` 新增 `case responseTooLarge`——
-  归 transport/HTTP failure 家族（传输层读取失败），**不把截断 body 送 JSON
-  parser**，按行 14/15 语义（无 confirmed response）处理。
+- **oversize outcome**：`RevokeTransportIssue.responseTooLarge`——归
+  transport/HTTP failure 家族，**不把截断 body 送 JSON parser**。
+- **主动超限 cancel 的 reason 保持（R8-B3）**：因主动超限而 cancel 产生的
+  `URLError.cancelled` **不得覆盖已锁定的 `responseTooLarge`**——实现须在
+  发起主动 cancel 前先记录 oversize 判定，cancel 回调按该判定归类。
 - **三条真实 HTTP 边界 fixture**：恰好 65,536 B（接受）/ 65,537 B（oversize）/
   无 Content-Length 的 chunked 流式超限（oversize）。测试证明超限后连接任务被
   **取消**、原 body 不进日志。
@@ -486,10 +508,10 @@ UI）。
 func revokeDevice(_ deviceId: String) async -> RevokeAttemptOutcome  // non-throwing
 ```
 
-所有失败（含 cancellation）映射进 outcome；**任何 outcome（含 cancelled）都
-执行恰好一次 typed reload**——reload 自身被取消 → reload class = `failed`。
-client fixture 验证 network error / cancelled / HTTP failure / protocol failure /
-oversize 各进入**一次且仅一次** reload。
+所有失败（含 cancellation）映射进 outcome；**任何 outcome（含 cancelled 与
+oversize）都执行恰好一次 typed reload**——reload 自身被取消 → reload class =
+`failed`。client fixture 验证 network error / cancelled / HTTP failure /
+protocol failure / oversize 各进入**一次且仅一次** reload。
 
 **typed reload outcome（归属状态管理层）**：`DeviceStore` 内部包装现有
 `listDevices() async throws -> [TrustedDevice]` 为 typed outcome；不给 API 协议
@@ -507,7 +529,7 @@ oversize 各进入**一次且仅一次** reload。
 | 6 | confirmedCleanupFailure | failed | 已撤销（response 确认） | failed(err) | cleanup-failure 警告；列表刷新失败另行呈现 |
 | 7 | confirmedCleanupUnknown | absent | 已撤销（双确认） | unknown | **pending（reload-absent）** |
 | 8 | confirmedCleanupUnknown | present | 已撤销 + 列表不一致 | unknown | inconsistent 警告 + cleanup-unknown 附句 |
-| 9 | confirmedCleanupUnknown | failed | 已撤销（response 确认） | unknown | **pending（response-confirmed）——不得声称「已从列表消失」（R7-B4）** |
+| 9 | confirmedCleanupUnknown | failed | 已撤销（response 确认） | unknown | **pending（response-confirmed）——不得声称「已从列表消失」** |
 | 10 | protocolUnknown | absent | 已撤销（reload 对账） | unknown | **pending（reload-absent）** |
 | 11 | protocolUnknown | present | 倾向未生效 | unknown | **unknown 警告**（撤销结果未知；设备仍在列表） |
 | 12 | protocolUnknown | failed | 未知 | unknown | **unknown 警告**（撤销与 cleanup 均未知） |
@@ -515,9 +537,13 @@ oversize 各进入**一次且仅一次** reload。
 | 14 | transportOrHTTPFailure | present | 未生效 | unknown | `devicesError`（网络诊断用 category） |
 | 15 | transportOrHTTPFailure | failed | 未知 | unknown | `devicesError` + 撤销状态未知；下次成功刷新自然对账 |
 
-**特例**：`404 not_found`（`.httpStatus(404, "not_found")`）× absent → 服务端
-无此设备（含此前已撤销），无 cleanup 对象 → 无警告，按「设备已不在授权列表」
-呈现；其他 404 与 oversize → 行 14/15 语义。
+**特例（R8-B3 修正：`responseTooLarge` 无特例）**：`responseTooLarge` 与其他
+transportOrHTTPFailure 一样**机械走第 13/14/15 行**（absent → 第 13 行
+lost-response 对账，呈现 reload-absent pending 文案；present → 14；failed →
+15）——服务端已完成撤销并返回异常大 body、client 超限取消后 reload 得 absent
+是可达形状，不得错误呈现为未生效/未知。唯一保留的特例：`404 not_found`
+（`.httpStatus(404, "not_found")`）× absent → 服务端无此设备（含此前已撤销），
+无 cleanup 对象 → 无警告，按「设备已不在授权列表」呈现；其他 404 → 行 14/15。
 
 **最低规则（由 §4.3.1 机械导出）**：
 
@@ -531,7 +557,7 @@ oversize 各进入**一次且仅一次** reload。
 4. reload `failed` 不从旧 `devices` 数组推断任何结论（行 3/6/9/12/15），**也
    不呈现只有 reload 才能证明的事实**（行 9 文案不含「已从列表消失」）。
 
-#### 4.3.4 文案（七键；按证据来源拆分 pending——R7-B4）
+#### 4.3.4 文案（七键；按证据来源拆分 pending）
 
 - `devices_push_cleanup_warning`（行 4/6 主文案）：
   - en: "The device was revoked, but cleaning up its push subscription failed: %@. Push delivery to this device stays blocked; the runtime retries the cleanup automatically on later notifications. Check the runtime log if it keeps failing."
@@ -560,44 +586,58 @@ oversize 各进入**一次且仅一次** reload。
 #### 4.3.5 实施与测试清单
 
 1. `RevokeAttemptOutcome` 契约落地（§4.3.2）：raw request + 流式 64KiB 上限 +
-   五类 response + 分类表 + 网络 category + `responseTooLarge`；`revokeDevice`
-   改 non-throwing。
+   五类 response + 分类表 + 网络 category + `responseTooLarge`（主动超限
+   cancel 不覆盖 reason）；`revokeDevice` 改 non-throwing。
 2. `DeviceStore` typed reload outcome 包装 + §4.3.6 operation coordinator；
    任何 outcome 后恰好一次 reload。
 3. Reducer 按 §4.3.1 规则机械实现（15 行矩阵 + 404 特例）。
 4. **wire fixtures（client 级，经真实 HTTP 层）**：分类表 9 行 2xx 形状逐行 +
    非 2xx（404 带/不带 `not_found`、500）+ 连接丢失 + 网络错误/cancelled +
    **oversize 三边界（65,536 B / 65,537 B / chunked 无 Content-Length 超限）**
-   ——各恰好一次 reload；超限后任务取消、原 body 不进日志。
-5. **ViewModel 测试**：15 行矩阵逐行 + 404 特例 + 行 5/8 组合文案断言 +
-   pending 两类文案**不可互换**断言（行 7/10/13 含「已从列表消失」；**行 9
-   不含「已从列表消失」且含「runtime 已确认撤销」**；行 11/12 含「无法确认」）
-   + presentation seam（四种警告态）+ typed outcome 包装测试。
+   ——各恰好一次 reload；超限后任务取消、原 body 不进日志；**主动超限 cancel
+   归类为 `responseTooLarge` 而非 `networkError(.cancelled)`**。
+5. **ViewModel 测试**：15 行矩阵逐行 + 404 特例 + **oversize × absent/present/
+   failed 三行（absent 用 reload-absent pending 文案——R8-B3）** + 行 5/8 组合
+   文案断言 + pending 两类文案不可互换断言（行 7/10/13 含「已从列表消失」；
+   行 9 不含且含「runtime 已确认撤销」；行 11/12 含「无法确认」）+
+   presentation seam + typed outcome 包装测试。
 6. **async 交错测试（controllable continuations，§4.3.6）**：旧 reload 后
-   返回、普通 refresh 与 revoke 交错、连续两次操作、dismiss 与晚到结果——
-   **逐项断言最终列表、warning、devicesError、hasLoadedDevices、isRevoking
-   以及 reload 次数**（R7-B5）。
+   返回、普通 refresh 与 revoke 交错、**两次重叠 revoke（R8-B4：第二次 busy、
+   不发网络请求、revoke 网络次数=1、第一笔 warning 保留）**、连续两次操作、
+   dismiss 与晚到结果——逐项断言最终列表、warning、devicesError、
+   hasLoadedDevices、isRevoking、revoke 网络次数与 reload 次数。
 7. 定向测试 → Release 重建 + 覆盖安装 + 新代际核验。
 
-#### 4.3.6 operation coordinator（R7-B5 重写：统一 token + 串行协调 + isRevoking）
+#### 4.3.6 operation coordinator（R7-B5 + R8-B4 重写）
 
-**模型（择一写死）**：**统一 operation token + revoke 期间 refresh 合并**：
+**模型**：**统一 operation token + refresh 合并 + 并发 revoke store 层拒绝**：
 
 - 所有 list/revoke 操作统一递增**同一个 operation generation**（token）。
-- **revoke 进行中（`isRevoking == true`）时，普通 refresh（on-appear/Retry）
-  不发起独立网络请求**：登记 pending-refresh 标记，**合并进 revoke 的强制
-  reload**（revoke 本来就 reload）——既避免 refresh 递增 gen 使已生效的
-  revoke flow 变 stale（保护撤销可观测性），也避免旧 refresh 覆盖新列表。
-- 若 refresh 已在飞行中而 revoke 开始：revoke 递增 gen → 旧 refresh 结果变
-  stale 被丢弃（revoke 的 reload 是更新的数据）。
-- **`isRevoking` 纳入同一 current-operation 检查与原子提交**：现生产实现的
-  `defer { isRevoking = false }`（`DeviceStore.swift:56-57`）改为「仅在 gen 仍
-  当前时清除」——**旧操作结束不得清除新操作的 busy 状态**。
+- **revoke 进行中（`isRevoking == true`）时**：
+  - 普通 refresh（on-appear/Retry）**不发起独立网络请求**：登记
+    pending-refresh 标记，合并进 revoke 的强制 reload；
+  - **第二个 revoke 调用被 store 层拒绝（R8-B4 择一）**：不发网络请求、
+    **不递增 token**，返回明确的 busy 结果（`RevokeFlowResult.busy` 或等价
+    typed 返回；测试可断言，不静默覆盖）——第一个 revoke 的 outcome、强制
+    reload 与 cleanup warning 完整保留提交，不被 stale 丢弃。
+- 若 refresh/revoke 已在飞行中而新 revoke 开始：新 revoke 递增 gen → 旧 refresh
+  结果变 stale 被丢弃。
+- **强制 reload 走内部 forced 路径**（`DeviceStore` 私有
+  `performForcedReload()`，即 typed outcome 包装）——**不调用公开
+  `loadDevices()`**（后者在 `isRevoking == true` 时会被当作普通 refresh 合并掉，
+  导致 revoke 自身的 reload 丢失）。
+- **warning 生命周期规则（R8-B4 恢复并扩展 v7 规则）**：
+  - 新 revoke **真正发起网络请求时**清除上一条 warning（旧警告不跨操作保留）；
+    busy 拒绝的调用不清除任何 warning；
+  - **dismiss 带 warning-generation**：dismiss 记录被清除的 warning 所属 gen；
+    晚到的旧 gen 结果被丢弃，**不会复活已 dismiss 的 warning**；
+  - `isRevoking` 只由 gen 仍当前的结束路径清除——**旧操作结束不得清除新操作
+    的 busy 状态**。
 - 最终同步提交清单（@MainActor 一次同步块）：`devices` / `hasLoadedDevices` /
   `devicesError` / warning / **`isRevoking`**。
 - 交错测试断言见 §4.3.5 测试 6。
 
-## 5. 交付与部署证据（`124b73d` 历史记录；Round 1–7 已独立复核，本轮无新部署）
+## 5. 交付与部署证据（`124b73d` 历史记录；Round 1–8 已独立复核，本轮无新部署）
 
 ### 5.1 构建来源门
 
@@ -623,28 +663,31 @@ runtime 进程=PID 30304（/Applications/CordCodeLink.app/Contents/Resources/cor
 启动 RSS=78112KB（仅记录，不作为内存效果验证）
 ```
 
-Round 2–7 评审实测：当前 runtime PID 34681（同版本 `124b73d7b0f2`）监听 8777；
+Round 2–8 评审实测：当前 runtime PID 34681（同版本 `124b73d7b0f2`）监听 8777；
 该代际变化不用于证明 §2 首采数据。
 
 ### 5.3 验证状态
 
 代码自 `124b73d7b0f2155ed19207c3ec6fe00cdf5fa888` 未变化；Go/Swift 定向测试、
-race、vet 的独立复跑记录见 Round 1–7 评审报告。本轮（v8）零代码改动，无新
+race、vet 的独立复跑记录见 Round 1–8 评审报告。本轮（v9）零代码改动，无新
 构建/部署。
 
 ## 6. 不采纳清单与择一决策表
 
-**Round 7 择一决策表（各选择点均采纳评审给出的选项之一，无否决）**：
+**Round 8 择一决策表（各选择点均采纳评审给出的选项之一，无否决）**：
 
-| 选择点 | 选项 | v8 落地 |
+| 选择点 | 选项 | v9 落地 |
 | --- | --- | --- |
-| R7-B1 JSONL 写法 | 整文件 tmp+rename vs append | **append-only**（稳定锁下 append + partial line 截断；state 快照单独 tmp+rename） |
-| R7-B2 实现载体 | 仓内可执行物 | **`/usr/bin/python3` + 仓内系统标准库单文件脚本**（不依赖 shell PATH/pyenv/Homebrew） |
-| R7-B3 读取上限 | delegate/bytes 流式 vs 有界 loader | **流式累计 + 第 65,537 byte 立即 cancel**；`Content-Length` 仅提前拒绝不作唯一依据 |
-| R7-B3 oversize 归属 | protocol vs HTTP failure 专用 reason | **`RevokeTransportIssue.responseTooLarge`**（transport 家族，不送截断 body 进 parser） |
-| R7-B4 pending 拆分 | response-confirmed 覆盖第 7 行与否 | **仅第 9 行用 response-confirmed 文案**（第 7 行有 reload-absent 双确认，保留列表消失陈述） |
-| R7-B5 协调模型 | 统一 token+合并 vs 优先级 coordinator | **统一 token + revoke 期间 refresh 合并进强制 reload** |
-| R7-N2 前跳上限 | 累计小步 vs 单段 anomaly 上限 | **单段 >24h 记 `clock_anomaly_forward` 不计入 elapsed**（正常整夜 sleep ≤24h 不受影响） |
+| R8-B1 journal 协议 | JSONL write-ahead truth vs 其他 journal | **JSONL 为唯一 durable truth**（唯一键 + append/fsync 后写 state + 启动重放去重；state 为可丢弃快照） |
+| R8-B2 crash 计数 | dirty-run 协议 vs 删除五次 fatal 承诺 | **dirty-run 协议**（run_in_progress marker + healthy milestone + 未清计 transient；fatal/clean 先写 marker 清 dirty 再 exit 0） |
+| R8-B4 并发 revoke | 串行队列 vs store 层拒绝 | **store 层拒绝**（isRevoking 时第二次调用 busy 返回、不发网络请求不递增 token） |
+| R8-N2 不可信数据根 | 启动前安全失败 vs 安装器预建可信目录 | **启动前安全失败**（exit 0 + stderr 最小诊断；不承诺 fatal.json 可写；O_NOFOLLOW + fstat） |
+
+**历史择一决策（Round 6/7，保留）**：解析失败=指标级 unavailable；t=0 原点=
+startedAt；拉起=launchd；非 2xx body=专用 raw request；revoked:true+坏 cleanup=
+`confirmedCleanupUnknown`；300MB=300MiB；JSONL=append-only；载体=/usr/bin/python3；
+64KiB=流式硬上限；oversize=transport 家族；pending 拆分=仅第 9 行 response-
+confirmed；协调=统一 token+合并；前跳上限=24h。
 
 **现存不采纳项（Round 1 的 3 项 + Round 4 的 1 项）**：
 
@@ -673,20 +716,19 @@ UI 面积。
 
 1. **本文档过审后（开发阶段，一次完成）**：实施 §4.3（raw request + 流式上限
    + 五类 response + 15 行 reducer + 七键文案 + operation coordinator + 全部
-   fixtures）与 §2.3 监测脚本（python3 载体 + launchd 规格 + 安全/解析契约 +
-   三层负载 + 测试矩阵）→ 定向测试 → Release 重建 + 覆盖安装 + 新代际核验。
+   fixtures）与 §2.3 监测脚本（python3 载体 + launchd 规格 + journal 协议 +
+   dirty-run + 安全/解析契约 + 三层负载 + 测试矩阵）→ 定向测试 → Release 重建
+   + 覆盖安装 + 新代际核验。
 2. **监测执行**：安装 launchd 单元，按 §2.3.6 完成条件运行，最终报告回填 §2.4。
 3. **owner 验收**：正常撤销自然路径（设备消失、无警告）；异常态由
    deterministic 测试验收。
 
-## 8. Round 8 终审准入清单勾销表
+## 8. Round 9 终审 checklist 勾销表
 
-| # | 准入条件（Round 7 报告 §6） | v8 落地位置 | 测试位置 |
+| # | 准入条件（Round 8 报告 §6） | v9 落地位置 | 测试位置 |
 | --- | --- | --- | --- |
-| 1 | 独立稳定 lock inode；state snapshot 与 JSONL append/replace 分开；真实双进程测试 | §2.3.3 单实例与持久化模型（monitor.lock / state.json tmp+rename / samples.jsonl append） | §2.3.3 真实双进程测试（state rename 期间第二进程无法进入；kill -9 后可取得） |
-| 2 | 实现载体、绝对路径、Label、ProgramArguments、app domain、安装/卸载、fatal/transient/clean 退出语义 | §2.3.3 launchd 运行单元（python3 载体 + 路径契约 + 三类退出语义 + ThrottleInterval + 连续 transient 升级 fatal） | §2.3.3 launchd 测试（plist 生成/坏权限不重启风暴/两种 stop 恢复/连续 transient 升级） |
-| 3 | 64KiB 网络读取阶段硬上限；oversize outcome；65536/65537/chunked 三 fixture | §4.3.2 流式上限 + `responseTooLarge` | §4.3.5 fixtures 4（三边界 + 任务取消 + body 不进日志） |
-| 4 | 拆分 response-confirmed 与 reload-absent pending 文案；第 9 行不声称列表已消失 | §4.3.4 `pending`（行 7/10/13）与 `pending_response`（行 9）两键 | §4.3.5 测试 5（行 9 不含「已从列表消失」且含「runtime 已确认撤销」） |
-| 5 | refresh/revoke generation 优先级或串行协调；`isRevoking` 入 stale guard 与原子断言；交错测试查全部状态与 reload 次数 | §4.3.6 统一 token + revoke 期间 refresh 合并 + isRevoking 原子提交 | §4.3.5 测试 6（列表/warning/devicesError/hasLoadedDevices/isRevoking/reload 次数逐项断言） |
-| 6 | N1 counter schema、N2 forward clock anomaly、N3 权限确定规则 | §2.3.2 N1 schema / §2.3.3 N2 前跳 / §2.3.1 N3 权限 | §2.3.2 counter fixtures / §2.3.3 调度测试 / §2.3.1 权限规则 |
-| 7 | 只改文档，不写产品代码 | 本轮 docs-only（§1.2 三门点 + 工作树干净） | — |
+| 1 | JSONL+state 单一 durable truth、写入/fsync/重放/去重顺序；四个 crash point 的 restart-recovery 测试 | §2.3.3 持久化 journal 协议（唯一键、append+fsync→state、启动重放重建、确定性去重、不丢不重证明边界） | §2.3.3 crash-recovery 测试（①append 前/②append 后 state 前/③temp 后 rename 前/④rename 后） |
+| 2 | dirty-run/healthy-milestone 跨实例 crash 计数（或删除承诺）；覆盖 SIGKILL、重置、clean/fatal exit | §2.3.3 launchd 退出语义（run_in_progress marker、healthy milestone=存活一个 discovery cycle+一次成功采样/idle 检查、未清计 transient、≥5 升级 fatal、fatal/clean 先写 marker 清 dirty 再 exit 0） | §2.3.3 launchd 测试（kill -9 累计/五次升级/milestone 重置/fatal-clean 不计入） |
+| 3 | `responseTooLarge` 统一走 13/14/15 行；oversize × 三类 reload；主动超限 reason 不被 cancelled 覆盖 | §4.3.2（主动超限 cancel 不覆盖 reason）+ §4.3.3 特例（oversize 无特例，机械走 13/14/15；仅 404-not_found × absent 保留无警告特例） | §4.3.5 fixtures 4（三边界+任务取消+归类）+ 测试 5（oversize × absent/present/failed，absent 用 reload-absent pending） |
+| 4 | 并发 revoke/revoke 串行或拒绝；warning/dismiss generation 规则；强制 reload 内部路径；重叠 revoke 测试 | §4.3.6（store 层拒绝 busy、不递增 token；warning 生命周期三规则含 warning-generation；performForcedReload 内部路径不被 refresh 合并） | §4.3.5 测试 6（重叠 revoke：busy/网络次数=1/第一笔 warning 保留 + 全状态与 reload 次数断言） |
+| 5 | 缺键 UserDefaults effective-default 规则；数据根不可信时 fatal 诊断安全路径 | §2.3.3 实际 restart policy 记录（{rawPresence, effectiveValue, source}，缺键=code_default；present/missing/wrong-type fixture）+ §2.3.1 N2（启动前安全失败 exit 0+stderr，不承诺 fatal.json；O_NOFOLLOW+fstat） | §2.3.3 N1 三形状 fixture + §2.3.1 权限规则测试 |
