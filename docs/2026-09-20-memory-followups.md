@@ -1,12 +1,14 @@
-# 2026-09-20 内存治理 r6 通过后的三项后续（评审稿 v7，待终审）
+# 2026-09-20 内存治理 r6 通过后的三项后续（评审稿 v8，待 Round 8 终审）
 
-> 状态：**待终审（Round 7）**。v6（`6987fce160c5ec4473bdde725b85665725d73ae9`）
-> 经 Round 6 评审（报告 `docs/2026-09-20-memory-followups-review-report-r6.md`，
-> commit `b4db658718dddfe710495977bc316c19f14fd45d`）判定：Round 5 三项已实质处置，
-> 剩余 3 个完整阻断簇（采集安全与解析契约 / 7 天调度与覆盖度 / revoke wire 可实
-> 现性）共 9 项终审准入条件。**v7 为 docs-only 修订：本轮零代码改动**，按
-> §8 勾销表逐项关闭 9 条准入条件；Round 6 各选择点全部采纳或择一落地（决策表
-> 见 §6 头部），无新增不采纳项。
+> 状态：**待 Round 8 终审（checklist verification）**。v7（`908444f7a83c1f10787ea1afe90578c1cbe768cd`）
+> 经 Round 7 终审（报告 `docs/2026-09-20-memory-followups-review-report-r7.md`，
+> commit `2ecad95f28bb55cfb92a2064022690801d12e8bd`）判定：Round 6 的 9 项准入
+> 均有处置，但 v7 具体化时引入 5 个实现级阻断（R7-B1 rename 上的 flock /
+> R7-B2 launchd 载体未定 / R7-B3 64KiB 只是事后断言 / R7-B4 第 9 行文案声称
+> 未观测事实 / R7-B5 generation 优先级与 `isRevoking` 缺失）+ 3 个非阻断项
+> （N1 counter schema / N2 时钟前跳 / N3 权限规则）。**v8 为 docs-only 修订：
+> 本轮零代码改动**，按 §8 的 Round 8 七条准入清单逐项关闭；Round 1–6 已通过
+> 裁决不再重开。
 >
 > 历史背景：r6 复审（报告 commit `35a1b8062fee8853180eb67f5572637731003fde`）
 > 通过主修复（代码 `ee43c8f783710f826817c7a60109691e24689df7`）后记录三项非阻断
@@ -24,21 +26,21 @@ v1 的 iOS 旧身份复用与 `124b73d` 误含 think.md 已于 v2 更正（think
 归属误写已于 v4 更正（`d3c7404d72dedae981b71e6482218a366818c849` 只改 think.md、
 `c976ef41ff9c0e88aaaf42e15f3fa02271812c41` 只改 followups 文档）。
 
-### 1.2 本任务（v7 轮）三门点清单（全部完整哈希）
+### 1.2 本任务（v8 轮）三门点清单（全部完整哈希）
 
 ```text
 仓库路径=/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline
 分支=feat/ios-native-message-timeline
-门点1（读取源码/文档分析前）提交=b4db658718dddfe710495977bc316c19f14fd45d（Round 6 评审报告提交；工作树干净，git status --porcelain 无输出）
-门点2（第一次修改文件前）提交=b4db658718dddfe710495977bc316c19f14fd45d（干净；本轮只改 think.md 与本文档，无业务代码修改）
+门点1（读取源码/文档分析前）提交=2ecad95f28bb55cfb92a2064022690801d12e8bd（Round 7 终审报告提交；工作树干净，git status --porcelain 无输出）
+门点2（第一次修改文件前）提交=2ecad95f28bb55cfb92a2064022690801d12e8bd（干净；本轮只改 think.md 与本文档，无业务代码修改）
 门点3（构建/部署前）=不适用——本轮 docs-only（D0），无构建、无安装、无部署
-本轮源码核读=MacBridge/MacBridge/Services/RuntimeManager.swift:622-624（autoRestartEnabled/autoRestartIntervalMinutes UserDefaults 键，只读探测源）、MacBridge/MacBridge/Views/SettingsView.swift:13-14（@AppStorage 默认值）、go-bridge/main.go:766-775/815-822、runtime_startup.go（前轮已核读部分复核），只读取证用于规格对齐，未修改
-v6 历史来源事实=本文档 v6 提交 6987fce160c5ec4473bdde725b85665725d73ae9；同轮 think.md 提交 caa340f53d457539452b2f6074692ca2b208b1df
-think.md 同轮提交（v7 轮）=8938a018a74ccda3f478401ffd2b82789dfec1c2（只改 think.md）
-本文档（v7）提交=本提交（只改 docs/2026-09-20-memory-followups.md；最终哈希在送审说明中给出，不在正文构造自引用）
+本轮源码核读=MacBridge/CordCodeLink.xcodeproj/project.pbxproj:524（PRODUCT_BUNDLE_IDENTIFIER=org.openagi.cordcode.link，与 Round 7 评审核验一致）、RuntimeManager.swift:622-624 / main.go:766-775/815-822 / runtime_startup.go（前轮已核读部分复核），只读取证用于规格对齐，未修改
+v7 历史来源事实=本文档 v7 提交 908444f7a83c1f10787ea1afe90578c1cbe768cd；同轮 think.md 提交 8938a018a74ccda3f478401ffd2b82789dfec1c2
+think.md 同轮提交（v8 轮）=5626248941ce88fa3ea85720a7fca96fa21b4671（只改 think.md）
+本文档（v8）提交=本提交（只改 docs/2026-09-20-memory-followups.md；最终哈希在送审说明中给出，不在正文构造自引用）
 任务预期分支=feat/ios-native-message-timeline
-配套仓库路径/分支/提交=/Users/jacklee/Projects/cordcode-ios-native-message-timeline / feat/ios-native-message-timeline / 389a179a1b01ad2a858f24b5b11ea41058e02381（门点1 实测，干净；与 Round 4–6 评审门点一致）
-预期产品特性=本轮无产品代码变化；当前部署仍为 124b73d7b0f2（Round 6 评审实测）
+配套仓库路径/分支/提交=/Users/jacklee/Projects/cordcode-ios-native-message-timeline / feat/ios-native-message-timeline / 389a179a1b01ad2a858f24b5b11ea41058e02381（门点1 实测，干净；与 Round 4–7 评审门点一致）
+预期产品特性=本轮无产品代码变化；当前部署仍为 124b73d7b0f2（Round 7 评审实测）
 ```
 
 ### 1.3 `124b73d` 真实文件范围（9 个）
@@ -105,14 +107,15 @@ bridge epoch=未记录（采样时未采集该字段——诚实标注，不回�
 **无法补证说明**：PID 12110 已消亡，时间序列无法回溯采集；选择撤回，不以替代
 数据冒充。
 
-### 2.3 复采设计（R2–R6 修订总集）
+### 2.3 复采设计（R2–R7 修订总集）
 
 **前提**：`autoRestartEnabled` / `autoRestartIntervalMinutes` 是可变 UserDefaults
-（`RuntimeManager.swift:622-624` 周期重读；默认 true/120 只是缺省值）——监测
-期间**实际值**必须记录（§2.3.3），不得以默认值冒充运行时事实。多代际监测不
-回答 27h 同进程累积问题（受控长窗口不采纳为默认，§6.2）。
+（app domain **`org.openagi.cordcode.link`**，`project.pbxproj:524`；`RuntimeManager.swift:622-624`
+周期重读；默认 true/120 只是缺省值）——监测期间实际值必须记录（§2.3.3），不得
+以默认值冒充运行时事实。多代际监测不回答 27h 同进程累积问题（受控长窗口不
+采纳为默认，§6.2）。
 
-**端点与 bootstrap 形状（源码核读，与 Round 2–6 评审实测一致）**：
+**端点与 bootstrap 形状（源码核读，与 Round 2–7 评审实测一致）**：
 
 - `runtime.json`（`runtime_startup.go` `WriteReadyFrame` 原子写）：
   `managementUrl`、`pid`、`bridgeEpoch`（**UUID 字符串**）。
@@ -131,10 +134,10 @@ bridge epoch=未记录（采样时未采集该字段——诚实标注，不回�
 - 实测同进程监听 management（`127.0.0.1:61945`）与 bridge（`*:8777`）——lsof
   无法唯一选择 management 端口，仅作诊断交叉检查。
 
-#### 2.3.1 采集事务与安全契约（六步 + R6-B1.1/2/3）
+#### 2.3.1 采集事务与安全契约（六步 + R6-B1 + R7-N3 权限确定规则）
 
-**URL 严格校验（发任何请求之前；R6-B1.1）**：解析 `managementUrl`，要求全部
-满足，否则 rejected（`bootstrap_invalid`，不崩溃）：
+**URL 严格校验（发任何请求之前）**：解析 `managementUrl`，要求全部满足，否则
+rejected（`bootstrap_invalid`，不崩溃）：
 
 - scheme 只能是 `http`；
 - host 只能是数值 loopback 白名单 **{`127.0.0.1`, `::1`}**（显式列出；生产值
@@ -144,7 +147,7 @@ bridge epoch=未记录（采样时未采集该字段——诚实标注，不回�
 `runtime.json` 缺失/不可读 → `bootstrap_unavailable`；JSON 无效/字段类型错/URL
 缺失 → `bootstrap_invalid`——均与 `command_failed` 分开，脚本不得崩溃。
 
-**HTTP 客户端（R6-B1.1/2）**：
+**HTTP 客户端**：
 
 - **进程内 HTTP 库**（禁止 `curl`/`wget` 等子进程 HTTP——token 会进 argv）；
   token 只存在于进程内存变量，不进 argv、环境变量、临时文件、错误文本。
@@ -152,12 +155,19 @@ bridge epoch=未记录（采样时未采集该字段——诚实标注，不回�
   Authorization 转发到 Location。
 - 错误归档只保留 status/reason code，不保留完整 request/headers。
 
-**归档权限（R6-B1.2）**：归档目录 0700、文件 0600；**启动时验证权限**（不只
-创建时设置），不匹配则修复或拒绝启动并报告。
+**归档权限（R7-N3 确定规则，替换 v7 的「修复或拒绝启动」二选一）**：归档目录
+0700、文件 0600；**启动时验证权限**。处置规则写死：
 
-**硬超时（R6-B1.3，预固定；变更须修订本文档）**：单 HTTP 请求 **10s**；单本地
-命令（vmmap/ps/sysctl）**15s**；**整笔事务 90s**（含 identity B 与 bootstrap
-重读——不得用无界等待换原子性）。超时 → 终止**本事务创建的**子进程并记录
+- owner 仍是当前 uid 且**仅 mode 过宽** → `chmod` 收紧后继续；
+- owner 错 / 类型错（非普通文件）/ symlink / 其他不可修复异常 → 写 fatal
+  reason 并按 §2.3.3 **永久 fatal stop** 语义退出（fatal marker + exit 0，
+  不进重启循环）；
+- 临时文件**从创建瞬间即 0600**（以 0600 mode 创建，不得先按默认 umask 创建
+  再事后 chmod）。
+
+**硬超时（预固定；变更须修订本文档）**：单 HTTP 请求 **10s**；单本地命令
+（vmmap/ps/sysctl）**15s**；**整笔事务 90s**（含 identity B 与 bootstrap 重读
+——不得用无界等待换原子性）。超时 → 终止**本事务创建的**子进程并记录
 `command_timeout`；下一计划槽不受影响。
 
 **六步事务**（每样本）：
@@ -176,11 +186,12 @@ bridge epoch=未记录（采样时未采集该字段——诚实标注，不回�
 5. **bootstrap 重读（含 token）**：再读 `runtime.json` 与 `management-token`，
    URL/pid/原始 UUID/token 内容均未变，否则 `bootstrap_rewritten`。
 6. **提交判定**：A == B 且所有命令成功且 `startedAt` 与该代已记录值一致且
-   bootstrap 重读未变 → **有效样本**（单条 JSONL）；否则 rejected（原因码：
-   `bootstrap_unavailable` / `bootstrap_invalid` / `management_token_unavailable`
-   / `bootstrap_mismatch` / `redirect_rejected` / `auth_rejected` /
-   `command_failed` / `command_timeout` / `payload_invalid` / `identity_changed`
-   / `started_at_mismatch` / `bootstrap_rewritten`），**绝不拼部分字段**。
+   bootstrap 重读未变 → **有效样本**（单条 JSONL append，见 §2.3.3）；否则
+   rejected（原因码：`bootstrap_unavailable` / `bootstrap_invalid` /
+   `management_token_unavailable` / `bootstrap_mismatch` / `redirect_rejected`
+   / `auth_rejected` / `command_failed` / `command_timeout` / `payload_invalid`
+   / `identity_changed` / `started_at_mismatch` / `bootstrap_rewritten`），
+   **绝不拼部分字段**。
 
 **epoch 转换契约测试**：活体 fixture（UUID `68fef32a-ef11-4c08-9392-bc1b7e32712e`
 → `2011574066258607221`）；固定 fixture ≥1；零值保护分支（hash 桩全零前 8 字节
@@ -190,7 +201,7 @@ bridge epoch=未记录（采样时未采集该字段——诚实标注，不回�
 缺失 port、残缺 runtime.json、每类超时、子进程退出回收、下一计划槽仍可执行、
 成功/失败输出扫描假 token 不出现在 stdout/stderr/JSONL/异常文本。
 
-#### 2.3.2 外部输出解析契约（R6-B1.4）
+#### 2.3.2 外部输出解析契约（R6-B1.4 + R7-N1 counter schema）
 
 **精确 byte 常量（与其他门统一为二进制）**：告警②阈值 = **300MiB =
 314,572,800 B，严格大于（>）**（同族：256MiB = 268,435,456 B；8MiB =
@@ -202,10 +213,10 @@ current `Physical footprint:`、`Physical footprint (peak)`、`TOTAL SWAPPED`
 以真实 fixture 钉死——若实际输出与该表不符，以 fixture 为准并回填本文档）；
 小数与空格变化均有测试。
 
-**解析失败策略（择一写死）**：**指标级 unavailable**——peak 缺失、重复行、
-未知单位、非数字 → 该指标标 `unavailable`（**不按 0**），样本其余指标仍有效，
-告警②覆盖度下降并在最终报告计入 unavailable 数。**命令执行失败**（非零退出/
-超时/PID 不存在）→ 整笔 rejected（`command_failed`）。
+**解析失败策略**：**指标级 unavailable**——peak 缺失、重复行、未知单位、非数字
+→ 该指标标 `unavailable`（**不按 0**），样本其余指标仍有效，告警②覆盖度下降并
+在最终报告计入 unavailable 数。**命令执行失败**（非零退出/超时/PID 不存在）→
+整笔 rejected（`command_failed`）。
 
 **`ps -o rss=`**：无表头形状；KB→B ×1024；PID 不存在 → 命令失败 → 整笔
 `command_failed`。
@@ -215,63 +226,121 @@ heapSys,heapInuse,heapIdle,heapReleased,sysMinusHeapReleased,heapObjects,stackSy
 numGC}`（数值）、`processUserCPUSeconds`/`processSystemCPUSeconds`（数值）、
 `processCPUAvailable`（bool）——缺失或类型错 → **不得以零值制造有效样本** →
 rejected（`payload_invalid`）。`processCPUAvailable == false` → CPU 指标标
-unavailable（负载门回落到 scan 计数器）；`agentBackgroundScans:*` 可选（按
-backend 存在）。
+unavailable（负载门回落到 scan 计数器）。
 
-**fixture 分层（R6-B1.4）**：**parser fixture 与纯算法 fixture 分开**——vmmap/ps
-用真实归档输出脱敏 fixture（防自造字符串自证）；epoch 转换/阈值边界用合成
-fixture。
+**`agentBackgroundScans:<backendID>` wire schema（R7-N1，完成门证据的最小契约）**：
 
-#### 2.3.3 调度与恢复模型（R6-B2.1/2/3）
+- 对象必须为 map；`scans` / `turnItemRequests` / `scannedTurns` 为**非负整数**；
+- **缺整个对象** = 该 backend 无此证据（不是错误，不标 unavailable）；
+- 字段缺失/类型错/**计数回退**（末值 < 首值）→ 该 backend 的 counter 标
+  `unavailable`——不按 0、不产生负 delta、**不导致整笔样本失败**；
+- 代际 `scan-evidenced` 判定：至少一个 backend 的**同名 counter** 首末可比较
+  且 delta > 0（全部 unavailable 的 backend 不贡献证据）；
+- fixtures：缺字段、类型错、计数回退、多 backend 混合（一个正常一个
+  unavailable）——防完成门被 malformed optional 数据误触发。
 
-**代际原点（R6-B2.1 择一：diagnostics `startedAt`）**：slot k = startedAt +
-30k 分钟（k=0..3）；**slot 窗口 = [t_k, t_k+15min)**（含左不含右），样本时间戳
-落入即归属该 slot；窗口外记 `out_of_slot`（不用于趋势）；每 slot 至多一个有效
-样本（后到重复记 `duplicate`，保留首个）。**v6 的「对齐代际启动时刻」与
-「检测后 t=0」双重定义作废**——检测晚于 slot 的历史 slot 记 `missed`，不补采。
+**fixture 分层**：**parser fixture 与纯算法 fixture 分开**——vmmap/ps 用真实
+归档输出脱敏 fixture；epoch 转换/阈值边界/counter schema 用合成 fixture。
+
+#### 2.3.3 调度与恢复模型（R6-B2 + R7-B1/B2 + R7-N2）
+
+**代际原点**：slot k = startedAt + 30k 分钟（k=0..3）；**slot 窗口 =
+[t_k, t_k+15min)**（含左不含右），样本时间戳落入即归属该 slot；窗口外记
+`out_of_slot`（不用于趋势）；每 slot 至多一个有效样本（后到重复记
+`duplicate`，保留首个）。检测晚于 slot 的历史 slot 记 `missed`，不补采。
 
 **代际发现节奏**：每 60s 检查 bootstrap（runtime.json 内容/stat）与 runtime
 存活性；变化 → 新代际发现流程（立即执行首个可用 slot 事务）。
 
-**时钟跳变**：样本时间戳 < 上一样本 → 该对不参与趋势，记 `clock_anomaly`；
-监测窗口不因回拨缩短（见下）。
+**时钟跳变（R7-N2 补前跳）**：样本时间戳 < 上一样本 → 该对不参与趋势，记
+`clock_anomaly`。完成门的 elapsed 定义：维护持久化 `last_observed_wallclock`，
+每次观测差 d：`d < 0`（回拨）→ 顺延窗口不计负；`0 ≤ d ≤ 24h` → 计入 elapsed；
+`d > 24h` → 记 `clock_anomaly_forward`，**该段不计入 elapsed**（暂停完成判定，
+防手工改时钟/NTP 异常瞬间满足 168h；正常整夜 sleep ≤24h 不受影响）。最终报告
+保留 wall-clock 起止与全部 anomaly 记录；7 个本地日历日仍为独立门。
 
-**拉起方式（R6-B2.3 择一：launchd user agent）**：
+**单实例与持久化模型（R7-B1 重写：锁与数据文件分离）**：
 
-- plist（Label、ProgramArguments、`KeepAlive={SuccessfulExit:false}`——崩溃
-  自动拉起；**告警停止后干净退出不复活**）、日志路径、卸载方式（`launchctl
-  bootout gui/$(id -u) …`）在实施时随脚本交付并写入本文档回填。
-- **单实例锁**：状态文件 flock + PID。
-- **状态/JSONL 原子持久化**（tmp+rename）；启动时读状态文件恢复当前代际/slot
-  进度；**partial line 检测**（JSONL 末行不完整 → 丢弃记 `corrupt_line`）。
-- sleep/wake、脚本停机、runtime 不存在：对应计划槽分别记 missed（原因
-  best-effort：`sleep` / `script_down` / `runtime_absent`）；**醒来不补造旧
-  样本**。
-- **「≥7 个自然日」精确定义**：前向推进墙钟 ≥168h（检测到时钟回拨按回拨量
-  顺延，不缩短）**且**覆盖 ≥7 个本地日历日。
-- **告警停止标志持久化**：provisional 告警触发 → 写停止标志 + 干净退出；
-  重启后读到标志立即退出，不悄悄继续采集。
-- **实际 restart policy 记录（R6-B2.2）**：监测开始与每次检测到变化时，只读
-  探测 Mac App UserDefaults（键 `autoRestartEnabled` / `autoRestartIntervalMinutes`，
-  `RuntimeManager.swift:622-624` 同源；app domain 实施时核对并回填本文档），
-  **不得修改**；最终报告含各时点实际值。
+- **独立稳定 lock 文件** `monitor.lock`（§2.3.3 目录契约内）：启动时 `open`
+  后持有 `flock` 到进程退出；**生命周期内绝不 rename/unlink 该文件**——flock
+  锁的是已打开的 inode，会被 tmp+rename 替换的路径（如 state 快照）不能作为
+  锁对象。PID 只作为锁文件内的诊断字段，不代替内核锁。
+- **state 快照**（当前代际/slot 进度/完成计数器/停止标志）：独立文件
+  `state.json`，**tmp+rename 原子替换**——与锁文件分离，替换不影响锁。
+- **JSONL 样本**：`samples.jsonl` **append-only**（在同一稳定锁持有下 append）；
+  启动时检测末行完整性，不完整的尾行**截断并记 `corrupt_line`**。append 与
+  state 的 atomic snapshot 是**两个分开描述的模型**（v7 把两者叠在一句的写法
+  作废）。
+- **真实双进程测试**（仅 fake state store 的单进程测试不能证明该性质）：持锁
+  进程反复 rename 替换 state 文件时，第二进程**始终无法取得锁**；持锁进程
+  异常退出（kill -9）后第二进程才能取得锁。
 
-**调度/恢复测试（fake clock/state store）**：重启恢复、双实例、sleep 跳槽、
-重复唤醒、部分写入、告警后恢复、晚发现、slot 边界（R6-B2.1 fixture）。
+**launchd 运行单元（R7-B2 完整确定规格）**：
 
-#### 2.3.4 代际分层与负载覆盖门（R6-B2.4）
+- **实现载体（择一写死）**：仓内单文件 Python 3 脚本（`scripts/memory-monitor/monitor.py`，
+  随本任务交付、仓库拥有），只用**系统标准库**（http.client——不自动跟随
+  redirect、可流式有界读取；hashlib；fcntl；json/plist 无关），由绝对路径
+  **`/usr/bin/python3`** 执行——不依赖交互 shell 的 PATH、pyenv/Homebrew 或
+  Codex 会话。
+- **绝对路径契约**（安装后稳定存在）：
+
+```text
+脚本（仓内）=<repo>/scripts/memory-monitor/monitor.py
+脚本（安装副本）=$HOME/Library/Application Support/CordCode Link/memory-monitor/monitor.py
+数据根目录=$HOME/Library/Application Support/CordCode Link/memory-monitor/
+  monitor.lock（稳定锁 inode，绝不 rename/unlink）
+  state.json（tmp+rename 原子快照）
+  samples.jsonl（append-only）
+  fatal.json（永久 fatal marker，含 reason）
+  stop.json（告警停止标志）
+plist=$HOME/Library/LaunchAgents/org.openagi.cordcode.link.memory-monitor.plist
+Label=org.openagi.cordcode.link.memory-monitor
+ProgramArguments=[/usr/bin/python3, <安装副本绝对路径>]
+WorkingDirectory=<数据根目录>
+StandardOutPath/StandardErrorPath=<数据根>/monitor.log
+KeepAlive={SuccessfulExit:false}（非零退出才重启）
+ThrottleInterval=30（重启节流）
+app domain（restart policy 只读探测）=org.openagi.cordcode.link（project.pbxproj:524 实证）
+```
+
+- **安装/卸载**：安装 = 复制脚本到安装副本路径 + 生成 plist + `launchctl
+  bootstrap gui/$(id -u) <plist>`；卸载/停止 = `launchctl bootout gui/$(id -u)
+  <plist>` + 删除数据根（owner 决定）；升级 = 替换安装副本后 `launchctl
+  kickstart -k gui/$(id -u)/<Label>`。
+- **退出语义（三类，写死）**：
+  1. **transient crash**（意外异常，非零退出）→ launchd 按 KeepAlive 重启
+     （ThrottleInterval=30 节流）；脚本在 state 中维护**连续 transient 计数**，
+     连续 ≥5 次 transient → 升级为 fatal（写 fatal.json + exit 0，防重启风暴）。
+  2. **fatal stop**（永久配置/权限/依赖错误，含 R7-N3 的不可修复权限异常）→
+     写 `fatal.json`（含 reason）+ **exit 0**（launchd 不重启）；恢复 = owner
+     修复后删除 marker 并 `launchctl kickstart`。
+  3. **clean stop**（provisional 告警触发）→ 写 `stop.json` + exit 0；重启后
+     读到标志立即退出，不悄悄继续采集；恢复 = owner 评估升级后清除标志重启。
+- **测试**（无需等待 7 天、无需 UI automation）：最小 plist 生成校验（路径/
+  Label/ProgramArguments/KeepAlive/ThrottleInterval）；缺依赖/坏权限 → fatal
+  marker + exit 0（不形成重启风暴）；告警 stop 与 fatal stop 的恢复方式；连续
+  transient ≥5 升级 fatal。
+
+**实际 restart policy 记录**：监测开始与每次检测到变化时，只读探测
+`defaults read org.openagi.cordcode.link autoRestartEnabled /
+autoRestartIntervalMinutes`（**不得修改**）；最终报告含各时点实际值。
+
+**调度/恢复测试（fake clock/state store）**：重启恢复、sleep 跳槽、重复唤醒、
+部分写入（corrupt_line 截断）、告警后恢复、晚发现、slot 边界。
+
+#### 2.3.4 代际分层与负载覆盖门
 
 代际分**三层**（同代际首末有效样本之间）：
 
 | 层 | 判定 | 语义 |
 | --- | --- | --- |
-| `scan-evidenced` | 任一 `agentBackgroundScans:<backend>` 累计计数（`scans`/`turnItemRequests`/`scannedTurns`）delta > 0 | **唯一算「真实工作负载证据」的层** |
-| `cpu-active-only` | 仅 `processUserCPUSeconds + processSystemCPUSeconds` delta ≥ 60s，无扫描证据 | 只证明 runtime 活跃（可能来自忙循环/维护任务/缺陷），**不得称为真实负载** |
+| `scan-evidenced` | 任一 backend 同名 counter（§2.3.2 N1 schema）首末可比较且 delta > 0 | **唯一算「真实工作负载证据」的层** |
+| `cpu-active-only` | 仅 `processUserCPUSeconds + processSystemCPUSeconds` delta ≥ 60s，无扫描证据 | 只证明 runtime 活跃，**不得称为真实负载** |
 | `idle/low-activity` | 两者皆无 | 空闲观测 |
 
 - 60s 与 256MiB/300MiB/8MiB 同级 **provisional**（无分布数据支撑）。
-- 完成条件「≥8 活跃代际」口径修正：**≥8 个 `scan-evidenced`**；
-  `cpu-active-only` 单列分母，不并入、不合并宣称真实负载覆盖。
+- 完成条件「≥8 活跃代际」口径：**≥8 个 `scan-evidenced`**；
+  `cpu-active-only` 单列分母，不并入。
 - `sysctl vm.loadavg` 仅系统背景，不作 CordCode 负载证据。
 
 #### 2.3.5 provisional 告警线（三类**独立 OR** 触发，只升级不定论）
@@ -279,23 +348,23 @@ fixture。
 | 触发器 | 条件（精确公式） | 覆盖形状 |
 | --- | --- | --- |
 | ① 绝对越线 | 任一有效样本 `sysMinusHeapReleased` **current** > 268,435,456 B（256MiB） | 持续高位 |
-| ② footprint 波峰 | 任一有效样本 vmmap footprint **current 或进程 lifetime peak**（`Physical footprint (peak)`）> **314,572,800 B（300MiB，R6-B1.4 精确化）** | 两采样点之间单次大分配波后回落/高位持平——原事故形状 |
+| ② footprint 波峰 | 任一有效样本 vmmap footprint **current 或进程 lifetime peak**（`Physical footprint (peak)`）> 314,572,800 B（300MiB） | 两采样点之间单次大分配波后回落/高位持平——原事故形状 |
 | ③ 趋势异常 | **4 个连续有效样本（完整 slot 序列）构成 3 个相邻 delta，每个 delta ≥ 8,388,608 B（8MiB）**；总增量 ≥ 24MiB/90min 由每步下限蕴含 | 稳定爬升的早期形态 |
 
 - 三者互不替代、独立 OR；③不要求与①同时成立。
-- 8MiB/256MiB/300MiB 均为 **provisional 运维启发式**（无生产分布支撑，只影响
-  是否升级取证）；预固定，变更须修订本文档。
-- **语义**：触发 → 仅「停止默认监测、评估升级取证（§6.2，需 owner 授权）」；
-  **未触发不能推出任何结论**。「未触发趋势」**必须同时报告可评估分母**（§2.4）。
+- 8MiB/256MiB/300MiB 均为 **provisional 运维启发式**；预固定，变更须修订本文档。
+- **语义**：触发 → 仅「写 stop.json + clean stop + 评估升级取证（§6.2，需
+  owner 授权）」；**未触发不能推出任何结论**。「未触发趋势」必须同时报告可
+  评估分母（§2.4）。
 - **能力边界**：无 GC pause/alloc counter，不能裁决 GOGC 或 512MiB 最优值。
 - **③边界 fixtures**：delta 恰等于 8,388,608 B（触发）/ 差 1 byte（不触发）/
   非严格上升（不触发）/ 步数不足（不触发）。
 
 #### 2.3.6 完成条件（预固定；变更须修订本文档）
 
-监测**完成**当且仅当：①窗口满足 §2.3.3 精确定义（≥168h 前向墙钟 + ≥7 本地
-日历日）；②有效代际（≥3 有效样本）≥ **20 个**；③**scan-evidenced 代际 ≥
-8 个**（R6-B2.4 口径）。
+监测**完成**当且仅当：①elapsed 满足 §2.3.3 定义（**按 ≤24h 观测段累计的
+前向墙钟 ≥168h**，回拨顺延、前跳 >24h 不计入 + ≥7 个本地日历日）；②有效代际
+（≥3 有效样本）≥ **20 个**；③**scan-evidenced 代际 ≥ 8 个**。
 
 - **提前终止**：任一 provisional 告警触发 → 写停止标志并升级（§6.2）。
 - **掉样处理**：rejected/missed 只计入统计；完成条件只数有效样本/代际；窗口
@@ -304,44 +373,45 @@ fixture。
 ### 2.4 最终报告形状（预留；监测完成后回填）
 
 - 每指标 **observed max**（按代际、按全局）与分布（min/p50/p95）、**各代际
-  真实 observed duration**（不笼统称「120 分钟上界」——R6-B2.2）。
-- **覆盖度分母（R6-B2.2）**：有效代际数（≥3 样本）；**趋势可评估代际数**
-  （完整 4 slot）；current/peak 指标可评估样本数及 parser `unavailable` 数；
-  三层负载分母（scan-evidenced / cpu-active-only / idle）。
+  真实 observed duration**。
+- **覆盖度分母**：有效代际数（≥3 样本）；**趋势可评估代际数**（完整 4 slot）；
+  current/peak 指标可评估样本数及 parser `unavailable` 数；三层负载分母
+  （scan-evidenced / cpu-active-only / idle）。
 - **restart policy 记录**：各时点实际 `autoRestartEnabled` /
   `autoRestartIntervalMinutes`（只读探测值）。
-- rejected/missed 样本数与原因分布、告警触发记录（含② lifetime peak）。
+- rejected/missed 样本数与原因分布、告警触发记录（含② lifetime peak）、
+  **wall-clock 起止与 clock anomaly 记录**（含前跳）。
 - 结论措辞限定为描述性；**不写**「治理有效」「512MiB 合理」「GOGC 应调」；
   附 §2.3.5 能力边界声明。
 
-## 3. API 硬化（r6 后续 2；已完成，Round 1–6 评审已独立复核通过）
+## 3. API 硬化（r6 后续 2；已完成，Round 1–7 评审已独立复核通过）
 
 `WebPushAuthorizationDecision` 零值从 `WebPushDeviceActive` 改为
 `WebPushDeviceUnspecified`（拒绝但不清理）。dispatcher `default` 分支天然覆盖
 零值。测试零值用例：0 次 HTTP 请求 + 订阅保留。本轮无变化。
 
-## 4. Mac UI 展示 pushCleanupError（r6 后续 3；B4 方案 v7）
+## 4. Mac UI 展示 pushCleanupError（r6 后续 3；B4 方案 v8）
 
 ### 4.1 已交付（`124b73d`）
 
 `DeviceRevocation`/`revokeCleanupWarning`/`.alert`/双语 L10n/`DeviceStoreTests`
 2 条新用例 + `WorkspaceViewTests` stub（Swift 定向 21 条全绿）。
 
-### 4.2 评审发现的问题（Round 1–6 累计，全部成立；1–6 已于 v2–v6 处置）
+### 4.2 评审发现的问题（Round 1–7 累计，全部成立；1–10 已于 v2–v7 处置）
 
-7. **R6-B3.1**：现网络层 `performRequest` 非 2xx 抛 `ManagementError.httpError(Int)`
-   前丢弃 body——「尽力解码 error code」不可实现。
-8. **R6-B3.2**：protocolUnknown 五类未覆盖全部 JSON shape（零字节/纯空白、顶层
-   null/array/标量、`revoked:null`、`revoked:true` + 坏 `pushCleanupError`、空串/
-   空白串、非 2xx `error` 非 string）；`{}` 与 missingRevokedKey 边界重叠。
-9. **R6-B3.3**：`.networkError` 无可呈现诊断；方法 `throws` 与否未写死；
-   cancellation 路径未定义。
-10. **R6-B3.4**：`@MainActor` ≠ async 事务原子——`await` 可重入，旧 reload 可
-    覆盖新状态；无 operation generation/stale guard。
+11. **R7-B1**：v7 在会被 tmp+rename 替换的状态文件上 flock——锁的是旧 inode，
+    双实例可各自持锁。
+12. **R7-B2**：launchd 载体/绝对路径/app domain/永久错误退出语义未确定。
+13. **R7-B3**：64KiB 上限用 `URLSession.data(for:)` 只是事后断言——系统先收
+    完整 body，失去限制分配的意义；无 oversize outcome。
+14. **R7-B4**：矩阵第 9 行（confirmedCleanupUnknown × reload failed）无列表
+    证据，pending 文案却固定声称「设备已从已授权列表消失」。
+15. **R7-B5**：refresh/revoke 的 generation 优先级未定义；`isRevoking` 不在
+    原子提交内——旧 `defer` 可提前清除新操作的 busy 状态。
 
 ### 4.3 过审后实施方案（本轮不动代码；过审后一次实施 + 定向测试 + 重建部署）
 
-#### 4.3.1 唯一证据优先级（R4-B3 定案；Round 4–6 已核验）
+#### 4.3.1 唯一证据优先级（R4-B3 定案；Round 4–7 已核验）
 
 **服务端事实**：`handleRevokeDevice` 只有在 `DeviceStore.RevokeDevice` **成功
 持久化**后才返回 `revoked:true`（失败 404，体含 `{"error":"not_found",...}`）；
@@ -355,24 +425,36 @@ fixture。
 2. **confirmed × present**：不降级撤销结论，列表只触发一致性告警。
 3. **投递阻断声明的证据 = confirmed 撤销 + confirmed cleanup failure**，与
    reload 结果无关。
-4. **`revoked:true` + 坏 cleanup 字段**（R6-B3.2 择一）：**保留撤销证据，新增
-   `confirmedCleanupUnknown`**——服务端只有成功持久化才返回 true，cleanup 字段
-   不可信只影响 cleanup 信息，不降级整包（符合 confirmed-first）。
+4. **`revoked:true` + 坏 cleanup 字段**：保留撤销证据，`confirmedCleanupUnknown`。
 5. **无 confirmed response** 时 reload 是唯一当前证据：`present` → 未生效/倾向
    未生效；`absent` → 已撤销（对账）；`failed` → 未知。
-6. **reload `failed` 永远不从旧 `devices` 数组推断任何结论**。
+6. **reload `failed` 永远不从旧 `devices` 数组推断任何结论**——**也不得在
+   呈现中声称只有 reload 才能证明的事实**（R7-B4：第 9 行不得声称「已从列表
+   消失」）。
 
-#### 4.3.2 API 边界契约（R6-B3.1/2/3）
+#### 4.3.2 API 边界契约（R6-B3 + R7-B3）
 
-**非 2xx body 获取（R6-B3.1 择一：专用 raw request）**：`ManagementAPIClient`
-为 revoke 增加**私有 raw 请求路径**，返回 `(status: Int, data: Data)`——**不
-修改** `performRequest` 与其他调用方（减少影响面）。响应体大小上限 **64KiB**；
-原 body 不写日志；只有类型校验通过的 `error` code 字符串进入 outcome。测试
-必须经真实 HTTP client 层（StubHTTPServer），**不得在 DeviceStore stub 伪造
-code 绕过丢 body 现状**。
+**非 2xx body 获取**：`ManagementAPIClient` 为 revoke 增加私有 raw 请求路径，
+返回 `(status: Int, data: Data)`——不修改 `performRequest` 与其他调用方。原
+body 不写日志；只有类型校验通过的 `error` code 字符串进入 outcome。测试必须
+经真实 HTTP client 层（StubHTTPServer），不得在 DeviceStore stub 伪造 code。
 
-**五类 response + 完整分类表（R6-B3.2：无重叠、全覆盖、固定优先级，按序判定
-先命中先归属）**：
+**64KiB 读取阶段硬上限（R7-B3 重写）**：
+
+- **流式累计**：用 delegate/bytes 流式读取并累计；**累计到第 65,537 byte 立即
+  cancel 任务**（或等价有界 loader）——不是 `URLSession.data(for:)` 收完再
+  检查 `data.count` 的事后断言。
+- `Content-Length > 65536` 可提前拒绝，但**不得单独依赖 header**（无
+  Content-Length 的 chunked/流式响应必须被流式上限截获）。
+- **oversize outcome**：`RevokeTransportIssue` 新增 `case responseTooLarge`——
+  归 transport/HTTP failure 家族（传输层读取失败），**不把截断 body 送 JSON
+  parser**，按行 14/15 语义（无 confirmed response）处理。
+- **三条真实 HTTP 边界 fixture**：恰好 65,536 B（接受）/ 65,537 B（oversize）/
+  无 Content-Length 的 chunked 流式超限（oversize）。测试证明超限后连接任务被
+  **取消**、原 body 不进日志。
+
+**五类 response + 完整分类表（无重叠、全覆盖、固定优先级，按序判定先命中先
+归属）**：
 
 2xx body：
 
@@ -386,36 +468,34 @@ code 绕过丢 body 现状**。
 | 6 | `revoked == false` | `protocolUnknown(.revokedFalse)` |
 | 7 | `revoked == true` 且无 `pushCleanupError` 键 | `confirmedClean` |
 | 8 | `revoked == true` 且 `pushCleanupError` 为非空非空白 string | `confirmedCleanupFailure(err)` |
-| 9 | `revoked == true` 且 `pushCleanupError` 类型错误（非 string）**或空串/纯空白** | `confirmedCleanupUnknown`（§4.3.1 规则 4） |
-
-（v6 的 `{}`→emptyBody 与 missingRevokedKey 重叠由序 1/4 的固定顺序消除。）
+| 9 | `revoked == true` 且 `pushCleanupError` 类型错误（非 string）或空串/纯空白 | `confirmedCleanupUnknown` |
 
 非 2xx：`transportOrHTTPFailure(.httpStatus(status, serverErrorCode))`——
-serverErrorCode = 尽力解码体 `{"error": ...}`（**非 string 或缺失 → nil**，不改
-变分类）；404 特例 = `status==404 && code=="not_found"`，不把所有 404 等同。
+serverErrorCode = 尽力解码体 `{"error": ...}`（非 string 或缺失 → nil）；404
+特例 = `status==404 && code=="not_found"`。**体超限（任意状态码）→
+`transportOrHTTPFailure(.responseTooLarge)`**。
 
 网络/取消：`transportOrHTTPFailure(.networkError(category))`——category 为
-**稳定、可本地化、非敏感**的类别（`offline` / `timedOut` /
-`cannotConnectToHost` / `cancelled` / `other`，映射自 `URLError.Code` 等；**不把
-服务器正文或本地路径进 UI**——R6-B3.3）。
+稳定、可本地化、非敏感类别（`offline` / `timedOut` / `cannotConnectToHost` /
+`cancelled` / `other`，映射自 `URLError.Code` 等；不把服务器正文或本地路径进
+UI）。
 
-**签名写死（R6-B3.3）**：
+**签名写死**：
 
 ```swift
 func revokeDevice(_ deviceId: String) async -> RevokeAttemptOutcome  // non-throwing
 ```
 
-所有失败（**含 cancellation**）映射进 outcome，无不可映射错误、无仍可 throw 的
-撤销路径错误；**任何 outcome（含 cancelled）都执行恰好一次 typed reload**——
-reload 自身被取消 → reload class = `failed`，走对应行。client fixture 验证
-network error / cancelled / HTTP failure / protocol failure 各进入**一次且仅一次**
-reload。
+所有失败（含 cancellation）映射进 outcome；**任何 outcome（含 cancelled）都
+执行恰好一次 typed reload**——reload 自身被取消 → reload class = `failed`。
+client fixture 验证 network error / cancelled / HTTP failure / protocol failure /
+oversize 各进入**一次且仅一次** reload。
 
 **typed reload outcome（归属状态管理层）**：`DeviceStore` 内部包装现有
 `listDevices() async throws -> [TrustedDevice]` 为 typed outcome；不给 API 协议
 新增重复 RPC；reducer 只消费返回值，不读陈旧 `devices` 数组。
 
-#### 4.3.3 完整决策矩阵（5 × 3 = 15 行，由 §4.3.1 机械生成；测试逐行覆盖）
+#### 4.3.3 完整决策矩阵（5 × 3 = 15 行；测试逐行覆盖）
 
 | # | response class | reload | 生效判定 | cleanup | 呈现 |
 | --- | --- | --- | --- | --- | --- |
@@ -425,40 +505,46 @@ reload。
 | 4 | confirmedCleanupFailure | absent | 已撤销（双确认） | failed(err) | cleanup-failure 警告（含投递阻断声明） |
 | 5 | confirmedCleanupFailure | present | 已撤销 + 列表不一致 | failed(err) | inconsistent 警告 + 清理失败附句（含投递阻断声明） |
 | 6 | confirmedCleanupFailure | failed | 已撤销（response 确认） | failed(err) | cleanup-failure 警告；列表刷新失败另行呈现 |
-| 7 | confirmedCleanupUnknown | absent | 已撤销（双确认） | unknown | **pending 警告**（撤销已确认，cleanup 未知） |
-| 8 | confirmedCleanupUnknown | present | 已撤销 + 列表不一致 | unknown | inconsistent 警告 + **cleanup-unknown 附句** |
-| 9 | confirmedCleanupUnknown | failed | 已撤销（response 确认） | unknown | **pending 警告**；列表刷新失败另行呈现 |
-| 10 | protocolUnknown | absent | 已撤销（reload 对账） | unknown | **pending 警告** |
+| 7 | confirmedCleanupUnknown | absent | 已撤销（双确认） | unknown | **pending（reload-absent）** |
+| 8 | confirmedCleanupUnknown | present | 已撤销 + 列表不一致 | unknown | inconsistent 警告 + cleanup-unknown 附句 |
+| 9 | confirmedCleanupUnknown | failed | 已撤销（response 确认） | unknown | **pending（response-confirmed）——不得声称「已从列表消失」（R7-B4）** |
+| 10 | protocolUnknown | absent | 已撤销（reload 对账） | unknown | **pending（reload-absent）** |
 | 11 | protocolUnknown | present | 倾向未生效 | unknown | **unknown 警告**（撤销结果未知；设备仍在列表） |
 | 12 | protocolUnknown | failed | 未知 | unknown | **unknown 警告**（撤销与 cleanup 均未知） |
-| 13 | transportOrHTTPFailure | absent | **已撤销（lost response 对账）** | unknown | **pending 警告** |
-| 14 | transportOrHTTPFailure | present | 未生效 | unknown | `devicesError`（现有失败语义；网络诊断用 §4.3.2 category） |
+| 13 | transportOrHTTPFailure | absent | **已撤销（lost response 对账）** | unknown | **pending（reload-absent）** |
+| 14 | transportOrHTTPFailure | present | 未生效 | unknown | `devicesError`（网络诊断用 category） |
 | 15 | transportOrHTTPFailure | failed | 未知 | unknown | `devicesError` + 撤销状态未知；下次成功刷新自然对账 |
 
 **特例**：`404 not_found`（`.httpStatus(404, "not_found")`）× absent → 服务端
 无此设备（含此前已撤销），无 cleanup 对象 → 无警告，按「设备已不在授权列表」
-呈现；其他 404 → 行 14/15 语义。
+呈现；其他 404 与 oversize → 行 14/15 语义。
 
 **最低规则（由 §4.3.1 机械导出）**：
 
-1. 撤销尝试后**总是恰好一次** typed reload（含 cancelled 路径）；reload
-   `absent` 可单独确认撤销并对账 lost response（行 10/13）。
-2. confirmed response 可单独确认撤销（行 2/3/5/6/7/8/9）；与 reload 冲突时
-   不降级撤销结论，只追加一致性告警；投递阻断声明只依赖 confirmed 证据（行
+1. 撤销尝试后**总是恰好一次** typed reload（含 cancelled/oversize 路径）；
+   reload `absent` 可单独确认撤销并对账 lost response（行 10/13）。
+2. confirmed response 可单独确认撤销（行 2/3/5/6/7/8/9）；与 reload 冲突时不
+   降级撤销结论，只追加一致性告警；投递阻断声明只依赖 confirmed 证据（行
    4/5/6 同结论）。
 3. 无 confirmed response 时 reload 是唯一当前证据：`present` → 未生效/倾向未
    生效（行 11/14），不声称投递阻断。
-4. reload `failed` 不从旧 `devices` 数组推断任何结论（行 3/6/9/12/15）。
+4. reload `failed` 不从旧 `devices` 数组推断任何结论（行 3/6/9/12/15），**也
+   不呈现只有 reload 才能证明的事实**（行 9 文案不含「已从列表消失」）。
 
-#### 4.3.4 文案（六键；L10n 组合而非嵌套格式化）
+#### 4.3.4 文案（七键；按证据来源拆分 pending——R7-B4）
 
 - `devices_push_cleanup_warning`（行 4/6 主文案）：
   - en: "The device was revoked, but cleaning up its push subscription failed: %@. Push delivery to this device stays blocked; the runtime retries the cleanup automatically on later notifications. Check the runtime log if it keeps failing."
   - zh: "设备已撤销，但其推送订阅清理失败：%@。对该设备的推送投递已被阻断；runtime 会在后续通知投递时自动重试清理；若持续失败，可查看 runtime 日志。"
-- `devices_push_cleanup_pending`（行 7/9/10/13：撤销已确认、仅 cleanup 未知）：
+- `devices_push_cleanup_pending`（**行 7/10/13：reload-absent 确认**——列表证据
+  存在，可陈述「已从列表消失」）：
   - en: "The device no longer appears in the authorized list, so the revocation is confirmed. The cleanup result of its push subscription is unknown; if it is still pending, the runtime retries it automatically on later notifications. Check the runtime log if needed."
   - zh: "该设备已从已授权列表消失，撤销已确认。其推送订阅的清理结果未知；若仍待清理，runtime 会在后续通知投递时自动重试；必要时可查看 runtime 日志。"
-- `devices_push_cleanup_unknown`（行 11/12：撤销与 cleanup 均未知）：
+- `devices_push_cleanup_pending_response`（**行 9：仅 response 确认，reload
+  failed**——不得声称列表已消失）：
+  - en: "The runtime confirmed the revocation. The cleanup result of this device's push subscription is unknown; if it is still pending, the runtime retries it automatically on later notifications. The device list could not be refreshed; refresh it later to verify. Check the runtime log if needed."
+  - zh: "runtime 已确认撤销该设备。其推送订阅的清理结果未知；若仍待清理，runtime 会在后续通知投递时自动重试。设备列表刷新失败，可稍后刷新确认；必要时可查看 runtime 日志。"
+- `devices_push_cleanup_unknown`（行 11/12）：
   - en: "The revocation outcome could not be confirmed, and the cleanup result of this device's push subscription is also unknown. Refresh the device list: if the device still appears, the revoke may not have taken effect — check the runtime log; if it has disappeared, the runtime retries any pending cleanup automatically on later notifications."
   - zh: "撤销结果无法确认，该设备推送订阅的清理结果也未知。请刷新设备列表：若设备仍显示在列表中，撤销可能未生效，请查看 runtime 日志；若已消失，仍待清理的订阅由 runtime 在后续通知投递时自动重试。"
 - `devices_push_cleanup_inconsistent`（行 2/5/8 基础文案）：
@@ -473,38 +559,45 @@ reload。
 
 #### 4.3.5 实施与测试清单
 
-1. `RevokeAttemptOutcome` 契约落地（§4.3.2）：raw request + 五类 response +
-   分类表 + 网络 category；`revokeDevice` 改 non-throwing。
-2. `DeviceStore` typed reload outcome 包装 + §4.3.6 generation guard；任何
-   outcome 后恰好一次 reload。
+1. `RevokeAttemptOutcome` 契约落地（§4.3.2）：raw request + 流式 64KiB 上限 +
+   五类 response + 分类表 + 网络 category + `responseTooLarge`；`revokeDevice`
+   改 non-throwing。
+2. `DeviceStore` typed reload outcome 包装 + §4.3.6 operation coordinator；
+   任何 outcome 后恰好一次 reload。
 3. Reducer 按 §4.3.1 规则机械实现（15 行矩阵 + 404 特例）。
-4. **wire fixtures（client 级，经真实 HTTP 层）**：分类表 9 行 2xx 形状逐行
-   （零字节/纯空白/语法错/顶层 null/array/标量/缺键/`revoked:null`/
-   `revoked:"yes"`/`revoked:false`/`revoked:true`±cleanupError/
-   cleanupError 类型错/空串/空白串）+ 非 2xx（404 带/不带 `not_found`、500）+
-   连接丢失（lost response）+ 网络错误/cancelled（各恰好一次 reload）。
+4. **wire fixtures（client 级，经真实 HTTP 层）**：分类表 9 行 2xx 形状逐行 +
+   非 2xx（404 带/不带 `not_found`、500）+ 连接丢失 + 网络错误/cancelled +
+   **oversize 三边界（65,536 B / 65,537 B / chunked 无 Content-Length 超限）**
+   ——各恰好一次 reload；超限后任务取消、原 body 不进日志。
 5. **ViewModel 测试**：15 行矩阵逐行 + 404 特例 + 行 5/8 组合文案断言 +
-   pending/unknown 两类文案**不可互换**断言（行 7/9/10/13 必含「撤销已确认」
-   且不含「无法确认撤销」；行 11/12 相反）+ presentation seam（四种警告态
-   发布 true / dismiss false）+ typed outcome 包装测试。
+   pending 两类文案**不可互换**断言（行 7/10/13 含「已从列表消失」；**行 9
+   不含「已从列表消失」且含「runtime 已确认撤销」**；行 11/12 含「无法确认」）
+   + presentation seam（四种警告态）+ typed outcome 包装测试。
 6. **async 交错测试（controllable continuations，§4.3.6）**：旧 reload 后
-   返回、普通 refresh 与 revoke 交错、连续两次操作、dismiss 与晚到结果。
+   返回、普通 refresh 与 revoke 交错、连续两次操作、dismiss 与晚到结果——
+   **逐项断言最终列表、warning、devicesError、hasLoadedDevices、isRevoking
+   以及 reload 次数**（R7-B5）。
 7. 定向测试 → Release 重建 + 覆盖安装 + 新代际核验。
 
-#### 4.3.6 operation generation / stale-result guard（R6-B3.4）
+#### 4.3.6 operation coordinator（R7-B5 重写：统一 token + 串行协调 + isRevoking）
 
-- `DeviceStore` 建立单调递增 **operation generation**：每次撤销操作取当前
-  gen；所有 `await` 结果（outcome、reload）**仅在 gen 仍当前时应用**，否则
-  丢弃（`@MainActor` ≠ async 事务原子）。
-- 最终 reducer 在 **@MainActor 一次同步块**提交 `devices` /
-  `hasLoadedDevices` / `devicesError` / warning。
-- **所有写 `devices` 的异步路径共享同一 generation guard**（页面 on-appear
-  刷新、错误区 Retry 与撤销 reload 交错防护）。
-- **旧 warning 清理规则**：开始新撤销操作时清除上一轮 warning（不跨操作
-  保留）；dismiss 只清 warning、不影响 gen；晚到的旧 gen 结果被丢弃，**不会
-  复活已 dismiss 的 warning**。
+**模型（择一写死）**：**统一 operation token + revoke 期间 refresh 合并**：
 
-## 5. 交付与部署证据（`124b73d` 历史记录；Round 1–6 已独立复核，本轮无新部署）
+- 所有 list/revoke 操作统一递增**同一个 operation generation**（token）。
+- **revoke 进行中（`isRevoking == true`）时，普通 refresh（on-appear/Retry）
+  不发起独立网络请求**：登记 pending-refresh 标记，**合并进 revoke 的强制
+  reload**（revoke 本来就 reload）——既避免 refresh 递增 gen 使已生效的
+  revoke flow 变 stale（保护撤销可观测性），也避免旧 refresh 覆盖新列表。
+- 若 refresh 已在飞行中而 revoke 开始：revoke 递增 gen → 旧 refresh 结果变
+  stale 被丢弃（revoke 的 reload 是更新的数据）。
+- **`isRevoking` 纳入同一 current-operation 检查与原子提交**：现生产实现的
+  `defer { isRevoking = false }`（`DeviceStore.swift:56-57`）改为「仅在 gen 仍
+  当前时清除」——**旧操作结束不得清除新操作的 busy 状态**。
+- 最终同步提交清单（@MainActor 一次同步块）：`devices` / `hasLoadedDevices` /
+  `devicesError` / warning / **`isRevoking`**。
+- 交错测试断言见 §4.3.5 测试 6。
+
+## 5. 交付与部署证据（`124b73d` 历史记录；Round 1–7 已独立复核，本轮无新部署）
 
 ### 5.1 构建来源门
 
@@ -530,27 +623,28 @@ runtime 进程=PID 30304（/Applications/CordCodeLink.app/Contents/Resources/cor
 启动 RSS=78112KB（仅记录，不作为内存效果验证）
 ```
 
-Round 2–6 评审实测：当前 runtime PID 34681（同版本 `124b73d7b0f2`）监听 8777；
+Round 2–7 评审实测：当前 runtime PID 34681（同版本 `124b73d7b0f2`）监听 8777；
 该代际变化不用于证明 §2 首采数据。
 
 ### 5.3 验证状态
 
 代码自 `124b73d7b0f2155ed19207c3ec6fe00cdf5fa888` 未变化；Go/Swift 定向测试、
-race、vet 的独立复跑记录见 Round 1–6 评审报告。本轮（v7）零代码改动，无新
+race、vet 的独立复跑记录见 Round 1–7 评审报告。本轮（v8）零代码改动，无新
 构建/部署。
 
 ## 6. 不采纳清单与择一决策表
 
-**Round 6 择一决策表（各选择点均采纳评审给出的选项之一，无否决）**：
+**Round 7 择一决策表（各选择点均采纳评审给出的选项之一，无否决）**：
 
-| 选择点 | 选项 | v7 落地 |
+| 选择点 | 选项 | v8 落地 |
 | --- | --- | --- |
-| R6-B1.4 解析失败 | 整笔 rejected vs 指标级 unavailable | **指标级 unavailable**（命令执行失败仍整笔 rejected） |
-| R6-B2.1 t=0 原点 | startedAt vs detection time | **startedAt**（评审推荐） |
-| R6-B2.3 拉起方式 | 前台常驻 vs launchd | **launchd user agent**（7 天无人值守必需） |
-| R6-B3.1 非 2xx body | 专用 raw request vs 改底层 typed error | **专用 raw request**（评审推荐，影响面小） |
-| R6-B3.2 revoked:true + 坏 cleanup | 新状态 vs 整包降级 | **新状态 `confirmedCleanupUnknown`**（符合 confirmed-first） |
-| 300MB 单位 | 10^6 vs 2^20 | **300MiB = 314,572,800 B**（与其他门统一二进制） |
+| R7-B1 JSONL 写法 | 整文件 tmp+rename vs append | **append-only**（稳定锁下 append + partial line 截断；state 快照单独 tmp+rename） |
+| R7-B2 实现载体 | 仓内可执行物 | **`/usr/bin/python3` + 仓内系统标准库单文件脚本**（不依赖 shell PATH/pyenv/Homebrew） |
+| R7-B3 读取上限 | delegate/bytes 流式 vs 有界 loader | **流式累计 + 第 65,537 byte 立即 cancel**；`Content-Length` 仅提前拒绝不作唯一依据 |
+| R7-B3 oversize 归属 | protocol vs HTTP failure 专用 reason | **`RevokeTransportIssue.responseTooLarge`**（transport 家族，不送截断 body 进 parser） |
+| R7-B4 pending 拆分 | response-confirmed 覆盖第 7 行与否 | **仅第 9 行用 response-confirmed 文案**（第 7 行有 reload-absent 双确认，保留列表消失陈述） |
+| R7-B5 协调模型 | 统一 token+合并 vs 优先级 coordinator | **统一 token + revoke 期间 refresh 合并进强制 reload** |
+| R7-N2 前跳上限 | 累计小步 vs 单段 anomaly 上限 | **单段 >24h 记 `clock_anomaly_forward` 不计入 elapsed**（正常整夜 sleep ≤24h 不受影响） |
 
 **现存不采纳项（Round 1 的 3 项 + Round 4 的 1 项）**：
 
@@ -577,24 +671,22 @@ UI 面积。
 
 ## 7. 遗留与下一步
 
-1. **本文档过审后（开发阶段，一次完成）**：实施 §4.3（raw request + 五类
-   response + 15 行 reducer + 六键文案 + generation guard + 全部 fixtures）与
-   §2.3 监测脚本（安全契约 + 解析契约 + launchd 调度 + 三层负载 + 测试矩阵）→
-   定向测试 → Release 重建 + 覆盖安装 + 新代际核验。
-2. **监测执行**：按 §2.3.6 完成条件运行，最终报告回填 §2.4。
+1. **本文档过审后（开发阶段，一次完成）**：实施 §4.3（raw request + 流式上限
+   + 五类 response + 15 行 reducer + 七键文案 + operation coordinator + 全部
+   fixtures）与 §2.3 监测脚本（python3 载体 + launchd 规格 + 安全/解析契约 +
+   三层负载 + 测试矩阵）→ 定向测试 → Release 重建 + 覆盖安装 + 新代际核验。
+2. **监测执行**：安装 launchd 单元，按 §2.3.6 完成条件运行，最终报告回填 §2.4。
 3. **owner 验收**：正常撤销自然路径（设备消失、无警告）；异常态由
    deterministic 测试验收。
 
-## 8. Round 6 终审准入清单勾销表
+## 8. Round 8 终审准入清单勾销表
 
-| # | 准入条件（评审报告 §7） | v7 落地位置 | 测试位置 |
+| # | 准入条件（Round 7 报告 §6） | v8 落地位置 | 测试位置 |
 | --- | --- | --- | --- |
-| 1 | loopback 校验、禁 redirect、token 不进 argv/env/temp/output、bootstrap 无效分类、权限检查 | §2.3.1 URL 严格校验 + HTTP 客户端 + 归档权限 | §2.3.1 安全/超时 fixtures |
-| 2 | HTTP/命令/整事务硬超时、子进程回收、真实 vmmap/ps fixture、300MB 精确常量、unavailable/failure 规则 | §2.3.1 硬超时 + §2.3.2 解析契约（314,572,800 B） | §2.3.1 超时 fixtures + §2.3.2 真实 fixture 分层 |
-| 3 | 统一 t=0 原点、discovery cadence/slot tolerance/missed slot、实际 restart policy、趋势/peak 可评估分母 | §2.3.3（startedAt 原点、60s 发现、slot 窗口、restart policy 只读探测）+ §2.4 分母 | §2.3.3 调度/恢复测试（晚发现、slot 边界） |
-| 4 | 拉起方式、单实例、持久状态、sleep/crash/restart 恢复、幂等、告警后停止、「自然日」精确定义 | §2.3.3 launchd 模型 + 168h/7 日历日定义 + 停止标志 | §2.3.3 fake clock/state store 测试 |
-| 5 | scan-evidenced / cpu-active-only / idle 分层、60s provisional、「真实负载」措辞、≥8 计数口径 | §2.3.4 三层 + §2.3.6 完成条件（≥8 scan-evidenced） | §2.3.4（随脚本实施） |
-| 6 | 非 2xx body 丢失解决（raw request 或 typed error）、真实 client fixture 证明 404 error code 可达 | §4.3.2 专用 raw request + 64KiB 上限 | §4.3.5 wire fixtures（经真实 HTTP 层） |
-| 7 | 2xx/非 2xx JSON shape 无重叠全覆盖分类、坏 cleanup 字段裁决、全部 wire fixtures | §4.3.2 分类表（9 行 2xx + 非 2xx + 网络）+ §4.3.1 规则 4 | §4.3.5 fixtures 4 |
-| 8 | non-throwing 签名写死、可本地化网络诊断、所有 failure/cancel 一次 reload | §4.3.2 签名 + networkError(category) + 恰好一次 reload | §4.3.5 fixtures 4（cancelled/网络错误） |
-| 9 | operation generation/stale guard、一次性状态提交、旧 warning 清理规则、async 交错测试 | §4.3.6 | §4.3.5 测试 6（controllable continuations） |
+| 1 | 独立稳定 lock inode；state snapshot 与 JSONL append/replace 分开；真实双进程测试 | §2.3.3 单实例与持久化模型（monitor.lock / state.json tmp+rename / samples.jsonl append） | §2.3.3 真实双进程测试（state rename 期间第二进程无法进入；kill -9 后可取得） |
+| 2 | 实现载体、绝对路径、Label、ProgramArguments、app domain、安装/卸载、fatal/transient/clean 退出语义 | §2.3.3 launchd 运行单元（python3 载体 + 路径契约 + 三类退出语义 + ThrottleInterval + 连续 transient 升级 fatal） | §2.3.3 launchd 测试（plist 生成/坏权限不重启风暴/两种 stop 恢复/连续 transient 升级） |
+| 3 | 64KiB 网络读取阶段硬上限；oversize outcome；65536/65537/chunked 三 fixture | §4.3.2 流式上限 + `responseTooLarge` | §4.3.5 fixtures 4（三边界 + 任务取消 + body 不进日志） |
+| 4 | 拆分 response-confirmed 与 reload-absent pending 文案；第 9 行不声称列表已消失 | §4.3.4 `pending`（行 7/10/13）与 `pending_response`（行 9）两键 | §4.3.5 测试 5（行 9 不含「已从列表消失」且含「runtime 已确认撤销」） |
+| 5 | refresh/revoke generation 优先级或串行协调；`isRevoking` 入 stale guard 与原子断言；交错测试查全部状态与 reload 次数 | §4.3.6 统一 token + revoke 期间 refresh 合并 + isRevoking 原子提交 | §4.3.5 测试 6（列表/warning/devicesError/hasLoadedDevices/isRevoking/reload 次数逐项断言） |
+| 6 | N1 counter schema、N2 forward clock anomaly、N3 权限确定规则 | §2.3.2 N1 schema / §2.3.3 N2 前跳 / §2.3.1 N3 权限 | §2.3.2 counter fixtures / §2.3.3 调度测试 / §2.3.1 权限规则 |
+| 7 | 只改文档，不写产品代码 | 本轮 docs-only（§1.2 三门点 + 工作树干净） | — |
