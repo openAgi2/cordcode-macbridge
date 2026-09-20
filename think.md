@@ -45,6 +45,20 @@ revoke/revoke 在 store 层拒绝（isRevoking 时第二次调用 busy 返回、
 可写），open 一律 O_NOFOLLOW+事后 fstat。详见
 `docs/2026-09-20-memory-followups.md`（v9）。
 
+**开发阶段完成（2026-09-20，r9 通过后一次实施）**：B4 撤销管线（`fb8bed9`，
+31/31 定向测试）+ 监测脚本 `scripts/memory-monitor/monitor.py`
+（`292f42b`/`dabefb8`/`d95049e`，64/64 测试）+ Release 重建部署（新代际
+pid 54537）+ launchd 监测常驻运行（首周期实测：restart_policy/slot 0 样本/
+milestone/duplicate 去重全部按协议）。两条实施期经验：(1) **JSONSerialization
+顶层标量需 `fragmentsAllowed`、`{"revoked":1}` 的 NSNumber-Bool 桥接会把数字 1
+当 true**——wire fixture 测试先于生产暴露分类 bug，CFBoolean 类型判定才是真
+JSON 布尔；(2) **活体首周期验证暴露了单测没覆盖的两个生产 bug**（journal 重放
+从错误层级读 startedAt → 代际中途重启后 slot 调度全丢；milestone 只数新样本 →
+duplicate 事务永不算成功）——deterministic 测试绿 ≠ 部署后行为对，活体验证
+不可省。owner 实际配置 `autoRestartEnabled` user_set **false**：完成门
+「≥20 有效代际」的节奏取决于 runtime 自然重启频率，窗口不足延长不降门槛。
+实施证据见 `docs/2026-09-20-memory-followups.md` §9。
+
 ## 2026-09-19 bridge runtime "内存 2G+"：已证明不是 2.5GB 可达 Go heap；swapped/retained 页状态与压缩器机制待一致遥测；LLDB 直读 gcController 取证法
 
 现象：`cordcode-bridge-runtime` 活动监视器显示 2.5G（峰值 3.8G），owner 质疑泄漏。
