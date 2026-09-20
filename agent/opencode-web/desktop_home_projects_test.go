@@ -10,14 +10,14 @@ import (
 
 func TestParseDesktopHomeStateMatchesServerURL(t *testing.T) {
 	blob := []byte(`{
-		"server": "{\"projects\":{\"http://127.0.0.1:4096\":[{\"worktree\":\"/Users/jacklee/Projects/cordcode-macbridge\",\"expanded\":true},{\"worktree\":\"/Users/jacklee/Projects/Chat\",\"expanded\":true}],\"local\":[{\"worktree\":\"/Users/jacklee/Projects/Chat\"}]}}"
+		"server": "{\"projects\":{\"http://127.0.0.1:4096\":[{\"worktree\":\"/Users/samples/cordcode-macbridge\",\"expanded\":true},{\"worktree\":\"/Users/samples/Chat\",\"expanded\":true}],\"local\":[{\"worktree\":\"/Users/samples/Chat\"}]}}"
 	}`)
 	state, got := parseDesktopHomeState(blob, "http://127.0.0.1:4096/")
-	if state != desktopHomeRowPresent || len(got) != 2 || got[0] != "/Users/jacklee/Projects/cordcode-macbridge" || got[1] != "/Users/jacklee/Projects/Chat" {
+	if state != desktopHomeRowPresent || len(got) != 2 || got[0] != "/Users/samples/cordcode-macbridge" || got[1] != "/Users/samples/Chat" {
 		t.Fatalf("4096 home state=%d open-set = %v", state, got)
 	}
 	state, local := parseDesktopHomeState(blob, "local")
-	if state != desktopHomeRowPresent || len(local) != 1 || local[0] != "/Users/jacklee/Projects/Chat" {
+	if state != desktopHomeRowPresent || len(local) != 1 || local[0] != "/Users/samples/Chat" {
 		t.Fatalf("local home state=%d open-set = %v", state, local)
 	}
 	if state, miss := parseDesktopHomeState(blob, "http://127.0.0.1:9999"); state != desktopHomeRowMissing || miss != nil {

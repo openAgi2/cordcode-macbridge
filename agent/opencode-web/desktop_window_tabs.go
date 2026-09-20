@@ -133,7 +133,14 @@ func readDesktopWindowTabs() ([]desktopSessionTab, error) {
 	}
 
 	root := filepath.Dir(settingsPath)
+	// The settings file itself counts against the aggregate budget (plan §7:
+	// settings+global+all windows ≤ maxDesktopPersistTotal); the per-window
+	// check below reserves one file's worth so global.dat (≤
+	// maxDesktopPersistFile) fits inside the budget.
 	total := int64(0)
+	if info, err := os.Stat(settingsPath); err == nil {
+		total += info.Size()
+	}
 	tabs := make([]desktopSessionTab, 0, len(windowIDs))
 	for _, id := range windowIDs {
 		path := filepath.Join(root, windowDataFile(id))

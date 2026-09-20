@@ -458,6 +458,33 @@ func TestMembershipCorruptWindowFailsClosed(t *testing.T) {
 	}
 }
 
+// TestMembershipDedupedDirLimitFailsClosed covers the merged-directory hard
+// limit (plan §7): a home row with more than maxDesktopDedupedDirs distinct
+// existing worktrees is a membership parse failure, not a truncated list.
+func TestMembershipDedupedDirLimitFailsClosed(t *testing.T) {
+	dirA, dirB := t.TempDir(), t.TempDir()
+	agent, _ := newC2Agent(t, dirA, dirB)
+	c, err := agent.clientFor(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktrees := make([]string, 0, maxDesktopDedupedDirs+1)
+	for i := 0; i <= maxDesktopDedupedDirs; i++ {
+		worktrees = append(worktrees, t.TempDir())
+	}
+	root := writePersistRoot(t, homePersist(c.baseURL, worktrees...), nil, nil)
+	injectPersist(t, root)
+	agent.invalidateProjectCache()
+
+	_, err = agent.projectWorktreeDirs(context.Background(), c)
+	if err == nil {
+		t.Fatal("over-limit deduped directory set must fail closed")
+	}
+	if !strings.Contains(err.Error(), "exceeds limit") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestListProjectSuggestionsUsesMembershipResolver(t *testing.T) {
 	dirA, dirB, dirC := t.TempDir(), t.TempDir(), t.TempDir()
 	agent, serve := newC2Agent(t, dirA, dirB)
