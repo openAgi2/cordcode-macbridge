@@ -7,7 +7,7 @@ discovery 8s 超时 no-broadcast（owner iPhone 列表报错/停更的直接原�
 代理 fake-IP（198.18.x.x）永久挂起且全链无超时；全局 config（当日 19:59 加 plugin 条目）使
 `plugin.init` 的 `waitForDependencies`（`config.ts:618` join deps）永久等待 → InstanceStore 按目录
 Deferred 永不 resolve。修复：`.opencode/` 离线补装 plugin/sdk/zod（两个短路门均为存在性检查）+
-SIGTERM 重启。完整报告见 iOS 仓 `docs/2026-09-20-opencode-web-directory-query-hang-phase0-report.md`。
+SIGTERM 重启。完整报告见 iOS 仓 `docs/archive/2026-09-20-opencode-web-directory-query-hang-phase0-report.md`。
 教训：①opencode server 的 boot 日志在 `logs/opencode-managed-server.err.log`，可直接定位挂点，
 时间戳 UTC；②「health 200」不代表实例层健康——目录级楔子要按目录探针（`/project/current?directory=`）；
 ③`ensureRunning` 会收养健康进程，重启前必须先杀旧 server 再触发 go-bridge 重拉；④任何项目目录

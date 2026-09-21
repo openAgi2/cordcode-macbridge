@@ -1,8 +1,8 @@
 package opencodeweb
 
 // desktop_window_tabs.go reads the official OpenCode Desktop window registry
-// (phase-1 plan §3.1/§7, docs/2026-09-20-opencode-web-off-home-membership-
-// phase1-plan.md). Only opencode.settings.windowIds construct registered
+// (phase-1 plan §3.1/§7, docs/archive/2026-09-20-opencode-web-off-home-
+// membership-phase1-plan.md). Only opencode.settings.windowIds construct registered
 // window paths — never a glob. Each opencode.window.<id>.dat carries
 // double-JSON-encoded values (the outer JSON's values are JSON strings),
 // exactly like the verified 1.18.31 fixtures in testdata/desktop-persist-1.18.31.
