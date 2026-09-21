@@ -481,15 +481,16 @@ func (s *sseSubscriber) handleMessageUpdated(properties map[string]any, sessionI
 				s.emit(core.Event{Type: eventType, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
 			}
 		case "reasoning":
-			// E2 verdict: no populated reasoning shape is verified on
-			// 1.18.18 — untranslated, never mapped to thinking or folded
-			// into answer text (§6.3). Non-fatal: an unsupported content
-			// type must not poison an otherwise healthy turn (owner 真机
-			// 2026-08-21: the former EventError settled every
-			// reasoning-model turn as turn_error and tore down relayEvents
-			// mid-stream).
-			if text := firstString(part, "text", "content"); strings.TrimSpace(text) != "" {
-				s.skipLiveReasoning(sessionID, messageID, partID)
+			// E2 verdict 退役（2026-09-21 serve 活体实证 reasoning part 带
+			// text：parts=['step-start','reasoning','text','step-finish']）：
+			// 思考映射 thinking（core.EventThinking → wire reasoning_delta），
+			// 与 grok/claude/dsh 同链路；快照与 delta 路径共用 partContent
+			// 前缀去重。此前静默丢弃导致思考视窗缺失。
+			if text := firstString(part, "text", "content"); text != "" {
+				if d := s.deltaForPartSnapshot(sessionID, messageID, partID, "reasoning", text); d.content != "" {
+					turnID := s.owningTurnID(sessionID, messageID)
+					s.emit(core.Event{Type: core.EventThinking, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
+				}
 			}
 		case "tool":
 			s.handleToolPart(part, sessionID, messageID)
@@ -523,9 +524,11 @@ func (s *sseSubscriber) handlePartDelta(properties map[string]any, sessionID str
 	kind := s.kindForPart(sessionID, messageID, partID, field)
 	switch kind {
 	case "reasoning":
-		// E2 verdict: populated reasoning is untranslated — skipped without
-		// poisoning the turn (see skipLiveReasoning; §6.3).
-		s.skipLiveReasoning(sessionID, messageID, partID)
+		// E2 verdict 退役：思考增量映射 thinking（见 handleMessageUpdated
+		// 同 case 注释）；与 text 路径共用 appendPartContent 去重状态。
+		s.appendPartContent(sessionID, messageID, partID, "reasoning", delta)
+		turnID := s.owningTurnID(sessionID, messageID)
+		s.emit(core.Event{Type: core.EventThinking, Content: delta, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
 	case "text", "":
 		s.appendPartContent(sessionID, messageID, partID, "text", delta)
 		turnID := s.owningTurnID(sessionID, messageID)
@@ -582,10 +585,13 @@ func (s *sseSubscriber) handlePartUpdated(properties map[string]any, sessionID s
 			s.emit(core.Event{Type: eventType, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
 		}
 	case "reasoning":
-		// E2 verdict: same untranslated rule as message.updated — skip
-		// without poisoning the turn (see skipLiveReasoning; §6.3).
-		if text := firstString(part, "text", "content"); strings.TrimSpace(text) != "" {
-			s.skipLiveReasoning(sessionID, messageID, partID)
+		// E2 verdict 退役：同 message.updated 的 reasoning case——快照增量
+		// 映射 thinking，partContent 前缀去重（delta 路径已累积的部分不重发）。
+		if text := firstString(part, "text", "content"); text != "" {
+			if d := s.deltaForPartSnapshot(sessionID, messageID, partID, "reasoning", text); d.content != "" {
+				turnID := s.owningTurnID(sessionID, messageID)
+				s.emit(core.Event{Type: core.EventThinking, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
+			}
 		}
 	case "tool":
 		s.handleToolPart(part, sessionID, messageID)
@@ -1124,22 +1130,28 @@ func (s *sseSubscriber) owningTurnID(sessionID, messageID string) string {
 // reasoning-model turn on owner devices (真机 2026-08-21: 正文只同步半截、
 // 会话卡执行中). The reasoning itself remains available through the E2b
 // HTTP-history hydrate path.
-func (s *sseSubscriber) skipLiveReasoning(sessionID, messageID, partID string) {
-	slog.Debug("opencode-web SSE: populated live reasoning skipped untranslated (E2; non-fatal)",
-		"sessionID", sessionID, "messageID", messageID, "partID", partID)
-}
+// (skipLiveReasoning was the retired E2 verdict: populated live reasoning was
+// dropped untranslated. Removed 2026-09-21 — serve 活体实证 reasoning part 带
+// text，思考现映射 core.EventThinking，与 grok/claude/dsh 同链路。)
 
 func (s *sseSubscriber) kindForPart(sessionID, messageID, partID, field string) string {
+	// The part's recorded kind is authoritative and must be consulted BEFORE
+	// the field heuristic: serve 的 part.delta 只携带被追加的字段名，而
+	// "text" 是 text 与 reasoning 两种 part 共有的内容字段（上游
+	// acp/event.ts:231/246 以 partType 区分、不以 field 区分）。2026-09-21
+	// 真机：reasoning 增量（field="text"）曾被这里的 field 短路误判成 text，
+	// 思考整段流进正文、思考视窗缺失。
+	key := partCacheKey(sessionID, messageID, partID, "")
+	s.stateMu.Lock()
+	kind := s.partKinds[key]
+	s.stateMu.Unlock()
+	if kind != "" {
+		return kind
+	}
 	if field == "reasoning" {
 		return "reasoning"
 	}
-	if field == "text" {
-		return "text"
-	}
-	key := partCacheKey(sessionID, messageID, partID, "")
-	s.stateMu.Lock()
-	defer s.stateMu.Unlock()
-	return s.partKinds[key]
+	return "text"
 }
 
 func (s *sseSubscriber) rememberPartKind(sessionID, messageID, partID, kind string) {

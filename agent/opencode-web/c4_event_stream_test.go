@@ -282,17 +282,13 @@ func (a *Agent) nextRoutedFor(sessionID string) *core.Event {
 	return nil
 }
 
-// TestReasoningSkippedUntranslatedAndNonFatal: populated reasoning on LIVE
-// carriers — message.updated parts, part.updated snapshots, part.delta
-// fields — is still unevidenced (E2 never sampled direct-SSE reasoning), so
-// it stays untranslated and NEVER EventThinking. The HTTP history surface is
-// E2b-evidenced and mapped separately (audit014_reasoning_test.go).
-// Reasoning on live carriers stays untranslated (no thinking, no answer-text
-// folding) but MUST be non-fatal: the former EventError settled every
-// reasoning-model turn as turn_error and tore relayEvents down mid-stream
-// (owner 真机 2026-08-21). A same-version direct-SSE sample is still required
-// before live reasoning may be translated.
-func TestReasoningSkippedUntranslatedAndNonFatal(t *testing.T) {
+// TestReasoningLiveMapsThinkingAndNonFatal: populated reasoning on LIVE
+// carriers maps to thinking events (2026-09-21 E2 verdict 退役——serve 活体
+// 实证 message parts 携带 reasoning.text，且 owner 真机直播流实证 field="text"
+// 增量；此前「需要同版本 direct-SSE 样本」的前置已满足)。Translation must stay
+// non-fatal: the former EventError settled every reasoning-model turn as
+// turn_error and tore relayEvents down mid-stream (owner 真机 2026-08-21).
+func TestReasoningLiveMapsThinkingAndNonFatal(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
 	sub := newDrivenSubscriber(t, agent)
 
@@ -307,24 +303,29 @@ func TestReasoningSkippedUntranslatedAndNonFatal(t *testing.T) {
 			"part": map[string]any{"id": "pt_r", "type": "reasoning", "text": "more chain"},
 		}),
 		sseFrame("message.part.delta", map[string]any{
-			"sessionID": "ses_1", "messageID": "msg_a", "partID": "pt_r", "field": "reasoning", "delta": "…",
+			"sessionID": "ses_1", "messageID": "msg_a", "partID": "pt_r", "field": "text", "delta": "…",
 		}),
 	)
 
 	var unsupported, thinking int
+	var thinkingText string
 	for _, ev := range drain(sub) {
 		switch ev.Type {
 		case core.EventError:
 			unsupported++
 		case core.EventThinking:
 			thinking++
+			thinkingText += ev.Content
 		}
 	}
 	if unsupported != 0 {
 		t.Fatalf("live reasoning must not poison the turn with EventError, got %d", unsupported)
 	}
-	if thinking != 0 {
-		t.Fatalf("reasoning must never map to thinking, got %d events", thinking)
+	// message.updated 快照（"chain…"）+ part.updated 快照（"more chain"，
+	// 非 "chain…" 前缀延伸 → 整段重发）+ delta（"…"）：全部进 thinking，
+	// 一条都不进正文。
+	if thinking != 3 || thinkingText != "chain…more chain…" {
+		t.Fatalf("live reasoning must map to thinking on every carrier, got %d events %q", thinking, thinkingText)
 	}
 }
 

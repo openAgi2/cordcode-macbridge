@@ -104,8 +104,16 @@ func TestSSEAssistantDeltasAndSnapshots(t *testing.T) {
 		sseFrame("message.part.delta", map[string]any{
 			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_1", "field": "text", "delta": "lo",
 		}),
+		sseFrame("message.part.updated", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1",
+			"part": map[string]any{"id": "pt_2", "type": "reasoning", "text": ""},
+		}),
+		// Real 1.18.18 wire shape: a reasoning part's content field is ALSO
+		// named "text" (upstream acp/event.ts:246 distinguishes partType from
+		// field) — the delta must route by the part's recorded kind, not by
+		// the field name (2026-09-21 真机：field 短路把思考流进正文).
 		sseFrame("message.part.delta", map[string]any{
-			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_2", "field": "reasoning", "delta": "hmm",
+			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_2", "field": "text", "delta": "hmm",
 		}),
 		sseFrame("message.part.updated", map[string]any{
 			"sessionID": "ses_1", "messageID": "msg_a1",
@@ -134,11 +142,15 @@ func TestSSEAssistantDeltasAndSnapshots(t *testing.T) {
 	if len(texts) != 2 || texts[0].Content != "Hel" || texts[1].Content != "lo" {
 		t.Fatalf("text deltas = %+v", texts)
 	}
-	// §6.3/E2: populated reasoning stays untranslated — no thinking stream,
-	// and (2026-08-21) NO EventError: the wire "error" event settles the turn
-	// as failed and tears relayEvents down mid-stream.
-	if len(thinking) != 0 {
-		t.Fatalf("reasoning must not map to thinking, got %+v", thinking)
+	// E2 verdict 退役（2026-09-21）：reasoning 增量映射 thinking——思考视窗
+	// 有内容；且绝不混进正文 text；也绝不以 EventError 毒化 turn。
+	if len(thinking) != 1 || thinking[0].Content != "hmm" {
+		t.Fatalf("reasoning delta must map to exactly one thinking event, got %+v", thinking)
+	}
+	for _, ev := range texts {
+		if ev.Content == "hmm" {
+			t.Fatalf("reasoning content leaked into body text: %+v", texts)
+		}
 	}
 	if len(errorsOut) != 0 {
 		t.Fatalf("reasoning must not poison the turn with EventError, got %+v", errorsOut)
@@ -979,11 +991,13 @@ func TestReasoningModelTurnStreamsTextAndCompletes(t *testing.T) {
 			"sessionID": "ses_1", "messageID": "msg_a1",
 			"part": map[string]any{"id": "pt_r1", "type": "reasoning", "text": "", "time": map[string]any{"start": 0}},
 		}),
+		// Real wire shape: reasoning part 的内容字段名就是 "text"（上游
+		// acp/event.ts:246），路由依据 part 类型而非 field 名。
 		sseFrame("message.part.delta", map[string]any{
-			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_r1", "field": "reasoning", "delta": "thinking",
+			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_r1", "field": "text", "delta": "thinking",
 		}),
 		sseFrame("message.part.delta", map[string]any{
-			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_r1", "field": "reasoning", "delta": " hard",
+			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_r1", "field": "text", "delta": " hard",
 		}),
 		sseFrame("message.part.updated", map[string]any{
 			"sessionID": "ses_1", "messageID": "msg_a1",
@@ -1012,11 +1026,14 @@ func TestReasoningModelTurnStreamsTextAndCompletes(t *testing.T) {
 	)
 
 	var texts []string
+	var thinking []string
 	var results, errorsOut int
 	for _, ev := range drain(sub) {
 		switch ev.Type {
 		case core.EventText:
 			texts = append(texts, ev.Content)
+		case core.EventThinking:
+			thinking = append(thinking, ev.Content)
 		case core.EventResult:
 			results++
 		case core.EventError:
@@ -1027,10 +1044,77 @@ func TestReasoningModelTurnStreamsTextAndCompletes(t *testing.T) {
 	if !strings.Contains(joined, "答案第一段。") || !strings.Contains(joined, "第二段完整收尾。") {
 		t.Fatalf("answer text must stream in full past the reasoning frames, got %q", joined)
 	}
+	if strings.Contains(joined, "thinking") {
+		t.Fatalf("reasoning must not leak into the body text, got %q", joined)
+	}
+	// E2 verdict 退役（2026-09-21）：思考增量映射 thinking（两段 delta），快照
+	// （text="thinking hard"）经 partContent 前缀去重不重发。
+	if strings.Join(thinking, "") != "thinking hard" {
+		t.Fatalf("reasoning deltas must stream as thinking events, got %q", thinking)
+	}
 	if errorsOut != 0 {
 		t.Fatalf("a healthy reasoning-model turn must emit zero EventError, got %d", errorsOut)
 	}
 	if results != 1 {
 		t.Fatalf("turn must close with exactly one terminal result, got %d", results)
+	}
+}
+
+// TestSSEReasoningStreamsThinkingWindowNotBody is the 2026-09-21 owner 真机
+// regression: opencode-web 思考过程直接流式输出在正文、没有思考视窗（grok/
+// claude/dsh 都有）。根因两处——①kindForPart 对 field="text" 短路不查 part
+// 类型缓存，而 reasoning part 的内容字段名就是 "text"（上游 acp/event.ts:246
+// 以 partType 区分），思考增量被当正文发 EventText；②完整 reasoning part 被
+// 已过时的 E2 verdict（skipLiveReasoning）静默丢弃。真实 serve 活体实证
+// parts=['step-start','reasoning','text','step-finish'] 且 reasoning 带 text。
+func TestSSEReasoningStreamsThinkingWindowNotBody(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+
+	driveFrames(sub,
+		sseFrame("message.updated", map[string]any{
+			"info":      map[string]any{"id": "msg_u1", "role": "user"},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("message.updated", map[string]any{
+			"info": map[string]any{"id": "msg_a1", "role": "assistant", "parentID": "msg_u1",
+				"parts": []any{
+					map[string]any{"id": "pt_r1", "type": "reasoning", "text": ""},
+				}},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_r1", "field": "text", "delta": "用户想听冷笑话",
+		}),
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_r1", "field": "text", "delta": "，挑一个讲",
+		}),
+		// message.updated 快照携带已累积的思考全文：前缀去重后只发新增量。
+		sseFrame("message.updated", map[string]any{
+			"info": map[string]any{"id": "msg_a1", "role": "assistant", "parentID": "msg_u1",
+				"parts": []any{
+					map[string]any{"id": "pt_r1", "type": "reasoning", "text": "用户想听冷笑话，挑一个讲"},
+				}},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_t1", "field": "text", "delta": "冷笑话正文。",
+		}),
+	)
+
+	var texts, thinking []string
+	for _, ev := range drain(sub) {
+		switch ev.Type {
+		case core.EventText:
+			texts = append(texts, ev.Content)
+		case core.EventThinking:
+			thinking = append(thinking, ev.Content)
+		}
+	}
+	if strings.Join(texts, "") != "冷笑话正文。" {
+		t.Fatalf("body text must carry ONLY the answer, got %q", texts)
+	}
+	if strings.Join(thinking, "") != "用户想听冷笑话，挑一个讲" {
+		t.Fatalf("reasoning must stream as thinking events exactly once, got %q", thinking)
 	}
 }

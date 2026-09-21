@@ -2520,3 +2520,16 @@ GET /project 过滤规则。
   4. **badge vs 服务端错误是「选了A跑成B」类 bug 的决定性测量仪**：客户端 badge 记录「发出了什么」，serve 侧错误/消息记录「实际跑了什么」——两者一分歧，断层就在中间的 bridge 层，可以立刻排除整段客户端状态机。本次正是 owner 截图里这组矛盾（badge=deepseek-0731-oc，错误=Highspeed 权限）一击推翻了「iOS 端覆写手选」的完整但错误的第一理论。修复未消除症状时，应当作理论被证伪重新定位，而不是给旧理论打补丁。
   5. **单测全绿 ≠ 链路正确：fixture 必须喂真实 wire 形状**。双重前缀只在「qualified id + providerId 并存」这一真实组合下出现；单测给 fake 的都是裸 id，于是解析链「每层都测到了」但整体是坏的（owner：单测全绿一用就崩）。回归测试的输入要从真机流量/日志里抄，不要从实现反推。
   6. **「不选正常、选了就坏」是强诊断信号**：可选参数路径坏、兜底路径好 → bug 必在可选路径的参数搬运上，且「反正能跑」的表现本身就是兜底在遮掩。遇到这类签名应第一时间对比两条路径的分叉点，而不是先怀疑模型/权限/订阅。
+
+## 2026-09-21 晚：OpenCode Web 思考过程流进正文、思考视窗缺失——field 名与 part 类型的混淆 + 过时的 E2 verdict
+
+- **现象**：grok build / Claude Code / DeepSeek harness 模式下思考过程在思考视窗滚动展示；opencode-web 模式下思考直接流式输出在正文、没有思考视窗。
+- **根因（两处，均在 agent/opencode-web/events.go 的 SSE 订阅器）**：
+  1. **field 名 ≠ part 类型**：serve 的 `message.part.delta` 只携带被追加的字段名，而 reasoning part 的内容字段名就是 `text`（与 text part 共有；上游 `acp/event.ts:231/246` 以 `partType` 区分、从不以 field 区分）。`kindForPart` 对 `field=="text"` 短路直接返回 "text"、不查 partKinds 缓存 → 思考增量全部被当正文发 `EventText` → **流进正文**。
+  2. **过时的 E2 verdict**：完整 reasoning part（message.updated / part.updated 快照）被 `skipLiveReasoning` 静默丢弃——2026-08-21 时「1.18.18 无已验证的 reasoning 形状」，现在 serve 活体实证 `parts=['step-start','reasoning','text','step-finish']` 且 reasoning 带 text → 直播链从未发过 thinking → **没有思考视窗**。
+- **修复**：`kindForPart` 缓存优先（part 类型是权威，field 只是 cache miss 时的启发式）；三条直播载体全部映射 `core.EventThinking`（→ wire `reasoning_delta`，与 grok/claude/dsh 同链路，投影/渲染层零改动）；快照与增量共用 `partContent` 前缀去重（与 text 路径同机制）；`skipLiveReasoning` 删除。
+- **教训**：
+  1. **「字段名」和「part 类型」是两个正交维度**：上游官方代码（acp/event.ts）同时携带 partType 和 field 正是因为二者会重名（reasoning 的内容字段也叫 text）。任何按 field 反推 part 类型的启发式都必须先查已记录的 part 类型。
+  2. **「未验证所以不翻译」的 verdict 要有退役条件**：E2 verdict 注释里写着「需要同版本 direct-SSE 样本才能翻译」——样本其实早就随 owner 的日常使用产生了（serve 消息行带完整 reasoning parts），但没人回去核对。带前置条件的保守裁决必须把前置条件写进可检索的 TODO/验证清单，否则保守变成永久。
+  3. **既有测试的 fixture 形状错误会锁死错误行为**：两个旧测试用 `field:"reasoning"`（serve 从不发送的形状）断言「不产生 thinking」——测试全绿但真实形状（field:"text"）下行为完全相反。改语义时先抓真实流量样本核对 fixture（同日模型替换事故教训 5 的复刻）。
+  4. **同链路对照是最好的定位器**：「grok/claude/dsh 有思考视窗、opencode-web 没有」→ 反查 `core.EventThinking` 的全部 producer，发现 opencode-web 是唯一不发它的 agent，断点立刻收敛。

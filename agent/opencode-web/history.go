@@ -88,8 +88,9 @@ var _ core.HistoryProvider = (*Agent)(nil)
 // errUnsupportedReasoning was the pre-2026-08-21 live verdict for populated
 // reasoning. It is retired: emitting it as core.EventError settled every
 // reasoning-model turn as turn_error and tore the live relay down mid-stream
-// (owner 真机 2026-08-21). Live carriers now SKIP populated reasoning
-// untranslated (skipLiveReasoning); E2b-verified HTTP history maps it as
+// (owner 真机 2026-08-21). Live carriers now map populated reasoning to
+// core.EventThinking (2026-09-21, E2 verdict retired — serve 活体实证 reasoning
+// part 带 text); E2b-verified HTTP history maps it as
 // first-class content via mapRichHistoryEntry.
 
 // mapRichHistoryEntry maps one official message element to
