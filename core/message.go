@@ -552,6 +552,15 @@ type FileChange struct {
 	Kind     string
 	Diff     string
 	MovePath string
+	// Additions/Deletions carry the backend's official per-file edit counts when
+	// the payload provides them (opencode-web filediff / apply_patch metadata.files,
+	// Claude structuredPatch hunk counting). Pointer semantics keep a legitimate
+	// 0 distinct from "no official number" (nil): wire encoding writes a present
+	// value verbatim and omits nil, so clients never see 0 fabricated for missing
+	// data. A complete pair (both non-nil) is the only official statistic; consumers
+	// must not mix one official number with a diff-derived one.
+	Additions *int
+	Deletions *int
 }
 
 // ToolMatchItem is one structured search/explore result. Preview is optional

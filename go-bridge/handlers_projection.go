@@ -1429,6 +1429,13 @@ func hydrateToolEventsFromStep(step map[string]any) []projectionHydrateEvent {
 	copyOptionalStepField(started, step, "title")
 	copyOptionalStepField(started, step, "toolInput")
 	copyOptionalStepField(started, step, "fileChanges")
+	// Parity plan §4.8 gate ①: structured display payloads must survive hydrate
+	// (fileDisplay = opencode-web read display / dsh write-create; editRegions +
+	// detailUnavailable = dsh-web clean-detail slice). Missing here = dropped at
+	// the very first hop, every later gate irrelevant.
+	copyOptionalStepField(started, step, "fileDisplay")
+	copyOptionalStepField(started, step, "editRegions")
+	copyOptionalStepField(started, step, "detailUnavailable")
 
 	finished := map[string]interface{}{
 		"itemId":     toolID,
@@ -1444,6 +1451,9 @@ func hydrateToolEventsFromStep(step map[string]any) []projectionHydrateEvent {
 	copyOptionalStepField(finished, step, "title")
 	copyOptionalStepField(finished, step, "toolInput")
 	copyOptionalStepField(finished, step, "fileChanges")
+	copyOptionalStepField(finished, step, "fileDisplay")
+	copyOptionalStepField(finished, step, "editRegions")
+	copyOptionalStepField(finished, step, "detailUnavailable")
 
 	return []projectionHydrateEvent{
 		{Event: "tool_started", Data: started},

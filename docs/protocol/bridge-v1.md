@@ -1680,6 +1680,25 @@ Projection Kernel reducer so snapshot/patch parts retain them. Clients map them 
 absent they fall back to `toolInput` / tool output presentation parsing — never invent paths or
 `+0 −0`. Older clients ignore unknown optional fields.
 
+#### Tool part additive fields: `fileDisplay` / `editRegions` / `detailUnavailable` + `fileChanges.additions/deletions` (native timeline clean detail)
+
+`BridgeProjectionPart` tool variant gains three **optional** display payloads, and the
+`fileChanges` entry gains two **optional** official counts (non-breaking, lowerCamelCase;
+parity plan `docs/2026-09-21-native-process-group-chatgpt-parity-plan.md` §4.8):
+
+| Field | Purpose |
+|-------|---------|
+| `fileChanges[].additions?: number` / `deletions?: number` | Official per-file edit counts from the backend payload (opencode-web `metadata.filediff` / `metadata.files`; Claude `structuredPatch` hunk counting). Independent optionals — only a complete pair is an official statistic; consumers must not mix one official number with a diff-derived count, and absent must not be read as 0. A legitimate `0` is written verbatim. |
+| `fileDisplay?: { path, text, lineStart, lineEnd, totalLines, truncated? }` | Structured file display for read / write-create steps (opencode-web read `metadata.display` with `type=="file"`; dsh-web read meta / write-create arguments). Clients render the clean detail (path + text + line range) instead of the raw XML-wrapped output. Absent on older producers → current output rendering. |
+| `editRegions?: Array<{ path, newText }>` | Ordered edit regions for edit / write-update steps (dsh-web `data.meta.diffs`, one entry per hunk, file order). Clients render path + "已更新 N 处" + bounded concatenated `newText`. |
+| `detailUnavailable?: { path? }` | Fail-closed diagnostic for a successful tool with an unmappable payload shape. Presence means clients must NOT fall back to raw output rendering; render the diagnostic line instead. |
+
+Producers (cold hydrate and live `tool_started`/`tool_finished`) must pass all of them through
+hydrate → ProjectionPart → reducer merge → snapshot/patch (parity plan §4.8 gates ①②③⑦⑧).
+The original `output` payload is **retained** alongside these fields (web lane / legacy /
+summary parsing still consume it) — the clean fields are additive, never a replacement.
+Older clients ignore unknown optional fields.
+
 #### Part vocabulary: `context_compaction` (native Codex lifecycle)
 
 `BridgeProjectionPart` gains an additive `type: "context_compaction"` variant with required

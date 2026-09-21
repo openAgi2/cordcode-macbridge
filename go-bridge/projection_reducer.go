@@ -1672,6 +1672,18 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if v, ok := data["fileChanges"]; ok {
 			part.FileChanges = v
 		}
+		// Parity plan §4.8 gate ②: structured display payloads must survive the
+		// reducer into Snapshot parts (hydrate emits them on event Data; without
+		// this read they die here even though the event carried them).
+		if v, ok := data["fileDisplay"]; ok {
+			part.FileDisplay = v
+		}
+		if v, ok := data["editRegions"]; ok {
+			part.EditRegions = v
+		}
+		if v, ok := data["detailUnavailable"]; ok {
+			part.DetailUnavailable = v
+		}
 		if status := dataString(data, "toolStatus"); status != "" {
 			part.ToolStatus = status
 		} else if msg.Event == "tool_started" {
@@ -2326,6 +2338,17 @@ func mergeToolPart(dst *ProjectionPart, src ProjectionPart) {
 	if src.FileChanges != nil {
 		dst.FileChanges = src.FileChanges
 	}
+	// Parity plan §4.8 gate ②/⑦ semantics: non-nil wins (later tool_finished
+	// upsert must not reset the display payloads a tool_started carried).
+	if src.FileDisplay != nil {
+		dst.FileDisplay = src.FileDisplay
+	}
+	if src.EditRegions != nil {
+		dst.EditRegions = src.EditRegions
+	}
+	if src.DetailUnavailable != nil {
+		dst.DetailUnavailable = src.DetailUnavailable
+	}
 	if src.ToolStatus != "" {
 		dst.ToolStatus = src.ToolStatus
 	}
@@ -2751,6 +2774,9 @@ func projectionTurnExceeds(turn *TurnProjection, limit int) bool {
 			projectionValueExceeds(part.ToolResult, &budget) ||
 			projectionValueExceeds(part.Matches, &budget) ||
 			projectionValueExceeds(part.FileChanges, &budget) ||
+			projectionValueExceeds(part.FileDisplay, &budget) ||
+			projectionValueExceeds(part.EditRegions, &budget) ||
+			projectionValueExceeds(part.DetailUnavailable, &budget) ||
 			projectionValueExceeds(part.UserInputQuestions, &budget) {
 			return true
 		}
@@ -3145,6 +3171,9 @@ func cloneProjectionPart(part ProjectionPart) ProjectionPart {
 	out.ToolResult = cloneProjectionJSONValue(part.ToolResult)
 	out.Matches = cloneProjectionJSONValue(part.Matches)
 	out.FileChanges = cloneProjectionJSONValue(part.FileChanges)
+	out.FileDisplay = cloneProjectionJSONValue(part.FileDisplay)
+	out.EditRegions = cloneProjectionJSONValue(part.EditRegions)
+	out.DetailUnavailable = cloneProjectionJSONValue(part.DetailUnavailable)
 	out.UserInputQuestions = cloneProjectionJSONValue(part.UserInputQuestions)
 	out.PermissionPlan = cloneProjectionJSONValue(part.PermissionPlan)
 	if len(part.PermissionPatterns) > 0 {

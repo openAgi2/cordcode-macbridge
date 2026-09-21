@@ -590,6 +590,15 @@ func fileChangesToWire(changes []core.FileChange) []map[string]interface{} {
 		if change.MovePath != "" {
 			item["movePath"] = change.MovePath
 		}
+		// Official per-file counts: present values (including a legitimate 0)
+		// are written verbatim; nil stays omitted so clients can distinguish
+		// "no official number" from a real zero-line change.
+		if change.Additions != nil {
+			item["additions"] = *change.Additions
+		}
+		if change.Deletions != nil {
+			item["deletions"] = *change.Deletions
+		}
 		result = append(result, item)
 	}
 	return result

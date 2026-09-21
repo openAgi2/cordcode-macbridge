@@ -34,9 +34,22 @@ type ProjectionPart struct {
 	// Codex patch target). Additive; see bridge-v1.types.ts BridgeProjectionPart tool.title.
 	Title string `json:"title,omitempty"`
 	// FileChanges is optional structured file mutations for this tool step (Codex Patch).
-	// Wire shape: []{path, kind?, movePath?, diff?}. Additive; see bridge-v1.types.ts
-	// BridgeProjectionPart tool.fileChanges.
+	// Wire shape: []{path, kind?, movePath?, diff?, additions?, deletions?}. Additive;
+	// see bridge-v1.types.ts BridgeProjectionPart tool.fileChanges.
 	FileChanges interface{} `json:"fileChanges,omitempty"`
+	// FileDisplay is the optional structured file-read / write-create display
+	// payload ({path, text, lineStart, lineEnd, totalLines, truncated}) mapped
+	// from official metadata (opencode-web read display; dsh-web read/write
+	// clean-detail). Additive; see bridge-v1.types.ts tool.fileDisplay.
+	FileDisplay interface{} `json:"fileDisplay,omitempty"`
+	// EditRegions is the optional ordered edit region list ([{path, newText}])
+	// for edit / write-update steps (dsh-web clean-detail slice). Additive.
+	EditRegions interface{} `json:"editRegions,omitempty"`
+	// DetailUnavailable is the optional fail-closed diagnostic object ({path?})
+	// marking a successful tool whose payload shape is unknown to the mapper.
+	// Presence means clients must NOT fall back to raw output rendering.
+	// Additive; see bridge-v1.types.ts tool.detailUnavailable.
+	DetailUnavailable interface{} `json:"detailUnavailable,omitempty"`
 	// RequiresPermissionConfirmation marks a pending tool that must be approved
 	// before the turn continues (dsh-web approval/requested → permission_request).
 	// Additive; absent/false on older producers. SSV2 clients render the existing

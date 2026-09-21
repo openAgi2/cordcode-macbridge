@@ -690,7 +690,52 @@ export type BridgeProjectionPart =
         kind?: string;
         movePath?: string;
         diff?: string;
+        /**
+         * Optional official per-file edit counts (opencode-web filediff /
+         * apply_patch metadata.files; Claude structuredPatch hunk counting).
+         * Independent optionals: only a complete pair (both present) is an
+         * official statistic — consumers must not mix one official number with
+         * a diff-derived one, and absent must not be read as 0. A legitimate
+         * 0 is written verbatim.
+         */
+        additions?: number;
+        deletions?: number;
       }>;
+      /**
+       * Optional structured file display for read / write-create steps, mapped
+       * from official metadata (opencode-web read `metadata.display` with
+       * type=="file"; dsh-web read meta / write-create call arguments).
+       * Additive; absent on older producers — clients fall back to the current
+       * output-tier rendering. Malformed-but-present shapes are the consumer's
+       * fail-closed diagnostic (detailUnavailable), never a silent fallback.
+       */
+      fileDisplay?: {
+        path: string;
+        text: string;
+        lineStart: number;
+        lineEnd: number;
+        totalLines: number;
+        truncated?: boolean;
+      };
+      /**
+       * Optional ordered edit regions for edit / write-update steps
+       * (dsh-web clean-detail: one {path, newText} per hunk, file order).
+       * Additive; empty arrays are not valid — absence means the producer has
+       * no structured regions.
+       */
+      editRegions?: Array<{
+        path: string;
+        newText: string;
+      }>;
+      /**
+       * Optional fail-closed diagnostic for a successful tool whose payload
+       * shape the producer could not map. Presence means clients must NOT
+       * render the raw output tier for this step (e.g. no XML passthrough);
+       * path is optional provenance when it could be trusted.
+       */
+      detailUnavailable?: {
+        path?: string;
+      };
       /**
        * Optional: this pending tool must be approved before the turn continues
        * (dsh-web approval/requested → permission_request). Additive; absent/false

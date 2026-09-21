@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -310,16 +311,62 @@ func mapToolStepFromPart(part map[string]any) map[string]any {
 	if changes := fileChangesFromToolState(state); len(changes) > 0 {
 		step["fileChanges"] = changes
 	}
+	if display := fileDisplayFromToolState(state); display != nil {
+		step["fileDisplay"] = display
+	}
 	return step
 }
 
-// fileChangesFromToolState reads official edit metadata.filediff
-// ({file, patch, additions, deletions}) into the projection fileChanges
-// vocabulary iOS already renders for Claude/Codex.
+// fileChangesFromToolState reads official edit metadata into the projection
+// fileChanges vocabulary iOS already renders for Claude/Codex.
+//
+// Two official sources (parity plan §3.1 / §5 S1):
+//   - metadata.files (apply_patch): one entry per file with official
+//     type(add/update/delete), patch, additions/deletions, optional movePath —
+//     mapped to one fileChange per entry, kind = official type.
+//   - metadata.filediff (edit): single object {file, patch, additions,
+//     deletions} — mapped as before, now carrying the official counts.
+//
+// additions/deletions are written only when present as JSON numbers (a
+// legitimate 0 is written verbatim; absent stays absent — clients must never
+// fabricate +0 −0 from missing data). Independent optionals: a mixed pair is
+// carried as-is and the consumer applies the complete-pair rule.
 func fileChangesFromToolState(state map[string]any) []map[string]any {
 	meta := firstMap(state, "metadata")
 	if meta == nil {
 		return nil
+	}
+	if files, ok := meta["files"].([]any); ok && len(files) > 0 {
+		changes := make([]map[string]any, 0, len(files))
+		for _, raw := range files {
+			entry, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			path := firstString(entry, "filePath", "relativePath", "file", "path")
+			if path == "" {
+				continue
+			}
+			kind := strings.TrimSpace(firstString(entry, "type"))
+			if kind == "" {
+				kind = "edit"
+			}
+			change := map[string]any{
+				"path": path,
+				"kind": kind,
+			}
+			if diff := firstString(entry, "patch"); diff != "" {
+				change["diff"] = diff
+			}
+			if movePath := firstString(entry, "movePath"); movePath != "" {
+				change["movePath"] = movePath
+			}
+			applyOfficialCounts(change, entry)
+			changes = append(changes, change)
+		}
+		if len(changes) > 0 {
+			return changes
+		}
 	}
 	filediff := firstMap(meta, "filediff")
 	if filediff == nil {
@@ -340,7 +387,89 @@ func fileChangesFromToolState(state map[string]any) []map[string]any {
 	if diff != "" {
 		change["diff"] = diff
 	}
+	applyOfficialCounts(change, filediff)
 	return []map[string]any{change}
+}
+
+// applyOfficialCounts copies official per-file additions/deletions onto the
+// wire change when present as JSON numbers (0 included; absent omitted).
+func applyOfficialCounts(change map[string]any, source map[string]any) {
+	if v, ok := optionalInt(source["additions"]); ok {
+		change["additions"] = v
+	}
+	if v, ok := optionalInt(source["deletions"]); ok {
+		change["deletions"] = v
+	}
+}
+
+// optionalInt reports whether v is a JSON number and its integral value.
+func optionalInt(v any) (int, bool) {
+	switch typed := v.(type) {
+	case float64:
+		if typed == math.Trunc(typed) {
+			return int(typed), true
+		}
+	case float32:
+		if math.Trunc(float64(typed)) == float64(typed) {
+			return int(typed), true
+		}
+	case int:
+		return typed, true
+	case int64:
+		return int(typed), true
+	case json.Number:
+		if n, err := typed.Int64(); err == nil {
+			return int(n), true
+		}
+	}
+	return 0, false
+}
+
+// fileDisplayFromToolState maps the official read metadata.display
+// ({type:"file", path, text, lineStart, lineEnd, totalLines, truncated}) onto
+// the step's optional fileDisplay payload (parity plan §5 S1; upstream
+// packages/opencode/src/tool/read.ts:359-375 builds it for UI rendering).
+//
+// Only display.type == "file" is mapped: the directory display is a distinct
+// upstream shape (read.ts:264-296) with no real target-server sample, and a
+// non-file display is deliberately NOT mapped (fail closed — iOS keeps the
+// current output-tier rendering). Field validation (1-based line numbers,
+// reversed-range empty-file exception, line-count consistency) is the iOS
+// consumer's job; a malformed-but-present display becomes the fail-closed
+// diagnostic there, so this mapper passes the official fields through without
+// inventing or clamping values.
+func fileDisplayFromToolState(state map[string]any) map[string]any {
+	meta := firstMap(state, "metadata")
+	if meta == nil {
+		return nil
+	}
+	display := firstMap(meta, "display")
+	if display == nil {
+		return nil
+	}
+	if t := firstString(display, "type"); t != "file" {
+		return nil
+	}
+	out := map[string]any{}
+	if path, ok := display["path"].(string); ok {
+		out["path"] = path
+	}
+	if text, ok := display["text"].(string); ok {
+		out["text"] = text
+	}
+	if v, ok := optionalInt(display["lineStart"]); ok {
+		out["lineStart"] = v
+	}
+	if v, ok := optionalInt(display["lineEnd"]); ok {
+		out["lineEnd"] = v
+	}
+	if v, ok := optionalInt(display["totalLines"]); ok {
+		out["totalLines"] = v
+	}
+	if v, ok := display["truncated"].(bool); ok {
+		out["truncated"] = v
+	}
+	return out
 }
 
 // errorMessageFromInfo reads info.error.data.message (1.18.18 shape) with
