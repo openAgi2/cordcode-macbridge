@@ -2504,3 +2504,16 @@ iOS：打开集合里每个工程都拉 bucket（不再名字序 prefix(6)）；
 
 没有「当前打开集合」HTTP。对齐 Desktop 首页就要读官方 UI 同一份 persist，不能发明
 GET /project 过滤规则。
+
+## 2026-09-21 傍晚：OpenCode Web 手选模型一律静默跑成 GLM-5.3-Highspeed——双重前缀 + 无效手选静默兜底（owner 裁决：兜底=掩盖真实问题）
+
+- **现象**：owner 在 iOS 上手选 DeepSeek 或 GLM-5.3-flash，发送到 MacBridge 后 serve 实跑 `zhipuai-coding-plan/glm-5.3-highspeed` 并报「当前订阅套餐暂未开放GLM-5.3-Highspeed权限」；不选模型反而正常。 decisive 证据：iOS 消息 badge 显示发出的确实是 `deepseek-v4-flash-0731-oc`（手选送达了），serve 却跑了 Highspeed。
+- **两处根因（均在 opencode-web agent）**：
+  1. **双重前缀**：`modelItemsForWire` 的 wire `id` 是目录权威形态 `providerID/modelID`（qualified）；iOS 原样回传 `{"id":"ctyun/deepseek-v4-flash-0731-oc","providerId":"ctyun"}`；`SendWithOptions` 却执行 `ocwModelRef{ProviderID: opts.ProviderID, ID: opts.ModelID}` 再拼一次 → `ctyun/ctyun/deepseek-v4-flash-0731-oc` → 目录必 miss。opencode-web `UsesPromptOptions()=true`，`applySendMessageRuntimeOptions` 跳过 SetModel，唯一候选就是这个拼坏的 explicit。
+  2. **无效手选静默兜底**：`resolvePromptModel` 对校验失败的候选「前进到下一级」，落到「第一个 connected provider 的默认」= zhipuai Highspeed → 订阅权限错误。该语义源自把官方 **picker** 的 find(valid) 默认高亮链（prompt-model-selection.ts）误用到 **send** 路径；上游 send 路径（prompt.ts:646 `input.model ?? agent.model ?? currentModel`）对未知模型是响亮 `ModelNotFoundError` + did-you-mean（prompt.ts:602-609）。
+- **修复**：①`normalizePromptModelRef`——id 自带前缀时以前缀为准，不再重复拼接；②用户显式手选（per-request 或 pending）不在 connected 目录 → 发送拒绝（零 POST），错误含 did-you-mean 最近候选；「什么都没选」默认链不变；agent 配置模型失效仍属配置回退继续前进。既有 `TestSendInvalidExplicitModelAdvances` 按新裁决改写为 `TestSendInvalidExplicitModelFailsLoud`（断言零 POST + 拒绝文案）。
+- **owner 裁决（原话要点）**：兜底机制是「懒政」——出问题不暴露真问题、给假数据蒙混过关、单测全绿一用就崩；任何需求不得先设计兜底。
+- **教训**：
+  1. **「目录校验失败 → 换一个模型继续发」这类静默替换比直接报错恶劣得多**：它把「选的模型不存在」变成一个无关的第三方错误（订阅权限），排障方向被人为引偏。校验失败的唯一诚实出路是拒绝 + 指出最近候选。
+  2. **上游有两条模型链，语义不同不能混用**：picker 的 valid/默认链决定「高亮什么」；send 的 `input.model` 优先级决定「跑什么」。把 picker 链套到 send 上就产生了「手选可被静默覆盖」的荒谬语义。
+  3. **wire id 的 qualified 形态是约定不是巧合**：`normalizeModelParam`（go-bridge 通用路径）早已正确处理「id 含 / 则不再拼 providerId」；`promptOptionsFromParams`/`SendWithOptions` 这条新路径没有复用同一约定，两处语义分叉就是 bug。

@@ -376,29 +376,55 @@ func (a *Agent) configuredDefault(ctx context.Context, c *Client, catalog *ocwMo
 	return ref, valid, nil
 }
 
+// normalizePromptModelRef merges the wire {providerId, id} pair into one
+// catalog ref. The wire id follows the catalog convention and may already
+// carry the provider prefix ("providerID/modelID" — modelItemsForWire emits
+// the qualified name verbatim); in that case the id's own prefix is
+// authoritative and providerId must not be prepended again.
+func normalizePromptModelRef(providerID, modelID string) ocwModelRef {
+	modelID = strings.TrimSpace(modelID)
+	providerID = strings.TrimSpace(providerID)
+	if p, m, ok := strings.Cut(modelID, "/"); ok && p != "" && m != "" {
+		return ocwModelRef{ProviderID: p, ID: m}
+	}
+	return ocwModelRef{ProviderID: providerID, ID: modelID}
+}
+
 // resolvePromptModel walks the official chain (canonical §6.6): current →
 // agent model → provider-default-over-config → recent → first-connected
-// fallback. Each candidate must be catalog-valid before use; an invalid
-// candidate advances to the next documented level, never to a guess. When no
+// fallback. A USER selection (per-request option or pending) must be
+// catalog-valid or the send FAILS LOUDLY — upstream prompt.ts:646 takes
+// input.model first and reports ModelNotFoundError with did-you-mean
+// (prompt.ts:602-609); silently substituting a default masks the real
+// problem (2026-09-21 owner 裁决：兜底蒙混等于掩盖真实问题). Only when the
+// user picked nothing do the configuration/default levels apply, and each
+// of those candidates must still be catalog-valid before use. When no
 // candidate validates the caller must issue ZERO prompt POSTs.
 func (s *serverSession) resolvePromptModel(ctx context.Context, c *Client, explicit ocwModelRef, agentModel string) (ocwModelRef, error) {
 	catalog, err := s.a.fetchModelCatalog(ctx, c)
 	if err != nil {
 		return ocwModelRef{}, fmt.Errorf("opencode-web: provider catalog unavailable: %w", err)
 	}
-	// (1) explicit current selection (per-request option or legacy pending).
-	candidates := []ocwModelRef{explicit}
+	// (1) user selection: per-request option first, then the legacy pending.
+	userCandidates := []ocwModelRef{explicit}
 	if pending := s.a.GetModel(); pending != "" {
 		p, id := parseQualifiedModel(pending)
-		candidates = append(candidates, ocwModelRef{ProviderID: p, ID: id})
+		userCandidates = append(userCandidates, ocwModelRef{ProviderID: p, ID: id})
 	}
-	// (2) selected agent's configured model.
+	for _, cand := range userCandidates {
+		if cand.ProviderID == "" && cand.ID == "" {
+			continue
+		}
+		if ref, ok := catalog.catalogValid(cand.ProviderID, cand.ID); ok {
+			return ref, nil
+		}
+		return ocwModelRef{}, catalog.modelNotFoundErr(cand)
+	}
+	// (2) selected agent's configured model — configuration fallback, not a
+	// user pick: an invalid entry advances to the default chain.
 	if agentModel != "" {
 		p, id := parseQualifiedModel(agentModel)
-		candidates = append(candidates, ocwModelRef{ProviderID: p, ID: id})
-	}
-	for _, cand := range candidates {
-		if ref, ok := catalog.catalogValid(cand.ProviderID, cand.ID); ok {
+		if ref, ok := catalog.catalogValid(p, id); ok {
 			return ref, nil
 		}
 	}
@@ -419,6 +445,37 @@ func (s *serverSession) resolvePromptModel(ctx context.Context, c *Client, expli
 		return ref, nil
 	}
 	return ocwModelRef{}, fmt.Errorf("opencode-web: no connected valid model — zero prompt POSTs (configure a provider in OpenCode first)")
+}
+
+// modelNotFoundErr mirrors upstream ModelNotFoundError (prompt.ts:602-609):
+// the send is refused (zero POSTs) and the error carries the nearest catalog
+// candidates so the client can re-pick from fresh truth instead of the send
+// silently running a different model.
+func (c *ocwModelCatalog) modelNotFoundErr(cand ocwModelRef) error {
+	want := cand.ProviderID + "/" + cand.ID
+	var suggestions []string
+	for _, m := range c.Models {
+		if strings.HasSuffix(m.Name, "/"+cand.ID) {
+			suggestions = append(suggestions, m.Name)
+			if len(suggestions) == 3 {
+				break
+			}
+		}
+	}
+	if len(suggestions) == 0 {
+		for _, m := range c.Models {
+			if strings.HasPrefix(m.Name, cand.ProviderID+"/") {
+				suggestions = append(suggestions, m.Name)
+				if len(suggestions) == 3 {
+					break
+				}
+			}
+		}
+	}
+	if len(suggestions) > 0 {
+		return fmt.Errorf("opencode-web: model not found in connected catalog: %s — send refused, nothing was run; did you mean: %s? (refresh the model list and re-pick)", want, strings.Join(suggestions, ", "))
+	}
+	return fmt.Errorf("opencode-web: model not found in connected catalog: %s — send refused, nothing was run (refresh the model list and re-pick)", want)
 }
 
 // modelVariants returns the live variant keys for a resolved model

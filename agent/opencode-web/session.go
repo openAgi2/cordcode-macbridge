@@ -238,7 +238,12 @@ func (s *serverSession) SendWithOptions(prompt string, images []core.ImageAttach
 	if err != nil {
 		return err
 	}
-	explicit := ocwModelRef{ProviderID: opts.ProviderID, ID: opts.ModelID}
+	// wire 的 model.id 沿目录约定携带 provider 前缀（modelItemsForWire：id =
+	// "providerID/modelID"），与 opts.ProviderID 并存时不得再拼一次——
+	// 2026-09-21 真机：iOS 手选 ctyun/deepseek-v4-flash-0731-oc 曾被拼成
+	// ctyun/ctyun/deepseek-v4-flash-0731-oc，目录必 miss，随后静默兜底成
+	// 第一个 connected provider 的默认（zhipuai Highspeed）并报订阅权限错。
+	explicit := normalizePromptModelRef(opts.ProviderID, opts.ModelID)
 	resolved, err := s.resolvePromptModel(s.ctx, s.client, explicit, agentModel)
 	if err != nil {
 		return err

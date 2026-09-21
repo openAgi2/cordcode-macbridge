@@ -92,11 +92,12 @@ func TestSendCarriesCatalogModelOnCreateAndPrompt(t *testing.T) {
 	}
 }
 
-// Canonical §6.6: an unavailable EXPLICIT selection advances to the next
-// documented level (the official picker's find(valid)) — it is not a hard
-// error, and the send never carries an unvalidated model. The zero-POST
-// error belongs to "no connected valid model at any level".
-func TestSendInvalidExplicitModelAdvances(t *testing.T) {
+// Upstream prompt.ts send semantics (2026-09-21 owner 裁决修订)：用户显式
+// 选择（pending SetModel）不在 connected 目录 → 发送必须响亮拒绝并给出
+// did-you-mean，零 POST——绝不静默前进到默认链（那正是 2026-09-21 真机
+// 事故：无效手选被静默换成 zhipuai 默认 Highspeed 并报订阅权限错，真实
+// 问题完全被掩盖）。默认链只属于「用户什么都没选」的场合。
+func TestSendInvalidExplicitModelFailsLoud(t *testing.T) {
 	agent, serve := newSendAgent(t, map[string]string{
 		"/provider": `{"all":[{"id":"other-provider","models":{"other-model":{"id":"other-model","limit":{"context":1000}}}}],"connected":["other-provider"],"default":{}}`,
 		"/session/ses_new/prompt_async": `{}`,
@@ -109,12 +110,16 @@ func TestSendInvalidExplicitModelAdvances(t *testing.T) {
 		t.Fatalf("StartSession: %v", err)
 	}
 	defer sess.Close()
-	if err := sess.Send("hello", nil, nil); err != nil {
-		t.Fatalf("invalid explicit selection must advance, got %v", err)
+	err = sess.Send("hello", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "model not found in connected catalog") {
+		t.Fatalf("invalid user selection must refuse the send loudly, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "nothing was run") {
+		t.Fatalf("refusal must state that nothing was run, got %v", err)
 	}
 	prompts := countRequests(serve, "POST", "/session/ses_new/prompt_async")
-	if len(prompts) != 1 || !strings.Contains(prompts[0].Body, `"modelID":"other-model"`) {
-		t.Fatalf("send must carry the ADVANCED validated model other-model, got %+v", prompts)
+	if len(prompts) != 0 {
+		t.Fatalf("refused send must issue ZERO prompt POSTs, got %+v", prompts)
 	}
 }
 

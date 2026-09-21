@@ -9,6 +9,7 @@
 ## [Unreleased]
 
 ### Fixed
+- **修复：OpenCode Web 手选模型被静默替换成第一个 provider 的默认模型（2026-09-21 真机：选 DeepSeek/GLM-5.3-flash 一律跑成 GLM-5.3-Highspeed 并报订阅权限错）**：两处根因。①双重前缀——wire 的 `model.id` 沿目录约定携带 provider 前缀（`providerID/modelID`），`SendWithOptions` 却把它与 `providerId` 再拼一次，任何手选都变成 `ctyun/ctyun/...` 式的目录外引用；②无效手选静默兜底——目录校验失败后不报错，而是沿「第一个 connected provider 默认」链静默换模型继续发送，真实问题（选的模型不存在）完全被掩盖。修复：①归一化 qualified id（id 自带前缀时以前缀为准，不再重复拼接）；②用户显式手选（per-request 或 pending）不在 connected 目录时发送响亮拒绝（零 POST，错误镜像上游 `ModelNotFoundError` 并附 did-you-mean 最近候选）；「什么都没选」时原默认链保持不变，agent 配置模型失效仍属配置回退继续前进。回归测试 ×7（归一化 + fail-loud ×2 + 默认链不变 ×2 + SendWithOptions 端到端归一化 + 既有 advance 语义测试按新裁决改写为拒绝语义）。
 - **修复：abort/删除会话泄漏 bridge-owned 发送槽，后续发送被误报 "Bridge runtime is quiescing"（2026-09-21 真机实证）**：`send_message` 按会话占用一个发送槽（`bridgeOwnedTurns`），唯一释放路径是会话转 idle 时的 `completeBridgeTurn`；而 `abort_generation`（通用与 opencode-web 两条路径）和 `delete_session` 走 `deleteSession`+`Close()`——注册表条目已删、idle 回调永不触发，槽永久泄漏，该会话后续所有发送被拒。真机事故链：GLM-5.3-Highspeed 权限错误 → turn 零输出卡 running → owner 点停止 → 槽泄漏 → 后续两发均被拒且错误文案误报 quiescing（管理 API 实证：`admissionState=accepting`、`quiesce=none`、`bridgeOwnedActiveTurns=1`；2026-09-20 的「quiesce 排空窗口」事故同签名，极可能同根因误诊）。修复：三条终态路径（abort×2 + delete_session）显式释放发送槽；`admitBridgeTurn` 对「同会话上一动作未收口」返回诚实的 `session_action_in_progress`（可重试），不再冒充 quiescing——真 quiesce（admission 机器）仍返回 `runtime.quiescing`。回归测试 ×4（诚实分叉 + 三路径释放）。
 
 ### Added
