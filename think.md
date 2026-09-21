@@ -2523,6 +2523,9 @@ GET /project 过滤规则。
 
 ## 2026-09-21 晚：OpenCode Web 思考过程流进正文、思考视窗缺失——field 名与 part 类型的混淆 + 过时的 E2 verdict
 
+> **✅ owner 真机验收（2026-09-21 晚）**：`e2a20a1` 装机后复测，opencode-web
+> 模式思考视窗正常出现，与 grok/claude/dsh 行为一致。
+
 - **现象**：grok build / Claude Code / DeepSeek harness 模式下思考过程在思考视窗滚动展示；opencode-web 模式下思考直接流式输出在正文、没有思考视窗。
 - **根因（两处，均在 agent/opencode-web/events.go 的 SSE 订阅器）**：
   1. **field 名 ≠ part 类型**：serve 的 `message.part.delta` 只携带被追加的字段名，而 reasoning part 的内容字段名就是 `text`（与 text part 共有；上游 `acp/event.ts:231/246` 以 `partType` 区分、从不以 field 区分）。`kindForPart` 对 `field=="text"` 短路直接返回 "text"、不查 partKinds 缓存 → 思考增量全部被当正文发 `EventText` → **流进正文**。
