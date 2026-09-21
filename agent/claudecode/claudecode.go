@@ -942,6 +942,10 @@ type transcriptContentBlock struct {
 type transcriptToolResult struct {
 	Output  any
 	IsError bool
+	// UseResult carries the top-level toolUseResult JSON from the user JSONL
+	// line (Edit/Write structured results). Only the transcript/history path
+	// consumes it (parity plan §5 S2); the live codec never sees this field.
+	UseResult json.RawMessage
 }
 
 type richHistoryMessageBuilder struct {
@@ -1134,6 +1138,12 @@ func (b *richHistoryMessageBuilder) applyToolResult(toolID string, result transc
 	if result.Output != nil {
 		step["output"] = result.Output
 	}
+	// Parity plan §5 S2: transcript toolUseResult.structuredPatch → projection
+	// fileChanges (path + hunk-rendered diff + counted additions/deletions).
+	// Attached only from the history path; the live codec never populates it.
+	if changes := claudeFileChangesFromToolUseResult(result.UseResult); len(changes) > 0 {
+		step["fileChanges"] = changes
+	}
 	toolName, _ := step["toolName"].(string)
 	matchInput := result.Output
 	if output, ok := result.Output.(map[string]any); ok && output["kind"] == "inline" {
@@ -1143,6 +1153,95 @@ func (b *richHistoryMessageBuilder) applyToolResult(toolID string, result transc
 		step["matches"] = matches
 	}
 	return true
+}
+
+// claudeFileChangesFromToolUseResult maps the Claude Code transcript
+// toolUseResult.structuredPatch into the projection fileChanges vocabulary
+// (parity plan §5 S2). Branching is by structuredPatch presence, NOT by the
+// type field — the R22 evidence corpus (6849 records) has 5859 non-empty
+// patches with no type at all while all 858 empty patches are type=create:
+// branching on type would miss the majority, and empty patches must never
+// fabricate +0 −0.
+//
+//   - top-level filePath present → one fileChange entry (Edit/Write family;
+//     Read keeps its content nested under file.filePath and stays output-tier)
+//   - non-empty structuredPatch → additions/deletions summed across every
+//     hunk ('+' adds, '-' deletes; ' ' context and '\' no-newline marker
+//     lines ignored), diff rendered as unified hunk text
+//   - empty/missing structuredPatch → the entry carries no counts (nil
+//     stats — never 0/0); create rows show the filename only
+func claudeFileChangesFromToolUseResult(useResult json.RawMessage) []map[string]any {
+	if len(useResult) == 0 {
+		return nil
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(useResult, &decoded); err != nil {
+		return nil
+	}
+	path := strings.TrimSpace(firstString(decoded, "filePath"))
+	if path == "" {
+		return nil
+	}
+	kind := strings.TrimSpace(firstString(decoded, "type"))
+	switch kind {
+	case "create":
+		// keep — matches the codex apply_patch vocabulary
+	case "update", "":
+		kind = "edit"
+	}
+	hunks, _ := decoded["structuredPatch"].([]any)
+	validHunks := make([]map[string]any, 0, len(hunks))
+	for _, hunkRaw := range hunks {
+		if hunk, ok := hunkRaw.(map[string]any); ok {
+			validHunks = append(validHunks, hunk)
+		}
+	}
+	if len(validHunks) == 0 {
+		return []map[string]any{{"path": path, "kind": kind}}
+	}
+	additions, deletions := 0, 0
+	var diff strings.Builder
+	for _, hunk := range validHunks {
+		fmt.Fprintf(&diff, "@@ -%d,%d +%d,%d @@\n",
+			hunkIntField(hunk["oldStart"]), hunkIntField(hunk["oldLines"]),
+			hunkIntField(hunk["newStart"]), hunkIntField(hunk["newLines"]))
+		lines, _ := hunk["lines"].([]any)
+		for _, lineRaw := range lines {
+			line, _ := lineRaw.(string)
+			diff.WriteString(line)
+			diff.WriteByte('\n')
+			switch {
+			case strings.HasPrefix(line, "+"):
+				additions++
+			case strings.HasPrefix(line, "-"):
+				deletions++
+			}
+		}
+	}
+	return []map[string]any{{
+		"path":      path,
+		"kind":      kind,
+		"diff":      diff.String(),
+		"additions": additions,
+		"deletions": deletions,
+	}}
+}
+
+// hunkIntField reads a JSON number field from an unmarshaled hunk map
+// (float64 after map[string]any decode); non-numeric or fractional values
+// render as 0, which only degrades the @@ header cosmetics — the counts come
+// from line prefixes, never from these fields.
+func hunkIntField(v any) int {
+	switch typed := v.(type) {
+	case float64:
+		return int(typed)
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	default:
+		return 0
+	}
 }
 
 func (b *richHistoryMessageBuilder) build() core.RichHistoryEntry {
@@ -1494,8 +1593,9 @@ func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHisto
 						continue
 					}
 					result := transcriptToolResult{
-						Output:  normalizeToolResultOutput(block.Content),
-						IsError: block.IsError,
+						Output:    normalizeToolResultOutput(block.Content),
+						IsError:   block.IsError,
+						UseResult: raw.ToolUseResult,
 					}
 					if isClaudeSkillLaunchOutput(result.Output) {
 						skipNextSkillInstruction = true

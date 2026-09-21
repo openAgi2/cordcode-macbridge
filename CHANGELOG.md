@@ -9,6 +9,7 @@
 ## [Unreleased]
 
 ### Added
+- **（数据面）Claude Code 冷历史 Edit/Write 统计进投影（原生时间线过程组对齐方案 v2.12 切片 S2）**：transcript `toolUseResult.structuredPatch` → 投影 `fileChanges`（path/kind/hunk 渲染 diff/计数）。分流按 structuredPatch 存在性、不按 type 字段（R22 实证：6849 记录中 5859 条非空 patch 无 type、858 条空 patch 全部 type=create——按 type 分流会漏掉多数）；非空 hunk → 全部 hunk lines 首字符求和（'+' 计增、'-' 计删，' ' context 与 '\' no-newline marker 忽略，跨 hunk 累加）；**空/缺失 → 统计 nil，禁止写 0/0**（create 行显示「已创建 文件名」无统计，nil≠0 不误导）。Read（type=text、filePath 嵌套在 file 下）与非文件结果不产条目（保持 output 档）。scope 仅 transcript/history 路径（live codec 未消费该字段——live 观看的 turn 在重连/冷拉后才显示统计，已知边界）。iOS 零改动（消费同一 fileChanges 字段，P2 已落地的 Int? 完整 pair 语义直接生效）。
 - **（数据面）opencode-web 冷历史官方编辑统计与 read 干净详情进投影（原生时间线过程组对齐方案 v2.12 切片 P2+S1）**：投影 tool part 新增三个可选展示载荷 `fileDisplay`（read/write-create 的 {path, text, lineStart, lineEnd, totalLines, truncated}，来自官方 `metadata.display`，仅 `type=="file"` 映射、directory 形状 fail closed 不误映射）、`editRegions`（[{path, newText}] 按序编辑区域，dsh-web 切片用）、`detailUnavailable`（未知成功形状的 fail-closed 诊断对象）；`fileChanges` entry 新增可选官方计数 `additions`/`deletions`（指针语义：合法 0 照写、缺失不写、绝不把缺失当 0）。opencode-web 冷历史映射 `metadata.filediff` 计数与 `metadata.files`（apply_patch 多文件→每文件一条，kind=官方 type）；§4.8 运输链全门落地（hydrate 复制 → ProjectionPart 字段 → reducer 读取/merge/clone → 预算按 output+clean field 双份计入 → canonical schema/文档），快照/增量 patch 字段存活。原始 output 保留不清空（web lane/legacy/汇总解析仍消费）。协议为非破坏性可选新增，canonical pack 与 iOS mirror 分别提交。
 
 ### Fixed
