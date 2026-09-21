@@ -122,7 +122,7 @@ func countMappableEntries(evs []apiHistoryEntry) int {
 // turn accumulation.
 func mapHistoryEvents(sessionID string, evs []apiHistoryEntry) []core.RichHistoryEntry {
 	// Pass 1: tool/result outputs by callId.
-	outputs := map[string]string{}
+	results := map[string]dshToolResultInfo{}
 	for _, e := range evs {
 		if e.Event.Type != "tool/result" {
 			continue
@@ -139,9 +139,13 @@ func mapHistoryEvents(sessionID string, evs []apiHistoryEntry) []core.RichHistor
 			continue
 		}
 		var sb strings.Builder
+		isError := false
 		for _, block := range d.Message.Content {
 			if block.Type != "tool-result" {
 				continue
+			}
+			if block.IsError {
+				isError = true
 			}
 			for _, piece := range block.Content {
 				if piece.Type == "text" && piece.Text != "" {
@@ -152,7 +156,7 @@ func mapHistoryEvents(sessionID string, evs []apiHistoryEntry) []core.RichHistor
 				}
 			}
 		}
-		outputs[callID] = sb.String()
+		results[callID] = dshToolResultInfo{text: sb.String(), isError: isError, meta: d.Meta}
 	}
 
 	var entries []core.RichHistoryEntry
@@ -281,7 +285,7 @@ func mapHistoryEvents(sessionID string, evs []apiHistoryEntry) []core.RichHistor
 			if jsonUnmarshal(e.Event.Data, &d) != nil {
 				continue
 			}
-			acc.addMessage(e.Event.Seq, e.Event.Time, d, outputs)
+			acc.addMessage(e.Event.Seq, e.Event.Time, d, results)
 		case "command/run":
 			var d dshCommandRunData
 			if jsonUnmarshal(e.Event.Data, &d) != nil {
@@ -431,6 +435,21 @@ type dshToolResultData struct {
 		Source  *dshSource        `json:"source,omitempty"`
 		Content []dshContentBlock `json:"content"`
 	} `json:"message"`
+	// Meta is the tool's private presentation payload (official
+	// tool-calls.ts: persisted so a UI bridge reproduces the card on
+	// replay — read {path, offset, lines, totalLines} / write·edit
+	// {diffs}). Parity plan §5 S3 clean-detail slice consumes it; the
+	// previous cold path dropped it.
+	Meta json.RawMessage `json:"meta,omitempty"`
+}
+
+// dshToolResultInfo is the cold-path per-call digest of one tool/result:
+// the joined output text, the block-level error flag (status mapping ⑤)
+// and the raw presentation meta (clean-detail branches ①②③⑥).
+type dshToolResultInfo struct {
+	text    string
+	isError bool
+	meta    json.RawMessage
 }
 
 // dshTurnAccumulator assembles one assistant turn entry in grokbuild's part
@@ -471,7 +490,7 @@ func (t *dshTurnAccumulator) flushPendingReasoning() {
 	t.pending.Reset()
 }
 
-func (t *dshTurnAccumulator) addMessage(seq int64, at int64, d dshAssistantData, outputs map[string]string) {
+func (t *dshTurnAccumulator) addMessage(seq int64, at int64, d dshAssistantData, results map[string]dshToolResultInfo) {
 	if !t.open {
 		t.start(seq, at, 0)
 	}
@@ -504,7 +523,11 @@ func (t *dshTurnAccumulator) addMessage(seq int64, at int64, d dshAssistantData,
 			if name == "" {
 				continue
 			}
-			output := outputs[strings.TrimSpace(block.ID)]
+			info, hasResult := results[strings.TrimSpace(block.ID)]
+			output := ""
+			if hasResult {
+				output = info.text
+			}
 			if name == "ask_user_question" {
 				// 冷拉重建结构化问答面（2026-09-15 owner 真机：重开带 pending
 				// 问答的 dsh 会话，iOS 弹出卡只剩 L1 缓存首帧 ~1s 即被权威冷快照
@@ -527,10 +550,21 @@ func (t *dshTurnAccumulator) addMessage(seq int64, at int64, d dshAssistantData,
 				}
 			}
 			stepID := fmt.Sprintf("%s:%d:%s", t.sessionID, seq, strings.TrimSpace(block.ID))
+			// 状态映射（§5 S3 分支⑤）：有 tool/result 的 step 按 block 级
+			// isError 写 failed/completed（与 live codec 同形）；journal 无
+			// 该 call 的 result（pending/中断残留）保持 unknown，不伪造终态。
+			status := "unknown"
+			if hasResult {
+				if info.isError {
+					status = "failed"
+				} else {
+					status = "completed"
+				}
+			}
 			step := map[string]any{
 				"id":                             stepID,
 				"toolName":                       name,
-				"status":                         "unknown",
+				"status":                         status,
 				"output":                         map[string]any{"kind": "inline", "text": output},
 				"duration":                      nil,
 				"requiresPermissionConfirmation": false,
@@ -538,6 +572,25 @@ func (t *dshTurnAccumulator) addMessage(seq int64, at int64, d dshAssistantData,
 			}
 			if title := toolStepTitle(name, block.Arguments); title != "" {
 				step["title"] = title
+			}
+			// clean-detail（§5 S3 分支①②③⑥）：read/write/edit 的成功
+			// result 消费官方 presentation meta（此前整字段丢弃，iOS 冷拉
+			// 只能渲染 XML 形 raw output）；错误 result（分支④）保持原始
+			// 错误文本，不套结构化载荷。
+			if hasResult && !info.isError {
+				switch name {
+				case "read", "write", "edit":
+					fd, regions, diag := dshCleanToolDisplay(name, block.Arguments, info.meta)
+					if fd != nil {
+						step["fileDisplay"] = fd
+					}
+					if regions != nil {
+						step["editRegions"] = regions
+					}
+					if diag != nil {
+						step["detailUnavailable"] = diag
+					}
+				}
 			}
 			t.steps = append(t.steps, step)
 			t.parts = append(t.parts, map[string]any{"type": "tool", "step": step})

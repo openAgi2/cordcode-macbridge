@@ -40,6 +40,10 @@ type dshContentBlock struct {
 	Arguments  json.RawMessage   `json:"arguments,omitempty"`
 	ToolCallID string            `json:"toolCallId,omitempty"`
 	Content    []dshContentBlock `json:"content,omitempty"`
+	// IsError marks a tool-result block as the tool's failure payload
+	// (official tool-calls.ts createToolResultMessage; the cold path maps
+	// it to failed/completed step status — parity plan §5 S3 branch ⑤).
+	IsError bool `json:"isError,omitempty"`
 }
 
 // dshUserMessageData is user/message's data payload.
