@@ -1,3 +1,33 @@
+## 2026-09-21 「Bridge runtime is quiescing」误报：abort/delete_session 泄漏 bridge-owned 发送槽（已修复）
+
+现象：owner 在 iPhone opencode-web 模式发消息被拒，报 "Bridge runtime is quiescing"（2026-09-20 13:02
+同签名事故当时误诊为 RuntimeManager quiesce 排空窗口）。本轮真机取证（15:45–15:49）+ 管理 API
+`/internal/status` 实证推翻旧结论：`admissionState=accepting`、`quiesce.state=none`——**根本没有
+quiesce 在发生**；`bridgeOwnedActiveTurns=1`——恰好一个泄漏的发送槽。
+
+根因链：`send_message` 经 `admitBridgeTurn` 按会话占 `bridgeOwnedTurns[sessionID]` 槽，唯一释放路径是
+session registry 转 idle 的 `onStateChange→completeBridgeTurn`（`markIdle` 触发）。而 `abort_generation`
+（`ocHandleAbortGeneration` 与通用 `handleAbortGeneration` 的 delete+Close 分支）和 `delete_session`
+（`ocHandleDeleteSession`）都走 `deleteSession`+`sess.Close()`：注册表条目被**删除**（`delete()` 不触发
+onStateChange），relayEvents 因「channel 关闭 + isKnownActive=false」**静默退出**（不合成终态、不
+broadcastIdleState），槽永不释放。真机事故链：GLM-5.3-Highspeed 权限错误 → turn 零输出卡 running →
+owner 点停止（15:45:48.274 abort）→ 槽泄漏 → 15:46:31 / 15:49:02 两发同 session 发送全被拒，且
+`admitBridgeTurn` 的两个拒绝路径（槽占用 vs 真 quiesce）**共用同一句误报文案**。opencode-web 不实现
+`RunningSessionLister`，列表富化的 markIdle 自愈路径也不适用——泄漏直到 go-bridge 重启才清除。
+
+修复（本轮）：①三条终态路径（abort×2 + delete_session）在 delete+Close 后显式
+`completeBridgeTurn(sessionID)`（幂等，锁外调用）；②`admitBridgeTurn` 改返回 `*WireError`——槽占用
+返回诚实 `session_action_in_progress`（可重试，对齐 `sendNativeSessionWriteBusy` 文案模式），真
+quiesce（admission 机器）才返回 `runtime.quiescing`。回归测试 ×4：
+`go-bridge/bridge_turn_slot_leak_test.go`。注意：claude 官方 interrupt 早退分支与共享 daemon 分支
+**不加**释放（turn 由官方收口帧经 relay→markIdle 释放，提前释放会破坏单飞语义）。
+
+教训：①同一文案覆盖两种语义不同的拒绝（生命周期状态 vs 用户动作冲突）会把 owner 和 agent 的排障
+方向都带偏——09-20 那次就是被「quiescing」字面量引去查 RuntimeManager；②管理 API 的
+`activity.admissionState` + `bridgeOwnedActiveTurns` 是判别「真 quiesce vs 槽泄漏」的一手证据，
+排障先查它；③`deleteSession` 的调用方里只有 send-defer 保护窗内的（ensureOpenCodeSession、evict
+修复路径）是安全的——任何在窗口外删会话的新路径都要自带 `completeBridgeTurn`。
+
 ## 2026-09-20 opencode-web 目录查询挂死：空 .opencode + 全局 plugin + 代理挂起 npm（已修复，未改代码）
 
 现象：目标 worktree 的 scoped query 0 字节挂死（>15s），health 20ms，其它目录毫秒级；driver 每轮

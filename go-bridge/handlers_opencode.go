@@ -553,8 +553,8 @@ func (h *Handlers) ocHandleSendMessage(conn Connection, msg WireMessage, dir str
 		conn.SendResult(msg.RequestID, nil, wireErr)
 		return
 	}
-	if !h.admitBridgeTurn(params.SessionID) {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "runtime.quiescing", Message: "Bridge runtime is quiescing"})
+	if wireErr := h.admitBridgeTurn(params.SessionID); wireErr != nil {
+		conn.SendResult(msg.RequestID, nil, wireErr)
 		return
 	}
 	turnCommitted := false
@@ -618,6 +618,13 @@ func (h *Handlers) ocHandleAbortGeneration(conn Connection, msg WireMessage, dir
 	if ok {
 		_ = sess.Close()
 	}
+	// abort 终止该 session 的 bridge-owned turn：注册表条目已删，markIdle→
+	// completeBridgeTurn 永远不会再触发，必须在此释放发送槽——否则槽泄漏，
+	// 该 session 后续所有 send 被拒（2026-09-21 真机：GLM 权限零输出 turn 被
+	// abort 后，15:46/15:49 两发均被误报 "Bridge runtime is quiescing"）。
+	if ok {
+		h.completeBridgeTurn(sessionID)
+	}
 
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
 	// 只有 session 确实被删除时才发完成事件，避免伪造状态
@@ -646,6 +653,9 @@ func (h *Handlers) ocHandleDeleteSession(conn Connection, msg WireMessage, dir s
 	if sess != nil {
 		_ = sess.Close()
 	}
+	// delete_session 同样终结该 session 的 bridge-owned turn（注册表已删，
+	// markIdle 不会再触发）；不释放则发送槽泄漏（同 abort 路径 2026-09-21）。
+	h.completeBridgeTurn(sessionID)
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
 }
 

@@ -199,8 +199,8 @@ func TestMgmtV1StatusActivityByBackendScopesTurnsPerBackend(t *testing.T) {
 	h := srv.cfg.Handlers
 	h.RegisterAgent("claude", &fakeAgent{name: "claudecode"})
 	h.sessions.put("s-claude", "claude", "", &fakeAgentSession{id: "s-claude", events: make(chan core.Event)})
-	if !h.admitBridgeTurn("s-claude") {
-		t.Fatal("admitBridgeTurn failed")
+	if wireErr := h.admitBridgeTurn("s-claude"); wireErr != nil {
+		t.Fatalf("admitBridgeTurn failed: %v", wireErr.Message)
 	}
 
 	rec := httptest.NewRecorder()

@@ -345,20 +345,31 @@ func (h *Handlers) SetAdmissionMachine(machine *admission.AdmissionMachine) {
 	h.mu.Unlock()
 }
 
-func (h *Handlers) admitBridgeTurn(sessionID string) bool {
+// admitBridgeTurn gates a send on (a) no in-flight bridge-owned turn for this
+// session and (b) the runtime admission machine (quiesce drain). The two
+// rejections must not share a message: a stuck per-session turn is a
+// user-action conflict (retryable, 2026-09-21 真机：abort 泄漏的槽被误报
+// "Bridge runtime is quiescing"，误导 owner 与排障方向)；真 quiesce 是运行时
+// 生命周期状态。返回 nil 表示放行。
+func (h *Handlers) admitBridgeTurn(sessionID string) *WireError {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.admission == nil {
-		return true
+		return nil
 	}
 	if _, exists := h.bridgeOwnedTurns[sessionID]; exists {
-		return false
+		retryable := true
+		return &WireError{
+			Code:      "session_action_in_progress",
+			Message:   "another action is already being submitted for this session",
+			Retryable: &retryable,
+		}
 	}
 	if !h.admission.TryBeginBridgeTurn() {
-		return false
+		return &WireError{Code: "runtime.quiescing", Message: "Bridge runtime is quiescing"}
 	}
 	h.bridgeOwnedTurns[sessionID] = struct{}{}
-	return true
+	return nil
 }
 
 func (h *Handlers) completeBridgeTurn(sessionID string) {
@@ -2756,8 +2767,8 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 		}
 		defer release()
 	}
-	if !h.admitBridgeTurn(params.SessionID) {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "runtime.quiescing", Message: "Bridge runtime is quiescing"})
+	if wireErr := h.admitBridgeTurn(params.SessionID); wireErr != nil {
+		conn.SendResult(msg.RequestID, nil, wireErr)
 		return
 	}
 	turnCommitted := false
@@ -3509,6 +3520,13 @@ func (h *Handlers) handleAbortGeneration(conn Connection, msg WireMessage) {
 			cancel()
 		}
 		_ = sess.Close()
+	}
+	// abort 终止该 session 的 bridge-owned turn：注册表条目已删，markIdle→
+	// completeBridgeTurn 永远不会再触发，必须在此释放发送槽——否则槽泄漏，
+	// 该 session 后续所有 send 被误报 "Bridge runtime is quiescing"
+	// （2026-09-21 真机实证，同 ocHandleAbortGeneration）。
+	if deleted {
+		h.completeBridgeTurn(sessionID)
 	}
 
 	// 私有进程后端（claude/opencode/dsh…）没有独立官方收口的 daemon：Close 即
