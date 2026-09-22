@@ -779,13 +779,12 @@ together. Canonical versions are tracked in [docs/protocol/README.md](docs/proto
   不是代码改动清单——同轮禁止修改业务代码（除非评审报告明确书面豁免）；(3) 评审中的
   代码类发现（缺测试、产品缺陷等）写进文档的「过审后实施」方案，不直接动手修；
   (4) 不采纳的评审意见逐项标明理由，修订版开头声明本轮改动范围；(5) 「边改代码边改
-  文档」「先编码再拿修改情况送审」都是脱离流程的违规形态。进入开发阶段后，开发过程的
-  监督由监工流程（仅 owner 亲自开启时启用，见下条）承接：评审员管方案质量，监工管
-  实施过程，两者不混用。
-- **监工流程（supervise skill）默认关闭（2026-09-21 owner 定案）：** 只有 owner 在当前
-  任务中亲自明确开启（点名「监工」/「supervise」）才启用；agent 不得自行进入或启用
-  监工流程，未被开启时不得套用监工规则。启用后的行为以
-  `~/.agents/skills/supervise/SKILL.md` 为准。
+  文档」「先编码再拿修改情况送审」都是脱离流程的违规形态。进入开发阶段后，按本文件
+  常规交付纪律执行（定向测试、构建部署验证、owner 验收）。
+- **监工流程（supervise skill）已废弃并删除（2026-09-21 owner 定案）：** 手动监工是
+  早期模型能力不足（幻觉、低级错误频发）时期的补偿机制；现模型能力已达标，监工模式
+  整体废弃——skill 已删除、不存在启用入口，任何任务中不得恢复或引用监工流程。开发
+  质量由方案评审循环、定向测试与 owner 验收承担。
 - **`AGENTS.md` 必须与本文保持同内容**：`AGENTS.md` 是本文的真实文件副本（非软链），供只加载 `AGENTS.md` 的工具（ZCode、Codex 等）读到同一份 runbook；修改本文后必须 `cp CLAUDE.md AGENTS.md` 同步并随本文一起提交。
 - 日志路径为 `~/Library/Application Support/CordCode Link/logs/go-bridge.log`（不再使用 `/tmp`，P2-8）。runtime 重启会重新打开日志文件；MacBridge 会按大小滚动（`maxLogBytes` 8MiB，保留 3 代）。日志从某时刻突然重新开始可能是 120min 定时兜底重启（`autoRestartIntervalMinutes` 默认 120），也可能是 `.starting` 卡住 60s 后的 supervisor 自愈，非必然 bug。排查时用 `tail -f ~/Library/Application\ Support/CordCode\ Link/logs/go-bridge.log | tee /tmp/evidence.log` 镜像，或临时关 `autoRestartEnabled`。
 - **CHANGELOG.md**：每轮对外可见的改动完成后，在 `[Unreleased]` 下按现有格式追加一节（日期 — 主题），记录「改了什么 / 有何提升」。发布正式版时把 `[Unreleased]` 改为版本号与日期。
