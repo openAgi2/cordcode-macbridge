@@ -638,10 +638,17 @@ func (s *sseSubscriber) handleToolPart(part map[string]any, sessionID, messageID
 			ToolName:   toolName,
 			ToolResult: truncateForError(output),
 			ToolStatus: toolStatus,
-			SessionID:  sessionID,
+			SessionID: sessionID,
 			RequestID:  partID,
 			TurnID:     turnID,
 			ItemID:     turnID,
+			// R34 live 补齐（2026-09-22 owner 批准的 round-3 修复）：终态帧的
+			// state.metadata.filediff / metadata.files 与 history part 是同一
+			// part 对象（上游 stream.transport.ts message.part.updated 携带
+			// properties.part；真实 1.18 desktop history 样本 202/202 edit
+			// filediff 完整）。单一解析 fileChangesFromToolState，双载体：history
+			// 走 step["fileChanges"] wire maps，live 走 core.Event.FileChanges。
+			FileChanges: coreFileChangesFromToolState(state),
 		})
 	}
 }

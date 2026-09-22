@@ -391,6 +391,44 @@ func fileChangesFromToolState(state map[string]any) []map[string]any {
 	return []map[string]any{change}
 }
 
+// coreFileChangesFromToolState is the live-path carrier of the same official
+// parse: fileChangesFromToolState produces the wire maps the history/hydrate
+// path writes into step["fileChanges"], and this converts them to
+// core.FileChange for the SSE terminal EventToolResult (go-bridge events.go
+// fileChangesToWire re-serializes to the identical wire shape). Single parse,
+// two carriers — the live and cold paths can never disagree on the mapping.
+// Pointer semantics are preserved end-to-end: a legitimate 0 stays *0, absent
+// stays nil.
+func coreFileChangesFromToolState(state map[string]any) []core.FileChange {
+	wire := fileChangesFromToolState(state)
+	if len(wire) == 0 {
+		return nil
+	}
+	out := make([]core.FileChange, 0, len(wire))
+	for _, m := range wire {
+		// path/kind are written unconditionally by the parser; diff/movePath
+		// are conditional, so comma-ok keeps a missing key an empty string.
+		change := core.FileChange{
+			Path: m["path"].(string),
+			Kind: m["kind"].(string),
+		}
+		if v, ok := m["diff"].(string); ok {
+			change.Diff = v
+		}
+		if v, ok := m["movePath"].(string); ok {
+			change.MovePath = v
+		}
+		if v, ok := m["additions"].(int); ok {
+			change.Additions = &v
+		}
+		if v, ok := m["deletions"].(int); ok {
+			change.Deletions = &v
+		}
+		out = append(out, change)
+	}
+	return out
+}
+
 // applyOfficialCounts copies official per-file additions/deletions onto the
 // wire change when present as JSON numbers (0 included; absent omitted).
 func applyOfficialCounts(change map[string]any, source map[string]any) {
