@@ -1893,13 +1893,21 @@ func openCodeRichHistoryEntryToProjectionEvents(
 			return nil
 		}
 		*currentTurnID = identity
+		userData := map[string]interface{}{
+			"itemId": identity,
+			"turnId": identity,
+			"text":   text,
+		}
+		// Turn-level official net file diffs (opencode user-message
+		// summary.diffs) ride the hydrate user_message; the reducer writes
+		// them onto TurnProjection.FileChanges (turn-level truth, preferred
+		// by clients over per-tool aggregation).
+		if len(entry.TurnFileChanges) > 0 {
+			userData["fileChanges"] = entry.TurnFileChanges
+		}
 		out = append(out, projectionHydrateEvent{
 			Event: "user_message",
-			Data: map[string]interface{}{
-				"itemId": identity,
-				"turnId": identity,
-				"text":   text,
-			},
+			Data:  userData,
 		})
 		return out
 	case "assistant":

@@ -211,6 +211,14 @@ type TurnProjection struct {
 	DetailManifestRev int   `json:"detailManifestRev,omitempty"` // 0 = no manifest yet
 	DetailItemCount   int   `json:"detailItemCount,omitempty"`
 	DetailTotalBytes  int64 `json:"detailTotalBytes,omitempty"`
+	// Turn-level official net file diffs (opencode user-message
+	// info.summary.diffs; live EventTurnFileChanges / hydrate user_message
+	// both upsert here). Same wire entry vocabulary as part-level
+	// fileChanges (path/kind/additions/deletions — no patch: iOS renders no
+	// message-inline file diff and the bytes stay bounded). Additive; absent
+	// on backends without an official turn summary. Clients prefer this over
+	// per-tool fileChanges aggregation for the per-turn file box.
+	FileChanges interface{} `json:"fileChanges,omitempty"`
 }
 
 // ExecutionView is the session-level execution state. isExecuting = phase ∈ {running, requires_action}.

@@ -327,6 +327,7 @@ const (
 	EventThinking                 EventType = "thinking"                   // thinking/processing status
 	EventTurnStarted              EventType = "turn_started"               // new turn started (for passive broadcast)
 	EventUserMessage              EventType = "user_message"               // user prompt attributed to a turn (projection SoT)
+	EventTurnFileChanges          EventType = "turn_file_changes"          // turn-level official net file diffs (opencode user-message summary.diffs; upserts the owning turn)
 	EventContextCompressing       EventType = "context_compressing"        // context compression started
 	EventContextCompressed        EventType = "context_compressed"         // context compression completed
 	EventContextUsageUpdated      EventType = "context_usage_updated"      // runtime context usage changed
@@ -714,6 +715,12 @@ type RichHistoryEntry struct {
 	// ContextInjection 非空 = Role "context_injection" 行（dsh subagent-settled
 	// settle 通知的冷拉载体；Content 同 Text）。其他 role 恒 nil。
 	ContextInjection *ContextInjectionEvent `json:"contextInjection,omitempty"`
+	// TurnFileChanges 是回合级官方净diff（opencode user-message
+	// info.summary.diffs：{file, patch, additions, deletions, status}）。非空时
+	// hydrate 把它作为该回合 user_message 事件的 fileChanges 附带——reducer 写
+	// TurnProjection.FileChanges（turn 级权威，客户端文件盒优先消费）。逐工具
+	// per-call fileChanges 仍是 L2/L3 工具行数据源，两者不混写。
+	TurnFileChanges []map[string]any `json:"turnFileChanges,omitempty"`
 }
 
 // Todo represents one backend-managed todo item for a session.

@@ -323,6 +323,13 @@ func (ps *projectionSession) upsertTurn(turn TurnProjection) {
 		if turn.System != nil {
 			t.System = turn.System
 		}
+		// Turn-level official net file diffs: present wins (live summary
+		// converges step by step; each upsert is the newest authoritative net
+		// state). Absent keeps the held value — a user_message re-emission
+		// without fileChanges never clears a settled summary.
+		if turn.FileChanges != nil {
+			t.FileChanges = turn.FileChanges
+		}
 		if ps.upsertTurns != nil {
 			ps.upsertTurns[turn.TurnID] = *t
 		}
@@ -1156,7 +1163,7 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			return
 		}
 		commit()
-		ps.upsertTurn(TurnProjection{
+		upsert := TurnProjection{
 			TurnID: turnID,
 			Status: "running",
 			// Canonical official item id (T2.1): the Summary user slot dedups against
@@ -1164,12 +1171,40 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			User: &MessageProjection{ID: itemID, Role: "user", Parts: []ProjectionPart{
 				{Type: "text", Text: text, ItemID: itemID},
 			}},
-		})
+		}
+		// Turn-level official net file diffs ride the hydrate user_message
+		// (cold path: opencode user-message summary.diffs). Present wins in
+		// upsertTurn; absent keeps any held value.
+		if v, ok := data["fileChanges"]; ok {
+			upsert.FileChanges = v
+		}
+		ps.upsertTurn(upsert)
 		// Design §7.4: any in-flight content must keep execution.running. After cold
 		// hydrate the last completed turn leaves phase=idle; a new user_message without
 		// a re-emitted turn_started must still arm the UI (owner 2026-07-25: reopen app
 		// → prompt+thinking then sticky 完成态 because phase stayed idle).
 		ps.markRunning(turnID)
+
+	case "turn_file_changes":
+		// Turn-level official net file diffs (opencode user-message
+		// summary.diffs, live path). Fail-closed attribution: the turn must
+		// already exist (created by user_message/turn_started) — no phantom
+		// turns; a bridge that connected mid-turn gets its baseline from cold
+		// hydrate instead. Present fileChanges win in upsertTurn (the summary
+		// converges step by step onto the full turn net diff).
+		turnID := dataString(data, "turnId")
+		if turnID == "" {
+			return
+		}
+		if ps.turnByID(turnID) == nil {
+			return
+		}
+		v, ok := data["fileChanges"]
+		if !ok {
+			return
+		}
+		commit()
+		ps.upsertTurn(TurnProjection{TurnID: turnID, FileChanges: v})
 
 	case "system_message":
 		turnID := dataString(data, "turnId")
@@ -2810,7 +2845,9 @@ func projectionTurnExceeds(turn *TurnProjection, limit int) bool {
 		consumeMessage(turn.Assistant) || consumeMessage(turn.System) {
 		return true
 	}
-	return budget <= 0
+	// Turn-level official net file diffs count toward the same budget (no
+	// patch rides here, so the cost stays bounded to path/kind/count entries).
+	return projectionValueExceeds(turn.FileChanges, &budget) || budget <= 0
 }
 
 // projectionValueExceeds walks the JSON-compatible containers used by tool and
@@ -3162,6 +3199,7 @@ func cloneTurn(t TurnProjection) TurnProjection {
 		}
 		out.System = &s
 	}
+	out.FileChanges = cloneProjectionJSONValue(t.FileChanges)
 	return out
 }
 

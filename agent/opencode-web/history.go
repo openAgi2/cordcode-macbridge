@@ -204,20 +204,78 @@ func mapRichHistoryEntry(message map[string]any) (core.RichHistoryEntry, error) 
 		}
 	}
 
+	// Turn-level official net diffs ride the USER message (upstream
+	// session/summary.ts: step-start/step-finish snapshots → per-file net diff,
+	// stored on info.summary.diffs; the official desktop renders exactly these
+	// — session-turn.tsx reads message()?.summary?.diffs). Only user rows
+	// carry them; other roles stay nil.
+	var turnFileChanges []map[string]any
+	if role == "user" {
+		turnFileChanges = turnFileChangesFromSummary(info)
+	}
+
 	return core.RichHistoryEntry{
-		ID:         id,
-		Role:       role,
-		Content:    content,
-		Thinking:   thinking,
-		Parts:      mappedParts,
-		Steps:      steps,
-		Files:      []map[string]any{},
-		Timestamp:  timestamp,
-		AgentName:  strValue(info, "agent"),
-		ModelID:    strValue(info, "modelID"),
-		ProviderID: strValue(info, "providerID"),
-		ModelName:  strValue(info, "modelName"),
+		ID:              id,
+		Role:            role,
+		Content:         content,
+		Thinking:        thinking,
+		Parts:           mappedParts,
+		Steps:           steps,
+		Files:           []map[string]any{},
+		Timestamp:       timestamp,
+		AgentName:       strValue(info, "agent"),
+		ModelID:         strValue(info, "modelID"),
+		ProviderID:       strValue(info, "providerID"),
+		ModelName:       strValue(info, "modelName"),
+		TurnFileChanges: turnFileChanges,
 	}, nil
+}
+
+// turnFileChangesFromSummary reads the official turn-level net diffs from a
+// user message's info.summary.diffs ({file, patch, additions, deletions,
+// status}). Entries carry path/kind/official counts — the patch is
+// deliberately NOT carried (iOS renders no message-inline file diff by the
+// 2026-08-01 owner boundary; skipping it keeps turn-level projection bytes
+// bounded). status maps onto the fileChange kind vocabulary (modified→edit,
+// added→create, deleted→delete); counts ride only as official numbers
+// (legitimate 0 verbatim, absent omitted — nil≠0).
+func turnFileChangesFromSummary(info map[string]any) []map[string]any {
+	summary := firstMap(info, "summary")
+	if summary == nil {
+		return nil
+	}
+	diffs, ok := summary["diffs"].([]any)
+	if !ok || len(diffs) == 0 {
+		return nil
+	}
+	changes := make([]map[string]any, 0, len(diffs))
+	for _, raw := range diffs {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		path := firstString(entry, "file")
+		if path == "" {
+			continue
+		}
+		kind := "edit"
+		switch firstString(entry, "status") {
+		case "added":
+			kind = "create"
+		case "deleted":
+			kind = "delete"
+		}
+		change := map[string]any{
+			"path": path,
+			"kind": kind,
+		}
+		applyOfficialCounts(change, entry)
+		changes = append(changes, change)
+	}
+	if len(changes) == 0 {
+		return nil
+	}
+	return changes
 }
 
 // mapToolStepFromPart translates one official (or legacy-nested) tool part

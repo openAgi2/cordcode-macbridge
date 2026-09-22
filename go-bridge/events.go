@@ -120,6 +120,21 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 			"turnId": ev.TurnID,
 		}), false
 
+	case core.EventTurnFileChanges:
+		// Turn-level official net file diffs (opencode user-message summary.diffs).
+		// Upserts the OWNING turn only — the reducer is fail-closed on unknown
+		// turn ids (no phantom turns); cold hydrate owns absent turns.
+		if ev.TurnID == "" {
+			return "", nil, false
+		}
+		payload := map[string]interface{}{
+			"turnId": ev.TurnID,
+		}
+		if fileChanges := fileChangesToWire(ev.FileChanges); len(fileChanges) > 0 {
+			payload["fileChanges"] = fileChanges
+		}
+		return "turn_file_changes", eventData(ev, payload), false
+
 	case core.EventResult:
 		if ev.Done {
 			if ev.Error != nil {

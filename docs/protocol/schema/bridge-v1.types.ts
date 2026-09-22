@@ -983,6 +983,20 @@ export interface BridgeTurnProjection {
   detailInline?: boolean;
   /** Per-turn monotonic generation; bumps on every post-completion mutation. Absent => 0. */
   generation?: number;
+  /**
+   * Turn-level official net file diffs (opencode user-message info.summary.diffs;
+   * live turn_file_changes / hydrate user_message both upsert here). Same entry
+   * vocabulary as part-level fileChanges (path/kind/additions/deletions — no
+   * patch: clients render no message-inline file diff). Additive; absent on
+   * backends without an official turn summary. Clients prefer this over
+   * per-tool fileChanges aggregation for the per-turn file box.
+   */
+  fileChanges?: Array<{
+    path: string;
+    kind?: string;
+    additions?: number;
+    deletions?: number;
+  }>;
 }
 
 /** One turnStateOps entry of a BridgeProjectionPatch (turn_detail_lazy_v1). */

@@ -56,6 +56,12 @@ type sseSubscriber struct {
 	// become one projection user_message. userTurnStarted de-dupes turn_started.
 	userPrompts     map[string]string
 	userTurnStarted map[string]bool
+	// userSummaryFingerprint dedups the turn-level summary emission: the serve
+	// re-runs summary.summarize after EVERY step-finish (processor.ts) and
+	// re-publishes the user message, so info.summary.diffs converges step by
+	// step onto the full turn net diff. Only a CHANGED summary may emit
+	// EventTurnFileChanges (stable kernel revisions between steps).
+	userSummaryFingerprint map[string]string // messageID -> last emitted diffs JSON
 	// turnSawAssistantOutput tracks whether a turn produced any assistant
 	// content. The serve closes a provider-resolution failure (e.g. stale
 	// default model) as a silent empty loop exit — no error event, no
@@ -97,6 +103,7 @@ func newSSESubscriber(ctx context.Context, a *Agent, c *Client) *sseSubscriber {
 		activeTurns:            make(map[string]string),
 		userPrompts:            make(map[string]string),
 		userTurnStarted:        make(map[string]bool),
+		userSummaryFingerprint: make(map[string]string),
 		turnSawAssistantOutput: make(map[string]bool),
 		lastSessionError:       make(map[string]string),
 		lastTerminalError:      make(map[string]string),
@@ -436,6 +443,23 @@ func (s *sseSubscriber) handleMessageUpdated(properties map[string]any, sessionI
 			}
 			if strings.TrimSpace(userText) != "" {
 				s.noteUserPrompt(sessionID, messageID, userText, false)
+			}
+			// Turn-level official net diffs (upstream prompt.ts forks
+			// summary.summarize after the turn's first step; the serve then
+			// re-publishes the user message with info.summary.diffs — exactly
+			// what the official desktop renders). Emit once per CHANGED
+			// summary (message.updated re-fires); the reducer upserts the
+			// owning turn with TurnID = user messageID, the same attribution
+			// noteUserPrompt uses.
+			if diffs := s.summaryDiffsForEmit(messageID, info); diffs != nil {
+				if changes := coreFileChangesFromSummaryDiffs(diffs); len(changes) > 0 {
+					s.emit(core.Event{
+						Type:        core.EventTurnFileChanges,
+						SessionID:   sessionID,
+						TurnID:      messageID,
+						FileChanges: changes,
+					})
+				}
 			}
 		}
 	}
@@ -940,6 +964,76 @@ func (s *sseSubscriber) noteUserPrompt(sessionID, messageID, text string, isDelt
 			TurnID:    messageID,
 		})
 	}
+}
+
+// summaryDiffsForEmit returns the official turn-level diffs when the user
+// message carries a summary that CHANGED since the last emission for this
+// message (the serve re-publishes the user message on every update; the
+// summary itself converges step by step). Same-summary re-fires return nil so
+// the kernel revision stays stable between steps.
+func (s *sseSubscriber) summaryDiffsForEmit(messageID string, info map[string]any) []any {
+	summary := firstMap(info, "summary")
+	if summary == nil {
+		return nil
+	}
+	diffs, ok := summary["diffs"].([]any)
+	if !ok {
+		return nil
+	}
+	raw, err := json.Marshal(diffs)
+	if err != nil {
+		return nil
+	}
+	fingerprint := string(raw)
+	s.stateMu.Lock()
+	prev, seen := s.userSummaryFingerprint[messageID]
+	if seen && prev == fingerprint {
+		s.stateMu.Unlock()
+		return nil
+	}
+	s.userSummaryFingerprint[messageID] = fingerprint
+	s.stateMu.Unlock()
+	return diffs
+}
+
+// coreFileChangesFromSummaryDiffs converts official turn-level summary diffs
+// ({file, additions, deletions, status}) into the live EventTurnFileChanges
+// payload — the same vocabulary turnFileChangesFromSummary (history.go) writes
+// for the cold path: no patch (iOS renders no message-inline file diff; keeps
+// turn-level projection bytes bounded), status→kind (modified→edit,
+// added→create, deleted→delete), official counts only (legitimate 0 verbatim,
+// absent omitted — nil≠0).
+func coreFileChangesFromSummaryDiffs(diffs []any) []core.FileChange {
+	changes := make([]core.FileChange, 0, len(diffs))
+	for _, raw := range diffs {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		file := firstString(entry, "file")
+		if file == "" {
+			continue
+		}
+		kind := "edit"
+		switch firstString(entry, "status") {
+		case "added":
+			kind = "create"
+		case "deleted":
+			kind = "delete"
+		}
+		change := core.FileChange{Path: file, Kind: kind}
+		if v, ok := optionalInt(entry["additions"]); ok {
+			change.Additions = &v
+		}
+		if v, ok := optionalInt(entry["deletions"]); ok {
+			change.Deletions = &v
+		}
+		changes = append(changes, change)
+	}
+	if len(changes) == 0 {
+		return nil
+	}
+	return changes
 }
 
 func (s *sseSubscriber) isUserMessage(messageID string) bool {
