@@ -26,6 +26,9 @@ const (
 	AgentStatusPortConflict       AgentStatus = "port_conflict"
 	AgentStatusVersionUnsupported AgentStatus = "version_unsupported"
 	AgentStatusPermissionDenied   AgentStatus = "permission_denied"
+	// AgentStatusPairingRequired means the backend has no valid controller
+	// identity and requires an explicit pairing action before it can be used.
+	AgentStatusPairingRequired AgentStatus = "pairing_required"
 	// AgentStatusNotConfigured: OpenCode endpoint URL 未配置（source disabled / external_http
 	// 未填 URL）。不 dial 64667，明确告知 iOS 该 backend 当前不可用，需先配置 endpoint。
 	AgentStatusNotConfigured AgentStatus = "not_configured"
@@ -192,6 +195,10 @@ type instanceStatusProber interface {
 	InstanceStatus() (available bool, detail string)
 }
 
+type structuredInstanceReadinessProber interface {
+	StructuredInstanceReadiness() (status string, detail string)
+}
+
 // detectAgentStatus 检测单个 agent 的可用性状态。
 // 所有检测设置超时，避免阻塞 go-bridge 启动。
 func detectAgentStatus(id string, agent core.Agent, codexBackendMode string, cfg *AgentDetectionConfig) (AgentStatus, string) {
@@ -233,10 +240,22 @@ func detectAgentStatus(id string, agent core.Agent, codexBackendMode string, cfg
 		// 探测本身由首次目录/历史请求触发，descriptor 只读镜像（设计 §9.1 第 8 条）。
 		return detectInstanceStatusProber("codex-web", agent)
 	case "codex-remote":
-		return detectInstanceStatusProber("codex-remote", agent)
+		return detectStructuredInstanceReadiness("codex-remote", agent)
 	default:
 		return AgentStatusAvailable, ""
 	}
+}
+
+func detectStructuredInstanceReadiness(backendID string, agent core.Agent) (AgentStatus, string) {
+	prober, ok := agent.(structuredInstanceReadinessProber)
+	if !ok {
+		return AgentStatusNotConfigured, backendID + " driver does not expose structured readiness"
+	}
+	status, detail := prober.StructuredInstanceReadiness()
+	if strings.TrimSpace(status) == "" {
+		return AgentStatusNotConfigured, backendID + " driver returned empty readiness status"
+	}
+	return AgentStatus(status), detail
 }
 
 // detectDSHWebInstance mirrors the dsh-web driver's resolved-instance state

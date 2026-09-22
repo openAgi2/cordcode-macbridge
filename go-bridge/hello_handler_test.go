@@ -138,6 +138,47 @@ func TestHandleHello_ContainsAgentDescriptors(t *testing.T) {
 	}
 }
 
+func TestHandleHelloCarriesCodexRemoteStructuredReadiness(t *testing.T) {
+	hello := &HelloMessage{
+		Type: "hello",
+		Client: HelloClient{
+			App:      "CordCode",
+			Version:  "1.0",
+			DeviceID: "test-device",
+		},
+		Protocol: HelloProtocol{
+			Name:    BridgeProtocolName,
+			Version: BridgeProtocolVersion,
+		},
+	}
+	agent := &structuredReadinessFakeAgent{
+		descriptorFakeAgent: descriptorFakeAgent{name: "Codex Desktop"},
+		status:              "pairing_required",
+		reason:              "请先在 MacBridge 配对",
+	}
+
+	ack := HandleHello(hello, nil, "bridge-1", "My Bridge", "0.1.0", "ws://localhost:8777", "", map[string]core.Agent{
+		"codex-remote": agent,
+	}, "", nil, nil)
+
+	if !ack.Ok {
+		t.Fatalf("hello failed: %+v", ack.Error)
+	}
+	var descriptor *AgentProviderDescriptor
+	for index, backend := range ack.Backends {
+		if backend.ID == "codex-remote" {
+			descriptor = &ack.Backends[index]
+			break
+		}
+	}
+	if descriptor == nil {
+		t.Fatalf("codex-remote missing from hello backends: %+v", ack.Backends)
+	}
+	if descriptor.Status != AgentStatusPairingRequired || descriptor.Reason != "请先在 MacBridge 配对" {
+		t.Fatalf("hello readiness = %+v, want pairing_required with reason", descriptor)
+	}
+}
+
 func TestHandleHello_WithAgents(t *testing.T) {
 	coreAgents := map[string]core.Agent{
 		"claude": &helloMockAgent{name: "Claude Code"},

@@ -106,7 +106,8 @@ export interface BridgeBackendInfo {
   permissionMode?: { mode?: string };
   /**
    * Backend availability status + reason, emitted by go-bridge AgentProviderDescriptor
-   * (agent_descriptor.go:31). status is "available"/"unavailable"/...; reason explains why a
+   * (agent_descriptor.go). status is "available"/"pairing_required"/"unavailable"/...;
+   * `pairing_required` means an explicit pairing action is required. reason explains why a
    * backend is not available (e.g. not installed / not running). Consumers surface unavailable
    * backends as disabled-with-reason rather than hiding them.
    */

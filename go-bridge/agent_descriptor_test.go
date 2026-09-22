@@ -40,6 +40,16 @@ type readyStructuredInputFakeAgent struct {
 	ready bool
 }
 
+type structuredReadinessFakeAgent struct {
+	descriptorFakeAgent
+	status string
+	reason string
+}
+
+func (f *structuredReadinessFakeAgent) StructuredInstanceReadiness() (string, string) {
+	return f.status, f.reason
+}
+
 func (f *readyStructuredInputFakeAgent) StructuredUserInputReady() bool { return f.ready }
 
 func (f *fullFakeAgent) SetModel(string)                                    {}
@@ -234,6 +244,9 @@ func TestCodexRemoteDescriptorOnlyAdvertisesImplementedCapabilities(t *testing.T
 	if d.ID != "codex-remote" || d.Kind != "codex-remote" || d.DisplayName != "Codex Desktop" {
 		t.Fatalf("codex-remote identity = %+v", d)
 	}
+	if d.Status != AgentStatusPairingRequired || d.Reason == "" {
+		t.Fatalf("unpaired codex-remote descriptor = %+v, want pairing_required with reason", d)
+	}
 	for _, capability := range []string{"session_state", "session_history", "model_switch", "workspace_diff", "session_mutation", "session_delete", "permission_resolve"} {
 		if !descriptorHasCapability(d.Capabilities, capability) {
 			t.Errorf("codex-remote missing implemented capability %q: %v", capability, d.Capabilities)
@@ -243,6 +256,31 @@ func TestCodexRemoteDescriptorOnlyAdvertisesImplementedCapabilities(t *testing.T
 		if descriptorHasCapability(d.Capabilities, capability) {
 			t.Errorf("codex-remote must fail closed for unsampled capability %q: %v", capability, d.Capabilities)
 		}
+	}
+}
+
+func TestCodexRemoteStructuredReadinessStatusesSurviveDescriptor(t *testing.T) {
+	tests := []struct {
+		name   string
+		status string
+		want   AgentStatus
+	}{
+		{name: "available", status: codexremote.ReadinessAvailable, want: AgentStatusAvailable},
+		{name: "paired-offline", status: codexremote.ReadinessServiceNotRunning, want: AgentStatusServiceNotRunning},
+		{name: "pairing-required", status: codexremote.ReadinessPairingRequired, want: AgentStatusPairingRequired},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent := &structuredReadinessFakeAgent{
+				descriptorFakeAgent: descriptorFakeAgent{name: "Codex Desktop"},
+				status:              tt.status,
+				reason:              tt.name,
+			}
+			d := BuildAgentDescriptor("codex-remote", agent, "", nil)
+			if d.Status != tt.want || d.Reason != tt.name {
+				t.Fatalf("descriptor readiness = (%q,%q), want (%q,%q)", d.Status, d.Reason, tt.want, tt.name)
+			}
+		})
 	}
 }
 

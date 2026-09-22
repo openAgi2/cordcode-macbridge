@@ -152,6 +152,35 @@ func (p *PairingController) forgetPersistedPairing() {
 	_ = os.Remove(p.storePath)
 }
 
+// invalidateRevokedPairing is the single terminal cleanup path for an
+// enrollment rejected by the official service. It clears the persisted and
+// in-memory controller identity before exposing pairing_required readiness.
+func (p *PairingController) invalidateRevokedPairing(message string) PairingSnapshot {
+	if p == nil {
+		return PairingSnapshot{Phase: PairPhaseFailed, Message: message}
+	}
+	p.forgetPersistedPairing()
+
+	var cl *Client
+	if p.agent != nil {
+		p.agent.mu.Lock()
+		cl = p.agent.client
+		p.agent.client = nil
+		p.agent.paired = false
+		p.agent.mu.Unlock()
+	}
+	if cl != nil {
+		_ = cl.Close()
+	}
+
+	p.mu.Lock()
+	p.state = pairState{phase: PairPhaseFailed, message: message}
+	p.stepUpToken = ""
+	p.mu.Unlock()
+	slog.Warn("codex-remote pairing", "phase", PairPhaseFailed, "message", message)
+	return p.Snapshot()
+}
+
 func (p *PairingController) jsonRequest(ctx context.Context, token, accountID, method, path string, body any) (json.RawMessage, int, error) {
 	var reader io.Reader
 	if body != nil {

@@ -121,8 +121,7 @@ func (p *PairingController) loadPersistedPairing() (*persistedPairing, *deviceKe
 func (p *PairingController) reconnectFromStore(ctx context.Context) (PairingSnapshot, error) {
 	if err := p.restoreOnce(ctx); err != nil {
 		if errors.Is(err, errPairingRevoked) {
-			p.forgetPersistedPairing()
-			return p.setFailed("配对已失效，请重新配对 Codex Desktop"), err
+			return p.invalidateRevokedPairing("配对已失效，请重新配对 Codex Desktop"), err
 		}
 		msg := "已配对，等待 ChatGPT Desktop"
 		if err.Error() == "请打开并登录 ChatGPT Desktop" || err.Error() == "请先安装并登录 ChatGPT Desktop" || err.Error() == "ChatGPT 未登录" || err.Error() == "读取 ChatGPT 登录态超时" {
@@ -230,8 +229,7 @@ func (a *Agent) restorePersistedPairing() {
 				break
 			}
 			if errors.Is(err, errPairingRevoked) {
-				p.forgetPersistedPairing()
-				p.setFailed("配对已失效，请重新配对 Codex Desktop")
+				p.invalidateRevokedPairing("配对已失效，请重新配对 Codex Desktop")
 				return
 			}
 			msg := "已配对，等待 ChatGPT Desktop"
@@ -287,8 +285,7 @@ func (a *Agent) watchBinding() {
 			continue
 		}
 		if errors.Is(err, errPairingRevoked) {
-			a.pairing.forgetPersistedPairing()
-			a.pairing.setFailed("配对已失效，请重新配对 Codex Desktop")
+			a.pairing.invalidateRevokedPairing("配对已失效，请重新配对 Codex Desktop")
 			return
 		}
 		a.pairing.markOffline("已配对，等待 ChatGPT Desktop")

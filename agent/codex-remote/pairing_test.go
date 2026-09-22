@@ -146,12 +146,17 @@ func TestInProgressEnrollmentIsNotPersistedIdentity(t *testing.T) {
 }
 
 func TestInstanceStatusUnpaired(t *testing.T) {
-	ok, detail := New(nil).InstanceStatus()
+	agent := New(nil)
+	ok, detail := agent.InstanceStatus()
 	if ok {
 		t.Fatal("unpaired agent must not be available")
 	}
 	if detail == "" {
 		t.Fatal("need a user-facing reason")
+	}
+	status, _ := agent.StructuredInstanceReadiness()
+	if status != ReadinessPairingRequired {
+		t.Fatalf("readiness = %q, want %q", status, ReadinessPairingRequired)
 	}
 }
 
@@ -411,27 +416,58 @@ func TestRestoreOfflineKeepsStore(t *testing.T) {
 	}
 }
 
-func TestRestoreRevokedDeletesStore(t *testing.T) {
-	key, err := newDeviceKeyStore().Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv := restoreHTTPServer(t, key, true, http.StatusForbidden)
-	t.Cleanup(srv.Close)
-	prev := officialAPIBase
-	officialAPIBase = srv.URL
-	t.Cleanup(func() { officialAPIBase = prev })
+func TestRestoreRevokedInvalidatesEveryIdentityLayer(t *testing.T) {
+	for _, statusCode := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(http.StatusText(statusCode), func(t *testing.T) {
+			key, err := newDeviceKeyStore().Create()
+			if err != nil {
+				t.Fatal(err)
+			}
+			srv := restoreHTTPServer(t, key, true, statusCode)
+			t.Cleanup(srv.Close)
+			prev := officialAPIBase
+			officialAPIBase = srv.URL
+			t.Cleanup(func() { officialAPIBase = prev })
 
-	agent := newPersistedAgent(t, key)
-	agent.pairing.http = srv.Client()
-	snap, err := agent.StartRemoteControl(context.Background(), "", "")
-	if err == nil {
-		t.Fatal("expected revoked error")
+			agent := newPersistedAgent(t, key)
+			agent.pairing.http = srv.Client()
+			agent.paired = true
+			snap, err := agent.StartRemoteControl(context.Background(), "", "")
+			if err == nil {
+				t.Fatal("expected revoked error")
+			}
+			if snap.Phase != PairPhaseFailed {
+				t.Fatalf("phase=%s", snap.Phase)
+			}
+			if _, statErr := os.Stat(agent.pairing.storePath); !os.IsNotExist(statErr) {
+				t.Fatal("revoked pairing must delete store")
+			}
+			agent.mu.Lock()
+			paired, client := agent.paired, agent.client
+			agent.mu.Unlock()
+			if paired || client != nil {
+				t.Fatalf("revoked identity survived: paired=%v client=%v", paired, client)
+			}
+			agent.pairing.mu.Lock()
+			state := agent.pairing.state
+			agent.pairing.mu.Unlock()
+			if state.clientID != "" || state.ctrlToken != "" || state.key != nil || state.env != nil {
+				t.Fatalf("revoked in-memory identity survived: %+v", state)
+			}
+			readiness, _ := agent.StructuredInstanceReadiness()
+			if readiness != ReadinessPairingRequired {
+				t.Fatalf("readiness=%q, want pairing_required", readiness)
+			}
+		})
 	}
-	if snap.Phase != PairPhaseFailed {
-		t.Fatalf("phase=%s", snap.Phase)
-	}
-	if _, statErr := os.Stat(agent.pairing.storePath); !os.IsNotExist(statErr) {
-		t.Fatal("revoked pairing must delete store")
+}
+
+func TestStructuredInstanceReadinessPairedOfflineIsNotPairingRequired(t *testing.T) {
+	agent := New(nil)
+	agent.paired = true
+	agent.pairing.markOffline("请打开 ChatGPT Desktop")
+	status, detail := agent.StructuredInstanceReadiness()
+	if status != ReadinessServiceNotRunning || detail != "请打开 ChatGPT Desktop" {
+		t.Fatalf("readiness=(%q,%q), want service_not_running with offline detail", status, detail)
 	}
 }

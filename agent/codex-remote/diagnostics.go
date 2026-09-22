@@ -7,27 +7,39 @@ import (
 	"time"
 )
 
-// InstanceStatus is a read-only mirror. Phase 1 identity has no enrollment
-// yet, so the backend is unavailable with a truthful not_configured detail.
-func (a *Agent) InstanceStatus() (bool, string) {
+const (
+	ReadinessAvailable         = "available"
+	ReadinessPairingRequired   = "pairing_required"
+	ReadinessServiceNotRunning = "service_not_running"
+)
+
+// StructuredInstanceReadiness is the descriptor-facing, read-only readiness
+// seam. It preserves the distinction between a missing/revoked controller
+// identity and an enrolled controller whose Desktop environment is offline.
+func (a *Agent) StructuredInstanceReadiness() (string, string) {
 	a.mu.Lock()
 	cl := a.client
 	paired := a.paired
 	a.mu.Unlock()
 	if cl != nil && !cl.IsClosed() {
-		return true, "codex-remote controller protocol " + ProtocolVersion + " (environment stream bound)"
+		return ReadinessAvailable, "codex-remote controller protocol " + ProtocolVersion + " (environment stream bound)"
 	}
 	snap := a.pairingSnapshot()
-	if paired {
+	if paired || (a.pairing != nil && a.pairing.hasPersistedIdentity()) {
 		if snap.Message != "" {
-			return false, snap.Message
+			return ReadinessServiceNotRunning, snap.Message
 		}
-		return false, "已配对，等待 ChatGPT Desktop"
+		return ReadinessServiceNotRunning, "已配对，等待 ChatGPT Desktop"
 	}
-	if snap.Message != "" {
-		return false, snap.Message
-	}
-	return false, ErrNotConfigured.Error()
+	return ReadinessPairingRequired, ErrNotConfigured.Error()
+}
+
+// InstanceStatus is the legacy boolean mirror used by callers that only need
+// availability. Descriptor consumers use StructuredInstanceReadiness so the
+// pairing-required and service-offline causes do not collapse together.
+func (a *Agent) InstanceStatus() (bool, string) {
+	status, detail := a.StructuredInstanceReadiness()
+	return status == ReadinessAvailable, detail
 }
 
 func (a *Agent) StartRemoteControl(ctx context.Context, token, accountID string) (PairingSnapshot, error) {
