@@ -1,0 +1,1125 @@
+{
+ "version": 6,
+ "project_root": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+ "plan_file": "docs/2026-09-23-dsh-web-source-first-convergence-plan.md",
+ "state_store": {
+  "canonical_path": ".exec-plan/state/plan-4fa3de3c08b4.json",
+  "legacy_path": ".claude/exec-plans/plan-4fa3de3c08b4.json",
+  "origin": "new",
+  "migrated_from": null,
+  "migrated_at": null
+ },
+ "queue_policy": {
+  "todo_md_role": "informational-only",
+  "completion_gate": "proof-carrying-impl-tests-regression",
+  "phase_done_rule": "all-required-todos-done",
+  "audit_rule": "unsupported-done-must-downgrade",
+  "start_exit_rule": "internal-audit-before-success",
+  "audit_failure_policy": "light-repairable-heavy-external-blocker",
+  "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+  "session_mirror_policy": "todo-write-optional-mirror",
+  "invocation_policy": "slash-or-natural-language-equivalent",
+  "persistence_rule": "persist-on-every-status-transition"
+ },
+ "report_policy": {
+  "auto_write_completion_report": true,
+  "report_directory": "docs",
+  "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+  "write_when": "all-required-todos-proven-done",
+  "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+ },
+ "reports": {
+  "completion_report_path": "docs/2026-09-23-dsh-web-source-first-convergence-plan完成情况.md",
+  "completion_report_status": "current",
+  "last_generated_at": "2026-09-23T14:36:03+08:00",
+  "based_on_queue_hash": "e36c1deb732c"
+ },
+ "scope_note": "本队列仅覆盖方案 v8 §5.2 S2 第一修复项（commands/execute 错参修复）——owner 指令明确放行的唯一实施内容，证据独立于 OD-5（§2.3/§9.7-1）。S2 第二项（跨版本防御/alpha.2 形状重写）受 A2 门控（alpha.2 座位样本未取得）；S3/S4/S5 受各自 Gate A 样本门与 OD-2b/OD-3/OD-1 未裁决约束——均不在本队列。方案文档 v8 冻结不改。禁止双发 images+submittedAttachments、禁止按版本试探；descriptor 校验错误如实上报。凭据红线：cookie 值不写入日志、诊断、hello_ack 或任何新文件。dsh 自身源码一行不改；不做 commit/merge/push。 【2026-09-23 扩界】owner 授权剩余切片全部实施（S2 第二项/S3/S4/S5/OD-2a/OD-4/A6 评估/协议 iOS 同步/发布门）；OD-1=A/OD-2a=A/OD-2b=B/OD-3=B/OD-4=A/OD-5=A 已代裁（docs/2026-09-23-dsh-web-convergence-od-decisions.md），样本门不豁免；S6 future 池不捆绑。",
+ "p0_source_manifest": {
+  "recorded_at": "2026-09-23T13:05:00+08:00",
+  "repo": {
+   "path": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+   "branch": "feat/ios-native-message-timeline",
+   "commit": "b4e42d5c5a9af6c12abe062a32a30bccece3bd5e",
+   "uncommitted": "81 项修改/未跟踪（dsh-web 收敛专项在途工作，含 S1 已部署改动）；本任务只做定向编辑，不回退/覆盖他人修改"
+  },
+  "upstream_dsh": {
+   "path": "/Users/jacklee/Projects/deepseek-harness",
+   "tag": "dsh-v0.1.7-alpha.2",
+   "commit": "00102833dfaee1da9f48a3a8eae9d34005a75218",
+   "anchor": "packages/interaction/commands/src/index.ts:360-366 execute(agent, line, submittedAttachments, signal) 亲核"
+  },
+  "running_seat": {
+   "listen": "127.0.0.1:3080",
+   "pid": 38778,
+   "started": "2026-09-23 00:34:37",
+   "command": "node /opt/homebrew/bin/dsh --profile web --host 127.0.0.1 --port 3080 --no-open",
+   "cli_version": "0.1.7-alpha.1"
+  }
+ },
+ "updated_at": "2026-09-23T21:49:22+08:00",
+ "todos": [
+  {
+   "id": "s2fix-payload-impl",
+   "title": "commands.go payload 修复：images → submittedAttachments",
+   "description": "agent/dsh-web/commands.go：commandsExecuteArgs 的 Images 字段（json:\"images\"）改为 SubmittedAttachments（json:\"submittedAttachments\"），空数组即官方无附件调用语义（phase 1 无图命令面恒为空数组，按新事实改写注释意图）；同步改写 47-56 行旧注释（rc.2 时点 images:[] 被座位接受的结论已被 alpha.1 活体证据推翻）与 127-129 行调用点。官方锚点：deepseek-harness dsh-v0.1.7-alpha.2 commit 00102833 packages/interaction/commands/src/index.ts:360-366 execute(agent, line, submittedAttachments, signal)。禁止双发、禁止版本试探。",
+   "status": "done",
+   "phase": "s2-first-fix",
+   "kind": "impl",
+   "depends_on": [],
+   "source": "方案 §5.2 第一项 + owner 指令实施范围",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "commands.go 三处定向修复：① commandsExecuteArgs.Images(json:images) → SubmittedAttachments(json:submittedAttachments)，元素类型 encodedImageAttachment → commandSubmitAttachment（镜像官方 CommandSubmitAttachment union：type 判别 + image 变体 mediaType/data/name + file 变体 receiptId，types.ts:15-17 + attachment/src/types.ts:85-92）；② 47-56 行旧注释按 alpha.1 活体证据改写（rc.2 images:[] 结论显式标记被推翻，引用 verbatim 证据文件与 alpha.2 锚点 index.ts:354-366）；③ 调用点恒发空数组（官方无附件调用语义）。文件头 rc.2 版本钉同步去除。禁止双发/版本试探：payload 只有一个第三参字段。GOTOOLCHAIN=local go build ./agent/dsh-web/ 通过，gofmt 已格式化。",
+    "artifacts": [
+     "agent/dsh-web/commands.go",
+     "git:worktree-feat/ios-native-message-timeline@b4e42d5c5a9a-uncommitted"
+    ],
+    "checked_at": "2026-09-23T14:06:31+08:00",
+    "upstream_anchor": "deepseek-harness@00102833dfaee1da9f48a3a8eae9d34005a75218 packages/interaction/commands/src/index.ts:354-366 (execute docstring+签名 亲核); packages/interaction/commands/src/types.ts:15-17 (CommandSubmitAttachment union); packages/attachment/attachment/src/types.ts:85-92 (EncodedImageAttachment)"
+   }
+  },
+  {
+   "id": "s2fix-payload-tests",
+   "title": "定向测试：纠正旧形状断言 + 契约测试钉 alpha.1 形状",
+   "description": "1) commands_test.go：TestExecuteSessionCommandLinePassthrough 中 rawArgs[\"images\"]==\"[]\" 断言（约 171-173 行）与 158-160 行注释改为 submittedAttachments；检索 agent/dsh-web 全包其他仍断言 images 形状的测试一并纠正，不留矛盾断言（方案 §5.2 明确要求）。2) 契约测试：用 scripts/dshweb-phase0/alpha1-commands-goals-wire.json 的 verbatim 样本钉 alpha.1 形状——正向 {agentId,line,submittedAttachments:[]} 被接受（未知命令名官方 no-op 返回 null）+ descriptor 拒绝原文（missing \"submittedAttachments\"; unexpected \"images\"）；fake server 的 execute handler 断言新 payload。3) GOTOOLCHAIN=local go test ./agent/dsh-web/... -count=1 全绿。",
+   "status": "done",
+   "phase": "s2-first-fix",
+   "kind": "tests",
+   "depends_on": [
+    "s2fix-payload-impl"
+   ],
+   "source": "方案 §5.2 第一项 + §6 测试策略",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "1) TestExecuteSessionCommandLinePassthrough：旧断言 rawArgs[images]==[] 与 2026-09-05 rc.2 注释改为 submittedAttachments（精确 []、无 images 键）；全包检索确认无其他旧形状断言（permission_mode_test.go 仅断言 agentId/line；list 夹具 input.images 是 descriptor 解码面，不在 execute 范围）。2) 新增 TestCommandsExecuteAlpha1WireContract：testdata/commands_execute_alpha1_wire.json（phase0 verbatim 四条 execute 探针脱敏副本）钉 alpha.1 形状——正形 ok+null no-op、images/agent/缺参三反形 verbatim 拒绝原文、桥序列化键集==正形键集且 submittedAttachments==[]。3) GOTOOLCHAIN=local go test ./agent/dsh-web/... -count=1 全绿（ok, 20.181s）。 退出审计复跑：GOTOOLCHAIN=local go test ./agent/dsh-web/... -count=1 再次全绿（ok, 22.483s）。",
+    "artifacts": [
+     "agent/dsh-web/commands_test.go",
+     "agent/dsh-web/testdata/commands_execute_alpha1_wire.json",
+     "cmd:GOTOOLCHAIN=local go test ./agent/dsh-web/... -count=1 => ok 20.181s"
+    ],
+    "checked_at": "2026-09-23T14:10:23+08:00",
+    "upstream_anchor": "deepseek-harness@00102833dfaee1da9f48a3a8eae9d34005a75218 packages/interaction/commands/src/index.ts:354-366"
+   }
+  },
+  {
+   "id": "s2fix-live-reconcile",
+   "title": "活体对账：运行座位真实 commands/execute + 证据归档",
+   "description": "新建一次性隔离会话（session/create，探针目录 /tmp/dshweb-phase0-probe），用修复后的确切 payload {agentId,line,submittedAttachments:[]} 对运行座位（127.0.0.1:3080，PID 38778，alpha.1）执行一次真实 commands/execute（未知命令名走官方 no-op 路径证明形状通过，或执行一条无害命令），结束后 workspace/archiveSession {sessionId, stopActivity:true} 归档；把脱敏请求/响应记入 scripts/dshweb-phase0/（新证据文件）；对账数字：修复前 descriptor 拒绝 verbatim（alpha1-commands-goals-wire.json）vs 修复后执行成功。禁止对 owner 既有会话/工作区写入；cookie 值不落任何文件。",
+   "status": "done",
+   "phase": "s2-first-fix",
+   "kind": "regression",
+   "depends_on": [
+    "s2fix-payload-tests"
+   ],
+   "source": "owner 指令验证要求 + 方案 §3.1 隔离规则",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "对运行座位（127.0.0.1:3080，PID 38778，alpha.1，探针前复核进程身份）活体对账：一次性隔离会话（session/create，cwd=/tmp/dshweb-phase0-probe）上 ① 未知命令名 no-op 探针 {agentId,line:/zz-s2fix-probe-noop,submittedAttachments:[]} → ok:true value:null（形状过 descriptor，官方 no-op）；② 真实命令 /plan 同形状 → ok:true 真实 settle {commandId:cmd-560ee2f9-1, result:{kind:success, text:'Plan mode on. Use /plan off to leave.'}}；③ workspace/archiveSession {sessionId,stopActivity:true} → ok，membership=true 归档收尾。对账数字：修复前 1/1 payload 被 descriptor 拒绝（verbatim：missing submittedAttachments; unexpected images）；修复后 0/2 拒绝、2/2 被接受、1/2 真实 settle。cookie 用桥持久化 cookie，运行时读取、未打印未落盘；未触碰 owner 既有会话/工作区；归档响应只记 membership+count（完整 archivedSessionIds 是 owner 数据）。",
+    "artifacts": [
+     "scripts/dshweb-phase0/s2fix-commands-execute-live-reconcile.json",
+     "cmd:python3 /tmp/s2fix_live_probe.py => 4/4 probes ok"
+    ],
+    "checked_at": "2026-09-23T14:13:03+08:00",
+    "upstream_anchor": null
+   }
+  },
+  {
+   "id": "s2fix-build-deploy",
+   "title": "Release 构建 + 覆盖安装 + 重启",
+   "description": "构建前在实际构建目录重新生成 P0 来源清单；GOTOOLCHAIN=local ./scripts/build-unsigned-release.sh → killall CordCodeLink + pkill -f cordcode-bridge-runtime（两进程名不同，缺一不可）→ rm -rf /Applications/CordCodeLink.app && cp -R build/unsigned-release/Build/Products/Release/CordCodeLink.app /Applications/ → open /Applications/CordCodeLink.app。禁止用临时构建产物测试（硬约束）。",
+   "status": "done",
+   "phase": "s2-first-fix",
+   "kind": "regression",
+   "depends_on": [
+    "s2fix-payload-tests"
+   ],
+   "source": "owner 指令验证要求 + CLAUDE.md 构建纪律",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "构建前在实际构建目录（仓库根）重新生成 P0 来源清单（分支 feat/ios-native-message-timeline、提交 b4e42d5c5a9a…、本任务 4 项改动、上游 dsh-v0.1.7-alpha.2@00102833、座位 PID 38778 全部吻合）。GOTOOLCHAIN=local ./scripts/build-unsigned-release.sh → BUILD SUCCEEDED，runtime commit b4e42d5c5a9a=仓库 HEAD、built 2026-09-23T06:13:18Z；产物身份门：内嵌 runtime 二进制含 submittedAttachments（1 处）、无 json:\"images\" 精确串。部署：killall CordCodeLink + pkill -f cordcode-bridge-runtime（先确认 all stopped）→ rm -rf /Applications/CordCodeLink.app → cp -R Release 产物 → open。新进程：app PID 30408、runtime PID 30448，均来自 /Applications 路径（无临时产物混入）。未用任何临时构建产物测试。",
+    "artifacts": [
+     "dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip",
+     "build/unsigned-release/Build/Products/Release/CordCodeLink.app",
+     "cmd:GOTOOLCHAIN=local ./scripts/build-unsigned-release.sh => BUILD SUCCEEDED, runtime b4e42d5c5a9a built 2026-09-23T06:13:18Z"
+    ],
+    "checked_at": "2026-09-23T14:21:11+08:00",
+    "upstream_anchor": null
+   }
+  },
+  {
+   "id": "s2fix-runtime-verify",
+   "title": "运行态验证：进程代际 + 特征输出 + dsh-web available",
+   "description": "1) 进程代际：runtime 新 PID 启动时间晚于本次构建，8777 由新 PID 监听且属 /Applications/CordCodeLink.app 内嵌 runtime；2) 本次提交独有特征输出（日志中本次修复独有行为，如 commands/execute 新 payload 相关探针/日志行）；3) dsh-web 行 available（hello_ack/管理 API 状态）；4) 无临时产物残留（pgrep 核对只有 /Applications 路径）。诊断真实性分级：生产 runtime 日志为「生产路径已验证」，单测/探针只算组件级。",
+   "status": "done",
+   "phase": "s2-first-fix",
+   "kind": "regression",
+   "depends_on": [
+    "s2fix-build-deploy"
+   ],
+   "source": "owner 指令验证要求 + CLAUDE.md 部署后运行态验证",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "四项全过：① 进程代际——runtime PID 30448 启动 14:14:46 晚于 14:13:18 构建，epoch db28e1a5，8777 由新 PID 监听，app/runtime 均来自 /Applications（无临时产物）；② 本次提交独有特征输出——经管理 API 本地配对流创建临时探针设备（用后撤销），以真实客户端面（WS 8777 + device token 鉴权）驱动生产 runtime：hello_ack ok（dsh-web available）→ list_session_commands 6 条 → execute_session_command /plan 返回官方 settle {commandId:cmd-560ee2f9-2, resultKind:success, resultText:'Plan mode on. Use /plan off to leave.'}——这是修复后 runtime 的独有生产行为（修复前同路径返回 execute_failed + descriptor 拒绝原文）；生产日志 14:33:23 pairing claimed 行佐证，探针窗口无新错误；③ dsh-web 行 available——管理 API /internal/agents 确认 status=available（external seat 3080），日志 mux open + $events ready；④ 诊断分级——本项为「生产路径已验证」（生产 runtime 日志/进程/客户端面），座位级对账为活体验证，单测为组件级。凭据卫生：管理 token/设备 token/cookie 运行时读取、未打印未落盘；探针设备已撤销、一次性会话已归档。",
+    "artifacts": [
+     "scripts/dshweb-phase0/s2fix-commands-execute-live-reconcile.json (production_runtime_probe 节)",
+     "cmd:python3 /tmp/s2fix_prod_probe.py => hello ok + list 6 cmds + execute settle ok + revoke ok + archive ok"
+    ],
+    "checked_at": "2026-09-23T14:34:14+08:00",
+    "upstream_anchor": null
+   }
+  },
+  {
+   "id": "s2fix-changelog",
+   "title": "CHANGELOG [Unreleased] 补条目",
+   "description": "按现有格式在 CHANGELOG.md [Unreleased] 下追加一节（日期 — 主题）：dsh-web commands/execute 参数形状修复（images→submittedAttachments，alpha.1 座位 descriptor 要求），斜杠命令执行恢复可用；契约测试钉 alpha.1 形状。",
+   "status": "done",
+   "phase": "s2-first-fix",
+   "kind": "impl",
+   "depends_on": [
+    "s2fix-runtime-verify"
+   ],
+   "source": "owner 指令交付要求 + CLAUDE.md CHANGELOG 约定",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "CHANGELOG.md [Unreleased] Fixed 节顶部按现有格式补一条：dsh-web 斜杠命令执行被座位拒绝的修复（根因=images→submittedAttachments 参数形状漂移、修复内容、契约测试钉形状、活体对账数字 1/1 拒→2/2 收、生产 runtime 复测、A2 门控边界）。",
+    "artifacts": [
+     "CHANGELOG.md"
+    ],
+    "checked_at": "2026-09-23T14:35:02+08:00",
+    "upstream_anchor": null
+   }
+  },
+  {
+   "id": "od-decisions-impl",
+   "title": "OD-1~OD-5 代裁记录（owner 授权）",
+   "description": "docs/2026-09-23-dsh-web-convergence-od-decisions.md：owner 授权原文 + 逐项裁决（OD-1=A/OD-2a=A/OD-2b=B/OD-3=B/OD-4=A/OD-5=A）+ 不豁免样本门声明。方案 v8 不改。",
+   "status": "done",
+   "phase": "od-gate",
+   "kind": "impl",
+   "depends_on": [],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "docs/2026-09-23-dsh-web-convergence-od-decisions.md：owner 授权原文（本 session 2026-09-23「直接把计划文档里的任务全部完成…不认为中间有什么需要我裁决」）+ 逐项裁决 OD-1=A/OD-2a=A/OD-2b=B/OD-3=B/OD-4=A/OD-5=A + 依据 + 不豁免样本门声明 + A2 测试座位路径（npm alpha 通道实查有 0.1.7-alpha.2）+ S6 不捆绑 + owner 真机矩阵处理方式。方案 v8 未改。",
+    "artifacts": [
+     "docs/2026-09-23-dsh-web-convergence-od-decisions.md"
+    ],
+    "checked_at": "2026-09-23T15:21:40+08:00",
+    "upstream_anchor": null
+   }
+  },
+  {
+   "id": "a2-seat-impl",
+   "title": "alpha.2 测试座位搭建（npm alpha 本地 prefix + 隔离核验）",
+   "description": "npm install --prefix /tmp/dshweb-a2-seat @deepseek-ai/dsh@alpha（0.1.7-alpha.2，不动全局 alpha.1）→ 另起测试座位（127.0.0.1:3081 --no-open）→ 只读 session/list 核验状态隔离（若与生产共享 owner 状态：写入仍只限新建一次性会话）→ 为 127.0.0.1:3081 authority 铸 cookie（复用探针 mint 逻辑，凭据不落盘）。记录座位进程身份。",
+   "status": "done",
+   "phase": "a2-gate",
+   "kind": "impl",
+   "depends_on": [
+    "od-decisions-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "npm install --prefix /tmp/dshweb-a2-seat @deepseek-ai/dsh@alpha（0.1.7-alpha.2，本地 prefix，全局 alpha.1 未动，dsh --version 实测确认）→ 测试座位 127.0.0.1:3081 --profile web --no-open（PID 42273）→ 官方 token 交换流确认存在（303，token 一次性已消耗）→ 凭据库 secret 铸 3081 authority cookie 成功（session/list ok）→ 状态隔离核验：session/list 返回 89 条 = 与生产座位共享 ~/.dsh 状态 → 按裁决记录收紧：一切写入只限新建一次性会话，descriptor 负例用假 session id（网关 handler 前拒绝，零状态风险），绝不触碰 owner 既有会话。",
+    "artifacts": [
+     "/tmp/dshweb-a2-seat (npm local prefix install)",
+     "cmd:./node_modules/.bin/dsh --version => 0.1.7-alpha.2",
+     "cmd:session/list @3081 => ok, 89 sessions (shared state confirmed)"
+    ],
+    "checked_at": "2026-09-23T15:29:46+08:00",
+    "upstream_anchor": null
+   }
+  },
+  {
+   "id": "a2-samples-impl",
+   "title": "A2 七面 verbatim 样本 + goal 成功路径 + 业务负例",
+   "description": "alpha.2 座位上逐面取证（commands/list、commands/execute 第三参、goals/get、pause、resume、clear、edit ref+request）——桥消费的每一面逐一，不外推；负例：agentId 在 alpha.2 被拒 verbatim；edit 业务负例（空 request 且有 goal，源码预期 GOAL_INVALID_EDIT，以样本为准）；goal 成功路径：隔离会话经官方 goal 创建命令建真实 goal → pause/resume/clear/edit 各一次真实动作并核对状态收敛；结束 workspace/archiveSession{stopActivity:true} 归档全部一次性会话；证据 scripts/dshweb-phase0/alpha2-commands-goals-wire.json（脱敏，cookie 永不落盘）。",
+   "status": "done",
+   "phase": "a2-gate",
+   "kind": "impl",
+   "depends_on": [
+    "a2-seat-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "alpha.2 测试座位（3081，PID 42273）七面逐项取证 23 探针：①descriptor 负例（agent 变体）七面 verbatim（missing agentId; unexpected agent）；②正形（agentId）七面全过——commands/list 裸数组、execute no-op+真实 /goal 命令、goals/get→GoalView；③goal 成功路径一次性会话全链收敛：create(rev1,active,armed)→pause(rev2,paused,disarmed)→resume(rev3,active,armed)→edit{objective}(rev4)→edit{} 业务负例（gateway/internal+官方消息原文，非 GOAL_INVALID_EDIT wire code——漂移2）→clear 墓碑(rev5)→get null，6/6 收敛；④缺第三参负例 verbatim。两条漂移发现如实入档：漂移1=alpha.2 wire 参数仍为 agentId（源码参数名 agent 不上 wire），方案 §2.3 alpha.2 列被活体推翻，七面两代 wire 一致、无需形状重写；漂移2=edit 业务负例错误码表现为 gateway/internal+消息原文。全部一次性会话已归档（含失败运行孤儿，共 5 个探针会话 membership 全 true）；cookie 运行时铸造未落盘。",
+    "artifacts": [
+     "scripts/dshweb-phase0/alpha2-commands-goals-wire.json",
+     "cmd:python3 /tmp/a2_samples_probe.py => 23 probes, goal lifecycle 6/6 converged"
+    ],
+    "checked_at": "2026-09-23T15:40:50+08:00",
+    "upstream_anchor": "deepseek-harness@00102833 packages/goal/goal/src/index.ts:276-277,328-334,351-352,363-364,432-433 (签名亲核；wire 名以活体样本为准——漂移1)"
+   }
+  },
+  {
+   "id": "s2b-impl",
+   "title": "S2 第二项：七面跨版本形状（alpha.1/alpha.2 按实测版本选择）",
+   "description": "按 A2 样本重写七面 alpha.2 形状（agent 参数）；版本探测纳入 readiness（hello_ack statusMessage 只携带版本号与来源标识，无凭据）；两代并存按实测版本选择，descriptor 校验错误如实上报；不双发、不试探、不从 alpha.1 外推 alpha.2。",
+   "status": "done",
+   "phase": "s2-defense",
+   "kind": "impl",
+   "depends_on": [
+    "a2-samples-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "按 A2 漂移1收窄实施（七面两代 wire 一致，无形状重写）：①core/interfaces.go 新增可选接口 StatusMessageProvider（DescriptorStatusMessage()，注释钉死只带版本/来源标识、无凭据红线）；②agent/dsh-web/version.go：版本探针（effectiveBinary --version，2s 超时，60s TTL 记忆化，exec seam 可测），格式 'dsh <ver> (cli <path>)'，探针失败降级 source-only，无二进制返回空；③go-bridge/agent_descriptor.go：AgentProviderDescriptor += StatusMessage(omitempty)，BuildAgentDescriptor 按类型断言填充；④goal.go 头注释 rc.2 时代引用改为两代证据+漂移注记；⑤协议 pack schema/bridge-v1.types.ts BridgeBackendInfo += statusMessage（additive，红线注释）。禁止事项遵守：无双发、无版本试探、descriptor 错误仍 verbatim 透传。",
+    "artifacts": [
+     "core/interfaces.go",
+     "agent/dsh-web/version.go",
+     "agent/dsh-web/dshweb.go",
+     "go-bridge/agent_descriptor.go",
+     "agent/dsh-web/goal.go",
+     "docs/protocol/schema/bridge-v1.types.ts"
+    ],
+    "checked_at": "2026-09-23T16:18:48+08:00",
+    "upstream_anchor": "deepseek-harness@00102833 packages/goal/goal/src/index.ts:276-433 + packages/interaction/commands/src/index.ts:314,360-366（签名亲核；wire 名以 A2 活体为准——漂移1）"
+   }
+  },
+  {
+   "id": "s2b-tests",
+   "title": "S2 第二项契约测试（两代形状钉死）",
+   "description": "契约测试逐面钉两代：alpha.1 用已归档样本（含四 mutation 错形/正形记录），alpha.2 用 A2 七面样本；GOTOOLCHAIN=local go test ./agent/dsh-web/... -count=1 全绿。",
+   "status": "done",
+   "phase": "s2-defense",
+   "kind": "tests",
+   "depends_on": [
+    "s2b-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "新增 alpha2_wire_contract_test.go：①TestAlpha2WireContractSevenSurfaces——七面 {agent} 变体 verbatim 拒绝（防任何人按 source 参数名改 payload）、桥序列化键集==alpha.2 接受键集（execute {agentId,line,submittedAttachments}+[]、goal 四动词 {agentId,ref}、edit +request.objective）、八条正形探针在夹具被接受、edit 业务负例官方消息原文（gateway/internal，漂移2）、goal 生命周期收敛字段级断言（active/rev1→paused/rev2→active/rev3→edited/rev4→墓碑 rev5→null）；②TestDescriptorStatusMessage——版本注记格式/记忆化（第二次调用不重跑探针）/探针失败降级。夹具 testdata/commands_goals_alpha2_wire.json（A2 证据 18 探针脱敏副本）。定向测试绿 + GOTOOLCHAIN=local go test ./agent/dsh-web/... 全绿（22.2s）+ ./go-bridge/ 全绿（163.2s，描述符快照不受 omitempty 新字段影响）。",
+    "artifacts": [
+     "agent/dsh-web/alpha2_wire_contract_test.go",
+     "agent/dsh-web/testdata/commands_goals_alpha2_wire.json",
+     "cmd:GOTOOLCHAIN=local go test ./agent/dsh-web/... ./go-bridge/ -count=1 => both ok"
+    ],
+    "checked_at": "2026-09-23T16:18:48+08:00",
+    "upstream_anchor": null
+   }
+  },
+  {
+   "id": "s2b-regression",
+   "title": "S2 活体复测：面板 + 真实 goal 四操作状态收敛（两座位）",
+   "description": "alpha.1（生产座位，一次性会话）与 alpha.2（测试座位）各：面板 list/execute 可用；对有真实 goal 的隔离会话各做一次真实 pause/resume/clear/edit 并核对状态收敛（§2.3 收窄后 goal 按钮端到端可用的唯一证据路径）；生产 runtime 部署后运行态验证。",
+   "status": "done",
+   "phase": "s2-defense",
+   "kind": "regression",
+   "depends_on": [
+    "s2b-tests"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "构建（16:20:29，P0 清单先行）→ killall+pkill → 覆盖安装 → 新 runtime PID 51672（16:21:29 启动，晚于构建，epoch 0dbab1c1）。生产 runtime 复测（临时配对探针设备，用后撤销）：①hello_ack.backends[].statusMessage 新字段上线='dsh 0.1.7-alpha.1 (cli /opt/homebrew/bin/dsh)'（本次构建独有特征输出，只带版本+CLI 路径）；②goal 四动词经桥端到端：execute /goal 创建（官方 settle）→ mutate pause（座位 paused/rev2）→ resume（active/rev3）→ edit（rev4+objective 替换）→ clear（goals/get null），4/4 RPC ok + 4/4 座位侧状态收敛——方案 §2.3 收窄后 goal 按钮端到端可用的 alpha.1 证据路径闭合；③alpha.2 侧由 A2 原座取样（相同 payload verbatim 被接受）+ 契约测试双夹具钉形覆盖（桥序列化 payload 两代字节一致）。一次性会话归档、探针设备撤销、凭据零落盘。",
+    "artifacts": [
+     "scripts/dshweb-phase0/s2b-crossversion-regression.json",
+     "cmd:python3 /tmp/s2b_regression_probe.py => statusMessage ok + goal 4/4 converged"
+    ],
+    "checked_at": "2026-09-23T16:23:02+08:00",
+    "upstream_anchor": null
+   }
+  },
+  {
+   "id": "a3a-samples-impl",
+   "title": "A3a inbox 可见性证据（id 连续性）",
+   "description": "运行座位隔离会话：①运行中 prompt → splice 插入（UserMessage.id）+ inbox 投影基线；②消耗 → splice 移除 + user/message 同 id 落定；③重连 → 投影重建。断言 UserMessage.id 在 inbox↔user/message 间连续（去重键成立）。证据 scripts/dshweb-phase0/alpha1-inbox-wire.json；非法 splice 投影错误由桥内 reducer 定向单测按源码语义覆盖（inbox.ts:32-55），活体不做。",
+   "status": "done",
+   "phase": "a3-gate",
+   "kind": "impl",
+   "depends_on": [
+    "od-decisions-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "A3a inbox 可见性证据（alpha.1 运行座位，持久 journal 为权威源——owner 质疑后改走已验证的单播分页路径，弃脆弱实时帧观察）：①splice 插入——源码证实每个 queue prompt 无条件走 inbox.splice('next-turn')（agent.ts send/followup），journal 记录 turn-1 prompt（seq3）与运行中排队消息（seq16）两次插入；②消耗——splice 移除（seq5/seq22）+ user/message 同 id 落定（seq8/seq24），id 连续性 2/2 程序化证实（188f0d97…、6fbc0d2f…）——S3 reducer 去重键成立；③重连重建——fresh follow 快照 0.0s 到达（19 records），落定排队消息 id 在快照中、零 pending splice 重放；负例按方案由 S3 桥内 reducer 单测按源码语义覆盖（非法 splice 是折叠内部不变量，正常 Remote 写不进）。过程发现并如实记录：throughSeq:-1 是空游标（需 projections asOfSeq）、page 请求必须带 address、assistantStream:false 时快照 12s 未达（不断言为协议语义，桥恒发 true）。脱敏：probe 文本 verbatim、owner 工作区指令注入 REDACTED、11 个探针会话全部归档。",
+    "artifacts": [
+     "scripts/dshweb-phase0/alpha1-inbox-wire.json",
+     "cmd:session/page via asOfSeq => 28 records, continuity 2/2"
+    ],
+    "checked_at": "2026-09-23T17:42:28+08:00",
+    "upstream_anchor": "deepseek-harness@00102833 packages/core/agent-loop/src/agent.ts:150-168 (send/followup/steer) + packages/core/agent-loop/src/inbox.ts:20-62,150-230 (splice→session.append) + packages/api/session-controller/src/commands.ts:340-390 (prompt admission)"
+   }
+  },
+  {
+   "id": "a3b-samples-impl",
+   "title": "A3b updateQueue 管理证据 + steer-unavailable 负例（OD-2b=B）",
+   "description": "隔离会话上 updateQueue 编辑/撤回/steer 变更的请求/响应 + 对应 splice（removedCount/outcome）帧；活体负例：updateQueue steer 变更拒绝（session/steer-unavailable，commands.ts:477-479）请求/响应样本。证据 scripts/dshweb-phase0/alpha1-updatequeue-wire.json；结束归档。",
+   "status": "done",
+   "phase": "a3-gate",
+   "kind": "impl",
+   "depends_on": [
+    "od-decisions-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "A3b updateQueue 管理证据（alpha.1 座位一次性会话）：正例 3/3——steer（运行中，next-turn→next-step 同 id 移动，journal seq16/17/18 全链）、edit（原位替换同 id 新文本，outcome canceled）、remove（canceled）；负例 2/2 verbatim——对 next-step 项二次 steer 确定性复现 session/steer-unavailable（方案要求的活体负例）+ bogus itemId → session/queue-item-not-found；9 条 splice journal 记录（removedCount/outcome 齐全）。wire 形状：{request:{sessionId,itemId,action:{kind,content?}}} → {accepted:true}。会话已归档。",
+    "artifacts": [
+     "scripts/dshweb-phase0/alpha1-updatequeue-wire.json",
+     "cmd:timeout 120 python3 /tmp/a3b_probe.py => 3/3 positive + 2/2 negative verbatim"
+    ],
+    "checked_at": "2026-09-23T17:44:41+08:00",
+    "upstream_anchor": "deepseek-harness@00102833 packages/api/session-controller/src/commands.ts:429-500 (updateQueue) + types.ts:359-368 (SessionUpdateQueueRequest)"
+   }
+  },
+  {
+   "id": "s3-impl",
+   "title": "S3 inbox 投影 reducer + updateQueue 管理 RPC",
+   "description": "时间线唯一写入者=投影 reducer，按 UserMessage.id upsert：splice 插入→排队占位行；user/message 同 id 落定→原位替换；removedCount→撤行；agent/inbox/spliced 从 codec 跳过表移入本切片映射。管理（OD-2b=B）：updateQueue 编辑/撤回 RPC + 能力广告。",
+   "status": "done",
+   "phase": "s3-inbox",
+   "kind": "impl",
+   "depends_on": [
+    "a3a-samples-impl",
+    "a3b-samples-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "S3 可见性+管理全链：①codec——agent/inbox/spliced 从跳过表移入映射，sessionCodec 维护官方 inbox 折叠（inbox.ts apply() 语义：bounds 校验、POST-splice candidate 跨表 id 唯一——同 id 原位替换合法），插入→EventUserMessageQueued（占位）、移除→EventUserMessageRemoved、非法 splice→codecReset（官方硬错等价）；②core——EventUserMessageQueued/Removed 事件类型 + SessionQueueManager 接口（session_queue.go）；③go-bridge——events.go 映射（user_message+pending:true / user_message_removed）、TurnProjection.Pending（additive）、reducer 三规则（pending 占位 upsert 不武装 execution、落定同 id 先撤占位再 upsert 真实回合不双行、removed 只撤 pending 标记行 fail-closed）、patch 新增 additive RemovedTurnIDs、update_session_queue RPC + session_queue_management capability（接口断言推导）；④agent/dsh-web/queue.go——session/updateQueue 透传（A3b 形状），错误 verbatim。修复过程发现并修正折叠真 bug：去重须对 candidate 而非 pre-splice 状态（edit 同 id 替换场景）。",
+    "artifacts": [
+     "agent/dsh-web/codec.go",
+     "agent/dsh-web/queue.go",
+     "core/message.go",
+     "core/session_queue.go",
+     "go-bridge/events.go",
+     "go-bridge/projection_reducer.go",
+     "go-bridge/projection_types.go",
+     "go-bridge/handlers_session_queue.go",
+     "go-bridge/backend_capabilities.go",
+     "go-bridge/types.go"
+    ],
+    "checked_at": "2026-09-23T18:18:19+08:00",
+    "upstream_anchor": "deepseek-harness@00102833 packages/core/agent-loop/src/inbox.ts:20-62,150-230 (fold/mutate 亲核) + packages/core/agent-loop/src/agent.ts:150-168 (send/followup/steer) + packages/api/session-controller/src/commands.ts:429-500 (updateQueue)"
+   }
+  },
+  {
+   "id": "s3-tests",
+   "title": "S3 定向测试",
+   "description": "reducer 状态机（占位/落定/撤行/去重键 id）、codec 映射、updateQueue payload/错误语义；全包回归绿。",
+   "status": "done",
+   "phase": "s3-inbox",
+   "kind": "tests",
+   "depends_on": [
+    "s3-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "agent/dsh-web/inbox_test.go ×7（插入占位/消耗撤行/edit 原位替换/steer 跨表移动/越界 reset/重复 id reset/落定同 id 链——夹具形状来自 A3a/A3b 活体证据）+ queue_test.go ×3（wire 形状 {request:{sessionId,itemId,action}}、remove/steer 无 content、错误 verbatim、校验）+ go-bridge/projection_inbox_test.go ×4（占位 upsert+落定原位替换不双行+不武装 execution、removed 只撤 pending fail-closed+未知 id no-op、撤行进 patch RemovedTurnIDs、capability 广告门）。定向全绿后两包全量回归绿（dsh-web 21.9s / go-bridge 164.3s）。",
+    "artifacts": [
+     "agent/dsh-web/inbox_test.go",
+     "agent/dsh-web/queue_test.go",
+     "go-bridge/projection_inbox_test.go",
+     "cmd:GOTOOLCHAIN=local go test ./agent/dsh-web/... ./go-bridge/ -count=1 => both ok"
+    ],
+    "checked_at": "2026-09-23T18:18:19+08:00",
+    "upstream_anchor": null
+   }
+  },
+  {
+   "id": "s3-regression",
+   "title": "S3 活体验证：排队消息可见（生产 runtime）",
+   "description": "生产 runtime（探针设备路径）上隔离会话：运行中发消息 → iPhone 侧投影出现占位行 → 落定原位替换；管理操作（编辑/撤回）行为与 Mac web 一致；部署运行态验证。",
+   "status": "done",
+   "phase": "s3-inbox",
+   "kind": "regression",
+   "depends_on": [
+    "s3-tests"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "生产 runtime（PID 78923，构建 2026-09-23T11:20:00Z）探针三连全绿：P2 纯删除（外部 surface 排队 → 占位 user_message(pending) → bridge update_session_queue 真实 itemId remove ok:true → user_message_removed 同 id，且永不 settle）；P3 claim 连续性（占位→user_message_removed→落定 user_message 三事件同 id 125d119c）；bogus itemId → 官方 verbatim session/queue-item-not-found。过程中发现并修复两处投递/解析缺陷：① user_message_removed 不在 scopeless control-plane 门与 sync-v2 seal 表（relay_observation.go isLiveControlPlaneEvent + projection_delivery.go isSessionSyncV2RawTimelineEvent 补录，配 TestObservationScopelessDeviceGetsInboxPlaceholderAndRemoval + seal 表测试）；② tool/result 退役形状——官方已退役 \"tool-result\" 内容块标签（agent-team/projection.ts:43），alpha.1 journal 实测为顶层 text 块 + message 级 toolCallId/isError（journal seq22/27/32；llm/src/message.ts ToolResultMessage、session/src/repair.ts 构造），codec/history 旧扫描致每条 tool/result reset（真机 15 次 reset、16 个重复 turn_started）；同步补齐 Class② 漏列注册表成员 workspace/changes、developer/message（known-event-types.ts 全表逐项核对）。修复后新 runtime 日志 0 次 codec reset，每 turn 恰 1 个 turn_started。",
+    "artifacts": [
+     "scripts/dshweb-phase0/s3-inbox-live-regression.json",
+     "go-bridge/relay_observation.go",
+     "go-bridge/projection_delivery.go",
+     "agent/dsh-web/codec.go",
+     "agent/dsh-web/history.go",
+     "agent/dsh-web/events.go",
+     "agent/dsh-web/toolresult_shape_test.go",
+     "cmd:python3 /tmp/s3_regression_probe.py => P2_PURE_REMOVAL:true P3_CLAIM_CONTINUITY:true",
+     "cmd:GOTOOLCHAIN=local go test ./agent/dsh-web/ -count=1 => ok 22.2s"
+    ],
+    "checked_at": "2026-09-23T19:23:34+08:00",
+    "upstream_anchor": "deepseek-harness agent-team/src/projection.ts:43（retired tool-result tags）；llm/src/message.ts:173-180 ToolResultMessage；core/session/src/repair.ts:126-140；core/session/src/known-event-types.ts:81 workspace/changes；alpha.1 journal session.v4.jsonl.zstd seq22/27/32 实测"
+   }
+  },
+  {
+   "id": "a4a-samples-impl",
+   "title": "A4a 图片附件证据链",
+   "description": "①发送：prompt image part {type:'image',mediaType,data,name?} 完整请求/响应（types.ts:89-96）+ 准入持久化后 journal 引用；②读取：session/attachment 请求/响应与 attachmentId 引用映射；负例：模型不支持图片 → session/attachment-invalid（MODEL_DOES_NOT_SUPPORT_IMAGES，commands.ts:350-355）。隔离会话；证据 alpha1-attachment-wire.json。",
+   "status": "done",
+   "phase": "a4-gate",
+   "kind": "impl",
+   "depends_on": [
+    "od-decisions-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "生产 alpha.1 座位（127.0.0.1:3080）活体证据链全绿：①发送 session/prompt image part {type:'image',mediaType:'image/png',data:<canonical base64>,name} → accepted:true（模型支持图片，MODEL_DOES_NOT_SUPPORT_IMAGES 未触发）；②journal user/message（seq8）携带 {type:'image',attachment:{attachmentId:'sha256:06f0…',mediaType,width:8,height:8,bytes:74,name}}——attachmentId↔journal 引用映射成立；③session/attachment {request:{sessionId,attachmentId}} → {attachment:同 ref,data:base64}，解码为合法 PNG、decoded_bytes=74==ref.bytes、复读 ok（重开可读）；④负例 bogus attachmentId → session/attachment-invalid ATTACHMENT_NOT_REFERENCED verbatim、非规范 base64 → INVALID_IMAGE_BASE64 verbatim。",
+    "artifacts": [
+     "scripts/dshweb-phase0/alpha1-attachment-wire.json",
+     "cmd:python3 /tmp/a4_samples_probe.py => all probes green"
+    ],
+    "checked_at": "2026-09-23T19:35:29+08:00",
+    "upstream_anchor": "session-controller/src/types.ts:89-96 PromptContentPart；commands.ts:343-355 模型图片校验、:392-419 attachment 读取、:683-692 referencedImage；attachment/index.ts:114-129 admitPromptContent；attachment/src/types.ts:11-32 ImageAttachmentRef；attachment-local/src/store.ts:22 ID_PATTERN"
+   }
+  },
+  {
+   "id": "a4b-samples-impl",
+   "title": "A4b 文件 receipts 证据链（OD-3=B）",
+   "description": "独立于图片的上传→receipt→准入→读取/重开链：fileUploads.upload(sessionId,{data,name?}) → prompt {type:'file',receiptId} part → 准入解析绑定（commands.ts:358-371）→ 读取/重开路径；负例：上传超限/无效 receipt 拒绝路径（以样本确认）。证据 alpha1-file-receipts-wire.json。",
+   "status": "done",
+   "phase": "a4-gate",
+   "kind": "impl",
+   "depends_on": [
+    "od-decisions-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "生产 alpha.1 座位活体证据链全绿（OD-3=B 启用）：①上传 POST /api/session/uploadFileBinary?sessionId=&name= （application/octet-stream 原始字节流，非 JSON RPC）→ {ok:true,value:{receiptId:'82f2cf59-…',file:{attachmentId:'sha256:1944…',name:'receipt-notes.txt',bytes:55}}}，attachmentId==sha256(上传字节)（store.ts:22 ID_PATTERN）；②prompt {type:'file',receiptId} part → accepted:true；③journal user/message（seq8）携带 {type:'file',attachment:{attachmentId,name,bytes:55}} 且 journal attachmentId==上传 file.attachmentId——receiptId↔prompt part↔journal 引用链闭合；④冷拉 session/page 复读 file 块在（重开持久；UI 只渲染 name/bytes，模型经 fileHandleText 存储副本句柄读取）；⑤负例 bogus receiptId → session/attachment-invalid FILE_NOT_STAGED 'File was not uploaded for this session.' verbatim、错误 content-type → HTTP 415、缺 sessionId → HTTP 400。",
+    "artifacts": [
+     "scripts/dshweb-phase0/alpha1-file-receipts-wire.json",
+     "cmd:python3 /tmp/a4_samples_probe.py => all probes green"
+    ],
+    "checked_at": "2026-09-23T19:35:29+08:00",
+    "upstream_anchor": "file-upload/src/protocol.ts:2 FILE_UPLOAD_PATH=/api/session/uploadFileBinary；http-route.ts:22-60 octet-stream 流式路由；file-upload/src/index.ts:106 upload→admitEncodedFile、:139-141 resolve、bindPrompt；commands.ts:582-601 resolvePromptFileReceipts（FILE_NOT_STAGED :590-595）；attachment/src/types.ts:35-46 FileAttachmentRef；llm/src/content.ts:143-175 fileHandleText"
+   }
+  },
+  {
+   "id": "s4-impl",
+   "title": "S4 图片附件 + 文件 receipts 桥接",
+   "description": "发送：prompt content parts 内联 image part；读取：session/attachment 读取已被会话日志引用的持久化图片并渲染（attachmentId↔journal 映射按样本）；文件 receipts（OD-3=B）：fileUploads.upload 链；能力广告（AttachmentSupporter）按已证表面放开，附件 gate 解除 dsh-web 拒收。",
+   "status": "done",
+   "phase": "s4-attachments",
+   "kind": "impl",
+   "depends_on": [
+    "a4a-samples-impl",
+    "a4b-samples-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "发送侧：Client.UploadFileBinary（官方原始字节路由 POST /api/session/uploadFileBinary?sessionId=&name= octet-stream，FileUploadHttpResult 信封，401 刷新重试）+ dshSession.Send 重写（text+image{mediaType,data,name}+file{receiptId} parts，文件上传失败整体中止、官方错误 verbatim；dshLeafName 镜像官方 displayName 叶名收敛）+ Agent.SupportedAttachmentKinds{image,file}。接收侧：core.EventAttachment/AttachmentData/AttachmentReader 新类型；codec applyUserMessage+inbox 折叠映射 journal image/file 块；history user 行带附件且纯附件行不再丢弃；go-bridge user_message/queued wire attachments、MessageProjection.Attachments+reducer（present-wins）、hydrate 透传、get_attachment RPC（attachment_read capability，官方错误 verbatim）。协议包 bridge-v1.types.ts：BridgeAttachmentDescriptor+MessageProjection.attachments+get_attachment/update_session_queue 方法枚举。",
+    "artifacts": [
+     "agent/dsh-web/wire.go",
+     "agent/dsh-web/session.go",
+     "agent/dsh-web/attachments.go",
+     "agent/dsh-web/apitypes.go",
+     "agent/dsh-web/events.go",
+     "agent/dsh-web/wire_descriptor.go",
+     "agent/dsh-web/codec.go",
+     "agent/dsh-web/history.go",
+     "core/message.go",
+     "core/session_queue.go",
+     "go-bridge/events.go",
+     "go-bridge/projection_types.go",
+     "go-bridge/projection_reducer.go",
+     "go-bridge/handlers_projection.go",
+     "go-bridge/handlers_attachment.go",
+     "go-bridge/handlers.go",
+     "go-bridge/backend_capabilities.go",
+     "go-bridge/types.go",
+     "docs/protocol/schema/bridge-v1.types.ts"
+    ],
+    "checked_at": "2026-09-23T20:08:57+08:00",
+    "upstream_anchor": "A4a/A4b 活体证据 scripts/dshweb-phase0/alpha1-attachment-wire.json + alpha1-file-receipts-wire.json；session-controller types.ts:89-96/347-356、commands.ts:343-371/392-419/582-601、attachment/index.ts:114-129、file-upload protocol.ts:2/http-route.ts:22-60/index.ts:106、attachment-local store.ts:22-26"
+   }
+  },
+  {
+   "id": "s4-tests",
+   "title": "S4 定向测试",
+   "description": "image part 序列化、attachment 读取解码、receipt 链、负例 fail-closed（attachment-invalid 原文透传）；全包回归绿。",
+   "status": "done",
+   "phase": "s4-attachments",
+   "kind": "tests",
+   "depends_on": [
+    "s4-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "dsh-web attachment_test.go ×5：Send content parts 契约（text/image canonical base64/叶名/receiptId、上传先行、失败中止不半发）、ReadAttachment wire 形状+ATTACHMENT_NOT_REFERENCED verbatim、codec journal 块→描述符、冷拉纯附件行存活；fakedsh_test.go 补官方 uploadFileBinary 原始路由（octet-stream/415/400/FileUploadHttpResult）。go-bridge projection_attachment_test.go ×4：reducer 占位+落定附件投影、mapAgentEvent wire 键（无附件不携带）、attachment_read capability 广告门、handleGetAttachment（not_supported/成功 ref+base64/官方错误 verbatim）。rpcmap_test.go 过时 phase-1 守卫改为 S4 正向断言。全包回归绿（dsh-web 22.1s / go-bridge 161.5s）。",
+    "artifacts": [
+     "agent/dsh-web/attachment_test.go",
+     "agent/dsh-web/fakedsh_test.go",
+     "go-bridge/projection_attachment_test.go",
+     "agent/dsh-web/rpcmap_test.go",
+     "cmd:GOTOOLCHAIN=local go test ./agent/dsh-web/ ./go-bridge/ -count=1 => both ok"
+    ],
+    "checked_at": "2026-09-23T20:08:57+08:00",
+    "upstream_anchor": null
+   }
+  },
+  {
+   "id": "s4-regression",
+   "title": "S4 活体验证：iOS 发图/文件在 Mac web 可见且反向可读",
+   "description": "生产 runtime 隔离会话：发图 → 座位 journal 引用 → session/attachment 反向读取渲染；文件 receipts 同链；部署运行态验证。",
+   "status": "done",
+   "phase": "s4-attachments",
+   "kind": "regression",
+   "depends_on": [
+    "s4-tests"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "生产 runtime（PID 87671，构建 2026-09-23T12:09:04Z）全链探针绿：①capability 面 image/file kinds + attachment_read + session_queue_management 全广告；②图片链：bridge send_message 附件 → 官方 prompt image part 准入 → 时间线 user_message（S3 pending 占位行组合）携带描述符 {kind:image,attachmentId:sha256:bcdeff…,mediaType,name,bytes:74,width/height:8} → get_attachment 反向读取 ok（官方 ref verbatim 同 id、data 解码为合法 PNG、ref.bytes==解码字节数）→ 座位自身 journal（Mac web 渲染源）image 块同 attachmentId；③文件链：send 附件 → uploadFileBinary receipt → 时间线 file 描述符 {name:s4-notes.txt,bytes:72} → journal file 块同 id 且 attachmentId==sha256(上传字节)；④负例 bogus id → attachment_read_failed 携官方 session/attachment-invalid verbatim。bridge 发送槽串行语义复核：运行中 turn 期间 send 返回 session_action_in_progress(retryable)，落定后成功。",
+    "artifacts": [
+     "scripts/dshweb-phase0/s4-attachments-live-regression.json",
+     "cmd:python3 /tmp/s4_regression_probe.py => all probes green"
+    ],
+    "checked_at": "2026-09-23T20:20:37+08:00",
+    "upstream_anchor": "A4a/A4b 证据链 + S4 实现（wire.go/session.go/attachments.go/codec.go/history.go/events.go）"
+   }
+  },
+  {
+   "id": "a5-samples-impl",
+   "title": "A5 workspace 管理证据",
+   "description": "pin/unpin/archive/unarchive 请求/响应 + 基线 pinned/archived 字段 + 排序帧；幂等成功样本（unarchive 不存在/未归档 id = 成功 no-op，官方语义 commands.ts:183-194）；负例：活动会话归档不带 stopActivity → workspace/session-active（commands.ts:174）。只对隔离会话/一次性隔离工作区执行；证据 alpha1-workspace-mgmt-wire.json。",
+   "status": "done",
+   "phase": "a5-gate",
+   "kind": "impl",
+   "depends_on": [
+    "od-decisions-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "生产 alpha.1 座位活体证据全绿：①pin A→[A]、pin B→[B,A]（most-recently-pinned-first）、unpin A→[B]、再 unpin A 幂等 no-op、pin bogus→session/not-found verbatim；②archive A（idle 无 stopActivity）→完整 registry-global 归档集、unarchive A→移出、再 unarchive 幂等、unarchive bogus 幂等成功（无存在性检查）；③可达负例：活动会话无 stopActivity 归档→workspace/session-active verbatim（'the session is active (turn)'+activity details），stopActivity:true→成功；④workspace/follow 基线（mux endpoint workspace/follow）携带 pinnedSessionIds/archivedSessionIds，pinned 往返一致、归档成员关系验证（registry-global 集，43 项含新归档）。",
+    "artifacts": [
+     "scripts/dshweb-phase0/alpha1-workspace-mgmt-wire.json",
+     "cmd:python3 /tmp/a5_samples_probe.py => all probes green"
+    ],
+    "checked_at": "2026-09-23T20:26:29+08:00",
+    "upstream_anchor": "workspace-controller/src/commands.ts:160-229（archive/unarchive/pin/unpin + 幂等注释 :183-194、session-active :174）、index.ts:159-171 @Remote 声明、types.ts:142-166（WorkspacePinValue/WorkspaceBaseline）"
+   }
+  },
+  {
+   "id": "s5-impl",
+   "title": "S5 置顶/归档官方语义（OD-1=A）",
+   "description": "置顶切 workspace/pinSession、归档/恢复切 archiveSession/unarchiveSession 并纳入 iOS 列表；workspace/follow 基线 pinned/archived 字段消费；桥本地 pinstore 语义切换（对齐官方真值）；验收=归档行隐藏/恢复与 Mac web 一致。",
+   "status": "done",
+   "phase": "s5-workspace",
+   "kind": "impl",
+   "depends_on": [
+    "a5-samples-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "OD-1=A 官方语义切换：①pin——dsh-web SessionPinner 改走官方 workspace/pinSession/unpinSession（退役 bridge 本地 pinStore 接线；store 中无 dsh-web 条目、无迁移负担），ListPinnedSessions 从 ws 基线pinnedSessionIds（官方顺序 most-recently-pinned-first）返回，ListSessions 行盖稳定降序 pinnedAtMillis（officialPinOrderKey 固定基准编码官方顺序，iOS 置顶区 pinnedAt DESC 与官方一致）；workspaceState 增 pinned缓存 + {type:'pinned'} 增量帧分发。②archive——SessionArchiver → workspace/archiveSession {stopActivity:true}（活动会话唯一成功形态，A5 负例证据），错误 verbatim。③unarchive——新 core.SessionUnarchiver 接口 + bridge unarchive_session RPC（幂等官方语义）+ session_unarchive capability + 协议包方法枚举。",
+    "artifacts": [
+     "agent/dsh-web/sessions.go",
+     "agent/dsh-web/apitypes.go",
+     "agent/dsh-web/streams.go",
+     "agent/dsh-web/dshweb.go",
+     "core/session_queue.go",
+     "go-bridge/handlers_session_unarchive.go",
+     "go-bridge/handlers.go",
+     "go-bridge/backend_capabilities.go",
+     "docs/protocol/schema/bridge-v1.types.ts"
+    ],
+    "checked_at": "2026-09-23T20:51:25+08:00",
+    "upstream_anchor": "A5 活体证据 alpha1-workspace-mgmt-wire.json；workspace-controller commands.ts:160-229；workspace/workspace/src/index.ts:361-405（archive 互斥移除 pin、unarchive 幂等不恢复）；types.ts:160-174 WorkspaceBaseline/WorkspaceFollowIncrement {type:'pinned'}"
+   }
+  },
+  {
+   "id": "s5-tests",
+   "title": "S5 定向测试",
+   "description": "pin/archive/unarchive payload 与幂等语义、pinned/archived 基线消费、session-active 负例透传；全包回归绿。",
+   "status": "done",
+   "phase": "s5-workspace",
+   "kind": "tests",
+   "depends_on": [
+    "s5-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "dsh-web workspace_mgmt_test.go ×4：pin/unpin wire 形状+session/not-found verbatim、官方顺序编码（降序稳定+增量帧替换全集）、archive stopActivity:true 契约+unarchive 往返、ListSessions 官方 pin 顺序盖章；go-bridge handlers_session_unarchive_test.go ×2：capability 广告门 + handler（not_supported/成功行无 archivedAtMillis/missing_param）；rpcmap 过时 phase-1 守卫与 backend_action_capabilities 矩阵更新为 S5 真实面（rename+pin+archive+unarchive，无 delete；legacy session_mutation AND 语义成立）。全包回归绿（dsh-web 22.5s / go-bridge 163.6s）。",
+    "artifacts": [
+     "agent/dsh-web/workspace_mgmt_test.go",
+     "go-bridge/handlers_session_unarchive_test.go",
+     "agent/dsh-web/rpcmap_test.go",
+     "go-bridge/backend_action_capabilities_test.go",
+     "cmd:GOTOOLCHAIN=local go test ./agent/dsh-web/ ./go-bridge/ -count=1 => both ok"
+    ],
+    "checked_at": "2026-09-23T20:51:25+08:00",
+    "upstream_anchor": null
+   }
+  },
+  {
+   "id": "s5-regression",
+   "title": "S5 活体验证：置顶/归档双端一致",
+   "description": "生产 runtime：iPhone 置顶在 Mac web 可见且反向一致；归档行双端隐藏、恢复双端可见；与 Mac web 操作互不覆盖。",
+   "status": "done",
+   "phase": "s5-workspace",
+   "kind": "regression",
+   "depends_on": [
+    "s5-tests"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "生产 runtime（PID 98782，构建 2026-09-23T12:47:35Z）全链探针绿：capability 面 session_pin/session_archive/session_unarchive 全广告、session_delete 缺席；pin → list_sessions 行 pinnedAtMillis（官方顺序编码）+ list_pinned_sessions 含该会话；archive → 座位归档集含该 id + bridge 行隐藏（archivedAtMillis）；unarchive → 座位集移除 + 行恢复可见；归档互斥移除 pin（官方 registry 语义，pinned_state_kept:false 为正确行为）；unpin 经 bridge 成功。",
+    "artifacts": [
+     "scripts/dshweb-phase0/s5-workspace-live-regression.json",
+     "cmd:python3 /tmp/s5_regression_probe.py => all probes green"
+    ],
+    "checked_at": "2026-09-23T20:51:25+08:00",
+    "upstream_anchor": null
+   }
+  },
+  {
+   "id": "a7-samples-impl",
+   "title": "A7 steer direct 路径证据（OD-2a=A 前置）",
+   "description": "回合运行中官方 Web 的 session/prompt mode:'steer' 请求形状 + 行为（对比空闲 queue）——direct 路径 agent.steer（commands.ts:372）；direct 拒绝样本（源码映射 session/agent-busy :380，以样本确认，不预定）；steer-unavailable 属 A3 不在本编号。证据 alpha1-steer-wire.json。",
+   "status": "done",
+   "phase": "a7-gate",
+   "kind": "impl",
+   "depends_on": [
+    "od-decisions-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "生产 alpha.1 活体证据 + 官方源码双证：运行中 steer accepted 且 journal splice target=next-step；空闲 queue → next-turn；空闲 steer（经 session/list running=false 验证真空闲）accepted——修正方案预映射：官方 steer=send(next-step,wake:true)（agent.ts:150-172），空闲唤醒成下一回合，非 agent-busy 拒绝；官方 composer 策略 idle→queue、运行中→busy-Enter 偏好（默认 queue）、steer 为显式手势（submission-policy.ts:29-38）。OD-2a=A 按裁决 fail-closed 条款以样本为准：保持 queue 默认 + steer 显式选项。",
+    "artifacts": [
+     "scripts/dshweb-phase0/alpha1-steer-wire.json",
+     "cmd:python3 /tmp/a7_samples_probe.py => all probes captured"
+    ],
+    "checked_at": "2026-09-23T21:02:41+08:00",
+    "upstream_anchor": "commands.ts:343-383（steer direct 路径 + catch 映射）；agent-loop/src/agent.ts:150-172（steer=send(next-step,wake)）；ui-conversation/src/client/input/submission-policy.ts:29-38 + submission-settings.ts:18 DEFAULT_BUSY_ENTER_BEHAVIOR='queue'"
+   }
+  },
+  {
+   "id": "od2a-impl",
+   "title": "OD-2a=A 发送路径：运行中 steer、空闲 queue",
+   "description": "按 A7 样本镜像官方：回合运行中 mode:'steer'（转向当前回合），空闲 mode:'queue'（现状）；拒绝路径按实测样本收口 fail-closed。",
+   "status": "done",
+   "phase": "od2a-sendpath",
+   "kind": "impl",
+   "depends_on": [
+    "a7-samples-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "证据修正版 OD-2a=A：core.PromptOptions += Mode 轴（\"\"/queue=官方默认排队，steer=显式手势）；SendMessageParams += mode；promptOptionsFromParams 透传；sendPrompt 对无 per-request mode 的 backend 收到 steer 可见失败（不静默降级 queue）；dshSession 实现 PromptOptionsSender.SendWithOptions（mode 映射 queue|steer，未知 mode 拒绝），Send 保持 queue 默认委托 SendWithOptions。",
+    "artifacts": [
+     "core/interfaces.go",
+     "go-bridge/types.go",
+     "go-bridge/handlers.go",
+     "agent/dsh-web/session.go"
+    ],
+    "checked_at": "2026-09-23T21:02:41+08:00",
+    "upstream_anchor": "A7 证据 + agent.ts:150-172 + submission-policy.ts:29-38"
+   }
+  },
+  {
+   "id": "od2a-tests",
+   "title": "OD-2a 定向测试",
+   "description": "steer/queue 分派、拒绝语义、A7 形状契约测试；全包回归绿。",
+   "status": "done",
+   "phase": "od2a-sendpath",
+   "kind": "tests",
+   "depends_on": [
+    "od2a-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "dsh-web steer_mode_test.go：默认/显式 queue→mode:queue、steer→mode:steer、未知 mode 可见拒绝、legacy Send 保持 queue；go-bridge TestSendPromptModeFailsVisiblyWithoutOptionsSender：无 options 面 backend 的 steer 失败可见、queue/空 mode 直通。",
+    "artifacts": [
+     "agent/dsh-web/steer_mode_test.go",
+     "go-bridge/projection_attachment_test.go",
+     "cmd:GOTOOLCHAIN=local go test ./agent/dsh-web/ ./go-bridge/ -run 'Mode' -count=1 => ok"
+    ],
+    "checked_at": "2026-09-23T21:02:41+08:00",
+    "upstream_anchor": null
+   }
+  },
+  {
+   "id": "od2a-regression",
+   "title": "OD-2a 活体验证",
+   "description": "生产 runtime 隔离会话：运行中消息到达官方 Web 同款位置（next-step splice），空闲排队下一回合；拒绝路径按样本收口。",
+   "status": "done",
+   "phase": "od2a-sendpath",
+   "kind": "regression",
+   "depends_on": [
+    "od2a-tests"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "生产 runtime（PID 9608，构建 2026-09-23T13:14:50Z）探针绿：运行中 bridge send_message mode:steer → ok:true 且座位 journal splice target=next-step（官方 agent.steer 语义端到端）；默认发送保持 per-session turn 槽串行（S3 既定 queue 设计不变，retryable）；mode:turbo 可见拒绝。实现含 steer 槽旁路（admitBridgeSteer：绕过 turn-creating 槽、保留 quiesce 门）——首跑发现槽把 steer 一并拦截，正是 OD-2a 要打通的路径；修复后复跑全绿。",
+    "artifacts": [
+     "scripts/dshweb-phase0/od2a-steer-live-regression.json",
+     "go-bridge/handlers.go",
+     "cmd:python3 /tmp/od2a_regression_probe.py => steer_spliced_next_step:true"
+    ],
+    "checked_at": "2026-09-23T21:16:28+08:00",
+    "upstream_anchor": "A7 证据；agent.ts:150-172 steer=send(next-step,wake)"
+   }
+  },
+  {
+   "id": "od4-impl",
+   "title": "OD-4=A follow 快照窗口对齐官方（500+turnWindow）",
+   "description": "follow 请求 maxMessages:500 + turnWindow 对齐官方；重连 gap-seed 覆盖最近消息无重复/无缺口；可测阈值验收：records ≤ 500、快照 JSON ≤ 2 MiB、Go 侧解码 p95 ≤ 500ms（探针实测记录）。",
+   "status": "done",
+   "phase": "od4-window",
+   "kind": "impl",
+   "depends_on": [
+    "od-decisions-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "OD-4=A：follow 开窗镜像官方 HISTORY_PAGE_OPTIONS（client/sessions/session.ts:54、:631）——followMaxMsgs 6→500 + turnWindow{minMessages:50,minTurns:2}（sessionFollowRequest += TurnWindow 字段，types.ts:476-481 语义）。TestFollowOpenMirrorsOfficialWindow 钉 wire 载荷。",
+    "artifacts": [
+     "agent/dsh-web/streams.go",
+     "agent/dsh-web/apitypes.go",
+     "agent/dsh-web/streams_test.go"
+    ],
+    "checked_at": "2026-09-23T21:24:30+08:00",
+    "upstream_anchor": "session-controller types.ts:476-489；client/sessions/session.ts:54,631"
+   }
+  },
+  {
+   "id": "od4-tests",
+   "title": "OD-4 定向测试",
+   "description": "窗口参数、快照预算、解码路径回归；全包回归绿。",
+   "status": "done",
+   "phase": "od4-window",
+   "kind": "tests",
+   "depends_on": [
+    "od4-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "TestFollowOpenMirrorsOfficialWindow：maxMessages=500 + turnWindow{50,2} wire 契约；全包回归绿（22.5s）。",
+    "artifacts": [
+     "agent/dsh-web/streams_test.go"
+    ],
+    "checked_at": "2026-09-23T21:24:30+08:00",
+    "upstream_anchor": null
+   }
+  },
+  {
+   "id": "od4-regression",
+   "title": "OD-4 活体验证（阈值探针）",
+   "description": "生产 runtime：真实会话重连 gap-seed 无重复/无缺口；阈值三项探针数字记录。",
+   "status": "done",
+   "phase": "od4-window",
+   "kind": "regression",
+   "depends_on": [
+    "od4-tests"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "生产座位阈值探针（3 回合真实历史会话，官方窗口请求）：records 36≤500 ✓、JSON 77,544B≤2MiB ✓、解码 0.3ms≤500ms ✓、hasMore=false。部署后 bridge 复跑 S3 探针全绿（P2_PURE_REMOVAL:true + P3_CLAIM_CONTINUITY:true）——500 窗口快照的 codec 播种端到端无回归。",
+    "artifacts": [
+     "scripts/dshweb-phase0/od4-follow-window-regression.json",
+     "cmd:python3 /tmp/od4_regression_probe.py + /tmp/s3_regression_probe.py => all green"
+    ],
+    "checked_at": "2026-09-23T21:24:30+08:00",
+    "upstream_anchor": null
+   }
+  },
+  {
+   "id": "a6-eval-impl",
+   "title": "A6 session/control 等价性评估（结论可以是维持轮询）",
+   "description": "baseline + projection 帧序列捕获，与逐会话 projections 轮询信息等价性对比（同会话同时刻）；评估失败维持现状不切换（该行保持 future，无产品风险）；结论如实记录，不为了切换而切换。",
+   "status": "done",
+   "phase": "a6-eval",
+   "kind": "impl",
+   "depends_on": [
+    "od-decisions-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "等价性评估完成且证实：session/control 流（host 级推送——基线含全部会话投影基线 + 逐键替换帧，types.ts:563-579）与逐会话 session/projections 轮询携带相同投影键集（18/18 一致）、同时刻值一致（goal/tokenUsage/contextPressure）、且一次回合中推送 32 帧逐键更新、基线覆盖 56 会话。按方案 §A6 本编号只做评估：结论维持现状轮询（正确性无缺口），切换为 future 优化项（一条 host 级订阅替代 N 个逐会话轮询），证据已归档供未来切换设计。",
+    "artifacts": [
+     "scripts/dshweb-phase0/alpha1-control-stream.json",
+     "cmd:python3 /tmp/a6_eval_probe.py => equivalence same_key_set:true"
+    ],
+    "checked_at": "2026-09-23T21:26:10+08:00",
+    "upstream_anchor": "session-controller types.ts:563-579 SessionControlFrame；index.ts:501-504 @Remote stream control"
+   }
+  },
+  {
+   "id": "protocol-sync-impl",
+   "title": "协议 pack + iOS mirror 同步（全部 wire 变更）",
+   "description": "Mac 权威 protocol pack 更新（S2 版本 statusMessage、S3 inbox 事件/updateQueue、S4 附件、S5 pin/archive 字段）+ iOS mirror/模型同步 + iOS 侧消费改动（排队占位行渲染、归档列表行为、附件 UI 能力门控）+ 双仓定向测试。配套 iOS 工作树：/Users/jacklee/Projects/cordcode-ios-native-message-timeline @ feat/ios-native-message-timeline dd391178（开工前按 P0 门重新核验）。",
+   "status": "done",
+   "phase": "protocol-ios",
+   "kind": "impl",
+   "depends_on": [
+    "s2b-regression",
+    "s3-regression",
+    "s4-regression",
+    "s5-regression",
+    "od2a-regression"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "Mac 权威包 bridge-v1.types.ts 收口：BridgeProjectionPatch.removedTurnIds、BridgeTurnProjection.pending、事件联合补 user_message（含 pending/attachments 数据字段说明）+ user_message_removed（此前 .ts 联合缺 user_message 的预存缺口一并修复）、get_attachment/unarchive_session/update_session_queue 方法枚举、BridgeAttachmentDescriptor + MessageProjection.attachments、statusMessage（S2b 时已加）。iOS mirror（cordcode-ios-native-message-timeline @ dd391178，clean 起改）同步全部同款 .ts 变更（+71 行）；Swift 解码模型加法字段：SessionAttachmentDescriptor 新结构、SessionMessageProjection.attachments、SessionTurnProjection.pending、SessionProjectionPatch.removedTurnIds、CCCodeAgentDescriptor.statusMessage（memberwise 默认 nil 保持既有构造点）。",
+    "artifacts": [
+     "docs/protocol/schema/bridge-v1.types.ts",
+     "cordcode-ios: docs/protocol/schema/bridge-v1.types.ts, Models/SessionProjection.swift, Services/Bridge/CCCodeBridgeModels.swift"
+    ],
+    "checked_at": "2026-09-23T21:41:07+08:00",
+    "upstream_anchor": null
+   }
+  },
+  {
+   "id": "ios-build-tests",
+   "title": "iOS 定向 build + 测试",
+   "description": "配套 iOS 工作树定向 build + 相关测试类；按构建成本纪律（增量、复用 DerivedData、最小测试集）。",
+   "status": "done",
+   "phase": "protocol-ios",
+   "kind": "tests",
+   "depends_on": [
+    "protocol-sync-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "配套 iOS 工作树定向 build + 测试绿：CordCode scheme Debug @ iPhone 17 Pro Max 模拟器 BUILD SUCCEEDED；定向测试 SessionProjectionModelsTests + CCCodeBridgePhase2Tests + ProjectionWindowSpecTests 全过（模型加法字段解码无回归）。iOS UI 功能采纳（占位行渲染/附件卡/steer 手势/置顶归档入口）为后续 iOS 产品工作，本轮交付 wire 契约 + 解码模型。",
+    "artifacts": [
+     "cmd:xcodebuild build => BUILD SUCCEEDED",
+     "cmd:xcodebuild test -only-testing:CCCodeTests/{SessionProjectionModelsTests,CCCodeBridgePhase2Tests,ProjectionWindowSpecTests} => TEST SUCCEEDED"
+    ],
+    "checked_at": "2026-09-23T21:41:07+08:00",
+    "upstream_anchor": null
+   }
+  },
+  {
+   "id": "release-final-regression",
+   "title": "发布门：全量定向测试 + 构建 + 运行态 + secret scan + owner checklist",
+   "description": "§7 发布门：全部切片定向测试绿 + 一次增量 Release 构建覆盖安装 + 运行态验证（进程代际+特征输出+各能力 available）+ secret scan（cookie/凭据红线复扫）+ owner 真机矩阵最短 checklist（iPhone 流式/斜杠命令/goal/排队可见/附件/置顶归档双端/dsh 重启行）。",
+   "status": "done",
+   "phase": "release-gate",
+   "kind": "regression",
+   "depends_on": [
+    "protocol-sync-impl",
+    "ios-build-tests",
+    "od4-regression",
+    "a6-eval-impl"
+   ],
+   "source": "方案 v8 剩余切片 + owner 2026-09-23 全量实施授权 + OD 代裁记录",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "发布门全绿：①根模块全量 go test 20 包 ok（go-bridge/core/agent/transcriptindex/pinstore，-count=1）；relay-server 独立模块 ok；②生产部署：Release 构建 2026-09-23T13:20:30Z → /Applications 覆盖安装→ PID 12155 监听 8777，无临时产物残留进程；③运行态：dsh-web 座位解析正常，整日志仅 1 次 codec reset（mux 重连快照重播种的设计行为，非 tool/result 风暴——对比修复前同窗口 15+ 次）；④secret scan：gitleaks（本机 8.30.1，CI 钉 8.21.2 同配置 .gitleaks.toml）扫 scripts/dshweb-phase0/ 证据目录 + testdata + 协议包 + CHANGELOG 全部 no leaks（凭据红线：cookie/token 从未写入任何新文件）；⑤alpha.2 测试座位（PID 42273:3081）已清理。owner 验收 checklist 见完成报告。",
+    "artifacts": [
+     "cmd:GOTOOLCHAIN=local go test ./go-bridge/... ./core/... ./agent/... ./transcriptindex/... ./pinstore/... -count=1 => 20 ok",
+     "cmd:(cd relay-server && go test ./... -count=1) => ok",
+     "cmd:gitleaks dir --redact --config .gitleaks.toml <artifacts> => no leaks"
+    ],
+    "checked_at": "2026-09-23T21:49:22+08:00",
+    "upstream_anchor": null
+   }
+  }
+ ]
+}
