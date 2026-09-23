@@ -9,22 +9,26 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
-	"github.com/openAgi2/cordcode-macbridge/pinstore"
 )
 
 // clientFor returns a Client bound to the resolved instance. The client is
-// stateless beyond the base URL, so a fresh one per call is fine.
+// stateless beyond the base URL, so a fresh one per call is fine; it carries
+// the seat's browser-session auth (2026-09-23 plan §4.2).
 func (a *Agent) clientFor(ctx context.Context) (*Client, error) {
 	inst, err := a.resolver.Resolve(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return NewClient(inst.BaseURL, nil), nil
+	c := NewClient(inst.BaseURL, nil)
+	c.SetAuth(a.auth)
+	return c, nil
 }
 
 // runningCache mirrors the last session.list running flags (per official
@@ -77,25 +81,141 @@ func (rc *runningCache) setOne(sessionID string, running bool) {
 // rows must not keep a workspace path or they collapse into that folder.
 const ungroupedDirectory = "未分组"
 
-// ListSessions maps session.list onto AgentSessionInfo rows (design §4.3.1):
+// ── workspace/follow grouping cache ────────────────────────────────────────
+
+// workspaceState caches the workspace/follow stream's grouping truth (the
+// retired workspace.list RPC's successor): one baseline per generation, then
+// ordered increments. ready=false until the first baseline — ListSessions
+// then degrades to cwd rows exactly like the old failed-call path.
+type workspaceState struct {
+	mu       sync.RWMutex
+	ready    bool
+	items    []apiWorkspaceView
+	archived map[string]struct{}
+	// pinned is the registry-global official pin set in official order
+	// (most recently pinned first — WorkspaceBaseline.pinnedSessionIds /
+	// the {type:'pinned'} increment; S5, OD-1=A).
+	pinned []string
+}
+
+func (w *workspaceState) applyBaseline(b *workspaceBaseline) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.items = append([]apiWorkspaceView(nil), b.Items...)
+	w.archived = map[string]struct{}{}
+	for _, id := range b.ArchivedSessionIds {
+		if id != "" {
+			w.archived[id] = struct{}{}
+		}
+	}
+	w.pinned = nonEmptyIDs(b.PinnedSessionIds)
+	w.ready = true
+}
+
+// applyPinned replaces the cached official pin set (the {type:'pinned'}
+// increment carries the complete set, official order).
+func (w *workspaceState) applyPinned(ids []string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.pinned = nonEmptyIDs(ids)
+}
+
+func nonEmptyIDs(ids []string) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func (w *workspaceState) applyUpsert(view apiWorkspaceView) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for i := range w.items {
+		if w.items[i].WorkspaceID == view.WorkspaceID {
+			w.items[i] = view
+			return
+		}
+	}
+	w.items = append(w.items, view)
+}
+
+func (w *workspaceState) applyRemove(workspaceID string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for i := range w.items {
+		if w.items[i].WorkspaceID == workspaceID {
+			w.items = append(w.items[:i], w.items[i+1:]...)
+			return
+		}
+	}
+}
+
+func (w *workspaceState) applyOrder(ids []string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	rank := make(map[string]int, len(ids))
+	for i, id := range ids {
+		rank[id] = i
+	}
+	sort.SliceStable(w.items, func(i, j int) bool {
+		ri, okI := rank[w.items[i].WorkspaceID]
+		rj, okJ := rank[w.items[j].WorkspaceID]
+		if okI && okJ {
+			return ri < rj
+		}
+		return okI && !okJ
+	})
+}
+
+func (w *workspaceState) applyArchived(ids []string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.archived = map[string]struct{}{}
+	for _, id := range ids {
+		if id != "" {
+			w.archived[id] = struct{}{}
+		}
+	}
+}
+
+// snapshot returns (items, archived, pinned, ready).
+func (w *workspaceState) snapshot() ([]apiWorkspaceView, map[string]struct{}, []string, bool) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	if !w.ready {
+		return nil, nil, nil, false
+	}
+	return w.items, w.archived, w.pinned, true
+}
+
+// ListSessions maps session/list onto AgentSessionInfo rows (design §4.3.1):
 // sessionId→id, updatedAt(ms)→modifiedAt, running→cache;
 // subagent rows (origin=subagent / parentSessionId set) and blank sessions
 // are filtered exactly like the web sidebar. Directory is official workspace
-// membership (workspace.list sessionIds), not cwd — same rule as the Mac web
-// sidebar (think.md 2026-08-16). Archived ids get ArchivedAt so iOS hides
-// them. The official cursor is an unimplemented reserved seat — one full
-// page; the bridge paginates.
+// membership (workspace/follow baseline sessionIds), not cwd — same rule as
+// the Mac web sidebar (think.md 2026-08-16). Archived ids get ArchivedAt so
+// iOS hides them. The official cursor is an unimplemented reserved seat — one
+// full page; the bridge paginates.
 func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, error) {
 	client, err := a.clientFor(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var val sessionListValue
-	if err := client.Call(ctx, "session.list", sessionListRequest{}, &val); err != nil {
+	if err := client.Call(ctx, "session/list", map[string]any{"_request": sessionListRequest{}}, &val); err != nil {
 		return nil, err
 	}
 
-	grouping, archived, haveGrouping := loadOfficialGrouping(ctx, client)
+	grouping, archived, haveGrouping := a.groupingFromWorkspace()
+	pinnedOrder := map[string]int{}
+	if pinned, havePins := a.pinnedFromWorkspace(); havePins {
+		for i, id := range pinned {
+			pinnedOrder[id] = i
+		}
+	}
 
 	a.running.stage(val.Items)
 	out := make([]core.AgentSessionInfo, 0, len(val.Items))
@@ -125,6 +245,12 @@ func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, erro
 				info.ArchivedAt = time.Unix(1, 0).UTC()
 			}
 		}
+		// S5 (OD-1=A): the official pin set marks pinned rows. pinnedAtMillis
+		// is a stable order encoding of the official set (most recently pinned
+		// first), not a real instant — the official set carries order only.
+		if idx, ok := pinnedOrder[item.SessionID]; ok {
+			info.PinnedAt = officialPinOrderKey(idx)
+		}
 		info.Summary = titleFromProjections(item.Projections)
 		if info.Summary == "" {
 			// Fallback (§3.5): deployments without the session-title projection
@@ -138,17 +264,18 @@ func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, erro
 	return out, nil
 }
 
-// loadOfficialGrouping reads workspace.list. On success, grouping maps a
-// session id to the first workspace path that lists it, and archived is the
-// registry-global archive set. A failed call returns haveGrouping=false so
-// ListSessions keeps cwd (list still works; grouping degrades).
-func loadOfficialGrouping(ctx context.Context, client *Client) (map[string]string, map[string]struct{}, bool) {
-	var val workspaceListValue
-	if err := client.Call(ctx, "workspace.list", map[string]any{}, &val); err != nil {
+// groupingFromWorkspace reads the workspace/follow cache. On ready, grouping
+// maps a session id to the first workspace path that lists it, and archived
+// is the registry-global archive set. Not ready (no baseline yet) returns
+// haveGrouping=false so ListSessions keeps cwd (list still works; grouping
+// degrades) — the same posture as the retired workspace.list failure path.
+func (a *Agent) groupingFromWorkspace() (map[string]string, map[string]struct{}, bool) {
+	items, archived, _, ready := a.ws.snapshot()
+	if !ready {
 		return nil, nil, false
 	}
 	grouping := make(map[string]string, 16)
-	for _, w := range val.Items {
+	for _, w := range items {
 		if w.Path == "" {
 			continue
 		}
@@ -162,14 +289,26 @@ func loadOfficialGrouping(ctx context.Context, client *Client) (map[string]strin
 			grouping[id] = w.Path
 		}
 	}
-	archived := make(map[string]struct{}, len(val.ArchivedSessionIds))
-	for _, id := range val.ArchivedSessionIds {
-		if id != "" {
-			archived[id] = struct{}{}
-		}
-	}
 	return grouping, archived, true
 }
+
+// pinnedFromWorkspace returns the cached official pin set in official order
+// (most recently pinned first) and whether the baseline has arrived.
+func (a *Agent) pinnedFromWorkspace() ([]string, bool) {
+	_, _, pinned, ready := a.ws.snapshot()
+	return pinned, ready
+}
+
+// officialPinOrderKey encodes the official pin-set order (most recently
+// pinned first) as a STABLE descending timestamp for the wire's
+// pinnedAtMillis sort key (iOS sorts the pinned section by pinnedAt DESC).
+// The official set carries order, not instants — the fixed base keeps the
+// encoding call-stable so re-fetches never reshuffle the section.
+func officialPinOrderKey(index int) time.Time {
+	return time.UnixMilli(dshPinnedOrderBaseMs - int64(index))
+}
+
+const dshPinnedOrderBaseMs = int64(1_000_000_000_000) // fixed 2001-09-09T01:46:40Z base
 
 // isUngroupedDirectory reports the iOS sidebar bucket for sessions that are
 // not on any workspace.sessionIds list. Create must not send it as cwd.
@@ -178,17 +317,18 @@ func isUngroupedDirectory(dir string) bool {
 }
 
 // workspaceIDForDirectory returns the official workspace id whose path matches
-// dir. Empty if workspace.list fails or no path matches — caller then sends cwd.
-func workspaceIDForDirectory(ctx context.Context, client *Client, dir string) string {
+// dir, from the workspace/follow cache. Empty when no baseline arrived yet or
+// no path matches — caller then sends cwd.
+func (a *Agent) workspaceIDForDirectory(dir string) string {
 	want := normalizeWorkspacePath(dir)
 	if want == "" {
 		return ""
 	}
-	var val workspaceListValue
-	if err := client.Call(ctx, "workspace.list", map[string]any{}, &val); err != nil {
+	items, _, _, ready := a.ws.snapshot()
+	if !ready {
 		return ""
 	}
-	for _, w := range val.Items {
+	for _, w := range items {
 		if normalizeWorkspacePath(w.Path) == want && w.WorkspaceID != "" {
 			return w.WorkspaceID
 		}
@@ -228,24 +368,35 @@ func titleFromProjections(block *apiSessionProjectionsBlock) string {
 func (a *Agent) tailReadTitle(ctx context.Context, client *Client, sessionID string) string {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	max := 12
-	var val sessionHistoryValue
-	req := sessionHistoryRequest{SessionID: sessionID, MaxMessages: &max}
-	if err := client.Call(ctx, "session.history", req, &val); err != nil {
+	head, err := headSeqOf(ctx, client, sessionID)
+	if err != nil || head < 0 {
 		return ""
 	}
-	// Rows are newest-first (beforeSeq pages backwards from the tail).
+	max := 12
+	var val sessionPageValue
+	req := sessionPageRequest{
+		Address:     sessionAddress{Kind: "session", SessionID: sessionID},
+		ThroughSeq:  head,
+		MaxMessages: &max,
+	}
+	if err := client.Call(ctx, "session/page", map[string]any{"request": req}, &val); err != nil {
+		return ""
+	}
+	// Records are journal-ordered (oldest→newest, ending at the page cut);
+	// scan newest-first to prefer the most recent title/message.
 	lastUser := ""
-	for _, row := range val.Events {
-		switch row.Event.Type {
+	events := pageEvents(val.Records)
+	for i := len(events) - 1; i >= 0; i-- {
+		row := events[i]
+		switch row.Type {
 		case "session/title":
 			var d dshTitleData
-			if json.Unmarshal(row.Event.Data, &d) == nil && strings.TrimSpace(d.Title) != "" {
+			if json.Unmarshal(row.Data, &d) == nil && strings.TrimSpace(d.Title) != "" {
 				return truncateTitle(d.Title)
 			}
 		case "user/message":
 			var d dshUserMessageData
-			if json.Unmarshal(row.Event.Data, &d) == nil && (d.Source == nil || d.Source.Kind == "user") {
+			if json.Unmarshal(row.Data, &d) == nil && (d.Source == nil || d.Source.Kind == "user") {
 				if text := strings.TrimSpace(joinTextBlocks(d.Content)); text != "" && lastUser == "" {
 					lastUser = text
 				}
@@ -297,7 +448,7 @@ func (a *Agent) RenameSession(ctx context.Context, sessionID, title string) (*co
 		return nil, err
 	}
 	var val sessionRenameValue
-	if err := client.Call(ctx, "session.rename", sessionRenameRequest{SessionID: sessionID, Title: title}, &val); err != nil {
+	if err := client.Call(ctx, "session/rename", map[string]any{"request": sessionRenameRequest{SessionID: sessionID, Title: title}}, &val); err != nil {
 		return nil, err // *RPCError carries the official title-invalid text verbatim
 	}
 	info := core.AgentSessionInfo{
@@ -308,24 +459,39 @@ func (a *Agent) RenameSession(ctx context.Context, sessionID, title string) (*co
 	return &info, nil
 }
 
-// ── SessionPinner (§4.3.1 ♻️ bridge pin index) ─────────────────────────────
+// ── SessionPinner (S5, OD-1=A: official workspace pin set) ────────────────
 
 const dshWebPinBackendID = BackendID
 
-// SetSessionPinned implements core.SessionPinner (bridge-owned pin index,
-// opencode pattern; summary enrichment stays in go-bridge handlers).
-func (a *Agent) SetSessionPinned(_ context.Context, sessionID, directory string, pinned bool, pinnedAt time.Time) (*core.SessionPin, error) {
-	if a.pinStore == nil {
-		return nil, pinstore.ErrStoreUnavailable
+// SetSessionPinned implements core.SessionPinner against the OFFICIAL
+// registry-global pin set (workspace/pinSession / unpinSession — A5 live
+// evidence: most-recently-pinned-first order, idempotent unpin,
+// session/not-found for unknown ids verbatim). The retired bridge-local
+// pinStore path kept iOS and the Mac web sidebar in disagreement; the
+// official set is the single truth both surfaces mutate. pinnedAt is
+// accepted for the returned pin envelope only — the official set stores
+// order, not instants (ListSessions encodes order as pinnedAtMillis).
+func (a *Agent) SetSessionPinned(ctx context.Context, sessionID, directory string, pinned bool, pinnedAt time.Time) (*core.SessionPin, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, fmt.Errorf("dsh-web: pin session: empty session id")
 	}
-	if pinned && pinnedAt.IsZero() {
-		pinnedAt = time.Now().UTC()
+	client, err := a.clientFor(ctx)
+	if err != nil {
+		return nil, err
 	}
-	if err := a.pinStore.SetPinned(dshWebPinBackendID, pinScope(directory), sessionID, directory, pinned, pinnedAt); err != nil {
+	method := "workspace/unpinSession"
+	if pinned {
+		method = "workspace/pinSession"
+	}
+	if err := client.Call(ctx, method, map[string]any{
+		"request": map[string]any{"sessionId": sessionID}}, nil); err != nil {
 		return nil, err
 	}
 	if !pinned {
 		return nil, nil
+	}
+	if pinnedAt.IsZero() {
+		pinnedAt = time.Now().UTC()
 	}
 	return &core.SessionPin{
 		BackendID: dshWebPinBackendID,
@@ -335,26 +501,85 @@ func (a *Agent) SetSessionPinned(_ context.Context, sessionID, directory string,
 	}, nil
 }
 
-// ListPinnedSessions returns identity-only pins across all directories.
+// ListPinnedSessions returns the official pin set in official order (most
+// recently pinned first). PinnedAt is the stable order encoding — the
+// official set carries no instants. Not ready (no baseline yet) returns an
+// empty list rather than an error: the pin set is grouping state, and the
+// next baseline refresh repopulates it.
 func (a *Agent) ListPinnedSessions(_ context.Context) ([]core.SessionPin, error) {
-	if a.pinStore == nil {
-		return nil, pinstore.ErrStoreUnavailable
+	pinned, ready := a.pinnedFromWorkspace()
+	if !ready || len(pinned) == 0 {
+		return []core.SessionPin{}, nil
 	}
-	entries := a.pinStore.List(dshWebPinBackendID)
-	out := make([]core.SessionPin, 0, len(entries))
-	for _, e := range entries {
-		out = append(out, e.ToPin())
+	out := make([]core.SessionPin, 0, len(pinned))
+	for i, id := range pinned {
+		out = append(out, core.SessionPin{
+			BackendID: dshWebPinBackendID,
+			SessionID: id,
+			PinnedAt:  officialPinOrderKey(i),
+		})
 	}
 	return out, nil
 }
 
-func pinScope(directory string) string {
-	d := strings.TrimSpace(directory)
-	return d // dsh sessions are not directory-scoped on the wire; keep the hint raw
+// ── SessionArchiver / SessionUnarchiver (S5, OD-1=A: official archive set) ─
+
+// ArchiveSession implements core.SessionArchiver against the official
+// registry-global archive set (workspace/archiveSession). stopActivity:true
+// mirrors the only official archive form that succeeds for active sessions
+// (A5 live evidence: plain archive of an active session fails with
+// workspace/session-active verbatim); the bridge's archive verb is the
+// user's intent to remove the row, so the turn stops. Errors pass through
+// verbatim (session/not-found).
+func (a *Agent) ArchiveSession(ctx context.Context, sessionID string, archivedAt time.Time) (*core.AgentSessionInfo, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, fmt.Errorf("dsh-web: archive session: empty session id")
+	}
+	client, err := a.clientFor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := client.Call(ctx, "workspace/archiveSession", map[string]any{
+		"request": map[string]any{"sessionId": sessionID, "stopActivity": true}}, nil); err != nil {
+		return nil, err
+	}
+	if archivedAt.IsZero() {
+		archivedAt = time.Now().UTC()
+	}
+	return &core.AgentSessionInfo{
+		ID:         sessionID,
+		ArchivedAt: archivedAt.UTC(),
+		Summary:    a.tailReadTitle(ctx, client, sessionID),
+	}, nil
+}
+
+// UnarchiveSession implements core.SessionUnarchiver against the official
+// archive set (workspace/unarchiveSession — A5 live evidence: idempotent,
+// unknown/not-archived ids succeed as no-ops, response is the complete
+// resulting set). The row reappears via the ws archived increment → catalog
+// refresh on the next list.
+func (a *Agent) UnarchiveSession(ctx context.Context, sessionID string) (*core.AgentSessionInfo, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, fmt.Errorf("dsh-web: unarchive session: empty session id")
+	}
+	client, err := a.clientFor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := client.Call(ctx, "workspace/unarchiveSession", map[string]any{
+		"request": map[string]any{"sessionId": sessionID}}, nil); err != nil {
+		return nil, err
+	}
+	return &core.AgentSessionInfo{
+		ID:      sessionID,
+		Summary: a.tailReadTitle(ctx, client, sessionID),
+	}, nil
 }
 
 var _ core.SessionPinner = (*Agent)(nil)
 var _ core.SessionRenamer = (*Agent)(nil)
+var _ core.SessionArchiver = (*Agent)(nil)
+var _ core.SessionUnarchiver = (*Agent)(nil)
 var _ core.RunningSessionLister = (*Agent)(nil)
 
 // SupportsRecentCatalog opts dsh-web into the `catalogView:"recent"` session-list

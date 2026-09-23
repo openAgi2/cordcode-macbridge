@@ -68,6 +68,7 @@
 		E75CD0B17C760CD64FA50E8F /* ManagementV1ProducerFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07A6B4332BC9879A154F32C8 /* ManagementV1ProducerFixtureTests.swift */; };
 		E92AEC04CA61D9B409B7F1E1 /* ManagementV1Codec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3FA4E481B8955CF8BAEA716 /* ManagementV1Codec.swift */; };
 		F0BA3AADB88EAA595F1170B1 /* GrokLeaderModeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3661756B00BD4739BA2FAEDA /* GrokLeaderModeManager.swift */; };
+		F1FD5C65345772C9F7CD517C /* DeepSeekSeatActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900677CF6D3E59B87C89BEC1 /* DeepSeekSeatActionTests.swift */; };
 		F2C2A5C336B3D22C91BE32D7 /* ManagementV1CodecTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49E751A7558843194506DCEC /* ManagementV1CodecTests.swift */; };
 		F58F901D587D8FF0447D960F /* RemoteAccessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2988639F5FD9CE1DC59A5338 /* RemoteAccessView.swift */; };
 		F5C384531F1D839395BC5B28 /* DeviceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD67C512C0B1389963658BDF /* DeviceStore.swift */; };
@@ -117,6 +118,7 @@
 		7A30F1DC335ECE32B9287C2D /* ManagementAPIClientRevokeDecodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementAPIClientRevokeDecodeTests.swift; sourceTree = "<group>"; };
 		816D0925391B834EE9F44199 /* LayoutConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutConstants.swift; sourceTree = "<group>"; };
 		8197EF3067C37980C65B8B65 /* TopologyMonitorStatusStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopologyMonitorStatusStore.swift; sourceTree = "<group>"; };
+		900677CF6D3E59B87C89BEC1 /* DeepSeekSeatActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepSeekSeatActionTests.swift; sourceTree = "<group>"; };
 		907DBA7297AA1E62F927C199 /* OpenCodeManagedServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeManagedServer.swift; sourceTree = "<group>"; };
 		9161FDEC7C3FB55BE3EB3CA6 /* AccessibilityPolishTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityPolishTests.swift; sourceTree = "<group>"; };
 		925DD08E60CAB8D17159E176 /* AppDependenciesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDependenciesTests.swift; sourceTree = "<group>"; };
@@ -230,6 +232,7 @@
 				9161FDEC7C3FB55BE3EB3CA6 /* AccessibilityPolishTests.swift */,
 				925DD08E60CAB8D17159E176 /* AppDependenciesTests.swift */,
 				E18C638B10992A839E98CC26 /* ConnectionStatusSheetTests.swift */,
+				900677CF6D3E59B87C89BEC1 /* DeepSeekSeatActionTests.swift */,
 				974E6D4F31954BBCE23287AF /* DeviceStoreTests.swift */,
 				11D8DA34EB3F19A2A8810355 /* DiagnosticsSheetTests.swift */,
 				55AD0E5417D58D858A510711 /* GrokLeaderModeTests.swift */,
@@ -433,6 +436,7 @@
 				E2D2328FD64A84D10BB2789D /* AccessibilityPolishTests.swift in Sources */,
 				6488DF459B5AA8758BD052D5 /* AppDependenciesTests.swift in Sources */,
 				873B6481F86EECA0D44F3698 /* ConnectionStatusSheetTests.swift in Sources */,
+				F1FD5C65345772C9F7CD517C /* DeepSeekSeatActionTests.swift in Sources */,
 				AFEC8A31F38FA1DBCF600898 /* DeviceStoreTests.swift in Sources */,
 				C391C7E4C937E896A9A97002 /* DiagnosticsSheetTests.swift in Sources */,
 				F8A16AA29D8179DD134B5A26 /* GrokLeaderModeTests.swift in Sources */,

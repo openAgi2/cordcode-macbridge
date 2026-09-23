@@ -1,0 +1,189 @@
+{
+ "captured_at": "2026-09-23T21:22:40+08:00",
+ "probes": {
+  "seat session/create (throwaway)": {
+   "ok": true,
+   "sessionId": "session-…(truncated)"
+  },
+  "bridge hello_ack": {
+   "ok": true,
+   "bridgeEpoch": "6e6040fd-77c2-44d8-bae1-03ba9688b19a"
+  },
+  "bridge send_message turn1": {
+   "ok": true,
+   "error": null
+  },
+  "seat session/prompt P2 queued (external surface)": {
+   "ok": true,
+   "note": "Mac-web-equivalent path: the bridge send slot makes bridge-originated queueing impossible by design"
+  },
+  "P2 placeholder user_message pending:true": {
+   "itemId": "2f3f3d96-110d-4ce6-ac75-60ba0030ac8f",
+   "pending": true,
+   "text": "S3 regression pure-removal message — queued then removed, never settled"
+  },
+  "bridge update_session_queue remove P2 (real itemId)": {
+   "ok": true,
+   "error": null
+  },
+  "P2 user_message_removed (pure removal)": {
+   "itemId": "2f3f3d96-110d-4ce6-ac75-60ba0030ac8f"
+  },
+  "seat session/prompt P3 queued (claim path)": {
+   "ok": true
+  },
+  "P3 placeholder user_message pending:true": {
+   "itemId": "93af8a4a-46f5-4594-a875-c675435ac2c9",
+   "pending": true,
+   "text": "S3 regression claim-path message — placeholder removed then settled in place"
+  },
+  "P3 user_message_removed (claim)": {
+   "itemId": "93af8a4a-46f5-4594-a875-c675435ac2c9"
+  },
+  "P3 user_message settled (same id, real turn)": {
+   "itemId": "93af8a4a-46f5-4594-a875-c675435ac2c9",
+   "text": "S3 regression claim-path message — placeholder removed then settled in place",
+   "turnId": "dshw-session-1380-t2"
+  },
+  "bridge update_session_queue (bogus itemId → official verbatim)": {
+   "ok": null,
+   "error": null
+  },
+  "mgmt devices/revoke (probe device)": {
+   "ok": true
+  },
+  "seat archiveSession stopActivity:true": {
+   "ok": true,
+   "archived_membership": true
+  }
+ },
+ "event_census": {
+  "session_state_changed": {
+   "count": 2,
+   "itemIds": []
+  },
+  "user_message": {
+   "count": 5,
+   "itemIds": [
+    "071b01c8",
+    "071b01c8",
+    "2f3f3d96",
+    "93af8a4a",
+    "93af8a4a"
+   ]
+  },
+  "turn_started": {
+   "count": 2,
+   "itemIds": []
+  },
+  "user_message_removed": {
+   "count": 3,
+   "itemIds": [
+    "071b01c8",
+    "2f3f3d96",
+    "93af8a4a"
+   ]
+  },
+  "sessions_changed": {
+   "count": 2,
+   "itemIds": []
+  },
+  "turn_completed": {
+   "count": 1,
+   "itemIds": []
+  }
+ },
+ "ordered_timeline": [
+  {
+   "event": "session_state_changed",
+   "itemId": "",
+   "pending": false,
+   "text": ""
+  },
+  {
+   "event": "user_message",
+   "itemId": "071b01c8",
+   "pending": true,
+   "text": "Write a 400-word essay about the tide."
+  },
+  {
+   "event": "turn_started",
+   "itemId": "",
+   "pending": false,
+   "text": ""
+  },
+  {
+   "event": "user_message_removed",
+   "itemId": "071b01c8",
+   "pending": false,
+   "text": ""
+  },
+  {
+   "event": "user_message",
+   "itemId": "071b01c8",
+   "pending": false,
+   "text": "Write a 400-word essay about the tide."
+  },
+  {
+   "event": "user_message",
+   "itemId": "2f3f3d96",
+   "pending": true,
+   "text": "S3 regression pure-removal message — queued then"
+  },
+  {
+   "event": "user_message_removed",
+   "itemId": "2f3f3d96",
+   "pending": false,
+   "text": ""
+  },
+  {
+   "event": "user_message",
+   "itemId": "93af8a4a",
+   "pending": true,
+   "text": "S3 regression claim-path message — placeholder r"
+  },
+  {
+   "event": "turn_completed",
+   "itemId": "",
+   "pending": false,
+   "text": ""
+  },
+  {
+   "event": "session_state_changed",
+   "itemId": "",
+   "pending": false,
+   "text": ""
+  },
+  {
+   "event": "turn_started",
+   "itemId": "",
+   "pending": false,
+   "text": ""
+  },
+  {
+   "event": "user_message_removed",
+   "itemId": "93af8a4a",
+   "pending": false,
+   "text": ""
+  },
+  {
+   "event": "user_message",
+   "itemId": "93af8a4a",
+   "pending": false,
+   "text": "S3 regression claim-path message — placeholder r"
+  }
+ ],
+ "id_continuity": {
+  "ids": {
+   "p2_placeholder": "2f3f3d96-110d-4ce6-ac75-60ba0030ac8f",
+   "p2_removed": "2f3f3d96-110d-4ce6-ac75-60ba0030ac8f",
+   "p3_placeholder": "93af8a4a-46f5-4594-a875-c675435ac2c9",
+   "p3_removed": "93af8a4a-46f5-4594-a875-c675435ac2c9",
+   "p3_settle": "93af8a4a-46f5-4594-a875-c675435ac2c9"
+  },
+  "P2_PURE_REMOVAL": true,
+  "P3_CLAIM_CONTINUITY": true
+ },
+ "coverage_note": "raw timeline path proven live on a non-sync-v2 connection; the sync-v2 projection_patch path (pending placeholder turn + removedTurnIds) is covered by go-bridge unit tests (projection_inbox_test.go)",
+ "sanitization": "probe-authored texts verbatim; session id truncated; tokens/cookie never printed"
+}

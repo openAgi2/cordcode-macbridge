@@ -27,6 +27,10 @@ func terminateProcessGroup(cmd *exec.Cmd) error {
 var _ = time.Second // keep time imported for future pacing parity
 var _ = syscall.SIGTERM
 
+// killProcessGroupNoWait is the windows no-op: process groups are a unix
+// concept, and exec.CommandContext already killed the direct child.
+func killProcessGroupNoWait(pid int) {}
+
 // processCommandLine is the windows placeholder: tasklist-based matching is
 // not wired; the legacy cleanup falls back to warn-and-remove (never a wrong
 // kill).

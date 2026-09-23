@@ -1,0 +1,104 @@
+{
+ "captured_at": "2026-09-23T19:33:08+08:00",
+ "seat": "127.0.0.1:3080 (dsh 0.1.7-alpha.1 production)",
+ "probes": {
+  "session/create": {
+   "ok": true,
+   "sessionId": "session-…(truncated)"
+  },
+  "prompt image part (wire request shape)": {
+   "method": "session/prompt",
+   "args.request": {
+    "requestId": "req-a4a-img",
+    "sessionId": "session-…",
+    "mode": "queue",
+    "content": [
+     {
+      "type": "text",
+      "text": "Describe the attached image in one sentence."
+     },
+     {
+      "type": "image",
+      "mediaType": "image/png",
+      "data": "<canonical base64 PNG, 100 chars, omitted>",
+      "name": "probe-red.png"
+     }
+    ]
+   },
+   "source_anchor": "session-controller/src/types.ts:89-96 PromptContentPart"
+  },
+  "session/prompt with image part (response)": {
+   "http": 200,
+   "result": {
+    "ok": true,
+    "value": {
+     "accepted": true
+    }
+   }
+  },
+  "journal user/message image block (admitted)": {
+   "seq": 8,
+   "block": {
+    "type": "image",
+    "attachment": {
+     "attachmentId": "sha256:06f0c5e9c11994cd621753b2621dcd2270e7d9e78473603964dd3fcb4889f2e5",
+     "mediaType": "image/png",
+     "width": 8,
+     "height": 8,
+     "bytes": 74,
+     "name": "probe-red.png"
+    }
+   },
+   "source_anchor": "attachment/index.ts:114-129 admitPromptContent → ImageAttachmentRef (attachment/src/types.ts:11-32)"
+  },
+  "session/attachment read (positive)": {
+   "http": 200,
+   "attachment": {
+    "attachmentId": "sha256:06f0c5e9c11994cd621753b2621dcd2270e7d9e78473603964dd3fcb4889f2e5",
+    "mediaType": "image/png",
+    "width": 8,
+    "height": 8,
+    "bytes": 74,
+    "name": "probe-red.png"
+   },
+   "data": "<base64 omitted, 100 chars>",
+   "decodes_to_png": true,
+   "decoded_bytes": 74,
+   "ref_bytes_matches_decoded": true,
+   "source_anchor": "commands.ts:392-419 attachment + referencedImage :683-692"
+  },
+  "session/attachment read (repeat/reopen)": {
+   "http": 200,
+   "ok": true
+  },
+  "session/attachment (bogus attachmentId → official verbatim)": {
+   "http": 200,
+   "result": {
+    "ok": false,
+    "error": {
+     "code": "session/attachment-invalid",
+     "message": "Image is not referenced by this session.",
+     "details": {
+      "reason": "ATTACHMENT_NOT_REFERENCED"
+     }
+    }
+   },
+   "expect": "session/attachment-invalid ATTACHMENT_NOT_REFERENCED (commands.ts:406-411)"
+  },
+  "session/prompt (non-canonical base64 → official verbatim)": {
+   "http": 200,
+   "result": {
+    "ok": false,
+    "error": {
+     "code": "session/attachment-invalid",
+     "message": "Image upload is not canonical base64.",
+     "details": {
+      "reason": "INVALID_IMAGE_BASE64"
+     }
+    }
+   },
+   "expect": "session/attachment-invalid INVALID_IMAGE_BASE64 (admission.ts:20-27 decodeCanonicalBase64)"
+  }
+ },
+ "sanitization": "probe-authored texts verbatim; base64 payloads and opaque ids omitted; session ids truncated; cookie never printed"
+}

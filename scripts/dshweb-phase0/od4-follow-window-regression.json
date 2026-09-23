@@ -1,0 +1,29 @@
+{
+ "captured_at": "2026-09-23T21:22:07+08:00",
+ "probes": {
+  "snapshot thresholds": {
+   "records": 36,
+   "records_le_500": true,
+   "json_bytes": 77544,
+   "json_le_2MiB": true,
+   "decode_ms_runs": [
+    0.2,
+    0.3,
+    0.3
+   ],
+   "decode_p95_ms_proxy": 0.3,
+   "decode_le_500ms": true,
+   "has_more": false,
+   "wire_request": {
+    "maxMessages": 500,
+    "turnWindow": {
+     "minMessages": 50,
+     "minTurns": 2
+    },
+    "assistantStream": true
+   },
+   "source_anchor": "client/sessions/session.ts:54 HISTORY_PAGE_OPTIONS + :631 events.open"
+  }
+ },
+ "sanitization": "probe-authored texts verbatim; session ids never printed; cookie never printed"
+}

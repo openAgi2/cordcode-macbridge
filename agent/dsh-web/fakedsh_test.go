@@ -1,31 +1,37 @@
 package dshweb
 
-// Fake dsh web API server for unit tests. Faithfully mirrors the carrier
-// contract from the dsh source (packages/host/apiproxy/src/fetch/handler.ts +
-// packages/client/connection/src/{index.ts,websocket-downlink.ts}), pinned at
-// 47f9438:
+// Fake dsh web API server for unit tests. Faithfully mirrors the typert
+// gateway carrier contract (upstream 0d1f50007f: packages/client/connection/
+// src/{rpc.ts,rpc-host.ts} + packages/api/gateway/src/{index.ts,
+// stream-protocol.ts}; live-probed against 0.1.7-alpha.1 2026-09-23):
 //
 //   - POST /api/<method>: content-type must be application/json (else 415),
 //     body must parse as JSON (else 400), body must be a ClientRequest
 //     envelope whose method matches the path (else HTTP 200 + bad-request
 //     ServerResponse), business failures are ALWAYS HTTP 200 +
 //     result:{ok:false,error}.
-//   - POST /api/respond: ClientResponse envelope → receipt
-//     {accepted:true} | {accepted:false,reason}.
-//   - GET /api/events.mux | /api/events.host: without WS upgrade headers →
-//     426 Upgrade Required; with upgrade → pushed server-request frames
-//     (downlink only; any client message closes 1008).
+//   - POST /api/$events/result: ClientRequest envelope with method
+//     "$events/result"; the args {clientId,eventId,outcome} are recorded and
+//     answered result:{ok:true} (or a scripted error — the answered-elsewhere
+//     path).
+//   - GET /api/remote.mux: without WS upgrade headers → 404 (the gateway
+//     registers an upgrade route); with upgrade → the logical-stream mux:
+//     client `open` frames are routed by streamId ("events" → ready + the
+//     scripted $events frames; "ws" → the workspace baseline; "f:<sid>" →
+//     the session's follow snapshot + events), each pushed as one
+//     {type:"item",streamId,value} frame.
 //
-// Method behavior is scripted per test via the handlers map.
+// Method behavior is scripted per test via the handlers map (slash-method
+// keys, e.g. "session/list").
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -37,6 +43,13 @@ type fakeRPCResponse struct {
 	// err, when non-nil, is served as result:{ok:false,error} — the business
 	// error branch (HTTP 200).
 	err *RPCError
+}
+
+// fakeFollowScript is one session's scripted follow stream: the opening
+// snapshot plus its live event items (each a pageRecord map).
+type fakeFollowScript struct {
+	snapshot map[string]any
+	items    []any
 }
 
 // fakeDSHServer is a scripted dsh web /api gateway.
@@ -62,22 +75,47 @@ type fakeDSHServer struct {
 		list []recordedRequest
 	}
 
-	// lastRespond records the most recent /api/respond body.
-	lastRespond struct {
+	// lastEventResult records the most recent /api/$events/result args.
+	lastEventResult struct {
 		mu   sync.Mutex
-		body []byte
+		args eventResultArgs
 	}
 
-	// muxFrames are pushed to every events.mux subscriber on connect.
-	muxFrames []any
-	// hostFrames are pushed to every events.host subscriber on connect.
-	hostFrames []any
-	// closeAfterPush closes each stream socket after pushing its frames
-	// (reconnect-path tests); false keeps streams open.
+	// eventResults records every $events/result args seen, in order.
+	eventResults struct {
+		mu   sync.Mutex
+		list []eventResultArgs
+	}
+
+	// eventsFrames are pushed as $events items after the ready frame (each a
+	// remoteEventFrame-shaped map: emit/waterfall/cancel).
+	eventsFrames []any
+	// eventResultErr, when set, is the business error answered to every
+	// $events/result (the answered-elsewhere path).
+	eventResultErr *RPCError
+	// wsBaseline is pushed as the "ws" stream's baseline item.
+	wsBaseline *workspaceBaseline
+	// followScripts scripts per-session follow streams by session id.
+	followScripts map[string]fakeFollowScript
+	// followOpens records each follow open's payload by session id.
+	followOpens struct {
+		mu   sync.Mutex
+		byID map[string]json.RawMessage
+	}
+	// closeAfterPush closes the mux socket after pushing a stream's frames
+	// (reconnect-path tests); false keeps the socket open.
 	closeAfterPush bool
 
 	// upgradeRequests counts WS dials seen per path.
 	upgradeSeen map[string]int
+
+	// upload scripts the next raw uploadFileBinary response (S4); uploads
+	// records every raw upload seen.
+	upload  uploadScript
+	uploads struct {
+		mu   sync.Mutex
+		list []recordedUpload
+	}
 
 	mu sync.Mutex
 }
@@ -97,14 +135,15 @@ type testingT interface {
 
 func newFakeDSHServer(t testingT) *fakeDSHServer {
 	f := &fakeDSHServer{
-		t:           t,
-		handlers:    map[string]fakeRPCResponse{},
-		hooks:       map[string]func(payload []byte) fakeRPCResponse{},
-		upgradeSeen: map[string]int{},
+		t:             t,
+		handlers:      map[string]fakeRPCResponse{},
+		hooks:         map[string]func(payload []byte) fakeRPCResponse{},
+		upgradeSeen:   map[string]int{},
+		followScripts: map[string]fakeFollowScript{},
 	}
+	f.followOpens.byID = map[string]json.RawMessage{}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/", f.handleAPI)
-	mux.HandleFunc("/api/respond", f.handleRespond)
 	f.server = httptest.NewServer(mux)
 	return f
 }
@@ -113,17 +152,98 @@ func (f *fakeDSHServer) URL() string { return f.server.URL }
 
 func (f *fakeDSHServer) Close() { f.server.Close() }
 
-// handleAPI routes both unary POSTs and the two event-stream GETs.
+// uploadScript scripts the raw upload route's next response (S4 tests).
+type uploadScript struct {
+	// receipt, when non-empty, is served as {ok:true, value:{receiptId, file}}.
+	receipt string
+	// err, when non-nil, is served as {ok:false, error}.
+	err *RPCError
+	// httpStatus, when non-200, is served with plainText as the body (the
+	// raw route's carrier rejections: 415/400).
+	httpStatus int
+	plainText  string
+}
+
+// handleUploadFileBinary mirrors the official raw byte route
+// (file-upload/src/http-route.ts:22-60): octet-stream only, sessionId query
+// required, FileUploadHttpResult JSON envelope.
+func (f *fakeDSHServer) handleUploadFileBinary(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	script := f.upload
+	f.upload = uploadScript{}
+	f.mu.Unlock()
+
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "", http.StatusMethodNotAllowed)
+		return
+	}
+	if mt := r.Header.Get("Content-Type"); !strings.HasPrefix(strings.ToLower(strings.TrimSpace(strings.Split(mt, ";")[0])), "application/octet-stream") {
+		http.Error(w, "content type must be application/octet-stream", http.StatusUnsupportedMediaType)
+		return
+	}
+	sessionID := r.URL.Query().Get("sessionId")
+	if sessionID == "" {
+		http.Error(w, "sessionId is required", http.StatusBadRequest)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+	if err != nil {
+		http.Error(w, "read error", http.StatusBadRequest)
+		return
+	}
+	f.uploads.mu.Lock()
+	f.uploads.list = append(f.uploads.list, recordedUpload{
+		sessionID: sessionID,
+		name:      r.URL.Query().Get("name"),
+		data:      append([]byte(nil), body...),
+	})
+	f.uploads.mu.Unlock()
+
+	if script.httpStatus != 0 {
+		http.Error(w, script.plainText, script.httpStatus)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if script.err != nil {
+		_ = json.NewEncoder(w).Encode(fileUploadHttpResult{OK: false, Error: script.err})
+		return
+	}
+	fileRef := struct {
+		AttachmentID string `json:"attachmentId"`
+		Name         string `json:"name"`
+		Bytes        int64  `json:"bytes"`
+	}{
+		AttachmentID: "sha256:" + hex.EncodeToString([]byte("fake-digest-"+script.receipt)),
+		Name:         "uploaded.bin",
+		Bytes:        int64(len(body)),
+	}
+	_ = json.NewEncoder(w).Encode(fileUploadHttpResult{OK: true, Value: &fileUploadValue{ReceiptID: script.receipt, File: fileRef}})
+}
+
+// recordedUpload is one captured raw upload.
+type recordedUpload struct {
+	sessionID string
+	name      string
+	data      []byte
+}
+
+// handleAPI routes unary POSTs, the $events/result RPC, the raw
+// uploadFileBinary byte route, and the remote.mux upgrade (all under /api/).
 func (f *fakeDSHServer) handleAPI(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/api/events.mux" || r.URL.Path == "/api/events.host" {
-		f.handleEvents(w, r)
+	if r.URL.Path == remoteMuxPath {
+		f.handleRemoteMux(w, r)
+		return
+	}
+	if r.URL.Path == "/api/session/uploadFileBinary" {
+		f.handleUploadFileBinary(w, r)
 		return
 	}
 	if r.Method != http.MethodPost || !strings.HasPrefix(r.URL.Path, "/api/") {
 		http.NotFound(w, r)
 		return
 	}
-	// Media-type fence (fetch/handler.ts: only application/json).
+	// Media-type fence (rpc-host.ts: only application/json).
 	if mt := r.Header.Get("Content-Type"); !strings.HasPrefix(strings.ToLower(strings.TrimSpace(strings.Split(mt, ";")[0])), "application/json") {
 		http.Error(w, "content type must be application/json", http.StatusUnsupportedMediaType)
 		return
@@ -142,7 +262,7 @@ func (f *fakeDSHServer) handleAPI(w http.ResponseWriter, r *http.Request) {
 	if err := json.Unmarshal(body, &env); err != nil || env.Type != "client-request" {
 		writeServerResponse(w, "invalid-request", rpcResultBody{
 			OK:    false,
-			Error: &RPCError{Code: "bad-request", Message: "invalid client-request message", Details: json.RawMessage(`{"issues":[]}`)},
+			Error: &RPCError{Code: "gateway/bad-request", Message: "invalid client-request message", Details: json.RawMessage(`{"issues":[]}`)},
 		})
 		return
 	}
@@ -150,7 +270,7 @@ func (f *fakeDSHServer) handleAPI(w http.ResponseWriter, r *http.Request) {
 	if env.Method != method {
 		writeServerResponse(w, env.RPCID, rpcResultBody{
 			OK:    false,
-			Error: &RPCError{Code: "bad-request", Message: "method \"" + env.Method + "\" does not match path \"" + method + "\"", Details: json.RawMessage(`{"issues":[]}`)},
+			Error: &RPCError{Code: "gateway/bad-request", Message: `method "` + env.Method + `" does not match endpoint "` + method + `"`, Details: json.RawMessage(`{"issues":[]}`)},
 		})
 		return
 	}
@@ -163,6 +283,15 @@ func (f *fakeDSHServer) handleAPI(w http.ResponseWriter, r *http.Request) {
 	f.requests.list = append(f.requests.list, recordedRequest{method: env.Method, payload: env.Payload})
 	f.requests.mu.Unlock()
 
+	if method == "$events/result" {
+		f.recordEventResult(env.Payload)
+		if f.eventResultErr != nil {
+			writeServerResponse(w, env.RPCID, rpcResultBody{OK: false, Error: f.eventResultErr})
+			return
+		}
+		writeServerResponse(w, env.RPCID, rpcResultBody{OK: true})
+		return
+	}
 	if hook, ok := f.hooks[env.Method]; ok {
 		scripted := hook(env.Payload)
 		if scripted.err != nil {
@@ -174,8 +303,9 @@ func (f *fakeDSHServer) handleAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	scripted, ok := f.handlers[method]
 	if !ok {
-		// Unknown-but-valid path: mirror the real registry's 404 for methods
-		// outside RpcMethodMap (only used when a test dials an unmapped one).
+		// Unknown-but-valid path: mirror the gateway's 404 for endpoints no
+		// interceptor claims (claimsEndpoint: two slash segments or the
+		// $events/result escape).
 		http.NotFound(w, r)
 		return
 	}
@@ -186,102 +316,155 @@ func (f *fakeDSHServer) handleAPI(w http.ResponseWriter, r *http.Request) {
 	writeServerResponse(w, env.RPCID, rpcResultBody{OK: true, Value: mustJSON(scripted.value)})
 }
 
-func (f *fakeDSHServer) handleRespond(w http.ResponseWriter, r *http.Request) {
-	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-	f.lastRespond.mu.Lock()
-	f.lastRespond.body = append([]byte(nil), body...)
-	f.lastRespond.mu.Unlock()
-	f.requests.mu.Lock()
-	f.requests.list = append(f.requests.list, recordedRequest{method: "/api/respond", payload: body})
-	f.requests.mu.Unlock()
-
-	var env struct {
-		Type   string        `json:"type"`
-		RPCID  string        `json:"rpcId"`
-		Result rpcResultBody `json:"result"`
+// recordEventResult captures one $events/result args body (the payload's
+// single-args envelope, same fence as the real gateway).
+func (f *fakeDSHServer) recordEventResult(payload json.RawMessage) {
+	var envelope struct {
+		Args json.RawMessage `json:"args"`
 	}
-	if err := json.Unmarshal(body, &env); err != nil || env.Type != "client-response" {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(respondReceipt{Accepted: false, Reason: "bad-response"})
-		return
+	_ = json.Unmarshal(payload, &envelope)
+	var args eventResultArgs
+	if len(envelope.Args) > 0 {
+		_ = json.Unmarshal(envelope.Args, &args)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(respondReceipt{Accepted: true})
+	f.lastEventResult.mu.Lock()
+	f.lastEventResult.args = args
+	f.lastEventResult.mu.Unlock()
+	f.eventResults.mu.Lock()
+	f.eventResults.list = append(f.eventResults.list, args)
+	f.eventResults.mu.Unlock()
 }
 
-// handleEvents mirrors index.ts: plain GET → 426; upgrade → push frames.
-func (f *fakeDSHServer) handleEvents(w http.ResponseWriter, r *http.Request) {
+// handleRemoteMux mirrors the gateway's logical-stream mux: upgrade, then
+// route client `open` frames by streamId and push scripted items.
+func (f *fakeDSHServer) handleRemoteMux(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.NotFound(w, r)
 		return
 	}
 	if !websocket.IsWebSocketUpgrade(r) {
-		w.Header().Set("Connection", "Upgrade")
-		w.Header().Set("Upgrade", "websocket")
-		http.Error(w, "upgrade required", http.StatusUpgradeRequired)
+		// The gateway registers an upgrade route; a plain GET never matches.
+		http.NotFound(w, r)
 		return
 	}
 	f.mu.Lock()
 	f.upgradeSeen[r.URL.Path]++
-	var frames []any
+	eventsFrames := f.eventsFrames
+	wsBaseline := f.wsBaseline
+	followScripts := f.followScripts
 	closeAfter := f.closeAfterPush
-	if r.URL.Path == "/api/events.mux" {
-		frames = f.muxFrames
-	} else {
-		frames = f.hostFrames
-	}
 	f.mu.Unlock()
 
 	conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
-	defer conn.Close()
-	// Downlink-only: any client message violates the contract (close 1008).
+	writeItem := func(streamID string, value any) bool {
+		return conn.WriteJSON(muxServerMessage{Type: "item", StreamID: streamID, Value: mustJSON(value)}) == nil
+	}
+	// Reader: route open frames; anything else is ignored.
 	go func() {
 		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
+			var msg muxClientMessage
+			if err := conn.ReadJSON(&msg); err != nil {
 				return
 			}
-			_ = conn.WriteControl(websocket.CloseMessage,
-				websocket.FormatCloseMessage(1008, "downlink only"),
-				time.Now().Add(2*time.Second))
-			return
+			if msg.Type != "open" {
+				continue
+			}
+			switch {
+			case msg.StreamID == eventsStreamID:
+				if !writeItem(eventsStreamID, map[string]any{
+					"type": "ready", "clientId": "fake-client-1", "host": map[string]any{"home": "/Users/test"},
+				}) {
+					return
+				}
+				for _, frame := range eventsFrames {
+					if !writeItem(eventsStreamID, frame) {
+						return
+					}
+				}
+				if closeAfter && len(followScripts) == 0 {
+					// Drop-after-push for tests with no follow traffic; when
+					// follow scripts exist the drop waits for their items so
+					// the demand-driven follow opens are not cut short.
+					_ = conn.Close()
+					return
+				}
+			case msg.StreamID == wsStreamID:
+				if wsBaseline != nil {
+					if !writeItem(wsStreamID, map[string]any{"type": "baseline", "value": wsBaseline}) {
+						return
+					}
+				}
+			case strings.HasPrefix(msg.StreamID, "f:"):
+				sid := strings.TrimPrefix(msg.StreamID, "f:")
+				f.followOpens.mu.Lock()
+				f.followOpens.byID[sid] = msg.Payload
+				f.followOpens.mu.Unlock()
+				script, ok := followScripts[sid]
+				if !ok {
+					_ = conn.WriteJSON(muxServerMessage{Type: "error", StreamID: msg.StreamID, Error: &RPCError{
+						Code: "session/not-found", Message: `session "` + sid + `" not found`, Details: json.RawMessage(`{}`),
+					}})
+					continue
+				}
+				if script.snapshot != nil {
+					if !writeItem(msg.StreamID, script.snapshot) {
+						return
+					}
+				}
+				for _, item := range script.items {
+					if !writeItem(msg.StreamID, item) {
+						return
+					}
+				}
+				if closeAfter {
+					_ = conn.Close()
+					return
+				}
+			}
 		}
 	}()
-	for _, frame := range frames {
-		// Every wire frame is a server-request envelope: method = payload.type.
-		env := map[string]any{
-			"type":    "server-request",
-			"rpcId":   "fake-rpc-" + r.URL.Path,
-			"method":  frame.(map[string]any)["type"],
-			"payload": frame,
-		}
-		if err := conn.WriteJSON(env); err != nil {
-			return
-		}
-	}
-	if closeAfter {
-		// Simulate a server-side drop so the client exercises its reopen path.
-		_ = conn.Close()
-		return
-	}
 	// Hold the socket open until the client closes (real server keeps the
-	// stream alive; tests close the stream themselves).
+	// mux alive; tests close the stream themselves).
 	select {}
 }
 
-// SetMuxFrames / SetHostFrames script the frames pushed on stream connect.
-func (f *fakeDSHServer) SetMuxFrames(frames []any) {
+// SetEventsFrames scripts the $events items pushed after the ready frame.
+func (f *fakeDSHServer) SetEventsFrames(frames []any) {
 	f.mu.Lock()
-	f.muxFrames = frames
+	f.eventsFrames = frames
 	f.mu.Unlock()
 }
 
-func (f *fakeDSHServer) SetHostFrames(frames []any) {
+// SetEventResultErr scripts the business error answered to $events/result.
+func (f *fakeDSHServer) SetEventResultErr(err *RPCError) {
 	f.mu.Lock()
-	f.hostFrames = frames
+	f.eventResultErr = err
 	f.mu.Unlock()
+}
+
+// SetWSBaseline scripts the workspace/follow baseline.
+func (f *fakeDSHServer) SetWSBaseline(b *workspaceBaseline) {
+	f.mu.Lock()
+	f.wsBaseline = b
+	f.mu.Unlock()
+}
+
+// SetFollowScript scripts one session's follow stream.
+func (f *fakeDSHServer) SetFollowScript(sessionID string, script fakeFollowScript) {
+	f.mu.Lock()
+	f.followScripts[sessionID] = script
+	f.mu.Unlock()
+}
+
+// FollowOpenPayload returns the recorded open payload of the session's most
+// recent follow open (nil when none was seen).
+func (f *fakeDSHServer) FollowOpenPayload(sessionID string) json.RawMessage {
+	f.followOpens.mu.Lock()
+	defer f.followOpens.mu.Unlock()
+	return f.followOpens.byID[sessionID]
 }
 
 func writeServerResponse(w http.ResponseWriter, rpcID string, result rpcResultBody) {

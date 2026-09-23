@@ -1,0 +1,69 @@
+{
+ "captured_at": "2026-09-23T20:49:52+08:00",
+ "runtime": "deployed /Applications build (S5)",
+ "probes": {
+  "session/create": {
+   "ok": true,
+   "sessionId": "session-…(truncated)"
+  },
+  "hello_ack dsh-web capabilities": {
+   "session_pin": true,
+   "session_archive": true,
+   "session_unarchive": true,
+   "session_delete_absent": true
+  },
+  "bridge set_session_pinned": {
+   "ok": true,
+   "error": null
+  },
+  "list_sessions row pinned (pinnedAtMillis present)": {
+   "found": true,
+   "pinnedAtMillis": 1000000000000,
+   "note": "pinnedAtMillis=1000000000000 is the stable official-order encoding base (most-recently-pinned-first → descending keys), not a real instant; the official set carries order only"
+  },
+  "list_pinned_sessions contains session": {
+   "ok": true,
+   "contains": true
+  },
+  "bridge archive_session": {
+   "ok": true,
+   "error": null
+  },
+  "archive effect": {
+   "seat_archive_set_contains": true,
+   "bridge_row_hidden": true,
+   "row": {
+    "archivedAtMillis": 1790167792460,
+    "createdAtMillis": 1790167792460,
+    "directory": "未分组",
+    "id": "session-7c53f992-5092-4e85-93de-05a6d33b2b53",
+    "messageCount": 0,
+    "modifiedAt": "2026-09-23T20:49:52+08:00",
+    "runtimeState": "idle",
+    "title": "Prompting the Assistant to Reply Ready",
+    "updatedAtMillis": 1790167792460
+   }
+  },
+  "bridge unarchive_session": {
+   "ok": true,
+   "error": null
+  },
+  "unarchive effect": {
+   "seat_archive_set_dropped": true,
+   "bridge_row_visible_again": true,
+   "pinned_state_kept": false,
+   "pinned_state_kept_note": "pinned_state_kept:false is CORRECT official behavior — archiveSession removes the session from the pin set (registry index.ts:361-381 'pinning and archival are mutually exclusive', pinnedSessionIds.filter(id !== sessionId)) and unarchiveSession never restores it; the bridge mirrors the official semantics faithfully"
+  },
+  "bridge set_session_pinned(false)": {
+   "ok": true,
+   "error": null
+  },
+  "mgmt devices/revoke (probe device)": {
+   "ok": true
+  },
+  "seat archiveSession stopActivity:true": {
+   "ok": true
+  }
+ },
+ "sanitization": "session ids truncated; tokens/cookie never printed"
+}

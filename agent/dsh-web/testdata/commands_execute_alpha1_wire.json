@@ -1,0 +1,27 @@
+{
+  "provenance": "sanitized verbatim copy of the commands/execute probes in scripts/dshweb-phase0/alpha1-commands-goals-wire.json (Gate A evidence, plan §2.3/§5.2 first fix item). Descriptor error text kept verbatim; cookie value was never recorded in the source file nor here. This fixture is the alpha.1 shape freeze gate for commandsExecuteArgs — a dsh upgrade that changes the descriptor must re-capture evidence and update this file, not loosen the test.",
+  "captured_at": "2026-09-23T12:32:39+08:00",
+  "seat": {
+    "listen": "127.0.0.1:3080",
+    "cli_version": "0.1.7-alpha.1"
+  },
+  "probes": {
+    "commands/execute {agentId,line,submittedAttachments:[]} (unknown cmd = official no-op admission miss)": {
+      "ok": true,
+      "value": null,
+      "note": "shape accepted; unknown command name returns null, no side effects (interaction/commands execute docstring)"
+    },
+    "commands/execute {agentId,line,images:[]}": {
+      "ok": false,
+      "error": "typert gateway: commands/execute: args fields do not match the descriptor: missing \"submittedAttachments\"; unexpected \"images\""
+    },
+    "commands/execute {agent,line,images:[]}": {
+      "ok": false,
+      "error": "typert gateway: commands/execute: args fields do not match the descriptor: missing \"agentId\", \"submittedAttachments\"; unexpected \"agent\", \"images\""
+    },
+    "commands/execute {agentId,line} (missing third param)": {
+      "ok": false,
+      "error": "typert gateway: commands/execute: args fields do not match the descriptor: missing \"submittedAttachments\""
+    }
+  }
+}

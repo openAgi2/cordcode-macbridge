@@ -1,0 +1,77 @@
+{
+  "captured_at": "2026-09-23T14:12:19+08:00",
+  "purpose": "S2 first-fix live reconcile (plan §5.2 item 1, post-review implementation): the bridge's commands/execute payload was fixed from {agentId,line,images} to {agentId,line,submittedAttachments:[]} — this capture proves the fixed shape passes the running alpha.1 seat's descriptor and that a real command settles end-to-end. All writes landed on ONE throwaway session created in /tmp/dshweb-phase0-probe and archived with stopActivity:true afterwards (§3.1 isolation); no owner session/workspace was touched.",
+  "seat": {
+    "listen": "127.0.0.1:3080",
+    "pid": 38778,
+    "started": "2026-09-23 00:34:37",
+    "command": "node /opt/homebrew/bin/dsh --profile web --host 127.0.0.1 --port 3080 --no-open",
+    "cli_version": "0.1.7-alpha.1"
+  },
+  "probes": {
+    "session/create {request:{cwd:/tmp/dshweb-phase0-probe}}": {
+      "http_status": 200,
+      "ok": true,
+      "value": {
+        "sessionId": "session-…(truncated)"
+      }
+    },
+    "commands/execute {agentId,line:/zz-s2fix-probe-noop,submittedAttachments:[]}": {
+      "http_status": 200,
+      "ok": true,
+      "value": null,
+      "note": "unknown command name → official no-op (undefined, value null); descriptor admitted the fixed shape"
+    },
+    "commands/execute {agentId,line:/plan,submittedAttachments:[]}": {
+      "http_status": 200,
+      "ok": true,
+      "value": {
+        "commandId": "cmd-560ee2f9-1",
+        "result": {
+          "kind": "success",
+          "text": "Plan mode on. Use /plan off to leave."
+        }
+      },
+      "note": "real command on the throwaway session; settle recorded verbatim"
+    },
+    "workspace/archiveSession {request:{sessionId,stopActivity:true}}": {
+      "http_status": 200,
+      "ok": true,
+      "value": {
+        "archived_membership": true,
+        "archived_count": 13
+      },
+      "note": "§3.1 closeout: throwaway session archived with stopActivity:true; response reduced to membership+count (full archivedSessionIds is owner data)"
+    }
+  },
+  "reconciliation": {
+    "pre_fix": "bridge payload {agentId,line,images} rejected by the same seat, verbatim (alpha1-commands-goals-wire.json): typert gateway: commands/execute: args fields do not match the descriptor: missing \"submittedAttachments\"; unexpected \"images\"",
+    "post_fix": "bridge payload shape {agentId,line,submittedAttachments:[]} accepted 2/2 on the live seat — 1 unknown-command official no-op (ok, value null) + 1 real /plan settle (commandId cmd-560ee2f9-1, result.kind success)",
+    "counts": "descriptor rejections before fix: 1/1 payload rejected; after fix: 0/2 rejected, 2/2 admitted, 1/2 returned a real settle"
+  },
+  "cookie_source": "bridge-persisted",
+  "sanitization": "session id truncated; cookie/secret never printed or written; archive response reduced to membership+count (full archivedSessionIds is owner data)",
+  "production_runtime_probe": {
+    "captured_at": "2026-09-23T14:33:23+08:00",
+    "purpose": "post-deploy runtime verification of the S2 first fix: a TEMPORARY locally-paired probe device (created via the management pairing flow, revoked afterwards) drove the deployed /Applications/CordCodeLink.app production runtime over its real client surface (bridge WS :8777, device-token auth). The successful execute settle is this build's unique runtime behavior — the pre-fix runtime returned execute_failed with the seat descriptor rejection on this exact path.",
+    "runtime_identity": {
+      "app_pid": 30408,
+      "runtime_pid": 30448,
+      "runtime_started": "2026-09-23 14:14:46 (later than the 14:13:18 build)",
+      "bridge_epoch": "db28e1a5-3c4e-4d11-bbf8-daf7fd2f0f55",
+      "binary": "/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime (embedded commit b4e42d5c5a9a, built 2026-09-23T06:13:18Z)"
+    },
+    "probes": {
+      "bridge hello/hello_ack": {"ok": true, "dsh-web": {"id": "dsh-web", "status": "available"}},
+      "bridge list_session_commands": {"ok": true, "command_count": 6, "names": ["compact", "export", "feedback", "goal", "permission", "plan"]},
+      "bridge execute_session_command /plan": {
+        "ok": true,
+        "data": {"commandId": "cmd-560ee2f9-2", "ok": true, "resultKind": "success", "resultText": "Plan mode on. Use /plan off to leave."},
+        "error": null
+      },
+      "cleanup": {"probe_device_revoked": true, "throwaway_session_archived": true, "archived_membership": true}
+    },
+    "log_corroboration": "go-bridge.log 14:33:23 'pairing websocket claimed' (probe deviceId) in the production log; probe window contains no new errors (two pre-existing unrelated lines: relay reconnect backoff, codex-remote not configured)",
+    "credential_hygiene": "management token, probe device token, and seat cookie read at runtime, never printed or written; probe device revoked before exit"
+  }
+}

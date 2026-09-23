@@ -1,0 +1,112 @@
+{
+ "captured_at": "2026-09-23T20:19:23+08:00",
+ "runtime": "deployed /Applications build (S4)",
+ "probes": {
+  "hello_ack dsh-web capabilities": {
+   "has_image_kind": true,
+   "has_file_kind": true,
+   "has_attachment_read": true,
+   "capabilities_sample": [
+    "session_queue_management",
+    "attachment_read",
+    "image",
+    "file"
+   ]
+  },
+  "bridge send_message with image attachment": {
+   "ok": true,
+   "error": null
+  },
+  "timeline user_message image descriptor": {
+   "attachments": [
+    {
+     "kind": "image",
+     "attachmentId": "sha256:bcdeffe7781a64c42fe63af26892ba4ebc7890c7e74661aea7e3b3a6086ca7a8",
+     "mediaType": "image/png",
+     "name": "probe-blue.png",
+     "bytes": 74,
+     "width": 8,
+     "height": 8
+    }
+   ],
+   "itemId": "4926732d-d07b-40fe-9e58-d02c4d55f886",
+   "pending": true,
+   "text": "S4 regression: describe the attached image in one short sentence."
+  },
+  "descriptor_shape_ok": true,
+  "bridge get_attachment (reverse read)": {
+   "ok": true,
+   "attachment": {
+    "kind": "image",
+    "attachmentId": "sha256:bcdeffe7781a64c42fe63af26892ba4ebc7890c7e74661aea7e3b3a6086ca7a8",
+    "mediaType": "image/png",
+    "name": "probe-blue.png",
+    "bytes": 74,
+    "width": 8,
+    "height": 8
+   },
+   "data": "<base64 omitted, 100 chars>",
+   "decodes_to_png": true,
+   "decoded_bytes": 74,
+   "ref_bytes_matches_decoded": true,
+   "attachmentId_matches_descriptor": true
+  },
+  "seat journal image block (Mac web visible)": {
+   "blocks": [
+    {
+     "attachmentId": "sha256:bcdeffe7781a64c42fe63af26892ba4ebc7890c7e74661aea7e3b3a6086ca7a8",
+     "mediaType": "image/png",
+     "width": 8,
+     "height": 8,
+     "bytes": 74,
+     "name": "probe-blue.png"
+    }
+   ],
+   "journal_id_matches_descriptor": true
+  },
+  "bridge send_message with file attachment": {
+   "ok": true,
+   "error": null
+  },
+  "timeline user_message file descriptor": {
+   "attachments": [
+    {
+     "kind": "file",
+     "attachmentId": "sha256:8ada6d39e2a377de720bd6756037eb45f150bb24d5d04c3c02ce894f600a7123",
+     "name": "s4-notes.txt",
+     "bytes": 72
+    }
+   ],
+   "itemId": "61eda422-ccd8-4cfa-9f56-80e238ef417f",
+   "pending": true,
+   "text": "S4 regression: read the attached file and quote its first line."
+  },
+  "file_descriptor_shape_ok": true,
+  "seat journal file block (Mac web visible)": {
+   "blocks": [
+    {
+     "attachmentId": "sha256:8ada6d39e2a377de720bd6756037eb45f150bb24d5d04c3c02ce894f600a7123",
+     "name": "s4-notes.txt",
+     "bytes": 72
+    }
+   ],
+   "journal_id_matches_descriptor": true,
+   "sha256_matches_body": true
+  },
+  "bridge get_attachment (bogus id → official verbatim)": {
+   "ok": false,
+   "error": {
+    "code": "attachment_read_failed",
+    "message": "dsh rpc error session/attachment-invalid: Image is not referenced by this session."
+   },
+   "expect": "attachment_read_failed carrying session/attachment-invalid ATTACHMENT_NOT_REFERENCED"
+  },
+  "mgmt devices/revoke (probe device)": {
+   "ok": true
+  },
+  "seat archiveSession stopActivity:true": {
+   "ok": true
+  }
+ },
+ "sanitization": "probe-authored texts verbatim; base64 payloads and opaque ids omitted in place; session id never printed; tokens/cookie never printed"
+}

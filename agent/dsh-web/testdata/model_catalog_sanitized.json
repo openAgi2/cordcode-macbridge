@@ -1,0 +1,111 @@
+{
+ "response": {
+  "result": {
+   "value": {
+    "default": {
+     "provider": "zai-coding-cn",
+     "model": "glm-5.3-flash"
+    },
+    "routableProviders": [
+     "zai-coding-cn",
+     "opencodego",
+     "deepseek-official"
+    ],
+    "groups": [
+     {
+      "id": "zai-coding-cn",
+      "name": "zai-coding-cn",
+      "models": [
+       {
+        "id": "glm-5.3",
+        "name": "glm-5.3",
+        "reasoning": {
+         "efforts": [
+          {
+           "id": "low",
+           "name": "Low"
+          },
+          {
+           "id": "high",
+           "name": "High"
+          },
+          {
+           "id": "max",
+           "name": "Max"
+          }
+         ]
+        }
+       },
+       {
+        "id": "glm-5.3-flash",
+        "name": "glm-5.3-flash",
+        "reasoning": {
+         "efforts": [
+          {
+           "id": "low",
+           "name": "Low"
+          },
+          {
+           "id": "high",
+           "name": "High"
+          },
+          {
+           "id": "max",
+           "name": "Max"
+          }
+         ]
+        }
+       },
+       {
+        "id": "glm-5-turbo",
+        "name": "glm-5-turbo",
+        "reasoning": {
+         "efforts": [
+          {
+           "id": "off",
+           "name": "Off"
+          },
+          {
+           "id": "minimal",
+           "name": "Minimal"
+          },
+          {
+           "id": "low",
+           "name": "Low"
+          },
+          {
+           "id": "medium",
+           "name": "Medium"
+          },
+          {
+           "id": "high",
+           "name": "High"
+          }
+         ]
+        }
+       }
+      ]
+     },
+     {
+      "id": "opencodego",
+      "name": "opencodego",
+      "models": [
+       {
+        "id": "ox-alpha-free",
+        "name": "ox-alpha-free"
+       },
+       {
+        "id": "deepseek-v4-flash",
+        "name": "deepseek-v4-flash"
+       },
+       {
+        "id": "deepseek-v4-flash-vision-exp",
+        "name": "deepseek-v4-flash-vision-exp"
+       }
+      ]
+     }
+    ]
+   }
+  }
+ }
+}

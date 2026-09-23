@@ -21,14 +21,41 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
-// historyPageMessages matches official DEFAULT_MAX_MESSAGES (api-proxy.ts).
-// Official maxMessages counts user/assistant messages; each expands to
-// thousands of assistant/chunk rows. 2000-message pages for a long Exec-plan
-// session were 55MiB and blew the 32MiB unary cap → truncated JSON →
-// projection.hydrate_failed on iPhone.
+// historyPageMessages bounds one session/page request. Official maxMessages
+// counts user/assistant messages; each expands to thousands of
+// assistant/chunk rows. 2000-message pages for a long Exec-plan session were
+// 55MiB and blew the 32MiB unary cap → truncated JSON → projection.hydrate_
+// failed on iPhone.
 const historyPageMessages = 50
 
-// getRichHistory maps session.history pages to rich entries (oldest first).
+// pageEvents flattens one page's records into the journal events the
+// accumulator consumes (ascending, ending at the page cut). Non-event
+// records (assistant-stream frames) are never requested and dropped here.
+func pageEvents(records []pageRecord) []sessionEventWire {
+	out := make([]sessionEventWire, 0, len(records))
+	for _, rec := range records {
+		if rec.Type == "event" {
+			out = append(out, rec.Event)
+		}
+	}
+	return out
+}
+
+// headSeqOf returns the session's current log head — the projection block's
+// asOfSeq. The page API's throughSeq must name a REAL log cut: the official
+// client pages backwards from the follow snapshot's cursor (ui-plan
+// plan-resource.ts), and -1 is the EMPTY-log cursor, not "latest"
+// (live-probed 2026-09-23: throughSeq -1 returns an empty page).
+func headSeqOf(ctx context.Context, client *Client, sessionID string) (int64, error) {
+	var proj sessionProjectionsValue
+	req := sessionProjectionsRequest{SessionID: sessionID}
+	if err := client.Call(ctx, "session/projections", map[string]any{"request": req}, &proj); err != nil {
+		return 0, err
+	}
+	return proj.AsOfSeq, nil
+}
+
+// getRichHistory maps session/page pages to rich entries (oldest first).
 // limit<=0 means unlimited.
 func (a *Agent) getRichHistory(ctx context.Context, client *Client, sessionID string, limit int) ([]core.RichHistoryEntry, error) {
 	// Collect pages newest→older until the entry budget is met or exhausted.
@@ -40,19 +67,30 @@ func (a *Agent) getRichHistory(ctx context.Context, client *Client, sessionID st
 	}
 	pageSize := historyPageMessages
 
-	var pages [][]apiHistoryEntry
+	head, err := headSeqOf(ctx, client, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if head < 0 {
+		return nil, nil // empty log: nothing to fold
+	}
+
+	var pages [][]sessionEventWire
 	collected := 0
 	var before *int64
 	for collected < budget {
-		req := sessionHistoryRequest{SessionID: sessionID}
+		req := sessionPageRequest{
+			Address:    sessionAddress{Kind: "session", SessionID: sessionID},
+			ThroughSeq: head, // the real log cut (official client: snapshot cursor)
+		}
 		if before != nil {
 			seq := *before
 			req.BeforeSeq = &seq
 		}
 		max := pageSize
 		req.MaxMessages = &max
-		var val sessionHistoryValue
-		if err := client.Call(ctx, "session.history", req, &val); err != nil {
+		var val sessionPageValue
+		if err := client.Call(ctx, "session/page", map[string]any{"request": req}, &val); err != nil {
 			if isUnaryOversize(err) && pageSize > 1 {
 				pageSize = pageSize / 2
 				if pageSize < 1 {
@@ -62,16 +100,17 @@ func (a *Agent) getRichHistory(ctx context.Context, client *Client, sessionID st
 			}
 			return nil, err
 		}
-		if len(val.Events) == 0 {
+		events := pageEvents(val.Records)
+		if len(events) == 0 {
 			break
 		}
-		pages = append(pages, val.Events)
-		collected += countMappableEntries(val.Events)
+		pages = append(pages, events)
+		collected += countMappableEntries(events)
 		if !val.HasMore {
 			break
 		}
 		// Next page walks backwards from this page's first (oldest-in-page) seq.
-		oldest := val.Events[0].Event.Seq
+		oldest := events[0].Seq
 		if oldest <= 0 {
 			break
 		}
@@ -84,7 +123,7 @@ func (a *Agent) getRichHistory(ctx context.Context, client *Client, sessionID st
 	for _, p := range pages {
 		total += len(p)
 	}
-	flat := make([]apiHistoryEntry, 0, total)
+	flat := make([]sessionEventWire, 0, total)
 	for i := len(pages) - 1; i >= 0; i-- {
 		flat = append(flat, pages[i]...)
 	}
@@ -106,10 +145,10 @@ func (a *Agent) getRichHistory(ctx context.Context, client *Client, sessionID st
 // len(evs)/8 fallback estimated such a page (8417 events, 0 boundaries) at
 // 1052 phantom entries, blew the walk budget after two pages, and iPhone
 // cold-open showed only the final turn of a 10-turn session.
-func countMappableEntries(evs []apiHistoryEntry) int {
+func countMappableEntries(evs []sessionEventWire) int {
 	n := 0
 	for _, e := range evs {
-		switch e.Event.Type {
+		switch e.Type {
 		case "turn/end", "user/message", "command/done":
 			n++
 		}
@@ -120,43 +159,37 @@ func countMappableEntries(evs []apiHistoryEntry) int {
 // mapHistoryEvents maps a oldest-first event slice onto rich entries — the
 // copied agent/dsh accumulator flow: pass 1 tool outputs by callId, pass 2
 // turn accumulation.
-func mapHistoryEvents(sessionID string, evs []apiHistoryEntry) []core.RichHistoryEntry {
+func mapHistoryEvents(sessionID string, evs []sessionEventWire) []core.RichHistoryEntry {
 	// Pass 1: tool/result outputs by callId.
 	results := map[string]dshToolResultInfo{}
 	for _, e := range evs {
-		if e.Event.Type != "tool/result" {
+		if e.Type != "tool/result" {
 			continue
 		}
 		var d dshToolResultData
-		if jsonUnmarshal(e.Event.Data, &d) != nil {
+		if jsonUnmarshal(e.Data, &d) != nil {
 			continue
 		}
-		callID := ""
-		if d.Message.Source != nil {
+		callID := strings.TrimSpace(d.Message.ToolCallID)
+		if callID == "" && d.Message.Source != nil {
 			callID = strings.TrimSpace(d.Message.Source.CallID)
 		}
 		if callID == "" {
 			continue
 		}
 		var sb strings.Builder
-		isError := false
 		for _, block := range d.Message.Content {
-			if block.Type != "tool-result" {
+			// 官方形状（llm ContentBlockMap + repair.ts；alpha.1 journal 实测）：
+			// tool/result 的 content 是顶层 text 块，"tool-result" 块标签已退役。
+			if block.Type != "text" || block.Text == "" {
 				continue
 			}
-			if block.IsError {
-				isError = true
+			if sb.Len() > 0 {
+				sb.WriteByte('\n')
 			}
-			for _, piece := range block.Content {
-				if piece.Type == "text" && piece.Text != "" {
-					if sb.Len() > 0 {
-						sb.WriteByte('\n')
-					}
-					sb.WriteString(piece.Text)
-				}
-			}
+			sb.WriteString(block.Text)
 		}
-		results[callID] = dshToolResultInfo{text: sb.String(), isError: isError, meta: d.Meta}
+		results[callID] = dshToolResultInfo{text: sb.String(), isError: d.Message.IsError, meta: d.Meta}
 	}
 
 	var entries []core.RichHistoryEntry
@@ -211,7 +244,7 @@ func mapHistoryEvents(sessionID string, evs []apiHistoryEntry) []core.RichHistor
 		})
 	}
 	for _, e := range evs {
-		switch e.Event.Type {
+		switch e.Type {
 		case "turn/start":
 			// 官方 turn 号（journal ground truth {"turn": N}）：冷拉 entry 身份
 			// 与 live codec adoptTurn 同式（dshw-<prefix>-t<N>），冷基线与
@@ -220,15 +253,15 @@ func mapHistoryEvents(sessionID string, evs []apiHistoryEntry) []core.RichHistor
 				Turn int `json:"turn"`
 			}
 			turnNum := 0
-			if jsonUnmarshal(e.Event.Data, &d) == nil && d.Turn >= 1 {
+			if jsonUnmarshal(e.Data, &d) == nil && d.Turn >= 1 {
 				turnNum = d.Turn
 			}
-			acc.start(e.Event.Seq, e.Event.Time, turnNum)
+			acc.start(e.Seq, e.Time, turnNum)
 		case "turn/end":
-			flushTurn(e.Event.Seq, e.Event.Time)
+			flushTurn(e.Seq, e.Time)
 		case "user/message":
 			var d dshUserMessageData
-			if jsonUnmarshal(e.Event.Data, &d) != nil {
+			if jsonUnmarshal(e.Data, &d) != nil {
 				continue
 			}
 			if d.Source != nil && d.Source.Kind == "subagent-settled" {
@@ -240,18 +273,18 @@ func mapHistoryEvents(sessionID string, evs []apiHistoryEntry) []core.RichHistor
 					continue
 				}
 				entry := core.RichHistoryEntry{
-					ID:      fmt.Sprintf("ctxinj:%d", e.Event.Seq),
+					ID:      fmt.Sprintf("ctxinj:%d", e.Seq),
 					Role:    "context_injection",
 					Content: joinTextBlocks(d.Content),
 					ContextInjection: &core.ContextInjectionEvent{
-						ItemID:          fmt.Sprintf("ctxinj:%d", e.Event.Seq),
+						ItemID:          fmt.Sprintf("ctxinj:%d", e.Seq),
 						Kind:            d.Source.Kind,
 						Form:            d.Source.Form,
 						Summary:         d.Source.Summary,
 						Text:            joinTextBlocks(d.Content),
 						SenderSessionID: d.Source.SenderSessionID,
 					},
-					Timestamp: dshLogTime(e.Event.Time),
+					Timestamp: dshLogTime(e.Time),
 				}
 				if acc.open {
 					pendingInjections = append(pendingInjections, entry)
@@ -264,13 +297,14 @@ func mapHistoryEvents(sessionID string, evs []apiHistoryEntry) []core.RichHistor
 				continue // plugin/system injections are not conversation turns
 			}
 			text := joinTextBlocks(d.Content)
-			if strings.TrimSpace(text) == "" {
+			atts := eventAttachments(d.Content)
+			if strings.TrimSpace(text) == "" && len(atts) == 0 {
 				continue
 			}
 			// user 行落在 turn 内 → 归属所属 dshw turn（live applyUserMessage
 			// 同式：TurnID=activeTurnID）；turn 外（attach 前残留形）保持
 			// sessionID:seq fallback。
-			userID := fmt.Sprintf("%s:%d", sessionID, e.Event.Seq)
+			userID := fmt.Sprintf("%s:%d", sessionID, e.Seq)
 			if acc.open && acc.turnNum >= 1 {
 				userID = dshwTurnID(sessionID, acc.turnNum)
 			}
@@ -278,17 +312,20 @@ func mapHistoryEvents(sessionID string, evs []apiHistoryEntry) []core.RichHistor
 				ID:        userID,
 				Role:      "user",
 				Content:   text,
-				Timestamp: dshLogTime(e.Event.Time),
+				// S4: journal image/file blocks ride as descriptors（A4a/A4b
+				// 证据形状；图片字节经 get_attachment 懒取）。
+				Attachments: atts,
+				Timestamp:   dshLogTime(e.Time),
 			})
 		case "assistant/message":
 			var d dshAssistantData
-			if jsonUnmarshal(e.Event.Data, &d) != nil {
+			if jsonUnmarshal(e.Data, &d) != nil {
 				continue
 			}
-			acc.addMessage(e.Event.Seq, e.Event.Time, d, results)
+			acc.addMessage(e.Seq, e.Time, d, results)
 		case "command/run":
 			var d dshCommandRunData
-			if jsonUnmarshal(e.Event.Data, &d) != nil {
+			if jsonUnmarshal(e.Data, &d) != nil {
 				continue
 			}
 			commandID := strings.TrimSpace(d.CommandID)
@@ -306,7 +343,7 @@ func mapHistoryEvents(sessionID string, evs []apiHistoryEntry) []core.RichHistor
 			plan.onCommandRun(commandID, name, args, argsPresent)
 		case "command/done":
 			var d dshCommandDoneData
-			if jsonUnmarshal(e.Event.Data, &d) != nil {
+			if jsonUnmarshal(e.Data, &d) != nil {
 				continue
 			}
 			commandID := strings.TrimSpace(d.CommandID)
@@ -323,12 +360,12 @@ func mapHistoryEvents(sessionID string, evs []apiHistoryEntry) []core.RichHistor
 				text = *d.Text
 			}
 			plan.onCommandDone(commandID, d.Kind)
-			appendCommandEntry(commandID, name, args, d.Kind, text, e.Event.Time)
+			appendCommandEntry(commandID, name, args, d.Kind, text, e.Time)
 		case "plan/mode":
 			var d struct {
 				Active bool `json:"active"`
 			}
-			if jsonUnmarshal(e.Event.Data, &d) != nil {
+			if jsonUnmarshal(e.Data, &d) != nil {
 				continue
 			}
 			plan.onPlanMode(d.Active)
@@ -339,7 +376,7 @@ func mapHistoryEvents(sessionID string, evs []apiHistoryEntry) []core.RichHistor
 				Operation string          `json:"operation"`
 				Goal      *core.GoalEvent `json:"goal"`
 			}
-			if jsonUnmarshal(e.Event.Data, &d) != nil {
+			if jsonUnmarshal(e.Data, &d) != nil {
 				continue
 			}
 			switch d.Operation {
@@ -355,7 +392,7 @@ func mapHistoryEvents(sessionID string, evs []apiHistoryEntry) []core.RichHistor
 			// run-start 在 journal 原位 append workflow part（官方 keyed chat 节点
 			// 锚定 run-start 位置），后续事件原地改同一 part。turn 未开 → 整 run
 			// 跳过（无锚定）。interrupted 由 reducer turn 终态 fixup 注入，不在此处理。
-			acc.foldWorkflowEvent(e.Event.Type, e.Event.Data)
+			acc.foldWorkflowEvent(e.Type, e.Data)
 		}
 	}
 	flushTurn(0, 0) // torn tail: serve the committed prefix
@@ -432,8 +469,12 @@ type dshToolResultData struct {
 	Turn    int `json:"turn"`
 	Step    int `json:"step"`
 	Message struct {
-		Source  *dshSource        `json:"source,omitempty"`
-		Content []dshContentBlock `json:"content"`
+		// 官方 ToolResultMessage（llm/src/message.ts）：toolCallId/isError 在
+		// message 顶层；content 是顶层 ContentBlock（text 等）。
+		ToolCallID string            `json:"toolCallId,omitempty"`
+		IsError    bool              `json:"isError,omitempty"`
+		Source     *dshSource        `json:"source,omitempty"`
+		Content    []dshContentBlock `json:"content"`
 	} `json:"message"`
 	// Meta is the tool's private presentation payload (official
 	// tool-calls.ts: persisted so a UI bridge reproduces the card on
@@ -566,7 +607,7 @@ func (t *dshTurnAccumulator) addMessage(seq int64, at int64, d dshAssistantData,
 				"toolName":                       name,
 				"status":                         status,
 				"output":                         map[string]any{"kind": "inline", "text": output},
-				"duration":                      nil,
+				"duration":                       nil,
 				"requiresPermissionConfirmation": false,
 				"availablePermissionOptions":     []any{},
 			}
@@ -682,7 +723,7 @@ func (t *dshTurnAccumulator) foldWorkflowEvent(eventType string, data []byte) bo
 }
 
 // workflowPhasesToPartMaps 把折叠快照的 phase 分组转成 part map 的 wire 形状
-//（键与 go-bridge ProjectionPart JSON 标签一致：phase/members/seq/label/
+// （键与 go-bridge ProjectionPart JSON 标签一致：phase/members/seq/label/
 // childSessionId/status；phase nil → JSON null = 未分阶段身份）。
 func workflowPhasesToPartMaps(phases []core.WorkflowRunPhase) []map[string]any {
 	out := make([]map[string]any, 0, len(phases))
@@ -861,7 +902,7 @@ func askUserQuestionToolStep(sessionID string, seq int64, block dshContentBlock,
 		"toolName":                       "ask_user_question",
 		"status":                         "completed",
 		"output":                         map[string]any{"kind": "inline", "text": output},
-		"duration":                      nil,
+		"duration":                       nil,
 		"requiresPermissionConfirmation": false,
 		"availablePermissionOptions":     []any{},
 	}

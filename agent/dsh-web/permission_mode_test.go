@@ -7,15 +7,15 @@ import (
 
 func TestNormalizePermissionMode(t *testing.T) {
 	cases := map[string]string{
-		"":                    permissionModeWorkspaceWrite,
-		"workspace-write":     permissionModeWorkspaceWrite,
-		"Workspace Write":     permissionModeWorkspaceWrite,
-		"read-only":           permissionModeReadOnly,
-		"readonly":            permissionModeReadOnly,
-		"danger-full-access":  permissionModeDangerFullAccess,
-		"full-access":         permissionModeDangerFullAccess,
-		"fullaccess":          permissionModeDangerFullAccess,
-		"unknown":             permissionModeWorkspaceWrite,
+		"":                   permissionModeWorkspaceWrite,
+		"workspace-write":    permissionModeWorkspaceWrite,
+		"Workspace Write":    permissionModeWorkspaceWrite,
+		"read-only":          permissionModeReadOnly,
+		"readonly":           permissionModeReadOnly,
+		"danger-full-access": permissionModeDangerFullAccess,
+		"full-access":        permissionModeDangerFullAccess,
+		"fullaccess":         permissionModeDangerFullAccess,
+		"unknown":            permissionModeWorkspaceWrite,
 	}
 	for in, want := range cases {
 		if got := normalizePermissionMode(in); got != want {
@@ -52,7 +52,7 @@ func TestApplySessionPermissionUsesCommandsExecuteNotPrompt(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["settings.update"] = fakeRPCResponse{value: map[string]any{}}
+	f.handlers["settings/update"] = fakeRPCResponse{value: map[string]any{}}
 	f.handlers["commands/execute"] = fakeRPCResponse{value: map[string]any{
 		"commandId": "cmd-1",
 		"result":    map[string]any{"kind": "success", "text": "preset read-only"},
@@ -61,14 +61,16 @@ func TestApplySessionPermissionUsesCommandsExecuteNotPrompt(t *testing.T) {
 	if err := a.applySessionPermission("sess-1", permissionModeReadOnly); err != nil {
 		t.Fatalf("applySessionPermission: %v", err)
 	}
-	if n := len(methodCalls(f, "session.prompt")); n != 0 {
+	if n := len(methodCalls(f, "session/prompt")); n != 0 {
 		t.Fatalf("session.prompt called %d times; slash command must not become a user turn", n)
 	}
 	calls := methodCalls(f, "commands/execute")
 	if len(calls) != 1 {
 		t.Fatalf("commands/execute calls = %d, want 1", len(calls))
 	}
-	var req commandsExecuteRequest
+	var req struct {
+		Args commandsExecuteArgs `json:"args"`
+	}
 	if err := json.Unmarshal(calls[0], &req); err != nil {
 		t.Fatalf("decode execute payload: %v", err)
 	}
@@ -85,20 +87,20 @@ func TestSetModeDoesNotPromptTheModel(t *testing.T) {
 	defer f.Close()
 	a := newTestAgent(t, f)
 	a.lastActiveSessionID = "sess-live"
-	f.handlers["settings.update"] = fakeRPCResponse{value: map[string]any{}}
+	f.handlers["settings/update"] = fakeRPCResponse{value: map[string]any{}}
 	f.handlers["commands/execute"] = fakeRPCResponse{value: map[string]any{
 		"commandId": "cmd-2",
 		"result":    map[string]any{"kind": "success", "text": "preset workspace-write"},
 	}}
 
 	a.SetMode("workspace-write")
-	if n := len(methodCalls(f, "session.prompt")); n != 0 {
+	if n := len(methodCalls(f, "session/prompt")); n != 0 {
 		t.Fatalf("SetMode used session.prompt %d times", n)
 	}
 	if len(methodCalls(f, "commands/execute")) != 1 {
 		t.Fatalf("SetMode commands/execute = %d, want 1", len(methodCalls(f, "commands/execute")))
 	}
-	if len(methodCalls(f, "settings.update")) != 1 {
-		t.Fatalf("SetMode settings.update = %d, want 1", len(methodCalls(f, "settings.update")))
+	if len(methodCalls(f, "settings/update")) != 1 {
+		t.Fatalf("SetMode settings.update = %d, want 1", len(methodCalls(f, "settings/update")))
 	}
 }

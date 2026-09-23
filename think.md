@@ -1,3 +1,71 @@
+## 2026-09-23 dsh-web 发送消息气泡重复两次：iOS 解码了 removedTurnIds 却从未实现应用逻辑（已修复，定向测试 ✅）
+
+现象：快照重播修复部署后 owner 复测——历史气泡不再聚拢（主修复生效），但刚发送的消息
+渲染成两个一模一样的气泡（截图：「讲个老猪的故事」×2 紧挨，均在上一条回复之后）。
+
+根因链：S3 排队占位流的事件序列是 占位 user_message(pending, itemId=X) → claim 撤行
+user_message_removed(X) → 落定 user_message(turnId=T, itemId=X)。桥侧全链路正确：reducer
+以 X 为占位 turn 键、落定时 removePendingPlaceholder(X) 后 upsert 真回合 T，patch 携带
+removedTurnIds=[X]；iOS 的 SessionProjectionPatch 也早已解码该字段（本轮 mirror 同步过）。
+但 iOS 增量投影应用 `applyingPatch` 只实现了 execution/upsertTurns/turnStateOps/partOps/
+各视图字段——**removedTurnIds 的撤行逻辑从未实现**（模型字段 + 注释「removedTurnIds 撤行」
+都在，grep 全仓零消费代码）。占位行永久残留 + 落定行新增 = 两行。该缺陷自 S3 上线起就存在，
+此前被快照重播洪流的更大错乱掩盖。
+
+修复（全部 iOS 仓 cordcode-ios-native-message-timeline，Mac 侧零改动）：
+`SessionProjection.removingTurns` 值变换（fail-closed，未知 id 无副作用）+ `applyingPatch`
+先撤后 upsert（镜像 Mac reducer 顺序）；Replica 增量 changeSet 透传 removedTurnIDs；
+展示引擎在映射 changedTurns 前清理被撤回合的行缓存并**释放 seenIDs 条目**——这一步让落定
+user 行拿回规范 id X（否则 uniqueMessageID 撞残留 seenIDs 会给出 "X#T#user" 消歧后缀，
+下次全量替换时 id 翻转成 X，行身份抖动）；撤行经 removedMessageIDs 报告消费端（消费端
+ChatViewModel 的 byID.removeValue 逻辑本就存在）。回归测试 ×3：值变换+fail-closed、
+Replica changeset 透传、引擎端到端（占位→撤行+落定同 patch → 恰一行 + 规范 id）。
+
+教训：①**「字段已解码」≠「字段已消费」**——跨仓协议加字段时，grep 对端**消费代码**而不
+是只看 mirror/模型层是否同步；本轮 S3 在 iOS 侧只交付了模型字段与注释，应用逻辑漏掉，
+且没有任何测试钉住「占位→落定后恰一行」这个端到端不变量。②修复撤行类语义时先核
+id 派生链：uniqueMessageID 的 seenIDs 去重永不丢消息（只消歧），所以「删 turn」不会
+误吞落定行——但残留 seenIDs 会让落定行带消歧后缀、跨全量替换 id 翻转；撤行时同步释放
+seenIDs 才是完整修复。③连环 bug 的复测顺序：先修大的可见错乱（洪流），再修它掩盖的小
+错乱（重复行）——owner 的「好消息是…」式反馈正是这个模式的信号，不要把残留症状当成
+新独立 bug 从零排查，先对照上一轮修复的事件面查缺哪一环。
+
+## 2026-09-23 dsh-web 发送瞬间 iOS 时间线错乱：OD-4 扩窗把「快照重播为实时事件」的旧缺陷放大成 90 事件洪流（已修复，生产座位活体验证 ✅）
+
+现象：owner 真机报告（截图 21:53:43）——dsh-web 模式发送消息后，所有用户气泡聚在一起、
+既有 assistant 回复全部消失、流区只剩「正在生成…」无正文；回合完成后时间线自动恢复。
+
+根因链：发送 → `handleSendMessage` 发现 session 不在 registry → `StartSession`(resume) →
+follow 开口快照（OD-4 已对齐官方 `HISTORY_PAGE_OPTIONS` 500 条窗口）→ **fresh codec 把快照里
+每条已落定 journal 记录都当实时事件发射**。日志签名（21:53:28.990-29.342，
+session-ad8cc947）：`user_message seq=1 → turn_started seq=2 → user_message_removed seq=3 →
+turn_completed seq=5,10,15,…,90`——relayEvents 的 `seq` 是**转发计数**，90 = 18 个已落定
+回合 × 每回合 5 记录（inbox/spliced 占位、turn/start、spliced 撤除、user/message 落定、
+turn/end），整段历史一次涌向 iOS 把运行中时间线冲毁；真回合落定后权威投影恢复（「又好了」）。
+该缺陷一直存在——旧 6 条窗口时只是 ≤6 个杂散事件，iOS 容忍了；OD-4 把窗口扩到 500 条后
+变成整段历史重播。官方语义：开口快照是历史页（session.ts:620-643
+`events.open(HISTORY_PAGE_OPTIONS)`，客户端按 seq 幂等 reconcile，不是新活动）；桥的追加式
+事件通道没有客户端幂等，必须在桥侧抑制。
+
+修复（`agent/dsh-web/streams.go` dispatchFollowItem 快照路径）：已落定历史（最后一个
+turn/end 及之前）只播种 codec（水位 + 回合/消息状态），不发射；在途尾部（turn/end 之后）
+照常发射（外部运行回合收养 + 本桥排队占位/落定流）；重连（codec 已有投递水位 priorNext）
+时发射所有 seq ≥ priorNext 的记录——**断线间隙落定的回合记录既不在旧 hydrate 也没 live
+投递过，是真增量，纯「已落定即抑制」会永远吞掉它们**（单测推演中抓到的角落）。回归测试
+×3 钉死三个场景；生产座位只读活体验证（StartSession(resume)+follow，不发送不写 journal）：
+owner 真实会话 192 条快照记录 → 播种水位 192、时间线重播 0 事件（旧代码会重播 ~192 个）。
+证据：`scripts/dshweb-phase0/od4b-snapshot-replay-fix-regression.json`。
+
+教训：①**改容量参数必须审计消费该参数的所有路径**——OD-4 只对齐了官方「拉多少」
+（500 条），没对齐官方「怎么消费」（幂等 reconcile）；一个无害的旧缺陷被参数放大成事故，
+且只在真机上可见（单测夹具从未覆盖「快照含已落定历史」这个场景，因为 fake 测试的快照
+要么空要么纯在途）。②排障时先确认日志字段语义再推事件序列——relayEvents 的 `seq` 是
+转发计数不是 journal seq，误读会把「每 5 计数一个 turn_completed」错判成 seq 语义。③
+「发送瞬间坏、落定后好」+ 事件洪流时间窗对齐（21:53:28 发送 → 28.99 洪流）是快照/重播
+类缺陷的指纹；先查发送路径上新开的流（StartSession→follow），再查回合本身。④
+`StartSession(resume)` + follow 订阅是纯只读（projections 探测 + 流订阅，不写 journal），
+可以在 owner 真实会话上安全验证桥侧直播修复——比等 owner 复测快一轮，且不污染会话。
+
 ## 2026-09-21 「Bridge runtime is quiescing」误报：abort/delete_session 泄漏 bridge-owned 发送槽（已修复）
 
 现象：owner 在 iPhone opencode-web 模式发消息被拒，报 "Bridge runtime is quiescing"（2026-09-20 13:02

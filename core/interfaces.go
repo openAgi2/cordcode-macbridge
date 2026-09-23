@@ -95,6 +95,13 @@ type PromptOptions struct {
 	ModelID         string // explicit model id, "" = backend resolves
 	Variant         string // model-specific variant key, "" = unset; NOT reasoningEffort
 	ReasoningEffort string // official reasoning effort, "" = backend resolves
+	// Mode is the official prompt delivery mode (dsh-web S-OD2a): "" or
+	// "queue" = queue for the next turn (the official composer DEFAULT —
+	// busy-Enter stays queue, submission-policy.ts:29-38 + DEFAULT_BUSY_
+	// ENTER_BEHAVIOR='queue'); "steer" = the explicit steering gesture
+	// (agent.steer: splice into the running turn's next-step, agent-loop/
+	// agent.ts:166 — on an idle agent the wake makes it the next turn).
+	Mode string
 }
 
 // PromptOptionsSender is an optional AgentSession interface for backends that
@@ -666,6 +673,16 @@ type DiagnosticReport struct {
 // backend diagnostics and stream incremental progress.
 type DiagnosticsProvider interface {
 	RunDiagnostics(ctx context.Context, progress func(DiagnosticProgress)) (*DiagnosticReport, error)
+}
+
+// StatusMessageProvider is an optional interface for agents that surface a
+// short runtime/version note on their backend descriptor
+// (hello_ack.backends[].statusMessage, additive optional field). The message
+// must carry ONLY version and source identifiers (e.g. the resolved CLI
+// path) — never credentials, cookies, or any other non-version information
+// (dsh-web convergence plan §2.4 red line). Empty string = no note.
+type StatusMessageProvider interface {
+	DescriptorStatusMessage() string
 }
 
 // ContextUsageReporter is an optional interface for running agent sessions that

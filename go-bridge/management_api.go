@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/agent/codex-remote"
+	dshweb "github.com/openAgi2/cordcode-macbridge/agent/dsh-web"
 	"github.com/openAgi2/cordcode-macbridge/core"
 	"github.com/openAgi2/cordcode-macbridge/go-bridge/admission"
 )
@@ -291,6 +292,12 @@ func (s *ManagementServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleCodexRemotePair(w, r)
 	case strings.HasPrefix(path, "/internal/agents/") && strings.HasSuffix(path, "/remote-control/status") && r.Method == http.MethodGet:
 		s.handleCodexRemoteStatus(w, r)
+	case strings.HasPrefix(path, "/internal/agents/") && strings.HasSuffix(path, "/install") && r.Method == http.MethodPost:
+		s.handleAgentInstall(w, r)
+	case strings.HasPrefix(path, "/internal/agents/") && strings.HasSuffix(path, "/start") && r.Method == http.MethodPost:
+		s.handleAgentStart(w, r)
+	case strings.HasPrefix(path, "/internal/agents/") && strings.HasSuffix(path, "/action-state") && r.Method == http.MethodGet:
+		s.handleAgentActionState(w, r)
 	case path == "/internal/shutdown" && r.Method == http.MethodPost:
 		s.handleShutdown(w, r)
 	case path == "/internal/devices" && r.Method == http.MethodGet:
@@ -619,9 +626,14 @@ func (s *ManagementServer) handleAgents(w http.ResponseWriter, _ *http.Request) 
 	writeMgmtJSON(w, http.StatusOK, s.liveAgentDescriptors())
 }
 
-// liveAgentDescriptors returns the cached descriptors with instance-prober
+// liveAgentDescriptors returns the cached descriptors with live-state
 // backends re-read from the driver. Codex Desktop restore/bind is async; a
 // startup snapshot would otherwise stay not_configured after the stream is up.
+// Structured-only drivers (dsh-web — no boolean InstanceStatus, 2026-09-22
+// plan §3) re-read through the structured seam so not_detected /
+// service_not_running / port_conflict survive instead of folding into
+// not_configured. Backends exposing BOTH seams keep the legacy boolean
+// re-read (behavior unchanged).
 func (s *ManagementServer) liveAgentDescriptors() []AgentProviderDescriptor {
 	descs := s.cachedAgentDescriptors()
 	for i := range descs {
@@ -630,6 +642,11 @@ func (s *ManagementServer) liveAgentDescriptors() []AgentProviderDescriptor {
 			continue
 		}
 		if _, ok := agent.(instanceStatusProber); !ok {
+			if _, ok := agent.(structuredInstanceReadinessProber); ok {
+				status, reason := detectStructuredInstanceReadiness(descs[i].ID, agent)
+				descs[i].Status = status
+				descs[i].Reason = reason
+			}
 			continue
 		}
 		status, reason := detectInstanceStatusProber(descs[i].ID, agent)
@@ -729,6 +746,72 @@ func (s *ManagementServer) handleCodexRemoteStatus(w http.ResponseWriter, r *htt
 		return
 	}
 	writeMgmtJSON(w, http.StatusOK, pairer.RemoteControlStatus())
+}
+
+// ── POST /internal/agents/{id}/install · /start · GET action-state ──────────
+// dsh-web 代装/启动（2026-09-22 方案 §5）。两个 POST 只 kick 异步工作并立即
+// 返回（management server 的 2s WriteTimeout 载不动 10 分钟 npm 或 30s 座位
+// 启动）；进度与错误经 GET action-state 和描述符 re-read 浮出。仅本机
+// management token（ServeHTTP 的 checkAuth 已挡）。
+
+type seatActionAgent interface {
+	InstallDSH() dshweb.SeatActionKick
+	StartSeatAction() dshweb.SeatActionKick
+	SeatActionState() dshweb.SeatActionSnapshot
+}
+
+func (s *ManagementServer) lookupSeatAction(agentID string) (seatActionAgent, bool) {
+	agent, ok := s.cfg.Agents[agentID]
+	if !ok {
+		return nil, false
+	}
+	sa, ok := agent.(seatActionAgent)
+	return sa, ok
+}
+
+func (s *ManagementServer) handleAgentInstall(w http.ResponseWriter, r *http.Request) {
+	agentID := extractPathSegment(r.URL.Path, "/internal/agents/", "/install")
+	sa, ok := s.lookupSeatAction(agentID)
+	if !ok {
+		writeMgmtJSON(w, http.StatusNotFound, map[string]interface{}{
+			"error":   "not_found",
+			"message": "agent does not support install actions",
+		})
+		return
+	}
+	kick := sa.InstallDSH()
+	desc := BuildAgentDescriptor(agentID, s.cfg.Agents[agentID], s.cfg.CodexBackendMode, s.cfg.DetectionCfg)
+	s.updateAgentDescriptor(desc)
+	writeMgmtJSON(w, http.StatusOK, kick)
+}
+
+func (s *ManagementServer) handleAgentStart(w http.ResponseWriter, r *http.Request) {
+	agentID := extractPathSegment(r.URL.Path, "/internal/agents/", "/start")
+	sa, ok := s.lookupSeatAction(agentID)
+	if !ok {
+		writeMgmtJSON(w, http.StatusNotFound, map[string]interface{}{
+			"error":   "not_found",
+			"message": "agent does not support start actions",
+		})
+		return
+	}
+	kick := sa.StartSeatAction()
+	desc := BuildAgentDescriptor(agentID, s.cfg.Agents[agentID], s.cfg.CodexBackendMode, s.cfg.DetectionCfg)
+	s.updateAgentDescriptor(desc)
+	writeMgmtJSON(w, http.StatusOK, kick)
+}
+
+func (s *ManagementServer) handleAgentActionState(w http.ResponseWriter, r *http.Request) {
+	agentID := extractPathSegment(r.URL.Path, "/internal/agents/", "/action-state")
+	sa, ok := s.lookupSeatAction(agentID)
+	if !ok {
+		writeMgmtJSON(w, http.StatusNotFound, map[string]interface{}{
+			"error":   "not_found",
+			"message": "agent does not support install actions",
+		})
+		return
+	}
+	writeMgmtJSON(w, http.StatusOK, sa.SeatActionState())
 }
 
 func (s *ManagementServer) updateAgentDescriptor(desc AgentProviderDescriptor) {

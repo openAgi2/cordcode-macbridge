@@ -1,16 +1,20 @@
 package dshweb
 
-// Dual WebSocket downlink pump (design §4.3.1/§4.3.3): one mux stream
-// (session events, ALL sessions — external turns included) + one host stream
-// (session lifecycle → immediate catalog refresh signal). Official v1 has no
-// `since`: reconnect = reopen stream + the bridge's history re-pull/forceCold
-// reconciles (§8-5).
+// remote.mux live pump (typert gateway, design §4.3.1/§4.3.3 successor):
+// ONE WebSocket (/api/remote.mux) carries every logical stream — the
+// forwarded $events source (session lifecycle + approval/question
+// waterfalls), the workspace/follow grouping baseline, and one session/follow
+// per desired (bound or running) session. External turns stream live because
+// api-session/activity (a human user/message) opens the follow on demand.
+// The streams carry no resume cursor: reconnect = re-open + each follow's
+// opening snapshot re-seeds its codec; the bridge's history re-pull/forceCold
+// remains the reconcile (§8-5).
 //
 // Event routing (single-delivery rule):
-//   - a session with a live bridge binding (StartSession'd) gets its frames
+//   - a session with a live bridge binding (StartSession'd) gets its events
 //     through that dshSession's Events() channel → relayEvents (registry,
 //     kernel, conn targeting);
-//   - every other session's frames go to the agent-level passive channel
+//   - every other session's events go to the agent-level passive channel
 //     (core.EventSubscriber → startPassiveSubscription broadcast) — external
 //     turns stay visible without double delivery.
 
@@ -18,6 +22,8 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -144,7 +150,7 @@ func (a *Agent) passiveEvents() chan core.Event {
 	return a.passive
 }
 
-// startStreams launches the pump once (idempotent).
+// startStreams launches the remote.mux pump once (idempotent).
 func (a *Agent) startStreams(ctx context.Context) {
 	a.streamMu.Lock()
 	defer a.streamMu.Unlock()
@@ -155,10 +161,7 @@ func (a *Agent) startStreams(ctx context.Context) {
 	if a.refreshSignals == nil {
 		a.refreshSignals = make(chan struct{}, 16)
 	}
-	codecs := map[string]*sessionCodec{}
-	go a.runStreamLoop(ctx, "mux", "/api/events.mux", a.dispatchMuxFrame, codecs)
-	// Host frames share the codecs map is unnecessary; pass its own.
-	go a.runStreamLoop(ctx, "host", "/api/events.host", a.dispatchHostFrame, map[string]*sessionCodec{})
+	go a.runMuxLoop(ctx)
 }
 
 // CatalogRefreshSignals implements the bridge's refresh-signaler contract:
@@ -186,10 +189,173 @@ func (a *Agent) signalRefresh() {
 	}
 }
 
-// runStreamLoop keeps one downlink open with reconnect; every frame goes
-// through dispatch. Reconnect is reopen-only (official v1: no since resume).
-func (a *Agent) runStreamLoop(ctx context.Context, name, path string, dispatch func(context.Context, string, string, json.RawMessage), codecs map[string]*sessionCodec) {
-	_ = codecs // per-session codecs are owned by the mux dispatch closure
+// ── remote.mux generation (gateway/src/{index.ts,stream-protocol.ts}) ────────
+//
+// One WebSocket carries every logical stream. Each generation opens:
+//
+//   - "$events"   — the forwarded Cordis event source: ready (binds this
+//     generation's clientId), emit (api-session/* lifecycle), waterfall
+//     (approval/request + user-questions/request — the §8-4 surface), and
+//     cancel (a pending waterfall was withdrawn or claimed elsewhere).
+//   - "ws"        — workspace/follow: one baseline (grouping truth for
+//     ListSessions / project suggestions) then ordered increments.
+//   - "f:<sid>"   — session/follow per DESIRED session (bound or running):
+//     opening snapshot (recent records + projections) then gap-free journal
+//     events — the successor of the pre-gateway agent-broadcast mux.
+//
+// Follows are demand-driven: api-session/activity (a human user/message was
+// appended) opens a follow for that session, so external turns stream live
+// without following the whole catalog (follow ACTIVATES a host Agent — the
+// running+bound set stays small). Reconnect = new generation: every stream
+// re-opens, the fresh $events ready frame rebinds the clientId, and each
+// follow's opening snapshot re-seeds its codec (the official streams carry
+// no resume cursor).
+
+// muxStreamIDs name the fixed logical streams (per-session follows use
+// followStreamID).
+const (
+	eventsStreamID = "events"
+	wsStreamID     = "ws"
+	remoteMuxPath  = "/api/remote.mux"
+	// OD-4=A: the opening-snapshot window mirrors the official web client's
+	// HISTORY_PAGE_OPTIONS (client/sessions/session.ts:54, served at :631) —
+	// maxMessages 500 + turnWindow {minMessages: 50, minTurns: 2}. Gap-seed
+	// depth only; cold pulls stay authoritative for full history.
+	followMaxMsgs = 500
+)
+
+// followTurnWindow is the official window's turn boundary (session.ts:54).
+var followTurnWindow = turnWindow{MinMessages: 50, MinTurns: 2}
+
+func followStreamID(sessionID string) string { return "f:" + sessionID }
+
+// remoteEventFrame is one $events stream value (stream-protocol.ts
+// RemoteEventDownlinkFrame).
+type remoteEventFrame struct {
+	Type     string `json:"type"` // ready|emit|waterfall|cancel
+	ClientID string `json:"clientId,omitempty"`
+	Host     *struct {
+		Home string `json:"home"`
+	} `json:"host,omitempty"`
+	Event   string            `json:"event,omitempty"`
+	Args    []json.RawMessage `json:"args,omitempty"`
+	EventID string            `json:"eventId,omitempty"`
+	AgentID string            `json:"agentId,omitempty"`
+	Request json.RawMessage   `json:"request,omitempty"`
+}
+
+// followRegistry tracks desired vs. opened per-session follows.
+type followRegistry struct {
+	mu      sync.Mutex
+	desired map[string]bool
+	opened  map[string]bool
+}
+
+func (f *followRegistry) ensure(sessionID string) bool { // returns true when newly desired
+	if sessionID == "" {
+		return false
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.desired == nil {
+		f.desired = map[string]bool{}
+	}
+	if f.desired[sessionID] {
+		return false
+	}
+	f.desired[sessionID] = true
+	return true
+}
+
+func (f *followRegistry) drop(sessionID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.desired, sessionID)
+	delete(f.opened, sessionID)
+}
+
+func (f *followRegistry) snapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, 0, len(f.desired))
+	for id := range f.desired {
+		out = append(out, id)
+	}
+	return out
+}
+
+// markOpened records that sessionID's follow went out on the live connection.
+func (f *followRegistry) markOpened(sessionID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.opened == nil {
+		f.opened = map[string]bool{}
+	}
+	f.opened[sessionID] = true
+}
+
+// resetOpened clears the opened set at a generation boundary (desired stays).
+func (f *followRegistry) resetOpened() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.opened = map[string]bool{}
+}
+
+// ensureFollow registers a session for live following and opens its stream on
+// the live connection when one exists.
+func (a *Agent) ensureFollow(sessionID string) {
+	if !a.follows.ensure(sessionID) {
+		return
+	}
+	a.streamMu.Lock()
+	stream := a.muxStream
+	a.streamMu.Unlock()
+	if stream == nil {
+		return // the next generation's openLogicalStreams covers it
+	}
+	a.openFollow(sessionID, stream)
+}
+
+// openFollow sends the session/follow open for sessionID.
+func (a *Agent) openFollow(sessionID string, stream *Stream) {
+	max := followMaxMsgs
+	window := followTurnWindow
+	if err := stream.Send(muxClientMessage{
+		Type:     "open",
+		StreamID: followStreamID(sessionID),
+		Endpoint: "session/follow",
+		// The open payload is the endpoint's ordinary args object — the same
+		// shape a unary Call would carry (wire.go's arg-name table).
+		Payload: marshalOpenPayload(map[string]any{
+			"args": map[string]any{
+				"request": sessionFollowRequest{
+					Address:         sessionAddress{Kind: "session", SessionID: sessionID},
+					MaxMessages:     &max,
+					TurnWindow:      &window,
+					AssistantStream: true,
+				},
+			},
+		}),
+	}); err != nil {
+		slog.Warn("dsh-web: session/follow open failed", "sessionPrefix", shortLog(sessionID), "error", err)
+		return
+	}
+	a.follows.markOpened(sessionID)
+}
+
+// marshalOpenPayload marshals a stream-open payload; a marshal failure of
+// plain map/struct values cannot happen, and the fallback keeps the send
+// honest.
+func marshalOpenPayload(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return json.RawMessage("{}")
+	}
+	return b
+}
+
+// runMuxLoop keeps one remote.mux generation open with reconnect.
+func (a *Agent) runMuxLoop(ctx context.Context) {
 	for {
 		if ctx.Err() != nil {
 			return
@@ -203,9 +369,9 @@ func (a *Agent) runStreamLoop(ctx context.Context, name, path string, dispatch f
 			}
 			continue
 		}
-		stream, err := client.OpenStream(ctx, name, path)
+		stream, err := client.OpenStream(ctx, "mux", remoteMuxPath)
 		if err != nil {
-			slog.Info("dsh-web: stream dial failed, retrying", "stream", name, "error", err)
+			slog.Info("dsh-web: remote.mux dial failed, retrying", "error", err)
 			select {
 			case <-ctx.Done():
 				return
@@ -213,23 +379,31 @@ func (a *Agent) runStreamLoop(ctx context.Context, name, path string, dispatch f
 			}
 			continue
 		}
-		slog.Info("dsh-web: stream open", "stream", name)
-		for {
-			frame, err := stream.Next(ctx)
-			if err != nil {
-				_ = stream.Close()
-				if ctx.Err() != nil {
-					return
-				}
-				slog.Info("dsh-web: stream ended, reopening", "stream", name, "error", err)
-				break
+		slog.Info("dsh-web: remote.mux open")
+		a.streamMu.Lock()
+		a.muxStream = stream
+		a.muxClientID = ""
+		a.streamMu.Unlock()
+		a.follows.resetOpened()
+		if err := a.openLogicalStreams(stream); err != nil {
+			slog.Info("dsh-web: logical stream open failed, reopening", "error", err)
+			a.closeGeneration(stream)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(streamReconnectBackoff):
 			}
-			if frame.Type != "server-request" {
-				slog.Warn("dsh-web: unexpected frame envelope", "stream", name, "type", frame.Type)
-				continue
-			}
-			dispatch(ctx, frame.RPCID, frame.Method, frame.Payload)
+			continue
 		}
+		err = a.drainMux(ctx, client, stream)
+		a.closeGeneration(stream)
+		if ctx.Err() != nil {
+			return
+		}
+		slog.Info("dsh-web: remote.mux ended, reopening", "error", err)
+		// The dead generation's clientId orphans every pending waterfall;
+		// close their surfaced cards as settled-elsewhere.
+		a.dropAllPendingInteractions()
 		select {
 		case <-ctx.Done():
 			return
@@ -238,123 +412,307 @@ func (a *Agent) runStreamLoop(ctx context.Context, name, path string, dispatch f
 	}
 }
 
-// dispatchMuxFrame routes one mux ServerRequest payload.
-func (a *Agent) dispatchMuxFrame(ctx context.Context, rpcID, method string, payload json.RawMessage) {
-	switch method {
-	case "session/event":
-		var f struct {
-			SessionID string           `json:"sessionId"`
-			Event     sessionEventWire `json:"event"`
+func (a *Agent) closeGeneration(stream *Stream) {
+	a.streamMu.Lock()
+	if a.muxStream == stream {
+		a.muxStream = nil
+	}
+	a.streamMu.Unlock()
+	_ = stream.Close()
+}
+
+// openLogicalStreams opens the fixed streams plus every desired follow on a
+// fresh connection.
+func (a *Agent) openLogicalStreams(stream *Stream) error {
+	if err := stream.Send(muxClientMessage{
+		Type:     "open",
+		StreamID: eventsStreamID,
+		Endpoint: "$events",
+		Payload:  json.RawMessage(`{"args":{}}`),
+	}); err != nil {
+		return err
+	}
+	if err := stream.Send(muxClientMessage{
+		Type:     "open",
+		StreamID: wsStreamID,
+		Endpoint: "workspace/follow",
+		Payload:  json.RawMessage(`{"args":{}}`),
+	}); err != nil {
+		return err
+	}
+	for _, sid := range a.follows.snapshot() {
+		a.openFollow(sid, stream)
+	}
+	return nil
+}
+
+// drainMux reads and dispatches frames until the socket errors.
+func (a *Agent) drainMux(ctx context.Context, client *Client, stream *Stream) error {
+	for {
+		frame, err := stream.Next(ctx)
+		if err != nil {
+			return err
 		}
-		if err := json.Unmarshal(payload, &f); err != nil {
-			slog.Warn("dsh-web: session/event frame unparsable", "error", err)
-			return
+		switch {
+		case frame.Error != nil:
+			slog.Warn("dsh-web: logical stream error frame",
+				"stream", frame.StreamID, "code", frame.Error.Code, "message", frame.Error.Message)
+			if sid, ok := strings.CutPrefix(frame.StreamID, "f:"); ok {
+				// The follow is dead on this generation (unknown session,
+				// withdrawn source). Drop the desire so reconnects stay clean.
+				a.follows.drop(sid)
+			}
+			continue
+		case frame.Type == "end":
+			slog.Info("dsh-web: logical stream ended", "stream", frame.StreamID)
+			if sid, ok := strings.CutPrefix(frame.StreamID, "f:"); ok {
+				a.follows.drop(sid)
+			}
+			continue
+		case frame.Type != "item":
+			slog.Debug("dsh-web: unexpected mux frame type", "type", frame.Type, "stream", frame.StreamID)
+			continue
 		}
-		feedWithReset(a.muxCodecs(), f.SessionID, &f.Event, func(events []core.Event) {
-			a.deliverSessionEvents(f.SessionID, events)
-		})
-
-	case "session/subscribed":
-		var f struct {
-			SessionID string `json:"sessionId"`
-			LastSeq   int64  `json:"lastSeq"`
+		switch frame.StreamID {
+		case eventsStreamID:
+			a.dispatchEventsFrame(client, frame.Value)
+		case wsStreamID:
+			a.dispatchWorkspaceFrame(frame.Value)
+		default:
+			if sid, ok := strings.CutPrefix(frame.StreamID, "f:"); ok {
+				a.dispatchFollowItem(sid, frame.Value)
+			} else {
+				slog.Debug("dsh-web: unknown logical stream", "stream", frame.StreamID)
+			}
 		}
-		if err := json.Unmarshal(payload, &f); err == nil {
-			slog.Debug("dsh-web: subscribed", "sessionPrefix", shortLog(f.SessionID), "lastSeq", f.LastSeq)
-		}
-
-	case "approval/requested", "approval/resolved":
-		a.handleApprovalFrame(ctx, rpcID, method, payload)
-
-	case "question/requested", "question/resolved":
-		a.handleQuestionFrame(ctx, rpcID, method, payload)
-
-	case "session/queue", "session/jobs":
-		// Renderer-side inbox/jobs hints: no bridge timeline mapping.
-		slog.Debug("dsh-web: mux frame noted", "method", method)
-
-	case "session/projection":
-		a.handleSessionProjection(payload)
-
-	case "stream/error":
-		var f struct {
-			Error RPCError `json:"error"`
-		}
-		if err := json.Unmarshal(payload, &f); err == nil {
-			// 坑 7: the official stream failure text, verbatim in the log.
-			slog.Warn("dsh-web: stream/error frame", "code", f.Error.Code, "message", f.Error.Message)
-		}
-
-	default:
-		slog.Debug("dsh-web: unknown mux frame", "method", method)
 	}
 }
 
-func (a *Agent) handleSessionProjection(payload json.RawMessage) {
-	var f struct {
-		SessionID string          `json:"sessionId"`
-		Key       string          `json:"key"`
-		Value     json.RawMessage `json:"value"`
-	}
-	if json.Unmarshal(payload, &f) != nil || f.SessionID == "" {
+// dispatchEventsFrame routes one $events value.
+func (a *Agent) dispatchEventsFrame(client *Client, raw json.RawMessage) {
+	var f remoteEventFrame
+	if err := json.Unmarshal(raw, &f); err != nil {
+		slog.Warn("dsh-web: $events frame unparsable", "error", err)
 		return
 	}
-	switch f.Key {
-	case "contextPressure", "contextBreakdown", "sessionStats", "tokenUsage":
+	switch f.Type {
+	case "ready":
+		a.streamMu.Lock()
+		a.muxClientID = f.ClientID
+		a.streamMu.Unlock()
+		slog.Info("dsh-web: $events ready", "clientPrefix", shortLog(f.ClientID))
+	case "emit":
+		a.dispatchHostEmit(f.Event, f.Args)
+	case "waterfall":
+		a.dispatchWaterfall(client, f)
+	case "cancel":
+		a.closePendingInteraction(f.EventID, "cancelled")
 	default:
-		return
+		slog.Debug("dsh-web: unknown $events frame", "type", f.Type)
 	}
-	usage := a.applyProjectionValue(f.SessionID, f.Key, f.Value)
-	if usage == nil {
-		return
-	}
-	a.deliverSessionEvents(f.SessionID, []core.Event{{
-		Type:         core.EventContextUsageUpdated,
-		SessionID:    f.SessionID,
-		ContextUsage: usage,
-	}})
 }
 
-// dispatchHostFrame routes one host ServerRequest payload.
-func (a *Agent) dispatchHostFrame(ctx context.Context, rpcID, method string, payload json.RawMessage) {
-	switch method {
-	case "host/session-added", "host/session-removed", "host/workspace-changed",
-		"host/workspace-removed", "host/workspace-order-changed", "host/archived-sessions-changed":
+// dispatchHostEmit routes the forwarded Cordis event allowlist
+// (api/remotes/src/remote-events.ts API_REMOTE_FORWARDED_EVENTS).
+func (a *Agent) dispatchHostEmit(event string, args []json.RawMessage) {
+	argString := func(i int) string {
+		if i >= len(args) {
+			return ""
+		}
+		var s string
+		if json.Unmarshal(args[i], &s) != nil {
+			return ""
+		}
+		return s
+	}
+	argBool := func(i int) bool {
+		if i >= len(args) {
+			return false
+		}
+		var b bool
+		if json.Unmarshal(args[i], &b) != nil {
+			return false
+		}
+		return b
+	}
+	switch event {
+	case "api-session/added":
 		// 即时层: immediate catalog rescan → fingerprint diff → sessions_changed.
 		a.signalRefresh()
-
-	case "host/session-status":
-		var f struct {
-			SessionID string `json:"sessionId"`
-			Running   bool   `json:"running"`
+	case "api-session/removed":
+		a.follows.drop(argString(0))
+		a.signalRefresh()
+	case "api-session/status":
+		sid := argString(0)
+		running := argBool(1)
+		a.running.setOne(sid, running)
+		if running {
+			a.ensureFollow(sid)
+		} else if _, bound := a.bindings.get(sid); !bound {
+			a.follows.drop(sid)
 		}
-		if err := json.Unmarshal(payload, &f); err != nil || f.SessionID == "" {
+		a.signalRefresh()
+	case "api-session/activity":
+		// A human user/message was appended — the turn that follows must
+		// stream live even for sessions this bridge never held.
+		a.ensureFollow(argString(0))
+		a.signalRefresh()
+	case "api-session/error":
+		slog.Warn("dsh-web: api-session/error", "sessionPrefix", shortLog(argString(0)), "message", argString(1))
+	case "goal/activation-changed", "agent-preset/selected", "commands/change",
+		"llm/adapters-updated", "settings/document-updated",
+		"credentials/reference-updated", "permission-presets/catalog-changed":
+		// Catalog-affecting emits ride the same refresh signal (preset/mode
+		// rows re-read on the next list).
+		a.signalRefresh()
+	default:
+		slog.Debug("dsh-web: emit noted", "event", event)
+	}
+}
+
+// dispatchFollowItem routes one session/follow item: the opening snapshot or
+// one live journal event (both feed the same per-session codec; the codec's
+// seq check dedups the snapshot/live overlap and resets on gaps). The opening
+// snapshot is official history-page semantics — reconcile (seed) its settled
+// records into codec state without re-broadcasting them as live activity;
+// only the in-flight tail (records after the last turn/end) may be emitted,
+// and only at/after the codec's already-delivered seq watermark.
+func (a *Agent) dispatchFollowItem(sessionID string, raw json.RawMessage) {
+	var head struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &head); err != nil {
+		slog.Warn("dsh-web: follow item unparsable", "sessionPrefix", shortLog(sessionID), "error", err)
+		return
+	}
+	switch head.Type {
+	case "snapshot":
+		var snap followSnapshot
+		if err := json.Unmarshal(raw, &snap); err != nil {
+			slog.Warn("dsh-web: follow snapshot unparsable", "sessionPrefix", shortLog(sessionID), "error", err)
 			return
 		}
-		a.running.setOne(f.SessionID, f.Running)
-		// Badge recency rides the refreshed list (updatedAt bumps on turn
-		// boundaries); the flip itself needs no synthetic timeline event.
-		a.signalRefresh()
-
-	case "host/agent-error":
-		var f struct {
-			SessionID string `json:"sessionId"`
-			Message   string `json:"message"`
+		// 2026-09-23 真机事故（owner：发送瞬间气泡聚拢、回复消失，回合落定后
+		// 自愈）：开口快照的已落定历史被当作实时事件重播。旧 6 条窗口时只是
+		// ≤6 个杂散事件；OD-4 对齐官方 HISTORY_PAGE_OPTIONS 500 条窗口后变成
+		// 整段历史一次涌向 iOS（实测 18 回合 × 5 记录 = 90 个事件），运行中
+		// 时间线被冲毁。官方 web 客户端把开口快照当历史页按 seq 幂等 reconcile
+		// （client/sessions/session.ts:620-643 events.open(HISTORY_PAGE_OPTIONS)），
+		// 不是新活动；桥的 iOS 事件通道是追加式，幂等必须在桥侧实现：
+		//   • 全新 codec（priorNext=0，从未投递过）：已落定历史（最后一个
+		//     turn/end 及之前）只播种 codec（水位 + 回合/消息状态），不发射
+		//     ——iOS 经投影 hydrate 已持有该段；只有 turn/end 之后的在途尾部
+		//     才发射（外部运行回合收养与本桥发送的占位/落定流都靠它）。
+		//   • 重连（priorNext>0，codec 已投递到该水位）：发射所有 seq ≥
+		//     priorNext 的记录——断线间隙新落账的记录（含已落定回合）从未
+		//     到达过客户端，也不在旧 hydrate 里，是真正的增量；低于水位的
+		//     记录已投递过，只播种。
+		codecs := a.muxCodecs()
+		priorNext := int64(0)
+		if prior := codecs[sessionID]; prior != nil {
+			priorNext = prior.expectedSeq
 		}
-		if err := json.Unmarshal(payload, &f); err == nil {
-			slog.Warn("dsh-web: host/agent-error", "sessionPrefix", shortLog(f.SessionID), "message", f.Message)
+		var lastSettledSeq int64 = -1
+		for _, rec := range snap.Records {
+			if rec.Type == "event" && rec.Event.Type == "turn/end" && rec.Event.Seq > lastSettledSeq {
+				lastSettledSeq = rec.Event.Seq
+			}
 		}
-
-	case "stream/error":
-		var f struct {
-			Error RPCError `json:"error"`
+		for _, rec := range snap.Records {
+			if rec.Type != "event" {
+				continue
+			}
+			env := rec.Event
+			live := env.Seq >= priorNext && (env.Seq > lastSettledSeq || priorNext > 0)
+			feedWithReset(codecs, sessionID, &env, func(events []core.Event) {
+				if !live {
+					return
+				}
+				a.deliverSessionEvents(sessionID, events)
+			})
 		}
-		if err := json.Unmarshal(payload, &f); err == nil {
-			slog.Warn("dsh-web: host stream/error frame", "code", f.Error.Code, "message", f.Error.Message)
+		if usage := usageFromProjections(snap.Projections); usage != nil {
+			a.rememberContextUsage(sessionID, usage)
+			a.deliverSessionEvents(sessionID, []core.Event{{
+				Type:         core.EventContextUsageUpdated,
+				SessionID:    sessionID,
+				ContextUsage: usage,
+			}})
 		}
-
+		// Opted-in snapshots carry the live-attempt reconnect baseline
+		// (official transport.ts:186-192 treats its absence as a protocol
+		// error). Feed it after the records — official order: durable
+		// window first, baseline expansion appended after.
+		if snap.AssistantStream == nil {
+			slog.Warn("dsh-web: follow snapshot missing opted-in assistantStream baseline",
+				"sessionPrefix", shortLog(sessionID))
+		} else if events := a.codecFor(sessionID).applyStreamBaseline(snap.AssistantStream); len(events) > 0 {
+			a.deliverSessionEvents(sessionID, events)
+		}
+	case "event":
+		var rec pageRecord
+		if err := json.Unmarshal(raw, &rec); err != nil {
+			slog.Warn("dsh-web: follow event unparsable", "sessionPrefix", shortLog(sessionID), "error", err)
+			return
+		}
+		env := rec.Event
+		feedWithReset(a.muxCodecs(), sessionID, &env, func(events []core.Event) {
+			a.deliverSessionEvents(sessionID, events)
+		})
+	case "assistant-stream":
+		// The typert generation's per-chunk live text carrier (journal commits
+		// only at message completion — see codec.go's live-stream section).
+		var wrap struct {
+			Frame assistantStreamFrame `json:"frame"`
+		}
+		if err := json.Unmarshal(raw, &wrap); err != nil {
+			slog.Warn("dsh-web: assistant-stream frame unparsable", "sessionPrefix", shortLog(sessionID), "error", err)
+			return
+		}
+		if events := a.codecFor(sessionID).applyStreamFrame(&wrap.Frame); len(events) > 0 {
+			a.deliverSessionEvents(sessionID, events)
+		}
 	default:
-		slog.Debug("dsh-web: unknown host frame", "method", method)
+		slog.Debug("dsh-web: unknown follow item", "sessionPrefix", shortLog(sessionID), "type", head.Type)
+	}
+}
+
+// dispatchWorkspaceFrame routes one workspace/follow item: the baseline sets
+// the grouping cache; increments keep it current and poke the catalog
+// refresh.
+func (a *Agent) dispatchWorkspaceFrame(raw json.RawMessage) {
+	var f workspaceFollowFrame
+	if err := json.Unmarshal(raw, &f); err != nil {
+		slog.Warn("dsh-web: workspace frame unparsable", "error", err)
+		return
+	}
+	switch f.Type {
+	case "baseline":
+		if f.Value != nil {
+			a.ws.applyBaseline(f.Value)
+			a.signalRefresh()
+		}
+	case "upsert":
+		if f.Workspace != nil {
+			a.ws.applyUpsert(*f.Workspace)
+			a.signalRefresh()
+		}
+	case "remove":
+		a.ws.applyRemove(f.WorkspaceID)
+		a.signalRefresh()
+	case "order":
+		a.ws.applyOrder(f.WorkspaceIDs)
+	case "archived":
+		a.ws.applyArchived(f.ArchivedSessionIDs)
+		a.signalRefresh()
+	case "pinned":
+		// S5 (OD-1=A): the official pin set increment (complete set, official
+		// order) — keeps the cached pin truth current for ListSessions rows
+		// and list_pinned_sessions.
+		a.ws.applyPinned(f.PinnedSessionIDs)
+		a.signalRefresh()
+	default:
+		slog.Debug("dsh-web: unknown workspace frame", "type", f.Type)
 	}
 }
 
@@ -366,6 +724,18 @@ func (a *Agent) muxCodecs() map[string]*sessionCodec {
 		a.codecs = map[string]*sessionCodec{}
 	}
 	return a.codecs
+}
+
+// codecFor returns the session's codec, creating it on first touch (the
+// snapshot baseline can arrive for a session whose records window is empty).
+func (a *Agent) codecFor(sessionID string) *sessionCodec {
+	codecs := a.muxCodecs()
+	c := codecs[sessionID]
+	if c == nil {
+		c = newSessionCodec(sessionID)
+		codecs[sessionID] = c
+	}
+	return c
 }
 
 // deliverSessionEvents applies the single-delivery rule.
@@ -406,7 +776,7 @@ func (a *Agent) IsSessionActive(ctx context.Context, sessionID string) bool {
 		return true
 	}
 	var val sessionListValue
-	if err := client.Call(listCtx, "session.list", sessionListRequest{}, &val); err != nil {
+	if err := client.Call(listCtx, "session/list", listArgs(), &val); err != nil {
 		return true
 	}
 	a.running.stage(val.Items)

@@ -2,7 +2,7 @@ package dshweb
 
 // Official dsh host-command catalog (commands/list + commands/execute, Typert
 // remotes on the commands registry). CordCode only bridges: request/response
-// shapes mirror the official rc.2 wire (gateway single `args` object; list
+// shapes mirror the official wire (gateway single `args` object; list
 // business value is a BARE array of descriptors) and are decoded into an
 // intermediate wire type before mapping to core.SessionCommand — the official
 // descriptor nests hint under `input` and omits `input` entirely for
@@ -26,10 +26,6 @@ const (
 	commandsExecuteMethod = "commands/execute"
 )
 
-type commandsListRequest struct {
-	Args commandsListArgs `json:"args"`
-}
-
 type commandsListArgs struct {
 	AgentID string `json:"agentId"`
 }
@@ -48,29 +44,33 @@ type commandInputWire struct {
 	Images bool   `json:"images,omitempty"`
 }
 
-type commandsExecuteRequest struct {
-	Args commandsExecuteArgs `json:"args"`
-}
-
-// commandsExecuteArgs.images MUST always serialize as an array. The deployed
-// seat gateway (live-probed 2026-09-05) enforces the execute descriptor
-// strictly: omitting images fails with `args fields do not match the
-// descriptor: missing "images"` (rc.2 fixtures tolerate omission; the seat
-// does not), and images:null fails boundary validation. An empty array is the
-// official no-attachment invocation ("empty for a plain invocation", rc.2
-// interaction/commands execute docstring), so `images: []` is the one shape
-// both gateway generations accept. Phase 1 has no image-command surface, so
-// the slice is always empty; the element type mirrors EncodedImageAttachment
-// for the day it is not.
-type encodedImageAttachment struct {
-	MediaType string `json:"mediaType"`
-	Data      string `json:"data"`
+// commandsExecuteArgs.submittedAttachments MUST always serialize as an array.
+// The running alpha.1 seat (live-probed 2026-09-23, verbatim evidence
+// scripts/dshweb-phase0/alpha1-commands-goals-wire.json) enforces the execute
+// descriptor strictly: the third parameter is `submittedAttachments` — the
+// bridge's former `images` field was rejected with `args fields do not match
+// the descriptor: missing "submittedAttachments"; unexpected "images"`, and
+// omitting the key fails with `missing "submittedAttachments"` (the
+// 2026-09-05 rc.2-era conclusion that `images:[]` is accepted is overturned
+// by that live evidence). An empty array is the official no-attachment
+// invocation ("empty for a plain invocation", interaction/commands execute
+// docstring, dsh-v0.1.7-alpha.2 index.ts:354-366). Phase 1 has no
+// image-command surface, so the slice is always empty; the element type
+// mirrors the official CommandSubmitAttachment union for the day it is not —
+// its non-empty wire shape is source-verified only (S4/A4a owns the first
+// live sample).
+type commandSubmitAttachment struct {
+	Type      string `json:"type"`                // 'image' | 'file'
+	MediaType string `json:"mediaType,omitempty"` // image variant
+	Data      string `json:"data,omitempty"`      // image variant
+	Name      string `json:"name,omitempty"`      // image variant (optional)
+	ReceiptID string `json:"receiptId,omitempty"` // file variant
 }
 
 type commandsExecuteArgs struct {
-	AgentID string                   `json:"agentId"`
-	Line    string                   `json:"line"`
-	Images  []encodedImageAttachment `json:"images"`
+	AgentID              string                    `json:"agentId"`
+	Line                 string                    `json:"line"`
+	SubmittedAttachments []commandSubmitAttachment `json:"submittedAttachments"`
 }
 
 type commandsExecuteValue struct {
@@ -96,9 +96,7 @@ func (a *Agent) ListSessionCommands(ctx context.Context, sessionID string) ([]co
 		return nil, err
 	}
 	var descriptors []commandDescriptorWire
-	if err := client.Call(ctx, commandsListMethod, commandsListRequest{
-		Args: commandsListArgs{AgentID: sessionID},
-	}, &descriptors); err != nil {
+	if err := client.Call(ctx, commandsListMethod, commandsListArgs{AgentID: sessionID}, &descriptors); err != nil {
 		return nil, err
 	}
 	commands := make([]core.SessionCommand, 0, len(descriptors))
@@ -134,8 +132,8 @@ func (a *Agent) ExecuteSessionCommand(ctx context.Context, sessionID, line strin
 		return zero, err
 	}
 	var out commandsExecuteValue
-	if err := client.Call(ctx, commandsExecuteMethod, commandsExecuteRequest{
-		Args: commandsExecuteArgs{AgentID: sessionID, Line: line, Images: []encodedImageAttachment{}},
+	if err := client.Call(ctx, commandsExecuteMethod, commandsExecuteArgs{
+		AgentID: sessionID, Line: line, SubmittedAttachments: []commandSubmitAttachment{},
 	}, &out); err != nil {
 		return zero, err
 	}

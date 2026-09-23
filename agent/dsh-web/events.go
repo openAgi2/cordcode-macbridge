@@ -6,7 +6,11 @@ package dshweb
 // so the data payload types are identical). Source: agent/dsh/{events.go,
 // store.go} at dsh/driver round12.
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
+)
 
 // dshSource is the shared source discriminant (user/plugin/model/tool kinds).
 // Form/Summary/SenderSessionID are the subagent-settled settle-notice fields
@@ -29,21 +33,66 @@ type dshModelSource struct {
 	Model    string `json:"model,omitempty"`
 }
 
-// dshContentBlock is one message content block; text/reasoning/tool-call/
-// tool-result shapes share this envelope (nested content belongs to
-// tool-result blocks).
+// dshContentBlock is one message content block, mirroring the official
+// ContentBlockMap envelope (llm/src/types.ts: text/reasoning/image/file/
+// tool-call/tool-addition/tool-removal). The nested-content "tool-result"
+// block tag is RETIRED upstream (agent-team/projection.ts:43); tool results
+// carry message-level toolCallId/isError with top-level text blocks.
 type dshContentBlock struct {
-	Type       string            `json:"type"`
-	Text       string            `json:"text,omitempty"`
-	ID         string            `json:"id,omitempty"`
-	Name       string            `json:"name,omitempty"`
-	Arguments  json.RawMessage   `json:"arguments,omitempty"`
-	ToolCallID string            `json:"toolCallId,omitempty"`
-	Content    []dshContentBlock `json:"content,omitempty"`
-	// IsError marks a tool-result block as the tool's failure payload
-	// (official tool-calls.ts createToolResultMessage; the cold path maps
-	// it to failed/completed step status — parity plan §5 S3 branch ⑤).
-	IsError bool `json:"isError,omitempty"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+	// Attachment is the durable reference carried by journal image/file
+	// blocks after admission (attachment/index.ts:114-129 admitPromptContent;
+	// ImageAttachmentRef / FileAttachmentRef, attachment/src/types.ts).
+	Attachment *dshAttachmentRef `json:"attachment,omitempty"`
+}
+
+// dshAttachmentRef mirrors the official durable attachment references:
+// image blocks carry {attachmentId, mediaType, bytes, width, height, name?}
+// (ImageAttachmentRef); file blocks carry {attachmentId, name, bytes}
+// (FileAttachmentRef, sha256 content-addressed).
+type dshAttachmentRef struct {
+	AttachmentID string `json:"attachmentId"`
+	MediaType    string `json:"mediaType,omitempty"`
+	Name         string `json:"name,omitempty"`
+	Bytes        int64  `json:"bytes"`
+	Width        int    `json:"width,omitempty"`
+	Height       int    `json:"height,omitempty"`
+}
+
+// eventAttachments maps journal image/file blocks onto the wire descriptors
+// (dsh-web S4). Text/reasoning/tool blocks contribute nothing.
+func eventAttachments(blocks []dshContentBlock) []core.EventAttachment {
+	var out []core.EventAttachment
+	for _, blk := range blocks {
+		ref := blk.Attachment
+		if ref == nil || ref.AttachmentID == "" {
+			continue
+		}
+		switch blk.Type {
+		case "image":
+			out = append(out, core.EventAttachment{
+				Kind:         "image",
+				AttachmentID: ref.AttachmentID,
+				MediaType:    ref.MediaType,
+				Name:         ref.Name,
+				Bytes:        ref.Bytes,
+				Width:        ref.Width,
+				Height:       ref.Height,
+			})
+		case "file":
+			out = append(out, core.EventAttachment{
+				Kind:         "file",
+				AttachmentID: ref.AttachmentID,
+				Name:         ref.Name,
+				Bytes:        ref.Bytes,
+			})
+		}
+	}
+	return out
 }
 
 // dshUserMessageData is user/message's data payload.

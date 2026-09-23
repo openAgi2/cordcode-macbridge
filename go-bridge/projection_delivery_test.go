@@ -206,6 +206,8 @@ func TestZeroTargetRebindIsRateLimitedPerSession(t *testing.T) {
 func TestSessionSyncV2RawTimelineClassification(t *testing.T) {
 	for _, event := range []string{
 		"turn_started", "turn_completed", "user_message",
+		// dsh-web inbox 撤销行：折进 ProjectionPatch.RemovedTurnIDs，raw 帧必须封印。
+		"user_message_removed",
 		"text_delta", "message_updated", "reasoning_delta",
 		"tool_started", "tool_finished",
 		"permission_request", "permission_resolved", "permission_asked",

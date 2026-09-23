@@ -7,6 +7,7 @@ package dshweb
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -103,8 +104,10 @@ func TestCodecTurnErrorPassesReasonVerbatim(t *testing.T) {
 		env("step/start", 1, map[string]any{"turn": 1, "step": 1}),
 		env("tool/call", 2, map[string]any{"turn": 1, "step": 1, "callId": "c1", "name": "bash", "arguments": `{"command":"ls"}`}),
 		env("tool/result", 3, map[string]any{"turn": 1, "step": 1, "message": map[string]any{
-			"source":  map[string]any{"kind": "tool", "callId": "c1"},
-			"content": []map[string]any{{"type": "tool-result", "toolCallId": "c1", "isError": true, "content": []map[string]any{{"type": "text", "text": "boom 原始错误"}}}},
+			"toolCallId": "c1",
+			"isError":    true,
+			"source":     map[string]any{"kind": "tool", "callId": "c1"},
+			"content":    []map[string]any{{"type": "text", "text": "boom 原始错误"}},
 		}}),
 		env("step/end", 4, map[string]any{"turn": 1, "step": 1}),
 		env("turn/end", 5, map[string]any{"turn": 1, "reason": map[string]any{"kind": "error"}}),
@@ -227,9 +230,15 @@ func TestSubscribeRoutesExternalSessionToPassiveChannel(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.SetMuxFrames([]any{
-		map[string]any{"type": "session/event", "sessionId": "ext-1",
-			"event": map[string]any{"type": "turn/start", "seq": 0, "time": 1, "data": map[string]any{"turn": 1}}},
+	// api-session/activity (a human user/message) opens the follow on demand;
+	// the follow's items then stream to the passive channel.
+	f.SetEventsFrames([]any{
+		map[string]any{"type": "emit", "event": "api-session/activity", "args": []any{"ext-1", 1786860018199}},
+	})
+	f.SetFollowScript("ext-1", fakeFollowScript{
+		items: []any{
+			map[string]any{"type": "event", "event": map[string]any{"type": "turn/start", "seq": 0, "time": 1, "data": map[string]any{"turn": 1}}},
+		},
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -252,27 +261,25 @@ func TestSubscribeLiveConsumesObservedTurnAndRejectsReplay(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.SetMuxFrames([]any{
-		map[string]any{"type": "session/event", "sessionId": "ext-live",
-			"event": map[string]any{"type": "turn/start", "seq": 0, "time": 1, "data": map[string]any{"turn": 1}}},
-		map[string]any{"type": "session/event", "sessionId": "ext-live",
-			"event": map[string]any{"type": "step/start", "seq": 1, "time": 2,
+	f.SetEventsFrames([]any{
+		map[string]any{"type": "emit", "event": "api-session/activity", "args": []any{"ext-live", 1786860018199}},
+	})
+	f.SetFollowScript("ext-live", fakeFollowScript{
+		items: []any{
+			map[string]any{"type": "event", "event": map[string]any{"type": "turn/start", "seq": 0, "time": 1, "data": map[string]any{"turn": 1}}},
+			map[string]any{"type": "event", "event": map[string]any{"type": "step/start", "seq": 1, "time": 2,
 				"data": map[string]any{"turn": 1, "step": 1}}},
-		map[string]any{"type": "session/event", "sessionId": "ext-live",
-			"event": map[string]any{"type": "assistant/chunk", "seq": 2, "time": 3,
+			map[string]any{"type": "event", "event": map[string]any{"type": "assistant/chunk", "seq": 2, "time": 3,
 				"data": map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{"type": "block-start", "index": 0, "blockType": "text"}}}},
-		map[string]any{"type": "session/event", "sessionId": "ext-live",
-			"event": map[string]any{"type": "assistant/chunk", "seq": 3, "time": 4,
+			map[string]any{"type": "event", "event": map[string]any{"type": "assistant/chunk", "seq": 3, "time": 4,
 				"data": map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{"type": "text-delta", "index": 0, "text": "真实回复"}}}},
-		map[string]any{"type": "session/event", "sessionId": "ext-live",
-			"event": map[string]any{"type": "assistant/chunk", "seq": 4, "time": 5,
+			map[string]any{"type": "event", "event": map[string]any{"type": "assistant/chunk", "seq": 4, "time": 5,
 				"data": map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{"type": "block-end", "index": 0, "block": map[string]any{"type": "text", "text": "真实回复"}}}}},
-		map[string]any{"type": "session/event", "sessionId": "ext-live",
-			"event": map[string]any{"type": "step/end", "seq": 5, "time": 6,
+			map[string]any{"type": "event", "event": map[string]any{"type": "step/end", "seq": 5, "time": 6,
 				"data": map[string]any{"turn": 1, "step": 1}}},
-		map[string]any{"type": "session/event", "sessionId": "ext-live",
-			"event": map[string]any{"type": "turn/end", "seq": 6, "time": 7, "turn": 1,
+			map[string]any{"type": "event", "event": map[string]any{"type": "turn/end", "seq": 6, "time": 7, "turn": 1,
 				"data": map[string]any{"turn": 1, "reason": map[string]any{"kind": "completed"}}}},
+		},
 	})
 	f.closeAfterPush = true
 
@@ -300,9 +307,9 @@ func TestSubscribeLiveConsumesObservedTurnAndRejectsReplay(t *testing.T) {
 	if !waitFor(t, 5*time.Second, func() bool {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		return f.upgradeSeen["/api/events.mux"] >= 2
+		return f.upgradeSeen[remoteMuxPath] >= 2
 	}) {
-		t.Fatalf("stream did not replay frames after reconnect (dials=%d)", f.upgradeSeen["/api/events.mux"])
+		t.Fatalf("mux did not reopen after reconnect (dials=%d)", f.upgradeSeen[remoteMuxPath])
 	}
 	select {
 	case ev := <-events:
@@ -315,13 +322,13 @@ func TestBoundSessionReceivesOwnEventsNotPassive(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["session.create"] = fakeRPCResponse{value: map[string]any{"sessionId": "own-1"}}
-	f.hooks["session.history"] = func(_ []byte) fakeRPCResponse {
-		return fakeRPCResponse{value: map[string]any{"events": []any{}, "hasMore": false}}
-	}
-	f.SetMuxFrames([]any{
-		map[string]any{"type": "session/event", "sessionId": "own-1",
-			"event": map[string]any{"type": "turn/start", "seq": 0, "time": 1, "data": map[string]any{"turn": 1}}},
+	f.handlers["session/create"] = fakeRPCResponse{value: map[string]any{"sessionId": "own-1"}}
+	// The bound session joins the follow set at StartSession; the pump opens
+	// its follow when the mux generation starts.
+	f.SetFollowScript("own-1", fakeFollowScript{
+		items: []any{
+			map[string]any{"type": "event", "event": map[string]any{"type": "turn/start", "seq": 0, "time": 1, "data": map[string]any{"turn": 1}}},
+		},
 	})
 
 	sess, err := a.StartSession(context.Background(), "")
@@ -360,12 +367,13 @@ func TestBoundSessionReceivesOwnEventsNotPassive(t *testing.T) {
 }
 
 func TestStreamReconnectReopensAfterDrop(t *testing.T) {
-	// 坑 8-class resilience: official v1 has no since — recovery is reopen.
+	// 坑 8-class resilience: the streams carry no resume cursor — recovery
+	// is a fresh mux generation.
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	f.closeAfterPush = true
-	f.SetMuxFrames([]any{
-		map[string]any{"type": "session/subscribed", "sessionId": "s", "lastSeq": 0},
+	f.SetEventsFrames([]any{
+		map[string]any{"type": "emit", "event": "api-session/added", "args": []any{map[string]any{"sessionId": "s"}}},
 	})
 	a := newTestAgent(t, f)
 
@@ -377,9 +385,9 @@ func TestStreamReconnectReopensAfterDrop(t *testing.T) {
 	if !waitFor(t, 10*time.Second, func() bool {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		return f.upgradeSeen["/api/events.mux"] >= 2
+		return f.upgradeSeen[remoteMuxPath] >= 2
 	}) {
-		t.Fatalf("stream did not reopen after drop (dials=%d)", f.upgradeSeen["/api/events.mux"])
+		t.Fatalf("mux did not reopen after drop (dials=%d)", f.upgradeSeen[remoteMuxPath])
 	}
 }
 
@@ -387,9 +395,9 @@ func TestHostFrameTriggersCatalogRefreshSignal(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.SetHostFrames([]any{
-		map[string]any{"type": "host/session-added", "sessionId": "new-1", "blank": false, "cwd": "/p"},
-		map[string]any{"type": "host/session-status", "sessionId": "new-1", "running": true},
+	f.SetEventsFrames([]any{
+		map[string]any{"type": "emit", "event": "api-session/added", "args": []any{map[string]any{"sessionId": "new-1"}}},
+		map[string]any{"type": "emit", "event": "api-session/status", "args": []any{"new-1", true}},
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -401,14 +409,14 @@ func TestHostFrameTriggersCatalogRefreshSignal(t *testing.T) {
 	select {
 	case <-signals:
 	case <-time.After(5 * time.Second):
-		t.Fatal("host/session-added never signaled a catalog refresh")
+		t.Fatal("api-session/added never signaled a catalog refresh")
 	}
 	// Running cache flip (badge data source, §4.3.1).
 	if !waitFor(t, 5*time.Second, func() bool {
 		running, known := a.running.get("new-1")
 		return known && running
 	}) {
-		t.Fatal("host/session-status never flipped the running cache")
+		t.Fatal("api-session/status never flipped the running cache")
 	}
 }
 
@@ -442,7 +450,7 @@ func TestIsSessionActiveThreeStates(t *testing.T) {
 	}
 
 	// Unknown to cache but listed ⇒ refresh resolves it.
-	f.handlers["session.list"] = fakeRPCResponse{value: map[string]any{
+	f.handlers["session/list"] = fakeRPCResponse{value: map[string]any{
 		"items": []map[string]any{{"sessionId": "fresh-1", "updatedAt": 1, "running": false, "blank": false}},
 	}}
 	if a.IsSessionActive(context.Background(), "fresh-1") {
@@ -470,18 +478,26 @@ func TestCodecKnownControlPlaneTypesDoNotReset(t *testing.T) {
 		env("session/title-llm-request", 3, map[string]any{"titleProvider": "llm"}),
 		env("approval/asked", 4, map[string]any{"id": "appr-1", "toolName": "write"}),
 		env("approval/decided", 5, map[string]any{"id": "appr-1", "outcome": "allowed-once"}),
-		env("step/start", 6, map[string]any{"turn": 1, "step": 1}),
-		env("assistant/chunk", 7, map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{
+		// typert 网关代新类型（2026-09-23 owner 真机：session/end-seed /
+		// system/message / model/selection 触发 unknown-required 重置，历史
+		// 与直播全空）——官方注册表成员，类②跳过不重置。
+		env("session/end-seed", 6, map[string]any{"inherited": true}),
+		env("system/message", 7, map[string]any{"text": "系统通知"}),
+		env("model/selection", 8, map[string]any{"provider": "deepseek", "model": "deepseek-v4"}),
+		env("assistant/attempt", 9, map[string]any{"attempt": 1}),
+		env("subagent/catalog", 10, map[string]any{}),
+		env("step/start", 11, map[string]any{"turn": 1, "step": 1}),
+		env("assistant/chunk", 12, map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{
 			"type": "block-start", "index": 0, "blockType": "text",
 		}}),
-		env("assistant/chunk", 8, map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{
+		env("assistant/chunk", 13, map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{
 			"type": "text-delta", "index": 0, "text": "命令后仍可流式",
 		}}),
-		env("assistant/chunk", 9, map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{
+		env("assistant/chunk", 14, map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{
 			"type": "block-end", "index": 0, "block": map[string]any{"type": "text", "text": "命令后仍可流式"},
 		}}),
-		env("step/end", 10, map[string]any{"turn": 1, "step": 1}),
-		env("turn/end", 11, map[string]any{"turn": 1, "reason": map[string]any{"kind": "completed"}}),
+		env("step/end", 15, map[string]any{"turn": 1, "step": 1}),
+		env("turn/end", 16, map[string]any{"turn": 1, "reason": map[string]any{"kind": "completed"}}),
 	})
 	// 恰一个 turn_started（无重置产生的第二个）+ delta 保留 + 干净收口。
 	var turnStarted, textDeltas, terminal int
@@ -911,5 +927,584 @@ func TestCodecSubagentSettledContextInjection(t *testing.T) {
 	// kind=user 行仍折进同一 dshw turn）。
 	if got := cb.activeTurnID; got != dshwTurnID("sess-ctxinj", 1) {
 		t.Fatalf("activeTurnID after injection = %q, want %q (injection must not steal the turn)", got, dshwTurnID("sess-ctxinj", 1))
+	}
+}
+
+// ── typert 代 assistant-stream 直播（S1）────────────────────────────────────
+//
+// 官方形状锚点：session-controller/src/types.ts:511-541（帧 union）、
+// client/transport.ts:181（assistantStream:true 硬编码）、
+// client/sessions/assistant-stream.ts（折叠与连续性）。
+
+// TestFollowOpenOptsIntoAssistantStream pins the wire contract: every follow
+// open must carry assistantStream:true — without it the server never
+// subscribes the per-chunk publication (history.ts:165-176) and live text
+// only appears at message completion.
+func TestFollowOpenOptsIntoAssistantStream(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+	f.SetEventsFrames([]any{
+		map[string]any{"type": "emit", "event": "api-session/activity", "args": []any{"opt-1", 1786860018199}},
+	})
+	f.SetFollowScript("opt-1", fakeFollowScript{
+		snapshot: map[string]any{"type": "snapshot", "cursor": 0, "records": []any{}, "hasMore": false,
+			"assistantStream": map[string]any{"revision": 3}},
+	})
+	if _, err := a.Subscribe(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(t, 5*time.Second, func() bool {
+		return f.FollowOpenPayload("opt-1") != nil
+	}) {
+		t.Fatal("follow open never reached the fake")
+	}
+	var payload struct {
+		Args struct {
+			Request struct {
+				AssistantStream bool `json:"assistantStream"`
+			} `json:"request"`
+		} `json:"args"`
+	}
+	if err := json.Unmarshal(f.FollowOpenPayload("opt-1"), &payload); err != nil {
+		t.Fatalf("open payload: %v (%s)", err, f.FollowOpenPayload("opt-1"))
+	}
+	if !payload.Args.Request.AssistantStream {
+		t.Fatalf("follow open lacks assistantStream:true: %s", f.FollowOpenPayload("opt-1"))
+	}
+}
+
+// TestFollowOpenMirrorsOfficialWindow pins the OD-4=A contract: the opening-
+// snapshot window mirrors the official web client's HISTORY_PAGE_OPTIONS
+// (client/sessions/session.ts:54, served at :631) — maxMessages 500 +
+// turnWindow {minMessages: 50, minTurns: 2} — so a reconnect gap-seed covers
+// the same recent span the Mac web reconciles.
+func TestFollowOpenMirrorsOfficialWindow(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+	f.SetEventsFrames([]any{
+		map[string]any{"type": "emit", "event": "api-session/activity", "args": []any{"win-1", 1786860018199}},
+	})
+	f.SetFollowScript("win-1", fakeFollowScript{
+		snapshot: map[string]any{"type": "snapshot", "cursor": 0, "records": []any{}, "hasMore": false,
+			"assistantStream": map[string]any{"revision": 3}},
+	})
+	if _, err := a.Subscribe(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(t, 5*time.Second, func() bool {
+		return f.FollowOpenPayload("win-1") != nil
+	}) {
+		t.Fatal("follow open never reached the fake")
+	}
+	var payload struct {
+		Args struct {
+			Request struct {
+				MaxMessages *int `json:"maxMessages"`
+				TurnWindow  *struct {
+					MinMessages int `json:"minMessages"`
+					MinTurns    int `json:"minTurns"`
+				} `json:"turnWindow"`
+			} `json:"request"`
+		} `json:"args"`
+	}
+	if err := json.Unmarshal(f.FollowOpenPayload("win-1"), &payload); err != nil {
+		t.Fatal(err)
+	}
+	req := payload.Args.Request
+	if req.MaxMessages == nil || *req.MaxMessages != 500 {
+		t.Fatalf("maxMessages = %v, want 500 (official HISTORY_PAGE_OPTIONS)", req.MaxMessages)
+	}
+	if req.TurnWindow == nil || req.TurnWindow.MinMessages != 50 || req.TurnWindow.MinTurns != 2 {
+		t.Fatalf("turnWindow = %+v, want {minMessages:50, minTurns:2}", req.TurnWindow)
+	}
+}
+
+// snapshotUserMessage/snapshotTurnStart/snapshotTurnEnd build follow-page
+// record maps for the snapshot-replay tests below (same wire shape the fake
+// pushes and the real seat serves: {"type":"event","event":{...}}).
+func snapshotUserMessage(seq int64, id, text string) map[string]any {
+	return map[string]any{"type": "event", "event": map[string]any{
+		"type": "user/message", "seq": seq, "time": seq * 1000,
+		"data": map[string]any{
+			"content": []map[string]any{{"type": "text", "text": text}},
+			"source":  map[string]any{"kind": "user"}, "id": id,
+		},
+	}}
+}
+
+func snapshotTurnStart(seq int64, turn int) map[string]any {
+	return map[string]any{"type": "event", "event": map[string]any{
+		"type": "turn/start", "seq": seq, "time": seq * 1000,
+		"data": map[string]any{"turn": turn},
+	}}
+}
+
+func snapshotTurnEnd(seq int64, turn int) map[string]any {
+	return map[string]any{"type": "event", "event": map[string]any{
+		"type": "turn/end", "seq": seq, "time": seq * 1000,
+		"data": map[string]any{"turn": turn, "reason": map[string]any{"kind": "completed"}},
+	}}
+}
+
+func snapshotInboxInsert(seq int64, id, text string) map[string]any {
+	return map[string]any{"type": "event", "event": map[string]any{
+		"type": "agent/inbox/spliced", "seq": seq, "time": seq * 1000,
+		"data": map[string]any{"target": "next-turn", "start": 0,
+			"inserted": []map[string]any{{"id": id, "content": []map[string]any{{"type": "text", "text": text}}}}},
+	}}
+}
+
+func snapshotInboxRemoval(seq int64) map[string]any {
+	return map[string]any{"type": "event", "event": map[string]any{
+		"type": "agent/inbox/spliced", "seq": seq, "time": seq * 1000,
+		"data": map[string]any{"target": "next-turn", "start": 0, "removedCount": 1},
+	}}
+}
+
+// snapshotTurn composes the official 5-record per-turn journal shape the
+// 2026-09-23 flood replayed 18×: inbox insert (pending placeholder) → turn
+// start → inbox removal (claim) → settled user message → turn end.
+func snapshotTurn(base int64, turn int, id, text string) []map[string]any {
+	return []map[string]any{
+		snapshotInboxInsert(base, id, text),
+		snapshotTurnStart(base+1, turn),
+		snapshotInboxRemoval(base + 2),
+		snapshotUserMessage(base+3, id, text),
+		snapshotTurnEnd(base+4, turn),
+	}
+}
+
+// TestFollowSnapshotSettledHistorySeedsWithoutReplay pins the 2026-09-23
+// 真机事故 regression (owner: sending a message clustered every bubble and
+// wiped assistant replies until the turn settled). The follow opening
+// snapshot is official history-page semantics — session.ts:620-643
+// events.open(HISTORY_PAGE_OPTIONS) reconciles the window by seq; it is not
+// new activity. On a fresh codec (nothing delivered yet) settled records
+// (through the last turn/end) must seed the codec's watermark and turn state
+// WITHOUT re-broadcasting them as live events — iOS holds that span via the
+// projection hydrate. With the OD-4 500-record window the old
+// replay-as-live behavior flooded iOS with the whole session history at send
+// time (18 turns × 5 events) and corrupted the running timeline. The only
+// event allowed through here is the live frame after the snapshot; the
+// duplicated seq-9 frame proves the watermark was seeded (idempotent replay
+// skip, not a fresh-codec re-emit).
+func TestFollowSnapshotSettledHistorySeedsWithoutReplay(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+	f.SetEventsFrames([]any{
+		map[string]any{"type": "emit", "event": "api-session/activity", "args": []any{"settle-1", 1786860018199}},
+	})
+	records := append(snapshotTurn(0, 1, "m1", "第一回合"), snapshotTurn(5, 2, "m2", "第二回合")...)
+	turn2End := records[len(records)-1]
+	f.SetFollowScript("settle-1", fakeFollowScript{
+		snapshot: map[string]any{"type": "snapshot", "cursor": 9, "hasMore": false,
+			"records": records,
+			"assistantStream": map[string]any{"revision": 1},
+		},
+		items: []any{
+			// Duplicate of the snapshot's last record: the seeded watermark
+			// must replay-skip it (no turn_completed re-emit, no reset).
+			turn2End,
+			// The first genuinely live frame — only this may reach clients.
+			snapshotTurnStart(10, 3),
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, err := a.Subscribe(ctx)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	select {
+	case ev := <-ch:
+		if ev.Type != core.EventTurnStarted || ev.SessionID != "settle-1" {
+			t.Fatalf("first delivered event = %+v, want the live turn_started for turn 3 (settled history must not re-broadcast)", ev)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("live frame never reached the passive channel")
+	}
+	select {
+	case ev := <-ch:
+		t.Fatalf("settled-history replay leaked after the live frame: %+v", ev)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// TestFollowSnapshotInFlightTailStillEmitted pins the other half of the
+// fresh-open semantics: records after the last turn/end are the in-flight
+// turn. External running-turn adoption (a human prompt on the Mac web while
+// iOS watches) and the bridge's own queued-prompt placeholder flow both
+// depend on them reaching clients as live events. Settled turn 1 must stay
+// silent; in-flight turn 2's pending placeholder + turn start must come
+// through.
+func TestFollowSnapshotInFlightTailStillEmitted(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+	f.SetEventsFrames([]any{
+		map[string]any{"type": "emit", "event": "api-session/activity", "args": []any{"tail-1", 1786860018199}},
+	})
+	records := append(snapshotTurn(0, 1, "m1", "已落定回合"),
+		snapshotInboxInsert(5, "m2", "在途回合的提问"),
+		snapshotTurnStart(6, 2))
+	f.SetFollowScript("tail-1", fakeFollowScript{
+		snapshot: map[string]any{"type": "snapshot", "cursor": 6, "hasMore": false,
+			"records": records,
+			"assistantStream": map[string]any{"revision": 1},
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, err := a.Subscribe(ctx)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	want := []core.EventType{core.EventUserMessageQueued, core.EventTurnStarted}
+	for i, wantType := range want {
+		select {
+		case ev := <-ch:
+			if ev.Type != wantType || ev.SessionID != "tail-1" {
+				t.Fatalf("event %d = %+v, want %v (in-flight tail only)", i, ev, wantType)
+			}
+			if wantType == core.EventUserMessageQueued && !strings.Contains(ev.Content, "在途回合的提问") {
+				t.Fatalf("in-flight placeholder = %+v", ev)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("in-flight tail event %d (%v) never delivered", i, wantType)
+		}
+	}
+	select {
+	case ev := <-ch:
+		t.Fatalf("settled turn 1 leaked around the in-flight tail: %+v", ev)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// TestFollowSnapshotReconnectSuppressesAlreadyDeliveredTail pins the
+// reconnect half: with a codec that has already delivered records live (its
+// expectedSeq watermark sits inside the replayed window), a re-opened follow
+// re-seeds silently up to that watermark, keeps later live frames gap-free,
+// and still emits records at/after the watermark — including records that
+// settled while the follow was down (never delivered live, absent from the
+// old hydrate: genuinely new to clients) and a new in-flight tail.
+func TestFollowSnapshotReconnectSuppressesAlreadyDeliveredTail(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, err := a.Subscribe(ctx)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	followItem := func(t *testing.T, payload any) json.RawMessage {
+		t.Helper()
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	snapshotItem := func(t *testing.T, records ...map[string]any) json.RawMessage {
+		t.Helper()
+		cursor := int64(0)
+		if n := len(records); n > 0 {
+			cursor = records[n-1]["event"].(map[string]any)["seq"].(int64)
+		}
+		return followItem(t, map[string]any{"type": "snapshot", "cursor": cursor, "hasMore": false,
+			"records": records, "assistantStream": map[string]any{"revision": 1}})
+	}
+	expect := func(t *testing.T, wantType core.EventType, why string) core.Event {
+		t.Helper()
+		select {
+		case ev := <-ch:
+			if ev.Type != wantType {
+				t.Fatalf("%s: event = %+v, want %v", why, ev, wantType)
+			}
+			return ev
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: %v never delivered", why, wantType)
+			return core.Event{}
+		}
+	}
+	drainQuiet := func(t *testing.T, why string) {
+		t.Helper()
+		select {
+		case ev := <-ch:
+			t.Fatalf("%s: unexpected event %+v", why, ev)
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+
+	const sid = "rejoin-9"
+	// First open (fresh codec): settled turn 1 seeds silently; in-flight
+	// turn 2's placeholder + turn start are new → emitted.
+	a.dispatchFollowItem(sid, snapshotItem(t, append(snapshotTurn(0, 1, "m1", "第一回合"),
+		snapshotInboxInsert(5, "m2", "在途回合的提问"),
+		snapshotTurnStart(6, 2))...))
+	expect(t, core.EventUserMessageQueued, "first open in-flight placeholder")
+	expect(t, core.EventTurnStarted, "first open in-flight turn start")
+
+	// Reconnect replay of the same window: every record sits below the
+	// codec's delivered watermark (7) → seed only, zero events.
+	a.dispatchFollowItem(sid, snapshotItem(t, append(snapshotTurn(0, 1, "m1", "第一回合"),
+		snapshotInboxInsert(5, "m2", "在途回合的提问"),
+		snapshotTurnStart(6, 2))...))
+	drainQuiet(t, "already-delivered window re-emitted")
+
+	// The re-seeded watermark keeps live frames gap-free: the claim removal
+	// at seq 7 is accepted (not a regression reset) and emits the retract.
+	a.dispatchFollowItem(sid, followItem(t, snapshotInboxRemoval(7)))
+	expect(t, core.EventUserMessageRemoved, "live frame after the re-seeded watermark")
+
+	// Second reconnect: turn 2 settled while the follow was down (records
+	// 8-9 never delivered live) and turn 3's prompt is now in flight. The
+	// gap-settled records at/after the watermark must reach clients, the
+	// new in-flight tail must be adopted, and everything below the
+	// watermark must stay silent.
+	a.dispatchFollowItem(sid, snapshotItem(t,
+		append(append(snapshotTurn(0, 1, "m1", "第一回合"), snapshotTurn(5, 2, "m2", "在途回合的提问")...),
+			snapshotInboxInsert(10, "m3", "新的在途提问"))...))
+	ev := expect(t, core.EventUserMessage, "gap-settled user message")
+	if ev.ItemID != "m2" {
+		t.Fatalf("gap-settled user message = %+v, want m2 settle", ev)
+	}
+	expect(t, core.EventResult, "gap-settled turn completion")
+	expect(t, core.EventUserMessageQueued, "new in-flight tail")
+	drainQuiet(t, "below-watermark history leaked on the second reconnect")
+}
+
+// TestAssistantStreamFramesStreamLiveText drives one full official-shape
+// live turn: snapshot baseline → start → text/reasoning/usage chunks →
+// committed end → the durable assistant/message settlement (which must stay
+// bookkeeping — the deltas already carried the live truth, no double emit).
+func TestAssistantStreamFramesStreamLiveText(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+	f.SetEventsFrames([]any{
+		map[string]any{"type": "emit", "event": "api-session/activity", "args": []any{"live-1", 1786860018199}},
+	})
+	f.SetFollowScript("live-1", fakeFollowScript{
+		snapshot: map[string]any{
+			"type": "snapshot", "cursor": 2, "hasMore": false,
+			"records": []any{
+				map[string]any{"type": "event", "event": map[string]any{"type": "turn/start", "seq": 0, "time": 1, "data": map[string]any{"turn": 1}}},
+				map[string]any{"type": "event", "event": map[string]any{"type": "step/start", "seq": 1, "time": 2, "data": map[string]any{"turn": 1, "step": 1}}},
+			},
+			"assistantStream": map[string]any{"revision": 7},
+		},
+		items: []any{
+			map[string]any{"type": "assistant-stream", "frame": map[string]any{"type": "start", "attemptId": "att-1", "revision": 8, "startedAfterSeq": 2, "turn": 1, "step": 1}},
+			map[string]any{"type": "assistant-stream", "frame": map[string]any{"type": "chunk", "attemptId": "att-1", "revision": 9, "index": 0, "time": 10,
+				"chunk": map[string]any{"type": "text-delta", "index": 0, "text": "你"}}},
+			map[string]any{"type": "assistant-stream", "frame": map[string]any{"type": "chunk", "attemptId": "att-1", "revision": 10, "index": 1, "time": 11,
+				"chunk": map[string]any{"type": "text-delta", "index": 0, "text": "好"}}},
+			map[string]any{"type": "assistant-stream", "frame": map[string]any{"type": "chunk", "attemptId": "att-1", "revision": 11, "index": 2, "time": 12,
+				"chunk": map[string]any{"type": "reasoning-delta", "index": 1, "text": "思考中"}}},
+			map[string]any{"type": "assistant-stream", "frame": map[string]any{"type": "chunk", "attemptId": "att-1", "revision": 12, "index": 3, "time": 13,
+				"chunk": map[string]any{"type": "usage", "usage": map[string]any{"inputTokens": 100, "outputTokens": 20, "cacheReadTokens": 5, "reasoningTokens": 2}}}},
+			map[string]any{"type": "assistant-stream", "frame": map[string]any{"type": "end", "attemptId": "att-1", "revision": 13, "index": 4,
+				"outcome": map[string]any{"kind": "committed", "eventType": "assistant/message", "seq": 3}}},
+			map[string]any{"type": "event", "event": map[string]any{"type": "assistant/message", "seq": 2, "time": 14,
+				"data": map[string]any{"turn": 1, "step": 1, "message": map[string]any{"content": []any{map[string]any{"type": "text", "text": "你好"}}}}}},
+			map[string]any{"type": "event", "event": map[string]any{"type": "step/end", "seq": 3, "time": 15,
+				"data": map[string]any{"turn": 1, "step": 1}}},
+			map[string]any{"type": "event", "event": map[string]any{"type": "turn/end", "seq": 4, "time": 16,
+				"data": map[string]any{"turn": 1, "reason": map[string]any{"kind": "completed"}}}},
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events, err := a.Subscribe(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type wantEvent struct {
+		typ     core.EventType
+		content string
+	}
+	want := []wantEvent{
+		{core.EventTurnStarted, ""},
+		{core.EventText, "你"},
+		{core.EventText, "好"},
+		{core.EventThinking, "思考中"},
+		{core.EventContextUsageUpdated, ""},
+		{core.EventResult, ""},
+	}
+	for i, w := range want {
+		select {
+		case ev := <-events:
+			if ev.Type != w.typ || ev.SessionID != "live-1" {
+				t.Fatalf("event %d = %v, want %v", i, ev.Type, w.typ)
+			}
+			if w.content != "" && ev.Content != w.content {
+				t.Fatalf("event %d content = %q, want %q", i, ev.Content, w.content)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("event %d (%v) never arrived", i, w.typ)
+		}
+	}
+	// The durable settlement must not re-emit the message text (deltas are
+	// the live truth; assistant/message stays bookkeeping).
+	select {
+	case ev := <-events:
+		t.Fatalf("unexpected extra event after turn settlement: %+v", ev)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// TestAssistantStreamBaselineCatchUp pins the mid-turn reconnect fold: the
+// opted-in snapshot's activeAttempt carries the attempt's compact chunk
+// prefix; the bridge replays it (per-type, first-occurrence order) and live
+// chunks continue at nextIndex.
+func TestAssistantStreamBaselineCatchUp(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+	f.SetEventsFrames([]any{
+		map[string]any{"type": "emit", "event": "api-session/activity", "args": []any{"rejoin-1", 1786860018199}},
+	})
+	f.SetFollowScript("rejoin-1", fakeFollowScript{
+		snapshot: map[string]any{
+			"type": "snapshot", "cursor": 5, "hasMore": false,
+			"records": []any{
+				map[string]any{"type": "event", "event": map[string]any{"type": "turn/start", "seq": 0, "time": 1, "data": map[string]any{"turn": 1}}},
+				map[string]any{"type": "event", "event": map[string]any{"type": "step/start", "seq": 1, "time": 2, "data": map[string]any{"turn": 1, "step": 1}}},
+			},
+			"assistantStream": map[string]any{
+				"revision": 20,
+				"activeAttempt": map[string]any{
+					"attemptId": "att-9", "startedAfterSeq": 2, "turn": 1, "step": 1, "nextIndex": 3,
+					"stream": []any{
+						map[string]any{"type": "reasoning-chunks", "time0": 100, "index": 0, "dt": []any{1, 2}, "texts": []any{"思", "考"}},
+						map[string]any{"type": "text-chunks", "time0": 103, "index": 1, "dt": []any{1}, "texts": []any{"已流出的"}},
+					},
+				},
+			},
+		},
+		items: []any{
+			map[string]any{"type": "assistant-stream", "frame": map[string]any{"type": "chunk", "attemptId": "att-9", "revision": 21, "index": 3, "time": 110,
+				"chunk": map[string]any{"type": "text-delta", "index": 1, "text": "+新增"}}},
+			map[string]any{"type": "assistant-stream", "frame": map[string]any{"type": "end", "attemptId": "att-9", "revision": 22, "index": 4,
+				"outcome": map[string]any{"kind": "committed", "eventType": "assistant/message", "seq": 6}}},
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events, err := a.Subscribe(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type wantEvent struct {
+		typ     core.EventType
+		content string
+	}
+	want := []wantEvent{
+		{core.EventTurnStarted, ""},
+		{core.EventThinking, "思考"}, // baseline replay, reasoning first seen
+		{core.EventText, "已流出的"}, // baseline replay
+		{core.EventText, "+新增"},    // live continuation at nextIndex
+	}
+	for i, w := range want {
+		select {
+		case ev := <-events:
+			if ev.Type != w.typ || ev.SessionID != "rejoin-1" {
+				t.Fatalf("event %d = %v, want %v", i, ev.Type, w.typ)
+			}
+			if w.content != "" && ev.Content != w.content {
+				t.Fatalf("event %d content = %q, want %q", i, ev.Content, w.content)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("event %d (%v) never arrived", i, w.typ)
+		}
+	}
+}
+
+// TestAssistantStreamContinuityDrops pins the fold's continuity semantics
+// (official transport.ts:206-215 + client accumulator): a revision gap
+// warns and pauses transient emission; a chunk without a known start is
+// ignored; an index gap drops the attempt; an abandoned end clears state;
+// a start while an attempt is active re-registers and keeps streaming.
+func TestAssistantStreamContinuityDrops(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+	f.SetEventsFrames([]any{
+		map[string]any{"type": "emit", "event": "api-session/activity", "args": []any{"cont-1", 1786860018199}},
+	})
+	f.SetFollowScript("cont-1", fakeFollowScript{
+		snapshot: map[string]any{
+			"type": "snapshot", "cursor": 2, "hasMore": false,
+			"records": []any{
+				map[string]any{"type": "event", "event": map[string]any{"type": "turn/start", "seq": 0, "time": 1, "data": map[string]any{"turn": 1}}},
+			},
+			"assistantStream": map[string]any{"revision": 5},
+		},
+		items: []any{
+			// revision gap (expected 6): dropped, no events.
+			map[string]any{"type": "assistant-stream", "frame": map[string]any{"type": "chunk", "attemptId": "att-x", "revision": 7, "index": 0, "time": 10,
+				"chunk": map[string]any{"type": "text-delta", "index": 0, "text": "丢"}}},
+			// fresh start at the expected revision: registers and streams.
+			map[string]any{"type": "assistant-stream", "frame": map[string]any{"type": "start", "attemptId": "att-y", "revision": 6, "startedAfterSeq": 2, "turn": 1, "step": 1}},
+			map[string]any{"type": "assistant-stream", "frame": map[string]any{"type": "chunk", "attemptId": "att-y", "revision": 7, "index": 0, "time": 11,
+				"chunk": map[string]any{"type": "text-delta", "index": 0, "text": "A"}}},
+			// index gap (expected 1): attempt dropped, no events.
+			map[string]any{"type": "assistant-stream", "frame": map[string]any{"type": "chunk", "attemptId": "att-y", "revision": 8, "index": 2, "time": 12,
+				"chunk": map[string]any{"type": "text-delta", "index": 0, "text": "丢"}}},
+			// chunk without a known start: ignored (official parity).
+			map[string]any{"type": "assistant-stream", "frame": map[string]any{"type": "chunk", "attemptId": "att-y", "revision": 9, "index": 3, "time": 13,
+				"chunk": map[string]any{"type": "text-delta", "index": 0, "text": "丢"}}},
+			// abandoned end with no active attempt: ignored.
+			map[string]any{"type": "assistant-stream", "frame": map[string]any{"type": "end", "attemptId": "att-y", "revision": 10, "index": 4,
+				"outcome": map[string]any{"kind": "abandoned"}}},
+			// start while an attempt is active is impossible here (cleared);
+			// a fresh start re-registers and streams again.
+			map[string]any{"type": "assistant-stream", "frame": map[string]any{"type": "start", "attemptId": "att-z", "revision": 11, "startedAfterSeq": 2, "turn": 1, "step": 1}},
+			map[string]any{"type": "assistant-stream", "frame": map[string]any{"type": "chunk", "attemptId": "att-z", "revision": 12, "index": 0, "time": 14,
+				"chunk": map[string]any{"type": "text-delta", "index": 0, "text": "B"}}},
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events, err := a.Subscribe(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []struct {
+		typ     core.EventType
+		content string
+	}{
+		{core.EventTurnStarted, ""},
+		{core.EventText, "A"},
+		{core.EventText, "B"},
+	}
+	for i, w := range want {
+		select {
+		case ev := <-events:
+			if ev.Type != w.typ || ev.SessionID != "cont-1" {
+				t.Fatalf("event %d = %v, want %v", i, ev.Type, w.typ)
+			}
+			if w.content != "" && ev.Content != w.content {
+				t.Fatalf("event %d content = %q, want %q", i, ev.Content, w.content)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("event %d (%v) never arrived", i, w.typ)
+		}
+	}
+	select {
+	case ev := <-events:
+		t.Fatalf("dropped frames leaked events: %+v", ev)
+	case <-time.After(300 * time.Millisecond):
 	}
 }

@@ -17,10 +17,13 @@ import (
 //   - question_reply: ask batches surface per-question and resolve through
 //     question_reply/question_reject (design §4.3.4).
 //
-// Attachment kinds are deliberately NOT declared: phase 1 is text-only
-// (official session.attachment lands in phase 2) — a declared kind is a
-// semantic claim, and AttachmentSupporter stays unimplemented so the bridge's
-// attachment gate rejects image/file uploads pre-StartSession.
+// Attachment kinds (S4, A4a/A4b live evidence): image bytes genuinely reach
+// the official session/prompt content part and file bytes reach the official
+// uploadFileBinary staging route, so both kinds are declared. Per-model
+// image rejection (MODEL_DOES_NOT_SUPPORT_IMAGES) and admission failures
+// surface seat-side as the official session/attachment-invalid error
+// verbatim — a declared kind is a transport claim, not an admission
+// guarantee.
 func (a *Agent) WireDescriptor() *core.WireDescriptor {
 	return &core.WireDescriptor{
 		Kind:                        WireKind, // "deepseek-web" — iOS BackendKind.deepSeekWeb
@@ -31,7 +34,13 @@ func (a *Agent) WireDescriptor() *core.WireDescriptor {
 	}
 }
 
+// SupportedAttachmentKinds (S4): both kinds reach the official wire —
+// images as prompt image parts (session/prompt content), files via the
+// uploadFileBinary → receiptId → file-part chain.
+func (a *Agent) SupportedAttachmentKinds() []string { return []string{"image", "file"} }
+
 var _ core.WireDescriptorProvider = (*Agent)(nil)
+var _ core.AttachmentSupporter = (*Agent)(nil)
 
 // ToolAuthorizer (grokbuild precedent): the bridge derives the
 // permission_resolve capability from this interface — dsh-web resolves

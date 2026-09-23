@@ -330,6 +330,16 @@ enum L10n {
     static var statusVersionIncompatible: String { tr("status_version_incompatible") }
     static var statusPermissionDenied: String { tr("status_permission_denied") }
     static var pairCodexDesktop: String { tr("pair_codex_desktop") }
+    // dsh-web 座位动作（2026-09-22 方案：未安装可代装、未启动可点启动）
+    static var dshWebStatusNotInstalled: String { tr("dsh_web_status_not_installed") }
+    static var dshWebStatusNotRunning: String { tr("dsh_web_status_not_running") }
+    static var dshWebInstall: String { tr("dsh_web_install") }
+    static var dshWebStart: String { tr("dsh_web_start") }
+    static var dshWebInstalling: String { tr("dsh_web_installing") }
+    static var dshWebStarting: String { tr("dsh_web_starting") }
+    static var dshWebNeedNode: String { tr("dsh_web_need_node") }
+    static var dshWebInstallingHint: String { tr("dsh_web_installing_hint") }
+    static var dshWebStartingHint: String { tr("dsh_web_starting_hint") }
     static var codexDesktopPairTitle: String { tr("codex_desktop_pair_title") }
     static var codexDesktopPairBody: String { tr("codex_desktop_pair_body") }
     static var codexDesktopPairCode: String { tr("codex_desktop_pair_code") }
@@ -592,6 +602,15 @@ enum L10n {
             "configured": "Configured",
             "not_configured": "Not configured",
             "pair_codex_desktop": "Pair",
+            "dsh_web_status_not_installed": "Not Installed",
+            "dsh_web_status_not_running": "Not Running",
+            "dsh_web_install": "Install",
+            "dsh_web_start": "Start",
+            "dsh_web_installing": "Installing",
+            "dsh_web_starting": "Starting",
+            "dsh_web_need_node": "Need Node.js",
+            "dsh_web_installing_hint": "Installing @deepseek-ai/dsh (up to 10 minutes)…",
+            "dsh_web_starting_hint": "Starting dsh web (up to 30 seconds)…",
             "codex_desktop_pair_title": "Pair ChatGPT Desktop",
             "codex_desktop_pair_body": "A browser window will open for authorization. In ChatGPT Desktop, open “Control this Mac”, switch to Computer, then paste the pairing code here. Do not send the code in chat.",
             "codex_desktop_pair_code": "Computer pairing code",
@@ -996,6 +1015,15 @@ enum L10n {
             "configured": "已配置",
             "not_configured": "未配置",
             "pair_codex_desktop": "配对",
+            "dsh_web_status_not_installed": "未安装",
+            "dsh_web_status_not_running": "未启动",
+            "dsh_web_install": "安装",
+            "dsh_web_start": "启动",
+            "dsh_web_installing": "安装中",
+            "dsh_web_starting": "启动中",
+            "dsh_web_need_node": "需要 Node.js",
+            "dsh_web_installing_hint": "正在安装 @deepseek-ai/dsh（最长 10 分钟）…",
+            "dsh_web_starting_hint": "正在启动 dsh web（最长 30 秒）…",
             "codex_desktop_pair_title": "配对 ChatGPT Desktop",
             "codex_desktop_pair_body": "会打开浏览器完成授权。然后在 ChatGPT Desktop 打开「控制这台 Mac」，切换到「电脑」，把配对码填在这里。不要把配对码发到聊天里。",
             "codex_desktop_pair_code": "电脑配对码",

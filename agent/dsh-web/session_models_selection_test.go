@@ -15,11 +15,14 @@ func TestGetSessionModelSelectionReportsCurrent(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["session.models"] = fakeRPCResponse{value: map[string]any{
-		"current":  map[string]any{"provider": "deepseek", "model": "deepseek-v4-flash", "reasoningEffort": "high"},
-		"routable": true,
-		"groups":   []any{},
-		"failures": []any{},
+	f.handlers["session/projections"] = fakeRPCResponse{value: map[string]any{
+		"asOfSeq": 42,
+		"values": map[string]any{
+			"modelSelection": map[string]any{
+				"lastUsed": map[string]any{"provider": "deepseek", "model": "deepseek-v4-flash", "reasoningEffort": "high"},
+				"next":     nil,
+			},
+		},
 	}}
 
 	sel, ok := a.GetSessionModelSelection(context.Background(), "ses_abc")
@@ -30,14 +33,14 @@ func TestGetSessionModelSelectionReportsCurrent(t *testing.T) {
 		t.Fatalf("selection = %+v", sel)
 	}
 
-	calls := methodCalls(f, "session.models")
+	calls := methodCalls(f, "session/projections")
 	if len(calls) != 1 {
-		t.Fatalf("session.models calls = %d, want 1", len(calls))
+		t.Fatalf("session/projections calls = %d, want 1", len(calls))
 	}
 	var payload struct {
 		SessionID string `json:"sessionId"`
 	}
-	if err := json.Unmarshal(calls[0], &payload); err != nil || payload.SessionID != "ses_abc" {
+	if err := json.Unmarshal(unwrapArgs(t, calls[0]), &payload); err != nil || payload.SessionID != "ses_abc" {
 		t.Fatalf("payload = %s (err %v)", calls[0], err)
 	}
 }
@@ -46,7 +49,7 @@ func TestGetSessionModelSelectionNoCurrentIsFalse(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["session.models"] = fakeRPCResponse{value: map[string]any{
+	f.handlers["session/projections"] = fakeRPCResponse{value: map[string]any{
 		"current":  map[string]any{},
 		"routable": true,
 		"groups":   []any{},
@@ -62,7 +65,7 @@ func TestGetSessionModelSelectionRPCErrorIsFalse(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["session.models"] = fakeRPCResponse{
+	f.handlers["session/projections"] = fakeRPCResponse{
 		err: &RPCError{Code: "internal", Message: "boom"},
 	}
 

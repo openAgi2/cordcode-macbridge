@@ -213,7 +213,11 @@ func (om *ObservationManager) RebindSessionID(backendID, oldSessionID, newSessio
 // (owner symptom: bulk text only after Mac finishes).
 func isLiveControlPlaneEvent(eventType string) bool {
 	switch eventType {
-	case "turn_started", "session_state_changed", "session_running_signal", "user_message":
+	case "turn_started", "session_state_changed", "session_running_signal", "user_message",
+		// user_message_removed retracts a pending placeholder that user_message
+		// delivered; the pair must clear the same gates or scopeless/milestones_only
+		// devices keep a stale pending row forever.
+		"user_message_removed":
 		return true
 	default:
 		return false

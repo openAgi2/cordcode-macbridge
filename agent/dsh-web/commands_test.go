@@ -8,6 +8,8 @@ package dshweb
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -136,14 +138,16 @@ func TestExecuteSessionCommandLinePassthrough(t *testing.T) {
 		t.Fatalf("settle = %#v, want official commandId/kind/text verbatim", res)
 	}
 	// 命令是 host 动作：绝不经 session.prompt（否则 /plan 变聊天）。
-	if n := len(methodCalls(f, "session.prompt")); n != 0 {
+	if n := len(methodCalls(f, "session/prompt")); n != 0 {
 		t.Fatalf("session.prompt called %d times; /plan must never become a user turn", n)
 	}
 	calls := methodCalls(f, "commands/execute")
 	if len(calls) != 1 {
 		t.Fatalf("commands/execute calls = %d, want 1", len(calls))
 	}
-	var req commandsExecuteRequest
+	var req struct {
+		Args commandsExecuteArgs `json:"args"`
+	}
 	if err := json.Unmarshal(calls[0], &req); err != nil {
 		t.Fatal(err)
 	}
@@ -153,9 +157,11 @@ func TestExecuteSessionCommandLinePassthrough(t *testing.T) {
 	if req.Args.Line != "/plan" {
 		t.Fatalf("line = %q, want /plan (verbatim)", req.Args.Line)
 	}
-	// 部署座位网关按描述符强制要求 images 字段（2026-09-05 真机报障活体复核：
-	// 缺 images → `missing "images"`；images:null → boundary validation 失败）。
-	// 必须精确序列化为 []（非 null、非缺键）。
+	// 运行座位（alpha.1，2026-09-23 活体取证）按描述符强制要求第三参
+	// submittedAttachments：缺键 → `missing "submittedAttachments"`；旧 images
+	// 字段 → `unexpected "images"`（verbatim 见
+	// testdata/commands_execute_alpha1_wire.json）。必须精确序列化为 []
+	// （非 null、非缺键），且不得再出现 images 键。
 	var argsEnvelope struct {
 		Args json.RawMessage `json:"args"`
 	}
@@ -166,8 +172,92 @@ func TestExecuteSessionCommandLinePassthrough(t *testing.T) {
 	if err := json.Unmarshal(argsEnvelope.Args, &rawArgs); err != nil {
 		t.Fatal(err)
 	}
-	if string(rawArgs["images"]) != "[]" {
-		t.Fatalf("args.images must serialize as exactly [] (seat gateway rejects omission and null), got %s", rawArgs["images"])
+	if string(rawArgs["submittedAttachments"]) != "[]" {
+		t.Fatalf("args.submittedAttachments must serialize as exactly [] (seat gateway rejects omission and null), got %s", rawArgs["submittedAttachments"])
+	}
+	if _, has := rawArgs["images"]; has {
+		t.Fatalf("args must not carry the former images key (seat gateway rejects it as unexpected \"images\")")
+	}
+}
+
+// 契约门（方案 §5.2 第一项）：alpha.1 座位 commands/execute 的 descriptor 形状用
+// 已归档 verbatim 样本钉死——testdata/commands_execute_alpha1_wire.json 是
+// scripts/dshweb-phase0/alpha1-commands-goals-wire.json 四条 execute 探针的脱敏
+// 副本。桥的 payload 键集必须与被座位接受的正形完全一致；把第三参改回 images
+// （或双发 images+submittedAttachments）这里先红。dsh 升级改变 descriptor 时重新
+// 取证并更新夹具，不得放宽断言。
+func TestCommandsExecuteAlpha1WireContract(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "commands_execute_alpha1_wire.json"))
+	if err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	var doc struct {
+		Probes map[string]struct {
+			OK    bool   `json:"ok"`
+			Value any    `json:"value"`
+			Error string `json:"error"`
+		} `json:"probes"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("fixture JSON: %v", err)
+	}
+
+	// 正形：{agentId,line,submittedAttachments:[]} 被接受；未知命令名官方 no-op
+	// （value null，无副作用）。
+	positive, ok := doc.Probes["commands/execute {agentId,line,submittedAttachments:[]} (unknown cmd = official no-op admission miss)"]
+	if !ok || !positive.OK {
+		t.Fatalf("alpha.1 positive probe missing or not ok: %+v", positive)
+	}
+	if positive.Value != nil {
+		t.Fatalf("unknown-command no-op must record value null, got %v", positive.Value)
+	}
+
+	// 反形 verbatim：images 变体被拒原文必须同时含 missing "submittedAttachments"
+	// 与 unexpected "images"；agent 变体额外含 unexpected "agent"（alpha.1 首参仍
+	// 是 agentId）；缺第三参 → missing "submittedAttachments"。
+	imagesRejected := doc.Probes["commands/execute {agentId,line,images:[]}"]
+	if imagesRejected.OK || imagesRejected.Error == "" {
+		t.Fatalf("alpha.1 images-variant probe must be a recorded rejection: %+v", imagesRejected)
+	}
+	for _, frag := range []string{`missing "submittedAttachments"`, `unexpected "images"`} {
+		if !strings.Contains(imagesRejected.Error, frag) {
+			t.Fatalf("images-variant rejection must keep verbatim fragment %q, got %q", frag, imagesRejected.Error)
+		}
+	}
+	agentRejected := doc.Probes["commands/execute {agent,line,images:[]}"]
+	if agentRejected.OK || !strings.Contains(agentRejected.Error, `unexpected "agent"`) {
+		t.Fatalf("agent-variant probe must keep the verbatim rejection, got %+v", agentRejected)
+	}
+	missingThird := doc.Probes["commands/execute {agentId,line} (missing third param)"]
+	if missingThird.OK || !strings.Contains(missingThird.Error, `missing "submittedAttachments"`) {
+		t.Fatalf("missing-third-param probe must keep the verbatim rejection, got %+v", missingThird)
+	}
+
+	// 桥的序列化键集 == 正形键集（agentId/line/submittedAttachments），
+	// submittedAttachments 恒为 []，无 images 键。
+	b, err := json.Marshal(commandsExecuteArgs{
+		AgentID: "sess-contract", Line: "/plan", SubmittedAttachments: []commandSubmitAttachment{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != 3 {
+		t.Fatalf("execute args key set must be exactly {agentId,line,submittedAttachments}, got %v", payloadKeys(raw))
+	}
+	for _, k := range []string{"agentId", "line", "submittedAttachments"} {
+		if _, has := raw[k]; !has {
+			t.Fatalf("execute args missing key %q; key set = %v", k, payloadKeys(raw))
+		}
+	}
+	if _, has := raw["images"]; has {
+		t.Fatalf("execute args must not carry \"images\" (alpha.1 seat rejects it as unexpected \"images\")")
+	}
+	if string(raw["submittedAttachments"]) != "[]" {
+		t.Fatalf("submittedAttachments must serialize as [] (official no-attachment invocation), got %s", raw["submittedAttachments"])
 	}
 }
 

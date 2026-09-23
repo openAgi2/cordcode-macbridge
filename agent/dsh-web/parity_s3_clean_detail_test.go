@@ -96,10 +96,10 @@ func TestS3ReadLineNumberInvariants(t *testing.T) {
 		"offset 0":        `{"path":"a","offset":0,"totalLines":3,"lines":[{"number":1,"text":"x"}]}`,
 		"first 0":         `{"path":"a","offset":0,"totalLines":3,"lines":[{"number":0,"text":"x"}]}`,
 		"乱序":              `{"path":"a","offset":1,"totalLines":3,"lines":[{"number":2,"text":"x"},{"number":1,"text":"y"}]}`,
-		"[1,3,5] 跳行":     `{"path":"a","offset":1,"totalLines":5,"lines":[{"number":1,"text":"x"},{"number":3,"text":"y"},{"number":5,"text":"z"}]}`,
-		"末行越界":           `{"path":"a","offset":1,"totalLines":2,"lines":[{"number":1,"text":"x"},{"number":3,"text":"y"}]}`,
+		"[1,3,5] 跳行":      `{"path":"a","offset":1,"totalLines":5,"lines":[{"number":1,"text":"x"},{"number":3,"text":"y"},{"number":5,"text":"z"}]}`,
+		"末行越界":            `{"path":"a","offset":1,"totalLines":2,"lines":[{"number":1,"text":"x"},{"number":3,"text":"y"}]}`,
 		"first != offset": `{"path":"a","offset":2,"totalLines":3,"lines":[{"number":1,"text":"x"}]}`,
-		"text 内嵌 LF":     `{"path":"a","offset":1,"totalLines":3,"lines":[{"number":1,"text":"x\ny"}]}`,
+		"text 内嵌 LF":      `{"path":"a","offset":1,"totalLines":3,"lines":[{"number":1,"text":"x\ny"}]}`,
 		"number < offset": `{"path":"a","offset":3,"totalLines":5,"lines":[{"number":2,"text":"x"}]}`,
 		"totalLines 负":    `{"path":"a","offset":1,"totalLines":-1,"lines":[]}`,
 	}
@@ -275,7 +275,7 @@ func TestS3UnknownSuccessShapeFailClosed(t *testing.T) {
 
 // ── 状态映射⑤ + 端到端（journal → step） ────────────────────────────────
 
-func s3ToolEvents(name, arguments, resultMeta string, isError bool) []apiHistoryEntry {
+func s3ToolEvents(name, arguments, resultMeta string, isError bool) []sessionEventWire {
 	resultBlocks := `"content": [{"type": "text", "text": "ok"}]`
 	if isError {
 		resultBlocks = `"content": [{"type": "text", "text": "Error: [sandbox: file access denied]"}]`
@@ -288,38 +288,38 @@ func s3ToolEvents(name, arguments, resultMeta string, isError bool) []apiHistory
 	if resultMeta != "" {
 		metaField = `, "meta": ` + resultMeta
 	}
-	return []apiHistoryEntry{
+	return []sessionEventWire{
 		mkHistoryEntry("turn/start", 100, `{"turn": 1}`),
 		mkHistoryEntry("assistant/message", 101, `{
 			"turn": 1, "step": 1,
 			"message": {"role": "assistant", "content": [
-				{"type": "tool-call", "id": "call_s3", "name": "` + name + `", "arguments": ` + arguments + `}
+				{"type": "tool-call", "id": "call_s3", "name": "`+name+`", "arguments": `+arguments+`}
 			]}
 		}`),
 		mkHistoryEntry("tool/result", 102, `{
 			"turn": 1, "step": 1,
-			"message": {"source": {"kind": "tool", "callId": "call_s3"},
-			 "content": [{"type": "tool-result", "toolCallId": "call_s3", "isError": ` + isErrJSON + `, ` + resultBlocks + `}]}` + metaField + `
+			"message": {"toolCallId": "call_s3", "isError": `+isErrJSON+`, "source": {"kind": "tool", "callId": "call_s3"},
+			 `+resultBlocks+`}`+metaField+`
 		}`),
 		mkHistoryEntry("turn/end", 200, `{"turn": 1}`),
 	}
 }
 
 // s3ToolEventsNoResult：journal 无该 call 的 tool/result（pending/中断残留）。
-func s3ToolEventsNoResult(name, arguments string) []apiHistoryEntry {
-	return []apiHistoryEntry{
+func s3ToolEventsNoResult(name, arguments string) []sessionEventWire {
+	return []sessionEventWire{
 		mkHistoryEntry("turn/start", 100, `{"turn": 1}`),
 		mkHistoryEntry("assistant/message", 101, `{
 			"turn": 1, "step": 1,
 			"message": {"role": "assistant", "content": [
-				{"type": "tool-call", "id": "call_s3", "name": "` + name + `", "arguments": ` + arguments + `}
+				{"type": "tool-call", "id": "call_s3", "name": "`+name+`", "arguments": `+arguments+`}
 			]}
 		}`),
 		mkHistoryEntry("turn/end", 200, `{"turn": 1}`),
 	}
 }
 
-func s3FirstToolStep(t *testing.T, evs []apiHistoryEntry) map[string]any {
+func s3FirstToolStep(t *testing.T, evs []sessionEventWire) map[string]any {
 	t.Helper()
 	entries := mapHistoryEvents("s3sess", evs)
 	parts := toolPartsOf(entries)

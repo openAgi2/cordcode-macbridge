@@ -3,10 +3,10 @@
 package dshweb
 
 import (
-	"strconv"
-	"strings"
 	"errors"
 	"os/exec"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -53,6 +53,17 @@ func terminateProcessGroup(cmd *exec.Cmd) error {
 		}
 		time.Sleep(killPollInterval)
 	}
+}
+
+// killProcessGroupNoWait sends KILL to the process group (and direct child)
+// WITHOUT reaping — for callers whose own goroutine owns the single Wait
+// (the npm install timeout path). ESRCH on an already-dead group is fine.
+func killProcessGroupNoWait(pid int) {
+	if pid <= 0 {
+		return
+	}
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
+	_ = syscall.Kill(pid, syscall.SIGKILL)
 }
 
 // processCommandLine returns the full command line of a pid via ps (unix).

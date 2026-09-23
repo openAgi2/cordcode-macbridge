@@ -63,33 +63,6 @@ func TestUsageFromProjectionsIncludesOfficialSessionStats(t *testing.T) {
 	}
 }
 
-func TestMergeProjectionValueKeepsOccupancyWhileUpdatingStats(t *testing.T) {
-	base := usageFromProjections(&apiSessionProjectionsBlock{
-		Values: map[string]json.RawMessage{
-			"contextPressure": json.RawMessage(`{"projectedTokens":41200,"contextWindow":1000000}`),
-		},
-	})
-	if base == nil {
-		t.Fatal("base = nil")
-	}
-	merged := mergeProjectionValue(base, "sessionStats", json.RawMessage(`{"turns":2,"steps":3,"llmMs":8000,"toolMs":0,"ttftMs":1200,"ttftSteps":2,"decodeMs":5000,"decodeTokens":200}`))
-	if merged == nil {
-		t.Fatal("merged = nil")
-	}
-	if merged.UsedTokens != 41200 || merged.ContextWindow != 1000000 {
-		t.Fatalf("occupancy clobbered: %d/%d", merged.UsedTokens, merged.ContextWindow)
-	}
-	if merged.SessionTurns != 2 || merged.SessionSteps != 3 || merged.SessionLlmMs != 8000 {
-		t.Fatalf("stats = %+v", merged)
-	}
-	if mergeProjectionValue(base, "title", json.RawMessage(`"ignored"`)) != nil {
-		t.Fatal("unknown projection key should be ignored")
-	}
-	if mergeProjectionValue(nil, "sessionStats", json.RawMessage(`{"turns":1,"steps":1}`)) != nil {
-		t.Fatal("stats without occupancy should stay hidden")
-	}
-}
-
 func TestUsageFromProjectionsHiddenUntilBothSidesExist(t *testing.T) {
 	if usageFromProjections(nil) != nil {
 		t.Fatal("nil block should hide the meter")
@@ -116,15 +89,11 @@ func TestGetSessionContextUsageReadsTailProjections(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["session.history"] = fakeRPCResponse{value: map[string]any{
-		"events":  []any{},
-		"hasMore": false,
-		"projections": map[string]any{
-			"asOfSeq": 12,
-			"values": map[string]any{
-				"contextPressure":  map[string]any{"projectedTokens": 41200, "contextWindow": 1000000},
-				"contextBreakdown": map[string]any{"systemTokens": 1500, "toolsTokens": 8400, "messageTokens": 19000},
-			},
+	f.handlers["session/projections"] = fakeRPCResponse{value: map[string]any{
+		"asOfSeq": 12,
+		"values": map[string]any{
+			"contextPressure":  map[string]any{"projectedTokens": 41200, "contextWindow": 1000000},
+			"contextBreakdown": map[string]any{"systemTokens": 1500, "toolsTokens": 8400, "messageTokens": 19000},
 		},
 	}}
 	usage, err := a.GetSessionContextUsage(context.Background(), "sess-ctx")

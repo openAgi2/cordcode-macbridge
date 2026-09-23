@@ -131,7 +131,12 @@ type SendMessageParams struct {
 	Agent           string                 `json:"agent,omitempty"`
 	Model           map[string]interface{} `json:"model,omitempty"`
 	ReasoningEffort string                 `json:"reasoningEffort,omitempty"`
-	Attachments     []AttachmentInput      `json:"attachments,omitempty"`
+	// Mode is the official prompt delivery mode (dsh-web): "" or "queue"
+	// = queue (official composer default); "steer" = the explicit steering
+	// gesture into the running turn's next-step. Backends without
+	// per-request modes reject "steer" with invalid_params.
+	Mode        string           `json:"mode,omitempty"`
+	Attachments []AttachmentInput `json:"attachments,omitempty"`
 }
 
 type AbortGenerationParams struct {
@@ -188,9 +193,29 @@ type ExecuteSessionCommandParams struct {
 
 type MutateSessionGoalParams struct {
 	SessionID string `json:"sessionId"`
-	Action    string `json:"action"`    // pause | resume | clear | edit
+	Action    string `json:"action"`              // pause | resume | clear | edit
 	Objective string `json:"objective,omitempty"` // edit only
 	Directory string `json:"directory,omitempty"`
+}
+
+// UpdateSessionQueueParams is the S3 queue-management RPC payload
+// (update_session_queue). ItemID is the official UserMessage.id — the same
+// identity the queued placeholder rows are keyed by.
+type UpdateSessionQueueParams struct {
+	SessionID string `json:"sessionId"`
+	ItemID    string `json:"itemId"`
+	Action    string `json:"action"`            // edit | remove | steer
+	Content   string `json:"content,omitempty"` // edit only
+	Directory string `json:"directory,omitempty"`
+}
+
+// GetAttachmentParams is the S4 attachment-read RPC payload
+// (get_attachment). AttachmentID is the official durable id from the user
+// message's attachment descriptor (journal image block, "sha256:<hex>").
+type GetAttachmentParams struct {
+	SessionID    string `json:"sessionId"`
+	AttachmentID string `json:"attachmentId"`
+	Directory    string `json:"directory,omitempty"`
 }
 
 type SetProviderParams struct {

@@ -1,12 +1,13 @@
 package dshweb
 
-// Diagnostics (design §4.3.8): instance lifecycle resolution (external probe /
-// managed spawn — this IS the make-it-work surface), host.describe (its
-// `version` is an API-level identifier, NOT the npm package version — S6, do
-// not pass it off as one), capability probe (empty session.list + llm.providers
-// with full state bits), and the honest unauthenticated-loopback disclosure
-// (S11: dsh v1 has no auth layer; loopback binding + Bridge-fronting is the
-// entire defense).
+// Diagnostics (design §4.3.8 + 2026-09-22 plan §5 read-only contract):
+// instance state discrimination is READ-ONLY (never spawns — only the 启动
+// button and the install back-half do), capability probe (session/list +
+// session/modelCatalog + llm/listConfigurableProviders with declared bits),
+// and the honest boundary disclosure (S11 successor: dsh ≥0.1.6 gates /api
+// behind browser-session auth; the bridge mints/exchanges the cookie —
+// auth.go — and loopback binding + Bridge-fronting remain the transport
+// defense).
 
 import (
 	"context"
@@ -57,9 +58,10 @@ func (a *Agent) RunDiagnostics(ctx context.Context, progress func(core.Diagnosti
 	return &core.DiagnosticReport{Results: results, OverallStatus: status}, nil
 }
 
-// diagInstance resolves and reports the instance source. NOTE: Resolve is a
-// MUTATING call (canonical-3080 design §0.1/S2 — it may spawn on the seat);
-// read-only discrimination is lsof + the state file + InstanceStatus.
+// diagInstance reports the instance state READ-ONLY (2026-09-22 plan §5:
+// diagnostics and 重新检查 must not become a third spawn path — only the
+// 启动 button and the install back-half spawn). It never calls Resolve; the
+// discrimination mirrors StructuredInstanceReadiness.
 func (a *Agent) diagInstance(ctx context.Context) core.DiagnosticResult {
 	// Grace window first: the seat is down but expected back — report the
 	// window, not a hard failure.
@@ -69,77 +71,98 @@ func (a *Agent) diagInstance(ctx context.Context) core.DiagnosticResult {
 			Message: fmt.Sprintf("座位 %s 失联，宽限重连中（至 %s）；期间 RPC 返回 backend_unavailable，不收养不补拉", a.resolver.seatURL(), until.Format(time.RFC3339)),
 		}
 	}
-	inst, err := a.resolver.Resolve(ctx)
-	if err != nil {
-		msg := fmt.Sprintf("未找到可用的 dsh web 实例：%v", err)
-		fix := "安装 dsh（npm i -g @deepseek-ai/dsh）；若权威端口被非 dsh 进程占用，请释放端口后重试"
-		if sp := a.resolver.LastSpawnErr(); sp != nil && strings.Contains(sp.Error(), "non-dsh") {
-			msg = fmt.Sprintf("权威端口被非 dsh 进程占用：%v", sp)
+	if inst := a.resolver.Current(); inst != nil {
+		switch inst.Source {
+		case SourceExternal:
+			return core.DiagnosticResult{
+				Status:  diagStatusPassed,
+				Message: fmt.Sprintf("复用权威端口上的实例 %s（探测命中，未另起进程；谁拉起的即归谁，端口即身份）", inst.BaseURL),
+			}
+		case SourceManaged:
+			start := processStartTime(inst.PID)
+			extra := ""
+			if start != "" {
+				extra = fmt.Sprintf("，启动于 %s", start)
+			}
+			return core.DiagnosticResult{
+				Status:  diagStatusPassed,
+				Message: fmt.Sprintf("托管实例 %s（本 Bridge 在权威端口拉起，pid %d%s；Link 退出不杀，下次经座位收养）", inst.BaseURL, inst.PID, extra),
+			}
 		}
+	}
+	// Cold discrimination, read-only (no spawn, no adoption).
+	status, detail := a.StructuredInstanceReadiness()
+	switch status {
+	case ReadinessAvailable:
+		return core.DiagnosticResult{
+			Status:  diagStatusPassed,
+			Message: fmt.Sprintf("座位 %s 在听（session/list 应答；本进程尚未持有，下一次 RPC 收养）", a.resolver.seatURL()),
+		}
+	case ReadinessNotDetected:
 		return core.DiagnosticResult{
 			Status:        diagStatusFailed,
-			Message:       msg,
-			FixSuggestion: fix,
+			Message:       "未找到 dsh 二进制（PATH、nvm、安装记录均无）",
+			FixSuggestion: "在工作站 DeepSeek Harness 行点「安装」，或自行安装 Node.js 后运行 npm install -g @deepseek-ai/dsh",
+		}
+	case ReadinessPortConflict:
+		return core.DiagnosticResult{
+			Status:        diagStatusFailed,
+			Message:       fmt.Sprintf("权威端口被非 dsh 进程占用：%s", detail),
+			FixSuggestion: "释放该端口后重试（lsof 看到的占用者如上）",
+		}
+	default: // service_not_running
+		return core.DiagnosticResult{
+			Status:        diagStatusFailed,
+			Message:       fmt.Sprintf("dsh web 未运行：%s", detail),
+			FixSuggestion: "在工作站 DeepSeek Harness 行点「启动」拉起 3080，或自行运行 dsh web",
 		}
 	}
-	switch inst.Source {
-	case SourceExternal:
-		return core.DiagnosticResult{
-			Status:  diagStatusPassed,
-			Message: fmt.Sprintf("复用权威端口上的实例 %s（探测命中，未另起进程；谁拉起的即归谁，端口即身份）", inst.BaseURL),
-		}
-	case SourceManaged:
-		start := processStartTime(inst.PID)
-		extra := ""
-		if start != "" {
-			extra = fmt.Sprintf("，启动于 %s", start)
-		}
-		return core.DiagnosticResult{
-			Status:  diagStatusPassed,
-			Message: fmt.Sprintf("托管实例 %s（本 Bridge 在权威端口拉起，pid %d%s；Link 退出不杀，下次经座位收养）", inst.BaseURL, inst.PID, extra),
-		}
-	}
-	return core.DiagnosticResult{Status: diagStatusFailed, Message: "unknown instance source"}
 }
 
-// diagAPI probes the capability surface (host.describe + empty session.list +
-// llm.providers full set with state bits — §3.4 应对).
+// diagAPI probes the capability surface (session/list + session/modelCatalog
+// + llm/listConfigurableProviders with declared bits — §3.4 应对). The
+// typert gateway retired host.describe; there is no API-level version
+// identifier to report (the npm package version is surfaced by the install
+// surface instead).
 func (a *Agent) diagAPI(ctx context.Context) core.DiagnosticResult {
 	client, err := a.clientFor(ctx)
 	if err != nil {
 		return core.DiagnosticResult{Status: diagStatusFailed, Message: fmt.Sprintf("实例不可达: %v", err)}
 	}
-	var desc describeValue
-	if err := client.Call(ctx, "host.describe", map[string]any{}, &desc); err != nil {
+	if err := client.Call(ctx, "session/list", listArgs(), nil); err != nil {
 		return core.DiagnosticResult{
 			Status:  diagStatusFailed,
-			Message: fmt.Sprintf("host.describe 失败: %v", err),
+			Message: fmt.Sprintf("session/list 探活失败: %v", err),
 		}
 	}
-	if err := client.Call(ctx, "session.list", sessionListRequest{}, nil); err != nil {
+	var catalog modelCatalogValue
+	if err := client.Call(ctx, "session/modelCatalog", map[string]any{}, &catalog); err != nil {
 		return core.DiagnosticResult{
 			Status:  diagStatusFailed,
-			Message: fmt.Sprintf("session.list 探活失败: %v", err),
+			Message: fmt.Sprintf("session/modelCatalog 失败: %v", err),
 		}
 	}
-	var provs llmProvidersValue
-	if err := client.Call(ctx, "llm.providers", map[string]any{}, &provs); err != nil {
+	var provs configurableProvidersValue
+	if err := client.Call(ctx, "llm/listConfigurableProviders", map[string]any{}, &provs); err != nil {
 		return core.DiagnosticResult{
 			Status:  diagStatusFailed,
-			Message: fmt.Sprintf("llm.providers 失败: %v", err),
+			Message: fmt.Sprintf("llm/listConfigurableProviders 失败: %v", err),
 		}
+	}
+	routable := make(map[string]bool, len(catalog.RoutableProviders))
+	for _, id := range catalog.RoutableProviders {
+		routable[id] = true
 	}
 	active, dormant := 0, 0
 	for _, p := range provs.Providers {
-		if p.Active {
+		if routable[p.Provider] {
 			active++
 		} else {
 			dormant++
 		}
 	}
 	lines := []string{
-		fmt.Sprintf("API 版本标识 %s（host.describe version；非 npm 包版本）", desc.Version),
-		fmt.Sprintf("providers: %d 活跃 / %d 休眠（休眠项不进入 list_providers）", active, dormant),
+		fmt.Sprintf("providers: %d 可路由 / %d 休眠（休眠项不进入 list_providers）", active, dormant),
 	}
 	return core.DiagnosticResult{Status: diagStatusPassed, Message: strings.Join(lines, "\n")}
 }

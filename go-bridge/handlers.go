@@ -32,12 +32,17 @@ import (
 // wireErrorWithReconnect maps the dsh-web seat-grace typed error to the
 // protocol code backend_unavailable (canonical-3080 design §3.2): the seat is
 // expected back, so the backend is NOT unconfigured — not_configured is
-// forbidden for this state. Every other error keeps the caller's current code
-// (send_failed / list_failed).
+// forbidden for this state. The cold-dark ErrSeatNotRunning (2026-09-22 plan
+// §5: cold Resolve no longer spawns) maps the same way. Every other error
+// keeps the caller's current code (send_failed / list_failed).
 func wireErrorWithReconnect(err error, fallbackCode string) *WireError {
 	code := fallbackCode
 	var re *dshweb.ErrInstanceReconnecting
 	if errors.As(err, &re) {
+		code = "backend_unavailable"
+	}
+	var nr *dshweb.ErrSeatNotRunning
+	if errors.As(err, &nr) {
 		code = "backend_unavailable"
 	}
 	return &WireError{Code: code, Message: err.Error()}
@@ -343,6 +348,22 @@ func (h *Handlers) SetAdmissionMachine(machine *admission.AdmissionMachine) {
 	h.mu.Lock()
 	h.admission = machine
 	h.mu.Unlock()
+}
+
+// admitBridgeSteer gates one steering send (OD-2a=A): a steer splices into
+// the RUNNING turn's next-step (official agent.steer), so the per-session
+// bridgeOwnedTurns slot — which serializes TURN-CREATING actions and is
+// released on idle — must not apply (the running turn already holds it).
+// The runtime quiesce drain still rejects: a steer extends live work the
+// drain is waiting out. Returns nil to admit.
+func (h *Handlers) admitBridgeSteer() *WireError {
+	h.mu.Lock()
+	machine := h.admission
+	h.mu.Unlock()
+	if machine != nil && machine.State() != admission.StateAccepting {
+		return &WireError{Code: "runtime.quiescing", Message: "Bridge runtime is quiescing"}
+	}
+	return nil
 }
 
 // admitBridgeTurn gates a send on (a) no in-flight bridge-owned turn for this
@@ -1799,6 +1820,10 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleExecuteSessionCommand(conn, msg, agent)
 	case "mutate_session_goal":
 		h.handleMutateSessionGoal(conn, msg, agent)
+	case "update_session_queue":
+		h.handleUpdateSessionQueue(conn, msg, agent)
+	case "get_attachment":
+		h.handleGetAttachment(conn, msg, agent)
 	case "list_collaboration_modes":
 		h.handleListCollaborationModes(conn, msg, agent)
 	case "update_collaboration_mode":
@@ -1894,6 +1919,8 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		})
 	case "archive_session":
 		h.handleArchiveSession(conn, msg, agent)
+	case "unarchive_session":
+		h.handleUnarchiveSession(conn, msg, agent)
 	case "get_session_preview":
 		h.handleGetSessionPreview(conn, msg, agent)
 	case "set_session_pinned":
@@ -2767,13 +2794,22 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 		}
 		defer release()
 	}
-	if wireErr := h.admitBridgeTurn(params.SessionID); wireErr != nil {
+	// OD-2a=A: steer splices into the running turn (official agent.steer) —
+	// it bypasses the turn-creating per-session slot but still respects the
+	// quiesce drain. Every other mode keeps the serialized turn admission.
+	steering := strings.TrimSpace(params.Mode) == "steer"
+	if steering {
+		if wireErr := h.admitBridgeSteer(); wireErr != nil {
+			conn.SendResult(msg.RequestID, nil, wireErr)
+			return
+		}
+	} else if wireErr := h.admitBridgeTurn(params.SessionID); wireErr != nil {
 		conn.SendResult(msg.RequestID, nil, wireErr)
 		return
 	}
 	turnCommitted := false
 	defer func() {
-		if !turnCommitted {
+		if !turnCommitted && !steering {
 			h.completeBridgeTurn(params.SessionID)
 		}
 	}()
@@ -3135,6 +3171,7 @@ func promptOptionsFromParams(params SendMessageParams) core.PromptOptions {
 	opts := core.PromptOptions{
 		Agent:           strings.TrimSpace(params.Agent),
 		ReasoningEffort: strings.TrimSpace(params.ReasoningEffort),
+		Mode:            strings.TrimSpace(params.Mode),
 	}
 	if params.Model == nil {
 		return opts
@@ -3150,10 +3187,15 @@ func promptOptionsFromParams(params SendMessageParams) core.PromptOptions {
 
 // sendPrompt dispatches one prompt to the session: option senders carry
 // agent/provider/model/variant atomically per request (canonical §6.11.1);
-// every other backend keeps the plain AgentSession.Send semantics.
+// every other backend keeps the plain AgentSession.Send semantics. A
+// non-default delivery mode (steer) on a backend without per-request modes
+// fails visibly instead of silently degrading to queue.
 func sendPrompt(sess core.AgentSession, prompt string, images []core.ImageAttachment, files []core.FileAttachment, opts core.PromptOptions) error {
 	if sender, ok := sess.(core.PromptOptionsSender); ok {
 		return sender.SendWithOptions(prompt, images, files, opts)
+	}
+	if opts.Mode != "" && opts.Mode != "queue" {
+		return fmt.Errorf("backend does not support prompt mode %q", opts.Mode)
 	}
 	return sess.Send(prompt, images, files)
 }

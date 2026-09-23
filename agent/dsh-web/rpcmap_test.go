@@ -14,11 +14,11 @@ import (
 )
 
 // newTestAgent builds an Agent bound to the fake instance (external probe
-// hit), with host.describe answered.
+// hit), with session/list answered.
 func newTestAgent(t *testing.T, f *fakeDSHServer) *Agent {
 	t.Helper()
-	f.handlers["host.describe"] = fakeRPCResponse{value: map[string]any{
-		"version": "0.0.1", "cwd": "/tmp", "attachedSessions": 0, "canOpenPath": false,
+	f.handlers["session/list"] = fakeRPCResponse{value: map[string]any{
+		"items": []map[string]any{},
 	}}
 	a := &Agent{workDir: "/tmp/ios-dir"}
 	a.resolver = NewResolver(WithProbeURLs([]string{f.URL()}))
@@ -40,6 +40,42 @@ func methodCalls(f *fakeDSHServer, method string) [][]byte {
 	return out
 }
 
+// unwrapArgsT extracts the args object's request field without a testing.T
+// (hook bodies have none at hand) — the typert gateway's payload shape.
+func unwrapArgsT(payload []byte) json.RawMessage {
+	// Wire shape: payload = {"args": {<param-keyed object>}} (wire.go
+	// mustWrapArgs); the params then carry "request"/"_request" fields.
+	var envelope struct {
+		Args json.RawMessage `json:"args"`
+	}
+	_ = json.Unmarshal(payload, &envelope)
+	inner := envelope.Args
+	if len(inner) == 0 {
+		inner = payload
+	}
+	var args struct {
+		Request           json.RawMessage `json:"request"`
+		UnderscoreRequest json.RawMessage `json:"_request"`
+	}
+	_ = json.Unmarshal(inner, &args)
+	if len(args.Request) > 0 {
+		return args.Request
+	}
+	return args.UnderscoreRequest
+}
+
+// unwrapArgs extracts the args object's request field ("request" for most
+// methods, "_request" for session/list) — the typert gateway's payload shape
+// (see wire.go's arg-name table).
+func unwrapArgs(t *testing.T, payload []byte) json.RawMessage {
+	t.Helper()
+	raw := unwrapArgsT(payload)
+	if len(raw) == 0 {
+		t.Fatalf("payload carries no request arg: %s", payload)
+	}
+	return raw
+}
+
 // ── list_sessions (§4.3.1) ──────────────────────────────────────────────────
 
 func TestListSessionsMappingAndFilters(t *testing.T) {
@@ -47,7 +83,7 @@ func TestListSessionsMappingAndFilters(t *testing.T) {
 	defer f.Close()
 	a := newTestAgent(t, f)
 
-	f.handlers["session.list"] = fakeRPCResponse{value: map[string]any{
+	f.handlers["session/list"] = fakeRPCResponse{value: map[string]any{
 		"items": []map[string]any{
 			{
 				"sessionId": "s-live", "updatedAt": 1786860018199, "running": true, "blank": false,
@@ -71,16 +107,19 @@ func TestListSessionsMappingAndFilters(t *testing.T) {
 		},
 	}}
 	// Tail-read fallback fixture: rows carry the {event:…} envelope.
-	f.hooks["session.history"] = func(payload []byte) fakeRPCResponse {
-		var req sessionHistoryRequest
-		_ = json.Unmarshal(payload, &req)
-		if req.SessionID != "s-cold" {
+	f.handlers["session/projections"] = fakeRPCResponse{value: map[string]any{
+		"asOfSeq": 9, "values": map[string]any{},
+	}}
+	f.hooks["session/page"] = func(payload []byte) fakeRPCResponse {
+		var req sessionPageRequest
+		_ = json.Unmarshal(unwrapArgsT(payload), &req)
+		if req.Address.SessionID != "s-cold" {
 			return fakeRPCResponse{err: &RPCError{Code: "session-not-found", Message: "no session", Details: json.RawMessage(`{}`)}}
 		}
 		return fakeRPCResponse{value: map[string]any{
-			"events": []map[string]any{
-				{"event": map[string]any{"type": "session/title", "seq": 9, "time": 1786860099, "data": map[string]any{"title": "尾读标题"}}},
-				{"event": map[string]any{"type": "user/message", "seq": 8, "time": 1786860090, "data": map[string]any{
+			"records": []map[string]any{
+				{"type": "event", "event": map[string]any{"type": "session/title", "seq": 9, "time": 1786860099, "data": map[string]any{"title": "尾读标题"}}},
+				{"type": "event", "event": map[string]any{"type": "user/message", "seq": 8, "time": 1786860090, "data": map[string]any{
 					"content": []map[string]any{{"type": "text", "text": "第一句话"}}, "source": map[string]any{"kind": "user"},
 				}}},
 			},
@@ -115,14 +154,17 @@ func TestListSessionsMappingAndFilters(t *testing.T) {
 		t.Fatalf("running cache mismatch: %v", running)
 	}
 
-	// The official cursor is an unimplemented reserved seat: the request must
-	// NOT page (a single session.list with an empty payload).
-	listCalls := methodCalls(f, "session.list")
-	if len(listCalls) != 1 {
-		t.Fatalf("expected exactly one session.list call, got %d", len(listCalls))
+	// The official cursor is an unimplemented reserved seat: every
+	// session/list call (the resolver probe rides the same method) must carry
+	// the empty reserved _request form — ListSessions itself never pages.
+	listCalls := methodCalls(f, "session/list")
+	if len(listCalls) == 0 {
+		t.Fatal("no session/list call")
 	}
-	if strings.TrimSpace(string(listCalls[0])) != "{}" {
-		t.Fatalf("session.list payload should be the empty reserved form: %s", listCalls[0])
+	for _, call := range listCalls {
+		if strings.TrimSpace(string(call)) != `{"args":{"_request":{}}}` {
+			t.Fatalf("session/list payload must be the empty reserved form in the args envelope: %s", call)
+		}
 	}
 }
 
@@ -130,15 +172,18 @@ func TestListSessionsTitleFallsBackToUserMessage(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["session.list"] = fakeRPCResponse{value: map[string]any{
+	f.handlers["session/list"] = fakeRPCResponse{value: map[string]any{
 		"items": []map[string]any{
 			{"sessionId": "s1", "updatedAt": 3, "running": false, "blank": false, "cwd": "/p"},
 		},
 	}}
-	f.hooks["session.history"] = func(payload []byte) fakeRPCResponse {
+	f.handlers["session/projections"] = fakeRPCResponse{value: map[string]any{
+		"asOfSeq": 1, "values": map[string]any{},
+	}}
+	f.hooks["session/page"] = func(payload []byte) fakeRPCResponse {
 		return fakeRPCResponse{value: map[string]any{
-			"events": []map[string]any{
-				{"event": map[string]any{"type": "user/message", "seq": 1, "time": 1, "data": map[string]any{
+			"records": []map[string]any{
+				{"type": "event", "event": map[string]any{"type": "user/message", "seq": 1, "time": 1, "data": map[string]any{
 					"content": []map[string]any{{"type": "text", "text": "帮我看下这个 bug"}}, "source": map[string]any{"kind": "user"},
 				}}},
 			},
@@ -158,7 +203,7 @@ func TestListSessionsGroupsByWorkspaceSessionIDs(t *testing.T) {
 	defer f.Close()
 	a := newTestAgent(t, f)
 
-	f.handlers["session.list"] = fakeRPCResponse{value: map[string]any{
+	f.handlers["session/list"] = fakeRPCResponse{value: map[string]any{
 		"items": []map[string]any{
 			{"sessionId": "s-chat", "updatedAt": 4, "running": false, "blank": false, "cwd": "/Users/x/Chat",
 				"projections": map[string]any{"values": map[string]any{"title": "讲封神榜故事"}}},
@@ -168,13 +213,13 @@ func TestListSessionsGroupsByWorkspaceSessionIDs(t *testing.T) {
 				"projections": map[string]any{"values": map[string]any{"title": "西游记"}}},
 		},
 	}}
-	f.handlers["workspace.list"] = fakeRPCResponse{value: map[string]any{
-		"items": []map[string]any{
-			{"workspaceId": "w-chat", "path": "/Users/x/Chat", "title": "Chat", "sessionIds": []string{"s-chat"}},
-			{"workspaceId": "w-ios", "path": "/Users/x/cordcode-ios", "title": "cordcode-ios", "sessionIds": []string{"s-ios"}},
+	a.ws.applyBaseline(&workspaceBaseline{
+		Items: []apiWorkspaceView{
+			{WorkspaceID: "w-chat", Path: "/Users/x/Chat", Title: "Chat", SessionIDs: []string{"s-chat"}},
+			{WorkspaceID: "w-ios", Path: "/Users/x/cordcode-ios", Title: "cordcode-ios", SessionIDs: []string{"s-ios"}},
 		},
-		"archivedSessionIds": []string{},
-	}}
+		ArchivedSessionIds: []string{},
+	})
 
 	sessions, err := a.ListSessions(context.Background())
 	if err != nil {
@@ -203,7 +248,7 @@ func TestListSessionsMarksArchivedFromWorkspaceList(t *testing.T) {
 	defer f.Close()
 	a := newTestAgent(t, f)
 
-	f.handlers["session.list"] = fakeRPCResponse{value: map[string]any{
+	f.handlers["session/list"] = fakeRPCResponse{value: map[string]any{
 		"items": []map[string]any{
 			{"sessionId": "s-live", "updatedAt": 4, "running": false, "blank": false, "cwd": "/Users/x/Chat",
 				"projections": map[string]any{"values": map[string]any{"title": "在列"}}},
@@ -211,12 +256,12 @@ func TestListSessionsMarksArchivedFromWorkspaceList(t *testing.T) {
 				"projections": map[string]any{"values": map[string]any{"title": "讲个光头笑话"}}},
 		},
 	}}
-	f.handlers["workspace.list"] = fakeRPCResponse{value: map[string]any{
-		"items": []map[string]any{
-			{"workspaceId": "w-chat", "path": "/Users/x/Chat", "title": "Chat", "sessionIds": []string{"s-live"}},
+	a.ws.applyBaseline(&workspaceBaseline{
+		Items: []apiWorkspaceView{
+			{WorkspaceID: "w-chat", Path: "/Users/x/Chat", Title: "Chat", SessionIDs: []string{"s-live"}},
 		},
-		"archivedSessionIds": []string{"s-arch"},
-	}}
+		ArchivedSessionIds: []string{"s-arch"},
+	})
 
 	sessions, err := a.ListSessions(context.Background())
 	if err != nil {
@@ -250,7 +295,7 @@ func TestListSessionsMapsOfficialAgentPreset(t *testing.T) {
 	defer f.Close()
 	a := newTestAgent(t, f)
 
-	f.handlers["session.list"] = fakeRPCResponse{value: map[string]any{
+	f.handlers["session/list"] = fakeRPCResponse{value: map[string]any{
 		"items": []map[string]any{
 			{"sessionId": "s-ptc", "updatedAt": 4, "running": false, "blank": false, "cwd": "/Users/x/Chat",
 				"agentPreset": "code",
@@ -260,11 +305,11 @@ func TestListSessionsMapsOfficialAgentPreset(t *testing.T) {
 				"projections": map[string]any{"values": map[string]any{"title": "普通会话"}}},
 		},
 	}}
-	f.handlers["workspace.list"] = fakeRPCResponse{value: map[string]any{
-		"items": []map[string]any{
-			{"workspaceId": "w-chat", "path": "/Users/x/Chat", "title": "Chat", "sessionIds": []string{"s-ptc", "s-std"}},
+	a.ws.applyBaseline(&workspaceBaseline{
+		Items: []apiWorkspaceView{
+			{WorkspaceID: "w-chat", Path: "/Users/x/Chat", Title: "Chat", SessionIDs: []string{"s-ptc", "s-std"}},
 		},
-	}}
+	})
 
 	sessions, err := a.ListSessions(context.Background())
 	if err != nil {
@@ -286,25 +331,26 @@ func TestListAgentsMapsOfficialPresets(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["agentPreset.list"] = fakeRPCResponse{value: map[string]any{
+	f.handlers["agentPresets/list"] = fakeRPCResponse{value: map[string]any{
 		"presets": []any{
-			map[string]any{"id": "standard", "name": "标准模式", "description": "完整", "isDefault": true, "trust": "system"},
-			map[string]any{"id": "minimal", "name": "极简模式", "description": "双工具", "trust": "system"},
-			map[string]any{"id": "broken", "name": "坏的", "broken": "missing plugin", "trust": "user"},
+			map[string]any{"id": "standard", "order": 1, "isDefault": true},
+			map[string]any{"id": "ptc", "order": 2, "isDefault": false},
+			map[string]any{"id": "minimal", "order": 3, "isDefault": false},
 		},
+		"modeSelectionEnabled": true,
 	}}
 	got, err := a.ListAgents(context.Background())
 	if err != nil {
 		t.Fatalf("ListAgents: %v", err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("len=%d want 2 (broken omitted): %+v", len(got), got)
+	if len(got) != 3 {
+		t.Fatalf("len=%d want 3: %+v", len(got), got)
 	}
-	if got[0].Name != "standard" || got[0].DisplayName != "标准模式" || !got[0].IsDefault {
+	if got[0].Name != "standard" || got[0].DisplayName != "standard" || !got[0].IsDefault {
 		t.Fatalf("standard = %+v", got[0])
 	}
-	if got[1].Name != "minimal" || got[1].DisplayName != "极简模式" {
-		t.Fatalf("minimal = %+v", got[1])
+	if got[1].Name != "ptc" || got[2].Name != "minimal" {
+		t.Fatalf("roster order: %+v", got)
 	}
 }
 
@@ -313,7 +359,7 @@ func TestStartSessionCreateSendsPendingAgentPreset(t *testing.T) {
 	defer f.Close()
 	a := newTestAgent(t, f)
 	a.SetPendingAgentPreset("minimal")
-	f.hooks["session.create"] = func(payload []byte) fakeRPCResponse {
+	f.hooks["session/create"] = func(payload []byte) fakeRPCResponse {
 		return fakeRPCResponse{value: map[string]any{"sessionId": "official-preset", "agentPreset": "minimal"}}
 	}
 	sess, err := a.StartSession(context.Background(), "")
@@ -321,12 +367,12 @@ func TestStartSessionCreateSendsPendingAgentPreset(t *testing.T) {
 		t.Fatalf("StartSession: %v", err)
 	}
 	defer sess.Close()
-	calls := methodCalls(f, "session.create")
+	calls := methodCalls(f, "session/create")
 	if len(calls) != 1 {
 		t.Fatalf("create calls: %d", len(calls))
 	}
 	var req sessionCreateRequest
-	if err := json.Unmarshal(calls[0], &req); err != nil {
+	if err := json.Unmarshal(unwrapArgs(t, calls[0]), &req); err != nil {
 		t.Fatal(err)
 	}
 	if req.AgentPreset != "minimal" {
@@ -339,7 +385,7 @@ func TestStartSessionOmitsUngroupedCwd(t *testing.T) {
 	defer f.Close()
 	a := newTestAgent(t, f)
 	a.workDir = ungroupedDirectory
-	f.hooks["session.create"] = func(payload []byte) fakeRPCResponse {
+	f.hooks["session/create"] = func(payload []byte) fakeRPCResponse {
 		return fakeRPCResponse{value: map[string]any{"sessionId": "official-ungrouped", "agentPreset": "standard"}}
 	}
 
@@ -348,12 +394,12 @@ func TestStartSessionOmitsUngroupedCwd(t *testing.T) {
 		t.Fatalf("StartSession: %v", err)
 	}
 	defer sess.Close()
-	calls := methodCalls(f, "session.create")
+	calls := methodCalls(f, "session/create")
 	if len(calls) != 1 {
 		t.Fatalf("create calls: %d", len(calls))
 	}
 	var req sessionCreateRequest
-	if err := json.Unmarshal(calls[0], &req); err != nil {
+	if err := json.Unmarshal(unwrapArgs(t, calls[0]), &req); err != nil {
 		t.Fatal(err)
 	}
 	if req.Cwd != "" {
@@ -370,7 +416,7 @@ func TestStartSessionCreateUsesCwd(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.hooks["session.create"] = func(payload []byte) fakeRPCResponse {
+	f.hooks["session/create"] = func(payload []byte) fakeRPCResponse {
 		return fakeRPCResponse{value: map[string]any{"sessionId": "official-1", "agentPreset": "standard"}}
 	}
 
@@ -382,12 +428,12 @@ func TestStartSessionCreateUsesCwd(t *testing.T) {
 	if sess.CurrentSessionID() != "official-1" {
 		t.Fatalf("session id: %s", sess.CurrentSessionID())
 	}
-	calls := methodCalls(f, "session.create")
+	calls := methodCalls(f, "session/create")
 	if len(calls) != 1 {
 		t.Fatalf("create calls: %d", len(calls))
 	}
 	var req sessionCreateRequest
-	if err := json.Unmarshal(calls[0], &req); err != nil {
+	if err := json.Unmarshal(unwrapArgs(t, calls[0]), &req); err != nil {
 		t.Fatal(err)
 	}
 	if req.Cwd != "/tmp/ios-dir" {
@@ -403,14 +449,14 @@ func TestStartSessionCreateUsesWorkspaceIDWhenCwdMatches(t *testing.T) {
 	defer f.Close()
 	a := newTestAgent(t, f)
 	a.workDir = "/Users/x/Chat/"
-	f.handlers["workspace.list"] = fakeRPCResponse{value: map[string]any{
-		"items": []map[string]any{
-			{"workspaceId": "w-chat", "path": "/Users/x/Chat", "title": "Chat", "sessionIds": []string{"s-old"}},
-			{"workspaceId": "w-ios", "path": "/Users/x/cordcode-ios", "title": "cordcode-ios", "sessionIds": []string{}},
+	a.ws.applyBaseline(&workspaceBaseline{
+		Items: []apiWorkspaceView{
+			{WorkspaceID: "w-chat", Path: "/Users/x/Chat", Title: "Chat", SessionIDs: []string{"s-old"}},
+			{WorkspaceID: "w-ios", Path: "/Users/x/cordcode-ios", Title: "cordcode-ios", SessionIDs: []string{}},
 		},
-		"archivedSessionIds": []string{},
-	}}
-	f.hooks["session.create"] = func(payload []byte) fakeRPCResponse {
+		ArchivedSessionIds: []string{},
+	})
+	f.hooks["session/create"] = func(payload []byte) fakeRPCResponse {
 		return fakeRPCResponse{value: map[string]any{"sessionId": "official-chat", "agentPreset": "standard"}}
 	}
 
@@ -419,12 +465,12 @@ func TestStartSessionCreateUsesWorkspaceIDWhenCwdMatches(t *testing.T) {
 		t.Fatalf("StartSession: %v", err)
 	}
 	defer sess.Close()
-	calls := methodCalls(f, "session.create")
+	calls := methodCalls(f, "session/create")
 	if len(calls) != 1 {
 		t.Fatalf("create calls: %d", len(calls))
 	}
 	var req sessionCreateRequest
-	if err := json.Unmarshal(calls[0], &req); err != nil {
+	if err := json.Unmarshal(unwrapArgs(t, calls[0]), &req); err != nil {
 		t.Fatal(err)
 	}
 	if req.WorkspaceID != "w-chat" {
@@ -439,13 +485,13 @@ func TestStartSessionExistingBindsWithoutCreate(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.hooks["session.history"] = func(payload []byte) fakeRPCResponse {
-		var req sessionHistoryRequest
-		_ = json.Unmarshal(payload, &req)
+	f.hooks["session/projections"] = func(payload []byte) fakeRPCResponse {
+		var req sessionProjectionsRequest
+		_ = json.Unmarshal(unwrapArgsT(payload), &req)
 		if req.SessionID != "known-1" {
-			return fakeRPCResponse{err: &RPCError{Code: "session-not-found", Message: `no session "unknown-1" in store`, Details: json.RawMessage(`{}`)}}
+			return fakeRPCResponse{err: &RPCError{Code: "session/not-found", Message: `session "unknown-1" not found`, Details: json.RawMessage(`{}`)}}
 		}
-		return fakeRPCResponse{value: map[string]any{"events": []any{}, "hasMore": false}}
+		return fakeRPCResponse{value: map[string]any{"asOfSeq": 0, "values": map[string]any{}}}
 	}
 
 	sess, err := a.StartSession(context.Background(), "known-1")
@@ -453,7 +499,7 @@ func TestStartSessionExistingBindsWithoutCreate(t *testing.T) {
 		t.Fatalf("resume bind: %v", err)
 	}
 	sess.Close()
-	if len(methodCalls(f, "session.create")) != 0 {
+	if len(methodCalls(f, "session/create")) != 0 {
 		t.Fatal("existing-id start must NOT create")
 	}
 
@@ -463,7 +509,7 @@ func TestStartSessionExistingBindsWithoutCreate(t *testing.T) {
 	}
 	// 坑 7: the official session-not-found text arrives verbatim.
 	rpcErr, ok := err.(*RPCError)
-	if !ok || rpcErr.Code != "session-not-found" || !strings.Contains(err.Error(), `no session "unknown-1" in store`) {
+	if !ok || rpcErr.Code != "session/not-found" || !strings.Contains(err.Error(), `session "unknown-1" not found`) {
 		t.Fatalf("unknown-id error must be the official RpcError: %v", err)
 	}
 }
@@ -472,9 +518,9 @@ func TestSendQueuesTextPrompt(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["session.create"] = fakeRPCResponse{value: map[string]any{"sessionId": "s9"}}
-	f.hooks["session.history"] = func(_ []byte) fakeRPCResponse {
-		return fakeRPCResponse{value: map[string]any{"events": []any{}, "hasMore": false}}
+	f.handlers["session/create"] = fakeRPCResponse{value: map[string]any{"sessionId": "s9"}}
+	f.hooks["session/page"] = func(_ []byte) fakeRPCResponse {
+		return fakeRPCResponse{value: map[string]any{"records": []any{}, "hasMore": false}}
 	}
 	sess, err := a.StartSession(context.Background(), "")
 	if err != nil {
@@ -482,16 +528,16 @@ func TestSendQueuesTextPrompt(t *testing.T) {
 	}
 	defer sess.Close()
 
-	f.handlers["session.prompt"] = fakeRPCResponse{value: map[string]any{"accepted": true}}
+	f.handlers["session/prompt"] = fakeRPCResponse{value: map[string]any{"accepted": true}}
 	if err := sess.Send("你好，帮我修个 bug", nil, nil); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	calls := methodCalls(f, "session.prompt")
+	calls := methodCalls(f, "session/prompt")
 	if len(calls) != 1 {
 		t.Fatalf("prompt calls: %d", len(calls))
 	}
 	var req sessionPromptRequest
-	if err := json.Unmarshal(calls[0], &req); err != nil {
+	if err := json.Unmarshal(unwrapArgs(t, calls[0]), &req); err != nil {
 		t.Fatal(err)
 	}
 	if req.SessionID != "s9" || req.Mode != "queue" {
@@ -502,7 +548,7 @@ func TestSendQueuesTextPrompt(t *testing.T) {
 	}
 
 	// Prompt business failure → official error text verbatim (fail visibly).
-	f.handlers["session.prompt"] = fakeRPCResponse{err: &RPCError{
+	f.handlers["session/prompt"] = fakeRPCResponse{err: &RPCError{
 		Code: "model-unavailable", Message: `model "default/deepseek-chat" is not routable`,
 		Details: json.RawMessage(`{}`),
 	}}
@@ -516,17 +562,17 @@ func TestCancelTurnMapsToSessionCancel(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["session.create"] = fakeRPCResponse{value: map[string]any{"sessionId": "s10"}}
-	f.hooks["session.history"] = func(_ []byte) fakeRPCResponse {
-		return fakeRPCResponse{value: map[string]any{"events": []any{}, "hasMore": false}}
+	f.handlers["session/create"] = fakeRPCResponse{value: map[string]any{"sessionId": "s10"}}
+	f.hooks["session/page"] = func(_ []byte) fakeRPCResponse {
+		return fakeRPCResponse{value: map[string]any{"records": []any{}, "hasMore": false}}
 	}
 	sess, _ := a.StartSession(context.Background(), "")
 	defer sess.Close()
-	f.handlers["session.cancel"] = fakeRPCResponse{value: map[string]any{"accepted": true}}
+	f.handlers["session/cancel"] = fakeRPCResponse{value: map[string]any{"accepted": true}}
 	if err := sess.(core.TurnCanceler).CancelTurn(context.Background()); err != nil {
 		t.Fatalf("CancelTurn: %v", err)
 	}
-	calls := methodCalls(f, "session.cancel")
+	calls := methodCalls(f, "session/cancel")
 	if len(calls) != 1 || !strings.Contains(string(calls[0]), `"s10"`) {
 		t.Fatalf("cancel calls: %s", calls)
 	}
@@ -538,7 +584,7 @@ func TestRenameReturnsAcceptedTitle(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["session.rename"] = fakeRPCResponse{value: map[string]any{"title": "规范化后的标题", "seq": 12}}
+	f.handlers["session/rename"] = fakeRPCResponse{value: map[string]any{"title": "规范化后的标题", "seq": 12}}
 	info, err := a.RenameSession(context.Background(), "s1", "  规范化后的标题  ")
 	if err != nil {
 		t.Fatal(err)
@@ -546,9 +592,9 @@ func TestRenameReturnsAcceptedTitle(t *testing.T) {
 	if info.Summary != "规范化后的标题" {
 		t.Fatalf("accepted title: %+v", info)
 	}
-	calls := methodCalls(f, "session.rename")
+	calls := methodCalls(f, "session/rename")
 	var req sessionRenameRequest
-	_ = json.Unmarshal(calls[0], &req)
+	_ = json.Unmarshal(unwrapArgs(t, calls[0]), &req)
 	if req.SessionID != "s1" || req.Title != "  规范化后的标题  " {
 		t.Fatalf("rename payload: %+v", req)
 	}
@@ -566,17 +612,17 @@ func TestRichHistoryWalksThroughMidTurnChunkPages(t *testing.T) {
 	a := newTestAgent(t, f)
 
 	chunkPage := []map[string]any{{
-		"event": map[string]any{"type": "turn/start", "seq": 200, "time": 200, "data": map[string]any{"turn": 2}},
+		"type": "event", "event": map[string]any{"type": "turn/start", "seq": 200, "time": 200, "data": map[string]any{"turn": 2}},
 	}}
 	// 4001 条 chunk：旧兜底 4002/8≈500 ≥ budget(500)，一页即停。
 	for i := int64(0); i < 4001; i++ {
 		chunkPage = append(chunkPage, map[string]any{
-			"event": map[string]any{"type": "assistant/chunk", "seq": 201 + i, "time": 201 + i,
+			"type": "event", "event": map[string]any{"type": "assistant/chunk", "seq": 201 + i, "time": 201 + i,
 				"data": map[string]any{"turn": 2, "step": 1, "chunk": map[string]any{"type": "text-delta", "text": "x"}}},
 		})
 	}
 	chunkPage = append(chunkPage,
-		map[string]any{"event": map[string]any{"type": "assistant/message", "seq": 4602, "time": 4602, "data": map[string]any{
+		map[string]any{"type": "event", "event": map[string]any{"type": "assistant/message", "seq": 4602, "time": 4602, "data": map[string]any{
 			"turn": 2, "step": 1,
 			"message": map[string]any{
 				"role":    "assistant",
@@ -586,11 +632,11 @@ func TestRichHistoryWalksThroughMidTurnChunkPages(t *testing.T) {
 		}}},
 	)
 	boundaryPage := []map[string]any{
-		{"event": map[string]any{"type": "user/message", "seq": 150, "time": 150, "data": map[string]any{
+		{"type": "event", "event": map[string]any{"type": "user/message", "seq": 150, "time": 150, "data": map[string]any{
 			"content": []map[string]any{{"type": "text", "text": "中间的用户消息"}},
 			"source":  map[string]any{"kind": "user"},
 		}}},
-		{"event": map[string]any{"type": "assistant/message", "seq": 160, "time": 160, "data": map[string]any{
+		{"type": "event", "event": map[string]any{"type": "assistant/message", "seq": 160, "time": 160, "data": map[string]any{
 			"turn": 1, "step": 1,
 			"message": map[string]any{
 				"role":    "assistant",
@@ -598,21 +644,24 @@ func TestRichHistoryWalksThroughMidTurnChunkPages(t *testing.T) {
 				"source":  map[string]any{"kind": "model", "provider": "deepseek", "model": "deepseek-v4-pro"},
 			},
 		}}},
-		{"event": map[string]any{"type": "turn/end", "seq": 199, "time": 199, "data": map[string]any{"turn": 1, "reason": map[string]any{"kind": "completed"}}}},
+		{"type": "event", "event": map[string]any{"type": "turn/end", "seq": 199, "time": 199, "data": map[string]any{"turn": 1, "reason": map[string]any{"kind": "completed"}}}},
 	}
 	oldestPage := []map[string]any{
-		{"event": map[string]any{"type": "turn/start", "seq": 100, "time": 100, "data": map[string]any{"turn": 1}}},
+		{"type": "event", "event": map[string]any{"type": "turn/start", "seq": 100, "time": 100, "data": map[string]any{"turn": 1}}},
 	}
-	f.hooks["session.history"] = func(payload []byte) fakeRPCResponse {
-		var req sessionHistoryRequest
-		_ = json.Unmarshal(payload, &req)
+	f.handlers["session/projections"] = fakeRPCResponse{value: map[string]any{
+		"asOfSeq": 4602, "values": map[string]any{},
+	}}
+	f.hooks["session/page"] = func(payload []byte) fakeRPCResponse {
+		var req sessionPageRequest
+		_ = json.Unmarshal(unwrapArgsT(payload), &req)
 		switch {
 		case req.BeforeSeq == nil:
-			return fakeRPCResponse{value: map[string]any{"events": chunkPage, "hasMore": true}}
+			return fakeRPCResponse{value: map[string]any{"records": chunkPage, "hasMore": true}}
 		case *req.BeforeSeq == 200:
-			return fakeRPCResponse{value: map[string]any{"events": boundaryPage, "hasMore": true}}
+			return fakeRPCResponse{value: map[string]any{"records": boundaryPage, "hasMore": true}}
 		default: // beforeSeq=150
-			return fakeRPCResponse{value: map[string]any{"events": oldestPage, "hasMore": false}}
+			return fakeRPCResponse{value: map[string]any{"records": oldestPage, "hasMore": false}}
 		}
 	}
 
@@ -621,7 +670,7 @@ func TestRichHistoryWalksThroughMidTurnChunkPages(t *testing.T) {
 		t.Fatalf("GetRichSessionHistory: %v", err)
 	}
 	// walk 必须走完 3 页（chunk 页 0 边界不能提前终止）。
-	if calls := len(methodCalls(f, "session.history")); calls != 3 {
+	if calls := len(methodCalls(f, "session/page")); calls != 3 {
 		t.Fatalf("expected 3 history pages (walk through the chunk page), got %d", calls)
 	}
 	// user 气泡 + 两个 assistant turn + plan/goal 快照。
@@ -638,12 +687,12 @@ func TestRichHistoryWalksThroughMidTurnChunkPages(t *testing.T) {
 		t.Fatalf("tail assistant entry: %+v", entries[2])
 	}
 	// 单元口径：零边界 chunk 页计 0（不再 len/8 兜底）。
-	var chunkOnly []apiHistoryEntry
+	var chunkOnly []sessionEventWire
 	for _, row := range chunkPage {
 		b, _ := json.Marshal(row)
-		var e apiHistoryEntry
-		_ = json.Unmarshal(b, &e)
-		chunkOnly = append(chunkOnly, e)
+		var rec pageRecord
+		_ = json.Unmarshal(b, &rec)
+		chunkOnly = append(chunkOnly, rec.Event)
 	}
 	if n := countMappableEntries(chunkOnly); n != 0 {
 		t.Fatalf("chunk-only page mappable = %d, want 0", n)
@@ -660,13 +709,13 @@ func TestRichHistoryMapsTurnsToolsAndReasoning(t *testing.T) {
 	// walk backwards via beforeSeq. Rows carry the {event:…} envelope.
 	pages := map[int64][]map[string]any{}
 	mkUser := func(seq int64, text string) map[string]any {
-		return map[string]any{"type": "user/message", "seq": seq, "time": seq * 1000, "data": map[string]any{
+		return map[string]any{"type": "event", "event": map[string]any{"type": "user/message", "seq": seq, "time": seq * 1000, "data": map[string]any{
 			"content": []map[string]any{{"type": "text", "text": text}}, "source": map[string]any{"kind": "user"},
-		}}
+		}}}
 	}
 	pages[0] = []map[string]any{ // newest window, ascending seq
-		{"event": map[string]any{"type": "turn/start", "seq": 5, "time": 5, "data": map[string]any{"turn": 1}}},
-		{"event": map[string]any{"type": "assistant/message", "seq": 6, "time": 6, "data": map[string]any{
+		{"type": "event", "event": map[string]any{"type": "turn/start", "seq": 5, "time": 5, "data": map[string]any{"turn": 1}}},
+		{"type": "event", "event": map[string]any{"type": "assistant/message", "seq": 6, "time": 6, "data": map[string]any{
 			"turn": 1, "step": 1,
 			"message": map[string]any{
 				"role": "assistant",
@@ -677,14 +726,15 @@ func TestRichHistoryMapsTurnsToolsAndReasoning(t *testing.T) {
 				"source": map[string]any{"kind": "model", "provider": "deepseek", "model": "deepseek-v4-pro"},
 			},
 		}}},
-		{"event": map[string]any{"type": "tool/result", "seq": 7, "time": 7, "data": map[string]any{
+		{"type": "event", "event": map[string]any{"type": "tool/result", "seq": 7, "time": 7, "data": map[string]any{
 			"turn": 1, "step": 2,
 			"message": map[string]any{
-				"source":  map[string]any{"kind": "tool", "callId": "call-1"},
-				"content": []map[string]any{{"type": "tool-result", "toolCallId": "call-1", "content": []map[string]any{{"type": "text", "text": "ls 输出"}}}},
+				"toolCallId": "call-1",
+				"source":    map[string]any{"kind": "tool", "callId": "call-1"},
+				"content":   []map[string]any{{"type": "text", "text": "ls 输出"}},
 			},
 		}}},
-		{"event": map[string]any{"type": "assistant/message", "seq": 8, "time": 8, "data": map[string]any{
+		{"type": "event", "event": map[string]any{"type": "assistant/message", "seq": 8, "time": 8, "data": map[string]any{
 			"turn": 1, "step": 2,
 			"message": map[string]any{
 				"role":    "assistant",
@@ -692,20 +742,23 @@ func TestRichHistoryMapsTurnsToolsAndReasoning(t *testing.T) {
 				"source":  map[string]any{"kind": "model", "provider": "deepseek", "model": "deepseek-v4-pro"},
 			},
 		}}},
-		{"event": map[string]any{"type": "turn/end", "seq": 9, "time": 9, "data": map[string]any{"turn": 1, "reason": map[string]any{"kind": "completed"}}}},
+		{"type": "event", "event": map[string]any{"type": "turn/end", "seq": 9, "time": 9, "data": map[string]any{"turn": 1, "reason": map[string]any{"kind": "completed"}}}},
 	}
 	pages[5] = []map[string]any{ // older window (beforeSeq=5), ascending seq
-		{"event": map[string]any{"type": "request/context", "seq": 3, "time": 3, "data": map[string]any{"provider": "deepseek", "model": "deepseek-v4-pro", "contextWindow": 128000}}},
-		{"event": mkUser(4, "帮我看下目录")},
+		{"type": "event", "event": map[string]any{"type": "request/context", "seq": 3, "time": 3, "data": map[string]any{"provider": "deepseek", "model": "deepseek-v4-pro", "contextWindow": 128000}}},
+		mkUser(4, "帮我看下目录"),
 	}
 
-	f.hooks["session.history"] = func(payload []byte) fakeRPCResponse {
-		var req sessionHistoryRequest
-		_ = json.Unmarshal(payload, &req)
+	f.handlers["session/projections"] = fakeRPCResponse{value: map[string]any{
+		"asOfSeq": 9, "values": map[string]any{},
+	}}
+	f.hooks["session/page"] = func(payload []byte) fakeRPCResponse {
+		var req sessionPageRequest
+		_ = json.Unmarshal(unwrapArgsT(payload), &req)
 		if req.BeforeSeq != nil {
-			return fakeRPCResponse{value: map[string]any{"events": pages[*req.BeforeSeq], "hasMore": false}}
+			return fakeRPCResponse{value: map[string]any{"records": pages[*req.BeforeSeq], "hasMore": false}}
 		}
-		return fakeRPCResponse{value: map[string]any{"events": pages[0], "hasMore": true}}
+		return fakeRPCResponse{value: map[string]any{"records": pages[0], "hasMore": true}}
 	}
 
 	entries, err := a.GetRichSessionHistory(context.Background(), "s-hist", 50)
@@ -757,11 +810,11 @@ func TestRichHistoryMapsTurnsToolsAndReasoning(t *testing.T) {
 		t.Fatalf("plan snapshot part: %+v", p)
 	}
 	// Paging walked both pages (two history calls).
-	if len(methodCalls(f, "session.history")) != 2 {
-		t.Fatalf("expected 2 history pages, got %d", len(methodCalls(f, "session.history")))
+	if len(methodCalls(f, "session/page")) != 2 {
+		t.Fatalf("expected 2 history pages, got %d", len(methodCalls(f, "session/page")))
 	}
-	var first sessionHistoryRequest
-	_ = json.Unmarshal(methodCalls(f, "session.history")[0], &first)
+	var first sessionPageRequest
+	_ = json.Unmarshal(unwrapArgs(t, methodCalls(f, "session/page")[0]), &first)
 	if first.MaxMessages == nil || *first.MaxMessages != historyPageMessages {
 		t.Fatalf("first page maxMessages=%v want %d", first.MaxMessages, historyPageMessages)
 	}
@@ -776,17 +829,20 @@ func TestRichHistoryShrinksOversizedPage(t *testing.T) {
 	unaryResponseLimit = 900
 	t.Cleanup(func() { unaryResponseLimit = old })
 
-	f.hooks["session.history"] = func(payload []byte) fakeRPCResponse {
-		var req sessionHistoryRequest
-		_ = json.Unmarshal(payload, &req)
+	f.handlers["session/projections"] = fakeRPCResponse{value: map[string]any{
+		"asOfSeq": 1, "values": map[string]any{},
+	}}
+	f.hooks["session/page"] = func(payload []byte) fakeRPCResponse {
+		var req sessionPageRequest
+		_ = json.Unmarshal(unwrapArgsT(payload), &req)
 		max := 0
 		if req.MaxMessages != nil {
 			max = *req.MaxMessages
 		}
 		if max >= historyPageMessages {
 			return fakeRPCResponse{value: map[string]any{
-				"events": []map[string]any{
-					{"event": map[string]any{"type": "user/message", "seq": 1, "time": 1, "data": map[string]any{
+				"records": []map[string]any{
+					{"type": "event", "event": map[string]any{"type": "user/message", "seq": 1, "time": 1, "data": map[string]any{
 						"content": []map[string]any{{"type": "text", "text": strings.Repeat("X", 4000)}},
 						"source":  map[string]any{"kind": "user"},
 					}}},
@@ -795,8 +851,8 @@ func TestRichHistoryShrinksOversizedPage(t *testing.T) {
 			}}
 		}
 		return fakeRPCResponse{value: map[string]any{
-			"events": []map[string]any{
-				{"event": map[string]any{"type": "user/message", "seq": 1, "time": 1, "data": map[string]any{
+			"records": []map[string]any{
+				{"type": "event", "event": map[string]any{"type": "user/message", "seq": 1, "time": 1, "data": map[string]any{
 					"content": []map[string]any{{"type": "text", "text": "短页"}},
 					"source":  map[string]any{"kind": "user"},
 				}}},
@@ -814,9 +870,9 @@ func TestRichHistoryShrinksOversizedPage(t *testing.T) {
 		t.Fatalf("entries after shrink: %+v", entries)
 	}
 	var sizes []int
-	for _, raw := range methodCalls(f, "session.history") {
-		var req sessionHistoryRequest
-		_ = json.Unmarshal(raw, &req)
+	for _, raw := range methodCalls(f, "session/page") {
+		var req sessionPageRequest
+		_ = json.Unmarshal(unwrapArgsT(raw), &req)
 		if req.MaxMessages != nil {
 			sizes = append(sizes, *req.MaxMessages)
 		}
@@ -832,14 +888,16 @@ func TestProvidersFilteredToActive(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["llm.providers"] = fakeRPCResponse{value: map[string]any{
+	f.handlers["llm/listConfigurableProviders"] = fakeRPCResponse{value: map[string]any{
 		"providers": []map[string]any{
-			{"provider": "deepseek", "displayName": "DeepSeek", "settingsNs": "llm.deepseek", "settingsPath": []string{}, "active": true},
-			{"provider": "anthropic", "displayName": "Anthropic", "settingsNs": "llm.anthropic", "settingsPath": []string{}, "active": false, "declared": false},
-			{"provider": "amazon-bedrock", "displayName": "Bedrock", "settingsNs": "llm.bedrock", "settingsPath": []string{}, "active": false},
+			{"provider": "deepseek", "displayName": "DeepSeek", "settingsNs": "llm.deepseek", "settingsPath": []string{}, "declared": true},
+			{"provider": "anthropic", "displayName": "Anthropic", "settingsNs": "llm.anthropic", "settingsPath": []string{}, "declared": false},
+			{"provider": "amazon-bedrock", "displayName": "Bedrock", "settingsNs": "llm.bedrock", "settingsPath": []string{}, "declared": false},
 		},
 	}}
-	f.handlers["llm.models"] = fakeRPCResponse{value: map[string]any{
+	f.handlers["session/modelCatalog"] = fakeRPCResponse{value: map[string]any{
+		"default":           map[string]any{"provider": "deepseek", "model": "deepseek-v4-pro"},
+		"routableProviders": []string{"deepseek"},
 		"groups": []map[string]any{
 			{"id": "deepseek", "name": "DeepSeek", "models": []map[string]any{
 				{"id": "deepseek-v4-pro", "name": "DeepSeek V4 Pro"},
@@ -868,13 +926,13 @@ func TestSwitchModelAppliesSelectModelToActiveSession(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["session.create"] = fakeRPCResponse{value: map[string]any{"sessionId": "s-model"}}
-	f.hooks["session.history"] = func(_ []byte) fakeRPCResponse {
-		return fakeRPCResponse{value: map[string]any{"events": []any{}, "hasMore": false}}
+	f.handlers["session/create"] = fakeRPCResponse{value: map[string]any{"sessionId": "s-model"}}
+	f.hooks["session/page"] = func(_ []byte) fakeRPCResponse {
+		return fakeRPCResponse{value: map[string]any{"records": []any{}, "hasMore": false}}
 	}
-	f.handlers["llm.providers"] = fakeRPCResponse{value: map[string]any{"providers": []any{}}}
-	f.handlers["llm.models"] = fakeRPCResponse{value: map[string]any{"groups": []any{}}}
-	f.handlers["session.selectModel"] = fakeRPCResponse{value: map[string]any{
+	f.handlers["llm/listConfigurableProviders"] = fakeRPCResponse{value: map[string]any{"providers": []any{}}}
+	f.handlers["session/modelCatalog"] = fakeRPCResponse{value: map[string]any{"groups": []any{}}}
+	f.handlers["session/selectModel"] = fakeRPCResponse{value: map[string]any{
 		"selected": map[string]any{"provider": "deepseek", "model": "deepseek-v4-pro", "reasoningEffort": "high"},
 	}}
 
@@ -889,12 +947,12 @@ func TestSwitchModelAppliesSelectModelToActiveSession(t *testing.T) {
 	if a.GetModel() != "deepseek/deepseek-v4-pro" {
 		t.Fatalf("GetModel: %s", a.GetModel())
 	}
-	calls := methodCalls(f, "session.selectModel")
+	calls := methodCalls(f, "session/selectModel")
 	if len(calls) == 0 {
 		t.Fatal("switch_model must reach session.selectModel on the active session")
 	}
 	var req sessionSelectModelRequest
-	_ = json.Unmarshal(calls[len(calls)-1], &req)
+	_ = json.Unmarshal(unwrapArgs(t, calls[len(calls)-1]), &req)
 	if req.SessionID != "s-model" || req.Provider != "deepseek" || req.Model != "deepseek-v4-pro" || req.ReasoningEffort != "high" {
 		t.Fatalf("selectModel payload: %+v", req)
 	}
@@ -910,8 +968,13 @@ func TestUnsupportedCapabilitiesAreAbsent(t *testing.T) {
 	if _, ok := interface{}(a).(core.SessionDeleter); ok {
 		t.Fatal("delete_session ⛔: must not implement SessionDeleter")
 	}
-	if _, ok := interface{}(a).(core.SessionArchiver); ok {
-		t.Fatal("archive_session 2️⃣: must not implement SessionArchiver in phase 1")
+	// S5（OD-1=A）：官方归档集语义已实施（workspace/archiveSession
+	// stopActivity:true + unarchiveSession 幂等，A5 活体证据）。
+	if _, ok := interface{}(a).(core.SessionArchiver); !ok {
+		t.Fatal("S5: must implement SessionArchiver (official workspace archive set)")
+	}
+	if _, ok := interface{}(a).(core.SessionUnarchiver); !ok {
+		t.Fatal("S5: must implement SessionUnarchiver (official workspace unarchive, idempotent)")
 	}
 	if _, ok := interface{}(a).(core.TranscriptLocator); ok {
 		t.Fatal("pathless backend must not implement TranscriptLocator")
@@ -936,8 +999,20 @@ func TestUnsupportedCapabilitiesAreAbsent(t *testing.T) {
 	if _, ok := interface{}(a).(core.ModeSwitcher); !ok {
 		t.Fatal("list_permission_modes/set_permission_mode: dsh-web must implement ModeSwitcher")
 	}
-	if _, ok := interface{}(a).(core.AttachmentSupporter); ok {
-		t.Fatal("text-only phase 1: must NOT implement AttachmentSupporter (a declared kind is a semantic claim)")
+	// S4（OD-3）：图片/文件都真实到达官方 wire（prompt image part +
+	// uploadFileBinary receipt 链，A4a/A4b 活体证据）→ 两种 kind 都是正向
+	// 语义声明；按模型拒图（MODEL_DOES_NOT_SUPPORT_IMAGES）由座位侧
+	// session/attachment-invalid verbatim 呈现，不是 transport 声明的否定。
+	if sup, ok := interface{}(a).(core.AttachmentSupporter); !ok {
+		t.Fatal("S4: must implement AttachmentSupporter (image+file reach the official wire)")
+	} else {
+		kinds := map[string]bool{}
+		for _, k := range sup.SupportedAttachmentKinds() {
+			kinds[k] = true
+		}
+		if !kinds["image"] || !kinds["file"] {
+			t.Fatalf("S4 attachment kinds = %v, want image+file", sup.SupportedAttachmentKinds())
+		}
 	}
 	if _, ok := interface{}(a).(core.ContextCompressor); ok {
 		t.Fatal("compress_context ⛔: must not implement ContextCompressor")
@@ -953,11 +1028,16 @@ func TestRunDiagnosticsReportsInstanceAndProviderStates(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["session.list"] = fakeRPCResponse{value: map[string]any{"items": []any{}}}
-	f.handlers["llm.providers"] = fakeRPCResponse{value: map[string]any{
+	f.handlers["session/list"] = fakeRPCResponse{value: map[string]any{"items": []any{}}}
+	f.handlers["session/modelCatalog"] = fakeRPCResponse{value: map[string]any{
+		"default":           map[string]any{"provider": "deepseek", "model": "deepseek-v4"},
+		"routableProviders":  []string{"deepseek"},
+		"groups":             []any{},
+	}}
+	f.handlers["llm/listConfigurableProviders"] = fakeRPCResponse{value: map[string]any{
 		"providers": []map[string]any{
-			{"provider": "deepseek", "displayName": "DeepSeek", "settingsNs": "llm.deepseek", "settingsPath": []string{}, "active": true},
-			{"provider": "anthropic", "displayName": "Anthropic", "settingsNs": "llm.a", "settingsPath": []string{}, "active": false, "declared": false},
+			{"provider": "deepseek", "displayName": "DeepSeek", "settingsNs": "llm.deepseek", "settingsPath": []string{}, "declared": true},
+			{"provider": "anthropic", "displayName": "Anthropic", "settingsNs": "llm.a", "settingsPath": []string{}, "declared": false},
 		},
 	}}
 	report, err := a.RunDiagnostics(context.Background(), nil)
@@ -971,10 +1051,7 @@ func TestRunDiagnosticsReportsInstanceAndProviderStates(t *testing.T) {
 	for _, r := range report.Results {
 		joined += r.Message + "\n"
 	}
-	if !strings.Contains(joined, "API 版本标识 0.0.1") || !strings.Contains(joined, "非 npm 包版本") {
-		t.Fatalf("S6: version must be labeled as an API identifier, not npm version: %s", joined)
-	}
-	if !strings.Contains(joined, "1 活跃 / 1 休眠") {
+	if !strings.Contains(joined, "1 可路由 / 1 休眠") {
 		t.Fatalf("S1: full provider set with state bits must reach diagnostics: %s", joined)
 	}
 	if !strings.Contains(joined, "127.0.0.1") {
@@ -1005,13 +1082,13 @@ func TestListProjectSuggestionsFromWorkspaceList(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["workspace.list"] = fakeRPCResponse{value: map[string]any{
-		"items": []map[string]any{
-			{"workspaceId": "w1", "path": "/Users/x/proj", "title": "我的项目", "sessionIds": []string{"s1"}, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z"},
-			{"workspaceId": "w2", "path": "/Users/x/other", "title": "", "sessionIds": []string{}, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"},
+	a.ws.applyBaseline(&workspaceBaseline{
+		Items: []apiWorkspaceView{
+			{WorkspaceID: "w1", Path: "/Users/x/proj", Title: "我的项目", SessionIDs: []string{"s1"}, CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-02T00:00:00Z"},
+			{WorkspaceID: "w2", Path: "/Users/x/other", Title: "", SessionIDs: []string{}, CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z"},
 		},
-		"archivedSessionIds": []string{},
-	}}
+		ArchivedSessionIds: []string{},
+	})
 	suggestions, err := a.ListProjectSuggestions(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -1031,9 +1108,10 @@ func TestListProjectSuggestionsEmptyRegistry(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["workspace.list"] = fakeRPCResponse{value: map[string]any{
-		"items": []map[string]any{}, "archivedSessionIds": []string{},
-	}}
+	a.ws.applyBaseline(&workspaceBaseline{
+		Items:              []apiWorkspaceView{},
+		ArchivedSessionIds: []string{},
+	})
 	suggestions, err := a.ListProjectSuggestions(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -1087,16 +1165,16 @@ func TestWireDescriptorDeepSeekWeb(t *testing.T) {
 // 计划快照（与 live codec 同一官方折叠）：run→done 按 commandId 续接、
 // done-only 续空 name、torn-tail run 保留 running 行、末尾一条 plan 快照。
 func TestMapHistoryEventsCommandFoldAndPlanSnapshot(t *testing.T) {
-	evs := []apiHistoryEntry{
-		{Event: env("user/message", 1, map[string]any{
+	evs := []sessionEventWire{
+		env("user/message", 1, map[string]any{
 			"content": []map[string]any{{"type": "text", "text": "压缩一下"}},
 			"source":  map[string]any{"kind": "user"},
-		})},
-		{Event: env("command/run", 2, map[string]any{"commandId": "cmd-a", "name": "compact", "source": map[string]any{"kind": "user"}})},
-		{Event: env("command/done", 3, map[string]any{"commandId": "cmd-a", "kind": "success", "text": "Compacted 20 history items (~11695 tokens)."})},
-		{Event: env("command/run", 4, map[string]any{"commandId": "cmd-b", "name": "plan", "args": "on"})},
-		{Event: env("command/done", 5, map[string]any{"commandId": "cmd-b", "kind": "error", "text": "Attachments cannot accompany /plan off."})},
-		{Event: env("command/run", 6, map[string]any{"commandId": "cmd-c", "name": "goal"})},
+		}),
+		env("command/run", 2, map[string]any{"commandId": "cmd-a", "name": "compact", "source": map[string]any{"kind": "user"}}),
+		env("command/done", 3, map[string]any{"commandId": "cmd-a", "kind": "success", "text": "Compacted 20 history items (~11695 tokens)."}),
+		env("command/run", 4, map[string]any{"commandId": "cmd-b", "name": "plan", "args": "on"}),
+		env("command/done", 5, map[string]any{"commandId": "cmd-b", "kind": "error", "text": "Attachments cannot accompany /plan off."}),
+		env("command/run", 6, map[string]any{"commandId": "cmd-c", "name": "goal"}),
 		// torn tail：cmd-c 无 done → 保留 running 行。
 	}
 	entries := mapHistoryEvents("s-fold", evs)
@@ -1146,10 +1224,10 @@ func TestMapHistoryEventsCommandFoldAndPlanSnapshot(t *testing.T) {
 	}
 
 	// /plan on 成功 + plan/mode 整值：快照迁到 active。
-	evs2 := []apiHistoryEntry{
-		{Event: env("command/run", 1, map[string]any{"commandId": "cmd-p", "name": "plan", "args": "on"})},
-		{Event: env("command/done", 2, map[string]any{"commandId": "cmd-p", "kind": "success"})},
-		{Event: env("plan/mode", 3, map[string]any{"active": true})},
+	evs2 := []sessionEventWire{
+		env("command/run", 1, map[string]any{"commandId": "cmd-p", "name": "plan", "args": "on"}),
+		env("command/done", 2, map[string]any{"commandId": "cmd-p", "kind": "success"}),
+		env("plan/mode", 3, map[string]any{"active": true}),
 	}
 	entries = mapHistoryEvents("s-fold2", evs2)
 	if len(entries) != 3 {
@@ -1166,17 +1244,17 @@ func TestMapHistoryEventsCommandFoldAndPlanSnapshot(t *testing.T) {
 // TestMapHistoryEventsGoalSnapshotFold：goal/change 全量替换语义的冷拉折叠——
 // 多条快照只留最后一条；clear 墓碑回到 "none"；快照字段保真。
 func TestMapHistoryEventsGoalSnapshotFold(t *testing.T) {
-	evs := []apiHistoryEntry{
-		{Event: env("goal/change", 1, map[string]any{
+	evs := []sessionEventWire{
+		env("goal/change", 1, map[string]any{
 			"kind": "goal/change", "version": 1, "operation": "create",
 			"goal":          map[string]any{"id": "goal-h-1", "revision": 1, "objective": "目标甲", "phase": "active", "maxGoalRounds": 256},
 			"roundsStarted": 0, "createdAt": 1, "updatedAt": 1,
-		})},
-		{Event: env("goal/change", 2, map[string]any{
+		}),
+		env("goal/change", 2, map[string]any{
 			"kind": "goal/change", "version": 1, "operation": "pause",
 			"goal":          map[string]any{"id": "goal-h-1", "revision": 2, "objective": "目标乙", "phase": "paused", "maxGoalRounds": 256},
 			"roundsStarted": 1, "createdAt": 1, "updatedAt": 2,
-		})},
+		}),
 	}
 	entries := mapHistoryEvents("s-goal", evs)
 	if len(entries) != 2 {
@@ -1189,15 +1267,15 @@ func TestMapHistoryEventsGoalSnapshotFold(t *testing.T) {
 	}
 
 	// clear 墓碑置空。
-	evsClear := []apiHistoryEntry{
-		{Event: env("goal/change", 1, map[string]any{
+	evsClear := []sessionEventWire{
+		env("goal/change", 1, map[string]any{
 			"kind": "goal/change", "version": 1, "operation": "create",
 			"goal": map[string]any{"id": "goal-h-1", "revision": 1, "objective": "目标甲", "phase": "active"},
-		})},
-		{Event: env("goal/change", 2, map[string]any{
+		}),
+		env("goal/change", 2, map[string]any{
 			"kind": "goal/change", "version": 1, "operation": "clear",
 			"cleared": map[string]any{"id": "goal-h-1", "revision": 2}, "clearedAt": 3,
-		})},
+		}),
 	}
 	entries = mapHistoryEvents("s-goal2", evsClear)
 	if len(entries) != 2 {
@@ -1215,39 +1293,39 @@ func TestMapHistoryEventsGoalSnapshotFold(t *testing.T) {
 // 与 live 同源的 dshw-<prefix>-t<N> 身份，命令行夹在轮次之间——不得把多轮
 // 输出折进同一 turn、命令行聚到尾部。
 func TestMapHistoryEventsGoalRoundInterleave(t *testing.T) {
-	mkAsst := func(seq int64, text string) apiHistoryEntry {
-		return apiHistoryEntry{Event: env("assistant/message", seq, map[string]any{
+	mkAsst := func(seq int64, text string) sessionEventWire {
+		return env("assistant/message", seq, map[string]any{
 			"turn": 1, "step": 1,
 			"message": map[string]any{
 				"role":    "assistant",
 				"content": []map[string]any{{"type": "text", "text": text}},
 				"source":  map[string]any{"kind": "model", "provider": "deepseek", "model": "deepseek-v4-pro"},
 			},
-		})}
+		})
 	}
-	evs := []apiHistoryEntry{
+	evs := []sessionEventWire{
 		// turn 1：user 提问 + 输出1。
-		{Event: env("turn/start", 1, map[string]any{"turn": 1})},
-		{Event: env("user/message", 2, map[string]any{
+		env("turn/start", 1, map[string]any{"turn": 1}),
+		env("user/message", 2, map[string]any{
 			"content": []map[string]any{{"type": "text", "text": "开始"}},
 			"source":  map[string]any{"kind": "user"},
-		})},
+		}),
 		mkAsst(3, "输出1"),
-		{Event: env("turn/end", 4, map[string]any{"turn": 1, "reason": map[string]any{"kind": "completed"}})},
+		env("turn/end", 4, map[string]any{"turn": 1, "reason": map[string]any{"kind": "completed"}}),
 		// goal 命令1：run+change+done（真值三连），随后 goal 轮无 user 行。
-		{Event: env("command/run", 5, map[string]any{"commandId": "g1", "name": "goal", "args": " 创作浩克故事1000字左右"})},
-		{Event: env("goal/change", 6, map[string]any{"operation": "create", "goal": map[string]any{"id": "goal-1", "revision": 1, "objective": "创作浩克故事", "phase": "active"}})},
-		{Event: env("command/done", 7, map[string]any{"commandId": "g1", "kind": "success"})},
+		env("command/run", 5, map[string]any{"commandId": "g1", "name": "goal", "args": " 创作浩克故事1000字左右"}),
+		env("goal/change", 6, map[string]any{"operation": "create", "goal": map[string]any{"id": "goal-1", "revision": 1, "objective": "创作浩克故事", "phase": "active"}}),
+		env("command/done", 7, map[string]any{"commandId": "g1", "kind": "success"}),
 		// goal 轮 turn 2：只有 assistant 输出2。
-		{Event: env("turn/start", 8, map[string]any{"turn": 2})},
+		env("turn/start", 8, map[string]any{"turn": 2}),
 		mkAsst(9, "输出2"),
-		{Event: env("turn/end", 10, map[string]any{"turn": 2, "reason": map[string]any{"kind": "completed"}})},
+		env("turn/end", 10, map[string]any{"turn": 2, "reason": map[string]any{"kind": "completed"}}),
 		// goal 命令2 + goal 轮 turn 3。
-		{Event: env("command/run", 11, map[string]any{"commandId": "g2", "name": "goal", "args": " 创作雷神故事2000字左右"})},
-		{Event: env("command/done", 12, map[string]any{"commandId": "g2", "kind": "success"})},
-		{Event: env("turn/start", 13, map[string]any{"turn": 3})},
+		env("command/run", 11, map[string]any{"commandId": "g2", "name": "goal", "args": " 创作雷神故事2000字左右"}),
+		env("command/done", 12, map[string]any{"commandId": "g2", "kind": "success"}),
+		env("turn/start", 13, map[string]any{"turn": 3}),
 		mkAsst(14, "输出3"),
-		{Event: env("turn/end", 15, map[string]any{"turn": 3, "reason": map[string]any{"kind": "completed"}})},
+		env("turn/end", 15, map[string]any{"turn": 3, "reason": map[string]any{"kind": "completed"}}),
 	}
 	entries := mapHistoryEvents("s-goalround", evs)
 	// 交错序：user(dshw-t1) + asst(dshw-t1) + cmd:g1 + asst(dshw-t2) + cmd:g2 +
@@ -1289,12 +1367,12 @@ func TestMapHistoryEventsGoalRoundInterleave(t *testing.T) {
 // （id "ctxinj:<seq>" 与 live codec 同身份，冷热合并防重复行）；summary 空 /
 // 其余注入 kind 维持 known-drop（fail-open，不造行）。
 func TestMapHistoryEventsSubagentSettledContextInjection(t *testing.T) {
-	evs := []apiHistoryEntry{
-		{Event: env("user/message", 1, map[string]any{
+	evs := []sessionEventWire{
+		env("user/message", 1, map[string]any{
 			"content": []map[string]any{{"type": "text", "text": "正常输入"}},
 			"source":  map[string]any{"kind": "user"},
-		})},
-		{Event: env("user/message", 2, map[string]any{
+		}),
+		env("user/message", 2, map[string]any{
 			"content": []map[string]any{
 				{"type": "text", "text": "Background subagent sess-bg finished after 1 round."},
 				{"type": "text", "text": "已生成封神榜第一章。"},
@@ -1304,15 +1382,15 @@ func TestMapHistoryEventsSubagentSettledContextInjection(t *testing.T) {
 				"summary":         "Background subagent sess-bg finished after 1 round.",
 				"senderSessionId": "sess-bg",
 			},
-		})},
-		{Event: env("user/message", 3, map[string]any{
+		}),
+		env("user/message", 3, map[string]any{
 			"content": []map[string]any{{"type": "text", "text": "形状未知"}},
-			"source": map[string]any{"kind": "subagent-settled", "form": "notice"},
-		})},
-		{Event: env("user/message", 4, map[string]any{
+			"source":  map[string]any{"kind": "subagent-settled", "form": "notice"},
+		}),
+		env("user/message", 4, map[string]any{
 			"content": []map[string]any{{"type": "text", "text": "<goal_round>"}},
-			"source": map[string]any{"kind": "goal"},
-		})},
+			"source":  map[string]any{"kind": "goal"},
+		}),
 	}
 	entries := mapHistoryEvents("s-ctxinj", evs)
 	// user 行 + settle 行 + plan-mode 快照 + goal 快照。
@@ -1352,44 +1430,44 @@ func TestMapHistoryEventsSubagentSettledContextInjection(t *testing.T) {
 // 折叠 turn 模型下归属该 turn 之后（live reducer 同位），不得先于所属 turn 的
 // assistant entry 入列（2026-09-06 owner 报障：注入行出现在回复开头）。
 func TestMapHistoryEventsMidTurnSettleAfterTurn(t *testing.T) {
-	evs := []apiHistoryEntry{
-		{Event: env("turn/start", 10, map[string]any{"turn": 1})},
-		{Event: env("user/message", 11, map[string]any{
+	evs := []sessionEventWire{
+		env("turn/start", 10, map[string]any{"turn": 1}),
+		env("user/message", 11, map[string]any{
 			"content": []map[string]any{{"type": "text", "text": "并行写五章"}},
 			"source":  map[string]any{"kind": "user"},
-		})},
-		{Event: env("assistant/message", 12, map[string]any{
+		}),
+		env("assistant/message", 12, map[string]any{
 			"turn": 1, "step": 1,
 			"message": map[string]any{
 				"role":    "assistant",
 				"content": []map[string]any{{"type": "text", "text": "启动 5 个 subagent"}},
 			},
-		})},
+		}),
 		// settle 落在 turn 内（journal 语义：子代理中途结算，正文/Think 之间）。
-		{Event: env("user/message", 13, map[string]any{
+		env("user/message", 13, map[string]any{
 			"content": []map[string]any{{"type": "text", "text": "Background subagent bg-1 finished after 2 rounds."}},
 			"source": map[string]any{
 				"kind": "subagent-settled", "form": "notice",
 				"summary":         "Background subagent bg-1 finished after 2 rounds.",
 				"senderSessionId": "bg-1",
 			},
-		})},
-		{Event: env("user/message", 14, map[string]any{
+		}),
+		env("user/message", 14, map[string]any{
 			"content": []map[string]any{{"type": "text", "text": "Background subagent bg-2 finished after 3 rounds."}},
 			"source": map[string]any{
 				"kind": "subagent-settled", "form": "notice",
 				"summary":         "Background subagent bg-2 finished after 3 rounds.",
 				"senderSessionId": "bg-2",
 			},
-		})},
-		{Event: env("assistant/message", 15, map[string]any{
+		}),
+		env("assistant/message", 15, map[string]any{
 			"turn": 1, "step": 2,
 			"message": map[string]any{
 				"role":    "assistant",
 				"content": []map[string]any{{"type": "text", "text": "全部结算完成"}},
 			},
-		})},
-		{Event: env("turn/end", 16, nil)},
+		}),
+		env("turn/end", 16, nil),
 	}
 	entries := mapHistoryEvents("s-midturn", evs)
 	want := []struct {

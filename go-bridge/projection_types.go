@@ -182,6 +182,23 @@ type MessageProjection struct {
 	ClientID string           `json:"clientId,omitempty"`
 	Role     string           `json:"role"` // user | assistant | system
 	Parts    []ProjectionPart `json:"parts"`
+	// Attachments are the received attachment descriptors on a user message
+	// (dsh-web S4: journal image/file blocks; A4a/A4b wire evidence). Image
+	// bytes stay lazy — clients fetch them via the get_attachment RPC keyed
+	// by attachmentId. Additive: absent = no attachments (old snapshots stay
+	// valid).
+	Attachments []ProjectionAttachment `json:"attachments,omitempty"`
+}
+
+// ProjectionAttachment mirrors core.EventAttachment on the projection wire.
+type ProjectionAttachment struct {
+	Kind         string `json:"kind"`                    // "image" | "file"
+	AttachmentID string `json:"attachmentId,omitempty"` // official durable id ("sha256:<hex>")
+	MediaType    string `json:"mediaType,omitempty"`    // image only
+	Name         string `json:"name,omitempty"`
+	Bytes        int64  `json:"bytes,omitempty"`
+	Width        int    `json:"width,omitempty"`
+	Height       int    `json:"height,omitempty"`
 }
 
 // TurnProjection is one turn's projection. TurnID is the Codex rollout lifecycle turn_id.
@@ -205,6 +222,13 @@ type TurnProjection struct {
 	// the paginated session_turn_items transport.
 	DetailInline   bool `json:"detailInline,omitempty"`
 	TurnGeneration int  `json:"generation,omitempty"` // per-turn fence counter; bumps on post-completion content mutation
+	// Pending marks an S3 queued placeholder row (dsh-web inbox splice insert;
+	// wire user_message with pending:true). The row is keyed by the official
+	// UserMessage.id and is replaced in place by the settled user_message with
+	// the same id (A3a id-continuity evidence) or retracted by
+	// user_message_removed. Absent = an ordinary turn row; only pending-marked
+	// rows are ever retracted.
+	Pending *bool `json:"pending,omitempty"`
 	// turn_detail_chunks_v1 (§11.8, owner final ruling 2026-08-30): manifest
 	// SUMMARY only — detail content never enters the projection. Additive;
 	// absent decodes as zero (v1 snapshots stay valid).
@@ -347,6 +371,11 @@ type ProjectionPatch struct {
 	PartOps           []PartOp         `json:"partOps,omitempty"`
 	TurnStateOps      []TurnStateOp    `json:"turnStateOps,omitempty"`
 	ReplacesClientIDs []string         `json:"replacesClientIds,omitempty"`
+	// RemovedTurnIDs (S3, additive): turn ids retracted in this delta — the
+	// dsh-web queued placeholder rows whose inbox splice was removed (claim/
+	// cancel) or whose settled user_message replaced them in place. Clients
+	// remove the rows by id; absent = no retraction (old clients ignore).
+	RemovedTurnIDs []string `json:"removedTurnIds,omitempty"`
 	// PlanMode carries the dsh-web plan-mode snapshot when it changed in this
 	// delta (additive; absent = unchanged).
 	PlanMode *PlanModeView `json:"planMode,omitempty"`

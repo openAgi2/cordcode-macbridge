@@ -1,0 +1,105 @@
+{
+ "captured_at": "2026-09-23T12:32:39+08:00",
+ "purpose": "alpha.1 wire-shape evidence (plan §2.3): commands & goals namespaces use agentId; commands/execute ALREADY requires submittedAttachments (bridge's images field rejected — live bug, S2 first fix); all four goal MUTATIONS had their request shapes accepted by the running seat (business error 'no current goal' on a goal-less throwaway session proves descriptor admission only — end-to-end mutation success with an active goal is NOT proven by this evidence and is S2's live-retest item); fileReferences/list also uses agentId on alpha.1; skills/list available",
+ "seat": {
+  "listen": "127.0.0.1:3080",
+  "pid": 38778,
+  "started": "2026-09-23 00:34:37",
+  "command": "node /opt/homebrew/bin/dsh --profile web --host 127.0.0.1 --port 3080 --no-open",
+  "cli_version": "0.1.7-alpha.1"
+ },
+ "probes": {
+  "commands/list {agentId}": {
+   "ok": true,
+   "value_head": [
+    {
+     "definitionId": "@deepseek-ai/dsh-command-compact",
+     "name": "compact"
+    },
+    {
+     "definitionId": "@deepseek-ai/dsh-session-log-export",
+     "name": "export"
+    },
+    {
+     "definitionId": "@deepseek-ai/dsh-command-feedback",
+     "name": "feedback"
+    }
+   ]
+  },
+  "commands/list {agent}": {
+   "ok": false,
+   "error": "typert gateway: commands/list: args fields do not match the descriptor: missing \"agentId\"; unexpected \"agent\""
+  },
+  "goals/get {agentId}": {
+   "ok": true
+  },
+  "goal/get {agentId}": {
+   "http_status": 404,
+   "body": "not found"
+  },
+  "commands/execute {agentId,line,submittedAttachments:[]} (unknown cmd = official no-op admission miss)": {
+   "ok": true,
+   "value": null,
+   "note": "shape accepted; unknown command name returns null, no side effects (interaction/commands execute docstring)"
+  },
+  "commands/execute {agentId,line,images:[]}": {
+   "ok": false,
+   "error": "typert gateway: commands/execute: args fields do not match the descriptor: missing \"submittedAttachments\"; unexpected \"images\""
+  },
+  "commands/execute {agent,line,images:[]}": {
+   "ok": false,
+   "error": "typert gateway: commands/execute: args fields do not match the descriptor: missing \"agentId\", \"submittedAttachments\"; unexpected \"agent\", \"images\""
+  },
+  "commands/execute {agentId,line} (missing third param)": {
+   "ok": false,
+   "error": "typert gateway: commands/execute: args fields do not match the descriptor: missing \"submittedAttachments\""
+  },
+  "skills/list {request:{sessionId}}": {
+   "ok": true,
+   "value_shape": {
+    "skills": "array of {name, path, description, modelInvocable}"
+   },
+   "sanitization": "skill names/paths/descriptions omitted from this record (user data)"
+  },
+  "fileReferences/list {agentId,query}": {
+   "ok": true,
+   "value_shape": "array of {path, kind: file|directory}",
+   "sanitization": "candidate paths omitted (user data)"
+  },
+  "fileReferences/list {agent,query}": {
+   "ok": false,
+   "error": "typert gateway: fileReferences/list: args fields do not match the descriptor: missing \"agentId\"; unexpected \"agent\""
+  },
+  "goals/pause {agent,ref}": {
+   "ok": false,
+   "error": "typert gateway: goals/pause: args fields do not match the descriptor: missing \"agentId\"; unexpected \"agent\""
+  },
+  "goals/edit {agent,ref,request}": {
+   "ok": false,
+   "error": "typert gateway: goals/edit: args fields do not match the descriptor: missing \"agentId\"; unexpected \"agent\""
+  },
+  "goals/pause {agentId,ref}": {
+   "ok": false,
+   "error": "no current goal",
+   "note": "shape accepted — method executed on a goal-less throwaway session; the business error proves the descriptor admitted the bridge's payload"
+  },
+  "goals/resume {agentId,ref}": {
+   "ok": false,
+   "error": "no current goal",
+   "note": "shape accepted — method executed on a goal-less throwaway session; the business error proves the descriptor admitted the bridge's payload"
+  },
+  "goals/clear {agentId,ref}": {
+   "ok": false,
+   "error": "no current goal",
+   "note": "shape accepted — method executed on a goal-less throwaway session; the business error proves the descriptor admitted the bridge's payload"
+  },
+  "goals/edit {agentId,ref,request}": {
+   "ok": false,
+   "error": "no current goal",
+   "note": "same as above, with edit's request.objective present"
+  }
+ },
+ "sanitization": "session ids shortened in narrative; cookie value never recorded; descriptor names kept verbatim",
+ "live_bug_finding": "the running alpha.1 seat rejects the bridge's current commands/execute payload ({agentId,line,images}) with 'missing submittedAttachments; unexpected images' — slash-command EXECUTION is broken today (list still works); recorded as S2's first fix item, to be implemented only after this plan passes review",
+ "goal_mutations_status": "all four bridge-consumed goal mutations (pause/resume/clear/edit) had their request shapes ACCEPTED by the running alpha.1 seat (descriptor admitted the payload; the method ran and returned the 'no current goal' business error on a goal-less throwaway session). This proves shape acceptance only — successful mutation with an active goal (state change, response decode, projection convergence) is NOT proven by this evidence and is scheduled as S2's live retest item. alpha.2 renames agentId→agent (source-verified), gated by A2."
+}

@@ -1,0 +1,168 @@
+{
+ "captured_at": "2026-09-23T17:43:44+08:00",
+ "purpose": "A3b Gate evidence (plan §3 row A3b, OD-2b=B): updateQueue MANAGEMENT on the running alpha.1 seat — edit/remove/steer mutations on ONE throwaway session's queued items, each with its journal splice (removedCount/outcome); the deterministic live negative steering an item that now lives in next-step (session/steer-unavailable verbatim, source commands.ts: request.action.kind==='steer' && (target!=='next-turn' || agent.status!=='running')); plus the queue-item-not-found negative. Unblocks S3's management scope.",
+ "seat": {
+  "listen": "127.0.0.1:3080",
+  "pid": 38778,
+  "started": "2026-09-23 00:34:37",
+  "cli_version": "0.1.7-alpha.1"
+ },
+ "wire_shape": {
+  "session/updateQueue": {
+   "args": {
+    "request": {
+     "sessionId": "<SessionId>",
+     "itemId": "<UserMessage.id>",
+     "action": {
+      "kind": "edit|remove|steer",
+      "content": "[{type:'text',text:'…'}] — edit only"
+     }
+    }
+   },
+   "value": {
+    "accepted": true
+   },
+   "source": "SessionUpdateQueueRequest (session-controller/src/types.ts:359-363)"
+  },
+  "inbox_projection": "session/projections values.inbox = {'next-turn': [UserMessage…], 'next-step': [UserMessage…]} (inbox.ts projection key 'inbox')"
+ },
+ "probes": {
+  "updateQueue steer (positive, item in next-turn while turn running)": {
+   "ok": true,
+   "value": {
+    "accepted": true
+   },
+   "journal": "seq16 insert next-turn -> seq17 removal (outcome canceled) -> seq18 insert next-step, SAME id 9953f902 — the steer moves the item between lists via remove+insert"
+  },
+  "updateQueue edit (positive)": {
+   "ok": true,
+   "value": {
+    "accepted": true
+   },
+   "journal": "seq19 insert -> seq21 replace (removedCount 1 + inserted 1, SAME id da25505d, new text, outcome canceled — replace() splices with discardRemoved=true)"
+  },
+  "updateQueue remove (positive)": {
+   "ok": true,
+   "value": {
+    "accepted": true
+   },
+   "journal": "seq22 insert -> seq23 removal (removedCount 1, outcome canceled)"
+  },
+  "updateQueue steer again (negative: item now next-step)": {
+   "ok": false,
+   "error": {
+    "code": "session/steer-unavailable",
+    "message": "current turn no longer accepts steering",
+    "details": {
+     "itemId": "(the steered item)"
+    }
+   },
+   "note": "the plan's A3b-required live negative, reproduced deterministically"
+  },
+  "updateQueue edit bogus itemId (negative)": {
+   "ok": false,
+   "error": {
+    "code": "session/queue-item-not-found",
+    "message": "queued item is no longer pending",
+    "details": {
+     "itemId": "00000000-…"
+    }
+   }
+  }
+ },
+ "journal_inbox_splices_sanitized": [
+  {
+   "seq": 3,
+   "target": "next-turn",
+   "start": 0,
+   "inserted": [
+    {
+     "id": "a01d0c63…",
+     "text_head": "Write a 500-word essay about the sea."
+    }
+   ]
+  },
+  {
+   "seq": 5,
+   "target": "next-turn",
+   "start": 0,
+   "removedCount": 1,
+   "inserted": [],
+   "outcome": null
+  },
+  {
+   "seq": 16,
+   "target": "next-turn",
+   "start": 0,
+   "inserted": [
+    {
+     "id": "9953f902…",
+     "text_head": "A3b queued message A (to be steered)"
+    }
+   ]
+  },
+  {
+   "seq": 17,
+   "target": "next-turn",
+   "start": 0,
+   "removedCount": 1,
+   "inserted": [],
+   "outcome": "canceled"
+  },
+  {
+   "seq": 18,
+   "target": "next-step",
+   "start": 0,
+   "inserted": [
+    {
+     "id": "9953f902…",
+     "text_head": "A3b queued message A (to be steered)"
+    }
+   ]
+  },
+  {
+   "seq": 19,
+   "target": "next-turn",
+   "start": 0,
+   "inserted": [
+    {
+     "id": "da25505d…",
+     "text_head": "A3b queued message B (to be edited)"
+    }
+   ]
+  },
+  {
+   "seq": 21,
+   "target": "next-turn",
+   "start": 0,
+   "removedCount": 1,
+   "inserted": [
+    {
+     "id": "da25505d…",
+     "text_head": "A3b queued message B (EDITED by updateQueue)"
+    }
+   ],
+   "outcome": "canceled"
+  },
+  {
+   "seq": 22,
+   "target": "next-turn",
+   "start": 1,
+   "inserted": [
+    {
+     "id": "d041866b…",
+     "text_head": "A3b queued message C (to be removed)"
+    }
+   ]
+  },
+  {
+   "seq": 23,
+   "target": "next-turn",
+   "start": 1,
+   "removedCount": 1,
+   "inserted": [],
+   "outcome": "canceled"
+  }
+ ],
+ "sanitization": "probe-authored texts verbatim; session id truncated; cookie never recorded; archive reduced to membership; throwaway session archived with stopActivity:true"
+}

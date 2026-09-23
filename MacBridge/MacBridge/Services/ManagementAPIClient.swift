@@ -154,6 +154,28 @@ struct AgentInfo: Codable, Equatable {
     let requiresPollingForExternalTurns: Bool
 }
 
+/// POST /internal/agents/dsh-web/install · /start 的立即返回（kick 异步工作）。
+/// status ∈ started / already_installing / already_starting / already_running /
+/// node_missing / no_binary / not_needed。
+struct DSHWebSeatActionKick: Codable, Equatable {
+    let status: String
+    let detail: String?
+    let binPath: String?
+}
+
+/// GET /internal/agents/dsh-web/action-state 的快照：npmFound 决定「安装」还是
+/// 「需要 Node.js」；installing/starting 驱动进行中态；错误字段是行字幕。
+struct DSHWebSeatActionState: Codable, Equatable {
+    var installing = false
+    var starting = false
+    var npmFound = false
+    var npmPath: String?
+    var binPath: String?
+    var lastInstallError: String?
+    var lastStartError: String?
+    var lastInstallNote: String?
+}
+
 struct CodexRemotePairingStatus: Codable, Equatable {
     let phase: String
     let stepUpUrl: String?
@@ -511,6 +533,40 @@ private static func categorizeNetworkFailure(_ error: Error) -> RevokeNetworkFai
     func testAgent(_ id: String) async throws -> AgentInfo {
         let data = try await performRequest("/internal/agents/\(id)/test", method: "POST")
         return try JSONDecoder().decode(AgentInfo.self, from: data)
+    }
+
+    // MARK: - dsh-web 座位动作（2026-09-22 方案 §5：未安装可代装、未启动可点启动）
+    // 两个 POST 只 kick 异步工作并立即返回（npm 最长 10 分钟、座位启动最长 30 秒，
+    // 不能占住请求）；进度经 action-state 轮询。remoteControlSession 的 60s 预算
+    // 覆盖 npm 路径发现等慢启动查询。
+
+    /// 点「安装」：kick 代装（npm install -g @deepseek-ai/dsh，装完自动启动座位）。
+    func installDSHWeb() async throws -> DSHWebSeatActionKick {
+        let data = try await performRequest(
+            "/internal/agents/dsh-web/install",
+            method: "POST",
+            using: remoteControlSession
+        )
+        return try JSONDecoder().decode(DSHWebSeatActionKick.self, from: data)
+    }
+
+    /// 点「启动」：kick 显式 StartSeat（座位上已有 dsh 在听则收养，不起第二个进程）。
+    func startDSHWebSeat() async throws -> DSHWebSeatActionKick {
+        let data = try await performRequest(
+            "/internal/agents/dsh-web/start",
+            method: "POST",
+            using: remoteControlSession
+        )
+        return try JSONDecoder().decode(DSHWebSeatActionKick.self, from: data)
+    }
+
+    /// 座位动作状态（npmFound / 进行中态 / 最近错误）。
+    func dshWebSeatActionState() async throws -> DSHWebSeatActionState {
+        let data = try await performRequest(
+            "/internal/agents/dsh-web/action-state",
+            using: remoteControlSession
+        )
+        return try JSONDecoder().decode(DSHWebSeatActionState.self, from: data)
     }
 
     // MARK: - Web Push 维护（设置页 misconfigured 状态 + 显式重置）

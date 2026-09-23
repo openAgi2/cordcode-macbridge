@@ -42,6 +42,7 @@ type AgentProviderDescriptor struct {
 	DisplayName                     string      `json:"displayName"`
 	Status                          AgentStatus `json:"status"`
 	Reason                          string      `json:"reason,omitempty"`
+	StatusMessage                   string      `json:"statusMessage,omitempty"`
 	Capabilities                    []string    `json:"capabilities"`
 	LiveEvents                      string      `json:"liveEvents"`
 	RequiresPollingForExternalTurns bool        `json:"requiresPollingForExternalTurns"`
@@ -152,12 +153,20 @@ func resolveLiveEvents(id string, agent core.Agent, codexBackendMode string, cfg
 func BuildAgentDescriptor(id string, agent core.Agent, codexBackendMode string, cfg *AgentDetectionConfig) AgentProviderDescriptor {
 	status, reason := detectAgentStatus(id, agent, codexBackendMode, cfg)
 	kind, displayName := resolveDescriptorNames(id, agent)
+	// statusMessage is additive and optional (dsh-web convergence plan §2.4):
+	// only backends implementing core.StatusMessageProvider carry it, and the
+	// message holds version/source identifiers only — never credentials.
+	statusMessage := ""
+	if sm, ok := agent.(core.StatusMessageProvider); ok {
+		statusMessage = sm.DescriptorStatusMessage()
+	}
 	return AgentProviderDescriptor{
 		ID:                              id,
 		Kind:                            kind,
 		DisplayName:                     displayName,
 		Status:                          status,
 		Reason:                          reason,
+		StatusMessage:                   statusMessage,
 		Capabilities:                    deriveBackendCapabilities(id, agent, codexBackendMode),
 		LiveEvents:                      resolveLiveEvents(id, agent, codexBackendMode, cfg),
 		RequiresPollingForExternalTurns: resolveRequiresPolling(id, agent),
@@ -230,7 +239,10 @@ func detectAgentStatus(id string, agent core.Agent, codexBackendMode string, cfg
 	case "deepseek":
 		return detectDSHRuntime()
 	case "dsh-web":
-		return detectDSHWebInstance(agent)
+		// 2026-09-22 方案 §3：结构化就绪（not_detected / service_not_running /
+		// port_conflict / available），不再走布尔折叠（available=false 一律
+		// not_configured 的旧路径禁止回归）。
+		return detectStructuredInstanceReadiness("dsh-web", agent)
 	case "opencode-web":
 		// 纯 HTTP/SSE 客户端：可用性 = 探针镜像的 serve 状态（设计 §4.2，
 		// 坑 12——默认分支会把空 URL 也报成 available）。
@@ -256,13 +268,6 @@ func detectStructuredInstanceReadiness(backendID string, agent core.Agent) (Agen
 		return AgentStatusNotConfigured, backendID + " driver returned empty readiness status"
 	}
 	return AgentStatus(status), detail
-}
-
-// detectDSHWebInstance mirrors the dsh-web driver's resolved-instance state
-// (external probe hit / managed spawn / both failed). Detection itself never
-// probes or spawns — the driver's startup background resolution owns that.
-func detectDSHWebInstance(agent core.Agent) (AgentStatus, string) {
-	return detectInstanceStatusProber("dsh-web", agent)
 }
 
 // detectInstanceStatusProber mirrors an instanceStatusProber driver's

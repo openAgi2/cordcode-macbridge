@@ -62,6 +62,21 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 			caps = append(caps, "session_goal")
 		}
 	}
+	// session_queue_management（S3 管理范围，OD-2b=B）：官方排队消息管理动词
+	// 透传（dsh session/updateQueue edit/remove/steer）。未实现
+	// SessionQueueManager 的 backend 不广告 → iOS 不画排队项管理动作。可见性
+	// （占位行渲染）不需要本 capability——它走投影事件（user_message
+	// pending:true / user_message_removed）。
+	if _, ok := agent.(core.SessionQueueManager); ok {
+		caps = append(caps, "session_queue_management")
+	}
+	// attachment_read（S4，OD-3）：官方 session/attachment 图片字节懒读
+	// （dsh-web）。未实现 AttachmentReader 的 backend 不广告 → iOS 不画
+	// 附件图。发送侧支持由 AttachmentSupporter 的 kinds（上方 §3.9 直接
+	// append 进 caps）单独广告，与本读取 capability 互不隐含。
+	if _, ok := agent.(core.AttachmentReader); ok {
+		caps = append(caps, "attachment_read")
+	}
 	if readiness, ok := agent.(core.ContextCompactionReadinessProvider); ok && readiness.ContextCompactionReady() {
 		caps = append(caps, "context_compaction")
 	}
@@ -85,6 +100,11 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 	}
 	if _, ok := agent.(core.SessionArchiver); ok {
 		caps = append(caps, "session_archive")
+	}
+	// S5（OD-1=A）：官方归档恢复动词（dsh-web workspace/unarchiveSession，
+	// 幂等）。未实现 SessionUnarchiver 的 backend 不广告 → iOS 不画恢复入口。
+	if _, ok := agent.(core.SessionUnarchiver); ok {
+		caps = append(caps, "session_unarchive")
 	}
 	// §6.2: A-class static positive capabilities (content_chunking for claude,
 	// claude question_reply, external_turn_streaming, opencode todos 兜底) migrated

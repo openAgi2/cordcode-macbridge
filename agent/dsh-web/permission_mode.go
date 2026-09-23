@@ -114,7 +114,7 @@ func (a *Agent) persistPermissionDefault(mode string) {
 		"ns":    permissionSettingsNS,
 		"patch": map[string]any{"defaultPreset": mode},
 	}
-	if err := client.Call(ctx, "settings.update", payload, nil); err != nil {
+	if err := client.Call(ctx, "settings/update", payload, nil); err != nil {
 		slog.Debug("dsh-web: persist permission default failed", "mode", mode, "error", err)
 	}
 }
@@ -135,7 +135,7 @@ func (a *Agent) readPermissionDefault() string {
 			Value json.RawMessage `json:"value"`
 		} `json:"namespaces"`
 	}
-	if err := client.Call(ctx, "settings.describe", map[string]any{}, &out); err != nil {
+	if err := client.Call(ctx, "settings/describe", map[string]any{}, &out); err != nil {
 		return ""
 	}
 	for _, ns := range out.Namespaces {

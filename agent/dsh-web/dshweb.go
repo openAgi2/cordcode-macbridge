@@ -7,15 +7,13 @@ package dshweb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
-	"sync/atomic"
-	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
-	"github.com/openAgi2/cordcode-macbridge/pinstore"
 )
 
 // BackendID is the go-bridge driver id (drivers flag / hello_ack backends[]).
@@ -33,10 +31,6 @@ func init() {
 type Agent struct {
 	workDir  string
 	resolver *Resolver
-
-	// pinStore persists MacBridge-owned 置顶 metadata (bridge pin index —
-	// design §4.3.1 ♻️; summary enrichment stays in go-bridge handlers).
-	pinStore *pinstore.Store
 
 	// running caches the last session.list running flags (§4.3.1 enrich;
 	// §8-3's host/session-status frames keep it fresh).
@@ -79,6 +73,16 @@ type Agent struct {
 	refreshSignals chan struct{}
 	codecs         map[string]*sessionCodec
 
+	// remote.mux generation state (typert gateway): the live $events client
+	// id (waterfall correlation), the live socket for demand-driven follow
+	// opens, the per-session follow registry, and the workspace/follow
+	// grouping cache (the retired workspace.list RPC's successor —
+	// sessions.go reads it for grouping/project suggestions).
+	muxClientID string
+	muxStream   *Stream
+	follows     followRegistry
+	ws          workspaceState
+
 	// approvals/question pending state (§8-4).
 	approvalsMu sync.Mutex
 	approvals   *approvalsState
@@ -86,9 +90,26 @@ type Agent struct {
 	bgCtx    context.Context
 	bgCancel context.CancelFunc
 
-	// resolveErr holds the last background resolution failure detail for
-	// InstanceStatus; a resolved instance reports its source instead.
-	resolveErr atomic.Value // string
+	// auth is the seat's browser-session cookie manager (2026-09-23 plan);
+	// nil in tests that construct Agent literals without wiring it.
+	auth *seatAuth
+
+	// readiness memoizes the cold-discrimination verdict for the read-only
+	// descriptor seam (2026-09-22 plan §3/§5; see readiness.go).
+	readiness readinessCache
+
+	// version memoizes the CLI version probe for the descriptor's
+	// statusMessage note (convergence plan §2.4; see version.go).
+	version versionCache
+
+	// seatActionMu guards the install/start action surface the management
+	// API polls (installer.go): in-flight flags + last errors/notes.
+	seatActionMu    sync.Mutex
+	installing      bool
+	starting        bool
+	lastInstallErr  string
+	lastStartErr    string
+	lastInstallNote string
 
 	mu sync.RWMutex
 }
@@ -102,7 +123,6 @@ var _ core.Agent = (*Agent)(nil)
 //	opts["cli_path"]      string — dsh executable for the managed spawn (default: PATH)
 //	opts["dsh_home"]      string — DSH_HOME override (sandbox experiments only)
 //	opts["data_dir"]      string — bridge data dir for dsh-web-managed-server.json
-//	opts["pin_store"]     *pinstore.Store — bridge pin index
 func New(opts map[string]any) (core.Agent, error) {
 	a := &Agent{
 		workDir: ".",
@@ -126,11 +146,12 @@ func New(opts map[string]any) (core.Agent, error) {
 	if v, ok := opts["data_dir"].(string); ok && strings.TrimSpace(v) != "" {
 		resolverOpts = append(resolverOpts, WithDataDir(strings.TrimSpace(v)))
 	}
-	if ps, ok := opts["pin_store"].(*pinstore.Store); ok {
-		a.pinStore = ps
-	}
 	a.resolver = NewResolver(resolverOpts...)
 	a.resolver.SetLostCallback(a.handleSeatLost)
+	// Browser-session auth (2026-09-23 plan): wire before any Resolve so the
+	// startup background probe and every later client carry the cookie.
+	a.auth = newSeatAuth(a.resolver.dataDirOf(), nil)
+	a.resolver.SetAuth(a.auth)
 
 	// One-time legacy reap (design §6): synchronous so it precedes any
 	// saveState that would overwrite a legacy record. PID-safe — mismatch
@@ -154,15 +175,19 @@ func New(opts map[string]any) (core.Agent, error) {
 }
 
 // backgroundResolve runs the one startup resolution attempt. Failure is
-// retained for InstanceStatus; real operations retry on demand.
+// logged honestly; real operations retry on demand. A cold dark seat is the
+// expected post-restart state (no spawn — the user clicks 启动).
 func (a *Agent) backgroundResolve() {
 	inst, err := a.resolver.Resolve(a.bgCtx)
 	if err != nil {
-		a.resolveErr.Store(err.Error())
+		var nr *ErrSeatNotRunning
+		if errors.As(err, &nr) {
+			slog.Info("dsh-web: seat not running (cold start — no spawn, waiting for the 启动 button)")
+			return
+		}
 		slog.Warn("dsh-web: startup instance resolution failed", "error", err)
 		return
 	}
-	a.resolveErr.Store("")
 	slog.Info("dsh-web: instance resolved", "source", string(inst.Source), "baseURL", inst.BaseURL)
 }
 
@@ -218,30 +243,12 @@ func (a *Agent) handleSeatLost() {
 	}
 }
 
-// InstanceStatus reports the resolved-instance state for hello_ack detection.
-// It never resolves or spawns — only mirrors the background/startup result.
-//
-// Canonical-seat grace special case (design §3.2/§12.1-4): while the seat is
-// in its grace window, Current()==nil — reporting available=false here would
-// fall through detectInstanceStatusProber as not_configured, exactly the code
-// the grace contract forbids. Stay visible with the reconnecting detail.
-func (a *Agent) InstanceStatus() (available bool, detail string) {
-	if inGrace, until := a.resolver.GraceState(); inGrace {
-		return true, fmt.Sprintf("instance reconnecting (grace until %s)", until.Format(time.RFC3339))
-	}
-	if inst := a.resolver.Current(); inst != nil {
-		switch inst.Source {
-		case SourceExternal:
-			return true, fmt.Sprintf("external dsh web instance at %s", inst.BaseURL)
-		case SourceManaged:
-			return true, fmt.Sprintf("managed dsh web instance at %s (pid %d)", inst.BaseURL, inst.PID)
-		}
-	}
-	if errStr, _ := a.resolveErr.Load().(string); errStr != "" {
-		return false, errStr
-	}
-	return false, "dsh web instance not resolved yet (probe/managed spawn in flight)"
-}
+// InstanceStatus is GONE (2026-09-22 plan §3): the descriptor no longer goes
+// through the boolean fold — dsh-web exposes StructuredInstanceReadiness
+// (readiness.go) so not_detected / service_not_running / port_conflict
+// survive into hello_ack.backends[].status instead of collapsing into
+// not_configured. Keeping a boolean InstanceStatus would also re-enter the
+// management API's boolean live re-read and undo the structured statuses.
 
 // WorkDirSwitcher: create_session's directory parameter lands via switchDir
 // before StartSession, so the agent-level work dir is the next create's cwd.

@@ -1,0 +1,75 @@
+{
+ "captured_at": "2026-09-23T12:24:14+08:00",
+ "purpose": "alpha.1 mount evidence for web-consumed and remaining non-api namespaces (plan §4): wrong-shape args are rejected at the gateway descriptor layer before any method runs — arguments-invalid proves mounted, 404 proves not mounted",
+ "probes": {
+  "pluginManager/listPlugins": {
+   "mounted": true,
+   "ok": false,
+   "descriptor_error": "typert gateway: pluginManager/listPlugins: args fields do not match the descriptor: unexpected \"zz\"",
+   "surface": "read-only list; wrong shape proves mount"
+  },
+  "pluginInventory/list": {
+   "mounted": true,
+   "ok": false,
+   "descriptor_error": "typert gateway: pluginInventory/list: args fields do not match the descriptor: unexpected \"zz\"",
+   "surface": "settings plugins tab"
+  },
+  "permissionPresets/catalog": {
+   "mounted": true,
+   "ok": false,
+   "descriptor_error": "typert gateway: permissionPresets/catalog: args fields do not match the descriptor: unexpected \"zz\"",
+   "surface": "permission presets catalog"
+  },
+  "messageFeedback/list": {
+   "mounted": true,
+   "ok": false,
+   "descriptor_error": "typert gateway: messageFeedback/list: args fields do not match the descriptor: missing \"request\"; unexpected \"zz\"",
+   "surface": "message feedback list"
+  },
+  "sessionFeedback/record": {
+   "mounted": true,
+   "ok": false,
+   "descriptor_error": "typert gateway: sessionFeedback/record: args fields do not match the descriptor: missing \"request\"; unexpected \"zz\"",
+   "surface": "/feedback command backend"
+  },
+  "subagents/prompt": {
+   "mounted": true,
+   "ok": false,
+   "descriptor_error": "typert gateway: subagents/prompt: args fields do not match the descriptor: missing \"request\"; unexpected \"zz\"",
+   "surface": "web subagent panel (write — wrong shape only)"
+  },
+  "fileUploads/upload": {
+   "mounted": true,
+   "ok": false,
+   "descriptor_error": "typert gateway: fileUploads/upload: args fields do not match the descriptor: missing \"agentId\", \"request\"; unexpected \"zz\"",
+   "surface": "file upload receipts (write — wrong shape only)"
+  },
+  "officeToPdf/render": {
+   "mounted": true,
+   "descriptor_error": "typert gateway: officeToPdf/render: args fields do not match the descriptor: missing \"workspaceFileScopeId\", \"path\", \"priority\"; unexpected \"zz\""
+  },
+  "sessionReferenceResolver/candidates": {
+   "mounted": true,
+   "descriptor_error": "typert gateway: sessionReferenceResolver/candidates: args fields do not match the descriptor: missing \"agentId\", \"query\"; unexpected \"zz\""
+  },
+  "agentTeams/view": {
+   "mounted": false,
+   "http": 404,
+   "body": "not found"
+  },
+  "speech/transcribe": {
+   "mounted": false,
+   "http": 404,
+   "body": "not found"
+  },
+  "dynamicCordisRunner/undefineFromPanel": {
+   "mounted": true,
+   "descriptor_error": "typert gateway: dynamicCordisRunner/undefineFromPanel: args fields do not match the descriptor: missing \"agentId\", \"pluginId\"; unexpected \"zz\""
+  },
+  "pluginRegistryProbe/fastest": {
+   "mounted": true,
+   "descriptor_error": "typert gateway: pluginRegistryProbe/fastest: args fields do not match the descriptor: unexpected \"zz\""
+  }
+ },
+ "correction_note": "r5 review: the earlier pluginRegistryProbe/list probe used a nonexistent method (the only @Remote is fastest(); official web calls remote.pluginRegistryProbe.fastest() at manager-store.ts:586) — that 404 proved nothing and was removed; replaced with a correct-method wrong-shape probe"
+}

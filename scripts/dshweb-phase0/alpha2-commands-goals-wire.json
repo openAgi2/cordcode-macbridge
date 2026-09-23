@@ -1,0 +1,256 @@
+{
+ "captured_at": "2026-09-23T15:35:40+08:00",
+ "purpose": "A2 Gate evidence (plan §3 row A2): alpha.2 wire shapes for the seven bridge-consumed commands/goals surfaces, captured one by one on the alpha.2 test seat; goal success path (real mutations with state convergence) + GOAL_INVALID_EDIT business negative on ONE throwaway session; descriptor negatives verbatim. DRIFT FINDING (live sample OVERTURNS plan §2.3 source-name extrapolation): the alpha.2 gateway wire param is STILL agentId — {agentId} passes the descriptor (fails later at session/not-found for a fake id) while {agent} is rejected verbatim; the TypeScript source param name agent never becomes the wire name. The seven surfaces are wire-IDENTICAL across alpha.1 and alpha.2; S2 cross-version defense needs no shape rewrite, only version-aware readiness + contract tests pinning the shared shape.",
+ "seat": {
+  "listen": "127.0.0.1:3081",
+  "pid": 42273,
+  "started": "2026-09-23 15:23:03",
+  "command": "node ./node_modules/.bin/dsh --profile web --host 127.0.0.1 --port 3081 --no-open (npm local prefix /tmp/dshweb-a2-seat, channel alpha)",
+  "cli_version": "0.1.7-alpha.2",
+  "state_isolation": "session/list returned 89 items — the test seat SHARES the ~/.dsh store with the production seat; all writes below are on ONE newly created throwaway session only, archived at the end; descriptor negatives use a fake session id (gateway rejects before handler execution)"
+ },
+ "drift_findings": [
+  "DRIFT 1 (overturns plan §2.3 alpha.2 column, source-name extrapolation): the alpha.2 gateway wire param is STILL agentId on all seven surfaces — {agentId} passes the descriptor (business session/not-found on a fake id; full success on a real session), while {agent} is rejected verbatim with `missing \"agentId\"; unexpected \"agent\"`. The TypeScript source param name `agent` (interaction/commands/src/index.ts:314,360-366; goal/goal/src/index.ts:276-277,328-329,351-352,363-364,432-433) never becomes the wire name. The seven surfaces are wire-IDENTICAL across alpha.1 and alpha.2: S2 cross-version defense needs NO shape rewrite — only version-aware readiness (statusMessage version-only) + contract tests pinning the shared shape + descriptor errors reported verbatim.",
+  "DRIFT 2 (edit business negative error code): the empty-request edit on a live goal surfaces as `gateway/internal` with the official message verbatim (`goal edit requires objective and/or maxGoalRounds`), NOT a `GOAL_INVALID_EDIT` wire code — the source's GoalError code does not map to a wire error code. Contract tests must pin the message, not a code."
+ ],
+ "goal_lifecycle_convergence": "one throwaway session, one goal (probe-authored objective): /goal create → get {revision:1, phase:active, activation:armed} → pause {revision:2, phase:paused, activation:disarmed} → resume {revision:3, phase:active, activation:armed} → edit{objective} {revision:4, objective replaced} → edit{} business negative (goal intact) → clear → tombstone {revision:5} → get null. 6/6 mutations returned convergent views; the business negative did not mutate (next clear used revision 4's successor correctly).",
+ "probes": {
+  "commands/list {agent} (descriptor negative)": {
+   "ok": false,
+   "error": {
+    "code": "gateway/arguments-invalid",
+    "message": "typert gateway: commands/list: args fields do not match the descriptor: missing \"agentId\"; unexpected \"agent\"",
+    "details": {
+     "endpoint": "commands/list"
+    }
+   },
+   "note": "alpha.2 descriptor expected to reject agentId; verbatim error is the contract-test fixture"
+  },
+  "commands/execute {agent,line,submittedAttachments} (descriptor negative)": {
+   "ok": false,
+   "error": {
+    "code": "gateway/arguments-invalid",
+    "message": "typert gateway: commands/execute: args fields do not match the descriptor: missing \"agentId\"; unexpected \"agent\"",
+    "details": {
+     "endpoint": "commands/execute"
+    }
+   }
+  },
+  "goals/get {agent} (descriptor negative)": {
+   "ok": false,
+   "error": {
+    "code": "gateway/arguments-invalid",
+    "message": "typert gateway: goals/get: args fields do not match the descriptor: missing \"agentId\"; unexpected \"agent\"",
+    "details": {
+     "endpoint": "goals/get"
+    }
+   }
+  },
+  "goals/edit {agent,ref,request} (descriptor negative)": {
+   "ok": false,
+   "error": {
+    "code": "gateway/arguments-invalid",
+    "message": "typert gateway: goals/edit: args fields do not match the descriptor: missing \"agentId\"; unexpected \"agent\"",
+    "details": {
+     "endpoint": "goals/edit"
+    }
+   }
+  },
+  "session/create {request:{cwd:/tmp/dshweb-phase0-probe}}": {
+   "ok": true,
+   "value": {
+    "sessionId": "session-…(truncated)"
+   }
+  },
+  "commands/list {agentId}": {
+   "ok": true,
+   "value": {
+    "command_names": [
+     "compact",
+     "export",
+     "feedback",
+     "goal",
+     "permission",
+     "plan"
+    ]
+   },
+   "note": "positive: alpha.2 first-param wire name confirmed by acceptance (live sample OVERTURNS the source-name extrapolation: wire stays agentId)"
+  },
+  "commands/execute {agentId,line} (missing third param, descriptor negative)": {
+   "ok": false,
+   "error": {
+    "code": "gateway/arguments-invalid",
+    "message": "typert gateway: commands/execute: args fields do not match the descriptor: missing \"submittedAttachments\"",
+    "details": {
+     "endpoint": "commands/execute"
+    }
+   }
+  },
+  "commands/execute {agentId,line:/goal <objective>} (real command, creates the goal)": {
+   "ok": true,
+   "value": {
+    "commandId": "cmd-f5bc1310-2",
+    "result": {
+     "kind": "success",
+     "text": "Goal created\nStatus: active\nObjective: A2 probe goal: verify alpha.2 goal mutation shapes end to end\nRounds: 0/256\nActivation: armed\n\nCommands: /goal edit <objective>, /goal pause, /goal clear"
+    }
+   },
+   "note": "official goal creation command per plan §3.1"
+  },
+  "goals/get {agentId}": {
+   "ok": true,
+   "value": {
+    "id": "goal-c0247401-326e-46f9-8bf1-00a14350f294",
+    "revision": 1,
+    "objective": "A2 probe goal: verify alpha.2 goal mutation shapes end to end",
+    "phase": "active",
+    "maxGoalRounds": 256,
+    "roundsStarted": 1,
+    "createdAt": 1790148941419,
+    "updatedAt": 1790148941419,
+    "activation": "armed"
+   },
+   "note": "GoalView verbatim (probe-authored objective); ref = {id, revision} for mutations"
+  },
+  "goals/pause {agentId,ref}": {
+   "ok": true,
+   "value": {
+    "id": "goal-c0247401-326e-46f9-8bf1-00a14350f294",
+    "revision": 2,
+    "objective": "A2 probe goal: verify alpha.2 goal mutation shapes end to end",
+    "phase": "paused",
+    "maxGoalRounds": 256,
+    "roundsStarted": 1,
+    "createdAt": 1790148941419,
+    "updatedAt": 1790148941488,
+    "activation": "disarmed"
+   },
+   "note": "success path: phase transition to paused; state convergence checked via response view"
+  },
+  "goals/resume {agentId,ref}": {
+   "ok": true,
+   "value": {
+    "id": "goal-c0247401-326e-46f9-8bf1-00a14350f294",
+    "revision": 3,
+    "objective": "A2 probe goal: verify alpha.2 goal mutation shapes end to end",
+    "phase": "active",
+    "maxGoalRounds": 256,
+    "roundsStarted": 1,
+    "createdAt": 1790148941419,
+    "updatedAt": 1790148941523,
+    "activation": "armed"
+   }
+  },
+  "goals/edit {agentId,ref,request:{objective}}": {
+   "ok": true,
+   "value": {
+    "id": "goal-c0247401-326e-46f9-8bf1-00a14350f294",
+    "revision": 4,
+    "objective": "A2 probe goal (edited): revised objective for alpha.2 shape evidence",
+    "phase": "active",
+    "maxGoalRounds": 256,
+    "roundsStarted": 2,
+    "createdAt": 1790148941419,
+    "updatedAt": 1790148941560,
+    "activation": "armed"
+   }
+  },
+  "goals/edit {agentId,ref,request:{}} (business negative: empty request with live goal)": {
+   "ok": false,
+   "error": {
+    "code": "gateway/internal",
+    "message": "goal edit requires objective and/or maxGoalRounds",
+    "details": {}
+   },
+   "note": "source expects GOAL_INVALID_EDIT (goal/goal/src/index.ts:331-334); recorded verbatim, error code confirmed by sample not by prediction"
+  },
+  "goals/clear {agentId,ref}": {
+   "ok": true,
+   "value": {
+    "id": "goal-c0247401-326e-46f9-8bf1-00a14350f294",
+    "revision": 5
+   },
+   "note": "returns tombstone ref {id, revision+1}"
+  },
+  "goals/get {agentId} (after clear)": {
+   "ok": true,
+   "value": null,
+   "note": "no current goal after clear — expect null/undefined value"
+  },
+  "workspace/archiveSession {request:{sessionId,stopActivity:true}}": {
+   "ok": true,
+   "value": {
+    "archived_membership": true,
+    "archived_count": 18
+   }
+  },
+  "goals/pause {agentId,ref} (fake id — descriptor ACCEPTED, business session/not-found)": {
+   "ok": false,
+   "error": {
+    "code": "session/not-found",
+    "message": "session \"sess-a2-descriptor-negative-probe\" not found",
+    "details": {
+     "sessionId": "sess-a2-descriptor-negative-probe"
+    }
+   },
+   "note": "agentId passes the alpha.2 descriptor; the failure is the business layer (fake session id), proving wire-name acceptance"
+  },
+  "goals/resume {agentId,ref} (fake id — descriptor ACCEPTED, business session/not-found)": {
+   "ok": false,
+   "error": {
+    "code": "session/not-found",
+    "message": "session \"sess-a2-descriptor-negative-probe\" not found",
+    "details": {
+     "sessionId": "sess-a2-descriptor-negative-probe"
+    }
+   },
+   "note": "same acceptance evidence as pause"
+  },
+  "goals/clear {agentId,ref} (fake id — descriptor ACCEPTED, business session/not-found)": {
+   "ok": false,
+   "error": {
+    "code": "session/not-found",
+    "message": "session \"sess-a2-descriptor-negative-probe\" not found",
+    "details": {
+     "sessionId": "sess-a2-descriptor-negative-probe"
+    }
+   },
+   "note": "same acceptance evidence as pause"
+  },
+  "goals/pause {agent,ref} (descriptor negative)": {
+   "ok": false,
+   "error": {
+    "code": "gateway/arguments-invalid",
+    "message": "typert gateway: goals/pause: args fields do not match the descriptor: missing \"agentId\"; unexpected \"agent\"",
+    "details": {
+     "endpoint": "goals/pause"
+    }
+   }
+  },
+  "goals/resume {agent,ref} (descriptor negative)": {
+   "ok": false,
+   "error": {
+    "code": "gateway/arguments-invalid",
+    "message": "typert gateway: goals/resume: args fields do not match the descriptor: missing \"agentId\"; unexpected \"agent\"",
+    "details": {
+     "endpoint": "goals/resume"
+    }
+   }
+  },
+  "goals/clear {agent,ref} (descriptor negative)": {
+   "ok": false,
+   "error": {
+    "code": "gateway/arguments-invalid",
+    "message": "typert gateway: goals/clear: args fields do not match the descriptor: missing \"agentId\"; unexpected \"agent\"",
+    "details": {
+     "endpoint": "goals/clear"
+    }
+   }
+  },
+  "commands/execute {agentId,line:/zz-a2-probe-noop,submittedAttachments:[]} (unknown cmd = official no-op)": {
+   "ok": true,
+   "value": null
+  }
+ },
+ "sanitization": "session id truncated; cookie/secret never printed or written; goal objective text is probe-authored (safe verbatim); archive response reduced to membership+count (full archivedSessionIds is owner data)"
+}

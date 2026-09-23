@@ -1,0 +1,103 @@
+.DS_Store
+
+# Go build outputs
+/cccode-bridge-runtime
+/go-bridge/go-bridge
+/go-bridge/cccode-bridge-runtime
+/relay-server/relay-server
+/relay-server/cmd/relay-server/relay-server
+/relay-server/build/
+
+# Xcode and local build products
+/MacBridge/build/
+/build/
+/.build/
+/dist/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Local runtime state
+*.log
+*.tmp
+
+# Python bytecode (evidence tooling under scripts/, e.g. scripts/dsh-gate0)
+__pycache__/
+*.pyc
+
+# Agent instruction files
+# CLAUDE.md is a shared project guide and is tracked with the root live docs.
+# AGENTS.md is an identical real-file copy of CLAUDE.md for tools that only
+# load AGENTS.md (ZCode/Codex); tracked so every checkout gets the rules.
+
+# docs/ is fully version-controlled: governance docs, plans, specs, reviews,
+# completion/audit reports, archive/, upstream-memory/, protocol/, assets/.
+# Owner opted in to tracking all docs work notes (2026-07-29); the former
+# local-only ignore block (/docs/* + selective re-includes) was abolished.
+
+# Local-only handoff/exec-plan clutter (untracked; files kept on disk).
+# Precise paths — do NOT ignore the whole handoffs/ or .exec-plan/ trees,
+# since both contain tracked files (older handoffs, committed plan states).
+handoffs/handoff-20260702-1511.md
+handoffs/handoff-20260702-1839.md
+handoffs/handoff-20260702-2053.md
+handoffs/handoff-20260703-0132.md
+handoffs/handoff-20260703-1024.md
+handoffs/handoff-20260703-1124.md
+handoffs/handoff-20260704-1211.md
+handoffs/handoff-20260704-1645.md
+handoffs/handoff-20260704-1954.md
+handoffs/handoff-20260822-1032.md
+handoffs/handoff-20260824-2257.md
+.exec-plan/state/plan-a4ebbe0ec47d.json
+.exec-plan/state/plan-b47d4fd1401b.json
+.exec-plan/state/plan-8ba00fc3460a.json
+.exec-plan/state/plan-bf2e7697a934.json
+.exec-plan/state/plan-ae479613af10.json
+.exec-plan/state/plan-60f196abb855.json
+.exec-plan/state/plan-be412be3d619.json
+# grokbuild-leader P0 evidence logs contain grok session dumps incl. MCP env
+# secrets (Z_AI_API_KEY); keep on disk, never commit.
+.exec-plan/artifacts/grokbuild-leader-p0/
+.exec-plan/artifacts/grokbuild-leader-p1/
+
+# Local task/evidence artifacts (kept on disk, never product inputs).
+.zcode/
+.workbuddy-ai/
+/dumps/
+/default.profraw
+.exec-plan/state/plan-4112d14c1d2b.json
+handoffs/handoff-20260905-1807.md
+# 2026-09-06 dsh 空白屏诊断的临时 wire 捕获程序（证据在 /tmp，不进 git）
+.scratch-wirecap/
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+node_modules/
+bower_components/
+jspm_packages/
+site-packages/
+venv/
+coverage/
+htmlcov/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.egg-info/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）

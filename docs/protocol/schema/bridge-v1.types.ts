@@ -113,6 +113,13 @@ export interface BridgeBackendInfo {
    */
   status?: string;
   reason?: string;
+  /**
+   * Additive optional runtime/version note (dsh-web convergence plan §2.4), emitted by
+   * go-bridge AgentProviderDescriptor for backends implementing core.StatusMessageProvider.
+   * Carries ONLY version and source identifiers (e.g. "dsh 0.1.7-alpha.1 (cli /opt/homebrew/bin/dsh)") —
+   * never credentials, cookies, or other non-version information. Absent = no note.
+   */
+  statusMessage?: string;
   /** Live-event transport mode the backend advertises (AgentProviderDescriptor.LiveEvents). */
   liveEvents?: string;
   /** Whether the client must poll to observe externally-initiated turns (AgentProviderDescriptor). */
@@ -261,6 +268,17 @@ export type BridgeRPCMethod =
   | "checkout_git_branch"
   | "create_git_branch"
   | "create_git_worktree"
+  // S3 (dsh-web inbox, OD-2b=B): official pending-queue management passthrough
+  // (session/updateQueue edit/remove/steer). Capability "session_queue_management".
+  | "update_session_queue"
+  // S4 (dsh-web attachments, OD-3): official session/attachment image-byte lazy
+  // read, keyed by the attachmentId from a user message's attachment descriptor.
+  // Capability "attachment_read".
+  | "get_attachment"
+  // S5 (dsh-web, OD-1=A): official archive-set restore (workspace/unarchiveSession
+  // — idempotent; unknown/not-archived ids succeed as no-ops). Capability
+  // "session_unarchive".
+  | "unarchive_session"
   // §6.1 checkpoint 只读 diff: per-turn / full-thread read-only workspace diff backed by
   // hidden git refs. Capability string: "supports_checkpoint" (derived from the driver
   // implementing core.CheckpointProvider). Scoped to session.read (scope table §6.3).
@@ -520,6 +538,18 @@ export type BridgeEventName =
   | "session_goal"
   | "session_collaboration_mode"
   | "session_goal_record"
+  // User-attributed message rows (projection SoT input; bridge-v1.md「Event:
+  // user_message」). S3 (dsh-web inbox) adds two additive data fields:
+  // pending:true marks a queued placeholder keyed by the official
+  // UserMessage.id (the settled frame with the same id replaces it in
+  // place); attachments carries S4 received-attachment descriptors.
+  | "user_message"
+  // S3 (dsh-web inbox): an official inbox splice removal (claim/cancel/
+  // edit-replace) retracts the pending placeholder row by id: {itemId}.
+  // Only pending-marked rows are ever retracted — a real turn is never
+  // touched. Sync-v2 connections receive the retraction via
+  // projection_patch.removedTurnIds instead (raw frame sealed).
+  | "user_message_removed"
   | "sync_invalidate";
 
 export interface BridgeEvent<TData = unknown> {
@@ -932,6 +962,52 @@ export interface ResolveUserInputResult {
   headRev: number;
 }
 
+/**
+ * get_attachment request (S4, capability "attachment_read"). attachmentId
+ * comes from a user message's BridgeAttachmentDescriptor — the official
+ * session/attachment read proves the session journal references it
+ * (referencedImage) before serving bytes.
+ */
+export interface GetAttachmentParams {
+  sessionId: string;
+  attachmentId: string;
+  directory?: string;
+}
+
+/**
+ * get_attachment result: the official ImageAttachmentRef verbatim plus the
+ * base64-encoded image bytes. Foreign/unreferenced ids fail with
+ * attachment_read_failed carrying the official session/attachment-invalid
+ * error verbatim (ATTACHMENT_NOT_REFERENCED).
+ */
+export interface GetAttachmentResult {
+  attachment: BridgeAttachmentDescriptor & { kind: "image" };
+  /** Canonical base64 of the stored (normalized) image bytes. */
+  data: string;
+}
+
+/**
+ * One RECEIVED attachment descriptor on a user message (dsh-web S4, OD-3:
+ * official journal image/file blocks after admitPromptContent — A4a/A4b live
+ * evidence, scripts/dshweb-phase0/alpha1-attachment-wire.json /
+ * alpha1-file-receipts-wire.json). Image bytes are never inlined on events or
+ * projections — clients fetch them lazily via get_attachment keyed by
+ * attachmentId (official session/attachment; referencedImage journal proof).
+ * Credential-free metadata only.
+ */
+export interface BridgeAttachmentDescriptor {
+  kind: "image" | "file";
+  /** Official durable id ("sha256:<hex>"); image reads key on this. */
+  attachmentId?: string;
+  /** Image only: one of the official ImageMediaType set (image/png|jpeg|webp|gif). */
+  mediaType?: string;
+  name?: string;
+  /** Exact byte length of the stored object. */
+  bytes?: number;
+  width?: number;
+  height?: number;
+}
+
 export interface BridgeMessageProjection {
   /** Authoritative source id: rollout response_item.id (user) / call_id (tool) / lifecycle turn_id (assistant text). */
   id: string;
@@ -939,6 +1015,11 @@ export interface BridgeMessageProjection {
   clientId?: string;
   role: "user" | "assistant" | "system";
   parts: BridgeProjectionPart[];
+  /**
+   * S4 (dsh-web): received attachment descriptors on a user message. Absent
+   * = none (old snapshots stay valid). Additive.
+   */
+  attachments?: BridgeAttachmentDescriptor[];
 }
 
 export type BridgeTurnStatus = "pending" | "running" | "completed" | "aborted" | "error";
@@ -960,6 +1041,13 @@ export interface BridgeTurnProjection {
   /** Codex rollout: stable lifecycle turn_id (event_msg.turn_id), carried by turn_started/turn_completed. */
   turnId: string;
   status: BridgeTurnStatus;
+  /**
+   * S3 (dsh-web inbox): true marks a queued-placeholder row keyed by the
+   * official UserMessage.id (turnId == that id). The settled user_message
+   * with the same id replaces it in place; removedTurnIds retracts it.
+   * Additive; absent = a real turn row.
+   */
+  pending?: boolean;
   startedAt?: number; // epoch-ms
   /** Integrates the existing turnCompletedAt evidence into a turn-level authoritative state. */
   completedAt?: number; // epoch-ms
@@ -1108,6 +1196,13 @@ export interface BridgeProjectionPatch {
   collaborationMode?: BridgeCollaborationModeState;
   /** Codex-native goal snapshot when changed; absent = unchanged. */
   codexGoal?: BridgeCodexGoalSnapshot;
+  /**
+   * S3 (dsh-web inbox): queued-placeholder retractions. Each id names a
+   * pending-marked turn row removed by an official inbox splice (claim/
+   * cancel/edit-replace); the settled user_message with the same id replaces
+   * it in place. Additive; absent = no retractions.
+   */
+  removedTurnIds?: string[];
 }
 
 /** Push frame `projection_snapshot`: full projection at syncRev (epoch mismatch / recovery). */

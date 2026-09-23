@@ -1889,7 +1889,7 @@ func openCodeRichHistoryEntryToProjectionEvents(
 			}
 			text = b.String()
 		}
-		if text == "" {
+		if text == "" && len(entry.Attachments) == 0 {
 			return nil
 		}
 		*currentTurnID = identity
@@ -1897,6 +1897,12 @@ func openCodeRichHistoryEntryToProjectionEvents(
 			"itemId": identity,
 			"turnId": identity,
 			"text":   text,
+		}
+		// S4 (dsh-web): received attachment descriptors ride the hydrate
+		// user_message in the same shape mapAgentEvent stamps live, so the
+		// reducer writes them onto the user MessageProjection.
+		if len(entry.Attachments) > 0 {
+			userData["attachments"] = entry.Attachments
 		}
 		// Turn-level official net file diffs (opencode user-message
 		// summary.diffs) ride the hydrate user_message; the reducer writes

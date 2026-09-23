@@ -1,0 +1,53 @@
+{
+ "captured_at": "2026-09-23T21:15:56+08:00",
+ "probes": {
+  "bridge send_message default (turn 1, idle)": {
+   "ok": true,
+   "error": null
+  },
+  "bridge send_message default while running": {
+   "ok": false,
+   "error": {
+    "code": "session_action_in_progress",
+    "message": "another action is already being submitted for this session",
+    "retryable": true
+   }
+  },
+  "bridge send_message mode:steer while running": {
+   "ok": true,
+   "error": null
+  },
+  "bridge send_message mode:turbo (unknown)": {
+   "ok": false,
+   "error": {
+    "code": "session_action_in_progress",
+    "message": "another action is already being submitted for this session",
+    "retryable": true
+   }
+  },
+  "journal splices (queue→next-turn, steer→next-step)": [
+   {
+    "target": "next-turn",
+    "inserted": [
+     "Write a 300-word essay about forest light."
+    ]
+   },
+   {
+    "target": "next-turn",
+    "inserted": []
+   },
+   {
+    "target": "next-step",
+    "inserted": [
+     "OD2a steer gesture: switch the essay topic to ocea"
+    ]
+   }
+  ],
+  "assertions": {
+   "steer_spliced_next_step": true,
+   "queue_spliced_next_turn": false,
+   "note": "steer_spliced_next_step:true is the OD-2a core assertion (explicit steer gesture through the bridge splices into the running turn's next-step). queue_spliced_next_turn:false is expected: bridge-originated DEFAULT sends stay serialized by the per-session turn slot (S3-established design — bridge-originated queueing waits for the running turn; external surfaces queue). mode:turbo is rejected before mode validation by the same slot — fail-visible either way."
+  }
+ },
+ "sanitization": "probe-authored texts verbatim; session ids never printed; cookie never printed"
+}

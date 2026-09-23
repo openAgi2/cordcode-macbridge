@@ -38,9 +38,12 @@ class BackendStatusViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var isShowingStaleResults = false
+    /// dsh-web 座位动作状态（2026-09-22 方案：安装/启动按钮与字幕的数据源）。
+    @Published var dshWebSeatAction = DSHWebSeatActionState()
 
     private var apiClient: ManagementAPIClient?
     private var refreshTask: Task<Void, Never>?
+    private var dshWebPollTask: Task<Void, Never>?
 
     /// 配置 API 客户端
     func configure(apiClient: ManagementAPIClient) {
@@ -95,6 +98,8 @@ class BackendStatusViewModel: ObservableObject {
             }
         }
         isLoading = false
+        // DeepSeek 行不可用时顺带刷新座位动作状态（npmFound 决定按钮文案）。
+        await refreshDSHWebSeatAction()
     }
 
     /// 手动刷新所有后端检测状态
@@ -145,6 +150,9 @@ class BackendStatusViewModel: ObservableObject {
                 }
                 return agent
             }
+            if id == "dsh-web" {
+                await refreshDSHWebSeatAction()
+            }
         } catch {
             errorMessage = String(format: L10n.failedTestAgent, error.localizedDescription)
             isShowingStaleResults = !agents.isEmpty
@@ -160,6 +168,83 @@ class BackendStatusViewModel: ObservableObject {
     /// 是否所有后端都不可用
     var allUnavailable: Bool {
         !agents.isEmpty && agents.allSatisfy { !$0.isAvailable }
+    }
+
+    // MARK: - dsh-web 座位动作（2026-09-22 方案 §2.1/§2.2/§5）
+
+    private var dshWebAgent: BackendAgentStatus? {
+        agents.first { $0.kind.lowercased() == "deepseek-web" || $0.id == "dsh-web" }
+    }
+
+    /// DeepSeek 行不可用时刷新座位动作状态：npmFound 决定按钮是「安装」还是
+    /// 「需要 Node.js」，错误/说明字段是行字幕。
+    func refreshDSHWebSeatAction() async {
+        guard let client = apiClient, let dsh = dshWebAgent, !dsh.isAvailable else { return }
+        if let state = try? await client.dshWebSeatActionState() {
+            dshWebSeatAction = state
+        }
+    }
+
+    /// 点「安装」：kick 后立刻进入本地「安装中」态，轮询收口后刷新行状态。
+    func installDSHWeb() async {
+        guard let client = apiClient else { return }
+        let kick: DSHWebSeatActionKick
+        do {
+            kick = try await client.installDSHWeb()
+        } catch {
+            errorMessage = String(format: L10n.failedTestAgent, error.localizedDescription)
+            return
+        }
+        switch kick.status {
+        case "started":
+            dshWebSeatAction = DSHWebSeatActionState(installing: true, npmFound: true)
+            startDSHWebActionPolling()
+        default:
+            // node_missing / not_needed / already_installing：刷新真实状态。
+            await refreshDSHWebSeatAction()
+            await loadAgents(showLoading: false)
+        }
+    }
+
+    /// 点「启动」：kick 后立刻进入本地「启动中」态，轮询收口后刷新行状态。
+    func startDSHWebSeat() async {
+        guard let client = apiClient else { return }
+        let kick: DSHWebSeatActionKick
+        do {
+            kick = try await client.startDSHWebSeat()
+        } catch {
+            errorMessage = String(format: L10n.failedTestAgent, error.localizedDescription)
+            return
+        }
+        switch kick.status {
+        case "started":
+            dshWebSeatAction = DSHWebSeatActionState(starting: true, npmFound: dshWebSeatAction.npmFound)
+            startDSHWebActionPolling()
+        default:
+            await refreshDSHWebSeatAction()
+            await loadAgents(showLoading: false)
+        }
+    }
+
+    /// 轮询动作状态直到安装/启动收口（npm 预算 10 分钟，上限 11 分钟防悬挂），
+    /// 然后刷新行状态与动作状态。行上的「安装中/启动中」由 dshWebSeatAction 驱动。
+    private func startDSHWebActionPolling() {
+        dshWebPollTask?.cancel()
+        dshWebPollTask = Task { [weak self] in
+            let deadline = Date().addingTimeInterval(11 * 60)
+            while !Task.isCancelled && Date() < deadline {
+                guard let self, let client = self.apiClient else { return }
+                if let state = try? await client.dshWebSeatActionState() {
+                    self.dshWebSeatAction = state
+                    if !state.installing && !state.starting {
+                        await self.loadAgents(showLoading: false)
+                        await self.refreshDSHWebSeatAction()
+                        return
+                    }
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
     }
 
     func startCodexDesktopPairing() async throws -> CodexRemotePairingStatus {

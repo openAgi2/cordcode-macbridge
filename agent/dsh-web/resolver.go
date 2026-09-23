@@ -21,15 +21,20 @@ package dshweb
 // never --trusted-host, never 0.0.0.0.
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -91,6 +96,19 @@ func (e *ErrInstanceReconnecting) Error() string {
 		e.BaseURL, e.Until.Format(time.RFC3339))
 }
 
+// ErrSeatNotRunning is the typed cold-dark error: the seat is not answering
+// and this process has never held it. Cold Resolve no longer spawns
+// (2026-09-22 install-and-start plan §5) — the 启动 button (StartSeat) and
+// the install back-half are the only spawn paths; handlers map this to
+// backend_unavailable like the grace error, never not_configured.
+type ErrSeatNotRunning struct {
+	BaseURL string
+}
+
+func (e *ErrSeatNotRunning) Error() string {
+	return fmt.Sprintf("dsh web instance not running on %s (start it from the CordCode Link workstation row, or run dsh web yourself)", e.BaseURL)
+}
+
 // ResolvedInstance is one live dsh web instance this backend talks to.
 type ResolvedInstance struct {
 	BaseURL string         // http://127.0.0.1:<port>
@@ -99,35 +117,25 @@ type ResolvedInstance struct {
 	PID     int            // managed only; 0 for external
 }
 
-// describeValue is the host.describe business value (host.schema.ts).
-type describeValue struct {
-	Version          string `json:"version"`
-	Cwd              string `json:"cwd"`
-	Provider         string `json:"provider,omitempty"`
-	Model            string `json:"model,omitempty"`
-	AttachedSessions int    `json:"attachedSessions"`
-	CanOpenPath      bool   `json:"canOpenPath"`
-}
-
-// probeInstance sends host.describe at baseURL and reports whether a dsh web
-// API answers. Short timeout — this is a liveness probe, not a workload.
-func probeInstance(ctx context.Context, httpClient *http.Client, baseURL string) (*describeValue, error) {
+// probeInstance sends session/list at baseURL and reports whether a dsh web
+// API answers (the typert gateway retired host.describe; the list is the
+// cheapest authenticated liveness probe). Short timeout — this is a liveness
+// probe, not a workload. auth may be nil (pre-auth dsh / tests): no cookie,
+// no refresh.
+func probeInstance(ctx context.Context, httpClient *http.Client, baseURL string, auth *seatAuth) error {
 	pctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	c := NewClient(baseURL, httpClient)
-	var out describeValue
-	if err := c.Call(pctx, "host.describe", map[string]any{}, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
+	c.SetAuth(auth)
+	return c.Call(pctx, "session/list", listArgs(), nil)
 }
 
-// probeTimeout bounds one host.describe probe.
+// probeTimeout bounds one session/list probe.
 const probeTimeout = 2 * time.Second
 
 // managedBootTimeout bounds how long a freshly spawned `dsh web` may take to
-// answer its first host.describe (profile composition is pnpm/node work; be
-// generous rather than flapping between spawn attempts).
+// answer its first session/list probe (profile composition is pnpm/node
+// work; be generous rather than flapping between spawn attempts).
 const managedBootTimeout = 30 * time.Second
 
 // managedStarter abstracts "get a dsh web server running on this port" so
@@ -141,10 +149,15 @@ type managedStarter interface {
 
 // execManagedStarter spawns the real `dsh web` CLI as a child process.
 type execManagedStarter struct {
-	binPath   string
+	binPath   string // explicit pin (option / installer write-back); "" = discover
 	extraArgs []string
 	dshHome   string // optional DSH_HOME override (tests only; "" = user's ~/.dsh)
 	logPath   string // optional stdout/stderr capture
+	dataDir   string // install-record source for fresh discovery
+	// onLaunchURL, when set, receives every captured child output line —
+	// the resolver scans it for dsh's authenticated entry URL (2026-09-23
+	// plan §4.3). Nil = inherit streams unchanged (tests).
+	onLaunchURL func(string)
 
 	cmd *exec.Cmd
 	mu  sync.Mutex
@@ -158,31 +171,88 @@ func (s *execManagedStarter) startArgs(port int) []string {
 	return append(args, s.extraArgs...)
 }
 
+// resolveBin returns the executable Start will spawn: the explicit pin
+// first (option or the installer's write-back), then a fresh discovery so a
+// mid-session terminal install is picked up without a runtime restart.
+func (s *execManagedStarter) resolveBin() string {
+	if s.binPath != "" {
+		return s.binPath
+	}
+	return findDSHBinary(s.dataDir)
+}
+
+// setBinPath re-pins the executable (installer write-back, plan §5).
+func (s *execManagedStarter) setBinPath(bin string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.binPath = bin
+}
+
 func (s *execManagedStarter) Start(ctx context.Context, port int) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.cmd != nil && s.cmd.Process != nil {
 		return 0, fmt.Errorf("dshweb: managed starter already has a process (pid %d)", s.cmd.Process.Pid)
 	}
-	cmd := exec.Command(s.binPath, s.startArgs(port)...)
+	bin := s.binPath
+	if bin == "" {
+		bin = findDSHBinary(s.dataDir)
+	}
+	if bin == "" {
+		return 0, fmt.Errorf("dshweb: no dsh binary found (PATH, nvm, install record) — install dsh first")
+	}
+	cmd := exec.Command(bin, s.startArgs(port)...)
 	// Own process group: dsh spawns node children; group kill reaps them all
 	// (same posture as agent/dsh and grokbuild).
 	prepareCmdForProcessGroup(cmd)
-	cmd.Env = os.Environ()
+	// The dsh shebang is `#!/usr/bin/env node`; GUI PATH misses nvm installs,
+	// so put the binary's own directory first (node lives next to dsh there).
+	cmd.Env = prependBinDirToPath(os.Environ(), filepath.Dir(bin))
 	if s.dshHome != "" {
 		cmd.Env = append(cmd.Env, "DSH_HOME="+s.dshHome)
 	}
+	var outDest, errDest io.Writer = os.Stdout, os.Stderr
 	if s.logPath != "" {
 		if f, err := os.OpenFile(s.logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600); err == nil {
-			cmd.Stdout = f
-			cmd.Stderr = f
+			outDest, errDest = f, f
 		}
 	}
+	if s.onLaunchURL != nil {
+		// Pipe both streams through a line scanner (the entry URL has only
+		// been verified on stdout, but scanning both is harmless) and tee
+		// every line to the original destination — diagnostics visibility is
+		// unchanged, only the launch URL is additionally captured.
+		if pr, pw, err := os.Pipe(); err == nil {
+			cmd.Stdout = pw
+			go teeAndScan(pr, outDest, s.onLaunchURL)
+		}
+		if pr, pw, err := os.Pipe(); err == nil {
+			cmd.Stderr = pw
+			go teeAndScan(pr, errDest, s.onLaunchURL)
+		}
+	} else {
+		cmd.Stdout = outDest
+		cmd.Stderr = errDest
+	}
 	if err := cmd.Start(); err != nil {
-		return 0, fmt.Errorf("dshweb: spawn %s: %w", s.binPath, err)
+		return 0, fmt.Errorf("dshweb: spawn %s: %w", bin, err)
 	}
 	s.cmd = cmd
 	return cmd.Process.Pid, nil
+}
+
+// teeAndScan drains one captured child stream: every line is teed to dest
+// and offered to onLine (which filters noise itself).
+func teeAndScan(r *os.File, dest io.Writer, onLine func(string)) {
+	defer r.Close()
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		if dest != nil {
+			_, _ = io.WriteString(dest, scanner.Text()+"\n")
+		}
+		onLine(scanner.Text())
+	}
 }
 
 func (s *execManagedStarter) Stop() error {
@@ -198,8 +268,8 @@ func (s *execManagedStarter) Stop() error {
 
 // Resolver owns the seat lifecycle for one dshweb Agent.
 type Resolver struct {
-	probeURLs   []string      // seat = probeURLs[0] (authoritative, design §9)
-	binPath     string        // dsh executable for spawn ("" = LookPath)
+	probeURLs   []string // seat = probeURLs[0] (authoritative, design §9)
+	binPath     string   // dsh executable for spawn ("" = LookPath)
 	extraArgs   []string
 	dshHome     string        // optional DSH_HOME override (sandbox experiments/tests)
 	dataDir     string        // state persistence dir ("" = no persistence)
@@ -207,6 +277,9 @@ type Resolver struct {
 
 	httpClient   *http.Client
 	managedStart managedStarter
+	// auth is the seat's browser-session cookie manager (2026-09-23 plan);
+	// nil until SetAuth wires it — pre-auth dsh and tests run without.
+	auth *seatAuth
 
 	// mu guards exactly these fields (§3.3); all network I/O and spawn
 	// waits happen outside the lock.
@@ -289,16 +362,12 @@ func NewResolver(opts ...ResolverOption) *Resolver {
 		opt(r)
 	}
 	if r.managedStart == nil {
-		bin := r.binPath
-		if bin == "" {
-			if found, err := exec.LookPath("dsh"); err == nil {
-				bin = found
-			}
-		}
 		r.managedStart = &execManagedStarter{
-			binPath:   bin,
-			extraArgs: r.extraArgs,
-			dshHome:   r.dshHome,
+			binPath:     r.binPath,
+			extraArgs:   r.extraArgs,
+			dshHome:     r.dshHome,
+			dataDir:     r.dataDir,
+			onLaunchURL: r.notifyLaunchURL,
 		}
 	}
 	if r.httpClient == nil {
@@ -316,6 +385,44 @@ func (r *Resolver) seatURL() string {
 		return r.probeURLs[0]
 	}
 	return fmt.Sprintf("http://127.0.0.1:%d", DefaultProbePort)
+}
+
+// SetAuth wires the seat's browser-session cookie manager (2026-09-23 plan
+// §4.2): every probe and client created by this resolver attaches the cookie
+// and refreshes on 401. Must be called before the first Resolve.
+func (r *Resolver) SetAuth(a *seatAuth) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.auth = a
+}
+
+// launchURLPattern matches dsh's startup line announcing the authenticated
+// browser entry (verified on stdout of 0.1.7-alpha.1, 2026-09-23):
+// "dsh web: http://127.0.0.1:3080/?token=<launch token>".
+var launchURLPattern = regexp.MustCompile(`^dsh web: (https?://[^\s?]+)/\?token=([A-Za-z0-9_-]+)\s*$`)
+
+// notifyLaunchURL receives captured entry URLs from the exec starter's stdout
+// scan and forwards them to the auth manager — but only when the URL names
+// this seat's authority (a foreign authority would mint a cookie for the
+// wrong seat; the exchange validates the cookie name anyway, this avoids
+// pointless exchanges).
+func (r *Resolver) notifyLaunchURL(rawURL string) {
+	m := launchURLPattern.FindStringSubmatch(strings.TrimSpace(rawURL))
+	if m == nil {
+		return
+	}
+	u, err := url.Parse(m[1])
+	if err != nil {
+		return
+	}
+	if authorityOf(u.Host) != authorityOf(r.seatURL()) {
+		return
+	}
+	r.mu.Lock()
+	auth := r.auth
+	r.mu.Unlock()
+	auth.setLaunchURL(m[1] + "/?token=" + m[2])
+	slog.Info("dsh-web: captured launch URL from spawned dsh (token exchange available)")
 }
 
 // SetLostCallback registers a callback fired (outside the resolver lock) once
@@ -402,12 +509,16 @@ func (r *Resolver) saveState(inst *ResolvedInstance) {
 	_ = core.AtomicWriteFile(path, b, 0o600)
 }
 
-// Resolve returns the live instance on the seat. Decision matrix (§3.1):
+// Resolve returns the live instance on the seat. Decision matrix (§3.1 +
+// 2026-09-22 plan §5):
 //
 //   - seat answers             → use it (label by ownership, never a dead PID)
 //   - held instance died       → grace window: typed error, no adopt, no spawn
-//   - grace elapsed, or cold
-//     start (never held)       → spawn ON the seat (single-flight, outside mu)
+//   - grace elapsed (this process once held) → spawn ON the seat
+//     (single-flight, outside mu) — the 2026-08-19 respawn contract
+//   - cold start (never held)  → probe only, typed ErrSeatNotRunning, NO
+//     spawn — the 启动 button / install back-half (StartSeat) are the only
+//     explicit spawn paths left
 //
 // All probes and boot-waits run outside mu; concurrent callers never block on
 // a spawn — they receive the typed starting/reconnecting error (§3.3).
@@ -425,7 +536,7 @@ func (r *Resolver) Resolve(ctx context.Context) (*ResolvedInstance, error) {
 			return nil, err
 		}
 		r.mu.Unlock()
-		if _, err := probeInstance(ctx, r.httpClient, inst.BaseURL); err == nil {
+		if err := probeInstance(ctx, r.httpClient, inst.BaseURL, r.auth); err == nil {
 			return inst, nil
 		}
 		r.mu.Lock()
@@ -441,7 +552,7 @@ func (r *Resolver) Resolve(ctx context.Context) (*ResolvedInstance, error) {
 			return nil, err
 		}
 		r.mu.Unlock()
-		if _, err := probeInstance(ctx, r.httpClient, seat); err == nil {
+		if err := probeInstance(ctx, r.httpClient, seat, r.auth); err == nil {
 			inst := &ResolvedInstance{BaseURL: seat, Port: portOf(seat), Source: SourceExternal}
 			r.mu.Lock()
 			r.rebindLocked(inst, "grace-rebind")
@@ -455,16 +566,21 @@ func (r *Resolver) Resolve(ctx context.Context) (*ResolvedInstance, error) {
 		return nil, err
 	}
 
-	// Dark seat, no grace: cold start or grace expiry. Probe the seat first —
-	// a fresh process must adopt an already-running instance (external) before
-	// ever spawning (§3.1 step 1; the 08-16 "external wins" invariant).
+	// Dark seat, no grace: probe the seat first — a fresh process must adopt
+	// an already-running instance (external) before ever spawning (§3.1
+	// step 1; the 08-16 "external wins" invariant).
 	if time.Now().Before(r.negUntil) {
+		if !r.everResolved {
+			// Cold negative cache: the seat is dark and we never held it.
+			r.mu.Unlock()
+			return nil, &ErrSeatNotRunning{BaseURL: seat}
+		}
 		err := &ErrInstanceReconnecting{BaseURL: seat, Starting: true}
 		r.mu.Unlock()
 		return nil, err
 	}
 	r.mu.Unlock()
-	if _, err := probeInstance(ctx, r.httpClient, seat); err == nil {
+	if err := probeInstance(ctx, r.httpClient, seat, r.auth); err == nil {
 		inst := &ResolvedInstance{BaseURL: seat, Port: portOf(seat), Source: SourceExternal}
 		r.mu.Lock()
 		r.rebindLocked(inst, "seat-adopt")
@@ -472,6 +588,15 @@ func (r *Resolver) Resolve(ctx context.Context) (*ResolvedInstance, error) {
 		return inst, nil
 	}
 	r.mu.Lock()
+	if !r.everResolved {
+		// Cold start (this process never held the seat): probe only, NO
+		// spawn (2026-09-22 plan §5) — the row shows 未启动 and the user
+		// decides via 启动 / 安装. Opening Link, refreshing, 重新检查 and
+		// diagnostics must never be a hidden spawn path.
+		r.negUntil = time.Now().Add(seatProbeNegativeCache)
+		r.mu.Unlock()
+		return nil, &ErrSeatNotRunning{BaseURL: seat}
+	}
 	if r.spawning {
 		err := &ErrInstanceReconnecting{BaseURL: seat, Starting: true}
 		r.mu.Unlock()
@@ -500,6 +625,104 @@ func (r *Resolver) Resolve(ctx context.Context) (*ResolvedInstance, error) {
 		"source", string(inst.Source), "baseURL", inst.BaseURL,
 		"reason", spawnReason(everResolved))
 	return inst, nil
+}
+
+// StartSeat is the explicit user-driven seat start (2026-09-22 plan §5: the
+// 启动 button and the install back-half are the ONLY spawn paths left). It
+// probes the seat first — an answering instance (whoever spawned it) is
+// adopted, never a second process — then spawns ON the seat and waits for
+// the first host.describe. Single-flight: a concurrent caller gets the typed
+// starting error immediately. The explicit click bypasses the probe negative
+// cache so every attempt re-checks the seat.
+func (r *Resolver) StartSeat(ctx context.Context) (*ResolvedInstance, error) {
+	seat := r.seatURL()
+	r.mu.Lock()
+	if r.resolved != nil {
+		inst := r.resolved
+		r.mu.Unlock()
+		return inst, nil
+	}
+	if r.spawning {
+		err := &ErrInstanceReconnecting{BaseURL: seat, Starting: true}
+		r.mu.Unlock()
+		return nil, err
+	}
+	r.spawning = true
+	r.mu.Unlock()
+
+	if err := probeInstance(ctx, r.httpClient, seat, r.auth); err == nil {
+		inst := &ResolvedInstance{BaseURL: seat, Port: portOf(seat), Source: SourceExternal}
+		r.mu.Lock()
+		r.spawning = false
+		r.rebindLocked(inst, "start-seat-adopt")
+		r.mu.Unlock()
+		return inst, nil
+	}
+
+	inst, err := r.spawnOnSeat(ctx, seat)
+	r.mu.Lock()
+	r.spawning = false
+	if err != nil {
+		r.spawnErr = err
+		r.mu.Unlock()
+		return nil, err
+	}
+	r.spawnErr = nil
+	r.resolved = inst
+	r.everResolved = true
+	r.lostAt = time.Time{}
+	r.mu.Unlock()
+	slog.Info("dsh-web: instance resolved",
+		"source", string(inst.Source), "baseURL", inst.BaseURL, "reason", "start-seat")
+	return inst, nil
+}
+
+// SetManagedBinary pins the dsh executable for the managed spawn — the
+// installer's write-back so a fresh install is used without a runtime
+// restart (plan §5: 安装后的 bin 绝对路径写回 resolver 的 cli_path).
+func (r *Resolver) SetManagedBinary(bin string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.binPath = bin
+	if st, ok := r.managedStart.(*execManagedStarter); ok {
+		st.setBinPath(bin)
+	}
+}
+
+// effectiveBinary returns the dsh executable the spawn path would use: the
+// explicit pin (option or installer write-back) first, then a fresh
+// discovery (install record → PATH → nvm). Empty = no binary anywhere —
+// readiness reports not_detected without consulting the port.
+func (r *Resolver) effectiveBinary() string {
+	r.mu.Lock()
+	explicit := r.binPath
+	r.mu.Unlock()
+	if explicit != "" {
+		return explicit
+	}
+	return findDSHBinary(r.dataDir)
+}
+
+// prependBinDirToPath puts the binary's directory first in the child PATH so
+// the dsh shebang (`#!/usr/bin/env node`) resolves node from the same
+// install (nvm keeps node next to dsh; the GUI PATH misses them).
+func prependBinDirToPath(env []string, dir string) []string {
+	if dir == "" {
+		return env
+	}
+	rest := make([]string, 0, len(env))
+	pathVal := ""
+	for _, e := range env {
+		if strings.HasPrefix(e, "PATH=") {
+			pathVal = strings.TrimPrefix(e, "PATH=")
+			continue
+		}
+		rest = append(rest, e)
+	}
+	if pathVal == "" {
+		pathVal = os.Getenv("PATH")
+	}
+	return append([]string{"PATH=" + dir + string(os.PathListSeparator) + pathVal}, rest...)
 }
 
 // loseSeatLocked transitions a held instance into the grace window and
@@ -552,7 +775,7 @@ func (r *Resolver) spawnOnSeat(ctx context.Context, seat string) (*ResolvedInsta
 
 	deadline := time.Now().Add(managedBootTimeout)
 	for {
-		if _, err := probeInstance(ctx, r.httpClient, seat); err == nil {
+		if err := probeInstance(ctx, r.httpClient, seat, r.auth); err == nil {
 			inst := &ResolvedInstance{BaseURL: seat, Port: port, Source: SourceExternal}
 			if processIsAlive(pid) {
 				// Our child still holds the port → we own it.
@@ -577,7 +800,7 @@ func (r *Resolver) spawnOnSeat(ctx context.Context, seat string) (*ResolvedInsta
 			// Child died (likely EADDRINUSE against a squatter). Give the
 			// seat one more beat for a real instance, then fail honestly.
 			time.Sleep(300 * time.Millisecond)
-			if _, err := probeInstance(ctx, r.httpClient, seat); err == nil {
+			if err := probeInstance(ctx, r.httpClient, seat, r.auth); err == nil {
 				inst := &ResolvedInstance{BaseURL: seat, Port: port, Source: SourceExternal}
 				r.saveState(inst)
 				slog.Info("dsh-web: seat won by external instance; spawn child exited",

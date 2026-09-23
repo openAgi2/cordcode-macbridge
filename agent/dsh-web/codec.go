@@ -62,6 +62,17 @@ type sessionCodec struct {
 	lastUsage     *dshUsage
 	contextWindow int
 
+	// S3 inbox fold (plan §5.3): the two pending lists mirrored from the
+	// durable agent/inbox/spliced journal events (official fold semantics,
+	// agent-loop/src/inbox.ts apply()). The fold is the identity authority for
+	// placeholder rows — splice insert → EventUserMessageQueued (row keyed by
+	// UserMessage.id), splice removal → EventUserMessageRemoved (retract the
+	// row), user/message settle (same id, official A3a evidence) replaces the
+	// placeholder reducer-side. Invalid splices reset the codec, mirroring the
+	// official hard-fail fold.
+	inboxTurn []inboxSlot
+	inboxStep []inboxSlot
+
 	// seq gate state (baseline-tolerant variant).
 	expectedSeq           int64
 	sawFirstSeq           bool
@@ -72,6 +83,18 @@ type sessionCodec struct {
 	// block-end / assistant/message / tool/call 按官方 partial.ts 整值替换语义
 	// 接管，不再累积比对（2026-09-05 真机 goal 轮五连 reset 教训）。
 	openBlocks map[int]string
+
+	// typert 代 live assistant 流（session/follow 的 assistant-stream 帧）。
+	// 官方锚点：history.ts:165-176（opt-in 订阅）、client/transport.ts:206-215
+	// （revision 逐帧 +1 连续性）、client/sessions/assistant-stream.ts（折叠）。
+	// 帧是进程内瞬态，不进 journal、不过 seq 门；settlement 仍走 journal 的
+	// assistant/message 路径（delta 是 live 真值，settlement 只簿记——与旧代
+	// assistant/chunk journal 路径同一语义）。
+	liveRevision  int64  // 最近接受帧的 revision；快照基线前为 0
+	liveAttemptID string // 当前 attempt；空 = 无活跃 attempt（后续 chunk 忽略）
+	liveTurn      int
+	liveStep      int
+	liveNextIndex int // 官方 index 连续性：下一 chunk 帧的期望 index
 
 	// host 斜杠命令 + 计划模式折叠状态（command_fold.go；live 帧与 history
 	// 冷拉共用同一官方折叠）。codec reset 会丢弃该状态——三类事件本身已
@@ -226,6 +249,8 @@ func (c *sessionCodec) apply(env *sessionEventWire) ([]core.Event, error) {
 		return c.applyStepEnd(env)
 	case "user/message":
 		return c.applyUserMessage(env)
+	case "agent/inbox/spliced":
+		return c.applyInboxSpliced(env)
 	case "assistant/chunk":
 		return c.applyAssistantChunk(env)
 	case "assistant/message":
@@ -257,24 +282,49 @@ func (c *sessionCodec) apply(env *sessionEventWire) ([]core.Event, error) {
 	case "request/context":
 		return c.applyRequestContext(env)
 
-	// Class ②: known control-plane events with no timeline effect.
-	// session/title-llm-request（标题生成的辅助 LLM 调用记录；标题本体经
-	// session/title 事件与标题投影落地）在官方 known-event-types.ts 注册表
-	// 中，且 2026-08-16 真机矩阵证实无 timeline 内容——此前两版因未知类型
-	// 重置杀了码器状态（双 turn_started、身份断裂）。
-	case "permission/preset", "sandbox/mode", "approval/policy", "agent/inbox/spliced", "session/title",
+	// Class ②: known control-plane events with no timeline effect. The list
+	// mirrors the official KNOWN_SESSION_EVENT_TYPES registry (core/session/
+	// src/known-event-types.ts @0d1f50007f — generated from every
+	// SessionEventMap member) minus the types mapped above: a registry member
+	// the codec does not map is known control-plane (skip, never reset);
+	// anything OUTSIDE the registry still resets unless ignorable-marked —
+	// the official read path's own fence. 2026-09-23 真机：typert 网关代日志
+	// 携带 session/end-seed / system/message / model/selection 等新代类型，
+	// 旧子集表把它们当未知 REQUIRED 整体重置码器——历史与直播全空。
+	// agent/inbox/spliced 已移入本切片映射（S3，applyInboxSpliced）。
+	case "permission/preset", "sandbox/mode", "approval/policy", "session/title",
 		"session/title-llm-request",
-		// approval/asked + approval/decided 是官方 log-only 审计对（known-event-types
-		// 注册表；user-approval README：「只写入日志，人类权限 UI 不属于上下文」）。
-		// 真机 2026-08-16 行 6：当未知类型重置，杀 mid-turn 码器。真正的 iOS 权限
-		// 面走 mux approval/requested → permission_request，不走这两条审计事件。
+		// approval/asked + approval/decided 是官方 log-only 审计对（user-approval
+		// README：「只写入日志，人类权限 UI 不属于上下文」）。真正的 iOS 权限面走
+		// $events approval/request waterfall → permission_request。
 		"approval/asked", "approval/decided",
-		// 斜杠命令执行的 durable 副产物（rc.2 known-event-types.ts 注册表内事件，
-		// ignorable 旁路不适用）。命令卡片/计划模式/目标状态由已收编的
-		// command/run|done + plan/mode + goal/change 承载（官方 web 同样不把这
-		// 些画成时间线节点）；known-drop 防执行后 reset 码器。
+		// 斜杠命令执行的 durable 副产物。命令卡片/计划模式/目标状态由已收编的
+		// command/run|done + plan/mode + goal/change 承载（官方 web 同样不把这些
+		// 画成时间线节点）。
 		"compaction/start", "compaction/prune", "compaction/summary", "compaction/end",
-		"feedback/record":
+		"feedback/record",
+		// 新代（typert 网关）注册表成员——官方语义均为控制面/审计，无时间线节点：
+		"agent-preset/selected", // 预设切换审计（列表行 agentPreset 已承载）
+		"assistant/attempt",     // LLM 尝试/重试审计
+		"deliverables/presented",
+		"feedback/message-delete", "feedback/message-put",
+		"hook/invoked", "hook/result",
+		"image/offload",
+		"llm/retry", "llm/retry-started",
+		"model/selection", // 模型选择变更；时间线模型归属仍以 assistant/message source 为准
+		"schedule/change",
+		"session-log-deepseek/delivery-accepted",
+		"session/end-seed", // 构造器种子边界（inherited 标记），纯簿记
+		"subagent/catalog", "subagent/descriptor", "subagent/model-selection-policy",
+		"system/message", // 系统通知行；官方 web 有专用渲染，桥暂不投影（不伪造时间线节点）
+	"team/member", "team/message/delivered", "team/message/queued", "team/task",
+	"tool/ptc-dispatch", "tool/ptc-dispatch-start",
+	"web/deepseek-search-llm-request",
+	// 2026-09-23 S3 回归实测补齐（对照 known-event-types.ts 全表逐项核对，
+	// 此前两成员漏列，alpha.1 真机 journal 携带 workspace/changes 时整码器误判
+	// unknown required 而 reset）：
+	"developer/message", // 工具增删的 developer-role 审计行，无时间线节点
+	"workspace/changes": // workspace-changes deliverable 的按回合变更通告（payload {turn}），摘要走独立 API
 		return nil, nil
 
 	default:
@@ -447,8 +497,11 @@ func (c *sessionCodec) applyUserMessage(env *sessionEventWire) ([]core.Event, er
 		return []core.Event{{
 			Type:    core.EventUserMessage,
 			Content: joinTextBlocks(d.Content),
-			TurnID:  c.activeTurnID,
-			ItemID:  d.ID,
+			// S4: journal image/file blocks ride as descriptors; image bytes
+			// are fetched lazily via session/attachment (A4a/A4b evidence).
+			Attachments: eventAttachments(d.Content),
+			TurnID:      c.activeTurnID,
+			ItemID:      d.ID,
 		}}, nil
 	case d.Source.Kind == "plugin":
 		return nil, nil // permission runtime context, never a user prompt
@@ -485,6 +538,111 @@ func (c *sessionCodec) applyUserMessage(env *sessionEventWire) ([]core.Event, er
 		// （P0）。
 		return nil, nil
 	}
+}
+
+// inboxSlot is one pending-inbox fold slot (identity only — the placeholder
+// row's text rides the insert event; removals need just the id).
+type inboxSlot struct {
+	ID string
+}
+
+// dshInboxSplice mirrors the official agent/inbox/spliced journal payload
+// (agent-loop/src/inbox.ts mutate(): {target, start, removedCount?, inserted,
+// outcome?}). A3a/A3b live evidence: scripts/dshweb-phase0/alpha1-inbox-wire.json
+// and alpha1-updatequeue-wire.json (removedCount absent for pure inserts;
+// outcome 'canceled' for discard-removals; edit = remove+insert with the SAME
+// id and new text).
+type dshInboxSplice struct {
+	Target       string               `json:"target"`
+	Start        int                  `json:"start"`
+	RemovedCount *int                 `json:"removedCount,omitempty"`
+	Inserted     []dshUserMessageData `json:"inserted"`
+}
+
+// applyInboxSpliced folds one durable inbox splice and projects the delta:
+// removals first (retract placeholder rows), then inserts (queue placeholder
+// rows keyed by UserMessage.id). The fold mirrors the official projection
+// semantics exactly (inbox.ts apply()): bounds-validated start/removedCount
+// and cross-list id uniqueness — an invalid splice is a hard reset (the
+// official read path throws on the same invariant; the reducer-side negative
+// tests pin it).
+func (c *sessionCodec) applyInboxSpliced(env *sessionEventWire) ([]core.Event, error) {
+	var d dshInboxSplice
+	if err := decodeData(env, &d); err != nil {
+		return nil, err
+	}
+	var list *[]inboxSlot
+	switch d.Target {
+	case "next-turn":
+		list = &c.inboxTurn
+	case "next-step":
+		list = &c.inboxStep
+	default:
+		return nil, resetf("inbox splice target %q", d.Target)
+	}
+	removedCount := 0
+	if d.RemovedCount != nil {
+		removedCount = *d.RemovedCount
+	}
+	if d.Start < 0 || d.Start > len(*list) || removedCount < 0 || d.Start+removedCount > len(*list) {
+		return nil, resetf("inbox splice bounds (target %s start %d removed %d len %d)", d.Target, d.Start, removedCount, len(*list))
+	}
+
+	removed := make([]inboxSlot, 0, removedCount)
+	removed = append(removed, (*list)[d.Start:d.Start+removedCount]...)
+	next := make([]inboxSlot, 0, len(*list)-removedCount+len(d.Inserted))
+	next = append(next, (*list)[:d.Start]...)
+	for _, m := range d.Inserted {
+		next = append(next, inboxSlot{ID: m.ID})
+	}
+	next = append(next, (*list)[d.Start+removedCount:]...)
+
+	// Cross-list pending-id uniqueness, checked on the POST-splice candidate
+	// (official inbox.ts mutate(): the removed slots are already gone, so an
+	// edit's remove+reinsert of the SAME id is legal; a duplicate only exists
+	// if the id would be pending twice after the splice).
+	other := c.inboxStep
+	if list == &c.inboxStep {
+		other = c.inboxTurn
+	}
+	pending := make(map[string]bool, len(next)+len(other))
+	for _, s := range next {
+		if s.ID == "" {
+			return nil, resetf("inbox splice candidate slot without id")
+		}
+		pending[s.ID] = true
+	}
+	for _, s := range other {
+		pending[s.ID] = true
+	}
+	if len(pending) != len(next)+len(other) {
+		return nil, resetf("inbox splice duplicate pending id (target %s)", d.Target)
+	}
+	for _, m := range d.Inserted {
+		if m.ID == "" {
+			return nil, resetf("inbox splice inserted message without id")
+		}
+	}
+	*list = next
+
+	events := make([]core.Event, 0, len(removed)+len(d.Inserted))
+	for _, s := range removed {
+		events = append(events, core.Event{
+			Type:   core.EventUserMessageRemoved,
+			ItemID: s.ID,
+		})
+	}
+	for _, m := range d.Inserted {
+		events = append(events, core.Event{
+			Type:    core.EventUserMessageQueued,
+			Content: joinTextBlocks(m.Content),
+			// S4: queued messages keep their attachment descriptors so the
+			// pending row renders the same cards as the settled one.
+			Attachments: eventAttachments(m.Content),
+			ItemID:      m.ID,
+		})
+	}
+	return events, nil
 }
 
 // dshChunk is the assistant/chunk payload (field names per the pinned schema:
@@ -597,6 +755,219 @@ func (c *sessionCodec) applyAssistantChunk(env *sessionEventWire) ([]core.Event,
 	}
 }
 
+// ── typert 代 live assistant 流（session/follow 的 assistant-stream 帧）──────
+//
+// 官方语义锚点（0.1.7-alpha.2 checkout 00102833df）：
+//   - history.ts:165-176：仅当 follow 请求 assistantStream===true 才订阅
+//     agent/assistant-stream；帧与 journal 事件交错在同一逻辑流按到达序处理。
+//   - client/transport.ts:186-215：opt-in 快照必带 assistantStream 基线；
+//     每帧 revision 必须等于上一 revision+1，否则载体错误（官方重连）。
+//   - client/sessions/assistant-stream.ts acceptFrame：start 注册 attempt；
+//     无 start 的 chunk 后缀忽略（"ignore the transient suffix until the
+//     next known start"）；index 必须逐帧 +1；end 释放 settlement。
+//   - runtime-types.ts:355：chunk 帧瞬态，journal 只在完成时落
+//     assistant/message —— delta 是 live 真值，settlement 走 journal 路径
+//     只簿记（与旧代 assistant/chunk journal 语义一致）。
+//
+// 与官方的两处有意差异（S1 边界，随专项收敛）：
+//   1. revision/index 断档时官方抛载体错误并重开 follow；此处告警并暂停
+//     瞬态发射（journal 路径不受影响，冷拉兜底对账）。
+//   2. abandoned attempt 官方删除已展示的瞬态块；bridge-v1 无撤回语义，
+//     已发射的 delta 保留到冷拉收敛（失败/重试路径，罕见）。
+
+// ensureLiveTurn adopts the turn a live frame names. Journal turn/start is
+// the normal adopter; frames can precede it after a reconnect window cut.
+// Same policy as validateActiveTurnStep: an orphan adopts, a turn switch
+// without turn/end settles the old turn as an error terminal first.
+func (c *sessionCodec) ensureLiveTurn(turn, step int) []core.Event {
+	if turn < 1 {
+		return nil
+	}
+	if c.activeTurn == noTurn {
+		return c.adoptTurn(turn, step)
+	}
+	if turn != c.activeTurn {
+		settled := []core.Event{{
+			Type:   core.EventResult,
+			Done:   true,
+			TurnID: c.activeTurnID,
+			Error:  fmt.Errorf("turn %d superseded by %d without turn/end (live stream)", c.activeTurn, turn),
+		}}
+		return append(settled, c.adoptTurn(turn, step)...)
+	}
+	return nil
+}
+
+// applyStreamBaseline adopts the snapshot's opted-in reconnect baseline:
+// registers the still-live attempt and replays its accumulated chunk prefix
+// so a mid-turn (re)connect shows the text already streamed. Official fold:
+// client assistant-stream.ts replace() expands opening.activeAttempt.stream
+// into transient entries after the durable window (records feed first).
+func (c *sessionCodec) applyStreamBaseline(b *assistantStreamBaseline) []core.Event {
+	if b == nil {
+		return nil
+	}
+	c.liveRevision = b.Revision
+	c.liveAttemptID = ""
+	if b.ActiveAttempt == nil {
+		return nil
+	}
+	at := b.ActiveAttempt
+	c.liveAttemptID = at.AttemptID
+	c.liveTurn = at.Turn
+	c.liveStep = at.Step
+	c.liveNextIndex = at.NextIndex
+	pre := c.ensureLiveTurn(at.Turn, at.Step)
+
+	// Compact runs (llm assistant-stream.ts AssistantStreamRecord):
+	// text-chunks / reasoning-chunks pack one block's delta texts; raw
+	// `chunk` members are non-delta types with no text to replay. Per-type
+	// concatenation in record order; the two bulk events keep the order
+	// their types first appear in the records.
+	var text, reasoning strings.Builder
+	textSeen, reasoningSeen := -1, -1
+	for i, rec := range at.Stream {
+		var run struct {
+			Type  string   `json:"type"`
+			Texts []string `json:"texts"`
+		}
+		if json.Unmarshal(rec, &run) != nil {
+			continue
+		}
+		switch run.Type {
+		case "text-chunks":
+			if textSeen < 0 {
+				textSeen = i
+			}
+			for _, t := range run.Texts {
+				text.WriteString(t)
+			}
+		case "reasoning-chunks":
+			if reasoningSeen < 0 {
+				reasoningSeen = i
+			}
+			for _, t := range run.Texts {
+				reasoning.WriteString(t)
+			}
+		}
+	}
+	var events []core.Event
+	emitText := func() {
+		if text.Len() > 0 {
+			events = append(events, core.Event{Type: core.EventText, Content: text.String(), TurnID: c.activeTurnID, ItemID: c.activeTurnID})
+		}
+	}
+	emitReasoning := func() {
+		if reasoning.Len() > 0 {
+			events = append(events, core.Event{Type: core.EventThinking, Content: reasoning.String(), TurnID: c.activeTurnID, ItemID: c.activeTurnID})
+		}
+	}
+	if reasoningSeen >= 0 && (textSeen < 0 || reasoningSeen < textSeen) {
+		emitReasoning()
+		emitText()
+	} else {
+		emitText()
+		emitReasoning()
+	}
+	return append(pre, events...)
+}
+
+// applyStreamFrame folds one transient assistant-stream frame. Dropped
+// frames warn and pause transient emission; they never reset the journal
+// codec (the two paths are independent — a transient frame cannot corrupt
+// durable state).
+func (c *sessionCodec) applyStreamFrame(f *assistantStreamFrame) []core.Event {
+	if f == nil {
+		return nil
+	}
+	if expected := c.liveRevision + 1; f.Revision != expected {
+		slog.Warn("dsh-web: assistant-stream revision gap",
+			"sessionPrefix", shortLog(c.sessionPrefix), "expected", expected, "got", f.Revision)
+		c.liveAttemptID = ""
+		return nil
+	}
+	c.liveRevision = f.Revision
+
+	switch f.Type {
+	case "start":
+		if c.liveAttemptID != "" {
+			// Official rebaselines (reopens follow); the attempt-keyed state
+			// makes re-registration safe here — keep streaming.
+			slog.Warn("dsh-web: assistant-stream start while attempt active",
+				"sessionPrefix", shortLog(c.sessionPrefix), "previousPrefix", shortLog(c.liveAttemptID))
+		}
+		c.liveAttemptID = f.AttemptID
+		c.liveTurn = f.Turn
+		c.liveStep = f.Step
+		c.liveNextIndex = 0
+		return c.ensureLiveTurn(f.Turn, f.Step)
+
+	case "chunk":
+		if c.liveAttemptID == "" || c.liveAttemptID != f.AttemptID {
+			return nil // official parity: transient suffix without a known start
+		}
+		if f.Index != c.liveNextIndex {
+			slog.Warn("dsh-web: assistant-stream chunk index gap",
+				"sessionPrefix", shortLog(c.sessionPrefix), "expected", c.liveNextIndex, "got", f.Index)
+			c.liveAttemptID = ""
+			return nil
+		}
+		c.liveNextIndex++
+		if f.Chunk == nil {
+			return nil
+		}
+		switch f.Chunk.Type {
+		case "text-delta":
+			return []core.Event{{Type: core.EventText, Content: f.Chunk.Text, TurnID: c.activeTurnID, ItemID: c.activeTurnID}}
+		case "reasoning-delta":
+			return []core.Event{{Type: core.EventThinking, Content: f.Chunk.Text, TurnID: c.activeTurnID, ItemID: c.activeTurnID}}
+		case "usage":
+			if f.Chunk.Usage == nil {
+				return nil
+			}
+			u := *f.Chunk.Usage
+			c.lastUsage = &u
+			return []core.Event{contextUsageEvent(&u, c.contextWindow)}
+		case "tool-call-delta":
+			if f.Chunk.ID != "" && f.Chunk.Name != "" {
+				c.toolCallNames[f.Chunk.ID] = f.Chunk.Name
+			}
+			return nil
+		case "block-end":
+			if f.Chunk.Block != nil && f.Chunk.Block.Type == "tool-call" && f.Chunk.Block.ID != "" && f.Chunk.Block.Name != "" {
+				c.toolCallNames[f.Chunk.Block.ID] = f.Chunk.Block.Name
+			}
+			return nil
+		case "block-start", "finish":
+			return nil
+		default:
+			// Transient path: unknown chunk types never reset the journal
+			// codec (official client's fold forwards known types only).
+			slog.Warn("dsh-web: assistant-stream unknown chunk type",
+				"sessionPrefix", shortLog(c.sessionPrefix), "chunkType", f.Chunk.Type)
+			return nil
+		}
+
+	case "end":
+		if c.liveAttemptID == "" || c.liveAttemptID != f.AttemptID {
+			return nil
+		}
+		if f.Index != c.liveNextIndex {
+			slog.Warn("dsh-web: assistant-stream end index mismatch",
+				"sessionPrefix", shortLog(c.sessionPrefix), "expected", c.liveNextIndex, "got", f.Index)
+		}
+		c.liveAttemptID = ""
+		// committed：delta 已是 live 真值，settlement 由 journal 的
+		// assistant/message 簿记（不重复发正文）。abandoned：见函数头边界注记。
+		return nil
+
+	default:
+		slog.Warn("dsh-web: assistant-stream unknown frame type",
+			"sessionPrefix", shortLog(c.sessionPrefix), "frameType", f.Type)
+		return nil
+	}
+}
+
 // contextUsageEvent builds the pressure projection (§3.7).
 func contextUsageEvent(u *dshUsage, window int) core.Event {
 	used := u.InputTokens + u.CacheReadTokens
@@ -689,22 +1060,24 @@ func (c *sessionCodec) applyToolCall(env *sessionEventWire) ([]core.Event, error
 }
 
 func (c *sessionCodec) applyToolResult(env *sessionEventWire) ([]core.Event, error) {
+	// 官方形状（llm/src/message.ts ToolResultMessage + repair.ts 构造；
+	// alpha.1 journal seq22/27/32 实测一致）：content 是顶层 text 块，
+	// toolCallId/isError 在 message 顶层。旧版 "tool-result" 块标签已退役
+	// （agent-team/projection.ts:43 "retired tool-result tags"），alpha.1/alpha.2
+	// journal 均不携带——按旧标签扫描会让每条 tool/result 都 reset 码器。
 	var d struct {
 		Turn    int `json:"turn"`
 		Step    int `json:"step"`
 		Message struct {
-			Source struct {
+			ToolCallID string `json:"toolCallId"`
+			IsError    bool   `json:"isError"`
+			Source     struct {
 				Kind   string `json:"kind"`
 				CallID string `json:"callId"`
 			} `json:"source"`
 			Content []struct {
-				Type       string `json:"type"`
-				ToolCallID string `json:"toolCallId"`
-				Content    []struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
-				} `json:"content"`
-				IsError bool `json:"isError"`
+				Type string `json:"type"`
+				Text string `json:"text"`
 			} `json:"content"`
 		} `json:"message"`
 	}
@@ -716,39 +1089,28 @@ func (c *sessionCodec) applyToolResult(env *sessionEventWire) ([]core.Event, err
 		return nil, err
 	}
 
-	callID := d.Message.Source.CallID
-	var text strings.Builder
-	isError := false
-	found := false
-	for _, blk := range d.Message.Content {
-		if blk.Type != "tool-result" {
-			continue
-		}
-		found = true
-		if blk.ToolCallID != "" {
-			callID = blk.ToolCallID
-		}
-		if blk.IsError {
-			isError = true
-		}
-		for _, inner := range blk.Content {
-			if inner.Type == "text" {
-				text.WriteString(inner.Text)
-			}
-		}
-	}
-	if !found {
-		return nil, resetf("tool/result (seq %d) missing tool-result content block", env.Seq)
+	callID := d.Message.ToolCallID
+	if callID == "" {
+		callID = d.Message.Source.CallID
 	}
 	if callID == "" {
 		return nil, resetf("tool/result (seq %d) missing callId", env.Seq)
 	}
+	var text strings.Builder
+	for _, blk := range d.Message.Content {
+		if blk.Type == "text" && blk.Text != "" {
+			if text.Len() > 0 {
+				text.WriteByte('\n')
+			}
+			text.WriteString(blk.Text)
+		}
+	}
 
 	status := "completed"
-	if isError {
+	if d.Message.IsError {
 		status = "failed"
 	}
-	success := !isError
+	success := !d.Message.IsError
 	return append(pre, core.Event{
 		Type:        core.EventToolResult,
 		ToolName:    c.toolCallNames[callID],

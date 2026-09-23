@@ -182,6 +182,28 @@ type ImageAttachment struct {
 	FileName string // original filename (optional)
 }
 
+// EventAttachment describes one RECEIVED attachment inside a user message
+// (dsh-web S4: journal image/file blocks, official admitPromptContent shape).
+// Image bytes are never inlined on the event — clients fetch them lazily via
+// the backend's attachment read path keyed by AttachmentID (official
+// session/attachment; referencedImage journal-proof + readImage).
+type EventAttachment struct {
+	Kind         string `json:"kind"`                    // "image" | "file"
+	AttachmentID string `json:"attachmentId,omitempty"` // official durable id ("sha256:<hex>")
+	MediaType    string `json:"mediaType,omitempty"`    // image only
+	Name         string `json:"name,omitempty"`
+	Bytes        int64  `json:"bytes,omitempty"`
+	Width        int    `json:"width,omitempty"`  // image only
+	Height       int    `json:"height,omitempty"` // image only
+}
+
+// AttachmentData is one durable image read: the official reference verbatim
+// plus the decoded bytes (AttachmentReader / dsh-web session/attachment).
+type AttachmentData struct {
+	Ref  EventAttachment // kind=image; official ImageAttachmentRef fields
+	Data []byte         // decoded image bytes
+}
+
 // 附件文件名清理用的常量（P2-3），避免在字符串字面量中混用转义。
 const (
 	backslash      = "\\"
@@ -327,6 +349,8 @@ const (
 	EventThinking                 EventType = "thinking"                   // thinking/processing status
 	EventTurnStarted              EventType = "turn_started"               // new turn started (for passive broadcast)
 	EventUserMessage              EventType = "user_message"               // user prompt attributed to a turn (projection SoT)
+	EventUserMessageQueued        EventType = "user_message_queued"        // dsh-web inbox splice insert: queued placeholder row keyed by UserMessage.id (S3; wire user_message with pending:true)
+	EventUserMessageRemoved       EventType = "user_message_removed"       // dsh-web inbox splice removal: retract the queued placeholder row by UserMessage.id (S3; wire user_message_removed)
 	EventTurnFileChanges          EventType = "turn_file_changes"          // turn-level official net file diffs (opencode user-message summary.diffs; upserts the owning turn)
 	EventContextCompressing       EventType = "context_compressing"        // context compression started
 	EventContextCompressed        EventType = "context_compressed"         // context compression completed
@@ -646,6 +670,10 @@ type Event struct {
 	FileChanges          []FileChange
 	ToolMatches          *ToolMatches
 	StreamID             string // stable child stream identity; empty means the main stream
+	// Attachments carries received user-message attachments (dsh-web S4:
+	// journal image/file blocks). Populated for EventUserMessage and
+	// EventUserMessageQueued; nil for every other event type.
+	Attachments []EventAttachment
 	ParentStreamID       string // optional parent child-stream identity
 	RetryAttempt         int    // populated for EventRetryStatus (1-based serve retry attempt)
 	RetryNext            int64  // populated for EventRetryStatus (serve epoch-ms when the next attempt fires)
@@ -721,6 +749,9 @@ type RichHistoryEntry struct {
 	// TurnProjection.FileChanges（turn 级权威，客户端文件盒优先消费）。逐工具
 	// per-call fileChanges 仍是 L2/L3 工具行数据源，两者不混写。
 	TurnFileChanges []map[string]any `json:"turnFileChanges,omitempty"`
+	// Attachments 是该 user 行收到的附件描述符（dsh-web S4：journal image/file
+	// 块）。图片字节不内联——客户端按 AttachmentID 经 get_attachment 懒取。
+	Attachments []EventAttachment `json:"attachments,omitempty"`
 }
 
 // Todo represents one backend-managed todo item for a session.

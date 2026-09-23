@@ -1,11 +1,12 @@
 package dshweb
 
 // Canonical-seat lifecycle tests (design
-// docs/2026-08-19-dsh-web-canonical-3080-instance-design.md §3/§8.1/§8.4/§8.6/§8.7):
-// seat loss → grace (no adopt, no spawn, typed error), grace rebind after a
-// user restart, grace-expiry respawn ON the seat, ownership labeling (M5 —
-// endpoint probe ≠ label, never a dead PID), cold-start single-flight, and
-// the lost-callback edge.
+// docs/2026-08-19-dsh-web-canonical-3080-instance-design.md §3/§8.1/§8.4/§8.6/§8.7
+// + 2026-09-22 install-and-start plan §5): seat loss → grace (no adopt, no
+// spawn, typed error), grace rebind after a user restart, grace-expiry
+// respawn ON the seat, ownership labeling (M5 — endpoint probe ≠ label,
+// never a dead PID), cold Resolve never spawns (StartSeat does), StartSeat
+// single-flight, and the lost-callback edge.
 
 import (
 	"context"
@@ -36,11 +37,13 @@ func seatServer(t *testing.T, port int) *httptest.Server {
 	return srv
 }
 
-// holdSeat cold-starts the resolver so its starter owns the seat, returning
-// the resolver and starter. Probes run with keep-alives disabled: closing a
-// listener does not kill already-accepted sockets, so a pooled idle conn would
-// survive the fake "process death" and answer the next probe — a real dsh
-// restart tears its sockets down with the process.
+// holdSeat starts the resolver's managed seat via the explicit StartSeat (the
+// 2026-09-22 plan's only spawn paths are StartSeat and the install
+// back-half; cold Resolve no longer spawns), returning the resolver and
+// starter. Probes run with keep-alives disabled: closing a listener does not
+// kill already-accepted sockets, so a pooled idle conn would survive the fake
+// "process death" and answer the next probe — a real dsh restart tears its
+// sockets down with the process.
 func holdSeat(t *testing.T, grace time.Duration) (*Resolver, *countingStarter, string, string) {
 	t.Helper()
 	seat := freeLoopbackSeat(t)
@@ -52,12 +55,12 @@ func holdSeat(t *testing.T, grace time.Duration) (*Resolver, *countingStarter, s
 		withGracePeriod(grace),
 		WithHTTPClient(&http.Client{Transport: &http.Transport{DisableKeepAlives: true}}),
 	)
-	inst, err := r.Resolve(context.Background())
+	inst, err := r.StartSeat(context.Background())
 	if err != nil {
-		t.Fatalf("cold-start Resolve: %v", err)
+		t.Fatalf("StartSeat: %v", err)
 	}
 	if inst.Source != SourceManaged || starter.starts != 1 {
-		t.Fatalf("expected one managed cold-start spawn: %+v starts=%d", inst, starter.starts)
+		t.Fatalf("expected one managed StartSeat spawn: %+v starts=%d", inst, starter.starts)
 	}
 	return r, starter, seat, seatPort(seat)
 }
@@ -220,9 +223,10 @@ func TestSpawnLabelOwnershipNeverDeadPid(t *testing.T) {
 	})
 }
 
-func TestColdStartSingleFlight(t *testing.T) {
-	// §3.3/§8.6: one spawn in flight; concurrent resolvers get the typed
-	// starting error immediately instead of blocking or double-spawning.
+func TestStartSeatSingleFlight(t *testing.T) {
+	// §3.3/§8.6 + 2026-09-22 plan §5: one spawn in flight; concurrent
+	// StartSeat callers get the typed starting error immediately instead of
+	// blocking or double-spawning.
 	seat := freeLoopbackSeat(t)
 	st := &blockingStarter{release: make(chan struct{})}
 	r := NewResolver(WithProbeURLs([]string{seat}), withManagedStarter(st), withGracePeriod(time.Second))
@@ -235,7 +239,7 @@ func TestColdStartSingleFlight(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			inst, err := r.Resolve(context.Background())
+			inst, err := r.StartSeat(context.Background())
 			switch {
 			case err == nil:
 				oks.Add(1)
@@ -297,7 +301,7 @@ func TestLostCallbackFiresOncePerEdge(t *testing.T) {
 type noBindStarter struct{ pid int }
 
 func (s *noBindStarter) Start(ctx context.Context, port int) (int, error) { return s.pid, nil }
-func (s *noBindStarter) Stop() error                                     { return nil }
+func (s *noBindStarter) Stop() error                                      { return nil }
 
 // blockingStarter parks inside Start until released, modelling a slow dsh
 // boot for the single-flight test.

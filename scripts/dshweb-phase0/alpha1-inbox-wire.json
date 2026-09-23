@@ -1,0 +1,136 @@
+{
+ "captured_at": "2026-09-23T17:42:10+08:00",
+ "purpose": "A3a Gate evidence (plan §3 row A3a): inbox VISIBILITY on the running alpha.1 seat. The durable session journal (read via session/projections asOfSeq + session/page, the bridge's own paging path) is the authoritative record: ① every queue-mode prompt splices into next-turn (agent-loop agent.ts send() → inbox.splice; source: followup→send('next-turn') unconditionally) — including a message queued WHILE turn 1 ran (seq 16 insert); ② consumption = splice removal + user/message journal event with the SAME UserMessage.id (the S3 reducer's dedup key); ③ reconnect rebuild = a fresh session/follow snapshot carries the settled message. Live-frame observation note: the follow snapshot arrives in 0.0s with assistantStream:true (the bridge's shape); with assistantStream:false no snapshot arrived within 12s in a spot check (not asserted as protocol semantics — the bridge never sends false).",
+ "seat": {
+  "listen": "127.0.0.1:3080",
+  "pid": 38778,
+  "started": "2026-09-23 00:34:37",
+  "cli_version": "0.1.7-alpha.1"
+ },
+ "session": {
+  "cwd": "/tmp/dshweb-phase0-probe (throwaway)",
+  "sessionId": "session-…(truncated)",
+  "asOfSeq": 27
+ },
+ "journal_excerpt_sanitized": [
+  {
+   "seq": 3,
+   "type": "agent/inbox/spliced",
+   "data": {
+    "target": "next-turn",
+    "start": 0,
+    "inserted": [
+     {
+      "id": "188f0d97-90a7-4115-a052-619772c2a529",
+      "content_head": "Write a 300-word story about a lighthouse keeper."
+     }
+    ]
+   }
+  },
+  {
+   "seq": 5,
+   "type": "agent/inbox/spliced",
+   "data": {
+    "target": "next-turn",
+    "start": 0,
+    "removedCount": 1,
+    "inserted": []
+   }
+  },
+  {
+   "seq": 8,
+   "type": "user/message",
+   "data": {
+    "id": "188f0d97-90a7-4115-a052-619772c2a529",
+    "source": {
+     "kind": "user",
+     "rpcId": "req-a3a-1-ad961b"
+    },
+    "content_text": "Write a 300-word story about a lighthouse keeper."
+   }
+  },
+  {
+   "seq": 9,
+   "type": "user/message",
+   "data": {
+    "id": "b1f4991a-2c53-466f-8750-d97a7cd3b582",
+    "content": "REDACTED — workspace-instruction/runtime-context injection (owner data), not probe-authored"
+   }
+  },
+  {
+   "seq": 10,
+   "type": "user/message",
+   "data": {
+    "id": "5da762ce-7fb5-40ab-ba12-fa39c36fa225",
+    "content": "REDACTED — workspace-instruction/runtime-context injection (owner data), not probe-authored"
+   }
+  },
+  {
+   "seq": 11,
+   "type": "user/message",
+   "data": {
+    "id": "b8e29007-8321-48ae-bacf-ec74c0e33f8f",
+    "content": "REDACTED — workspace-instruction/runtime-context injection (owner data), not probe-authored"
+   }
+  },
+  {
+   "seq": 16,
+   "type": "agent/inbox/spliced",
+   "data": {
+    "target": "next-turn",
+    "start": 0,
+    "inserted": [
+     {
+      "id": "6fbc0d2f-3326-44fa-85b1-8dd0d8264866",
+      "content_head": "This is the A3a queued message — it must splice into the inb"
+     }
+    ]
+   }
+  },
+  {
+   "seq": 22,
+   "type": "agent/inbox/spliced",
+   "data": {
+    "target": "next-turn",
+    "start": 0,
+    "removedCount": 1,
+    "inserted": []
+   }
+  },
+  {
+   "seq": 24,
+   "type": "user/message",
+   "data": {
+    "id": "6fbc0d2f-3326-44fa-85b1-8dd0d8264866",
+    "source": {
+     "kind": "user",
+     "rpcId": "req-a3a-2-0c123b"
+    },
+    "content_text": "This is the A3a queued message — it must splice into the inbox while turn 1 runs."
+   }
+  }
+ ],
+ "id_continuity_assertions": [
+  {
+   "inserted_at_seq": 3,
+   "settled_at_seq": 8,
+   "id": "188f0d97-90a7-4115-a052-619772c2a529",
+   "CONTINUITY": true
+  },
+  {
+   "inserted_at_seq": 16,
+   "settled_at_seq": 24,
+   "id": "6fbc0d2f-3326-44fa-85b1-8dd0d8264866",
+   "CONTINUITY": true
+  }
+ ],
+ "reconnect_rebuild": {
+  "method": "fresh session/follow open (assistantStream:true, mirrors bridge openFollow) after the consumption completed",
+  "snapshot_records": 19,
+  "settled_queued_message_id_in_snapshot": "6fbc0d2f…(matches the seq-16 splice insert and the seq-24 user/message settle)",
+  "pending_inbox_splices_replayed": 0,
+  "note": "the durable journal reconstructs the settled message on reconnect; no pending splice replays"
+ },
+ "negative_coverage": "no independent live negative per plan §3 row A3a: the invalid-splice projection error is a persistence-fold internal invariant (inbox.ts apply() — start/removedCount bounds, duplicate pending id) that normal Remote writes cannot commit; covered by bridge reducer unit tests in S3 per source semantics",
+ "sanitization": "probe-authored texts kept verbatim; workspace-instruction/runtime-context user messages REDACTED (owner data); session id truncated; cookie never recorded"
+}

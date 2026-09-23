@@ -153,16 +153,17 @@ func TestRealDriverActionMatrix(t *testing.T) {
 		t.Fatalf("dshweb.New: %v", err)
 	}
 	caps = deriveBackendCapabilities("dsh-web", dsh, "")
-	if !hasCap(caps, "session_rename") || !hasCap(caps, "session_pin") {
-		t.Errorf("dsh-web missing rename/pin: %v", caps)
-	}
-	if hasCap(caps, "session_archive") {
-		t.Errorf("dsh-web must NOT advertise session_archive: %v", caps)
+	// S5（OD-1=A）：官方归档集语义落地后 dsh-web 的真实动作面是
+	// rename+pin+archive+unarchive（A5 活体证据）；delete 仍无。
+	if !hasCap(caps, "session_rename") || !hasCap(caps, "session_pin") ||
+		!hasCap(caps, "session_archive") || !hasCap(caps, "session_unarchive") {
+		t.Errorf("dsh-web missing rename/pin/archive/unarchive: %v", caps)
 	}
 	if hasCap(caps, "session_delete") {
 		t.Errorf("dsh-web must NOT advertise session_delete: %v", caps)
 	}
-	if hasCap(caps, "session_mutation") {
-		t.Errorf("dsh-web must NOT advertise legacy session_mutation: %v", caps)
+	// Legacy AND semantics: rename AND archive both present → session_mutation.
+	if !hasCap(caps, "session_mutation") {
+		t.Errorf("dsh-web must advertise legacy session_mutation (rename+archive): %v", caps)
 	}
 }

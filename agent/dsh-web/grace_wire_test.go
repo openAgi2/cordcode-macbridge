@@ -2,9 +2,9 @@ package dshweb
 
 // §8.5 wire-contract rows (canonical-3080 design §3.2/§12.1): an already-bound
 // session's Send during grace returns the typed error (handlers map it to
-// backend_unavailable, never send_failed), and InstanceStatus stays available
-// with the reconnecting detail so the hello detector cannot fold it into
-// not_configured.
+// backend_unavailable, never send_failed), and the structured readiness stays
+// available with the reconnecting detail so the descriptor cannot fold it
+// into not_configured.
 
 import (
 	"context"
@@ -52,19 +52,19 @@ func TestSendDuringGraceReturnsTypedError(t *testing.T) {
 	}
 }
 
-func TestInstanceStatusDuringGraceStaysAvailable(t *testing.T) {
-	// §12.1-4: Current() is nil while dark; InstanceStatus must still report
-	// available=true + reconnecting detail, or detectInstanceStatusProber
-	// would emit not_configured — the code the grace contract forbids.
+func TestReadinessDuringGraceStaysAvailable(t *testing.T) {
+	// §12.1-4 (2026-09-22 plan §3 grace row): Current() is nil while dark;
+	// StructuredInstanceReadiness must still report available + reconnecting
+	// detail — a grace row must never fall through as 未启动.
 	r := graceFixture(t)
 	a := &Agent{resolver: r}
 
 	if cur := r.Current(); cur != nil {
 		t.Fatalf("Current must be nil during grace, got %+v", cur)
 	}
-	available, detail := a.InstanceStatus()
-	if !available {
-		t.Fatalf("InstanceStatus must stay available during grace: %q", detail)
+	status, detail := a.StructuredInstanceReadiness()
+	if status != ReadinessAvailable {
+		t.Fatalf("readiness must stay available during grace: %q (%q)", status, detail)
 	}
 	if !strings.Contains(detail, "reconnecting") {
 		t.Fatalf("detail must mention reconnecting: %q", detail)
@@ -73,8 +73,8 @@ func TestInstanceStatusDuringGraceStaysAvailable(t *testing.T) {
 	// Outside grace (healthy seat) the detail reverts to the instance line.
 	r2, _, _, _ := holdSeat(t, time.Second)
 	a2 := &Agent{resolver: r2}
-	available2, detail2 := a2.InstanceStatus()
-	if !available2 || !strings.Contains(detail2, "instance at") {
-		t.Fatalf("healthy status mismatch: %v %q", available2, detail2)
+	status2, detail2 := a2.StructuredInstanceReadiness()
+	if status2 != ReadinessAvailable || !strings.Contains(detail2, "instance at") {
+		t.Fatalf("healthy status mismatch: %q %q", status2, detail2)
 	}
 }

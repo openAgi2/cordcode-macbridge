@@ -1,0 +1,380 @@
+{
+ "captured_at": "2026-09-23T20:25:32+08:00",
+ "seat": "127.0.0.1:3080 (dsh 0.1.7-alpha.1 production)",
+ "probes": {
+  "sessions": {
+   "A": "session-…",
+   "B": "session-…"
+  },
+  "pinSession A": {
+   "ok": true,
+   "value": {
+    "pinnedSessionIds": [
+     "session-3bb32ff1-b8dd-495f-be3a-72e506d818c1"
+    ]
+   }
+  },
+  "pinSession B (most-recently-pinned-first order)": {
+   "ok": true,
+   "value": {
+    "pinnedSessionIds": [
+     "session-8bb7ab9d-c2c3-457d-8d10-3fe344d495b9",
+     "session-3bb32ff1-b8dd-495f-be3a-72e506d818c1"
+    ]
+   }
+  },
+  "unpinSession A": {
+   "ok": true,
+   "value": {
+    "pinnedSessionIds": [
+     "session-8bb7ab9d-c2c3-457d-8d10-3fe344d495b9"
+    ]
+   }
+  },
+  "unpinSession A again (idempotent no-op)": {
+   "ok": true,
+   "value": {
+    "pinnedSessionIds": [
+     "session-8bb7ab9d-c2c3-457d-8d10-3fe344d495b9"
+    ]
+   }
+  },
+  "pinSession bogus (→ session/not-found verbatim)": {
+   "ok": false,
+   "error": {
+    "code": "session/not-found",
+    "message": "cannot pin session 'session-nonexistent': live sessions and session persistence hold no such session",
+    "details": {
+     "sessionId": "session-nonexistent"
+    }
+   }
+  },
+  "archiveSession A (idle, no stopActivity)": {
+   "ok": true,
+   "value": {
+    "archivedSessionIds": [
+     "dsh-45c57ca1050be60d",
+     "dsh-02e2e67b3986aef3",
+     "session-e2019339-2f44-4392-9e0f-df867e335d38",
+     "session-c2998fc8-f055-46ee-8bfa-608b3b881827",
+     "session-1bd12595-1336-4fa3-9655-1e15aca9a307",
+     "session-b4cfd1c4-34b4-44b1-88a4-47798998a3da",
+     "session-1550b3ab-0486-466f-9bd4-10dbbcc227ae",
+     "session-d72969c2-802d-44bd-8d9b-9c2e213ef126",
+     "session-828f3c45-68d7-431f-90c7-845a91e63af0",
+     "session-1d528a11-010c-4b8f-877e-4de0f3c64676",
+     "session-070f866d-1e98-472e-9ccb-83092525a829",
+     "session-1525371a-9b91-403e-a68d-ef87a4ec97ea",
+     "session-d8bdcbbf-e013-4d8a-8178-4266fb669522",
+     "session-e47248bc-4d31-4fde-95a5-2c4298099e21",
+     "session-cc9970e5-85a7-46d1-a14f-274e1109517d",
+     "session-012a238e-4f51-4685-9426-cf0a167ef422",
+     "session-2cb79209-4e0b-472b-ad23-bb0cc3070cfb",
+     "session-9ef27d70-f1a0-498f-9c3e-472c1fb23971",
+     "session-d1c65967-16e0-4640-89cd-f4b7d8d3e4e3",
+     "session-eaaf03c2-44c4-4b81-ac34-8aa85a75ce4b",
+     "session-a894df5c-bbaf-4d94-b1c1-10743a9cd47d",
+     "session-927da183-e84c-40a7-9a33-6956167f9384",
+     "session-19877d4a-1c96-4fe8-a86c-fe8571670847",
+     "session-fddcf881-5a71-4076-adda-2495ffa6ad18",
+     "session-bc9b86e7-3ead-4ac2-ac80-261c001e506d",
+     "session-7fd6c5aa-802b-49ab-8358-80a3c0ecc757",
+     "session-b4c5961f-a09a-493d-aca0-f2d5d936cc01",
+     "session-3dbcaf49-b19e-4fc7-941d-6a7f5fe2aab0",
+     "session-be306a41-52fd-4a37-9f14-5b4ced47260d",
+     "session-760724c8-075f-4323-b190-7482b46e5370",
+     "session-960e92db-bfb0-40eb-9335-42f6b71824ec",
+     "session-d80e3313-70b3-4ba2-b515-b57c4a93a510",
+     "session-92635644-eb9f-4d54-8bfc-ecfabd4b45f5",
+     "session-902c6513-10d1-46c9-bf90-01f79a15b5dc",
+     "session-10c15565-9beb-4bc0-bd67-331a98f52fc5",
+     "session-485943fa-da2c-4f7b-993b-08c5c42eb3c3",
+     "session-5275611f-f99e-4726-a06c-647da71cdd97",
+     "session-f6561f91-f1af-4916-b8ed-8f23ef143457",
+     "session-87f13c1e-c63d-4c94-be0f-006ba81c9246",
+     "session-48cec0fc-bdf1-406a-b11a-e3d6923621c0",
+     "session-3f79cd14-8c61-4051-95c9-a3a6bf485e98",
+     "session-44d30a5c-b219-4743-be0b-86d615a2147b",
+     "session-3bb32ff1-b8dd-495f-be3a-72e506d818c1"
+    ]
+   }
+  },
+  "unarchiveSession A": {
+   "ok": true,
+   "value": {
+    "archivedSessionIds": [
+     "dsh-45c57ca1050be60d",
+     "dsh-02e2e67b3986aef3",
+     "session-e2019339-2f44-4392-9e0f-df867e335d38",
+     "session-c2998fc8-f055-46ee-8bfa-608b3b881827",
+     "session-1bd12595-1336-4fa3-9655-1e15aca9a307",
+     "session-b4cfd1c4-34b4-44b1-88a4-47798998a3da",
+     "session-1550b3ab-0486-466f-9bd4-10dbbcc227ae",
+     "session-d72969c2-802d-44bd-8d9b-9c2e213ef126",
+     "session-828f3c45-68d7-431f-90c7-845a91e63af0",
+     "session-1d528a11-010c-4b8f-877e-4de0f3c64676",
+     "session-070f866d-1e98-472e-9ccb-83092525a829",
+     "session-1525371a-9b91-403e-a68d-ef87a4ec97ea",
+     "session-d8bdcbbf-e013-4d8a-8178-4266fb669522",
+     "session-e47248bc-4d31-4fde-95a5-2c4298099e21",
+     "session-cc9970e5-85a7-46d1-a14f-274e1109517d",
+     "session-012a238e-4f51-4685-9426-cf0a167ef422",
+     "session-2cb79209-4e0b-472b-ad23-bb0cc3070cfb",
+     "session-9ef27d70-f1a0-498f-9c3e-472c1fb23971",
+     "session-d1c65967-16e0-4640-89cd-f4b7d8d3e4e3",
+     "session-eaaf03c2-44c4-4b81-ac34-8aa85a75ce4b",
+     "session-a894df5c-bbaf-4d94-b1c1-10743a9cd47d",
+     "session-927da183-e84c-40a7-9a33-6956167f9384",
+     "session-19877d4a-1c96-4fe8-a86c-fe8571670847",
+     "session-fddcf881-5a71-4076-adda-2495ffa6ad18",
+     "session-bc9b86e7-3ead-4ac2-ac80-261c001e506d",
+     "session-7fd6c5aa-802b-49ab-8358-80a3c0ecc757",
+     "session-b4c5961f-a09a-493d-aca0-f2d5d936cc01",
+     "session-3dbcaf49-b19e-4fc7-941d-6a7f5fe2aab0",
+     "session-be306a41-52fd-4a37-9f14-5b4ced47260d",
+     "session-760724c8-075f-4323-b190-7482b46e5370",
+     "session-960e92db-bfb0-40eb-9335-42f6b71824ec",
+     "session-d80e3313-70b3-4ba2-b515-b57c4a93a510",
+     "session-92635644-eb9f-4d54-8bfc-ecfabd4b45f5",
+     "session-902c6513-10d1-46c9-bf90-01f79a15b5dc",
+     "session-10c15565-9beb-4bc0-bd67-331a98f52fc5",
+     "session-485943fa-da2c-4f7b-993b-08c5c42eb3c3",
+     "session-5275611f-f99e-4726-a06c-647da71cdd97",
+     "session-f6561f91-f1af-4916-b8ed-8f23ef143457",
+     "session-87f13c1e-c63d-4c94-be0f-006ba81c9246",
+     "session-48cec0fc-bdf1-406a-b11a-e3d6923621c0",
+     "session-3f79cd14-8c61-4051-95c9-a3a6bf485e98",
+     "session-44d30a5c-b219-4743-be0b-86d615a2147b"
+    ]
+   }
+  },
+  "unarchiveSession A again (idempotent no-op)": {
+   "ok": true,
+   "value": {
+    "archivedSessionIds": [
+     "dsh-45c57ca1050be60d",
+     "dsh-02e2e67b3986aef3",
+     "session-e2019339-2f44-4392-9e0f-df867e335d38",
+     "session-c2998fc8-f055-46ee-8bfa-608b3b881827",
+     "session-1bd12595-1336-4fa3-9655-1e15aca9a307",
+     "session-b4cfd1c4-34b4-44b1-88a4-47798998a3da",
+     "session-1550b3ab-0486-466f-9bd4-10dbbcc227ae",
+     "session-d72969c2-802d-44bd-8d9b-9c2e213ef126",
+     "session-828f3c45-68d7-431f-90c7-845a91e63af0",
+     "session-1d528a11-010c-4b8f-877e-4de0f3c64676",
+     "session-070f866d-1e98-472e-9ccb-83092525a829",
+     "session-1525371a-9b91-403e-a68d-ef87a4ec97ea",
+     "session-d8bdcbbf-e013-4d8a-8178-4266fb669522",
+     "session-e47248bc-4d31-4fde-95a5-2c4298099e21",
+     "session-cc9970e5-85a7-46d1-a14f-274e1109517d",
+     "session-012a238e-4f51-4685-9426-cf0a167ef422",
+     "session-2cb79209-4e0b-472b-ad23-bb0cc3070cfb",
+     "session-9ef27d70-f1a0-498f-9c3e-472c1fb23971",
+     "session-d1c65967-16e0-4640-89cd-f4b7d8d3e4e3",
+     "session-eaaf03c2-44c4-4b81-ac34-8aa85a75ce4b",
+     "session-a894df5c-bbaf-4d94-b1c1-10743a9cd47d",
+     "session-927da183-e84c-40a7-9a33-6956167f9384",
+     "session-19877d4a-1c96-4fe8-a86c-fe8571670847",
+     "session-fddcf881-5a71-4076-adda-2495ffa6ad18",
+     "session-bc9b86e7-3ead-4ac2-ac80-261c001e506d",
+     "session-7fd6c5aa-802b-49ab-8358-80a3c0ecc757",
+     "session-b4c5961f-a09a-493d-aca0-f2d5d936cc01",
+     "session-3dbcaf49-b19e-4fc7-941d-6a7f5fe2aab0",
+     "session-be306a41-52fd-4a37-9f14-5b4ced47260d",
+     "session-760724c8-075f-4323-b190-7482b46e5370",
+     "session-960e92db-bfb0-40eb-9335-42f6b71824ec",
+     "session-d80e3313-70b3-4ba2-b515-b57c4a93a510",
+     "session-92635644-eb9f-4d54-8bfc-ecfabd4b45f5",
+     "session-902c6513-10d1-46c9-bf90-01f79a15b5dc",
+     "session-10c15565-9beb-4bc0-bd67-331a98f52fc5",
+     "session-485943fa-da2c-4f7b-993b-08c5c42eb3c3",
+     "session-5275611f-f99e-4726-a06c-647da71cdd97",
+     "session-f6561f91-f1af-4916-b8ed-8f23ef143457",
+     "session-87f13c1e-c63d-4c94-be0f-006ba81c9246",
+     "session-48cec0fc-bdf1-406a-b11a-e3d6923621c0",
+     "session-3f79cd14-8c61-4051-95c9-a3a6bf485e98",
+     "session-44d30a5c-b219-4743-be0b-86d615a2147b"
+    ]
+   }
+  },
+  "unarchiveSession bogus (idempotent success, no existence check)": {
+   "ok": true,
+   "value": {
+    "archivedSessionIds": [
+     "dsh-45c57ca1050be60d",
+     "dsh-02e2e67b3986aef3",
+     "session-e2019339-2f44-4392-9e0f-df867e335d38",
+     "session-c2998fc8-f055-46ee-8bfa-608b3b881827",
+     "session-1bd12595-1336-4fa3-9655-1e15aca9a307",
+     "session-b4cfd1c4-34b4-44b1-88a4-47798998a3da",
+     "session-1550b3ab-0486-466f-9bd4-10dbbcc227ae",
+     "session-d72969c2-802d-44bd-8d9b-9c2e213ef126",
+     "session-828f3c45-68d7-431f-90c7-845a91e63af0",
+     "session-1d528a11-010c-4b8f-877e-4de0f3c64676",
+     "session-070f866d-1e98-472e-9ccb-83092525a829",
+     "session-1525371a-9b91-403e-a68d-ef87a4ec97ea",
+     "session-d8bdcbbf-e013-4d8a-8178-4266fb669522",
+     "session-e47248bc-4d31-4fde-95a5-2c4298099e21",
+     "session-cc9970e5-85a7-46d1-a14f-274e1109517d",
+     "session-012a238e-4f51-4685-9426-cf0a167ef422",
+     "session-2cb79209-4e0b-472b-ad23-bb0cc3070cfb",
+     "session-9ef27d70-f1a0-498f-9c3e-472c1fb23971",
+     "session-d1c65967-16e0-4640-89cd-f4b7d8d3e4e3",
+     "session-eaaf03c2-44c4-4b81-ac34-8aa85a75ce4b",
+     "session-a894df5c-bbaf-4d94-b1c1-10743a9cd47d",
+     "session-927da183-e84c-40a7-9a33-6956167f9384",
+     "session-19877d4a-1c96-4fe8-a86c-fe8571670847",
+     "session-fddcf881-5a71-4076-adda-2495ffa6ad18",
+     "session-bc9b86e7-3ead-4ac2-ac80-261c001e506d",
+     "session-7fd6c5aa-802b-49ab-8358-80a3c0ecc757",
+     "session-b4c5961f-a09a-493d-aca0-f2d5d936cc01",
+     "session-3dbcaf49-b19e-4fc7-941d-6a7f5fe2aab0",
+     "session-be306a41-52fd-4a37-9f14-5b4ced47260d",
+     "session-760724c8-075f-4323-b190-7482b46e5370",
+     "session-960e92db-bfb0-40eb-9335-42f6b71824ec",
+     "session-d80e3313-70b3-4ba2-b515-b57c4a93a510",
+     "session-92635644-eb9f-4d54-8bfc-ecfabd4b45f5",
+     "session-902c6513-10d1-46c9-bf90-01f79a15b5dc",
+     "session-10c15565-9beb-4bc0-bd67-331a98f52fc5",
+     "session-485943fa-da2c-4f7b-993b-08c5c42eb3c3",
+     "session-5275611f-f99e-4726-a06c-647da71cdd97",
+     "session-f6561f91-f1af-4916-b8ed-8f23ef143457",
+     "session-87f13c1e-c63d-4c94-be0f-006ba81c9246",
+     "session-48cec0fc-bdf1-406a-b11a-e3d6923621c0",
+     "session-3f79cd14-8c61-4051-95c9-a3a6bf485e98",
+     "session-44d30a5c-b219-4743-be0b-86d615a2147b"
+    ]
+   }
+  },
+  "active session C prompt (make it busy)": {
+   "ok": true
+  },
+  "archiveSession C active without stopActivity (→ workspace/session-active verbatim)": {
+   "ok": false,
+   "error": {
+    "code": "workspace/session-active",
+    "message": "cannot archive session 'session-af9165e3-f7b7-4bdf-87d3-867444f6cc00': the session is active (turn)",
+    "details": {
+     "sessionId": "session-af9165e3-f7b7-4bdf-87d3-867444f6cc00",
+     "activity": [
+      {
+       "kind": "turn"
+      }
+     ]
+    }
+   }
+  },
+  "archiveSession C with stopActivity:true": {
+   "ok": true,
+   "value": {
+    "archivedSessionIds": [
+     "dsh-45c57ca1050be60d",
+     "dsh-02e2e67b3986aef3",
+     "session-e2019339-2f44-4392-9e0f-df867e335d38",
+     "session-c2998fc8-f055-46ee-8bfa-608b3b881827",
+     "session-1bd12595-1336-4fa3-9655-1e15aca9a307",
+     "session-b4cfd1c4-34b4-44b1-88a4-47798998a3da",
+     "session-1550b3ab-0486-466f-9bd4-10dbbcc227ae",
+     "session-d72969c2-802d-44bd-8d9b-9c2e213ef126",
+     "session-828f3c45-68d7-431f-90c7-845a91e63af0",
+     "session-1d528a11-010c-4b8f-877e-4de0f3c64676",
+     "session-070f866d-1e98-472e-9ccb-83092525a829",
+     "session-1525371a-9b91-403e-a68d-ef87a4ec97ea",
+     "session-d8bdcbbf-e013-4d8a-8178-4266fb669522",
+     "session-e47248bc-4d31-4fde-95a5-2c4298099e21",
+     "session-cc9970e5-85a7-46d1-a14f-274e1109517d",
+     "session-012a238e-4f51-4685-9426-cf0a167ef422",
+     "session-2cb79209-4e0b-472b-ad23-bb0cc3070cfb",
+     "session-9ef27d70-f1a0-498f-9c3e-472c1fb23971",
+     "session-d1c65967-16e0-4640-89cd-f4b7d8d3e4e3",
+     "session-eaaf03c2-44c4-4b81-ac34-8aa85a75ce4b",
+     "session-a894df5c-bbaf-4d94-b1c1-10743a9cd47d",
+     "session-927da183-e84c-40a7-9a33-6956167f9384",
+     "session-19877d4a-1c96-4fe8-a86c-fe8571670847",
+     "session-fddcf881-5a71-4076-adda-2495ffa6ad18",
+     "session-bc9b86e7-3ead-4ac2-ac80-261c001e506d",
+     "session-7fd6c5aa-802b-49ab-8358-80a3c0ecc757",
+     "session-b4c5961f-a09a-493d-aca0-f2d5d936cc01",
+     "session-3dbcaf49-b19e-4fc7-941d-6a7f5fe2aab0",
+     "session-be306a41-52fd-4a37-9f14-5b4ced47260d",
+     "session-760724c8-075f-4323-b190-7482b46e5370",
+     "session-960e92db-bfb0-40eb-9335-42f6b71824ec",
+     "session-d80e3313-70b3-4ba2-b515-b57c4a93a510",
+     "session-92635644-eb9f-4d54-8bfc-ecfabd4b45f5",
+     "session-902c6513-10d1-46c9-bf90-01f79a15b5dc",
+     "session-10c15565-9beb-4bc0-bd67-331a98f52fc5",
+     "session-485943fa-da2c-4f7b-993b-08c5c42eb3c3",
+     "session-5275611f-f99e-4726-a06c-647da71cdd97",
+     "session-f6561f91-f1af-4916-b8ed-8f23ef143457",
+     "session-87f13c1e-c63d-4c94-be0f-006ba81c9246",
+     "session-48cec0fc-bdf1-406a-b11a-e3d6923621c0",
+     "session-3f79cd14-8c61-4051-95c9-a3a6bf485e98",
+     "session-44d30a5c-b219-4743-be0b-86d615a2147b",
+     "session-af9165e3-f7b7-4bdf-87d3-867444f6cc00"
+    ]
+   }
+  },
+  "workspace/follow baseline (pinned/archived fields)": {
+   "pinnedSessionIds": [
+    "session-…"
+   ],
+   "archivedSessionIds": [
+    "dsh-45c5…",
+    "dsh-02e2…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…",
+    "session-…"
+   ],
+   "item_count": 2,
+   "pinned_matches_B": true,
+   "archived_matches_A": false,
+   "source_anchor": "workspace-controller/src/types.ts:160-166 WorkspaceBaseline",
+   "archived_membership_followup": {
+    "archived_membership": true,
+    "baseline_found": true,
+    "archived_set_len": 43
+   },
+   "archived_matches_A_note": "the archived set is REGISTRY-GLOBAL (contains the owner's pre-existing archived sessions too), so the correct assertion is membership, not set equality; the follow-up probe archived a fresh session and verified it appears in the baseline archivedSessionIds"
+  }
+ },
+ "sanitization": "session ids truncated; probe-authored texts verbatim; cookie never printed"
+}

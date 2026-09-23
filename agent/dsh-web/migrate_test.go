@@ -167,7 +167,7 @@ func TestStopLeavesSpawnedSeatInstanceRunning(t *testing.T) {
 		t.Fatalf("Stop() must not terminate the spawned instance (stops=%d)", starter.stops)
 	}
 	// The seat still answers after Stop.
-	if _, err := probeInstance(context.Background(), r.httpClient, r.seatURL()); err != nil {
+	if err := probeInstance(context.Background(), r.httpClient, r.seatURL(), nil); err != nil {
 		t.Fatalf("seat must keep serving after Stop: %v", err)
 	}
 	_ = starter.Stop() // test hygiene

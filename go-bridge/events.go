@@ -111,7 +111,43 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		} else if ev.TurnID != "" {
 			payload["itemId"] = ev.TurnID
 		}
+		// S4 (dsh-web): received attachment descriptors (journal image/file
+		// blocks). Image bytes stay lazy — clients fetch via get_attachment.
+		if len(ev.Attachments) > 0 {
+			payload["attachments"] = ev.Attachments
+		}
 		return "user_message", eventData(ev, payload), false
+
+	case core.EventUserMessageQueued:
+		// S3 inbox visibility (dsh-web): a queued placeholder row keyed by the
+		// official UserMessage.id. Same wire event as the settle, plus
+		// pending:true — the reducer upserts by itemId, so the later
+		// user/message with the same id replaces the placeholder in place
+		// (A3a evidence: id continuity between the splice insert and the
+		// settled journal event).
+		if ev.ItemID == "" {
+			return "", nil, false
+		}
+		queued := map[string]interface{}{
+			"text":    ev.Content,
+			"itemId":  ev.ItemID,
+			"pending": true,
+		}
+		if len(ev.Attachments) > 0 {
+			queued["attachments"] = ev.Attachments
+		}
+		return "user_message", eventData(ev, queued), false
+
+	case core.EventUserMessageRemoved:
+		// S3 inbox visibility: a splice removal (claim/cancel/edit-replace)
+		// retracts the placeholder row by the same id. The reducer only ever
+		// removes pending-marked rows — a real turn is never touched.
+		if ev.ItemID == "" {
+			return "", nil, false
+		}
+		return "user_message_removed", eventData(ev, map[string]interface{}{
+			"itemId": ev.ItemID,
+		}), false
 
 	case core.EventTurnStarted:
 		// Phase-3 turnId plumbing: carry source-proven turn identity so ProjectionReducer

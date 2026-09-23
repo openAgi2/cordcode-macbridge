@@ -1,0 +1,77 @@
+{
+ "captured_at": "2026-09-23T20:54:40+08:00",
+ "seat": "127.0.0.1:3080 (dsh 0.1.7-alpha.1 production)",
+ "probes": {
+  "turn 1 start (mode:queue, idle)": {
+   "ok": true
+  },
+  "session/prompt mode:steer while running (direct path)": {
+   "ok": true,
+   "value": {
+    "accepted": true
+   },
+   "error": null,
+   "wire_shape": {
+    "request": {
+     "requestId": "<fresh>",
+     "sessionId": "<truncated>",
+     "mode": "steer",
+     "content": [
+      {
+       "type": "text",
+       "text": "A7 steer probe: …"
+      }
+     ]
+    }
+   },
+   "source_anchor": "commands.ts:372 agent.steer(message) — direct path, distinct from updateQueue steer"
+  },
+  "journal agent/inbox/spliced shapes (steer → next-step vs queue → next-turn)": {
+   "splices": [
+    {
+     "target": "next-turn",
+     "removed_count": 0,
+     "removed_texts": [],
+     "inserted_count": 1,
+     "inserted_texts": [
+      "Write a 300-word essay about mountain air."
+     ]
+    },
+    {
+     "target": "next-turn",
+     "removed_count": 0,
+     "removed_texts": [],
+     "inserted_count": 0,
+     "inserted_texts": []
+    },
+    {
+     "target": "next-step",
+     "removed_count": 0,
+     "removed_texts": [],
+     "inserted_count": 1,
+     "inserted_texts": [
+      "A7 steer probe: switch to writing about sea air instead."
+     ]
+    }
+   ],
+   "note": "official inbox apply(): target next-step = steer into the running turn; target next-turn = queue for the next turn"
+  },
+  "idle poll (session/list running flag)": {
+   "reached_idle": true
+  },
+  "session/prompt mode:steer while idle (rejection sample)": {
+   "ok": true,
+   "value": {
+    "accepted": true
+   },
+   "error": null,
+   "source_anchor": "commands.ts:377-380 catch → session/agent-busy 'prompt rejected' (live-confirmed)"
+  },
+  "session/prompt mode:queue while idle (control)": {
+   "ok": true,
+   "error": null
+  }
+ },
+ "sanitization": "probe-authored texts verbatim; session ids never printed; cookie never printed",
+ "conclusion": "A7 direct steer path fully evidenced with ONE correction to the plan's source-mapped premise: ①running steer → accepted, journal splice target=next-step (agent.steer, commands.ts:372); ②idle queue → accepted, splice target=next-turn; ③idle steer (verified idle via session/list running=false) → ACCEPTED, not the source-mapped session/agent-busy rejection — official agent.steer = send(next-step, wake:true) (agent-loop/src/agent.ts:150-172): an idle agent wakes and the steered message becomes the next turn. ④Official composer policy (ui-conversation submission-policy.ts:29-38 + DEFAULT_BUSY_ENTER_BEHAVIOR='queue'): idle→queue always; running→the user's busy-Enter preference, DEFAULT queue; steer is the explicit Cmd/Ctrl gesture or a settings change. OD-2a=A 'mirror official' therefore = keep queue default + expose steer as an explicit per-request mode (fail-closed per the ruling's own clause: samples override the source-mapped premise)."
+}

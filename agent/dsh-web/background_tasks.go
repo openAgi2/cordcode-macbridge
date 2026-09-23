@@ -61,7 +61,7 @@ func (a *Agent) ListBackgroundTasks(ctx context.Context) ([]core.BackgroundTask,
 		return nil, err
 	}
 	var val sessionListValue
-	if err := client.Call(ctx, "session.list", sessionListRequest{}, &val); err != nil {
+	if err := client.Call(ctx, "session/list", listArgs(), &val); err != nil {
 		return nil, err
 	}
 	// 两遍扫描（嵌套真值）：官方 session.list 只给 parentSessionId（直接父）。
@@ -176,7 +176,7 @@ func (a *Agent) CancelBackgroundTask(ctx context.Context, taskID string) error {
 	if err != nil {
 		return err
 	}
-	return client.Call(ctx, "session.cancel", sessionCancelRequest{SessionID: taskID}, nil)
+	return client.Call(ctx, "session/cancel", map[string]any{"request": sessionCancelRequest{SessionID: taskID}}, nil)
 }
 
 var _ core.BackgroundTaskProvider = (*Agent)(nil)

@@ -37,7 +37,7 @@ func TestMutateSessionGoalWireAndRef(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["session.list"] = fakeRPCResponse{value: goalListFixture("sess-goal", 7)}
+	f.handlers["session/list"] = fakeRPCResponse{value: goalListFixture("sess-goal", 7)}
 	f.handlers["goals/pause"] = fakeRPCResponse{value: map[string]any{}}
 
 	if err := a.MutateSessionGoal(context.Background(), "sess-goal", "pause", ""); err != nil {
@@ -82,7 +82,7 @@ func TestMutateSessionGoalEditCarriesObjective(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["session.list"] = fakeRPCResponse{value: goalListFixture("sess-goal", 2)}
+	f.handlers["session/list"] = fakeRPCResponse{value: goalListFixture("sess-goal", 2)}
 	f.handlers["goals/edit"] = fakeRPCResponse{value: map[string]any{}}
 
 	if err := a.MutateSessionGoal(context.Background(), "sess-goal", "edit", "  新目标  "); err != nil {
@@ -120,7 +120,7 @@ func TestMutateSessionGoalNoCurrentGoal(t *testing.T) {
 	defer f.Close()
 	a := newTestAgent(t, f)
 	// 投影无 goal 单元（官方 null / absent）。
-	f.handlers["session.list"] = fakeRPCResponse{value: map[string]any{
+	f.handlers["session/list"] = fakeRPCResponse{value: map[string]any{
 		"items": []map[string]any{{
 			"sessionId": "sess-goal", "updatedAt": 1,
 			"projections": map[string]any{"asOfSeq": 9, "values": map[string]any{}},
@@ -139,7 +139,7 @@ func TestMutateSessionGoalValidation(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["session.list"] = fakeRPCResponse{value: goalListFixture("sess-goal", 1)}
+	f.handlers["session/list"] = fakeRPCResponse{value: goalListFixture("sess-goal", 1)}
 
 	if err := a.MutateSessionGoal(context.Background(), "", "pause", ""); err == nil {
 		t.Fatal("empty session id must fail")
@@ -150,7 +150,11 @@ func TestMutateSessionGoalValidation(t *testing.T) {
 	if err := a.MutateSessionGoal(context.Background(), "sess-goal", "edit", "   "); err == nil {
 		t.Fatal("edit without objective must fail")
 	}
-	if calls := methodCalls(f, "session.list"); len(calls) != 0 {
-		t.Fatalf("validation must fail before any seat call, got %d", len(calls))
+	// The resolver's liveness probe rides session/list; validation must fail
+	// before any GOAL verb reaches the seat.
+	for _, verb := range []string{"goals/pause", "goals/resume", "goals/clear", "goals/edit"} {
+		if calls := methodCalls(f, verb); len(calls) != 0 {
+			t.Fatalf("validation must fail before %s, got %d", verb, len(calls))
+		}
 	}
 }

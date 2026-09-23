@@ -538,6 +538,46 @@ struct WorkspaceView: View {
         return agent.id == "codex-remote" || kind == "codex-remote"
     }
 
+    private func isDeepSeekWeb(_ agent: BackendAgentStatus) -> Bool {
+        agent.kind.lowercased() == "deepseek-web" || agent.id == "dsh-web"
+    }
+
+    /// DeepSeek 行的座位动作决策（§3 状态表 → 按钮），纯函数供单测锁定。
+    enum DeepSeekSeatAction: Equatable {
+        case none
+        case install
+        case needNode
+        case start
+        case installing
+        case starting
+    }
+
+    static func deepSeekSeatAction(
+        status: String,
+        installing: Bool,
+        starting: Bool,
+        npmFound: Bool
+    ) -> DeepSeekSeatAction {
+        if installing { return .installing }
+        if starting { return .starting }
+        switch status {
+        case "not_detected": return npmFound ? .install : .needNode
+        case "service_not_running": return .start
+        default: return .none
+        }
+    }
+
+    /// DeepSeek 行的状态文案覆盖（§3）：not_detected → 未安装、
+    /// service_not_running → 未启动；其余沿用全局映射（就绪 / 端口占用）。
+    /// 只覆盖该行——Claude 等其他 backend 的 not_detected 仍是「未找到」。
+    static func deepSeekRowStatusText(_ status: String) -> String {
+        switch status {
+        case "not_detected": return L10n.dshWebStatusNotInstalled
+        case "service_not_running": return L10n.dshWebStatusNotRunning
+        default: return BackendStatusText.display(status)
+        }
+    }
+
     private func agentRow(for agent: BackendAgentStatus) -> some View {
         HStack(spacing: 0) {
             AgentBrandMark(kind: agent.kind)
@@ -559,13 +599,18 @@ struct WorkspaceView: View {
                 if agent.kind.lowercased() == "grokbuild" {
                     grokLeaderHint(for: agent)
                 }
+                if isDeepSeekWeb(agent) {
+                    deepSeekSeatHint(for: agent)
+                }
             }
 
             HStack(spacing: 12) {
                 Image(systemName: agent.isAvailable ? "checkmark.circle" : "exclamationmark.circle")
                     .font(.system(size: 23, weight: .light))
                     .frame(width: 23, height: 23)
-                Text(agent.displayStatus)
+                Text(isDeepSeekWeb(agent)
+                     ? Self.deepSeekRowStatusText(agent.status)
+                     : agent.displayStatus)
                     .font(.system(size: 16, weight: .semibold))
             }
             .foregroundStyle(agent.isAvailable ? Color.green : Color.orange)
@@ -606,6 +651,10 @@ struct WorkspaceView: View {
                     .frame(width: 172, height: 32)
             }
 
+            if isDeepSeekWeb(agent) {
+                deepSeekSeatControls(for: agent)
+            }
+
             if !agent.isAvailable {
                 Button(L10n.workspaceRecheck) {
                     Task { await backendViewModel.testAgent(id: agent.id) }
@@ -624,6 +673,84 @@ struct WorkspaceView: View {
                 .fill(Color.white.opacity(0.15))
                 .frame(height: 0.5)
                 .offset(y: -3) // 分割线也跟随上移 3px
+        }
+    }
+
+    // MARK: - DeepSeek 座位动作（2026-09-22 方案 §2.1/§2.2/§2.4）
+
+    /// 行按钮：未安装 → 安装（无 node/npm 时改为「需要 Node.js」，点开官网）；
+    /// 未启动 → 启动；进行中 → 禁用态。样式对齐「配对」「重新检查」。
+    @ViewBuilder
+    private func deepSeekSeatControls(for agent: BackendAgentStatus) -> some View {
+        let state = backendViewModel.dshWebSeatAction
+        switch Self.deepSeekSeatAction(
+            status: agent.status,
+            installing: state.installing,
+            starting: state.starting,
+            npmFound: state.npmFound
+        ) {
+        case .installing:
+            Button(L10n.dshWebInstalling) {}
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(true)
+                .frame(width: 72, height: 32)
+        case .starting:
+            Button(L10n.dshWebStarting) {}
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(true)
+                .frame(width: 72, height: 32)
+        case .install:
+            Button(L10n.dshWebInstall) {
+                Task { await backendViewModel.installDSHWeb() }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .frame(width: 72, height: 32)
+        case .needNode:
+            Button(L10n.dshWebNeedNode) {
+                if let url = URL(string: "https://nodejs.org") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .frame(width: 110, height: 32)
+        case .start:
+            Button(L10n.dshWebStart) {
+                Task { await backendViewModel.startDSHWebSeat() }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .frame(width: 72, height: 32)
+        case .none:
+            EmptyView()
+        }
+    }
+
+    /// 名字下方字幕（§2.4：一行，hover 全文）。优先级：进行中提示 → npm 真实
+    /// 错误 → prefix 回退说明 → 启动失败原文 → port_conflict 的 lsof 命令行 →
+    /// service_not_running 的 reason。
+    @ViewBuilder
+    private func deepSeekSeatHint(for agent: BackendAgentStatus) -> some View {
+        let state = backendViewModel.dshWebSeatAction
+        if state.installing {
+            hintText(L10n.dshWebInstallingHint, full: L10n.dshWebInstallingHint, color: .secondary)
+        } else if state.starting {
+            hintText(L10n.dshWebStartingHint, full: L10n.dshWebStartingHint, color: .secondary)
+        } else if let err = state.lastInstallError, !err.isEmpty {
+            hintText(err, full: err, color: .orange)
+        } else if let note = state.lastInstallNote, !note.isEmpty {
+            hintText(note, full: note, color: .secondary)
+        } else if let err = state.lastStartError, !err.isEmpty {
+            hintText(err, full: err, color: .orange)
+        } else if agent.status == "port_conflict", let reason = agent.reason, !reason.isEmpty {
+            hintText(reason, full: reason, color: .orange)
+        } else if agent.status == "service_not_running", let reason = agent.reason, !reason.isEmpty {
+            hintText(reason, full: reason, color: .secondary)
+        } else {
+            EmptyView()
         }
     }
 

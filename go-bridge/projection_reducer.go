@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // ProjectionReducer maintains the authoritative in-memory SessionProjection per
@@ -55,8 +57,12 @@ type projectionSession struct {
 	thinking    map[string]reasoningPending // turnId+itemId -> full reasoning item (set_thinking)
 	tools       map[string]toolPending      // tool callId -> latest tool part + owning turn (upsert_tool)
 	upsertTurns map[string]TurnProjection   // turnId -> latest whole-turn snapshot (upsertTurns)
-	userInputs  map[string]userInputPending // interactionId -> latest user_input part + owning turn (upsert_user_input)
-	workflows   map[string]workflowPending  // workflow runId -> latest workflow part + owning turn (upsert_workflow)
+	// removedTurns stages S3 placeholder retractions (user_message_removed /
+	// settle replacement) for the next patch — a deletion cannot ride
+	// UpsertTurns, so it gets the additive RemovedTurnIDs patch field.
+	removedTurns []string
+	userInputs   map[string]userInputPending // interactionId -> latest user_input part + owning turn (upsert_user_input)
+	workflows    map[string]workflowPending  // workflow runId -> latest workflow part + owning turn (upsert_workflow)
 	// permissionCards tracks control-plane permission-card part itemIDs (the
 	// reducer synthesizes these from permission_request; the real tool part has
 	// a different ItemID and completes separately). turn_completed settles the
@@ -287,6 +293,37 @@ func dataBool(m map[string]interface{}, key string) bool {
 	return false
 }
 
+// dataAttachments extracts the S4 attachment descriptors from a user_message
+// frame (mapAgentEvent stamps []core.EventAttachment). Returns nil when the
+// frame carries none — callers treat nil as "absent" so upsertTurn keeps any
+// held value (same merge rule as FileChanges).
+func dataAttachments(m map[string]interface{}, key string) []ProjectionAttachment {
+	if m == nil {
+		return nil
+	}
+	raw, ok := m[key]
+	if !ok {
+		return nil
+	}
+	list, ok := raw.([]core.EventAttachment)
+	if !ok {
+		return nil
+	}
+	out := make([]ProjectionAttachment, 0, len(list))
+	for _, a := range list {
+		out = append(out, ProjectionAttachment{
+			Kind:         a.Kind,
+			AttachmentID: a.AttachmentID,
+			MediaType:    a.MediaType,
+			Name:         a.Name,
+			Bytes:        a.Bytes,
+			Width:        a.Width,
+			Height:       a.Height,
+		})
+	}
+	return out
+}
+
 func (ps *projectionSession) turnByID(turnID string) *TurnProjection {
 	for i := range ps.projection.Turns {
 		if ps.projection.Turns[i].TurnID == turnID {
@@ -330,6 +367,13 @@ func (ps *projectionSession) upsertTurn(turn TurnProjection) {
 		if turn.FileChanges != nil {
 			t.FileChanges = turn.FileChanges
 		}
+		// S3 queued placeholder marker: present wins, absent keeps the held
+		// value (a placeholder re-emission stays pending; the settle path
+		// retracts the placeholder row before this merge, so the surviving
+		// turn never carries a stale marker).
+		if turn.Pending != nil {
+			t.Pending = turn.Pending
+		}
 		if ps.upsertTurns != nil {
 			ps.upsertTurns[turn.TurnID] = *t
 		}
@@ -339,6 +383,30 @@ func (ps *projectionSession) upsertTurn(turn TurnProjection) {
 	if ps.upsertTurns != nil {
 		ps.upsertTurns[turn.TurnID] = turn
 	}
+}
+
+// removePendingPlaceholder retracts the S3 queued placeholder row keyed by
+// itemID — and ONLY that shape: a turn whose TurnID == itemID AND whose
+// pending marker is set. Ordinary turns (including itemID-keyed fallback
+// rows from other backends) are never touched; an unknown id is a no-op
+// (fail-closed, no phantom effects). The retraction rides the next patch via
+// the additive RemovedTurnIDs list. Returns true when a row was retracted.
+func (ps *projectionSession) removePendingPlaceholder(itemID string) bool {
+	if itemID == "" {
+		return false
+	}
+	turns := ps.projection.Turns
+	for i := range turns {
+		if turns[i].TurnID != itemID || turns[i].Pending == nil || !*turns[i].Pending {
+			continue
+		}
+		ps.projection.Turns = append(turns[:i], turns[i+1:]...)
+		delete(ps.publishedTurnShells, itemID)
+		delete(ps.upsertTurns, itemID)
+		ps.removedTurns = append(ps.removedTurns, itemID)
+		return true
+	}
+	return false
 }
 
 // upsertSessionCommandTurn is the shared timeline projection used by DSH,
@@ -1156,6 +1224,31 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		turnID := dataString(data, "turnId")
 		itemID := dataString(data, "itemId")
 		text := dataString(data, "text")
+		// S3 inbox visibility (dsh-web): pending:true marks a queued
+		// placeholder row keyed by the official UserMessage.id — no turn
+		// attribution, no execution arming. The settled user_message with the
+		// same id replaces it in place (retract-then-upsert), so the row never
+		// doubles (A3a id-continuity evidence).
+	if dataBool(data, "pending") {
+		if itemID == "" {
+			return
+		}
+		commit()
+		pending := true
+		placeholder := TurnProjection{
+			TurnID:  itemID,
+			Status:  "pending",
+			Pending: &pending,
+			User: &MessageProjection{ID: itemID, Role: "user", Parts: []ProjectionPart{
+				{Type: "text", Text: text, ItemID: itemID},
+			}},
+		}
+		if atts := dataAttachments(data, "attachments"); len(atts) > 0 {
+			placeholder.User.Attachments = atts
+		}
+		ps.upsertTurn(placeholder)
+		return
+	}
 		if turnID == "" {
 			turnID = itemID // fallback: attribute to the message id if no explicit turnId
 		}
@@ -1163,6 +1256,13 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			return
 		}
 		commit()
+		// Settle replacement: a pending placeholder keyed by this itemID (if
+		// any) is retracted first — the real turn row takes over the timeline
+		// slot (the claim splice precedes the settle in the journal, but a
+		// replay may deliver the settle first; both orders converge).
+		if itemID != "" {
+			ps.removePendingPlaceholder(itemID)
+		}
 		upsert := TurnProjection{
 			TurnID: turnID,
 			Status: "running",
@@ -1171,6 +1271,11 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			User: &MessageProjection{ID: itemID, Role: "user", Parts: []ProjectionPart{
 				{Type: "text", Text: text, ItemID: itemID},
 			}},
+		}
+		// S4: received attachment descriptors ride the same frame; present
+		// wins in upsertTurn, absent keeps any held value (FileChanges rule).
+		if atts := dataAttachments(data, "attachments"); len(atts) > 0 {
+			upsert.User.Attachments = atts
 		}
 		// Turn-level official net file diffs ride the hydrate user_message
 		// (cold path: opencode user-message summary.diffs). Present wins in
@@ -1184,6 +1289,18 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		// a re-emitted turn_started must still arm the UI (owner 2026-07-25: reopen app
 		// → prompt+thinking then sticky 完成态 because phase stayed idle).
 		ps.markRunning(turnID)
+
+	case "user_message_removed":
+		// S3 inbox visibility: an inbox splice removal (claim/cancel/edit-
+		// replace) retracts the queued placeholder row by id. Only pending-
+		// marked rows are ever retracted; unknown ids are no-ops.
+		itemID := dataString(data, "itemId")
+		if itemID == "" {
+			return
+		}
+		if ps.removePendingPlaceholder(itemID) {
+			commit()
+		}
 
 	case "turn_file_changes":
 		// Turn-level official net file diffs (opencode user-message
@@ -2597,10 +2714,15 @@ func (r *ProjectionReducer) flushLocked(ps *projectionSession) (ProjectionPatch,
 	headRev := ps.projection.SyncRev
 	if headRev == ps.lastFlushedRev && len(ps.textAppends) == 0 && len(ps.thinking) == 0 &&
 		len(ps.tools) == 0 && len(ps.upsertTurns) == 0 && len(ps.userInputs) == 0 && len(ps.workflows) == 0 &&
+		len(ps.removedTurns) == 0 &&
 		ps.execution == nil && ps.planMode == nil && ps.goal == nil && ps.sessionMode == nil && ps.collaborationMode == nil && ps.codexGoal == nil {
 		return ProjectionPatch{}, false
 	}
 	patch := ProjectionPatch{BaseRev: ps.lastFlushedRev, SyncRev: headRev}
+	if len(ps.removedTurns) > 0 {
+		patch.RemovedTurnIDs = append([]string(nil), ps.removedTurns...)
+		ps.removedTurns = nil
+	}
 	if ps.execution != nil {
 		e := *ps.execution
 		patch.Execution = &e

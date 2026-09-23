@@ -53,6 +53,21 @@ func TestObservationIncludeRunningSignalsAllowsUnlistedMilestonesOnly(t *testing
 	}
 }
 
+func TestObservationScopelessDeviceGetsInboxPlaceholderAndRemoval(t *testing.T) {
+	om := NewObservationManager()
+	// dsh-web inbox：user_message 占位与 user_message_removed 撤销必须成对通过
+	// scopeless control-plane 门；只放占位会留下永远不消失的 pending 行。
+	if !om.ShouldSendEvent("dev_fresh", "dsh-web", "session-x", "user_message") {
+		t.Fatal("user_message placeholder must pass the scopeless control-plane gate")
+	}
+	if !om.ShouldSendEvent("dev_fresh", "dsh-web", "session-x", "user_message_removed") {
+		t.Fatal("user_message_removed retraction must pass the scopeless control-plane gate")
+	}
+	if om.ShouldSendEvent("dev_fresh", "dsh-web", "session-x", "text_delta") {
+		t.Fatal("scopeless devices must not receive streaming deltas")
+	}
+}
+
 func TestObservationRebindSessionIDRewritesPendingAlias(t *testing.T) {
 	om := NewObservationManager()
 	om.SetScope("dev_1", ObservationScope{

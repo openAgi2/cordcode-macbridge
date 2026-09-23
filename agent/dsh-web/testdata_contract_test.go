@@ -1,10 +1,10 @@
 package dshweb
 
-// testdata 夹具契约门：session.list / llm.models 的脱敏活体捕获（dsh web
-// 0.0.1，2026-08-18 实跑；audit P1 / 路线图 Phase 1 测试资产项）。codex/grok/
-// opencode 均有 sanitized 捕获夹具，dsh-web 此前缺失——runtime 升级破坏契约时
-// 无对照。schema 漂移时这里先红，由设计阶段重新取证，而不是在 client 现场
-// 猜格式（与 grokbuild catalog_session_list_test.go 的格式冻结门同构）。
+// testdata 夹具契约门：session/list / session/modelCatalog / agentPresets/list
+// 的脱敏活体捕获（typert 网关代，dsh 0.1.7-alpha.1，2026-09-23 实跑；上一代
+// 点分隔捕获已于 wire 迁移时退役）。runtime 升级破坏契约时这里先红，由设计
+// 阶段重新取证，而不是在 client 现场猜格式（与 grokbuild catalog_session_
+// list_test.go 的格式冻结门同构）。
 
 import (
 	"encoding/json"
@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	sessionListFixture = "testdata/session_list_sanitized.json"
-	llmModelsFixture   = "testdata/llm_models_sanitized.json"
+	sessionListFixture  = "testdata/session_list_sanitized.json"
+	modelCatalogFixture = "testdata/model_catalog_sanitized.json"
 )
 
 // loadFixtureValue reads a sanitized capture and unmarshals response.result.value
@@ -76,14 +76,20 @@ func TestSessionListFixtureDecodesAgainstPinnedSchema(t *testing.T) {
 	}
 }
 
-func TestLLMModelsFixtureDecodesAgainstPinnedSchema(t *testing.T) {
-	var val llmModelsValue
-	loadFixtureValue(t, llmModelsFixture, &val)
+func TestModelCatalogFixtureDecodesAgainstPinnedSchema(t *testing.T) {
+	var val modelCatalogValue
+	loadFixtureValue(t, modelCatalogFixture, &val)
 
 	if len(val.Groups) == 0 {
-		t.Fatal("llm.models fixture without provider groups")
+		t.Fatal("session/modelCatalog fixture without provider groups")
 	}
-	models, sawOff, sawDefaultEffort := 0, false, false
+	if val.Default.Provider == "" || val.Default.Model == "" {
+		t.Fatalf("fixture lost the default selection: %+v", val.Default)
+	}
+	if len(val.RoutableProviders) == 0 {
+		t.Fatal("fixture lost routableProviders")
+	}
+	models, sawOff := 0, false
 	for _, g := range val.Groups {
 		for _, m := range g.Models {
 			models++
@@ -92,9 +98,6 @@ func TestLLMModelsFixtureDecodesAgainstPinnedSchema(t *testing.T) {
 			}
 			if m.Reasoning == nil {
 				continue
-			}
-			if m.Reasoning.DefaultEffort != "" {
-				sawDefaultEffort = true
 			}
 			for _, e := range m.Reasoning.Efforts {
 				if e.ID == "" || e.Name == "" {
@@ -107,15 +110,14 @@ func TestLLMModelsFixtureDecodesAgainstPinnedSchema(t *testing.T) {
 		}
 	}
 	if models < 5 {
-		t.Fatalf("llm.models fixture too thin: %d models", models)
+		t.Fatalf("modelCatalog fixture too thin: %d models", models)
 	}
 	// off 档是审计 N2 的 wire 证据（DSH 真实词表含 off）——夹具丢失它即失效。
 	if !sawOff {
-		t.Fatal("llm.models fixture lost the `off` effort tier (N2 wire evidence)")
+		t.Fatal("modelCatalog fixture lost the `off` effort tier (N2 wire evidence)")
 	}
-	if !sawDefaultEffort {
-		t.Fatal("llm.models fixture lost defaultEffort (ModelEffortCatalog reads it)")
-	}
+	// defaultEffort：上一代捕获携带它；typert 网关代的活体目录（2026-09-23
+	// 捕获）不再携带 —— EffortsForModel 对缺失返回空默认档，不伪造。
 }
 
 // ---- G4 sample-gate fixtures (2026-08-28 live captures; docs G4 深对齐 evidence) ----
@@ -129,7 +131,6 @@ const (
 	agentPresetListFixture     = "testdata/agentpreset_list_sanitized.json"
 	sessionListG4Fixture       = "testdata/session_list_g4_sanitized.json"
 	permissionPresetEventsFixt = "testdata/permission_preset_events_sanitized.json"
-	hostDescribeFixture        = "testdata/host_describe_sanitized.json"
 )
 
 func TestAgentPresetListFixtureDecodesAgainstPinnedSchema(t *testing.T) {
@@ -137,22 +138,22 @@ func TestAgentPresetListFixtureDecodesAgainstPinnedSchema(t *testing.T) {
 	loadFixtureValue(t, agentPresetListFixture, &val)
 
 	if len(val.Presets) < 4 {
-		t.Fatalf("agentPreset.list fixture lost presets: %d", len(val.Presets))
+		t.Fatalf("agentPresets/list fixture lost presets: %d", len(val.Presets))
 	}
 	byID := map[string]apiAgentPresetEntry{}
 	for _, p := range val.Presets {
-		if p.ID == "" || p.Trust == "" {
-			t.Fatalf("preset without id/trust: %+v", p)
+		if p.ID == "" {
+			t.Fatalf("preset without id: %+v", p)
 		}
 		byID[p.ID] = p
 	}
-	for _, id := range []string{"standard", "code", "minimal", "cordis"} {
+	for _, id := range []string{"standard", "ptc", "minimal", "cordis"} {
 		if _, ok := byID[id]; !ok {
 			t.Fatalf("fixture lost official preset %q", id)
 		}
 	}
-	if !byID["minimal"].IsDefault {
-		t.Fatal("minimal must stay the default preset (matches settings agent-presets.default)")
+	if !byID["standard"].IsDefault {
+		t.Fatal("standard must stay the default preset (live capture 2026-09-23)")
 	}
 }
 
@@ -160,7 +161,7 @@ func TestSessionListG4FixtureCarriesNonNullBreakdownAndPermissions(t *testing.T)
 	var val sessionListValue
 	loadFixtureValue(t, sessionListG4Fixture, &val)
 
-	sawBreakdown, sawPermissions, sawAnomaly := false, false, false
+	sawBreakdown, sawPermissions, sawPressure := false, false, false
 	for _, it := range val.Items {
 		vals := it.Projections.Values
 		if vals == nil {
@@ -183,23 +184,19 @@ func TestSessionListG4FixtureCarriesNonNullBreakdownAndPermissions(t *testing.T)
 		}
 		if raw, ok := vals["permissions"]; ok && raw != nil {
 			var perm struct {
-				Options []struct {
-					Value string `json:"value"`
-					Name  string `json:"name"`
-				} `json:"options"`
 				CurrentValue string `json:"currentValue"`
 			}
 			if err := json.Unmarshal(raw, &perm); err != nil {
 				t.Fatalf("row %s permissions decode: %v", it.SessionID, err)
 			}
-			if len(perm.Options) == 3 && perm.CurrentValue != "" {
+			if perm.CurrentValue != "" {
 				sawPermissions = true
 			}
 		}
-		// 零压异常行（press/proj=0 但 breakdown 和真实非零）：上游数据状态，decode 不得漂移。
-		if cp.PressureTokens != nil && cp.ProjectedTokens != nil && cp.ContextWindow != nil &&
-			*cp.PressureTokens == 0 && *cp.ProjectedTokens == 0 && *cp.ContextWindow > 0 {
-			sawAnomaly = true
+		// 真实压力行（projected>0 且 window>0）：新代捕获的活体证据，decode 不得漂移。
+		if cp.ProjectedTokens != nil && cp.ContextWindow != nil &&
+			*cp.ProjectedTokens > 0 && *cp.ContextWindow > 0 {
+			sawPressure = true
 		}
 	}
 	if !sawBreakdown {
@@ -208,8 +205,8 @@ func TestSessionListG4FixtureCarriesNonNullBreakdownAndPermissions(t *testing.T)
 	if !sawPermissions {
 		t.Fatal("fixture lost the non-null permissions projection (G4 preset forcing evidence)")
 	}
-	if !sawAnomaly {
-		t.Fatal("fixture lost the zero-pressure anomaly row")
+	if !sawPressure {
+		t.Fatal("fixture lost the live pressure row (projected>0, window>0)")
 	}
 }
 
@@ -270,12 +267,5 @@ func TestPermissionPresetEventsFixtureChain(t *testing.T) {
 	}
 }
 
-func TestHostDescribeFixturePinsAPIVersion(t *testing.T) {
-	var val struct {
-		Version string `json:"version"`
-	}
-	loadFixtureValue(t, hostDescribeFixture, &val)
-	if val.Version != "0.0.1" {
-		t.Fatalf("host.describe version = %q, want 0.0.1 (API-level identity pin)", val.Version)
-	}
-}
+// host.describe 已随 typert 网关退役（claimsEndpoint 无 host 命名空间）；
+// 其夹具与版本钉子一并退役，API 身份以 npm 包版本 + 上游 commit 锚定。

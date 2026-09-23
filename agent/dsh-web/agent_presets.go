@@ -1,7 +1,9 @@
 package dshweb
 
-// Official agentPreset roster and create/select. List is the picker source;
-// create carries the id; select is only legal on a still-blank session.
+// Official agentPreset roster and select. List is the picker source; select
+// is only legal on a still-blank session (agentPresets/* — the typert
+// gateway's plural namespace; the select parameter is agentId, the
+// session-backed Agent identity).
 
 import (
 	"context"
@@ -12,21 +14,22 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
+// apiAgentPresetEntry is one agentPresets/list row (id/order/isDefault —
+// the gateway generation carries no name/description/trust/broken fields;
+// display degrades to the id).
 type apiAgentPresetEntry struct {
-	ID          string `json:"id"`
-	Trust       string `json:"trust"`
-	IsDefault   bool   `json:"isDefault"`
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
-	Broken      string `json:"broken,omitempty"`
+	ID        string `json:"id"`
+	Order     int    `json:"order"`
+	IsDefault bool   `json:"isDefault"`
 }
 
 type agentPresetListValue struct {
-	Presets []apiAgentPresetEntry `json:"presets"`
+	Presets              []apiAgentPresetEntry `json:"presets"`
+	ModeSelectionEnabled bool                  `json:"modeSelectionEnabled"`
 }
 
 type agentPresetSelectRequest struct {
-	SessionID   string `json:"sessionId"`
+	AgentID     string `json:"agentId"`
 	AgentPreset string `json:"agentPreset"`
 }
 
@@ -53,10 +56,8 @@ func (a *Agent) SelectAgentPreset(ctx context.Context, sessionID, id string) err
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	var val agentPresetSelectValue
-	if err := client.Call(ctx, "agentPreset.select", agentPresetSelectRequest{
-		SessionID:   sessionID,
-		AgentPreset: id,
-	}, &val); err != nil {
+	req := agentPresetSelectRequest{AgentID: sessionID, AgentPreset: id}
+	if err := client.Call(ctx, "agentPresets/select", map[string]any{"request": req}, &val); err != nil {
 		return err
 	}
 	a.pendingPreset = id
@@ -71,22 +72,17 @@ func (a *Agent) ListAgents(ctx context.Context) ([]core.AgentDescriptor, error) 
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	var val agentPresetListValue
-	if err := client.Call(ctx, "agentPreset.list", struct{}{}, &val); err != nil {
+	if err := client.Call(ctx, "agentPresets/list", map[string]any{}, &val); err != nil {
 		return nil, err
 	}
 	out := make([]core.AgentDescriptor, 0, len(val.Presets))
 	for _, p := range val.Presets {
-		if strings.TrimSpace(p.ID) == "" || p.Broken != "" {
+		if strings.TrimSpace(p.ID) == "" {
 			continue
-		}
-		display := strings.TrimSpace(p.Name)
-		if display == "" {
-			display = p.ID
 		}
 		out = append(out, core.AgentDescriptor{
 			Name:        p.ID,
-			DisplayName: display,
-			Description: p.Description,
+			DisplayName: p.ID,
 			IsDefault:   p.IsDefault,
 			Mode:        "primary",
 		})

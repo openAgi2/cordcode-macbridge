@@ -7,23 +7,21 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
-// mkHistoryEntry builds one apiHistoryEntry from a raw data payload.
-func mkHistoryEntry(typ string, seq int64, data string) apiHistoryEntry {
-	return apiHistoryEntry{
-		Event: sessionEventWire{
-			Type: typ,
-			Seq:  seq,
-			Time: 1789473149000,
-			Data: json.RawMessage(data),
-		},
+// mkHistoryEntry builds one journal event from a raw data payload.
+func mkHistoryEntry(typ string, seq int64, data string) sessionEventWire {
+	return sessionEventWire{
+		Type: typ,
+		Seq:  seq,
+		Time: 1789473149000,
+		Data: json.RawMessage(data),
 	}
 }
 
 // askQuestionEvents builds a minimal journal slice: turn 5 with one
 // ask_user_question tool call; withResult controls whether the call already
 // carries its tool/result (answered) or not (pending).
-func askQuestionEvents(withResult bool) []apiHistoryEntry {
-	evs := []apiHistoryEntry{
+func askQuestionEvents(withResult bool) []sessionEventWire {
+	evs := []sessionEventWire{
 		mkHistoryEntry("turn/start", 100, `{"turn": 5}`),
 		mkHistoryEntry("assistant/message", 101, `{
 			"turn": 5, "step": 2,
@@ -38,16 +36,15 @@ func askQuestionEvents(withResult bool) []apiHistoryEntry {
 		evs = append(evs,
 			mkHistoryEntry("tool/result", 102, `{
 				"turn": 5, "step": 2,
-				"message": {"source": {"kind": "tool", "callId": "call_9ec02aa7"},
-				 "content": [{"type": "tool-result", "toolCallId": "call_9ec02aa7",
-				  "content": [{"type": "text", "text": "另建新文件"}]}]}
+				"message": {"toolCallId": "call_9ec02aa7", "source": {"kind": "tool", "callId": "call_9ec02aa7"},
+				 "content": [{"type": "text", "text": "另建新文件"}]}
 			}`),
 		)
 	}
 	return append(evs, mkHistoryEventTurnEnd())
 }
 
-func mkHistoryEventTurnEnd() apiHistoryEntry {
+func mkHistoryEventTurnEnd() sessionEventWire {
 	return mkHistoryEntry("turn/end", 200, `{"turn": 5}`)
 }
 
@@ -143,7 +140,7 @@ func TestAskUserQuestionColdFoldAnswered(t *testing.T) {
 // TestAskUserQuestionColdFoldMalformedFailsClosed：arguments 不可解析时落回
 // 普通工具卡（不造半张问答卡）。
 func TestAskUserQuestionColdFoldMalformedFailsClosed(t *testing.T) {
-	evs := []apiHistoryEntry{
+	evs := []sessionEventWire{
 		mkHistoryEntry("turn/start", 100, `{"turn": 5}`),
 		mkHistoryEntry("assistant/message", 101, `{
 			"turn": 5, "step": 2,

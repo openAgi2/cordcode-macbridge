@@ -7,6 +7,7 @@ package dshweb
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -36,7 +37,9 @@ func TestDiagInstanceHealthyLines(t *testing.T) {
 		t.Fatalf("managed line mismatch: %s", res.Message)
 	}
 
-	// Instance rotates (user restarts on the seat): external adoption line.
+	// Instance rotates (user restarts on the seat). Diagnostics are read-only
+	// (2026-09-22 plan §5): the answering-but-unheld seat reports the 在听
+	// line without adopting or spawning; the next real RPC (Resolve) adopts.
 	if err := starter.Stop(); err != nil {
 		t.Fatal(err)
 	}
@@ -49,10 +52,58 @@ func TestDiagInstanceHealthyLines(t *testing.T) {
 	var res2 = res
 	for time.Now().Before(deadline) {
 		res2 = a.diagInstance(context.Background())
-		if strings.Contains(res2.Message, "复用权威端口") {
-			return
+		if strings.Contains(res2.Message, "在听") {
+			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatalf("external adoption line never appeared: %s", res2.Message)
+	if !strings.Contains(res2.Message, "在听") {
+		t.Fatalf("read-only answering-seat line never appeared: %s", res2.Message)
+	}
+	if starter.starts != 1 {
+		t.Fatalf("read-only diagnostics must not spawn (starts=%d)", starter.starts)
+	}
+
+	// A real RPC adopts the rotated instance; the diag line then names the
+	// external adoption.
+	if _, err := r.Resolve(context.Background()); err != nil {
+		t.Fatalf("adoption Resolve: %v", err)
+	}
+	res3 := a.diagInstance(context.Background())
+	if !strings.Contains(res3.Message, "复用权威端口") {
+		t.Fatalf("external adoption line mismatch: %s", res3.Message)
+	}
+}
+
+// TestDiagnosticsReadOnlyNeverSpawns (2026-09-22 plan §7): RunDiagnostics on
+// a dark seat with a never-held resolver must not call the starter —
+// diagnostics is not a third spawn path.
+func TestDiagnosticsReadOnlyNeverSpawns(t *testing.T) {
+	seat := freeLoopbackSeat(t) // nothing binds it
+	starter := &countingStarter{}
+	r := NewResolver(
+		WithProbeURLs([]string{seat}),
+		withManagedStarter(starter),
+		WithHTTPClient(&http.Client{Transport: &http.Transport{DisableKeepAlives: true}}),
+	)
+	a := &Agent{resolver: r}
+
+	report, err := a.RunDiagnostics(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("RunDiagnostics: %v", err)
+	}
+	if starter.starts != 0 {
+		t.Fatalf("RunDiagnostics must not spawn on a dark cold seat (starts=%d)", starter.starts)
+	}
+	if report.OverallStatus != "unhealthy" {
+		t.Fatalf("dark cold seat must report unhealthy, got %q", report.OverallStatus)
+	}
+
+	// The descriptor seam is read-only too.
+	if _, err := a.resolver.Resolve(context.Background()); err == nil {
+		t.Fatal("expected not-running error")
+	}
+	if starter.starts != 0 {
+		t.Fatalf("Resolve must not spawn on a cold dark seat (starts=%d)", starter.starts)
+	}
 }

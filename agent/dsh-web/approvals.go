@@ -4,38 +4,45 @@ package dshweb
 // iOS-initiated turn hangs forever at the first ask-policy tool, violating
 // fail-visibly).
 //
-// Approval flow: approval/requested → core permission_request. Bound sessions
-// emit on the session channel; unbound (Mac-initiated) sessions emit on the
-// agent passive channel so an observing iPhone can also approve. First writer
-// wins: either side's allow/deny closes both UIs via approval/resolved.
-// iOS answers → /api/respond {sessionId, approvalId, outcome} where
-// allow→allowed-once / deny→rejected (the official outcome set is binary;
-// iOS's always-variants already collapse to allow/deny on the wire, R3-2).
-// approval/resolved closes the pending entry (first-writer-wins) and emits
-// permission_resolved so the projection drops requiresPermissionConfirmation.
+// Typert-gateway shape (2026-09-23 migration): approvals and questions are
+// $events WATERFALLS — {event:"approval/request"|"user-questions/request",
+// eventId, agentId, request}. The agentId IS the session id (Agent.id is the
+// session-backed identity, core/agent/src/types.ts). The surfaced request id
+// is the eventId (the only correlation the wire offers; the journal's
+// approval/asked ids live in a different, uncorrelated id space). Answers go
+// via POST /api/$events/result {clientId, eventId, outcome} where the value
+// is the official answer payload: approval → the outcome string
+// ("allowed-once"|"rejected"), question → {answers:[{id,selected,custom?}]}.
+//
+// Approval flow: waterfall → core permission_request. Bound sessions emit on
+// the session channel; unbound (Mac-initiated) sessions emit on the agent
+// passive channel so an observing iPhone can also approve. First writer
+// wins: the Host cancels the losing waterfall (cancel frame) and a late
+// $events/result fails with "no active event stream" — both close the pending
+// entry and emit permission_resolved so the projection drops
+// requiresPermissionConfirmation.
 //
 // Question flow (R2-1/R3-1/S-1/S-2/S-3): dsh asks WHOLE BATCHES (one ask,
-// many questions, one answer). Each question carries its own dsh id
-// (events.schema.ts) — per-question ids ride the bridge wire so iOS's
-// replace-by-id upsert keeps every question visible and answerable. The mux
-// frame's rpcId is dshweb-internal batch state only, never on the wire.
-// Answers accumulate per question id (later answer overwrites — S-3); when
-// the batch is complete ONE /api/respond posts {answers:[{id,selected,custom?}]}
-// keyed by question id. NOTHING is synthesized as resolved before the host's
-// batch question/resolved frame arrives (中间态如实 — a per-question synthetic
-// resolution would be a lie if another question gets rejected); that frame
-// carries no per-question content, so the batch state expands into N
-// question_resolved events (S-1). Reject cancels the WHOLE batch through the
-// respond ERROR branch (ok:false, code "cancelled") — asymmetric with
-// approvals by design. Reconnect replays still-pending frames (same rpcId):
-// re-emitting question events is idempotent on iOS (same ids), and a missing
-// batch is rebuilt from the replay (S-2). Batches answered on the web during
-// a disconnect window are NOT replayed — those iOS pending steps settle via
-// the session's cold reload, same as every other transient question backend.
+// many questions, one answer). Each question carries its own dsh id —
+// per-question ids ride the bridge wire so iOS's replace-by-id upsert keeps
+// every question visible and answerable. The waterfall's eventId is dshweb-
+// internal batch state only, never on the wire. Answers accumulate per
+// question id (later answer overwrites — S-3); when the batch is complete
+// ONE $events/result posts {answers:[…]} keyed by question id. The batch's
+// per-question resolution is emitted locally once the respond is accepted
+// (the gateway generation has no question/resolved frame); a cancel frame
+// (withdrawn/claimed elsewhere) or a generation loss settles the batch as
+// cancelled. Reconnect replays still-pending waterfalls under NEW eventIds:
+// re-emitting question events is idempotent on iOS (same question ids), and
+// a missing batch is rebuilt from the replay (S-2). Batches answered on the
+// web during a disconnect window are NOT replayed — those iOS pending steps
+// settle via the session's cold reload, same as every other transient
+// question backend.
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -51,18 +58,19 @@ var _ core.UserInputResponder = (*Agent)(nil)
 var _ core.StructuredUserInputProvider = (*Agent)(nil)
 var _ core.UserInputResponder = (*dshSession)(nil)
 
-// approvalsState is the agent-level pending registry (mux is agent-scoped).
+// approvalsState is the agent-level pending registry (waterfalls are
+// agent-scoped).
 type approvalsState struct {
 	mu sync.Mutex
-	// approvals: approvalId → pending approval (surfaced ones only).
+	// approvals: eventId → pending approval (surfaced ones only).
 	approvals map[string]*pendingApproval
-	// batches: frame rpcId → pending question batch.
+	// batches: waterfall eventId → pending question batch.
 	batches map[string]*pendingQuestionBatch
-	// questionOwner: question id → batch rpcId (answer routing).
+	// questionOwner: question id → batch eventId (answer routing).
 	questionOwner map[string]string
 	// planReviews: question id → derived plan-review answer labels (plan approval
 	// layer, 2026-09-04). Present only for questions surfaced as the plan_review
-	// permission card; cleaned up with questionOwner on question/resolved.
+	// permission card; cleaned up with questionOwner on resolution.
 	planReviews map[string]planReviewMeta
 }
 
@@ -75,16 +83,20 @@ type planReviewMeta struct {
 	keepPlanningLabel string
 }
 
+// pendingApproval is one surfaced approval waterfall. clientID is the $events
+// generation that delivered it — the respond correlation; a generation loss
+// orphans it (dropAllPendingInteractions settles those cards).
 type pendingApproval struct {
-	rpcID      string
-	sessionID  string
-	approvalID string
-	toolName   string
+	clientID  string
+	eventID   string
+	sessionID string
+	toolName  string
 }
 
 // pendingQuestionBatch is one dsh ask batch awaiting its complete answer.
 type pendingQuestionBatch struct {
-	rpcID     string // mux frame envelope rpcId — the respond echo key
+	eventID   string // waterfall eventId — the $events/result correlation key
+	clientID  string // $events generation that delivered the waterfall
 	sessionID string
 	// questionIDs preserves the batch's own order.
 	questionIDs []string
@@ -290,83 +302,71 @@ func (s *dshSession) emitControlCritical(ev core.Event) {
 	}
 }
 
-// ── mux frame entries ───────────────────────────────────────────────────────
+// ── $events waterfall entries ──────────────────────────────────────────────
 
-// handleApprovalFrame dispatches approval/requested|resolved.
-func (a *Agent) handleApprovalFrame(ctx context.Context, rpcID, method string, payload json.RawMessage) {
-	a.approvalsInit()
-	switch method {
-	case "approval/requested":
-		var f struct {
-			SessionID  string `json:"sessionId"`
-			ApprovalID string `json:"approvalId"`
-			ToolName   string `json:"toolName"`
-			CallID     string `json:"callId"`
-			Reason     string `json:"reason"`
-		}
-		if err := json.Unmarshal(payload, &f); err != nil || f.ApprovalID == "" {
-			slog.Warn("dsh-web: approval/requested unparsable", "error", err)
-			return
-		}
-		a.approvals.mu.Lock()
-		a.approvals.approvals[f.ApprovalID] = &pendingApproval{
-			rpcID: rpcID, sessionID: f.SessionID, approvalID: f.ApprovalID, toolName: f.ToolName,
-		}
-		a.approvals.mu.Unlock()
-		sess, _ := a.bindings.get(f.SessionID)
-		// The dsh approval frame carries no tool input (events.schema.ts) —
-		// the request surfaces with the tool name; nothing is invented.
-		raw := map[string]any{}
-		if f.Reason != "" {
-			raw["reason"] = f.Reason
-		}
-		if f.CallID != "" {
-			raw["callId"] = f.CallID
-		}
-		var toolInputRaw map[string]any
-		if len(raw) > 0 {
-			toolInputRaw = raw
-		}
-		a.emitPermissionEvent(f.SessionID, sess, core.Event{
-			Type:         core.EventPermissionRequest,
-			SessionID:    f.SessionID,
-			RequestID:    f.ApprovalID,
-			ToolName:     f.ToolName,
-			Content:      f.Reason,
-			ToolInput:    f.Reason,
-			ToolInputRaw: toolInputRaw,
-		})
-		slog.Info("dsh-web: approval surfaced", "sessionPrefix", shortLog(f.SessionID), "tool", f.ToolName, "bound", sess != nil)
-
-	case "approval/resolved":
-		var f struct {
-			SessionID  string `json:"sessionId"`
-			ApprovalID string `json:"approvalId"`
-			Outcome    string `json:"outcome"` // allowed-once|rejected|cancelled|unavailable
-		}
-		if err := json.Unmarshal(payload, &f); err != nil {
-			return
-		}
-		a.approvals.mu.Lock()
-		delete(a.approvals.approvals, f.ApprovalID)
-		a.approvals.mu.Unlock()
-		// Projection SoT now owns the permission card. Closing the pending
-		// entry is not enough — SSV2 remaps from the projection, so the
-		// host-resolved outcome must clear requiresPermissionConfirmation.
-		// Idempotent with go-bridge resolve_permission → permission_resolved.
-		behavior := "deny"
-		if f.Outcome == "allowed-once" {
-			behavior = "allow"
-		}
-		sess, _ := a.bindings.get(f.SessionID)
-		a.emitPermissionEvent(f.SessionID, sess, core.Event{
-			Type:      core.EventPermissionResolved,
-			SessionID: f.SessionID,
-			RequestID: f.ApprovalID,
-			Content:   behavior,
-		})
-		slog.Info("dsh-web: approval resolved", "sessionPrefix", shortLog(f.SessionID), "outcome", f.Outcome)
+// dispatchWaterfall routes one approval/user-questions waterfall frame. The
+// agentId IS the session id (Agent.id is the session-backed identity).
+func (a *Agent) dispatchWaterfall(client *Client, f remoteEventFrame) {
+	switch f.Event {
+	case "approval/request":
+		a.handleApprovalWaterfall(f)
+	case "user-questions/request":
+		a.handleQuestionWaterfall(f)
+	default:
+		slog.Debug("dsh-web: unknown waterfall", "event", f.Event)
 	}
+}
+
+// handleApprovalWaterfall surfaces one approval/request waterfall
+// (request: {toolName, callId?, reason?} — interaction/user-approval
+// ApprovalRequestEvent with the agent/signal lifetime stripped in transit).
+func (a *Agent) handleApprovalWaterfall(f remoteEventFrame) {
+	a.approvalsInit()
+	if f.EventID == "" || f.AgentID == "" {
+		slog.Warn("dsh-web: approval waterfall missing correlation", "eventId", f.EventID)
+		return
+	}
+	var req struct {
+		ToolName string `json:"toolName"`
+		CallID   string `json:"callId"`
+		Reason   string `json:"reason"`
+	}
+	if err := json.Unmarshal(f.Request, &req); err != nil || req.ToolName == "" {
+		slog.Warn("dsh-web: approval/request unparsable", "error", err)
+		return
+	}
+	sessionID := f.AgentID
+	a.approvals.mu.Lock()
+	if _, exists := a.approvals.approvals[f.EventID]; !exists {
+		a.approvals.approvals[f.EventID] = &pendingApproval{
+			clientID: a.muxClientID, eventID: f.EventID, sessionID: sessionID, toolName: req.ToolName,
+		}
+	} // existing = reconnect replay under a new generation: re-emit only
+	a.approvals.mu.Unlock()
+	sess, _ := a.bindings.get(sessionID)
+	// The official approval request carries no tool input — the request
+	// surfaces with the tool name; nothing is invented.
+	raw := map[string]any{}
+	if req.Reason != "" {
+		raw["reason"] = req.Reason
+	}
+	if req.CallID != "" {
+		raw["callId"] = req.CallID
+	}
+	var toolInputRaw map[string]any
+	if len(raw) > 0 {
+		toolInputRaw = raw
+	}
+	a.emitPermissionEvent(sessionID, sess, core.Event{
+		Type:         core.EventPermissionRequest,
+		SessionID:    sessionID,
+		RequestID:    f.EventID,
+		ToolName:     req.ToolName,
+		Content:      req.Reason,
+		ToolInput:    req.Reason,
+		ToolInputRaw: toolInputRaw,
+	})
+	slog.Info("dsh-web: approval surfaced", "sessionPrefix", shortLog(sessionID), "tool", req.ToolName, "bound", sess != nil)
 }
 
 // derivePlanReviewMeta validates the official intent against the offered
@@ -395,231 +395,166 @@ func derivePlanReviewMeta(approve string, labels []string) (planReviewMeta, bool
 	return planReviewMeta{approveLabel: approve, keepPlanningLabel: keep}, true
 }
 
-// handleQuestionFrame dispatches question/requested|resolved.
-func (a *Agent) handleQuestionFrame(ctx context.Context, rpcID, method string, payload json.RawMessage) {
+// handleQuestionWaterfall surfaces one user-questions/request waterfall
+// (request: {questions:[…]} — interaction/user-questions
+// AskUserQuestionRequestEvent with the agent/signal lifetime stripped).
+func (a *Agent) handleQuestionWaterfall(f remoteEventFrame) {
 	a.approvalsInit()
-	switch method {
-	case "question/requested":
-		var f struct {
-			SessionID string `json:"sessionId"`
-			Questions []struct {
-				ID       string `json:"id"`
-				Question string `json:"question"`
-				Header   string `json:"header"`
-				Detail   string `json:"detail"`
-				Options  []struct {
-					Label       string `json:"label"`
-					Description string `json:"description"`
-				} `json:"options"`
-				MultiSelect bool `json:"multiSelect"`
-				// intent is presentation-only metadata on the official question
-				// (plan-mode/src/index.ts:313): {kind:"plan-review", approve:<label>}
-				// names the approve label; a capable UI renders the plan (detail)
-				// as a review decision instead of a generic question.
-				Intent *struct {
-					Kind    string `json:"kind"`
-					Approve string `json:"approve,omitempty"`
-				} `json:"intent"`
-			} `json:"questions"`
-		}
-		if err := json.Unmarshal(payload, &f); err != nil || len(f.Questions) == 0 {
-			slog.Warn("dsh-web: question/requested unparsable or empty", "error", err)
-			return
-		}
-		a.approvals.mu.Lock()
-		if _, exists := a.approvals.batches[rpcID]; !exists {
-			fresh := &pendingQuestionBatch{
-				rpcID:       rpcID,
-				sessionID:   f.SessionID,
-				answers:     map[string]questionAnswer{},
-				questionIDs: make([]string, 0, len(f.Questions)),
-			}
-			for _, q := range f.Questions {
-				fresh.questionIDs = append(fresh.questionIDs, q.ID)
-				a.approvals.questionOwner[q.ID] = rpcID
-			}
-			a.approvals.batches[rpcID] = fresh
-		} // existing batch = reconnect replay (S-2): re-emit only
-		a.approvals.mu.Unlock()
-
-		sess, _ := a.bindings.get(f.SessionID)
-		// Per-question events, each with its own dsh id (R3-1). Bound sessions
-		// use the session channel; Mac-initiated (unbound) use the passive
-		// channel so an observing iPhone can answer too.
-		//
-		// Canonical writer is user_input_requested (SSV2 projection / UserInputDock).
-		// question_asked is the one-way legacy presentation only — EventPublisher
-		// will not ingest it, so emitting it alone leaves iPhone with no card
-		// (owner 2026-08-16: Mac 多选框出现，iPhone 没有).
-		for _, q := range f.Questions {
-			// plan approval layer (2026-09-04): a plan-review question (official
-			// intent.kind=="plan-review", plan full text in detail) surfaces as the
-			// plan_review permission card INSTEAD of the user_input card — the
-			// answer rides resolve_permission.planAction. Non-plan questions in
-			// the same batch are unaffected. Meta not derivable (intent.approve
-			// not among the offered labels / option shape unexpected) fails
-			// closed to the generic card, never to a broken plan card.
-			if q.Intent != nil && q.Intent.Kind == "plan-review" {
-				labels := make([]string, 0, len(q.Options))
-				for _, o := range q.Options {
-					labels = append(labels, o.Label)
-				}
-				if meta, ok := derivePlanReviewMeta(q.Intent.Approve, labels); ok {
-					a.approvals.mu.Lock()
-					a.approvals.planReviews[q.ID] = meta
-					a.approvals.mu.Unlock()
-					a.emitPermissionEvent(f.SessionID, sess, core.Event{
-						Type:              core.EventPermissionRequest,
-						SessionID:         f.SessionID,
-						TurnID:            a.sessionTurnID(f.SessionID),
-						RequestID:         q.ID,
-						ToolName:          q.Header,
-						PermissionKind:    "plan_review",
-						PermissionActions: []string{"approve", "requestChanges", "quit"},
-						PlanReview:        &core.PlanPayload{Content: q.Detail},
-					})
-					continue
-				}
-				slog.Warn("dsh-web: plan-review question without derivable labels, degrading to generic card",
-					"sessionPrefix", shortLog(f.SessionID), "questionPrefix", shortLog(q.ID), "approve", q.Intent.Approve, "options", len(q.Options))
-			}
-			opts := make([]core.QuestionOption, 0, len(q.Options))
-			uiOpts := make([]core.UserInputOption, 0, len(q.Options))
-			for _, o := range q.Options {
-				// dsh options have no ids: the label IS the identifier, echoed
-				// verbatim in the answer's selected[] (user-questions types).
-				opts = append(opts, core.QuestionOption{ID: o.Label, Label: o.Label, Description: o.Description})
-				uiOpts = append(uiOpts, core.UserInputOption{ID: o.Label, Label: o.Label, Description: o.Description})
-			}
-			text := q.Question
-			if q.Header != "" {
-				text = q.Header + "：" + q.Question
-			}
-			mode := core.UserInputAnswerModeSingle
-			if q.MultiSelect {
-				mode = core.UserInputAnswerModeMultiple
-			}
-			a.emitPermissionEvent(f.SessionID, sess, core.Event{
-				Type:      core.EventUserInputRequested,
-				SessionID: f.SessionID,
-				TurnID:    a.sessionTurnID(f.SessionID),
-				ItemID:    q.ID,
-				UserInput: &core.UserInputInteraction{
-					InteractionID: q.ID,
-					Status:        core.UserInputStatusPending,
-					Questions: []core.UserInputQuestion{{
-						ID:                 q.ID,
-						Header:             q.Header,
-						Prompt:             q.Question,
-						AnswerMode:         mode,
-						Options:            uiOpts,
-						AllowsCustomAnswer: true,
-						IsSecret:           false,
-						Required:           true,
-					}},
-					CanRespond: true,
-					CanReject:  true,
-				},
-			})
-			a.emitPermissionEvent(f.SessionID, sess, core.Event{
-				Type:         core.EventQuestionAsked,
-				SessionID:    f.SessionID,
-				QuestionID:   q.ID,
-				QuestionText: text,
-				QuestionOpts: opts,
-				Required:     true,
-				ThreadID:     f.SessionID,
-			})
-		}
-		slog.Info("dsh-web: question batch surfaced",
-			"sessionPrefix", shortLog(f.SessionID), "questions", len(f.Questions), "batch", shortLog(rpcID), "bound", sess != nil)
-
-	case "question/resolved":
-		var f struct {
-			SessionID     string `json:"sessionId"`
-			QuestionRPCID string `json:"questionRpcId"`
-			Outcome       string `json:"outcome"` // answered|cancelled
-		}
-		if err := json.Unmarshal(payload, &f); err != nil {
-			return
-		}
-		a.approvals.mu.Lock()
-		batch := a.approvals.batches[f.QuestionRPCID]
-		if batch != nil {
-			delete(a.approvals.batches, f.QuestionRPCID)
-			for _, qid := range batch.questionIDs {
-				delete(a.approvals.questionOwner, qid)
-			}
-		}
-		// Plan-surfaced question ids leave the plan registry too; snapshot which
-		// ones were plan cards so the per-id close below emits permission_resolved
-		// (the card face iOS actually has) instead of the user_input resolution.
-		planQIDs := make([]string, 0, len(batch.questionIDs))
-		if batch != nil {
-			for _, qid := range batch.questionIDs {
-				if _, isPlan := a.approvals.planReviews[qid]; isPlan {
-					delete(a.approvals.planReviews, qid)
-					planQIDs = append(planQIDs, qid)
-				}
-			}
-		}
-		a.approvals.mu.Unlock()
-		if batch == nil {
-			return // resolved for a batch never surfaced here
-		}
-		// S-1: the frame has no per-question content — the batch state expands
-		// into N per-id resolved events so each iOS pending card closes.
-		sess, _ := a.bindings.get(f.SessionID)
-		status := core.UserInputStatusAnswered
-		if strings.EqualFold(f.Outcome, "cancelled") || strings.EqualFold(f.Outcome, "rejected") {
-			status = core.UserInputStatusRejected
-		}
-		turnID := a.sessionTurnID(f.SessionID)
-		planSet := map[string]bool{}
-		for _, qid := range planQIDs {
-			planSet[qid] = true
-			// Web-answered-first plan card: close the permission face. The frame
-			// carries no per-question content, so the outcome is echoed verbatim
-			// (answered|cancelled) — no synthetic approve/deny claim.
-			a.emitPermissionEvent(f.SessionID, sess, core.Event{
-				Type:      core.EventPermissionResolved,
-				SessionID: f.SessionID,
-				TurnID:    turnID,
-				RequestID: qid,
-				Content:   f.Outcome,
-			})
-		}
-		for _, qid := range batch.questionIDs {
-			if planSet[qid] {
-				continue // plan-surfaced: no user_input face was ever emitted
-			}
-			a.emitPermissionEvent(f.SessionID, sess, core.Event{
-				Type:      core.EventUserInputResolved,
-				SessionID: f.SessionID,
-				TurnID:    turnID,
-				ItemID:    qid,
-				UserInput: &core.UserInputInteraction{
-					InteractionID:    qid,
-					Status:           status,
-					ResolutionSource: "backend",
-				},
-			})
-			a.emitPermissionEvent(f.SessionID, sess, core.Event{
-				Type:       core.EventQuestionResolved,
-				SessionID:  f.SessionID,
-				QuestionID: qid,
-				Content:    f.Outcome,
-				ThreadID:   f.SessionID,
-			})
-		}
-		slog.Info("dsh-web: question batch resolved",
-			"sessionPrefix", shortLog(f.SessionID), "questions", len(batch.questionIDs), "outcome", f.Outcome)
+	if f.EventID == "" || f.AgentID == "" {
+		slog.Warn("dsh-web: question waterfall missing correlation", "eventId", f.EventID)
+		return
 	}
+	var req struct {
+		Questions []struct {
+			ID       string `json:"id"`
+			Question string `json:"question"`
+			Header   string `json:"header"`
+			Detail   string `json:"detail"`
+			Options  []struct {
+				Label       string `json:"label"`
+				Description string `json:"description"`
+			} `json:"options"`
+			MultiSelect bool `json:"multiSelect"`
+			// intent is presentation-only metadata on the official question
+			// (plan-mode/src/index.ts:313): {kind:"plan-review", approve:<label>}
+			// names the approve label; a capable UI renders the plan (detail)
+			// as a review decision instead of a generic question.
+			Intent *struct {
+				Kind    string `json:"kind"`
+				Approve string `json:"approve,omitempty"`
+			} `json:"intent"`
+		} `json:"questions"`
+	}
+	if err := json.Unmarshal(f.Request, &req); err != nil || len(req.Questions) == 0 {
+		slog.Warn("dsh-web: user-questions/request unparsable or empty", "error", err)
+		return
+	}
+	sessionID := f.AgentID
+	rpcID := f.EventID
+	a.approvals.mu.Lock()
+	if _, exists := a.approvals.batches[rpcID]; !exists {
+		fresh := &pendingQuestionBatch{
+			eventID:     rpcID,
+			clientID:    a.muxClientID,
+			sessionID:   sessionID,
+			answers:     map[string]questionAnswer{},
+			questionIDs: make([]string, 0, len(req.Questions)),
+		}
+		for _, q := range req.Questions {
+			fresh.questionIDs = append(fresh.questionIDs, q.ID)
+			a.approvals.questionOwner[q.ID] = rpcID
+		}
+		a.approvals.batches[rpcID] = fresh
+	} // existing batch = reconnect replay (S-2): re-emit only
+	a.approvals.mu.Unlock()
+
+	sess, _ := a.bindings.get(sessionID)
+	// Per-question events, each with its own dsh id (R3-1). Bound sessions
+	// use the session channel; Mac-initiated (unbound) use the passive
+	// channel so an observing iPhone can answer too.
+	//
+	// Canonical writer is user_input_requested (SSV2 projection / UserInputDock).
+	// question_asked is the one-way legacy presentation only — EventPublisher
+	// will not ingest it, so emitting it alone leaves iPhone with no card
+	// (owner 2026-08-16: Mac 多选框出现，iPhone 没有).
+	for _, q := range req.Questions {
+		// plan approval layer (2026-09-04): a plan-review question (official
+		// intent.kind=="plan-review", plan full text in detail) surfaces as the
+		// plan_review permission card INSTEAD of the user_input card — the
+		// answer rides resolve_permission.planAction. Non-plan questions in
+		// the same batch are unaffected. Meta not derivable (intent.approve
+		// not among the offered labels / option shape unexpected) fails
+		// closed to the generic card, never to a broken plan card.
+		if q.Intent != nil && q.Intent.Kind == "plan-review" {
+			labels := make([]string, 0, len(q.Options))
+			for _, o := range q.Options {
+				labels = append(labels, o.Label)
+			}
+			if meta, ok := derivePlanReviewMeta(q.Intent.Approve, labels); ok {
+				a.approvals.mu.Lock()
+				a.approvals.planReviews[q.ID] = meta
+				a.approvals.mu.Unlock()
+				a.emitPermissionEvent(sessionID, sess, core.Event{
+					Type:              core.EventPermissionRequest,
+					SessionID:         sessionID,
+					TurnID:            a.sessionTurnID(sessionID),
+					RequestID:         q.ID,
+					ToolName:          q.Header,
+					PermissionKind:    "plan_review",
+					PermissionActions: []string{"approve", "requestChanges", "quit"},
+					PlanReview:        &core.PlanPayload{Content: q.Detail},
+				})
+				continue
+			}
+			slog.Warn("dsh-web: plan-review question without derivable labels, degrading to generic card",
+				"sessionPrefix", shortLog(sessionID), "questionPrefix", shortLog(q.ID), "approve", q.Intent.Approve, "options", len(q.Options))
+		}
+		opts := make([]core.QuestionOption, 0, len(q.Options))
+		uiOpts := make([]core.UserInputOption, 0, len(q.Options))
+		for _, o := range q.Options {
+			// dsh options have no ids: the label IS the identifier, echoed
+			// verbatim in the answer's selected[] (user-questions types).
+			opts = append(opts, core.QuestionOption{ID: o.Label, Label: o.Label, Description: o.Description})
+			uiOpts = append(uiOpts, core.UserInputOption{ID: o.Label, Label: o.Label, Description: o.Description})
+		}
+		text := q.Question
+		if q.Header != "" {
+			text = q.Header + "：" + q.Question
+		}
+		mode := core.UserInputAnswerModeSingle
+		if q.MultiSelect {
+			mode = core.UserInputAnswerModeMultiple
+		}
+		a.emitPermissionEvent(sessionID, sess, core.Event{
+			Type:      core.EventUserInputRequested,
+			SessionID: sessionID,
+			TurnID:    a.sessionTurnID(sessionID),
+			ItemID:    q.ID,
+			UserInput: &core.UserInputInteraction{
+				InteractionID: q.ID,
+				Status:        core.UserInputStatusPending,
+				Questions: []core.UserInputQuestion{{
+					ID:                 q.ID,
+					Header:             q.Header,
+					Prompt:             q.Question,
+					AnswerMode:         mode,
+					Options:            uiOpts,
+					AllowsCustomAnswer: true,
+					IsSecret:           false,
+					Required:           true,
+				}},
+				CanRespond: true,
+				CanReject:  true,
+			},
+		})
+		a.emitPermissionEvent(sessionID, sess, core.Event{
+			Type:         core.EventQuestionAsked,
+			SessionID:    sessionID,
+			QuestionID:   q.ID,
+			QuestionText: text,
+			QuestionOpts: opts,
+			Required:     true,
+			ThreadID:     sessionID,
+		})
+	}
+	slog.Info("dsh-web: question batch surfaced",
+		"sessionPrefix", shortLog(sessionID), "questions", len(req.Questions), "batch", shortLog(rpcID), "bound", sess != nil)
 }
 
 // ── responders (bridge handler entry) ──────────────────────────────────────
 
-// respondApproval maps the iOS permission decision onto the official payload.
+// isAnsweredElsewhere reports whether a $events/result failure means the
+// waterfall was already claimed/cancelled (first-writer-wins) — the
+// gateway's "identifies no active event stream" rejection.
+func isAnsweredElsewhere(err error) bool {
+	var rpcErr *RPCError
+	return err != nil && errors.As(err, &rpcErr) &&
+		strings.Contains(rpcErr.Message, "no active event stream")
+}
+
+// respondApproval maps the iOS permission decision onto the official
+// approval outcome string (the $events/result value is the bare
+// ApprovalOutcome — interaction/user-approval types.ts).
 func (a *Agent) respondApproval(ctx context.Context, sessionID, requestID string, result core.PermissionResult) error {
 	client, err := a.clientFor(ctx)
 	if err != nil {
@@ -630,37 +565,46 @@ func (a *Agent) respondApproval(ctx context.Context, sessionID, requestID string
 	if result.Behavior == "allow" || result.Behavior == "always" {
 		outcome = "allowed-once"
 	}
-	// The respond echoes the FRAME envelope's rpcId (the host's pending table
-	// keys by it, api-proxy.ts:1410) — looked up from the surfaced entry.
 	a.approvalsInit()
 	a.approvals.mu.Lock()
-	echoKey := requestID
-	if pending := a.approvals.approvals[requestID]; pending != nil {
-		echoKey = pending.rpcID
+	pending := a.approvals.approvals[requestID]
+	if pending != nil {
 		delete(a.approvals.approvals, requestID)
 	}
 	a.approvals.mu.Unlock()
-
-	value := map[string]any{
-		"sessionId":  sessionID,
-		"approvalId": requestID,
-		"outcome":    outcome,
+	if pending == nil {
+		// Unknown here: answered/cancelled elsewhere (the cancel frame or a
+		// generation loss already settled the card) — not an iOS error.
+		slog.Info("dsh-web: approval respond for unknown waterfall", "approval", shortLog(requestID))
+		return nil
 	}
-	accepted, err := client.Respond(ctx, echoKey, true, value, nil)
-	if err != nil {
-		return err
+	if err := client.RespondEventResult(ctx, pending.clientID, pending.eventID, outcome, false); err != nil {
+		if isAnsweredElsewhere(err) {
+			// First-writer-wins: the web already answered. The turn's
+			// continuation is the visible outcome — not an error for iOS.
+			slog.Info("dsh-web: approval answered elsewhere", "approval", shortLog(requestID))
+		} else {
+			return err
+		}
 	}
-	if !accepted {
-		// First-writer-wins: the web already answered; the resolved frame (or
-		// its prior arrival) settles the state. The turn's continuation is
-		// the visible outcome — not an error for the iOS submit.
-		slog.Info("dsh-web: approval respond not-pending (answered elsewhere)", "approval", shortLog(requestID))
+	behavior := "deny"
+	if outcome == "allowed-once" {
+		behavior = "allow"
 	}
+	sess, _ := a.bindings.get(pending.sessionID)
+	a.emitPermissionEvent(pending.sessionID, sess, core.Event{
+		Type:      core.EventPermissionResolved,
+		SessionID: pending.sessionID,
+		RequestID: requestID,
+		Content:   behavior,
+	})
+	slog.Info("dsh-web: approval resolved", "sessionPrefix", shortLog(pending.sessionID), "outcome", outcome)
 	return nil
 }
 
 // respondQuestion accumulates one per-question answer; the batch answers ONCE
-// when every question carries an answer (R3-1/S-3).
+// when every question carries an answer (R3-1/S-3) — the $events/result value
+// is the official AskUserQuestionAnswer {answers:[…]}.
 func (a *Agent) respondQuestion(ctx context.Context, sessionID, questionID string, optionIDs []string, custom string) error {
 	a.approvalsInit()
 	a.approvals.mu.Lock()
@@ -697,24 +641,23 @@ func (a *Agent) respondQuestion(ctx context.Context, sessionID, questionID strin
 	if err != nil {
 		return err
 	}
-	value := map[string]any{
-		"sessionId": batch.sessionID,
-		"answer":    map[string]any{"answers": answers},
-	}
-	accepted, err := client.Respond(ctx, batch.rpcID, true, value, nil)
-	if err != nil {
+	value := map[string]any{"answers": answers}
+	if err := client.RespondEventResult(ctx, batch.clientID, batch.eventID, value, false); err != nil {
+		if isAnsweredElsewhere(err) {
+			slog.Info("dsh-web: question answered/cancelled elsewhere", "batch", shortLog(batch.eventID))
+			a.settleBatch(batch.eventID, "cancelled")
+			return nil
+		}
 		return err
 	}
-	if !accepted {
-		slog.Info("dsh-web: question respond not-pending (answered/cancelled elsewhere)",
-			"batch", shortLog(batch.rpcID))
-	}
-	// 中间态如实: the batch stays registered until the host's
-	// question/resolved frame expands per-question resolutions (S-1).
+	// The gateway generation has no question/resolved frame: the accepted
+	// respond settles the batch locally (S-1 expansion — one resolved event
+	// per question id so each iOS pending card closes).
+	a.settleBatch(batch.eventID, "answered")
 	return nil
 }
 
-// rejectQuestion cancels the WHOLE batch via the respond error branch
+// rejectQuestion cancels the WHOLE batch via the rejected outcome branch
 // (asymmetric with approvals, R2-1/S-3).
 func (a *Agent) rejectQuestion(ctx context.Context, sessionID, questionID string) error {
 	a.approvalsInit()
@@ -736,10 +679,143 @@ func (a *Agent) rejectQuestion(ctx context.Context, sessionID, questionID string
 	if err != nil {
 		return err
 	}
-	if _, err := client.Respond(ctx, batch.rpcID, false, nil, nil); err != nil {
-		return err
+	if err := client.RespondEventResult(ctx, batch.clientID, batch.eventID, nil, true); err != nil {
+		if isAnsweredElsewhere(err) {
+			slog.Info("dsh-web: question answered/cancelled elsewhere", "batch", shortLog(batch.eventID))
+		} else {
+			return err
+		}
 	}
-	slog.Info("dsh-web: question batch cancelled by reject", "batch", shortLog(rpcID),
+	a.settleBatch(batch.eventID, "cancelled")
+	slog.Info("dsh-web: question batch cancelled by reject", "batch", shortLog(batch.eventID),
 		"viaQuestion", shortLog(questionID), "questions", len(batch.questionIDs))
 	return nil
+}
+
+// settleBatch closes one pending question batch and expands its state into
+// per-id resolved events (the S-1 expansion the retired question/resolved
+// frame used to trigger). outcome is echoed verbatim (answered|cancelled) —
+// no synthetic approve/deny claim. Unknown/missing batches are a no-op.
+func (a *Agent) settleBatch(rpcID, outcome string) {
+	a.approvalsInit()
+	a.approvals.mu.Lock()
+	batch := a.approvals.batches[rpcID]
+	if batch != nil {
+		delete(a.approvals.batches, rpcID)
+		for _, qid := range batch.questionIDs {
+			delete(a.approvals.questionOwner, qid)
+		}
+	}
+	// Plan-surfaced question ids leave the plan registry too; snapshot which
+	// ones were plan cards so the per-id close emits permission_resolved (the
+	// card face iOS actually has) instead of the user_input resolution.
+	planQIDs := make([]string, 0, len(batch.questionIDs))
+	if batch != nil {
+		for _, qid := range batch.questionIDs {
+			if _, isPlan := a.approvals.planReviews[qid]; isPlan {
+				delete(a.approvals.planReviews, qid)
+				planQIDs = append(planQIDs, qid)
+			}
+		}
+	}
+	a.approvals.mu.Unlock()
+	if batch == nil {
+		return // settled for a batch never surfaced here
+	}
+	sess, _ := a.bindings.get(batch.sessionID)
+	status := core.UserInputStatusAnswered
+	if strings.EqualFold(outcome, "cancelled") || strings.EqualFold(outcome, "rejected") {
+		status = core.UserInputStatusRejected
+	}
+	turnID := a.sessionTurnID(batch.sessionID)
+	planSet := map[string]bool{}
+	for _, qid := range planQIDs {
+		planSet[qid] = true
+		a.emitPermissionEvent(batch.sessionID, sess, core.Event{
+			Type:      core.EventPermissionResolved,
+			SessionID: batch.sessionID,
+			TurnID:    turnID,
+			RequestID: qid,
+			Content:   outcome,
+		})
+	}
+	for _, qid := range batch.questionIDs {
+		if planSet[qid] {
+			continue // plan-surfaced: no user_input face was ever emitted
+		}
+		a.emitPermissionEvent(batch.sessionID, sess, core.Event{
+			Type:      core.EventUserInputResolved,
+			SessionID: batch.sessionID,
+			TurnID:    turnID,
+			ItemID:    qid,
+			UserInput: &core.UserInputInteraction{
+				InteractionID:    qid,
+				Status:           status,
+				ResolutionSource: "backend",
+			},
+		})
+		a.emitPermissionEvent(batch.sessionID, sess, core.Event{
+			Type:       core.EventQuestionResolved,
+			SessionID:  batch.sessionID,
+			QuestionID: qid,
+			Content:    outcome,
+			ThreadID:   batch.sessionID,
+		})
+	}
+	slog.Info("dsh-web: question batch settled",
+		"sessionPrefix", shortLog(batch.sessionID), "questions", len(batch.questionIDs), "outcome", outcome)
+}
+
+// closePendingInteraction settles one surfaced waterfall after a Host cancel
+// frame (withdrawn or claimed elsewhere — first-writer-wins).
+func (a *Agent) closePendingInteraction(eventID, outcome string) {
+	if eventID == "" {
+		return
+	}
+	a.approvalsInit()
+	a.approvals.mu.Lock()
+	pending := a.approvals.approvals[eventID]
+	if pending != nil {
+		delete(a.approvals.approvals, eventID)
+	}
+	a.approvals.mu.Unlock()
+	if pending != nil {
+		sess, _ := a.bindings.get(pending.sessionID)
+		a.emitPermissionEvent(pending.sessionID, sess, core.Event{
+			Type:      core.EventPermissionResolved,
+			SessionID: pending.sessionID,
+			RequestID: eventID,
+			Content:   "deny", // outcome unknown: withdrawn/claimed — never claim allow
+		})
+		slog.Info("dsh-web: approval withdrawn/answered elsewhere",
+			"sessionPrefix", shortLog(pending.sessionID), "approval", shortLog(eventID))
+		return
+	}
+	a.settleBatch(eventID, outcome)
+}
+
+// dropAllPendingInteractions settles every surfaced waterfall at a mux
+// generation loss: the dead generation's clientId orphans their responds.
+func (a *Agent) dropAllPendingInteractions() {
+	a.approvalsInit()
+	a.approvals.mu.Lock()
+	approvalIDs := make([]string, 0, len(a.approvals.approvals))
+	for id := range a.approvals.approvals {
+		approvalIDs = append(approvalIDs, id)
+	}
+	batchIDs := make([]string, 0, len(a.approvals.batches))
+	for id := range a.approvals.batches {
+		batchIDs = append(batchIDs, id)
+	}
+	a.approvals.mu.Unlock()
+	for _, id := range approvalIDs {
+		a.closePendingInteraction(id, "cancelled")
+	}
+	for _, id := range batchIDs {
+		a.settleBatch(id, "cancelled")
+	}
+	if len(approvalIDs)+len(batchIDs) > 0 {
+		slog.Info("dsh-web: settled pending interactions after stream generation loss",
+			"approvals", len(approvalIDs), "batches", len(batchIDs))
+	}
 }

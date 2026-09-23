@@ -1,0 +1,63 @@
+{
+ "captured_at": "2026-09-23T16:22:18+08:00",
+ "purpose": "S2 cross-version defense regression (plan §5.2 second item, post-deploy): the deployed production runtime (PID 51672, epoch 0dbab1c1, built 16:20:29, started 16:21:29) drives (1) hello_ack.backends[].statusMessage — this build's new additive field, version+CLI path only; (2) the goal four-verb path END TO END through the bridge on a throwaway session, each verb verified against the seat's authoritative goals/get (the plan's goal-buttons-end-to-end evidence for alpha.1). alpha.2 side is covered by the A2 raw-seat capture (identical payload accepted verbatim) + contract tests pinning both fixture sets — the bridge's marshaled payload is byte-identical across generations.",
+ "runtime_identity": {
+  "pid": 51672,
+  "started": "2026-09-23 16:21:29 (after the 16:20:29 build)",
+  "bridge_epoch": "0dbab1c1-4860-4cc3-b249-6fb3f841f0e5",
+  "binary": "/Applications/CordCodeLink.app (embedded commit b4e42d5c5a9a)"
+ },
+ "probes": {
+  "bridge hello_ack statusMessage": {
+   "ok": true,
+   "dsh-web": {
+    "status": "available",
+    "statusMessage": "dsh 0.1.7-alpha.1 (cli /opt/homebrew/bin/dsh)",
+    "reason": "external dsh web instance at http://127.0.0.1:3080"
+   }
+  },
+  "bridge execute_session_command /goal": {
+   "ok": true,
+   "settle": {
+    "commandId": "cmd-560ee2f9-3",
+    "resultKind": "success",
+    "resultText_head": "Goal created\\nStatus: active…"
+   }
+  },
+  "bridge mutate_session_goal pause → seat": {
+   "rpc_ok": true,
+   "seat_state": {
+    "phase": "paused",
+    "revision": 2
+   }
+  },
+  "bridge mutate_session_goal resume → seat": {
+   "rpc_ok": true,
+   "seat_state": {
+    "phase": "active",
+    "revision": 3
+   }
+  },
+  "bridge mutate_session_goal edit → seat": {
+   "rpc_ok": true,
+   "seat_state": {
+    "phase": "active",
+    "revision": 4,
+    "objective": "S2b regression goal (edited): bridge edit verb converged"
+   }
+  },
+  "bridge mutate_session_goal clear → seat": {
+   "rpc_ok": true,
+   "seat_state": null
+  },
+  "seat goals/get after clear": {
+   "value": null
+  },
+  "cleanup": {
+   "probe_device_revoked": true,
+   "throwaway_session_archived": true
+  }
+ },
+ "reconciliation": "goal verbs through the bridge: 4/4 rpc ok + 4/4 seat-side state convergence (paused/active/edited/null); statusMessage: new field present with version+cli only",
+ "credential_hygiene": "management/device tokens and seat cookie read at runtime, never printed or written; probe device revoked; throwaway session archived"
+}

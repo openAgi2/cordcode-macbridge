@@ -129,58 +129,6 @@ func applyTokenUsage(usage *core.ContextUsage, raw json.RawMessage) {
 	usage.OutputTokens = tokens.OutputTokens
 }
 
-func mergeProjectionValue(base *core.ContextUsage, key string, raw json.RawMessage) *core.ContextUsage {
-	if key == "" || len(raw) == 0 {
-		return nil
-	}
-	usage := &core.ContextUsage{}
-	if base != nil {
-		copy := *base
-		usage = &copy
-	}
-	switch key {
-	case "contextPressure":
-		var pressure apiContextPressure
-		if json.Unmarshal(raw, &pressure) != nil {
-			return nil
-		}
-		used := pressure.ProjectedTokens
-		if used == nil {
-			used = pressure.PressureTokens
-		}
-		if used == nil || pressure.ContextWindow == nil || *pressure.ContextWindow <= 0 {
-			return nil
-		}
-		usage.UsedTokens = *used
-		usage.TotalTokens = *used
-		usage.ContextWindow = *pressure.ContextWindow
-	case "contextBreakdown":
-		applyContextBreakdown(usage, raw)
-	case "sessionStats":
-		applySessionStats(usage, raw)
-	case "tokenUsage":
-		applyTokenUsage(usage, raw)
-	default:
-		return nil
-	}
-	if usage.ContextWindow <= 0 {
-		return nil
-	}
-	return usage
-}
-
-func (a *Agent) applyProjectionValue(sessionID, key string, raw json.RawMessage) *core.ContextUsage {
-	if a == nil || sessionID == "" {
-		return nil
-	}
-	usage := mergeProjectionValue(a.cachedContextUsage(sessionID), key, raw)
-	if usage == nil {
-		return nil
-	}
-	a.rememberContextUsage(sessionID, usage)
-	return usage
-}
-
 func (a *Agent) rememberContextUsage(sessionID string, usage *core.ContextUsage) {
 	if a == nil || sessionID == "" || usage == nil || usage.ContextWindow <= 0 {
 		return
@@ -232,18 +180,19 @@ func (a *Agent) GetSessionContextUsage(ctx context.Context, sessionID string) (*
 	return usage, nil
 }
 
+// fetchContextUsage reads the session's official projection block
+// (session/projections — the successor of the retired history-tail page's
+// projections rider).
 func fetchContextUsage(ctx context.Context, client *Client, sessionID string) (*core.ContextUsage, error) {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	max := 1
-	var val sessionHistoryValue
-	if err := client.Call(ctx, "session.history", sessionHistoryRequest{
-		SessionID:   sessionID,
-		MaxMessages: &max,
-	}, &val); err != nil {
+	var val sessionProjectionsValue
+	req := sessionProjectionsRequest{SessionID: sessionID}
+	if err := client.Call(ctx, "session/projections", map[string]any{"request": req}, &val); err != nil {
 		return nil, err
 	}
-	return usageFromProjections(val.Projections), nil
+	block := apiSessionProjectionsBlock{AsOfSeq: val.AsOfSeq, Values: val.Values}
+	return usageFromProjections(&block), nil
 }
 
 func (s *dshSession) GetContextUsage() *core.ContextUsage {

@@ -1,14 +1,16 @@
 package dshweb
 
 // Provider / model switching (design §4.3.5): the catalog ALWAYS comes from
-// the runtime (llm.models / llm.providers / session.models — 坑 3 red line:
-// no hand-written model copies). There is no official backend-global write
-// surface: session.selectModel is session-scoped and persists as the
-// deployment default, so a bridge-level switch_model targets the most
-// recently started session, or is applied right after the next create.
+// the runtime (session/modelCatalog + llm/listConfigurableProviders — 坑 3
+// red line: no hand-written model copies). There is no official
+// backend-global write surface: session/selectModel is session-scoped and
+// persists as the deployment default, so a bridge-level switch_model targets
+// the most recently started session, or is applied right after the next
+// create.
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"strings"
 	"time"
@@ -20,33 +22,41 @@ import (
 // fetch; never hand-written).
 type modelCatalog struct {
 	groups []modelProviderGroup
-	// activeProviders carries the llm.providers rows filtered to active:true
-	// (S1: dormant providers never reach list_providers; the full set with
-	// state bits goes to diagnostics).
-	activeProviders []configurableProviderView
+	// activeProviders carries the llm/listConfigurableProviders rows whose
+	// provider is routable (session/modelCatalog routableProviders — the
+	// successor of the retired llm.providers active:true bit: dormant
+	// providers never reach list_providers; the full set with declared bits
+	// goes to diagnostics).
+	activeProviders []configurableProviderRow
 }
 
-// fetchCatalog pulls llm.providers + llm.models from the resolved instance.
+// fetchCatalog pulls session/modelCatalog + llm/listConfigurableProviders
+// from the resolved instance (the typert-gateway successors of the retired
+// llm.models / llm.providers pair).
 func (a *Agent) fetchCatalog(ctx context.Context) (*modelCatalog, error) {
 	client, err := a.clientFor(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var provs llmProvidersValue
-	if err := client.Call(ctx, "llm.providers", map[string]any{}, &provs); err != nil {
+	var catalog modelCatalogValue
+	if err := client.Call(ctx, "session/modelCatalog", map[string]any{}, &catalog); err != nil {
 		return nil, err
 	}
-	var models llmModelsValue
-	if err := client.Call(ctx, "llm.models", map[string]any{}, &models); err != nil {
+	var provs configurableProvidersValue
+	if err := client.Call(ctx, "llm/listConfigurableProviders", map[string]any{}, &provs); err != nil {
 		return nil, err
 	}
-	active := make([]configurableProviderView, 0, len(provs.Providers))
+	routable := make(map[string]bool, len(catalog.RoutableProviders))
+	for _, id := range catalog.RoutableProviders {
+		routable[id] = true
+	}
+	active := make([]configurableProviderRow, 0, len(provs.Providers))
 	for _, p := range provs.Providers {
-		if p.Active {
+		if routable[p.Provider] {
 			active = append(active, p)
 		}
 	}
-	return &modelCatalog{groups: models.Groups, activeProviders: active}, nil
+	return &modelCatalog{groups: catalog.Groups, activeProviders: active}, nil
 }
 
 // selection is the recorded bridge-level selection (provider + model +
@@ -90,7 +100,7 @@ func (a *Agent) GetActiveProvider() *core.ProviderConfig {
 }
 
 // ListProviders returns the runtime's ACTIVE providers with their model
-// lists (S1 filter).
+// lists (routable filter).
 func (a *Agent) ListProviders() []core.ProviderConfig {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -195,8 +205,8 @@ func (a *Agent) applySelection(ctx context.Context, sel selection, targetSession
 		Model:           sel.model,
 		ReasoningEffort: sel.effort,
 	}
-	if err := client.Call(ctx, "session.selectModel", req, nil); err != nil {
-		slog.Warn("dsh-web: session.selectModel failed", "session", targetSession, "error", err)
+	if err := client.Call(ctx, "session/selectModel", map[string]any{"request": req}, nil); err != nil {
+		slog.Warn("dsh-web: session/selectModel failed", "session", targetSession, "error", err)
 	}
 }
 
@@ -215,8 +225,8 @@ func (a *Agent) applyPendingModelSelection(ctx context.Context, client *Client, 
 		Model:           sel.model,
 		ReasoningEffort: sel.effort,
 	}
-	if err := client.Call(ctx, "session.selectModel", req, nil); err != nil {
-		slog.Warn("dsh-web: session.selectModel after create failed", "session", sessionID, "error", err)
+	if err := client.Call(ctx, "session/selectModel", map[string]any{"request": req}, nil); err != nil {
+		slog.Warn("dsh-web: session/selectModel after create failed", "session", sessionID, "error", err)
 	}
 }
 
@@ -270,11 +280,12 @@ func (a *Agent) AvailableReasoningEfforts() []string {
 // ── SessionModelSelectionReader (session truth for get_session) ────────────
 
 // GetSessionModelSelection reads the official per-session current selection
-// (session.models → current{provider, model, reasoningEffort}) — the layer-1
-// truth of the selection priority chain (session truth > history > cache >
-// default). go-bridge merges it into get_session so iOS opens the session
-// with its REAL model instead of a global default. ok=false when the RPC
-// fails or the session has no current selection — callers must not fabricate.
+// (session/projections → values.modelSelection: the queued-next selection
+// when one is pending, else the last-used one) — the layer-1 truth of the
+// selection priority chain (session truth > history > cache > default).
+// go-bridge merges it into get_session so iOS opens the session with its
+// REAL model instead of a global default. ok=false when the RPC fails or the
+// session has no current selection — callers must not fabricate.
 func (a *Agent) GetSessionModelSelection(ctx context.Context, sessionID string) (core.SessionModelSelection, bool) {
 	client, err := a.clientFor(ctx)
 	if err != nil {
@@ -282,17 +293,31 @@ func (a *Agent) GetSessionModelSelection(ctx context.Context, sessionID string) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	var val sessionModelsValue
-	if err := client.Call(ctx, "session.models", sessionModelsRequest{SessionID: sessionID}, &val); err != nil {
+	var val sessionProjectionsValue
+	req := sessionProjectionsRequest{SessionID: sessionID}
+	if err := client.Call(ctx, "session/projections", map[string]any{"request": req}, &val); err != nil {
 		return core.SessionModelSelection{}, false
 	}
-	if strings.TrimSpace(val.Current.Model) == "" && strings.TrimSpace(val.Current.Provider) == "" {
+	raw, ok := val.Values["modelSelection"]
+	if !ok || len(raw) == 0 {
+		return core.SessionModelSelection{}, false
+	}
+	var proj modelSelectionProjection
+	if json.Unmarshal(raw, &proj) != nil {
+		return core.SessionModelSelection{}, false
+	}
+	current := proj.Next
+	if current == nil {
+		current = proj.LastUsed
+	}
+	if current == nil ||
+		(strings.TrimSpace(current.Model) == "" && strings.TrimSpace(current.Provider) == "") {
 		return core.SessionModelSelection{}, false
 	}
 	return core.SessionModelSelection{
-		Provider:        val.Current.Provider,
-		Model:           val.Current.Model,
-		ReasoningEffort: val.Current.ReasoningEffort,
+		Provider:        current.Provider,
+		Model:           current.Model,
+		ReasoningEffort: current.ReasoningEffort,
 	}, true
 }
 
@@ -305,7 +330,7 @@ var _ core.ModelEffortCatalog = (*Agent)(nil)
 // ── ModelEffortCatalog (per-model effort truth) ────────────────────────────
 
 // EffortsForModel returns the runtime-declared efforts + default effort for
-// one catalog model (llm.models reasoning{efforts,defaultEffort} — per-model
+// one catalog model (modelCatalog groups reasoning{efforts,defaultEffort} — per-model
 // truth, never smeared across the catalog). model accepts the
 // provider-qualified "provider/model" ids that AvailableModels emits, or a
 // bare model id. The catalog cache is refreshed by AvailableModels, which

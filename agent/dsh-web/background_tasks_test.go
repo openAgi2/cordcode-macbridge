@@ -32,9 +32,9 @@ func bgTaskFixtureSessionList() map[string]any {
 				"projections": map[string]any{
 					"asOfSeq": 20,
 					"values": map[string]any{
-						"title": "调查 WebSocket 重连问题",
+						"title":        "调查 WebSocket 重连问题",
 						"sessionStats": map[string]any{"turns": 2, "steps": 31, "llmMs": 182817, "toolMs": 5017},
-						"tokenUsage": map[string]any{"uncachedInputTokens": 1000, "outputTokens": 500, "cacheReadTokens": 200, "cacheWriteTokens": 0},
+						"tokenUsage":   map[string]any{"uncachedInputTokens": 1000, "outputTokens": 500, "cacheReadTokens": 200, "cacheWriteTokens": 0},
 					},
 				},
 			},
@@ -51,7 +51,7 @@ func TestListBackgroundTasksMapsSubagentRows(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["session.list"] = fakeRPCResponse{value: bgTaskFixtureSessionList()}
+	f.handlers["session/list"] = fakeRPCResponse{value: bgTaskFixtureSessionList()}
 
 	tasks, err := a.ListBackgroundTasks(context.Background())
 	if err != nil {
@@ -110,7 +110,7 @@ func TestListBackgroundTasksNestedChainRootWalk(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["session.list"] = fakeRPCResponse{value: map[string]any{
+	f.handlers["session/list"] = fakeRPCResponse{value: map[string]any{
 		"items": []any{
 			map[string]any{
 				"sessionId": "session-root-1", "updatedAt": 1786942288185, "running": false,
@@ -174,7 +174,7 @@ func TestGetBackgroundTaskDetailFoundAndMissing(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
-	f.handlers["session.list"] = fakeRPCResponse{value: bgTaskFixtureSessionList()}
+	f.handlers["session/list"] = fakeRPCResponse{value: bgTaskFixtureSessionList()}
 
 	detail, err := a.GetBackgroundTaskDetail(context.Background(), "sub-1111")
 	if err != nil {
@@ -212,23 +212,23 @@ func TestCancelBackgroundTaskUsesOfficialSessionCancel(t *testing.T) {
 	defer f.Close()
 	a := newTestAgent(t, f)
 	f.handlers["background"] = fakeRPCResponse{}
-	f.handlers["session.cancel"] = fakeRPCResponse{value: map[string]any{}}
+	f.handlers["session/cancel"] = fakeRPCResponse{value: map[string]any{}}
 
 	if err := a.CancelBackgroundTask(context.Background(), "sub-999"); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
-	calls := methodCalls(f, "session.cancel")
+	calls := methodCalls(f, "session/cancel")
 	if len(calls) != 1 {
 		t.Fatalf("session.cancel calls = %d, want 1", len(calls))
 	}
 	var payload struct {
 		SessionID string `json:"sessionId"`
 	}
-	if err := json.Unmarshal(calls[0], &payload); err != nil || payload.SessionID != "sub-999" {
+	if err := json.Unmarshal(unwrapArgs(t, calls[0]), &payload); err != nil || payload.SessionID != "sub-999" {
 		t.Fatalf("payload = %s (err %v)", calls[0], err)
 	}
 	// 运行中任务的 detail 声明可取消；终态不声明。
-	f.handlers["session.list"] = fakeRPCResponse{value: bgTaskFixtureSessionList()}
+	f.handlers["session/list"] = fakeRPCResponse{value: bgTaskFixtureSessionList()}
 	detail, err := a.GetBackgroundTaskDetail(context.Background(), "sub-1111")
 	if err != nil {
 		t.Fatal(err)

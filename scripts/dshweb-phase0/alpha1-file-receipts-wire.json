@@ -1,0 +1,81 @@
+{
+ "captured_at": "2026-09-23T19:33:08+08:00",
+ "seat": "127.0.0.1:3080 (dsh 0.1.7-alpha.1 production)",
+ "probes": {
+  "session/create": {
+   "ok": true,
+   "sessionId": "session-…(truncated)"
+  },
+  "uploadFileBinary (positive)": {
+   "http": 200,
+   "route": "POST /api/session/uploadFileBinary?sessionId=…&name=receipt-notes.txt (Content-Type: application/octet-stream, raw body, 55 bytes)",
+   "value": {
+    "receiptId": "82f2cf59-a50a-4fee-b7b2-6d083461f7a3",
+    "file": {
+     "attachmentId": "sha256:1944ed8fa5d56599424f9509d47560c3b739d6f51741df177022e1a8e2b7405a",
+     "name": "receipt-notes.txt",
+     "bytes": 55
+    }
+   },
+   "sha256_of_body_matches_attachmentId_prefix": true,
+   "source_anchor": "file-upload/src/protocol.ts:2 FILE_UPLOAD_PATH; http-route.ts:22-60; FileAttachmentRef sha256 content-addressed (attachment/src/types.ts:35-46)",
+   "attachmentId_format_note": "attachmentId = \"sha256:\"+hexdigest of the exact uploaded bytes (attachment-local/src/store.ts:22 ID_PATTERN /^sha256:([a-f0-9]{64})$/, :25-26 digest); earlier false was a probe assertion bug (missing prefix strip), corrected against the archived value"
+  },
+  "session/prompt with file receipt part (response)": {
+   "http": 200,
+   "result": {
+    "ok": true,
+    "value": {
+     "accepted": true
+    }
+   },
+   "wire_part": {
+    "type": "file",
+    "receiptId": "<opaque receipt id, omitted>"
+   },
+   "source_anchor": "commands.ts:582-601 resolvePromptFileReceipts; bindPrompt :369-371"
+  },
+  "journal user/message file block (bound)": {
+   "seq": 8,
+   "block": {
+    "type": "file",
+    "attachment": {
+     "attachmentId": "sha256:1944ed8fa5d56599424f9509d47560c3b739d6f51741df177022e1a8e2b7405a",
+     "name": "receipt-notes.txt",
+     "bytes": 55
+    }
+   },
+   "journal_attachmentId_equals_upload_file_attachmentId": true,
+   "source_anchor": "admitPromptContent passthrough (attachment/index.ts:120/126); model-facing handle text (llm/src/content.ts:143-175 fileHandleText)"
+  },
+  "reopen durability": {
+   "file_block_in_cold_page": true,
+   "note": "cold session/page read is the reopen path; UI renders name/bytes only (FileCard), model reads via fileHandleText stored-copy handle"
+  },
+  "session/prompt (bogus receiptId → official verbatim)": {
+   "http": 200,
+   "result": {
+    "ok": false,
+    "error": {
+     "code": "session/attachment-invalid",
+     "message": "File was not uploaded for this session.",
+     "details": {
+      "reason": "FILE_NOT_STAGED"
+     }
+    }
+   },
+   "expect": "session/attachment-invalid FILE_NOT_STAGED 'File was not uploaded for this session.' (commands.ts:590-595)"
+  },
+  "uploadFileBinary (wrong content-type)": {
+   "http": 415,
+   "body_or_text": "",
+   "expect": "HTTP 415 'content type must be application/octet-stream' (http-route.ts:26-29)"
+  },
+  "uploadFileBinary (missing sessionId)": {
+   "http": 400,
+   "body_or_text": "",
+   "expect": "HTTP 400 'sessionId is required' (http-route.ts:31-34)"
+  }
+ },
+ "sanitization": "probe-authored texts verbatim; base64 payloads and opaque ids omitted; session ids truncated; cookie never printed"
+}

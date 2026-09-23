@@ -443,6 +443,12 @@ shadow-tree 启动）子进程，协议是 SDK JSON-RPC 2.0 over stdio，不是�
 **实例生命周期（权威端口/座位模型，2026-08-19 设计
 `docs/2026-08-19-dsh-web-canonical-3080-instance-design.md`）：**
 
+> 2026-09-22 owner 在本会话指示「不代装」改为可以代装（出处见
+> `docs/2026-09-22-dsh-web-install-and-start-plan.md` §0）。冷启动缺位改为等用户点
+> 「启动」是该计划从「未启动 + 启动按钮」推导的，不是另一句裁决原文。计划 v2
+> 评审通过前，下文第 3 点仍是运行中的代码行为。本注记是该计划的 doc-only 交付，
+> 不是已实施记录。
+
 1. **座位 = 探测列表首位**（默认 `127.0.0.1:3080`；用户显式配置 `dsh_web_url`
    则配置端口即座位）。座位是唯一实例位子——**端口即身份**，应答即用，无论谁
    拉起（3096–3196 私有端口区间已退役，旧孤儿由一次性迁移清理按 PID 安全收尸）；
@@ -466,12 +472,27 @@ shadow-tree 启动）子进程，协议是 SDK JSON-RPC 2.0 over stdio，不是�
 `dsh-web-managed-server.json`（0600，无凭据）只写不读：诊断与迁移清理消费，
 解析不读。
 
-**两条常驻 WebSocket（官方 v1 无 `since`，重连 = 重开流 + history/forceCold）：**
+**一条常驻复用 WebSocket `GET /api/remote.mux`（2026-09-23 typert 网关代；官方无
+`since`，重连 = 重开逻辑流）：**
 
-| 流 | 作用 |
+| 逻辑流 | 作用 |
 | --- | --- |
-| `GET /api/events.mux` | 全会话 `session/event`（与磁盘日志同构）。`assistant/chunk` 的 `text-delta` 即真流式打字机。绑定中的 session 走该 `dshSession.Events()`；其余走 agent 级 passive 通道（外部 Mac web turn 同样直播）。 |
-| `GET /api/events.host` | `session-added/removed/status`、`workspace-changed` → `CatalogRefreshSignaler` 立即重扫 catalog，不必等 60s discovery。 |
+| `$events` | api-session 生命周期 + approval/question waterfall；人类 `user/message` 触发 `api-session/activity` → 按需开该会话的 follow。 |
+| `session/follow`（按需，每会话一条） | 外部回合直播。开口快照 = 官方历史页（`HISTORY_PAGE_OPTIONS`：maxMessages 500 + turnWindow {50,2}，client/sessions/session.ts:54/:631）+ `assistantStream` 重连基线；之后 gap-free live 帧。绑定中的 session 走该 `dshSession.Events()`；其余走 agent 级 passive 通道（外部 Mac web turn 同样直播）。 |
+| `workspace/follow` | 归组基线 + `pinned` 增量 → catalog 刷新与归组缓存。 |
+
+**follow 开口快照的播种语义（2026-09-23 真机事故修复，必须保持）：** 快照是官方
+历史页——客户端按 seq 幂等 reconcile，**不是新活动**。桥的 iOS 事件通道是追加式，
+幂等必须在桥侧实现（`agent/dsh-web/streams.go` dispatchFollowItem）：
+
+- **已落定历史**（最后一个 `turn/end` 及之前）只播种 codec（水位 + 回合/消息
+  状态），**不重播为实时事件**——iOS 经投影 hydrate 已持有该段。违反此语义的
+  后果见 think.md 2026-09-23 快照重播事故：发送瞬间整段历史（18 回合 × 5 记录
+  = 90 事件）涌向 iOS，运行中时间线被冲毁，回合落定后自愈。
+- **在途尾部**（最后一个 `turn/end` 之后）照常发射——外部运行回合收养与本桥
+  排队占位/落定流都靠它。
+- **重连**（codec 已有投递水位）：发射所有 seq ≥ 水位的记录——断线间隙新落账
+  的记录（含已落定回合）从未到达客户端，是真正增量；低于水位的只播种。
 
 **会话列表与归组：**
 

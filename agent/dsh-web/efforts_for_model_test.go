@@ -15,13 +15,15 @@ func TestEffortsForModelPerModelTruth(t *testing.T) {
 	defer f.Close()
 	a := newTestAgent(t, f)
 
-	f.handlers["llm.providers"] = fakeRPCResponse{value: map[string]any{
+	f.handlers["llm/listConfigurableProviders"] = fakeRPCResponse{value: map[string]any{
 		"providers": []any{map[string]any{
 			"provider": "deepseek", "displayName": "DeepSeek",
-			"settingsNs": "", "settingsPath": []any{}, "active": true,
+			"settingsNs": "", "settingsPath": []any{}, "declared": true,
 		}},
 	}}
-	f.handlers["llm.models"] = fakeRPCResponse{value: map[string]any{
+	f.handlers["session/modelCatalog"] = fakeRPCResponse{value: map[string]any{
+		"default":           map[string]any{"provider": "deepseek", "model": "deepseek-v4"},
+		"routableProviders": []any{"deepseek"},
 		"groups": []any{map[string]any{
 			"id": "deepseek", "name": "DeepSeek",
 			"models": []any{
@@ -40,7 +42,6 @@ func TestEffortsForModelPerModelTruth(t *testing.T) {
 				map[string]any{"id": "deepseek-v4", "name": "V4"},
 			},
 		}},
-		"failures": []any{},
 	}}
 
 	if models := a.AvailableModels(context.Background()); len(models) != 2 {

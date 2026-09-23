@@ -154,7 +154,7 @@ func TestWorkflowCodecReplayPlan109Progression(t *testing.T) {
 // TestWorkflowCodecReplayPlan110FailedMemberAndTornRun：seq2 failed 的成员
 // 结算 + run-end completed（官方 statusFromOutcome/statusFromStopReason）；
 // turn 14 内的 torn run（run-start + agent-start，无 end）快照保持 running
-//（interrupted 由 reducer turn 终态注入，不在 codec）。
+// （interrupted 由 reducer turn 终态注入，不在 codec）。
 func TestWorkflowCodecReplayPlan110FailedMemberAndTornRun(t *testing.T) {
 	events, _ := replayWorkflowFrames(t)
 	const runID = "f041ca5c-3479-4709-abc5-f3d417351233"
@@ -293,7 +293,7 @@ func TestWorkflowFoldInvariants(t *testing.T) {
 }
 
 // TestWorkflowFoldPhaseIdentity：phase 身份——absent（未分阶段，nil）与空串
-//（空阶段名）是两个独立分组，按首现顺序；同 phase 归并同组。
+// （空阶段名）是两个独立分组，按首现顺序；同 phase 归并同组。
 func TestWorkflowFoldPhaseIdentity(t *testing.T) {
 	raw := func(d map[string]any) []byte { b, _ := json.Marshal(d); return b }
 	fold := &workflowFold{}
@@ -337,15 +337,14 @@ func TestWorkflowFoldPhaseIdentity(t *testing.T) {
 // 的 parts；plan110 turn 含两个 run 的 part（seq2 failed + torn running）；
 // turn 外 run 整跳过。goal_round user 行非回归。
 func TestWorkflowHistoryColdFoldPlacement(t *testing.T) {
-	var evs []apiHistoryEntry
+	var evs []sessionEventWire
 	for _, env := range loadWorkflowRuns(t) {
 		b, err := json.Marshal(env)
 		if err != nil {
 			t.Fatalf("marshal env: %v", err)
 		}
-		var e apiHistoryEntry
-		wrapped := []byte(`{"event":` + string(b) + `}`)
-		if err := json.Unmarshal(wrapped, &e); err != nil {
+		var e sessionEventWire
+		if err := json.Unmarshal(b, &e); err != nil {
 			t.Fatalf("unmarshal entry: %v", err)
 		}
 		evs = append(evs, e)

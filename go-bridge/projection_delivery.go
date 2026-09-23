@@ -62,6 +62,9 @@ func isSessionSyncV2RawTimelineEvent(event string) bool {
 	switch event {
 	case "turn_started", "turn_completed",
 		"user_message", "system_message",
+		// Pending-queue retraction: reduced into ProjectionPatch.RemovedTurnIDs
+		// (removePendingPlaceholder), so the raw frame must stay sealed for syncV2.
+		"user_message_removed",
 		"text_delta", "message_updated", "message_content",
 		"reasoning_delta", "thinking_delta",
 		"tool_started", "tool_finished", "tool_content",

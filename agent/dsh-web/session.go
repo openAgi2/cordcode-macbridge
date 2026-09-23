@@ -8,6 +8,7 @@ package dshweb
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"sync"
@@ -15,6 +16,32 @@ import (
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
+
+// dshLeafName mirrors the official attachment displayName rule
+// (attachment-local/src/store.ts:29-36): take the leaf after the last
+// separator of either style, strip control characters, trim, cap at 255;
+// empty becomes "" (omitted on the wire). Keeps local paths off the wire —
+// the seat applies the same rule server-side.
+func dshLeafName(name string) string {
+	leaf := name
+	if i := strings.LastIndexAny(leaf, `/\\`); i >= 0 && i+1 < len(leaf) {
+		leaf = leaf[i+1:]
+	} else if i >= 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range leaf {
+		if r < 0x20 || r == 0x7f {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	out := strings.TrimSpace(b.String())
+	if len(out) > 255 {
+		out = out[:255]
+	}
+	return out
+}
 
 var _ core.AgentSession = (*dshSession)(nil)
 var _ core.TurnCanceler = (*dshSession)(nil)
@@ -59,19 +86,19 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 		}
 		s.idValue.Store(created)
 	} else {
-		// Light existence probe: history on an unknown id returns the official
-		// session-not-found RpcError — surfaced verbatim (坑 7). The tail page
-		// also carries contextPressure/contextBreakdown — seed the meter so
-		// iOS does not open on "暂无上下文用量数据".
-		max := 1
-		var hist sessionHistoryValue
-		probe := sessionHistoryRequest{SessionID: sessionID, MaxMessages: &max}
-		if err := client.Call(ctx, "session.history", probe, &hist); err != nil {
+		// Light existence probe: session/projections on an unknown id returns
+		// the official session/not-found RpcError — surfaced verbatim (坑 7).
+		// The block also carries contextPressure/contextBreakdown — seed the
+		// meter so iOS does not open on "暂无上下文用量数据".
+		var proj sessionProjectionsValue
+		probe := sessionProjectionsRequest{SessionID: sessionID}
+		if err := client.Call(ctx, "session/projections", map[string]any{"request": probe}, &proj); err != nil {
 			s.cancel()
 			return nil, err
 		}
 		s.idValue.Store(sessionID)
-		if usage := usageFromProjections(hist.Projections); usage != nil {
+		block := apiSessionProjectionsBlock{AsOfSeq: proj.AsOfSeq, Values: proj.Values}
+		if usage := usageFromProjections(&block); usage != nil {
 			a.rememberContextUsage(sessionID, usage)
 			select {
 			case s.events <- core.Event{Type: core.EventContextUsageUpdated, SessionID: sessionID, ContextUsage: usage}:
@@ -81,6 +108,9 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	}
 	a.noteActiveSession(s.CurrentSessionID())
 	a.bindings.put(s.CurrentSessionID(), s)
+	// Bound sessions join the live follow set (streams.go): their external
+	// turns must stream without waiting for an api-session/activity poke.
+	a.ensureFollow(s.CurrentSessionID())
 	return s, nil
 }
 
@@ -89,15 +119,16 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 // surface is session-scoped selectModel, applied right after create).
 //
 // Official attach (workspace.sessionIds) runs ONLY when the payload carries
-// workspaceId (apiproxy session.create). cwd alone sets the session header
-// directory and leaves the row in 未分组 — the design's "cwd match auto-groups"
-// claim was wrong. When the iOS-selected directory matches a registered
-// workspace path, send workspaceId (schema: at most one of workspaceId|cwd).
+// workspaceId (session/create schema). cwd alone sets the session header
+// directory and leaves the row in 未分组 — the design's "cwd match
+// auto-groups" claim was wrong. When the iOS-selected directory matches a
+// registered workspace path (workspace/follow baseline), send workspaceId
+// (schema: at most one of workspaceId|cwd).
 func (s *dshSession) create(ctx context.Context) (string, error) {
 	var val sessionCreateValue
 	req := sessionCreateRequest{}
 	if cwd := s.agent.GetWorkDir(); cwd != "" && !isUngroupedDirectory(cwd) {
-		if wsID := workspaceIDForDirectory(ctx, s.client, cwd); wsID != "" {
+		if wsID := s.agent.workspaceIDForDirectory(cwd); wsID != "" {
 			req.WorkspaceID = wsID
 		} else {
 			req.Cwd = cwd
@@ -106,11 +137,11 @@ func (s *dshSession) create(ctx context.Context) (string, error) {
 	if preset := strings.TrimSpace(s.agent.pendingPreset); preset != "" {
 		req.AgentPreset = preset
 	}
-	if err := s.client.Call(ctx, "session.create", req, &val); err != nil {
+	if err := s.client.Call(ctx, "session/create", map[string]any{"request": req}, &val); err != nil {
 		return "", err
 	}
 	if val.SessionID == "" {
-		return "", fmt.Errorf("dshweb: session.create returned empty sessionId")
+		return "", fmt.Errorf("dshweb: session/create returned empty sessionId")
 	}
 	s.agent.applyPendingModelSelection(ctx, s.client, val.SessionID)
 	return val.SessionID, nil
@@ -121,17 +152,31 @@ func (s *dshSession) CurrentSessionID() string {
 	return id
 }
 
-// Send queues one user turn: session.prompt{mode:"queue"} with a single text
-// part (phase 1 is text-only — images ride session.attachment in phase 2;
-// the bridge's attachment gate already rejects them pre-StartSession since
-// this driver does not declare AttachmentSupporter).
-//
-// Turn events (turn/start…turn/end) arrive on Events() via the mux stream
-// (§8-3). Send failures return the official RpcError text verbatim — the
-// iOS send-error bubble shows the real cause (fail visibly, 坑 8).
+// Send queues one user turn with the default delivery mode (queue). Kept for
+// the plain AgentSession surface; the bridge's send path routes through
+// SendWithOptions (PromptOptionsSender).
 func (s *dshSession) Send(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
-	if len(images) > 0 || len(files) > 0 {
-		return fmt.Errorf("dsh-web: attachments are not supported in phase 1 (text-only)")
+	return s.SendWithOptions(prompt, images, files, core.PromptOptions{})
+}
+
+// SendWithOptions carries the official prompt delivery mode per request
+// (OD-2a=A, A7 live evidence): "" or "queue" → mode:"queue" (the official
+// composer default — busy-Enter stays queue, submission-policy.ts:29-38 +
+// DEFAULT_BUSY_ENTER_BEHAVIOR='queue'); "steer" → mode:"steer" (the explicit
+// steering gesture: agent.steer splices into the running turn's next-step,
+// agent-loop/agent.ts:166; on an idle agent the wake makes it the next
+// turn — live-confirmed accepted, NOT the source-mapped agent-busy
+// rejection). Other option axes (agent/model/variant/effort) are applied
+// agent-global by the bridge before this call and are not re-carried here.
+func (s *dshSession) SendWithOptions(prompt string, images []core.ImageAttachment, files []core.FileAttachment, opts core.PromptOptions) error {
+	mode := strings.TrimSpace(opts.Mode)
+	switch mode {
+	case "", "queue":
+		mode = "queue"
+	case "steer":
+		// official gesture
+	default:
+		return fmt.Errorf("dsh-web: unsupported prompt mode %q (want queue|steer)", opts.Mode)
 	}
 	if s.closed.Load() {
 		return fmt.Errorf("dsh web: session closed")
@@ -143,17 +188,39 @@ func (s *dshSession) Send(prompt string, images []core.ImageAttachment, files []
 	if inGrace, until := s.agent.resolver.GraceState(); inGrace {
 		return &ErrInstanceReconnecting{BaseURL: s.agent.resolver.seatURL(), Until: until}
 	}
-	req := sessionPromptRequest{
-		SessionID: s.CurrentSessionID(),
-		Mode:      "queue",
-		Content:   []promptContentPart{{Type: "text", Text: prompt}},
+	content := make([]promptContentPart, 0, 1+len(images)+len(files))
+	if prompt != "" {
+		content = append(content, promptContentPart{Type: "text", Text: prompt})
 	}
-	return s.client.Call(s.ctx, "session.prompt", req, nil)
+	for _, img := range images {
+		content = append(content, promptContentPart{
+			Type:      "image",
+			MediaType: img.MimeType,
+			Data:      base64.StdEncoding.EncodeToString(img.Data),
+			Name:      dshLeafName(img.FileName),
+		})
+	}
+	for _, f := range files {
+		uploaded, err := s.client.UploadFileBinary(s.ctx, s.CurrentSessionID(),
+			dshLeafName(f.FileName), f.Data)
+		if err != nil {
+			return err
+		}
+		content = append(content, promptContentPart{Type: "file", ReceiptID: uploaded.ReceiptID})
+	}
+	req := sessionPromptRequest{
+		RequestID: randomID("req"),
+		SessionID: s.CurrentSessionID(),
+		Mode:      mode,
+		Content:   content,
+	}
+	return s.client.Call(s.ctx, "session/prompt", map[string]any{"request": req}, nil)
 }
 
-// CancelTurn maps abort_generation onto session.cancel.
+// CancelTurn maps abort_generation onto session/cancel.
 func (s *dshSession) CancelTurn(ctx context.Context) error {
-	return s.client.Call(ctx, "session.cancel", sessionCancelRequest{SessionID: s.CurrentSessionID()}, nil)
+	req := sessionCancelRequest{SessionID: s.CurrentSessionID()}
+	return s.client.Call(ctx, "session/cancel", map[string]any{"request": req}, nil)
 }
 
 func (s *dshSession) Events() <-chan core.Event { return s.events }
@@ -275,3 +342,5 @@ func (a *Agent) noteActiveSession(id string) {
 	a.lastActiveSessionID = id
 	a.mu.Unlock()
 }
+
+var _ core.PromptOptionsSender = (*dshSession)(nil)

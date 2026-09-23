@@ -1,13 +1,18 @@
 package dshweb
 
 // Official dsh goal projection verbs (goals/pause|resume|clear|edit — Typert
-// remotes on the GoalService host face 'goals'; dsh-goal/src/index.ts
+// remotes on the GoalService host face 'goals'; goal/goal/src/index.ts
 // @Remote('pause'|'resume'|'clear'|'edit')). CordCode only bridges: request
-// shapes mirror the live-probed rc.2 wire (gateway single `args` object with
+// shapes mirror the live-probed wire (gateway single `args` object with
 // agentId + CAS ref {id, revision}; edit additionally carries
-// request.objective — live probe 2026-09-05: `goals/pause` with
-// args{agentId,ref} reached the official transition check and was rejected
-// with the seat's own message, proving both the endpoint and the payload).
+// request.objective). Two-generation live evidence: alpha.1
+// (alpha1-commands-goals-wire.json, 2026-09-23 — shapes accepted, business
+// "no current goal" on a goal-less session) and alpha.2
+// (alpha2-commands-goals-wire.json, 2026-09-23 — full success path with state
+// convergence). DRIFT note: the alpha.2 TypeScript source renames the param
+// `agent`, but the gateway wire name stays `agentId` on BOTH generations
+// (`{agent}` is rejected verbatim with `missing "agentId"; unexpected "agent"`
+// — alpha.2 live sample); the source param name never reaches the wire.
 //
 // The CAS ref is fetched fresh from session.list projections.values.goal
 // (authoritative whole snapshot) right before each mutation — never from the
@@ -30,10 +35,6 @@ const (
 	goalsClearMethod  = "goals/clear"
 	goalsEditMethod   = "goals/edit"
 )
-
-type goalsMutateRequest struct {
-	Args goalsMutateArgs `json:"args"`
-}
 
 type goalsMutateArgs struct {
 	AgentID string        `json:"agentId"`
@@ -94,9 +95,7 @@ func (a *Agent) MutateSessionGoal(ctx context.Context, sessionID, action, object
 	if err != nil {
 		return err
 	}
-	return client.Call(ctx, method, goalsMutateRequest{
-		Args: goalsMutateArgs{AgentID: sessionID, Ref: ref, Request: request},
-	}, nil)
+	return client.Call(ctx, method, goalsMutateArgs{AgentID: sessionID, Ref: ref, Request: request}, nil)
 }
 
 // currentGoalRef fetches the authoritative goal snapshot (session.list
@@ -105,7 +104,7 @@ func (a *Agent) MutateSessionGoal(ctx context.Context, sessionID, action, object
 // meaningless without one (official GOAL_NOT_FOUND).
 func (a *Agent) currentGoalRef(ctx context.Context, client *Client, sessionID string) (goalsRefWire, error) {
 	var val sessionListValue
-	if err := client.Call(ctx, "session.list", sessionListRequest{}, &val); err != nil {
+	if err := client.Call(ctx, "session/list", listArgs(), &val); err != nil {
 		return goalsRefWire{}, err
 	}
 	for _, item := range val.Items {

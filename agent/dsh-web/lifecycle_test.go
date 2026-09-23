@@ -8,6 +8,7 @@ package dshweb
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -24,16 +25,19 @@ import (
 func TestUnaryCallSendsEnvelopeAndDecodesValue(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
-	f.handlers["host.describe"] = fakeRPCResponse{value: map[string]any{
-		"version": "0.0.1", "cwd": "/tmp/x", "attachedSessions": 2, "canOpenPath": true,
+	f.handlers["session/list"] = fakeRPCResponse{value: map[string]any{
+		"items": []map[string]any{{
+			"sessionId": "s-1", "updatedAt": 1786860018199, "running": true, "blank": false,
+			"agentAvailable": true, "cwd": "/tmp/x",
+		}},
 	}}
 
 	c := NewClient(f.URL(), nil)
-	var out describeValue
-	if err := c.Call(context.Background(), "host.describe", map[string]any{}, &out); err != nil {
+	var out sessionListValue
+	if err := c.Call(context.Background(), "session/list", listArgs(), &out); err != nil {
 		t.Fatalf("Call: %v", err)
 	}
-	if out.Version != "0.0.1" || out.AttachedSessions != 2 {
+	if len(out.Items) != 1 || out.Items[0].SessionID != "s-1" || !out.Items[0].AgentAvailable {
 		t.Fatalf("decoded value mismatch: %+v", out)
 	}
 
@@ -42,14 +46,14 @@ func TestUnaryCallSendsEnvelopeAndDecodesValue(t *testing.T) {
 	f.lastRequest.mu.Lock()
 	method, rpcID, payload := f.lastRequest.method, f.lastRequest.rpcID, f.lastRequest.payload
 	f.lastRequest.mu.Unlock()
-	if method != "host.describe" {
+	if method != "session/list" {
 		t.Fatalf("server saw method %q", method)
 	}
 	if rpcID == "" {
 		t.Fatal("rpcId missing")
 	}
-	if strings.TrimSpace(string(payload)) != "{}" {
-		t.Fatalf("payload slot not carried: %s", payload)
+	if strings.TrimSpace(string(payload)) != `{"args":{"_request":{}}}` {
+		t.Fatalf("payload not the single-args envelope with empty _request: %s", payload)
 	}
 }
 
@@ -59,14 +63,14 @@ func TestUnaryBusinessErrorPassesRPCErrorVerbatim(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	original := `model "deepseek-chat" is not routable: allowed models are deepseek-v4-pro, deepseek-v4-flash (provider deepseek)`
-	f.handlers["session.prompt"] = fakeRPCResponse{err: &RPCError{
+	f.handlers["session/prompt"] = fakeRPCResponse{err: &RPCError{
 		Code:    "model-unavailable",
 		Message: original,
 		Details: json.RawMessage(`{"provider":"deepseek","model":"deepseek-chat"}`),
 	}}
 
 	c := NewClient(f.URL(), nil)
-	err := c.Call(context.Background(), "session.prompt", map[string]any{}, nil)
+	err := c.Call(context.Background(), "session/prompt", map[string]any{"request": map[string]any{}}, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -123,11 +127,11 @@ func TestUnaryCarrierStatuses(t *testing.T) {
 func TestBareObjectBodyGetsBadRequestBranch(t *testing.T) {
 	// Documents the carrier contract: valid JSON without the ClientRequest
 	// envelope is answered HTTP 200 + bad-request ServerResponse (the real
-	// fetch/handler.ts behavior). Asserted against the fake to keep it honest
-	// with the pinned dsh source.
+	// rpc-host.ts behavior — the gateway's invalidEnvelopeResponse). Asserted
+	// against the fake to keep it honest with the pinned dsh source.
 	f := newFakeDSHServer(t)
 	defer f.Close()
-	resp, err := http.Post(f.URL()+"/api/session.list", "application/json",
+	resp, err := http.Post(f.URL()+"/api/session/list", "application/json",
 		strings.NewReader(`{"hello":"world"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -140,149 +144,134 @@ func TestBareObjectBodyGetsBadRequestBranch(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&sr); err != nil {
 		t.Fatal(err)
 	}
-	if sr.Type != "server-response" || sr.Result.OK || sr.Result.Error == nil || sr.Result.Error.Code != "bad-request" {
-		t.Fatalf("expected bad-request branch, got %+v", sr)
+	if sr.Type != "server-response" || sr.Result.OK || sr.Result.Error == nil || sr.Result.Error.Code != "gateway/bad-request" {
+		t.Fatalf("expected gateway/bad-request branch, got %+v", sr)
 	}
 }
 
 // ── Wire: WS downlinks ───────────────────────────────────────────────────────
 
-func TestEventsEndpointsRequireUpgrade(t *testing.T) {
-	// Plain GET → 426 with Upgrade headers (client/connection/src/index.ts).
-	resp, err := http.Get(newFakeDSHServer(t).URL() + "/api/events.mux")
+func TestRemoteMuxRequiresUpgrade(t *testing.T) {
+	// Plain GET on the gateway's upgrade route never matches → 404
+	// (rpc-host.ts registers /api/remote.mux as an upgrade route only).
+	resp, err := http.Get(newFakeDSHServer(t).URL() + remoteMuxPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusUpgradeRequired {
-		t.Fatalf("expected 426, got %d", resp.StatusCode)
-	}
-	if resp.Header.Get("Upgrade") != "websocket" {
-		t.Fatal("missing Upgrade: websocket header")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", resp.StatusCode)
 	}
 }
 
-func TestOpenStreamReceivesServerRequestFrames(t *testing.T) {
+func TestOpenStreamReceivesLogicalStreamItems(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
-	f.SetMuxFrames([]any{
-		map[string]any{"type": "session/subscribed", "sessionId": "s1", "lastSeq": 42},
-		map[string]any{"type": "session/event", "sessionId": "s1",
-			"event": map[string]any{"type": "turn/start", "seq": 1, "time": 1.0, "data": map[string]any{}}},
+	f.SetEventsFrames([]any{
+		map[string]any{"type": "emit", "event": "api-session/status", "args": []any{"s1", true}},
 	})
 
 	c := NewClient(f.URL(), nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	st, err := c.OpenStream(ctx, "mux", "/api/events.mux")
+	st, err := c.OpenStream(ctx, "mux", remoteMuxPath)
 	if err != nil {
 		t.Fatalf("OpenStream: %v", err)
 	}
 	defer st.Close()
 
+	// The $events stream opens with the ready frame binding the generation's
+	// clientId, then the scripted emits arrive as items.
+	if err := st.Send(muxClientMessage{
+		Type: "open", StreamID: eventsStreamID, Endpoint: "$events",
+		Payload: json.RawMessage(`{"args":{}}`),
+	}); err != nil {
+		t.Fatalf("open: %v", err)
+	}
 	frame, err := st.Next(ctx)
 	if err != nil {
 		t.Fatalf("first frame: %v", err)
 	}
-	// Envelope contract: type=server-request, method = payload's type tag.
-	if frame.Type != "server-request" {
-		t.Fatalf("frame type %q", frame.Type)
+	if frame.Type != "item" || frame.StreamID != eventsStreamID {
+		t.Fatalf("frame type/stream: %q/%q", frame.Type, frame.StreamID)
 	}
-	if frame.Method != "session/subscribed" {
-		t.Fatalf("method %q (must equal payload.type)", frame.Method)
+	var ready remoteEventFrame
+	if err := json.Unmarshal(frame.Value, &ready); err != nil {
+		t.Fatalf("ready: %v", err)
 	}
-	var payload struct {
-		Type      string `json:"type"`
-		SessionID string `json:"sessionId"`
-		LastSeq   int    `json:"lastSeq"`
-	}
-	if err := json.Unmarshal(frame.Payload, &payload); err != nil {
-		t.Fatalf("payload: %v", err)
-	}
-	if payload.SessionID != "s1" || payload.LastSeq != 42 {
-		t.Fatalf("mux frame payload mismatch: %+v", payload)
+	if ready.Type != "ready" || ready.ClientID == "" {
+		t.Fatalf("ready frame: %+v", ready)
 	}
 
 	frame2, err := st.Next(ctx)
 	if err != nil {
 		t.Fatalf("second frame: %v", err)
 	}
-	if frame2.Method != "session/event" {
-		t.Fatalf("second frame method %q", frame2.Method)
+	var emit remoteEventFrame
+	if err := json.Unmarshal(frame2.Value, &emit); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	if emit.Type != "emit" || emit.Event != "api-session/status" {
+		t.Fatalf("second frame emit: %+v", emit)
 	}
 }
 
-// ── Wire: /api/respond ───────────────────────────────────────────────────────
+// ── Wire: $events/result ────────────────────────────────────────────────────
 
-func TestRespondEchoesRPCIDAndCarriesValue(t *testing.T) {
+func TestRespondEventResultCarriesCorrelationAndValue(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	c := NewClient(f.URL(), nil)
 
-	accepted, err := c.Respond(context.Background(), "frame-rpc-7", true, map[string]any{
-		"sessionId": "s1", "approvalId": "a1", "outcome": "allowed-once",
-	}, nil)
-	if err != nil || !accepted {
-		t.Fatalf("Respond: accepted=%v err=%v", accepted, err)
+	if err := c.RespondEventResult(context.Background(), "client-7", "event-7", "allowed-once", false); err != nil {
+		t.Fatalf("RespondEventResult: %v", err)
 	}
-	f.lastRespond.mu.Lock()
-	body := f.lastRespond.body
-	f.lastRespond.mu.Unlock()
-	var sent struct {
-		Type   string        `json:"type"`
-		RPCID  string        `json:"rpcId"`
-		Result rpcResultBody `json:"result"`
+	f.lastEventResult.mu.Lock()
+	args := f.lastEventResult.args
+	f.lastEventResult.mu.Unlock()
+	if args.ClientID != "client-7" || args.EventID != "event-7" {
+		t.Fatalf("correlation mismatch: %+v", args)
 	}
-	if err := json.Unmarshal(body, &sent); err != nil {
-		t.Fatal(err)
+	if args.Outcome.Kind != "result" || string(args.Outcome.Value) != `"allowed-once"` {
+		t.Fatalf("value mismatch: %+v", args.Outcome)
 	}
-	if sent.Type != "client-response" || sent.RPCID != "frame-rpc-7" {
-		t.Fatalf("envelope/rpcId echo mismatch: %+v", sent)
-	}
-	if !sent.Result.OK {
-		t.Fatalf("expected ok:true value branch: %+v", sent.Result)
-	}
-	var val map[string]any
-	_ = json.Unmarshal(sent.Result.Value, &val)
-	if val["outcome"] != "allowed-once" {
-		t.Fatalf("value mismatch: %s", sent.Result.Value)
+	// Envelope fidelity: the server saw a client-request on the $events/result
+	// path with the method matching.
+	f.lastRequest.mu.Lock()
+	method := f.lastRequest.method
+	f.lastRequest.mu.Unlock()
+	if method != "$events/result" {
+		t.Fatalf("server saw method %q", method)
 	}
 }
 
-func TestRespondRejectEncodesCancelledErrorBranch(t *testing.T) {
-	// Question reject rides the error branch (ok:false) — asymmetric with
-	// approvals by design (questions.schema.ts); the client must not send a
-	// value payload there.
+func TestRespondEventResultRejectEncodesRejectedOutcome(t *testing.T) {
+	// Question reject rides the rejected outcome branch — asymmetric with
+	// approvals by design; the client must not send a value there.
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	c := NewClient(f.URL(), nil)
 
-	if _, err := c.Respond(context.Background(), "q-rpc-1", false, nil, nil); err != nil {
-		t.Fatalf("Respond: %v", err)
+	if err := c.RespondEventResult(context.Background(), "client-9", "event-9", nil, true); err != nil {
+		t.Fatalf("RespondEventResult: %v", err)
 	}
-	f.lastRespond.mu.Lock()
-	body := f.lastRespond.body
-	f.lastRespond.mu.Unlock()
-	var sent struct {
-		Result rpcResultBody `json:"result"`
+	f.lastEventResult.mu.Lock()
+	args := f.lastEventResult.args
+	f.lastEventResult.mu.Unlock()
+	if args.Outcome.Kind != "rejected" {
+		t.Fatal("reject must be the rejected branch")
 	}
-	if err := json.Unmarshal(body, &sent); err != nil {
-		t.Fatal(err)
-	}
-	if sent.Result.OK {
-		t.Fatal("reject must be the ok:false branch")
-	}
-	if sent.Result.Error == nil || sent.Result.Error.Code != "cancelled" {
-		t.Fatalf("expected cancelled error branch: %+v", sent.Result)
+	if args.Outcome.Error == nil || args.Outcome.Error.Message == "" {
+		t.Fatalf("expected rejected error body: %+v", args.Outcome)
 	}
 }
 
 // ── Resolver lifecycle (§4.2) ────────────────────────────────────────────────
 
-// describeHandler answers host.describe with a valid server-response — enough
+// describeHandler answers session/list with a valid server-response — enough
 // for probeInstance.
 func describeHandler(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/api/host.describe" || r.Method != http.MethodPost {
+	if r.URL.Path != "/api/session/list" || r.Method != http.MethodPost {
 		http.NotFound(w, r)
 		return
 	}
@@ -346,10 +335,11 @@ func (s *countingStarter) Stop() error {
 	return nil
 }
 
-func TestResolveColdStartSpawnsOnSeatAndSeatIdentityAdopts(t *testing.T) {
-	// Canonical-seat model (08-19 design §3.1): cold start spawns ON the seat
-	// (never a private port range); a second resolver finds the same instance
-	// through the seat itself — port = identity, no state-file adoption.
+func TestStartSeatSpawnsOnSeatAndSeatIdentityAdopts(t *testing.T) {
+	// Canonical-seat model (08-19 design §3.1 + 2026-09-22 plan §5): the
+	// explicit StartSeat spawns ON the seat (never a private port range); a
+	// second resolver finds the same instance through the seat itself —
+	// port = identity, no state-file adoption.
 	seat := freeLoopbackSeat(t)
 	dataDir := t.TempDir()
 	starter := &countingStarter{}
@@ -358,9 +348,9 @@ func TestResolveColdStartSpawnsOnSeatAndSeatIdentityAdopts(t *testing.T) {
 		WithDataDir(dataDir),
 		withManagedStarter(starter),
 	)
-	inst, err := r1.Resolve(context.Background())
+	inst, err := r1.StartSeat(context.Background())
 	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+		t.Fatalf("StartSeat: %v", err)
 	}
 	if inst.Source != SourceManaged {
 		t.Fatalf("expected managed, got %s", inst.Source)
@@ -433,17 +423,56 @@ func freeLoopbackSeat(t *testing.T) string {
 	return fmt.Sprintf("http://127.0.0.1:%d", ln.Addr().(*net.TCPAddr).Port)
 }
 
-func TestResolveBothFailReturnsError(t *testing.T) {
+// TestColdResolveNeverSpawns (2026-09-22 plan §5): a cold Resolve on a dark
+// seat returns the typed ErrSeatNotRunning WITHOUT calling the starter —
+// opening Link, refreshing, 重新检查 and RPC retries are not hidden spawn
+// paths; only StartSeat (the 启动 button / install back-half) spawns.
+func TestColdResolveNeverSpawns(t *testing.T) {
+	seat := freeLoopbackSeat(t) // nothing binds it
+	starter := &countingStarter{}
+	r := NewResolver(
+		WithProbeURLs([]string{seat}),
+		withManagedStarter(starter),
+	)
+	_, err := r.Resolve(context.Background())
+	var nr *ErrSeatNotRunning
+	if !errors.As(err, &nr) {
+		t.Fatalf("cold Resolve must return ErrSeatNotRunning, got %v", err)
+	}
+	if nr.BaseURL != seat {
+		t.Fatalf("typed error must name the seat %s, got %s", seat, nr.BaseURL)
+	}
+	if starter.starts != 0 {
+		t.Fatalf("cold Resolve must not spawn (starts=%d)", starter.starts)
+	}
+	// Repeat calls stay probe-only (negative cache path).
+	for i := 0; i < 3; i++ {
+		if _, err := r.Resolve(context.Background()); !errors.As(err, &nr) {
+			t.Fatalf("resolve #%d: %v", i+1, err)
+		}
+	}
+	if starter.starts != 0 {
+		t.Fatalf("repeat cold Resolve must not spawn (starts=%d)", starter.starts)
+	}
+}
+
+// TestStartSeatReportsSpawnFailureDetail: the explicit StartSeat surfaces the
+// starter's honest failure (binary missing / port occupied) — the row keeps
+// 未启动 with the original text.
+func TestStartSeatReportsSpawnFailureDetail(t *testing.T) {
 	r := NewResolver(
 		WithProbeURLs([]string{"http://127.0.0.1:1"}),
 		withManagedStarter(&countingStarter{fail: true}),
 	)
-	_, err := r.Resolve(context.Background())
+	_, err := r.StartSeat(context.Background())
 	if err == nil {
 		t.Fatal("expected error when probe misses and managed spawn fails")
 	}
 	if !strings.Contains(err.Error(), "dsh binary not found") {
 		t.Fatalf("spawn failure detail lost: %v", err)
+	}
+	if sp := r.LastSpawnErr(); sp == nil || !strings.Contains(sp.Error(), "dsh binary not found") {
+		t.Fatalf("LastSpawnErr must retain the failure: %v", sp)
 	}
 }
 
