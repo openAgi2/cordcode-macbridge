@@ -1,3 +1,57 @@
+
+## 2026-09-24 dsh-web /goal 无气泡 + 注入堆尾：投影「一回合一条目」与官方「journal 逐行内联」的排版冲突（已修复，真实 journal 全链对账 ✅）
+
+现象：owner 在 Mac dsh web 执行 /goal 多子代理任务后报障两处——① /goal 输入没有用户
+气泡样式（官方是右对齐气泡 + 折叠结果卡两个表面，iOS 渲染成一块灰字纯文本）；② 回合
+中间注入的 5 条「上下文注入 · subagent-settled」全部堆在最终消息之后（官方 journal 里
+位于最后一个回合中间的 step 边界）。
+
+方法论收获（先证官方真值再动手）：
+- 解压官方 journal（session.v4.jsonl.zstd → 151 条）拿到两个反直觉真值：① /goal 输入
+  **没有 user/message**——只记录 command/run+done，官方气泡是 goal-command-input 投影
+  （GoalCommandInputView "Right-aligned /goal input bubble"，anchorSeq=run.seq-0.1）；
+  ② 5 条 settle 通知里 3138efcb **官方就结算了两次**——iOS 显示 5 行不是重复 bug，内容
+  本来就 1:1，错的只是位置与样式。先对账再修，避免把「正确的内容」当重复 bug 修坏。
+- 结构性根因：投影是「一回合一条目」，注入作为独立 ctx: turn 纯追加（upsertTurn 无
+  StartedAt 插入——对比 command turn 2026-09-12 已修过同类错位），回合后续内容原位更新
+  同一条目 → 注入永远在回合整块之后。**给 ctx turn 加时间排序也修不好**（注入时间戳晚于
+  回合开始，仍排整块后）——位置语义必须靠「挂进回合 part 流」表达，这正是官方 journal
+  逐行内联的本质。方案评审 r1-r3 把这个架构判断钉死后才动手。
+- 冷拉同病异根：history.go 的 pendingInjections「缓冲到回合 flush 之后」是 2026-09-06
+  修复「注入行出现在回复开头」时引入的当时最优解（折叠 turn 模型放不下中间行）；官方
+  内联方案落地后该机制整体删除——同一 journal 两种排版的投影，修一处必须冷热同形
+  （同 itemId ctxinj:<seq> + 同 turnId 幂等）。
+- iOS 渲染降级的教训：结构化数据到端（item.command/item.contextInjection 都在）但原生
+  行把 copy 降级文案（ChatTimelineCopyText）当显示文本——「copy 宿主」与「显示宿主」
+  职责分离后，copy golden 逐字节不变、显示面走官方双表面，两者互不牵连。
+- 编译波及面清单的价值：AssistantRenderBlock 加一个 case 牵出 6 处穷举 switch
+  （makeBlock/isProcessBoundary/buildExpandedItems/live 视窗段/子代理块循环/自动化目标
+  扫描）——方案 r2 的 B1 阻塞项预判了 3 处，实施中又亲核出 3 处；「同 target 无 default
+  穷举 switch」检索应成为加 enum case 的固定前置动作。
+- 路由真相修正：streaming 组 parts 非空时恒走 buildFromParts（B3 防抖粘性）——「流式期
+  注入即时可见」实际由 parts path 承接；buildFromOverlay 只是 finalized 漂移形状的回退。
+  测试用例按真实路由构造（content 非空 + parts 无 text part 才落 overlay），按臆想的路由
+  写测试会连跑三轮红。
+- 环境坑（非本任务引入但阻塞构建）：go.mod toolchain go1.26.6 本机未装，Xcode 脚本相
+  环境无 GOTOOLCHAIN=local → Release 构建 Go 阶段必失败；`GOTOOLCHAIN=local
+  ./scripts/build-unsigned-release.sh` 通过。后续可考虑把 GOTOOLCHAIN=local 写进
+  project.yml 构建脚本（另行小改，未纳入本轮）。
+- 验证分层如实标注（全部完成）：Mac 侧真实 journal 两段式探针对账 5/5、堆行 0、
+  inputLine 逐字；iOS 7 类 102 用例绿；iPhone 16 Pro 真机走查完成——AX 树五条注入行
+  按 journal 注入点夹在文本/工具组之间（3138efcb 两次各一行）、默认收起可展开、
+  最终消息+模型行之后零注入行；/goal 右对齐徽章气泡 + 折叠结果卡、permission 只出卡，
+  视觉验收（vision-agent 判读三张截图）通过。过程插曲：iPhone 锁屏曾阻塞安装
+  （devicectl assertion 4016）；/tmp 构建产物被系统清掉 + devicectl 沙箱读不了 /tmp，
+  且全新 DerivedData 的包解析会挂死（22 分钟 0 产出，杀掉换默认 dd 后 4 分钟编完）——
+  真机构建产物应放 ~/Library 稳定路径并用已有热 DerivedData。
+
+- 顺带观察（既有行为，非本轮引入，未修）：真实 journal 探针暴露冷拉 hydrate 的
+  `openCodeRichHistoryEntryToProjectionEvents` 对**连续 assistant entry** 用粘性
+  currentTurnID 归属（user/cmd 行才重置）——dsh goal 多轮会话冷拉重开时 t2/t3/t4
+  三个回合合并成一个 turn（26 parts 顺序保留、内容不丢，但回合头/时长合并）。
+  本轮报障的截图是直播态（三回合分开），owner 未报障冷拉形态；属既有冷路径
+  行为，超出本轮范围，留待后续专项核实是否需要按 entry.ID 逐条归属。
+
 ## 2026-09-23 dsh-web 发送消息气泡重复两次：iOS 解码了 removedTurnIds 却从未实现应用逻辑（已修复，定向测试 ✅）
 
 现象：快照重播修复部署后 owner 复测——历史气泡不再聚拢（主修复生效），但刚发送的消息

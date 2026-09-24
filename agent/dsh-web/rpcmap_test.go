@@ -1426,10 +1426,13 @@ func TestMapHistoryEventsSubagentSettledContextInjection(t *testing.T) {
 	}
 }
 
-// TestMapHistoryEventsMidTurnSettleAfterTurn：settle 注入发生在 turn 进行中时，
-// 折叠 turn 模型下归属该 turn 之后（live reducer 同位），不得先于所属 turn 的
-// assistant entry 入列（2026-09-06 owner 报障：注入行出现在回复开头）。
-func TestMapHistoryEventsMidTurnSettleAfterTurn(t *testing.T) {
+// TestMapHistoryEventsMidTurnSettleInlineParts：settle 注入发生在 turn 进行中时，
+// 落进该 turn entry 的 parts（journal 原位 = 官方内联位；与 live codec busy
+// 分支同 id "ctxinj:<seq>"，hydrate 转换补同 turnId，reducer 幂等合并）；
+// 不再产出独立注入 entry（旧 pendingInjections「缓冲到 turn flush 之后」机制
+// 已删除——2026-09-24 Fix B，官方对齐内联）。idle 注入（turn 外）保持独立
+// entry（见 TestMapHistoryEventsSubagentSettledContextInjection）。
+func TestMapHistoryEventsMidTurnSettleInlineParts(t *testing.T) {
 	evs := []sessionEventWire{
 		env("turn/start", 10, map[string]any{"turn": 1}),
 		env("user/message", 11, map[string]any{
@@ -1476,8 +1479,6 @@ func TestMapHistoryEventsMidTurnSettleAfterTurn(t *testing.T) {
 	}{
 		{"dshw-s-midturn-t1", "user"},
 		{"dshw-s-midturn-t1", "assistant"},
-		{"ctxinj:13", "context_injection"},
-		{"ctxinj:14", "context_injection"},
 		{"s-midturn:plan-mode", "system"},
 		{"s-midturn:goal", "system"},
 	}
@@ -1486,12 +1487,39 @@ func TestMapHistoryEventsMidTurnSettleAfterTurn(t *testing.T) {
 	}
 	for i, w := range want {
 		if entries[i].ID != w.id || entries[i].Role != w.role {
-			t.Fatalf("entries[%d] = {%s %s}, want {%s %s}（turn 内 settle 应在所属 turn 之后）",
+			t.Fatalf("entries[%d] = {%s %s}, want {%s %s}",
 				i, entries[i].ID, entries[i].Role, w.id, w.role)
 		}
 	}
 	// turn 折叠未被注入打断：两条 assistant 文本合并进同一 entry。
 	if entries[1].Content != "启动 5 个 subagent\n全部结算完成" {
 		t.Fatalf("turn content = %q, want merged two-step text", entries[1].Content)
+	}
+	// busy 注入落 turn parts，位置 = journal 序（text → inj13 → inj14 → text）。
+	parts := entries[1].Parts
+	if len(parts) != 4 {
+		t.Fatalf("turn parts = %d, want 4 (text + 2 injections + text): %+v", len(parts), parts)
+	}
+	if parts[0]["type"] != "text" || parts[0]["content"] != "启动 5 个 subagent" {
+		t.Fatalf("parts[0] = %+v, want leading text", parts[0])
+	}
+	for i, wantID := range []string{"ctxinj:13", "ctxinj:14"} {
+		p := parts[i+1]
+		if p["type"] != "context_injection" || p["itemId"] != wantID {
+			t.Fatalf("parts[%d] = %+v, want context_injection %s", i+1, p, wantID)
+		}
+		if p["kind"] != "subagent-settled" || p["form"] != "notice" ||
+			p["summary"] == "" || p["text"] == "" || p["senderSessionId"] == "" {
+			t.Fatalf("injection part fields: %+v", p)
+		}
+	}
+	if parts[3]["type"] != "text" || parts[3]["content"] != "全部结算完成" {
+		t.Fatalf("parts[3] = %+v, want trailing text", parts[3])
+	}
+	// mid-turn settle 不再产出独立注入 entry（结尾不堆行）。
+	for _, e := range entries {
+		if e.Role == "context_injection" {
+			t.Fatalf("mid-turn settle must not produce a standalone entry: %+v", e)
+		}
 	}
 }

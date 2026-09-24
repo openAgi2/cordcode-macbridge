@@ -201,20 +201,9 @@ func mapHistoryEvents(sessionID string, evs []sessionEventWire) []core.RichHisto
 	plan := &planFold{}
 	// goal 投影整值快照（goal/change 全量替换；live codec 同一语义）。
 	goal := (*core.GoalEvent)(nil)
-	// turn 内 settle 注入行缓冲：折叠 turn 模型无法把独立行插进气泡内部，
-	// 「turn N 进行中结算」按时间归属渲染在该 turn 之后（live reducer 同位——
-	// turn skeleton 先 append、ctx turn 后 append；官方 web 逐行展开时插在
-	// journal 原位正文之间，是同一 journal 顺序在两种排版下的投影）。2026-09-06
-	// owner 报障：旧实现注入行先于所属 turn 入列，iPhone 上读作「回复开头的一
-	// 串通知」。
-	var pendingInjections []core.RichHistoryEntry
 	flushTurn := func(endSeq int64, endTime int64) {
 		if entry, ok := acc.flush(endSeq, endTime); ok {
 			entries = append(entries, entry)
-		}
-		if len(pendingInjections) > 0 {
-			entries = append(entries, pendingInjections...)
-			pendingInjections = nil
 		}
 	}
 	appendCommandEntry := func(commandID, name, args, kind, text string, at int64) {
@@ -265,14 +254,27 @@ func mapHistoryEvents(sessionID string, evs []sessionEventWire) []core.RichHisto
 				continue
 			}
 			if d.Source != nil && d.Source.Kind == "subagent-settled" {
-				// 官方 settle 通知（同 live codec 分支）：独立 context_injection
-				// 行，与 live 同 id（"ctxinj:<seq>"）防冷热重复；Summary 空 =
-				// 未知形状，静默丢（fail-open）。turn 进行中 → 缓冲到该 turn
-				// flush 之后（flushTurn）；turn 外保持原位。
+				// 官方 settle 通知（同 live codec 分支）：busy 注入（turn 进行中）
+				// 落进该 turn 的 parts（journal 原位 = 官方内联位），与 live 同 id
+				//（"ctxinj:<seq>"）+ 同 turnId，reducer 幂等合并；idle 注入（turn
+				// 外）保持独立 entry 原位（官方回合间位）。Summary 空 = 未知形状，
+				// 静默丢（fail-open）。
 				if strings.TrimSpace(d.Source.Summary) == "" {
 					continue
 				}
-				entry := core.RichHistoryEntry{
+				if acc.open {
+					acc.parts = append(acc.parts, map[string]any{
+						"type":            "context_injection",
+						"itemId":          fmt.Sprintf("ctxinj:%d", e.Seq),
+						"kind":            d.Source.Kind,
+						"form":            d.Source.Form,
+						"summary":         d.Source.Summary,
+						"text":            joinTextBlocks(d.Content),
+						"senderSessionId": d.Source.SenderSessionID,
+					})
+					continue
+				}
+				entries = append(entries, core.RichHistoryEntry{
 					ID:      fmt.Sprintf("ctxinj:%d", e.Seq),
 					Role:    "context_injection",
 					Content: joinTextBlocks(d.Content),
@@ -285,12 +287,7 @@ func mapHistoryEvents(sessionID string, evs []sessionEventWire) []core.RichHisto
 						SenderSessionID: d.Source.SenderSessionID,
 					},
 					Timestamp: dshLogTime(e.Time),
-				}
-				if acc.open {
-					pendingInjections = append(pendingInjections, entry)
-				} else {
-					entries = append(entries, entry)
-				}
+				})
 				continue
 			}
 			if d.Source == nil || d.Source.Kind != "user" {

@@ -508,14 +508,15 @@ func (c *sessionCodec) applyUserMessage(env *sessionEventWire) ([]core.Event, er
 	case d.Source.Kind == "subagent-settled":
 		// 官方 continuation.ts settle 通知（注入父会话的 user/message，
 		// source{kind:"subagent-settled", form:"notice", summary, senderSessionId}）。
-		// 官方 UI 渲染 ContextInjectionRow「上下文注入 · subagent-settled · <summary>」。
-		// 独立系统行（turnId "ctx:<itemId>"，镜像 session_command 模式），不挂
-		// activeTurn——注入可发生在父会话任意状态（idle followup / busy steer）。
+		// 官方 UI 渲染 ContextInjectionRow「上下文注入 · subagent-settled · <summary>」，
+		// 位置=journal 注入点。busy 注入（activeTurn 存在）附 TurnID 挂进该回合
+		// part 流（官方内联位）；idle 注入（turn 外）维持独立系统行
+		//（turnId "ctx:<itemId>"，镜像 session_command 模式）。
 		// Summary 空 = 未知形状，fail-open 静默丢（不造行、不 reset 流）。
 		if strings.TrimSpace(d.Source.Summary) == "" {
 			return nil, nil
 		}
-		return []core.Event{{
+		ev := core.Event{
 			Type: core.EventContextInjection,
 			ContextInjection: &core.ContextInjectionEvent{
 				ItemID:          fmt.Sprintf("ctxinj:%d", env.Seq),
@@ -525,7 +526,11 @@ func (c *sessionCodec) applyUserMessage(env *sessionEventWire) ([]core.Event, er
 				Text:            joinTextBlocks(d.Content),
 				SenderSessionID: d.Source.SenderSessionID,
 			},
-		}}, nil
+		}
+		if c.activeTurn != noTurn {
+			ev.TurnID = c.activeTurnID
+		}
+		return []core.Event{ev}, nil
 	default:
 		// 官方 message.ts start()：source.kind != "user" 一律是注入上下文
 		// （ContextMessageNode，渲染为「上下文注入 · <kind>」行）——goal 轮的

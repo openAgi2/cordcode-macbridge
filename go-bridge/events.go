@@ -503,9 +503,12 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 	case core.EventContextInjection:
 		// dsh-web context-injection row (official ContextInjectionRow parity —
 		// the settle notice a finished subagent injects into its parent session).
-		// Projects through the Kernel as a `context_injection` part on a completed
-		// system turn (turnId "ctx:<itemId>"), mirroring session_command. Raw frame
-		// is deny-listed for syncV2 clients (projection is the SoT).
+		// Busy injection (TurnID set): projects through the Kernel as a
+		// `context_injection` part inside the owning turn's assistant parts (the
+		// official journal inline position). Idle injection: a `context_injection`
+		// part on a completed system turn (turnId "ctx:<itemId>"), mirroring
+		// session_command. Raw frame is deny-listed for syncV2 clients
+		// (projection is the SoT).
 		if ev.ContextInjection == nil {
 			return "", nil, false
 		}
@@ -525,6 +528,9 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		}
 		if ci.SenderSessionID != "" {
 			data["senderSessionId"] = ci.SenderSessionID
+		}
+		if ev.TurnID != "" {
+			data["turnId"] = ev.TurnID
 		}
 		return "context_injection", data, false
 

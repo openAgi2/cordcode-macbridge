@@ -862,7 +862,8 @@ func TestToolStepTitleSubagentDisplayKeys(t *testing.T) {
 // TestCodecSubagentSettledContextInjection：官方 continuation.ts settle 通知
 // （注入父会话的 user/message，source{kind:"subagent-settled", form:"notice",
 // summary, senderSessionId}）→ 一条 EventContextInjection（itemId "ctxinj:<seq>"，
-// 与冷拉 history.go 同 id）；summary 空 / 其余 kind 维持 known-drop，不 reset 流。
+// 与冷拉 history.go 同 id）；busy 注入（activeTurn 进行中）附 TurnID 挂进该回合
+//（官方 journal 内联位）；summary 空 / 其余 kind 维持 known-drop，不 reset 流。
 func TestCodecSubagentSettledContextInjection(t *testing.T) {
 	cb := newSessionCodec("sess-ctxinj")
 	real := collect(t, cb, []sessionEventWire{
@@ -892,11 +893,13 @@ func TestCodecSubagentSettledContextInjection(t *testing.T) {
 		}),
 	})
 	var injections []*core.ContextInjectionEvent
+	var injectionTurnIDs []string
 	var userEchoes int
 	for _, ev := range real {
 		switch ev.Type {
 		case core.EventContextInjection:
 			injections = append(injections, ev.ContextInjection)
+			injectionTurnIDs = append(injectionTurnIDs, ev.TurnID)
 		case core.EventUserMessage:
 			userEchoes++
 		}
@@ -920,6 +923,11 @@ func TestCodecSubagentSettledContextInjection(t *testing.T) {
 	if inj.Text != "Background subagent sess-bg finished after 1 round.\n已生成封神榜第一章。" {
 		t.Fatalf("text (joined model-facing body) = %q", inj.Text)
 	}
+	// busy 注入（turn 1 进行中）附 TurnID：挂进该回合 part 流（官方 journal
+	// 内联位），reducer 侧按 (type,itemId) 幂等落 part。
+	if got := injectionTurnIDs[0]; got != dshwTurnID("sess-ctxinj", 1) {
+		t.Fatalf("busy injection TurnID = %q, want %q (official inline position)", got, dshwTurnID("sess-ctxinj", 1))
+	}
 	if userEchoes != 1 {
 		t.Fatalf("kind=user echo count = %d, want 1 (goal/empty-settle stays dropped)", userEchoes)
 	}
@@ -927,6 +935,43 @@ func TestCodecSubagentSettledContextInjection(t *testing.T) {
 	// kind=user 行仍折进同一 dshw turn）。
 	if got := cb.activeTurnID; got != dshwTurnID("sess-ctxinj", 1) {
 		t.Fatalf("activeTurnID after injection = %q, want %q (injection must not steal the turn)", got, dshwTurnID("sess-ctxinj", 1))
+	}
+}
+
+// TestCodecSubagentSettledContextInjectionIdle：turn 结束后（idle）到达的
+// settle 通知不附 TurnID → 独立系统行（官方回合间位）；reducer 走既有
+// ctx:<itemId> 独立 turn 路径。
+func TestCodecSubagentSettledContextInjectionIdle(t *testing.T) {
+	cb := newSessionCodec("sess-ctxinj-idle")
+	real := collect(t, cb, []sessionEventWire{
+		env("turn/start", 0, map[string]any{"turn": 1}),
+		env("turn/end", 1, map[string]any{"turn": 1, "reason": map[string]any{"kind": "completed"}}),
+		env("user/message", 2, map[string]any{
+			"content": []map[string]any{{"type": "text", "text": "Background subagent sess-bg2 finished and will do no further work."}},
+			"source": map[string]any{
+				"kind": "subagent-settled", "form": "notice",
+				"summary":         "Background subagent sess-bg2 finished and will do no further work.",
+				"senderSessionId": "sess-bg2",
+			},
+		}),
+	})
+	var injections []*core.ContextInjectionEvent
+	var injectionTurnIDs []string
+	for _, ev := range real {
+		if ev.Type == core.EventContextInjection {
+			injections = append(injections, ev.ContextInjection)
+			injectionTurnIDs = append(injectionTurnIDs, ev.TurnID)
+		}
+	}
+	if len(injections) != 1 {
+		t.Fatalf("want exactly 1 context injection, got %d: %+v", len(injections), injections)
+	}
+	if injections[0].ItemID != "ctxinj:2" {
+		t.Fatalf("itemId = %q, want ctxinj:2", injections[0].ItemID)
+	}
+	// idle 注入不附 TurnID：独立系统行（官方回合间位），不造回合归属。
+	if got := injectionTurnIDs[0]; got != "" {
+		t.Fatalf("idle injection TurnID = %q, want empty (standalone row between turns)", got)
 	}
 }
 

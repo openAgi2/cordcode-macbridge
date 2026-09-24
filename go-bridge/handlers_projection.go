@@ -1992,6 +1992,29 @@ func openCodeRichHistoryEntryToProjectionEvents(
 					}
 					deferredWorkflow = append(deferredWorkflow, events...)
 					emittedContent = true
+				case "context_injection":
+					// dsh-web busy settle 注入（history.go 冷拉折叠的 turn 内
+					// part → 一次带 turnId 的 context_injection hydrate 事件；
+					// reducer 按 (type,itemId) 落进该回合 assistant parts，
+					// 与 live 路径同 id + 同 turnId 幂等）。字段同独立 entry
+					// 路径（role context_injection）。
+					itemID := strings.TrimSpace(fmt.Sprint(part["itemId"]))
+					kind := strings.TrimSpace(fmt.Sprint(part["kind"]))
+					if itemID == "" || kind == "" || itemID == "<nil>" || kind == "<nil>" {
+						continue
+					}
+					data := map[string]interface{}{
+						"turnId": turnID,
+						"itemId": itemID,
+						"kind":   kind,
+					}
+					for key, wireKey := range map[string]string{"form": "form", "summary": "summary", "text": "text", "senderSessionId": "senderSessionId"} {
+						if v, ok := part[key]; ok {
+							data[wireKey] = v
+						}
+					}
+					out = append(out, projectionHydrateEvent{Event: "context_injection", Data: data})
+					emittedContent = true
 				}
 			}
 		}

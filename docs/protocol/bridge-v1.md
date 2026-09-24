@@ -1865,9 +1865,18 @@ current sole producer is the subagent **settle notice**: when a background subag
 (official `continuation.ts`), dsh injects a `user/message` into the parent session with
 `source{kind: "subagent-settled", form: "notice", summary, senderSessionId}`; the official web
 UI renders it as「上下文注入 · subagent-settled · \<summary\」 with the model-facing body on
-expand. The MacBridge Projection Kernel is the single writer: it reduces `context_injection`
-events into exactly ONE completed **system turn** per itemId (`turnId "ctx:<itemId>"`,
-`itemId "ctxinj:<journal-seq>"` — identical from live and cold, so replay folds in place).
+expand. The MacBridge Projection Kernel is the single writer; the occurrence follows the
+official journal position of the injection (2026-09-24 Fix B, official-inline alignment):
+
+- **Busy injection** — the settle notice arrives while the owning turn is open (the official
+  journal places these mid-turn at step boundaries). Reduced into exactly ONE
+  `context_injection` part **inside the owning turn's assistant parts** (whole-value upsert
+  keyed by `(type, itemId)`; `itemId "ctxinj:<journal-seq>"` — identical from live and cold,
+  so replay folds in place). The part's array position is the official journal injection
+  position.
+- **Idle injection** — the settle notice arrives outside any turn. Reduced into exactly ONE
+  completed **system turn** per itemId (`turnId "ctx:<itemId>"`).
+
 Injection rows never arm `execution.phase` and never reset turn attribution (an injection is
 not an official turn boundary).
 
@@ -1886,9 +1895,11 @@ locale.ts verbatim) + bare `contextKind` label + `contextSummary`; tapping expan
 and is dropped silently (no row, no stream reset); other injection kinds (`goal`,
 `agent-instructions`, `skill-catalog`, `agent-message`) remain known-drops (deliberately
 unsupported, 方案 §13.7) — the codec never treats them as protocol violations. Live source:
-dsh-web codec `user/message` `source.kind == "subagent-settled"` branch. Cold hydrate: the
-history mapper folds the same rows into typed `context_injection` rich-history entries routed
-through the identical reducer event.
+dsh-web codec `user/message` `source.kind == "subagent-settled"` branch (busy injections
+carry the owning `turnId`; idle ones do not). Cold hydrate: the history mapper folds
+mid-turn rows into `context_injection` parts inside the owning turn entry (same id + same
+turnId as live); turn-external rows remain typed standalone `context_injection`
+rich-history entries — both route through the identical reducer event.
 
 #### Part vocabulary: `workflow` (dsh-web parallel-subagent workflow cards)
 

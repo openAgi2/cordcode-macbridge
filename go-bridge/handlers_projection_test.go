@@ -2483,3 +2483,72 @@ func TestRichHistoryContextInjectionEntryToProjectionEvent(t *testing.T) {
 		t.Fatalf("bare entry must be dropped, got %+v", evs)
 	}
 }
+
+// TestRichHistoryTurnPartContextInjectionToProjectionEvent：busy settle 注入
+//（history.go 冷拉折叠进 turn entry 的 context_injection part）→ 带 turnId 的
+// context_injection hydrate 事件（reducer 按 (type,itemId) 落进该回合
+// assistant parts，与 live 同 id + 同 turnId 幂等）；事件序保持 journal 原位
+//（text → 注入 → text）；身份缺失 fail-closed 跳过。
+func TestRichHistoryTurnPartContextInjectionToProjectionEvent(t *testing.T) {
+	current := ""
+	entry := core.RichHistoryEntry{
+		ID:      "dshw-s1-t4",
+		Role:    "assistant",
+		Content: "四个 subagent 已并行启动。",
+		Parts: []map[string]any{
+			{"type": "text", "content": "四个 subagent 已并行启动。"},
+			{"type": "context_injection", "itemId": "ctxinj:94", "kind": "subagent-settled",
+				"form": "notice", "summary": "Background subagent 3138efcb finished.",
+				"text":            "Background subagent 3138efcb finished and will do no further work unless you send it more.",
+				"senderSessionId": "sess-bg"},
+			{"type": "text", "content": "王熙凤篇已完成。"},
+		},
+	}
+	events := openCodeRichHistoryEntryToProjectionEvents(entry, &current, true)
+	var order []string
+	injIdx, text1, text2 := -1, -1, -1
+	for i, e := range events {
+		order = append(order, e.Event)
+		switch {
+		case e.Event == "context_injection":
+			injIdx = i
+			d := e.Data
+			if d["turnId"] != "dshw-s1-t4" || d["itemId"] != "ctxinj:94" ||
+				d["kind"] != "subagent-settled" || d["form"] != "notice" ||
+				d["summary"] != "Background subagent 3138efcb finished." ||
+				d["senderSessionId"] != "sess-bg" {
+				t.Fatalf("injection event data = %+v", d)
+			}
+		case e.Event == "text_delta" && e.Data["delta"] == "四个 subagent 已并行启动。":
+			text1 = i
+		case e.Event == "text_delta" && e.Data["delta"] == "王熙凤篇已完成。":
+			text2 = i
+		}
+	}
+	if injIdx == -1 {
+		t.Fatalf("no context_injection event, order = %v", order)
+	}
+	if !(text1 < injIdx && injIdx < text2) {
+		t.Fatalf("event order wrong: text1=%d inj=%d text2=%d (%v)", text1, injIdx, text2, order)
+	}
+	// 注入算内容：turn_completed 收口仍发出。
+	last := events[len(events)-1]
+	if last.Event != "turn_completed" || last.Data["turnId"] != "dshw-s1-t4" {
+		t.Fatalf("tail event = %+v, want turn_completed for dshw-s1-t4", last)
+	}
+
+	// 身份缺失（itemId/kind 空）fail-closed：跳过不造事件。
+	current2 := ""
+	entry2 := core.RichHistoryEntry{
+		ID: "dshw-s1-t5", Role: "assistant",
+		Parts: []map[string]any{
+			{"type": "text", "content": "正文"},
+			{"type": "context_injection", "summary": "无 id"},
+		},
+	}
+	for _, e := range openCodeRichHistoryEntryToProjectionEvents(entry2, &current2, true) {
+		if e.Event == "context_injection" {
+			t.Fatalf("identity-less injection part must be dropped: %+v", e)
+		}
+	}
+}

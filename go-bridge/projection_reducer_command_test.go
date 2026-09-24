@@ -313,3 +313,121 @@ func TestReducerContextInjectionSettleRow(t *testing.T) {
 		t.Fatalf("patch part: %+v", p)
 	}
 }
+
+// TestReducerContextInjectionBusyInline：busy 注入（turnId 指向已存在回合）
+// → context_injection part 落进该回合 assistant parts（官方 journal 内联位，
+// 镜像 subagent_part 模式）；live/冷拉同 id + 同 turnId 幂等整值替换（单 part）；
+// turn 缺失（防御性乱序）→ 降级独立 ctx: 行，不丢内容、不造幽灵回合；
+// patch 面携带整回合 upsert。
+func TestReducerContextInjectionBusyInline(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "dsh-web", "s1", "turn_started", map[string]interface{}{"turnId": "dshw-s1-t4"}))
+	r.Apply(ev(2, "dsh-web", "s1", "text_delta", map[string]interface{}{
+		"turnId": "dshw-s1-t4", "itemId": "dshw-s1-t4", "delta": "四个 subagent 已并行启动。",
+	}))
+	r.Apply(ev(3, "dsh-web", "s1", "context_injection", map[string]interface{}{
+		"turnId":          "dshw-s1-t4",
+		"itemId":          "ctxinj:94", "kind": "subagent-settled", "form": "notice",
+		"summary":         "Background subagent 3138efcb finished and will do no further work unless you send it more.",
+		"text":            "Background subagent 3138efcb finished and will do no further work unless you send it more.",
+		"senderSessionId": "sess-bg",
+	}))
+	proj, ok := r.Snapshot("dsh-web", "s1")
+	if !ok || len(proj.Turns) != 1 {
+		t.Fatalf("projection = %+v", proj)
+	}
+	tu := proj.Turns[0]
+	if tu.TurnID != "dshw-s1-t4" || tu.Assistant == nil {
+		t.Fatalf("owning turn shell: %+v", tu)
+	}
+	// part 序 = 到达序（journal 序）：text 在前、注入在后。
+	var texts, injParts int
+	var injPart ProjectionPart
+	for _, p := range tu.Assistant.Parts {
+		switch {
+		case p.Type == "text":
+			texts++
+		case p.Type == "context_injection":
+			injParts++
+			injPart = p
+		}
+	}
+	if texts != 1 || injParts != 1 {
+		t.Fatalf("parts = %+v (want 1 text + 1 injection)", tu.Assistant.Parts)
+	}
+	if injPart.ItemID != "ctxinj:94" || injPart.ContextKind != "subagent-settled" ||
+		injPart.ContextForm != "notice" || injPart.ContextSenderSession != "sess-bg" ||
+		injPart.ContextSummary == "" || injPart.ContextText == "" {
+		t.Fatalf("injection part: %+v", injPart)
+	}
+	if tu.System != nil {
+		t.Fatalf("busy injection must not create a standalone system turn: %+v", tu.System)
+	}
+
+	// 冷拉重放同 id + 同 turnId → 幂等整值替换：仍是单 part、不新增回合。
+	rev := proj.SyncRev
+	r.Apply(ev(4, "dsh-web", "s1", "context_injection", map[string]interface{}{
+		"turnId":          "dshw-s1-t4",
+		"itemId":          "ctxinj:94", "kind": "subagent-settled", "form": "notice",
+		"summary":         "Background subagent 3138efcb finished and will do no further work unless you send it more.",
+		"text":            "Background subagent 3138efcb finished and will do no further work unless you send it more.",
+		"senderSessionId": "sess-bg",
+	}))
+	proj, _ = r.Snapshot("dsh-web", "s1")
+	if len(proj.Turns) != 1 {
+		t.Fatalf("replay must not add turns: %+v", proj.Turns)
+	}
+	injParts = 0
+	for _, p := range proj.Turns[0].Assistant.Parts {
+		if p.Type == "context_injection" {
+			injParts++
+		}
+	}
+	if injParts != 1 {
+		t.Fatalf("replay must fold in place, injection parts = %d", injParts)
+	}
+	if proj.SyncRev != rev+1 {
+		t.Fatalf("replay commits a mutation: rev %d → %d", rev, proj.SyncRev)
+	}
+
+	// turn 缺失（防御性乱序）→ 降级独立 ctx: 行。
+	r.Apply(ev(5, "dsh-web", "s1", "context_injection", map[string]interface{}{
+		"turnId":  "dshw-s1-t99",
+		"itemId":  "ctxinj:112", "kind": "subagent-settled", "form": "notice",
+		"summary": "Background subagent 5f00ee6d finished.",
+	}))
+	proj, _ = r.Snapshot("dsh-web", "s1")
+	if len(proj.Turns) != 2 {
+		t.Fatalf("missing-owner injection must degrade to a standalone row, turns = %+v", proj.Turns)
+	}
+	if proj.Turns[1].TurnID != "ctx:ctxinj:112" || proj.Turns[1].System == nil {
+		t.Fatalf("degraded standalone row: %+v", proj.Turns[1])
+	}
+
+	// patch 面携带整回合 upsert（busy 注入经 upsertTurns staging）+ 降级独立行。
+	patch, ok := r.FlushPatch("dsh-web", "s1")
+	if !ok {
+		t.Fatal("no patch")
+	}
+	var sawInjTurn, sawStandalone bool
+	for _, u := range patch.UpsertTurns {
+		if u.TurnID == "dshw-s1-t4" {
+			sawInjTurn = true
+			found := false
+			for _, p := range u.Assistant.Parts {
+				if p.Type == "context_injection" && p.ItemID == "ctxinj:94" {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("patch turn missing injection part: %+v", u.Assistant.Parts)
+			}
+		}
+		if u.TurnID == "ctx:ctxinj:112" {
+			sawStandalone = true
+		}
+	}
+	if !sawInjTurn || !sawStandalone {
+		t.Fatalf("patch must carry both turns: %+v", patch.UpsertTurns)
+	}
+}

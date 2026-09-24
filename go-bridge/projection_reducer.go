@@ -1429,16 +1429,51 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 
 	case "context_injection":
 		// dsh-web context-injection row (official ContextInjectionRow parity —
-		// subagent-settled settle notice injected into the parent session). One
-		// completed system turn per itemId (turnId "ctx:<itemId>"); whole-value
-		// upsert, idempotent across live replay and cold hydrate (same
-		// "ctxinj:<seq>" id from both paths). Never touches execution.phase.
+		// subagent-settled settle notice injected into the parent session).
+		// Busy injection (turnId present): whole-value upsert of one
+		// context_injection part inside the owning turn's assistant parts — the
+		// official journal inline position (mirrors the subagent_part pattern;
+		// live and cold hydrate derive the same "ctxinj:<seq>" id + same turnId
+		// from the journal, so the upsert is idempotent). Idle injection (no
+		// turnId) or a missing owning turn (defensive out-of-order): one
+		// completed standalone system turn per itemId (turnId "ctx:<itemId>") —
+		// degrade, never drop content, never fabricate a phantom turn. Never
+		// touches execution.phase.
 		itemID := dataString(data, "itemId")
 		kind := dataString(data, "kind")
 		if itemID == "" || kind == "" {
 			return
 		}
 		commit()
+		if ownerID := dataString(data, "turnId"); ownerID != "" {
+			if t := ps.turnByID(ownerID); t != nil {
+				if t.Assistant == nil {
+					t.Assistant = &MessageProjection{ID: ownerID, Role: "assistant"}
+				}
+				part := ProjectionPart{
+					Type:                 "context_injection",
+					ItemID:               itemID,
+					ContextKind:          kind,
+					ContextForm:          dataString(data, "form"),
+					ContextSummary:       dataString(data, "summary"),
+					ContextText:          dataString(data, "text"),
+					ContextSenderSession: dataString(data, "senderSessionId"),
+				}
+				found := false
+				for i := range t.Assistant.Parts {
+					if t.Assistant.Parts[i].Type == "context_injection" && t.Assistant.Parts[i].ItemID == itemID {
+						t.Assistant.Parts[i] = part
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Assistant.Parts = append(t.Assistant.Parts, part)
+				}
+				ps.upsertTurns[ownerID] = *t
+				return
+			}
+		}
 		timestamp := dataInt64(data, "timestampMillis")
 		turnID := "ctx:" + itemID
 		ps.upsertTurn(TurnProjection{

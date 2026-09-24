@@ -132,7 +132,10 @@ type ProjectionPart struct {
 
 	// context_injection (Type=="context_injection") — dsh-web 上下文注入行
 	// （官方 ContextInjectionRow 对位：user/message source.kind!="user" 的注入
-	// 上下文，当前唯一生产者是 subagent-settled settle 通知）。ContextKind 是
+	// 上下文，当前唯一生产者是 subagent-settled settle 通知）。出现点按官方
+	// journal 注入位置（2026-09-24 Fix B）：busy 注入（turn 进行中）落所属回合
+	// assistant parts 内（官方内联位，(type,itemId) 幂等 upsert）；idle 注入
+	//（turn 外）落独立 system turn（turnId "ctx:<itemId>"）。ContextKind 是
 	// 官方 source.kind 逐字（客户端行 label 用裸 kind，官方 context-provenance
 	// 语义）；ContextForm 官方 source.form（"notice"）；ContextSummary 是折叠行
 	// 一行结算（notice 的全部要点，官方 ContextBody noticeSummary）；ContextText
