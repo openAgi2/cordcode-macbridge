@@ -437,3 +437,64 @@ func TestRecentView_ArchiveFencesWireSnapshot(t *testing.T) {
 		t.Fatalf("post-archive page-0 ids = %v, want [live] (fence rebuilt snapshot; archived row must not return)", ids)
 	}
 }
+
+// TestRecentView_CodexRemoteColdStartRetry: codex-remote 首次 page-0 在 8s 预算内超时后，
+// 必须自动重试一次（30s 预算），重试成功后返回正常结果。
+func TestRecentView_CodexRemoteColdStartRetry(t *testing.T) {
+	base := []core.AgentSessionInfo{
+		{ID: "session-1", Summary: "first", ModifiedAt: time.Unix(1710000100, 0).UTC()},
+		{ID: "session-2", Summary: "second", ModifiedAt: time.Unix(1710000200, 0).UTC()},
+	}
+
+	// 自定义 agent：第一次调用时阻塞直到 context deadline 过期并返回 DeadlineExceeded，
+	// 第二次调用立即返回成功。
+	agent := &codexRemoteTimeoutAgent{
+		fakeRecentCatalogAgent: &fakeRecentCatalogAgent{
+			fakeAgent: &fakeAgent{name: "codex-remote", sessionInfos: base},
+			recentOK:  true,
+		},
+	}
+
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex-remote", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+	handlers.eventPublisher.SetConnCatalogCursorEpochV2(serverConn, true)
+
+	// page-0：首次 8s 超时 → 自动重试 30s → 成功
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex-remote", Method: "list_sessions", RequestID: "r1",
+		Params: recentRequestParams(t, map[string]any{"limit": 10}),
+	})
+	msgs := readJSONMaps(t, clientConn, 1)
+
+	// 验证结果：重试成功
+	if msgs[0]["ok"] != true {
+		t.Fatalf("codex-remote recent page-0 ok = %#v, want true (retry should succeed)", msgs[0]["ok"])
+	}
+	if ids := resultSessionIDs(t, msgs[0]); len(ids) != 2 {
+		t.Fatalf("codex-remote recent page-0 ids = %v, want both sessions", ids)
+	}
+
+	// 验证 ListSessions 被调用了 2 次（首次 + 重试）
+	if agent.listSessionsCalls.Load() != 2 {
+		t.Fatalf("ListSessions calls = %d, want 2 (initial + retry)", agent.listSessionsCalls.Load())
+	}
+}
+
+// codexRemoteTimeoutAgent 是一个测试用 agent，第一次 ListSessions 调用时等待 context
+// deadline 过期并返回 DeadlineExceeded（模拟 codex-remote 冷启动超时），后续调用正常返回。
+type codexRemoteTimeoutAgent struct {
+	*fakeRecentCatalogAgent
+}
+
+func (a *codexRemoteTimeoutAgent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, error) {
+	callCount := a.listSessionsCalls.Add(1)
+	if callCount == 1 {
+		// 等待 context deadline 过期
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	// 第二次调用正常返回
+	return append([]core.AgentSessionInfo(nil), a.sessionInfos...), nil
+}

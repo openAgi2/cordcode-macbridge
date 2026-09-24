@@ -22,6 +22,7 @@ package gobridge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -138,6 +139,24 @@ func rejectCrossViewCursor(cursor string) *WireError {
 	return nil
 }
 
+// codexRemoteRecentRetryTimeout is the extended budget for a single retry of
+// the codex-remote recent-view page-0 builder after a cold-start deadline
+// exceeded. codex-remote paginates 440+ threads over the Remote Control relay
+// (~7-12s per page × 2 pages = 14-24s), so the shared 8s catalogRequestTimeout
+// always kills the first fetch. The retry gets 30s — enough headroom for the
+// measured 14-24s range plus a margin, without blocking other backends' 8s
+// budget. Only page-0 (cursor=="") is retried; page-N slices the frozen
+// snapshot and never hits the network.
+//
+// See docs/2026-09-24-codex-remote-session-list-auto-retry.md §4.2.1.
+const codexRemoteRecentRetryTimeout = 30 * time.Second
+
+// codexRemoteRecentRetryDelay is the pause between the initial 8s timeout and
+// the extended-budget retry, giving the Remote Control relay stream time to
+// settle after the cold-start handshake (auth refresh + env lookup + WSS dial +
+// initialize RPC).
+const codexRemoteRecentRetryDelay = 1500 * time.Millisecond
+
 // recentHandleListSessions serves `catalogView:"recent"` for every backend that
 // opts in via core.RecentCatalogProvider (plan §6.1). One shared wire path:
 //
@@ -205,13 +224,78 @@ func (h *Handlers) recentHandleListSessions(conn Connection, msg WireMessage, ag
 
 	cache := h.openCodeCatalogWireCache()
 	scope := recentCatalogScope(backendID)
-	result, staleErr, err := cache.pageV2Context(ctx, scope, cursor, limit, func() ([]map[string]interface{}, error) {
+	builder := func() ([]map[string]interface{}, error) {
 		global, err := buildGlobal()
 		if err != nil {
 			return nil, err
 		}
 		return prepareRecentSnapshot(global), nil
-	})
+	}
+	result, staleErr, err := cache.pageV2Context(ctx, scope, cursor, limit, builder)
+
+	// codex-remote cold-start retry: the first page-0 fetch on the 8s shared
+	// budget almost always loses to the 14-24s Remote Control relay pagination.
+	// Retry once with an extended 30s budget so the user sees a loading spinner
+	// instead of an error page. Only page-0 (cursor=="") can trigger this;
+	// page-N slices the frozen snapshot and never reaches the builder.
+	if err != nil && backendID == "codex-remote" && cursor == "" && errors.Is(err, context.DeadlineExceeded) {
+		slog.Warn("go-bridge: codex-remote recent view cold-start timeout, retrying with extended budget",
+			"backend", backendID,
+			"initial_timeout", catalogRequestTimeout,
+			"retry_timeout", codexRemoteRecentRetryTimeout,
+			"elapsed_ms", time.Since(started).Milliseconds(),
+		)
+		time.Sleep(codexRemoteRecentRetryDelay)
+
+		retryCtx, retryCancel := context.WithTimeout(h.ctx, codexRemoteRecentRetryTimeout)
+		defer retryCancel()
+		retryMetrics := newSessionLoadRequestMetrics(conn, msg)
+		retryMctx := core.WithSessionLoadMetrics(retryCtx, retryMetrics.context())
+
+		// Rebuild the builder with the retry context so the codex-remote driver
+		// sees the new deadline. The original mctx carries the expired 8s ctx.
+		retryBuildGlobal := func() ([]map[string]interface{}, error) {
+			switch {
+			case usesCodexWorkspaceCatalog(agent):
+				return h.buildCodexEnrichedSessions(retryMctx, msg.BackendID, "")
+			case agent.Name() == "grokbuild":
+				return h.buildGrokEnrichedSessions(retryMctx, msg.BackendID)
+			case agent.Name() == "claudecode":
+				all := h.claudeSessions.list("", retryMetrics.context())
+				all = h.enrichSessionStatesForList(all, agent, h.getRunningMap(retryMctx, agent))
+				h.overlayPinnedState(all, "claudecode")
+				return all, nil
+			default:
+				sessions, err := agent.ListSessions(retryMctx)
+				if err != nil {
+					return nil, err
+				}
+				wire := sessionsToWire(sessions)
+				if _, scoped := agent.(core.DirectorySessionLister); scoped {
+					wire = filterSessionsMissingWorkspace(wire)
+				}
+				wire = h.enrichSessionStatesForList(wire, agent, h.getRunningMap(retryMctx, agent))
+				h.overlayPinnedState(wire, backendID)
+				return wire, nil
+			}
+		}
+
+		retryBuilder := func() ([]map[string]interface{}, error) {
+			global, err := retryBuildGlobal()
+			if err != nil {
+				return nil, err
+			}
+			return prepareRecentSnapshot(global), nil
+		}
+
+		result, staleErr, err = cache.pageV2Context(retryCtx, scope, cursor, limit, retryBuilder)
+		if err == nil && staleErr == nil {
+			slog.Info("go-bridge: codex-remote recent view cold-start retry succeeded",
+				"backend", backendID,
+				"total_elapsed_ms", time.Since(started).Milliseconds(),
+			)
+		}
+	}
 	if err != nil {
 		metrics.sendResult(conn, msg.RequestID, nil, listWireError(err))
 		return
