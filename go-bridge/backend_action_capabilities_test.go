@@ -14,6 +14,7 @@ import (
 
 	dshweb "github.com/openAgi2/cordcode-macbridge/agent/dsh-web"
 	"github.com/openAgi2/cordcode-macbridge/agent/grokbuild"
+	codexremote "github.com/openAgi2/cordcode-macbridge/agent/codex-remote"
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
@@ -165,5 +166,15 @@ func TestRealDriverActionMatrix(t *testing.T) {
 	// Legacy AND semantics: rename AND archive both present → session_mutation.
 	if !hasCap(caps, "session_mutation") {
 		t.Errorf("dsh-web must advertise legacy session_mutation (rename+archive): %v", caps)
+	}
+
+	// codex-remote pins via the upstream-native Pinned thread section
+	// (docs/2026-09-25-codex-remote-session-pinning-plan.md). It already
+	// advertises rename/archive/delete (mutations.go); the pinning plan adds
+	// session_pin on top.
+	remote := codexremote.New(nil)
+	caps = deriveBackendCapabilities("codex-remote", remote, "")
+	if !hasCap(caps, "session_pin") {
+		t.Errorf("codex-remote missing session_pin: %v", caps)
 	}
 }

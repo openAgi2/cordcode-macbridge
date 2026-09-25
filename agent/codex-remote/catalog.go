@@ -29,6 +29,14 @@ type catalogThreadRow struct {
 	Name      string `json:"name"`
 	UpdatedAt int64  `json:"updatedAt"`
 	Cwd       string `json:"cwd"`
+	// Thread-section decoration (upstream v2 thread_data.rs: section +
+	// sectionEnteredAt, serde defaults). Used to carry pin state on list rows
+	// (session pinning plan §3.1); unsectioned threads decode zero values.
+	Section *struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"section"`
+	SectionEnteredAt int64 `json:"sectionEnteredAt"`
 }
 
 func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, error) {
@@ -117,6 +125,11 @@ func mapCatalogThread(row catalogThreadRow) core.AgentSessionInfo {
 	info := core.AgentSessionInfo{ID: row.ID, Summary: row.Name, Directory: row.Cwd}
 	if row.UpdatedAt > 0 {
 		info.ModifiedAt = time.Unix(row.UpdatedAt, 0)
+	}
+	// Pinned-section membership rides the row itself (official decoration);
+	// the authoritative pinned SET still comes from ListPinnedSessions.
+	if row.Section != nil && row.Section.ID == pinnedThreadSectionID && row.SectionEnteredAt > 0 {
+		info.PinnedAt = time.Unix(row.SectionEnteredAt, 0)
 	}
 	return info
 }
