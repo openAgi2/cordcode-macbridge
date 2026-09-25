@@ -77,12 +77,50 @@ func (h *Handlers) handleSetSessionPinned(conn Connection, msg WireMessage, agen
 	conn.SendResult(msg.RequestID, map[string]interface{}{"session": wire}, nil)
 }
 
-func (h *Handlers) handleListPinnedSessions(conn Connection, msg WireMessage, agent core.Agent) {
-	pinner, ok := agent.(core.SessionPinner)
+// pinSummaryResolver is implemented by agents whose pinned listing already
+// carries full row summaries (codex-remote: the sectionId-filtered thread/list
+// returns complete rows). Preferred over catalog re-resolution, which costs a
+// full paginated fetch per pin and drops pinned threads outside the recency
+// window (S-3 finding 2026-09-25).
+type pinSummaryResolver interface {
+	ListPinnedSessionSummaries(ctx context.Context) ([]core.AgentSessionInfo, error)
+}
+
+// resolvePinnedSummaries fetches the pinned rows with summaries in one call.
+func (h *Handlers) resolvePinnedSummaries(ctx context.Context, agent core.Agent) ([]map[string]interface{}, error) {
+	resolver, ok := agent.(pinSummaryResolver)
 	if !ok {
+		return nil, errNotASummaryResolver
+	}
+	infos, err := resolver.ListPinnedSessionSummaries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return sessionsToWire(infos), nil
+}
+
+var errNotASummaryResolver = fmt.Errorf("agent does not provide pinned summaries")
+
+func (h *Handlers) handleListPinnedSessions(conn Connection, msg WireMessage, agent core.Agent) {
+	if _, ok := agent.(core.SessionPinner); !ok {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "not_supported", Message: "session pinning not supported for this backend"})
 		return
 	}
+
+	// Preferred path: agents that return summaries with the pinned listing
+	// (single filtered fetch; no per-pin catalog resolution, no recency-cap
+	// loss). The summaries are the authoritative listing for these backends —
+	// the identity-only ListPinnedSessions fetch is skipped entirely.
+	if _, ok := agent.(pinSummaryResolver); ok {
+		wires, err := h.resolvePinnedSummaries(context.Background(), agent)
+		if err != nil {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "pin_list_failed", Message: err.Error()})
+			return
+		}
+		conn.SendResult(msg.RequestID, map[string]interface{}{"sessions": wires}, nil)
+		return
+	}
+	pinner := agent.(core.SessionPinner)
 	pins, err := pinner.ListPinnedSessions(context.Background())
 	if err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "pin_list_failed", Message: err.Error()})
@@ -162,7 +200,22 @@ func (h *Handlers) resolvePinWire(ctx context.Context, agent core.Agent, pin cor
 		return h.resolveClaudePin(pin)
 	case "opencode":
 		return h.resolveOpenCodePin(pin)
-	default: // codex and any future file-backed backend
+	default: // codex, codex-remote and any future file-backed backend
+		// Preferred: summary-resolver agents (codex-remote) resolve from the
+		// section-filtered listing — one fetch, no recency-cap loss.
+		if resolver, ok := agent.(pinSummaryResolver); ok {
+			infos, err := resolver.ListPinnedSessionSummaries(ctx)
+			if err != nil {
+				return nil, false, err
+			}
+			for _, info := range infos {
+				if info.ID == pin.SessionID {
+					wire := sessionsToWire([]core.AgentSessionInfo{info})[0]
+					return wire, false, nil
+				}
+			}
+			return nil, true, nil // not in the pinned listing => gone
+		}
 		return h.resolveAgentListPin(ctx, agent, pin)
 	}
 }

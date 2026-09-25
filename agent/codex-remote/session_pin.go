@@ -74,13 +74,36 @@ func (a *Agent) SetSessionPinned(ctx context.Context, sessionID, _ string, pinne
 // as-is (strict-fail; the bridge handler keeps iOS on its last cached set
 // rather than fabricating a partial section).
 func (a *Agent) ListPinnedSessions(ctx context.Context) ([]core.SessionPin, error) {
+	infos, err := a.ListPinnedSessionSummaries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pins := make([]core.SessionPin, 0, len(infos))
+	for _, info := range infos {
+		pins = append(pins, core.SessionPin{
+			BackendID: BackendID,
+			SessionID: info.ID,
+			PinnedAt:  info.PinnedAt,
+		})
+	}
+	return pins, nil
+}
+
+// ListPinnedSessionSummaries returns the Pinned section rows WITH summaries,
+// straight from the sectionId-filtered thread/list response (each row carries
+// name/cwd/updatedAt). The bridge pin handler prefers this over re-resolving
+// identities against the recency catalog: the catalog path costs a full
+// paginated fetch per pin AND silently drops pinned threads that fall outside
+// the recency window (S-3 finding, 2026-09-25: 10s+ section latency).
+// PinnedAt carries the official-order key, not a real instant.
+func (a *Agent) ListPinnedSessionSummaries(ctx context.Context) ([]core.AgentSessionInfo, error) {
 	a.mu.Lock()
 	cl := a.client
 	a.mu.Unlock()
 	if cl == nil {
 		return nil, ErrNotConfigured
 	}
-	out := make([]core.SessionPin, 0, 16)
+	out := make([]core.AgentSessionInfo, 0, 16)
 	cursor := ""
 	for {
 		params := map[string]any{
@@ -110,14 +133,14 @@ func (a *Agent) ListPinnedSessions(ctx context.Context) ([]core.SessionPin, erro
 			if row.ID == "" {
 				continue
 			}
+			info := mapCatalogThread(row)
 			// Order key uses the GLOBAL row position (len(out)), not the
 			// per-page index — page 2's first row must rank below page 1's
-			// last row, not restart at the section head.
-			out = append(out, core.SessionPin{
-				BackendID: BackendID,
-				SessionID: row.ID,
-				PinnedAt:  officialPinnedOrderKey(len(out)),
-			})
+			// last row, not restart at the section head. It replaces the
+			// row's real sectionEnteredAt so iOS pinnedAt DESC sorting keeps
+			// the official section order.
+			info.PinnedAt = officialPinnedOrderKey(len(out))
+			out = append(out, info)
 			if len(out) >= pinnedListMaxItems {
 				return out, nil
 			}

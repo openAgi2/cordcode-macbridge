@@ -210,3 +210,30 @@ func TestMapCatalogThreadCarriesPinnedSectionDecoration(t *testing.T) {
 		t.Fatal("non-pinned section must not mark the row pinned")
 	}
 }
+
+func TestListPinnedSessionSummariesCarryRowSummaries(t *testing.T) {
+	var calls []map[string]any
+	client := startPinPeer(t, &calls, func(method string, _ map[string]any) (any, *RPCError) {
+		if method != "thread/list" {
+			return nil, &RPCError{Code: -32601, Message: method}
+		}
+		return map[string]any{
+			"data": []any{
+				map[string]any{"id": "a", "name": "First pinned", "cwd": "/ws", "updatedAt": int64(7)},
+			},
+		}, nil
+	})
+	agent := boundAgent()
+	agent.BindClient(client)
+
+	infos, err := agent.ListPinnedSessionSummaries(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 || infos[0].ID != "a" || infos[0].Summary != "First pinned" || infos[0].Directory != "/ws" {
+		t.Fatalf("infos=%+v", infos)
+	}
+	if infos[0].PinnedAt != officialPinnedOrderKey(0) {
+		t.Fatalf("order key=%v", infos[0].PinnedAt)
+	}
+}
