@@ -226,6 +226,16 @@ duplicate 事务永不算成功）——deterministic 测试绿 ≠ 部署后行
 「≥20 有效代际」的节奏取决于 runtime 自然重启频率，窗口不足延长不降门槛。
 实施证据见 `docs/2026-09-20-memory-followups.md` §9。
 
+**对账定论（2026-09-25，5 天真实负载 111 样本/43 代际）**：原事故形状未复现
+——footprint current 全程 ≤93M、lifetime peak ≤154M（事故峰值 3.8G 的 4%），
+所有样本无 TOTAL SWAPPED 行（无换出）；sysMinusHeapReleased 峰值 84M（告警线
+256M 的 33%）；三类 provisional 告警零触发。swapped/压缩器机制假设在修复后
+无法直接观测——heap 有界后该状态不再发生，经验性结论修复有效。**512MiB 软
+上限保持不调**（真实峰值余量 3.3 倍）。完成门：有效代际 22/20 已过；瓶颈是
+scan-evidenced 2/8——开发期代际寿命 <90 分钟（每小时级重建）使后台扫描来不及
+积累，需正常使用节奏的长寿命代际补齐；state.json 曾于 09-24 丢失重建（journal
+无损，elapsed 门保守重算，符合「state 可丢弃」设计边界）。详见 followups §9.6。
+
 ## 2026-09-19 bridge runtime "内存 2G+"：已证明不是 2.5GB 可达 Go heap；swapped/retained 页状态与压缩器机制待一致遥测；LLDB 直读 gcController 取证法
 
 现象：`cordcode-bridge-runtime` 活动监视器显示 2.5G（峰值 3.8G），owner 质疑泄漏。
