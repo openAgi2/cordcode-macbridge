@@ -1,13 +1,16 @@
-# 2026-09-20 内存治理 r6 通过后的三项后续（评审稿 v9，待 Round 9 终审）
+# 2026-09-20 内存治理 r6 通过后的三项后续（终版 v9，已通过并实施完成）
 
-> 状态：**待 Round 9 终审（checklist verification）**。v8（`b1c5ff70269ac3408fb2ad942df075c63659ffe6`）
-> 经 Round 8 终审（报告 `docs/2026-09-20-memory-followups-review-report-r8.md`，
-> commit `b20b651121a57bd756a7e23b6fe2593a418fff85`）判定：Round 7 的 5 阻断 +
-> 3 非阻断均已正面处置；剩 4 个 v8 机制推演出的闭合缺口（R8-B1 双文件崩溃
-> 一致性 / R8-B2 异常终止无法自记 crash 次数 / R8-B3 oversize 漏第 13 行 /
-> R8-B4 并发 revoke 未定义）+ 2 个同期修正（N1 缺键默认值 / N2 不可信数据根）。
-> **v9 为 docs-only 修订：本轮零代码改动**，按 §8 的 Round 9 五项 checklist
-> 逐项关闭；Round 1–7 已通过裁决冻结不重开。
+> 状态：**done——Round 9 终审通过（报告
+> `docs/2026-09-20-memory-followups-review-report-r9.md`，commit
+> `2d5e6a2bcd43d897079be4de3b84bacd4cadde9b`）→ 开发阶段一次完成（§9）→
+> owner 验收 ✅✅（§9.5）→ 真实负载对账定论（§9.6）**。三项后续全部关闭：
+> 真实负载内存对账（5 天 111 样本/43 代际，原事故形状未复现，512MiB 保持
+> 不调，监测继续跑正式完成门）、Mac UI pushCleanupError 提示（B4 管线
+> `fb8bed9`）、API 零值硬化（`124b73d`）。
+>
+> 历史评审链：v1→v8 经 Round 1–8 迭代（历轮报告见同目录
+> `2026-09-20-memory-followups-review-report-r*.md`）；v9 为 docs-only 修订，
+> 按 §8 的 Round 9 五项 checklist 逐项关闭；Round 1–7 已通过裁决冻结不重开。
 >
 > 历史背景：r6 复审（报告 commit `35a1b8062fee8853180eb67f5572637731003fde`）
 > 通过主修复（代码 `ee43c8f783710f826817c7a60109691e24689df7`）后记录三项非阻断
