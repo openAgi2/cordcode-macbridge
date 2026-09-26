@@ -78,7 +78,7 @@ func TestVerticalListResumeAndTextDelta(t *testing.T) {
 		switch method {
 		case "thread/list":
 			return map[string]any{
-				"data": []any{map[string]any{"id": "thread_probe", "name": "probe", "updatedAt": int64(1), "cwd": "/tmp"}},
+				"data": []any{map[string]any{"id": "thread_probe", "name": "probe", "updatedAt": time.Now().Unix(), "cwd": "/tmp"}},
 			}, nil
 		case "thread/resume":
 			var p struct {

@@ -22,6 +22,14 @@ const (
 	catalogListPageSize = 100
 	catalogListMaxItems = 500
 	catalogListHeadMax  = 25
+	// Owner product decision (2026-09-26): the session list only shows
+	// sessions whose last update falls inside this window — the full catalog
+	// (all providers, all directories) had grown to 400+ rows and reads as
+	// clutter. Older sessions stay resumable by ID and remain searchable after
+	// opening, they just leave the list. Pinned rows are exempt: pinning is
+	// the explicit "keep this visible" gesture (the official Pinned section
+	// behaves the same way).
+	catalogActivityWindow = 10 * 24 * time.Hour
 )
 
 type catalogThreadRow struct {
@@ -67,6 +75,7 @@ func (a *Agent) listThreads(ctx context.Context, dir string, limit int, followCu
 	}
 	out := make([]core.AgentSessionInfo, 0, pageLimit)
 	seen := map[string]struct{}{}
+	cutoff := time.Now().Add(-catalogActivityWindow).Unix()
 	cursor := ""
 	for {
 		params := map[string]any{
@@ -108,6 +117,9 @@ func (a *Agent) listThreads(ctx context.Context, dir string, limit int, followCu
 				continue
 			}
 			seen[row.ID] = struct{}{}
+			if row.UpdatedAt < cutoff && !rowPinned(row) {
+				continue
+			}
 			out = append(out, mapCatalogThread(row))
 			if limit > 0 && len(out) >= limit {
 				return out, nil
@@ -127,6 +139,12 @@ func (a *Agent) listThreads(ctx context.Context, dir string, limit int, followCu
 	}
 }
 
+// rowPinned reports whether a catalog row belongs to the official Pinned
+// section (the section decoration plus a positive entered-at timestamp).
+func rowPinned(row catalogThreadRow) bool {
+	return row.Section != nil && row.Section.ID == pinnedThreadSectionID && row.SectionEnteredAt > 0
+}
+
 func mapCatalogThread(row catalogThreadRow) core.AgentSessionInfo {
 	info := core.AgentSessionInfo{ID: row.ID, Summary: row.Name, Directory: row.Cwd}
 	if row.UpdatedAt > 0 {
@@ -134,7 +152,7 @@ func mapCatalogThread(row catalogThreadRow) core.AgentSessionInfo {
 	}
 	// Pinned-section membership rides the row itself (official decoration);
 	// the authoritative pinned SET still comes from ListPinnedSessions.
-	if row.Section != nil && row.Section.ID == pinnedThreadSectionID && row.SectionEnteredAt > 0 {
+	if rowPinned(row) {
 		info.PinnedAt = time.Unix(row.SectionEnteredAt, 0)
 	}
 	return info

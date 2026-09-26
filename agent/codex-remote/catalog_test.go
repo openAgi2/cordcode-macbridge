@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestFetchThreadListPaginatesAndFiltersDir(t *testing.T) {
@@ -11,6 +12,7 @@ func TestFetchThreadListPaginatesAndFiltersDir(t *testing.T) {
 	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_primary")
 	defer stream.Close()
 	var calls []map[string]any
+	fresh := time.Now().Unix()
 	startEnvelopePeer(t, hostConn, func(_ int64, method string, params json.RawMessage) (any, *RPCError) {
 		if method != "thread/list" {
 			return nil, &RPCError{Code: -32601, Message: method}
@@ -20,11 +22,11 @@ func TestFetchThreadListPaginatesAndFiltersDir(t *testing.T) {
 		calls = append(calls, p)
 		if cur, _ := p["cursor"].(string); cur == "page2" {
 			return map[string]any{
-				"data": []any{map[string]any{"id": "t2", "name": "two", "updatedAt": int64(2), "cwd": "/ws"}},
+				"data": []any{map[string]any{"id": "t2", "name": "two", "updatedAt": fresh, "cwd": "/ws"}},
 			}, nil
 		}
 		return map[string]any{
-			"data":       []any{map[string]any{"id": "t1", "name": "one", "updatedAt": int64(1), "cwd": "/ws"}},
+			"data":       []any{map[string]any{"id": "t1", "name": "one", "updatedAt": fresh, "cwd": "/ws"}},
 			"nextCursor": "page2",
 		}, nil
 	})
@@ -82,7 +84,7 @@ func TestFetchThreadListHeadDoesNotFollowCursor(t *testing.T) {
 			t.Errorf("head probe must not send cursor: %v", p["cursor"])
 		}
 		return map[string]any{
-			"data":       []any{map[string]any{"id": "t1", "name": "one", "cwd": "/ws"}},
+			"data":       []any{map[string]any{"id": "t1", "name": "one", "updatedAt": time.Now().Unix(), "cwd": "/ws"}},
 			"nextCursor": "page2",
 		}, nil
 	})
@@ -96,5 +98,43 @@ func TestFetchThreadListHeadDoesNotFollowCursor(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("head calls=%d", n)
+	}
+}
+
+// Owner product decision (2026-09-26): the list keeps only sessions updated
+// inside catalogActivityWindow, except pinned rows (pin = keep visible).
+func TestFetchThreadListDropsStaleSessionsButKeepsPinned(t *testing.T) {
+	clientConn, hostConn := LoopbackPair()
+	stream := NewStream(clientConn, "client_window", "env_desktop", "stream_window")
+	defer stream.Close()
+	now := time.Now().Unix()
+	stale := now - int64(10*24*time.Hour/time.Second) - 60
+	startEnvelopePeer(t, hostConn, func(_ int64, method string, params json.RawMessage) (any, *RPCError) {
+		if method != "thread/list" {
+			return nil, &RPCError{Code: -32601, Message: method}
+		}
+		return map[string]any{
+			"data": []any{
+				map[string]any{"id": "recent", "name": "r", "updatedAt": now, "cwd": "/ws"},
+				map[string]any{"id": "stale", "name": "s", "updatedAt": stale, "cwd": "/ws"},
+				map[string]any{"id": "stale_pinned", "name": "sp", "updatedAt": stale, "cwd": "/ws",
+					"section":          map[string]any{"id": pinnedThreadSectionID, "name": "Pinned"},
+					"sectionEnteredAt": stale},
+			},
+		}, nil
+	})
+	cl := NewClient(stream, 1)
+	defer cl.Close()
+	agent := New(nil)
+	agent.BindClient(cl)
+	list, err := agent.FetchThreadList(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 || list[0].ID != "recent" || list[1].ID != "stale_pinned" {
+		t.Fatalf("windowed list=%+v, want [recent stale_pinned] (stale dropped, pinned exempt)", list)
+	}
+	if list[1].PinnedAt.IsZero() {
+		t.Fatalf("pinned row lost its decoration: %+v", list[1])
 	}
 }

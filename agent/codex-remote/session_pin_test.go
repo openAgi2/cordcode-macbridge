@@ -139,6 +139,13 @@ func TestListPinnedSessionsSendsSectionFilterAndOrderKeys(t *testing.T) {
 	if first["sectionId"] != pinnedThreadSectionID || first["sortKey"] != "section_position" || first["sortDirection"] != "asc" {
 		t.Fatalf("list wire=%v", first)
 	}
+	// The pinned query must carry the present-but-empty provider filter:
+	// an omitted filter narrows to the Desktop's active provider and would
+	// empty the section on a provider switch.
+	providers, ok := first["modelProviders"].([]any)
+	if !ok || len(providers) != 0 {
+		t.Fatalf("modelProviders=%v want present-but-empty", first["modelProviders"])
+	}
 	if calls[1]["cursor"] != "page2" {
 		t.Fatalf("second page cursor=%v", calls[1]["cursor"])
 	}

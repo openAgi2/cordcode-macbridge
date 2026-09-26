@@ -107,10 +107,14 @@ func (a *Agent) ListPinnedSessionSummaries(ctx context.Context) ([]core.AgentSes
 	cursor := ""
 	for {
 		params := map[string]any{
-			"limit":         catalogListPageSize,
-			"sectionId":     pinnedThreadSectionID,
-			"sortKey":       "section_position",
-			"sortDirection": "asc",
+			"limit": catalogListPageSize,
+			// Same provider-default hazard as the recency catalog: an omitted
+			// filter narrows to the Desktop's active provider and would empty
+			// the Pinned section whenever the user switches model routing.
+			"modelProviders": []string{},
+			"sectionId":      pinnedThreadSectionID,
+			"sortKey":        "section_position",
+			"sortDirection":  "asc",
 		}
 		if cursor != "" {
 			params["cursor"] = cursor
