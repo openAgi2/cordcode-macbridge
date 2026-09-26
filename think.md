@@ -37,6 +37,17 @@ ChatGPT Desktop」横幅 + 「加载失败：codex-remote: stream closed」。�
   警告跳过继续（epoch 级 skip 集），传输级错误仍整体中止。教训：**批量逐项操作里，「单
   项被服务端拒绝」与「连接死了」是两类错误，混为一谈会把单项永久失败放大成全局死循环**；
   官方把 no-rollout 归类为 ThreadNotFound（正常 miss）就是语义锚点。
+- 第五项（同日，iOS 侧修复 + Mac 侧待立项）：owner 报障「已恢复连接但红色横幅
+  『正在恢复与 ChatGPT Desktop 的连接』不消失」。根因=**hello_ack 的 backends[] 状态是
+  握手瞬间快照，桥侧没有后端状态变化推送**——iOS 在恢复窗口内握手（runtime 重启后
+  ~10s，且 120min 自动重启会反复制造该窗口）就永久停留旧状态。短期修复在 iOS 侧
+  （hasFreshLoadSuccess：列表加载成功即抑制横幅，失败/切后端复位，commit 17762b9a，
+  真机受控复现验证 ✅）。**待立项（协议面）**：桥侧 `backend_status_changed` 推送——
+  对位既有同形 backend 级 control-plane 事件 `background_tasks_changed`（带 backendId、
+  非 session-scoped、broadcast；event_publisher.go:1010 已有先例通道），可同时补上反向
+  缺口（后端中途挂掉时 iOS 不会主动得知）。属跨仓协议改动，走方案评审另立。教训：
+  **握手快照类状态（hello 的 backends/bridge 信息）在长连接期间没有刷新机制时，客户端
+  必须有「用后续真实交互证据覆盖快照」的路径，否则瞬时状态会变成永久谎言**。
 - 第三坑（同日修复）：用户把 `~/.codex/config.toml` 的 `model_provider` 切到本地网关
   （magpie，未设 requires_openai_auth）后，新 CLI `getAuthStatus` 走「活跃 provider 不需
   要 OpenAI 认证」分支返回 authMethod:null（上游 account_processor.rs 首分支），桥误读为
