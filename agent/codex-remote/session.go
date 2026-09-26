@@ -3,6 +3,7 @@ package codexremote
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -170,6 +171,7 @@ func (a *Agent) BindClient(cl *Client) {
 		a.listeners = map[string]map[chan core.Event]struct{}{}
 	}
 	a.attached = map[string]*Client{}
+	a.attachSkipped = map[string]struct{}{}
 	// Cached resume initial pages are client-epoch-scoped: a rebind re-attaches
 	// every observed thread (which re-caches fresh pages on the new client), so
 	// the old entries must never outlive their connection. The server version
@@ -375,12 +377,30 @@ func (a *Agent) AttachLiveCatalog(ctx context.Context) error {
 	for _, threadID := range ids {
 		a.mu.Lock()
 		already := a.attached[threadID] == cl
+		_, skipped := a.attachSkipped[threadID]
 		a.mu.Unlock()
-		if already {
+		if already || skipped {
 			continue
 		}
 		if err := a.attachLiveThreadOn(ctx, cl, threadID); err != nil {
-			return err
+			// Official thread_manager maps a refused thread/resume (e.g.
+			// "no rollout found for thread id") to a per-thread ThreadNotFound;
+			// one unloadable loaded-thread must not block the rest of the
+			// catalog (a ChatGPT Desktop upgrade can leave such threads in
+			// thread/loaded/list). Transport-level failures still abort: the
+			// connection itself is dead and the outer loop reconnects.
+			var rpcErr *RPCError
+			if !errors.As(err, &rpcErr) {
+				return err
+			}
+			a.mu.Lock()
+			if a.attachSkipped == nil {
+				a.attachSkipped = map[string]struct{}{}
+			}
+			a.attachSkipped[threadID] = struct{}{}
+			a.mu.Unlock()
+			slog.Warn("codex-remote live catalog attach skipping thread", "threadId", threadID, "error", err)
+			continue
 		}
 		attached++
 	}

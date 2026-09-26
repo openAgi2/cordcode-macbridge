@@ -240,7 +240,7 @@ func (a *Agent) restorePersistedPairing() {
 			}
 			p.markOffline(msg)
 			retryIn := backoff.Next()
-			slog.Warn("codex-remote pairing restore waiting", "retryIn", retryIn)
+			slog.Warn("codex-remote pairing restore waiting", "retryIn", retryIn, "error", err)
 			a.sleepInterruptible(retryIn)
 		}
 	}
@@ -290,7 +290,7 @@ func (a *Agent) watchBinding() {
 		}
 		a.pairing.markOffline("已配对，等待 ChatGPT Desktop")
 		retryIn := backoff.Next()
-		slog.Warn("codex-remote pairing reconnect waiting", "retryIn", retryIn)
+		slog.Warn("codex-remote pairing reconnect waiting", "retryIn", retryIn, "error", err)
 		a.sleepInterruptible(retryIn)
 	}
 }

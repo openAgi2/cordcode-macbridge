@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { extractFile } from "file:///opt/homebrew/lib/node_modules/@electron/asar/lib/asar.js";
 
+import { resolveCodexPath } from "../probe/lib/codex_path.mjs";
+
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "../../..");
 const metadataPath = path.join(
@@ -105,7 +107,7 @@ expectEqual(
   "ChatGPT bundle version",
 );
 const asarPath = "/Applications/ChatGPT.app/Contents/Resources/app.asar";
-const codexBinaryPath = "/Applications/ChatGPT.app/Contents/Resources/codex";
+const codexBinaryPath = resolveCodexPath();
 expectEqual(
   sha256(readFileSync(asarPath)),
   metadata.chatgpt_desktop.app_asar_sha256,

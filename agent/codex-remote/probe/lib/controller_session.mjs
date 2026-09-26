@@ -16,12 +16,14 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 
+import { resolveCodexPath } from "./codex_path.mjs";
+
 const require = createRequire(import.meta.url);
 const WebSocket = require("/opt/homebrew/lib/node_modules/wscat/node_modules/ws");
 
 export const base = "https://chatgpt.com/backend-api";
 export const websocketURL = "wss://chatgpt.com/backend-api/codex/remote/control/client";
-export const codexPath = "/Applications/ChatGPT.app/Contents/Resources/codex";
+export const codexPath = resolveCodexPath();
 export const scope = "codex.remote_control.enroll";
 export const controllerScope = "remote_control_controller_websocket";
 export const oauthClientID = "app_EMoamEEZ73f0CkXaXp7hrann";

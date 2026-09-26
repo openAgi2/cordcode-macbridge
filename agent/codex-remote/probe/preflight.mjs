@@ -7,10 +7,12 @@ import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import { resolveCodexPath } from "./lib/codex_path.mjs";
+
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "../../..");
 const appPath = "/Applications/ChatGPT.app";
-const codexPath = path.join(appPath, "Contents/Resources/codex");
+const codexPath = resolveCodexPath();
 const nodePath = path.join(appPath, "Contents/Resources/cua_node/bin/node");
 const addonPath = path.join(
   appPath,

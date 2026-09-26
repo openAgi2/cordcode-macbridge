@@ -17,17 +17,22 @@ var ErrNotConfigured = fmt.Errorf("请先在 Mac 的 CordCode Link 里配对 Cod
 // Agent is the fail-closed Phase 1 identity. Transport, RPC and live turns
 // land in later Phase 1 units.
 type Agent struct {
-	mu                 sync.Mutex
-	attachMu           sync.Mutex
-	catalogMu          sync.Mutex
-	catalogWake        chan struct{}
-	workDir            string
-	stopped            bool
-	client             *Client
-	codec              *LiveCodec
-	listeners          map[string]map[chan core.Event]struct{}
-	passiveObservers   map[chan core.Event]struct{}
-	attached           map[string]*Client
+	mu               sync.Mutex
+	attachMu         sync.Mutex
+	catalogMu        sync.Mutex
+	catalogWake      chan struct{}
+	workDir          string
+	stopped          bool
+	client           *Client
+	codec            *LiveCodec
+	listeners        map[string]map[chan core.Event]struct{}
+	passiveObservers map[chan core.Event]struct{}
+	attached         map[string]*Client
+	// attachSkipped records threads whose thread/resume the app-server refused
+	// with an RPC error (e.g. "no rollout found" = official ThreadNotFound) in
+	// this client epoch, so the 3s catalog loop warns once instead of every
+	// pass. BindClient clears it together with attached.
+	attachSkipped      map[string]struct{}
 	resumeInitialPages map[string]*resumeInitialPage
 	resumePageBroken   bool
 	// serverVersion is the codex app-server workspace version announced by

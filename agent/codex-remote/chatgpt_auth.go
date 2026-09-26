@@ -11,8 +11,36 @@ import (
 	"time"
 )
 
+// chatGPTCodexCandidates mirrors the official ChatGPT Desktop codex CLI
+// locations, newest layout first. ChatGPT 26.924.20706 (codex 0.158.0-alpha.2)
+// replaced the flat Resources/codex binary with the install-context
+// layoutVersion 1 package (codex-package.json + bin/codex wrapper +
+// CodexCLI.app/Contents/MacOS/codex); older releases keep the flat binary.
+func chatGPTCodexCandidates() []string {
+	return []string{
+		"/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+		"/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+		"/Applications/ChatGPT.app/Contents/Resources/codex",
+	}
+}
+
+func resolveChatGPTCodexPath(exists func(string) bool) string {
+	candidates := chatGPTCodexCandidates()
+	for _, p := range candidates {
+		if exists(p) {
+			return p
+		}
+	}
+	// None installed: keep the legacy path so os.Stat in loadChatGPTAuth
+	// still produces the "请先安装并登录 ChatGPT Desktop" guidance.
+	return candidates[len(candidates)-1]
+}
+
 func defaultChatGPTCodexPath() string {
-	return "/Applications/ChatGPT.app/Contents/Resources/codex"
+	return resolveChatGPTCodexPath(func(p string) bool {
+		_, err := os.Stat(p)
+		return err == nil
+	})
 }
 
 func loadChatGPTAuth(ctx context.Context) (token, accountID string, err error) {
@@ -22,7 +50,13 @@ func loadChatGPTAuth(ctx context.Context) (token, accountID string, err error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "app-server", "--stdio")
+	// Pin the probe instance to the built-in OpenAI provider: getAuthStatus
+	// reports null auth when the active provider has requires_openai_auth=false
+	// (e.g. a user model-routing gateway in ~/.codex/config.toml), even though
+	// the ChatGPT login token in auth.json is valid. The probe reads account
+	// auth only; per-process -c never writes the user's config and turn-side
+	// model routing on the Desktop app-server is unaffected.
+	cmd := exec.CommandContext(ctx, bin, "-c", "model_provider=openai", "app-server", "--stdio")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return "", "", err

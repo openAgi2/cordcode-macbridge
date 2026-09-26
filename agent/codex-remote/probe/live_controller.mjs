@@ -8,11 +8,13 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 
+import { resolveCodexPath } from "./lib/codex_path.mjs";
+
 const require = createRequire(import.meta.url);
 const WebSocket = require("/opt/homebrew/lib/node_modules/wscat/node_modules/ws");
 const base = "https://chatgpt.com/backend-api";
 const websocketURL = "wss://chatgpt.com/backend-api/codex/remote/control/client";
-const codexPath = "/Applications/ChatGPT.app/Contents/Resources/codex";
+const codexPath = resolveCodexPath();
 const helperSource = new URL("./device_key_helper.swift", import.meta.url).pathname;
 const scope = "codex.remote_control.enroll";
 const controllerScope = "remote_control_controller_websocket";

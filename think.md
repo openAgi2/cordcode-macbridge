@@ -1,5 +1,52 @@
 
-## 2026-09-24 dsh-web /goal 无气泡 + 注入堆尾：投影「一回合一条目」与官方「journal 逐行内联」的排版冲突（已修复，真实 journal 全链对账 ✅）
+## 2026-09-26 ChatGPT Desktop 26.924.20706 升级打断 codex-remote：内嵌 codex CLI 迁移包布局，桥硬编码旧路径断裂（已修复，运行态验证 ✅）
+
+现象：owner 升级 Mac 端 ChatGPT App 后，iPhone 切到 Codex Desktop 报「已配对，等待
+ChatGPT Desktop」横幅 + 「加载失败：codex-remote: stream closed」。日志时间线与升级
+精确对齐：11:41:57 app 被替换（26.924.20706，内嵌 codex 0.149 时代→0.158.0-alpha.2），
+11:42:14 桥 stream lost，此后 restoreOnce 循环全部失败。
+
+根因与排障要点：
+- **新版删除了 `Contents/Resources/codex` 平铺二进制**，迁移到官方 install-context
+  layoutVersion 1 包布局：`Contents/Resources/codex-cli/{codex-package.json, bin/codex
+  wrapper, CodexCLI.app/Contents/MacOS/codex 真二进制}`（上游锚点
+  `/Users/jacklee/Projects/codex` @ e72da2b538，codex-rs/install-context/src/lib.rs:246-283
+  CodexPackageLayout::from_exe + bundle_tests.rs:11）。桥的 `loadChatGPTAuth` 硬编码旧
+  路径，`os.Stat` 每次第一步就失败——日志里 11:42 后零条 `official request failed` 正是
+  因为根本走不到 HTTP 步。
+- **错误折叠掩盖根因**：`watchBinding`（pairing_persist.go:291）把所有恢复错误映射成
+  笼统的「已配对，等待 ChatGPT Desktop」，真实错误「请先安装并登录 ChatGPT Desktop」
+  不可见。排障时不能只看 iOS 文案，要手动走一遍 restore 链路定位失败步。
+- **分层验证避免误修**：手动用新路径二进制走完整链路（initialize→getAuthStatus ~12ms
+  响应、账号 70f1917c 与桥持久化 envID env_e_6a0c68fa 匹配、environments API 返回
+  online:true）证明桌面端/enrollment/协议全部健康，唯一断点是路径——防止把「新版
+  remoteControl 需要重新开关」这类臆测当根因。注意手动 spawn 新 CLI 时 stdin 不能立即
+  EOF（printf 完就关），否则 app-server 直接退出、getAuthStatus 无响应，是假阴性。
+- 修复：`chatgpt_auth.go` 候选路径解析（包布局二进制 → bin/codex wrapper → 旧平铺兜底，
+  缺失时保持旧路径以维持「请先安装并登录」引导）；probe/validate 五个脚本共享
+  `probe/lib/codex_path.mjs` resolver。Swift 侧 `configureCodexDesktopSharedRuntime` 的
+  同名旧路径引用被 codex-web drivers 门控（已退役）+ fileExists 保护，未动。
+- 教训：**对外部 App bundle 内部布局的硬编码路径是升级脆弱点**——ChatGPT.app 每次大
+  版本升级都可能重排 Resources；引用处应按官方 manifest（codex-package.json
+  layoutVersion）或候选列表解析，并在上游 install-context 找锚点，而不是钉死单一路径。
+- 次生坑（同日修复）：路径修好后 live catalog 仍起不来——新版桌面端 `thread/loaded/list`
+  里有一个升级遗留 thread（rollout 文件已不存在），app-server 对它 `thread/resume` 返回
+  -32600 "no rollout found"（官方 thread_manager.rs:1674 映射为单 thread ThreadNotFound），
+  而桥 `AttachLiveCatalog` 对单 thread 拒绝 fail-closed 整体 return，3s 循环里其余 thread
+  永远 attach 不上。修复=按错误层级分流：`*RPCError`（服务端对该 thread 的拒绝）记一次
+  警告跳过继续（epoch 级 skip 集），传输级错误仍整体中止。教训：**批量逐项操作里，「单
+  项被服务端拒绝」与「连接死了」是两类错误，混为一谈会把单项永久失败放大成全局死循环**；
+  官方把 no-rollout 归类为 ThreadNotFound（正常 miss）就是语义锚点。
+- 第三坑（同日修复）：用户把 `~/.codex/config.toml` 的 `model_provider` 切到本地网关
+  （magpie，未设 requires_openai_auth）后，新 CLI `getAuthStatus` 走「活跃 provider 不需
+  要 OpenAI 认证」分支返回 authMethod:null（上游 account_processor.rs 首分支），桥误读为
+  「ChatGPT 未登录」再次掉线——auth.json 里的账号 token 其实一直有效。修复=探针实例加
+  `-c model_provider=openai`（进程级覆盖）。教训：**借官方 CLI 的 RPC 读登录态时，探针
+  语义（账号认证）与用户配置（模型路由）必须解耦**；官方 Desktop 的 Remote Control
+  enrollment 本来就不依赖 model provider，这是「探针该看什么」的语义锚点。诊断关键：新
+  加的 reconnect 日志 error 字段让真实错误（ChatGPT 未登录）一眼可见，不再被折叠文案误导。
+
+
 
 现象：owner 在 Mac dsh web 执行 /goal 多子代理任务后报障两处——① /goal 输入没有用户
 气泡样式（官方是右对齐气泡 + 折叠结果卡两个表面，iOS 渲染成一块灰字纯文本）；② 回合

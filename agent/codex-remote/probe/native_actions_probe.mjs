@@ -15,6 +15,7 @@ import {
   pairedEnvironments,
   selectEnvironment,
 } from "./lib/controller_session.mjs";
+import { resolveCodexPath } from "./lib/codex_path.mjs";
 
 const helperSource = new URL("./device_key_helper.swift", import.meta.url).pathname;
 const startedAt = Date.now();
@@ -35,7 +36,7 @@ function observe(kind, detail = {}) {
 function installedTarget() {
   const plist = "/Applications/ChatGPT.app/Contents/Info.plist";
   const read = (args) => spawnSync("/usr/bin/defaults", args, { encoding: "utf8" }).stdout.trim();
-  const codex = spawnSync("/Applications/ChatGPT.app/Contents/Resources/codex", ["--version"], { encoding: "utf8" }).stdout.trim();
+  const codex = spawnSync(resolveCodexPath(), ["--version"], { encoding: "utf8" }).stdout.trim();
   return {
     desktopVersion: read(["read", plist, "CFBundleShortVersionString"]),
     bundleVersion: read(["read", plist, "CFBundleVersion"]),
