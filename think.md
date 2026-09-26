@@ -45,6 +45,15 @@ ChatGPT Desktop」横幅 + 「加载失败：codex-remote: stream closed」。�
   语义（账号认证）与用户配置（模型路由）必须解耦**；官方 Desktop 的 Remote Control
   enrollment 本来就不依赖 model provider，这是「探针该看什么」的语义锚点。诊断关键：新
   加的 reconnect 日志 error 字段让真实错误（ChatGPT 未登录）一眼可见，不再被折叠文案误导。
+- 第四坑（同日修复）：会话列表只剩今天 1 条——新版 thread/list 改从 sqlite threads 表枚
+  举（不再扫 rollout），且**省略 modelProviders 参数时默认过滤为「当前活跃 provider」**
+  （上游 list_threads_common：`None => Some(vec![self.config.model_provider_id])`）。用户
+  历史 1046 条全是 custom provider，切 magpie 后新会话是 magpie → 默认过滤只剩 2 条。修
+  复=请求显式带 `modelProviders: []`（协议文档「present but empty = 所有 provider」）。
+  教训：**官方 RPC 加了「省略参数=按当前会话上下文过滤」的默认值时，桥的既有请求形状会
+  静默收窄结果集**——大版本升级后必须对每个列表类 RPC 做省略参数 vs 显式参数的对拍实测
+  （本次 2 条 vs 100 条一测即现形）；「数据还在但查不到」先查存储层（rollout/sqlite 都
+  在）再查过滤层，别急着怀疑数据丢了。
 
 
 

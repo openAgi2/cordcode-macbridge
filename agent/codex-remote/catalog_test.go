@@ -49,6 +49,14 @@ func TestFetchThreadListPaginatesAndFiltersDir(t *testing.T) {
 	if calls[0]["limit"] != float64(catalogListPageSize) {
 		t.Fatalf("page limit=%v want official max %d", calls[0]["limit"], catalogListPageSize)
 	}
+	// Regression (ChatGPT 26.924 / codex 0.158): an omitted provider filter
+	// defaults to the Desktop's active model provider and hides sessions
+	// recorded under earlier providers; the request must carry the
+	// present-but-empty "all providers" shape.
+	providers, ok := calls[0]["modelProviders"].([]any)
+	if !ok || len(providers) != 0 {
+		t.Fatalf("modelProviders=%v want present-but-empty", calls[0]["modelProviders"])
+	}
 	cwd, _ := calls[0]["cwd"].([]any)
 	if len(cwd) != 1 || cwd[0] != "/ws" {
 		t.Fatalf("cwd filter=%v", calls[0]["cwd"])

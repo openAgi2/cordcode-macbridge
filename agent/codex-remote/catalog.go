@@ -73,6 +73,12 @@ func (a *Agent) listThreads(ctx context.Context, dir string, limit int, followCu
 			"limit":         pageLimit,
 			"sortKey":       "recency_at",
 			"sortDirection": "desc",
+			// codex 0.158+ thread/list defaults an omitted provider filter to
+			// the Desktop's currently active model provider, so a provider
+			// switch (e.g. a local routing gateway) would hide every session
+			// recorded under earlier providers. Present-but-empty is the
+			// documented "all providers" shape (ThreadListParams docs).
+			"modelProviders": []string{},
 		}
 		if dir != "" {
 			params["cwd"] = []string{dir}
