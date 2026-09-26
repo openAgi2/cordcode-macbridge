@@ -1,8 +1,9 @@
 # codex-remote 断线韧性与恢复专项方案
 
 - 日期：2026-09-26
-- 状态：v1（首次送审，未实施）
+- 状态：v1.1（首次送审前整合官方源码深挖增量；未实施）
 - 本轮改动范围：全新方案文档；**只设计，不实施**。owner 已授权写方案，未授权任何代码改动。
+- v1.1 增量：整合官方 transport 层深挖结论——host 未 ack 重放缓冲与反压（新风险 R-6）、官方 caller 侧重连模式（TUI）、入站 seq 去重语义、token 刷新提前量官方先例、官方测试不变量引用。
 - 前置方案：`docs/2026-08-26-codex-remote-backend-implementation-plan.md`（owner 撰写，r2 评审通过；其 §6.2/Gate P0 的韧性相关要求本方案逐条对账）。
 
 ## 1. 摘要与范围
@@ -37,7 +38,7 @@
 1. 受控断线（断 relay 链路 10–60s 后恢复）期间冷开会话：iOS 显示 loading/可重试态，恢复后 ≤ 一轮重试内自动加载成功，全程无硬「无法加载」。
 2. 断线窗口内完成的 turn：重连完成后 ≤ 一轮对账内收口为完成态（真机时间线可见，无需重开会话）。
 3. pairing revoked（401/403）仍为硬错误（提示重新配对语义），不被自动重试掩盖。
-4. 入为 seq 缺口在桥日志可查，并触发对账；无缺口时零开销。
+4. 入站 seq 缺口在桥日志可查，并触发对账；无缺口时零开销。
 
 ## 2. 来源与现状调查
 
@@ -58,7 +59,11 @@
 | 重连退避形状（1s 基准→30s 封顶、封顶归零、±jitter） | 官方 host：`app-server-transport/src/transport/remote_control/websocket.rs:78`（cap 30s）、`:1343-1345`（cap 归零）；MacBridge `agent/codex-remote/backoff.go:15-56` | **复用现状** | 已逐常量对齐，不改 |
 | 判活超时（入站静默 60s） | 官方 pong timeout 60s `websocket.rs:74-75`；MacBridge `streamIdleLimit` 60s `ws.go:318` | **复用现状** | 已对齐 |
 | controller 腿 cursor 事件重放 | 官方 cursor 机制是 **host↔relay 腿专用**：host 记录 client envelope 回传的 cursor（`websocket.rs:201-207`），host 重连 relay 时经 `x-codex-subscribe-cursor` header 续传缓冲的 client 消息（`websocket.rs:1275-1330`）；controller 收不到 cursor（owner attempt-008，plan:588-599） | **不实现** | E-1。MacBridge `stream.go:458-466` 的 `SubscribeCursorHeader` 为死代码，注释升级为明确「不实现」决定（S-5） |
-| 官方客户端自动重连 | `app-server-client/src/remote.rs:181-632`：connect/notify/next_event/shutdown，**无任何 reconnect API** | **自建维持** | 重连必须调用方自建；MacBridge `watchBinding`/`restoreOnce`（`pairing_persist.go:250-296`）已是正确形态，本方案优化其补偿行为而非替换 |
+| 官方客户端自动重连 | `app-server-client/src/remote.rs:181-632`：connect/notify/next_event/shutdown，**无任何 reconnect API**；断线即终止（pending requests 全部以传输错误失败，`remote.rs:510-518`）。官方 caller 侧模式 = **TUI** `tui/src/app/reconnect.rs:30-122`：120s 共享 deadline、delay 阶梯 `[0,1,2,4]` 后恒 8s、每次全量重建（新 client + initialize + resume thread）、不重发输入 | **自建维持** | MacBridge `watchBinding`/`restoreOnce`（`pairing_persist.go:250-296`）是与 TUI 同位的 caller 侧循环，形态正确；本方案优化其补偿行为而非替换 |
+| host↔relay 腿至少一次投递（未 ack 重放） | 官方 host 侧 `BoundedOutboundBuffer`（`app-server-transport/src/transport/remote_control/websocket.rs:86-145`）：按 `(client_id, stream_id)` 缓冲已发未 ack 的 ServerEnvelope，容量 128（`transport/mod.rs:24` `CHANNEL_CAPACITY`），满则 writer 停止拉新事件（反压）；host 自身重连 relay 时**全量重发未 ack 信封**（`websocket.rs:965-988`）；清除只发生在 relay Ack 或 client shutdown | **认知对齐，不镜像** | 该机制只保护 host↔relay 腿；MacBridge 断线重连用新 stream_id，旧 stream 的未 ack 信封不会补发到新流（E-1 结论不变）。但 host 侧重放可能让 MacBridge 在**同一 stream** 上收到重复 seq（host 侧抖动场景）——S-3 需同时做去重与缺口检测 |
+| 入站 seq 语义（host→controller 方向） | 官方 `ServerEnvelope.seq_id` 按 `(client_id, stream_id)` **严格单调、从 1 起**（`websocket.rs:1031-1067`）；官方对 client→host 方向只去重不查缺口（`client_tracker.rs:134-143`） | **复用语义** | host→controller 方向的单调性是可依赖契约 → S-3 的缺口检测成立；去重语义镜像官方 `last_inbound_seq_id >= seq_id → drop` |
+| token 刷新提前量先例 | 官方 host 对 server token **到期前 5 分钟**刷新（`enroll.rs` `server_token_refresh_requirement_at`，经 `websocket.rs:1511-1652` 每次 connect 前判定）；refresh 失败退避 24–36s 均匀随机（`server_api.rs:27-28, 366-386`，commit `d047c33a1b`） | **参照** | OD-3 的 T 值量级先例：官方取分钟级提前量；E-9 fixture 仍门住 S-4 |
+| 重连退避基准 | 官方 `async-utils/src/backoff.rs:12-17`：**200ms** ×2^(n-1)、jitter 0.9–1.1、cap 30s、cap 后归零；MacBridge `backoff.go:15-56` base **1s** | **维持现状（可选对齐）** | 形状/cap/归零已对齐；base 差 5 倍属本仓选择，S-5 仅记录不强制改 |
 | turn 权威状态源（对账用） | `thread/turns/list` 摘要页：MacBridge `ReadColdHistory`/`mapColdPage` 已实现分页冷校准（`history_paginated.go:830-941`） | **复用** | S-2 把同一拉取路径用于重连后对账，不新写协议调用 |
 | iOS 自动重试 loop | `ProjectionStore.swift:164-180` 可重试 code 白名单 + `.retryable` → 灾难重试 1s→30s（`ChatViewModel.swift:438-490`） | **复用+扩展** | S-1b 接上 wire `retryable` 标志消费 |
 | wire `retryable`/`retryAfterMillis` 字段 | 桥已发送：`handlers_projection.go:176-181`（`WireError{Retryable, RetryAfterMillis, Attempts}`）；iOS 已解码：`CCCodeBridgeModels.swift:314-331`（`CCCodeBridgeError.retryable/retryAfterMillis/attempts`） | **复用** | 两头已备、中间未接：iOS `isRetryablePullError` 只看 code 白名单（`ProjectionStore.swift:887-900`），标志被忽略——S-1 的核心事实 |
@@ -103,13 +108,13 @@
 
 事务域归属：对账是同一 Kernel 的 hydrate 域事务（SSV2 规则 5），经既有 fence 串行化；re-observed items 幂等（`codec.go:118-124` 注释已有先例：重连后重观察事件 idempotent）。
 
-### 3.3 S-3 入站 seq 缺口检测
+### 3.3 S-3 入站 seq 缺口检测与去重
 
-`readLoop` 按 per-stream 维护入站 `seq_id` 单调性（owner 方案 §6.2 plan:496 的 per-stream 单调语义；MacBridge 出站已做 `stream.go:90-113`，入站补齐）。缺口 → 记录（stream、缺口范围、关联 thread）→ 触发 S-2 对账。不重传、不断线、不伪造事件——fail-visible 而非 fail-closed。
+`readLoop` 按 per-stream 维护入站 `seq_id`：**去重**（`seq_id <= last_seen` → 跳过+计数，镜像官方 `client_tracker.rs:134-143` 的 `last_inbound_seq_id >= seq_id → drop` 语义，覆盖 host 侧未 ack 重放造成的同 stream 重复）+ **缺口检测**（`seq_id > last_seen + 1` → 记录缺口范围与关联 thread）。缺口 → 触发 S-2 对账。不重传、不断线、不伪造事件——fail-visible 而非 fail-closed。依据：host→controller 方向 `ServerEnvelope.seq_id` 按 `(client_id, stream_id)` 严格单调（官方 `websocket.rs:1031-1067`），缺口即真实丢失。
 
 ### 3.4 S-4 ctrl token 到期前主动刷新
 
-用已持久化的 `ctrlExp`（`pairing_persist.go:23-24,60-61`）调度到期前刷新：长连接期间到期前 T 秒执行 `refreshControlToken`，成功则原地更新持久化 token（连接不断）；失败沿用现有路径（连接死亡→重连时强制 refresh），不新增死亡路径。**T 的取值受 owner 方案约束**（plan:508-509「未取样前不得写死提前量或退避」）：实现为常量但被 E-9 fixture 门住——E-9 未满足前 S-4 不得实施。
+用已持久化的 `ctrlExp`（`pairing_persist.go:23-24,60-61`）调度到期前刷新：长连接期间到期前 T 秒执行 `refreshControlToken`，成功则原地更新持久化 token（连接不断）；失败沿用现有路径（连接死亡→重连时强制 refresh），不新增死亡路径。**T 的取值受 owner 方案约束**（plan:508-509「未取样前不得写死提前量或退避」）：实现为常量但被 E-9 fixture 门住——E-9 未满足前 S-4 不得实施。量级先例：官方 host 对 server token 取**到期前 5 分钟**（`enroll.rs` `server_token_refresh_requirement_at`）；ctrl token 与 server token 是不同凭证，E-9 仍须实测 ctrlExp 的真实有效期分布。
 
 ### 3.5 S-5 常量与死代码对齐
 
@@ -134,13 +139,14 @@
 | ID | 待证明命题 | 证据类别/来源 | 断言与锚点 | 状态 | 未满足时阻塞 |
 | --- | --- | --- | --- | --- | --- |
 | E-1 | 官方不向 controller 提供 cursor 事件重放；cursor 是 host↔relay 腿机制 | 源码事实（官方 FETCH_HEAD）+ owner 实测 | `websocket.rs:201-207`（host 记录 client 回传 cursor）、`:1275-1330`（host 重连带 header）；attempt-008（plan:588-599）；MacBridge `stream.go:459-460` 注释「live target never delivered one」 | **verified** | 非目标成立性；若未来官方新增 controller cursor，S-5 注释与「不做重放」决定需复审 |
-| E-2 | 官方 RemoteAppServerClient 无自动重连 | 源码事实 | `remote.rs:181-632` API 面无 reconnect/resubscribe | **verified** | 「自建维持」选择成立 |
+| E-2 | 官方 RemoteAppServerClient 无自动重连；官方 caller 侧模式 = TUI 全量重建 | 源码事实 | `remote.rs:181-632` API 面无 reconnect；断线即终止并失败全部 pending（`remote.rs:510-518`）；TUI `reconnect.rs:30-122`（120s 窗口、`[0,1,2,4,8∞]` 阶梯、新 client+initialize+resume、不重发输入） | **verified** | 「自建维持」选择成立 |
 | E-3 | iOS 只认 code 白名单；wire retryable 已解码未消费 | 源码事实（两仓） | `ProjectionStore.swift:887-900`（只读 code）；`CCCodeBridgeModels.swift:314-331`（retryable 已解码）；`handlers_projection.go:176-181`（桥已发送） | **verified** | S-1b |
 | E-4 | 瞬态 offline 冷开已走可重试 hydrating | 源码事实 | `agent.go:103-135` + `handlers_projection.go:864-871, 152-156` | **verified** | S-1 范围界定（只补 mid-hydrate 缺口） |
 | E-5 | mid-hydrate/终态失败 → `hydrate_failed` 硬错误（iOS 白名单缺） | 源码事实 | `handlers_projection.go:599-606` + `ProjectionStore.swift:163-180` 白名单不含 | **verified** | S-1a/S-1b |
 | E-6 | 重连后无 turn 对账；断线窗口完成的 turn 停在 running | 源码事实 | `session.go:161-212`（BindClient 只订阅+baseline）；`codec.go:112-126`（turnByThread 保留）；孤儿收口仅桥重启（`projection_kernel.go:1115-1123`） | **verified** | S-2 |
 | E-7 | ctrlExp 持久化但无到期前刷新调度 | 源码事实 | `pairing_persist.go:23-24,60-61,167,186-191`；全仓 grep 无调度调用 | **verified** | S-4 |
-| E-8 | 常量漂移：重组上限官方 100MB vs 本仓 1GB；backoff/pong 已对齐 | 源码事实 | `segment.rs:21` vs `envelope.go:16`；`websocket.rs:74-79` vs `backoff.go:15-56`/`ws.go:318` | **verified** | S-5 |
+| E-8 | 常量漂移：重组上限官方 100MB vs 本仓 1GB；backoff/pong 已对齐（base 200ms vs 1s 仅记录） | 源码事实 | `segment.rs:21` vs `envelope.go:16`；`websocket.rs:74-79` vs `backoff.go:15-56`/`ws.go:318`；官方 base `async-utils/src/backoff.rs:12-17` | **verified** | S-5 |
+| E-11 | host↔relay 腿有未 ack 重放缓冲（至少一次投递）+ 128 容量反压；controller 腿无重放（E-1 不变） | 源码事实 | `websocket.rs:86-145`（BoundedOutboundBuffer）、`:965-988`（重连重放）、`transport/mod.rs:24`（CHANNEL_CAPACITY=128 + 反压）；官方测试 `remote_control_transport_clears_outgoing_buffer_when_backend_acks`（`tests.rs:1528`，不变量=已 ack 不重发） | **verified** | S-3 去重语义；§6 风险 5（ack 熔断 × 反压停摆） |
 | E-9 | ctrl token 实际有效期分布与刷新时序（fixture） | 原始运行证据 | 计划路径：真机抓 enroll/refresh 响应的 `ctrlExp`（脱敏，不记 token 值），≥5 个样本覆盖典型会话 | **pending**（实施期捕获） | **S-4 整体**（OD-3 依赖） |
 | E-10 | 受控断线复现样本（断 relay 10–60s） | 原始运行证据 | 计划路径：真机 + 桥日志对齐一次断/恢复窗口（iOS 拉取行为 + 桥 hydrate 行为 + 对账行为） | **pending**（实施期捕获） | S-1/S-2/S-3 的完成验收门 |
 
@@ -153,7 +159,7 @@ Gate A（证据）作用：S-1/S-2/S-3/S-5 的设计依据全部 verified；S-4 
 | S-1a | revoked 硬错误、瞬态可重试的桥侧分类（R-1 验收 3） | `handlers_projection.go` `markHydrateFailed` 分类；复用 `RetryAt` 退避 | E-5；OD-1 | 定向单测：`ErrNotConfigured` → retryable=false；传输类 → true+RetryAt | 分类失败回退现状（一律 true），不劣化 |
 | S-1b | iOS 消费 retryable 标志，瞬态失败自动重试（R-1 验收 1） | `ProjectionStore.swift` `isRetryablePullError` 扩展；复用灾难 loop 与 `retryAfterMillis` | S-1a；OD-1；E-3 | iOS 定向单测：标志 true → `.retryable`；false/无标志 → 白名单路径；真机 E-10 验收 1 | 标志缺失时白名单兜底（兼容老桥） |
 | S-2 | 断线窗口完成的 turn 重连后自动收口（R-2） | `session.go` BindClient 后对 `turnByThread` 非空 thread 重拉摘要（复用 `ReadColdHistory` 路径）；Kernel hydrate 域事务提交 | E-6；E-10 验收 2 | 桥定向单测（fake app-server 断线窗口收口）；真机 E-10 | 对账失败记日志，3s 周期重试；不猜完成 |
-| S-3 | 入站 seq 缺口检测→触发对账（R-4） | `stream.go` readLoop per-stream 单调性；复用 S-2 对账 | S-2；E-1（缺口真实存在的依据） | 桥定向单测：注入缺口→检测+触发；正常流零告警 | 检测异常时降级为纯日志（不阻断事件流） |
+| S-3 | 入站 seq 去重+缺口检测→触发对账（R-4） | `stream.go` readLoop per-stream 去重（镜像官方 `client_tracker.rs:134-143`）+ 缺口检测；复用 S-2 对账 | S-2；E-1/E-11 | 桥定向单测：注入重复 seq→跳过；注入缺口→检测+触发；正常流零告警。官方不变量参照 `websocket_state_drops_replayed_client_chunks_after_completion`（`websocket.rs:3062`） | 检测异常时降级为纯日志（不阻断事件流） |
 | S-4 | ctrl token 到期前续期（R-3） | `pairing_persist.go` 基于 `ctrlExp` 调度；复用 `refreshControlToken` | **E-9**；OD-3 | 定向单测（fake 时钟）+ 真机长连接观测 | 刷新失败沿用现有重连路径 |
 | S-5 | 常量对齐 + 死代码决定记录 | `envelope.go:16` 100MB；`stream.go:458-466` 注释 | E-8 | 常量断言单测 | 无（纯对齐） |
 | S-6 | 桥内状态可区分（R-5） | `pairing_persist.go`/`diagnostics.go` 错误类别保留 | 无（独立） | 日志/readiness 定向断言 | 无 |
@@ -163,15 +169,16 @@ Gate A（证据）作用：S-1/S-2/S-3/S-5 的设计依据全部 verified；S-4 
 ## 6. 验证、风险与交付
 
 **验证分层**（按构建成本纪律，本方案属 D3 状态/协议边缘）：
-- 方案阶段已验证：E-1~E-8（源码事实，锚点见 §4）。
-- 实施期：定向单测（桥：对账事务/seq 检测/token 调度/错误分类；iOS：retryable 消费）+ 各自定向 build + 交付前一次真机安装。
+- 方案阶段已验证：E-1~E-8、E-11（源码事实，锚点见 §4）。
+- 实施期：定向单测（桥：对账事务/seq 去重+缺口检测/token 调度/错误分类；iOS：retryable 消费）+ 各自定向 build + 交付前一次真机安装。官方测试不变量可作断言参照：`remote_control_transport_reconnects_after_disconnect`（`tests.rs:1086`，断连自动重建）、`remote_control_transport_clears_outgoing_buffer_when_backend_acks`（`tests.rs:1528`，已 ack 不重发）、`websocket_state_drops_replayed_client_chunks_after_completion`（`websocket.rs:3062`，完成后旧 seq 丢弃）、`expired_token_refresh_failure_throttles_reconnect_without_websocket`（`websocket_refresh_tests.rs:716`，refresh 失败退避不发新连）。
 - 端到端验收（E-10）：owner 测试矩阵（受控断线场景，§1 验收 1–4 逐项），agent 不以单测冒充。
 
 **主要风险与对策**：
 1. S-2 对账与 live 事件竞态 → 走 Kernel 既有 fence/事务域（SSV2 规则 5），re-observed 幂等；单测覆盖「对账提交与 live delta 并发」负例。
 2. S-1 扩大重试掩盖真错误 → S-1a 分类先行（revoked 恒硬错误）；白名单保留兜底；E-10 验收 3。
-3. S-3 seq 语义误报（官方 host 是否保证入站连续未取样）→ 检测只触发对账+日志，不断线不重传；E-10 观察正常流是否零误报，误报则收紧判定条件。
-4. S-4 提前量拍脑袋 → E-9 fixture 门整体阻塞切片。
+3. S-3 seq 语义误报（官方 host 是否保证入站连续未取样）→ 检测只触发对账+日志，不断线不重传；E-10 观察正常流是否零误报，误报则收紧判定条件。**v1.1 修正**：host→controller 方向 seq 严格单调已由官方源码证实（`websocket.rs:1031-1067`，E-11），本风险降级为「实现正确性」而非「语义不确定」。
+4. S-4 提前量拍脑袋 → E-9 fixture 门整体阻塞切片；官方 5 分钟先例（`enroll.rs`）提供量级参照。
+5. **（v1.1 新增）ack 熔断器 × host 反压停摆**：MacBridge 的 ack 风暴熔断器（`stream.go:359-373`，2026-09-14 事故产物）在熔断期间停发 ack；官方 host 侧未 ack 缓冲满 128 条后 writer 停止拉新事件（E-11）——两者叠加可能造成**静默停摆**（无事件、无缺口），只能等 60s 入站静默判死触发重连。对策：S-3 实施时把「熔断激活期间入站静默」纳入观测日志；若 E-10 复现停摆，熔断器改为有界时长或熔断期间维持最低 ack 频率（独立小切片，不阻塞主链）。
 
 **阻塞清单**：OD-1（owner 确认重试语义）、E-9（token fixture）、E-10（断线复现，实施期）。
 
