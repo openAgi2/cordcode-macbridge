@@ -1,8 +1,9 @@
 # codex-remote 断线韧性与恢复专项方案
 
 - 日期：2026-09-26
-- 状态：v1.3（r2 评审通过（APPROVED，blockers 0）后的**通过后纠错勘误轮**；未实施）
-- 本轮改动范围（v1.3）：仅来源清单纠错，**设计内容（§1/§3~§7）零改动**。元审核定向复核（`docs/2026-09-26-codex-remote-disconnect-resilience-plan-review-r2-meta.md`，confirm=false——锚点抽查 7/7 通过、APPROVED 锚点依据未受污染）发现 r2 报告来源清单两项程序性缺陷：①同族配套 iOS 工作树未覆盖（无枚举、无分支族解析）；②P0 模板「任务预期分支/预期产品特性」字段不全。方案自身 §2.1 存在同源缺陷，本轮一并补全并留 §8 勘误记录。r2 的 4 条建议级意见（R2-A1~A4）**未在本轮处理**——按 plan-contract「通过后纠错」，设计类改动不得夹带进勘误；它们不构成通过前置条件（r2 §8），待 owner 排期。
+- 状态：v1.4（r4 评审 REVISION_REQUIRED（4 阻塞 + 2 建议）后的修订轮；未实施）
+- 本轮改动范围（v1.4）：处置 r4 全部意见（报告：`docs/2026-09-26-codex-remote-disconnect-resilience-plan-review-r4.md`，处置表见 §7.1）。r4 以新反证使 r3 的 APPROVED 进入**通过后纠错**（plan-contract：改变验收成立性的错误使相关通过依据暂停有效；r1~r3 的锚点核验仍作历史证据，但 admission/归属/half-open 状态机/wire 样本四条跨组件约束未被旧轮覆盖）。四条阻塞：F-R4-1 → §3.2 事务域重写为 READY-safe 专用对账事务（kernel 新增 reconcile admission/abort API 设计）；F-R4-2 → §3.3 缺口归属重写为 stream 级未知归属 + 有界 fan-out + 游标推进（一并闭合被 r4 升级为阻塞的 R2-A1）；F-R4-3 → §3.7 重写为 closed/open/half-open 状态机、删除不可观测的「transport 接受」伪事实（一并闭合被升级的 R2-A3，并按 R2-A2 补 S-7 游标依赖）；F-R4-4 → E-12 降级为 pending wire 证据门、门住 S-3/S-7 实施，真实捕获清单写成 owner 授权后的实施前置 fixture 计划（§4）。两条建议：R4-A1 → 删除 S-1b「尊重 retryAfterMillis」承诺（选项 b，理由见 §7.1）；R4-A2 → §2.1 标注为设计证据历史快照 + 新增实施来源门模板。R2-A4 两处行号精度顺手修（§1/§3.1）。联动更新 §4 门控、§5 切片表、§6 风险与验收。稳定 ID（R-1~R-5、S-1~S-7、E-1~E-12、OD-1~OD-3）不变；**只设计，不实施**。
+- v1.3 改动范围：仅来源清单纠错，设计内容零改动（勘误背景见 §8）。r2 的 4 条建议级意见（R2-A1~A4）当时按 plan-contract「通过后纠错」未夹带进勘误——其中 R2-A1/R2-A3 已被 r4 升级为阻塞（F-R4-2/F-R4-3）并在本轮闭合，R2-A2 随 F-R4-3 一并补依赖，R2-A4 行号精度本轮顺手修。
 - v1.2 改动范围：处置 r1 全部意见 F-1~F-6（2 阻塞 + 4 建议，全部采纳，处置表见 §7）。另含设计师复核 F-1/F-2 证据链时亲核发现的**相邻缺口**：MacBridge chunk ack 不携带 `SegmentID`（官方 `protocol.rs:114-119` 文档要求携带）——该缺口使 S-3「缺口即真实丢失」存在已证盲区，故并入 S-3 修复并新增 E-12；此项超出 r1 意见范围，已在 §7 处置表单列，**r2 评审已确认采纳**。F-2 对策升主链：新增 S-7 切片（ack 熔断有界化）。**只设计，不实施**；owner 已授权写方案，未授权任何代码改动。
 - v1.1 增量：整合官方 transport 层深挖结论——host 未 ack 重放缓冲与反压（新风险 R-6→§6 风险 5）、官方 caller 侧重连模式（TUI）、入站 seq 去重语义、token 刷新提前量官方先例、官方测试不变量引用。
 - v1.0→v1.1 间「R-6」为风险草稿编号，未进入 §1 需求清单，正式编号为 §6 风险 5；本版不再使用 R-6 字样。
@@ -16,7 +17,7 @@
 
 复盘证据（think.md，两仓）：
 - macbridge `think.md:2-6`（2026-09-26）：Desktop 26.924 升级打断 codex-remote，iPhone 报「加载失败：codex-remote: stream closed」+「已配对，等待 ChatGPT Desktop」横幅；`watchBinding` 把所有恢复错误折叠成笼统文案。
-- cordcode-ios `think.md:432`（2026-09-20）：Mac 端 codex-remote 自 11:36 起病态（thread/list 每轮 12s 超时、stream idle/closed、pairing 流反复重连），**至 14:00 未恢复**——驱动长时间不自愈的实测。
+- cordcode-ios `think.md:432`（2026-09-20）：Mac 端 codex-remote 自 11:36 起病态（thread/list 每轮 12s 超时、stream idle/closed、pairing 流反复重连），**至 14:00 未恢复**——驱动长时间不自愈的实测。（行号按方案记录来源 bd46169 框架；当前 iOS main fe421cdc 下同内容位于 :477——r2 报告 R2-A4② 亲核的双框架注记，v1.4 顺手补录。）
 - macbridge `think.md:421`（2026-09-14）：error 通知风暴期间 live catalog attach failed 318 次，iOS 间歇卡「执行中」。
 
 ### 目标行为（R）
@@ -44,7 +45,9 @@
 
 ## 2. 来源与现状调查
 
-### 2.1 来源表（v1.3 按 P0 来源门补全：工作树枚举 + 分支族解析 + 任务预期分支 + 预期产品特性；勘误背景见 §8）
+### 2.1 来源表（**设计证据历史快照**，v1.3 按 P0 来源门补全：工作树枚举 + 分支族解析 + 任务预期分支 + 预期产品特性；勘误背景见 §8）
+
+> **R4-A2 处置（v1.4）**：本节记录方案各版形成/评审核验时的来源身份，属**设计证据历史快照**——表中哈希反映的是对应轮次的核验时点，不代表当前工作树状态。实施前必须按下方「实施来源门模板」在三个门点（读源码分析前/首次改文件前/构建安装前）**现场重跑**，禁止复制本节任何哈希作为实施来源清单。
 
 **工作树枚举**（`git worktree list` 本轮勘误亲跑，2026-09-26）：
 - cordcode-macbridge 共 3 树：`/Users/jacklee/Projects/cordcode-macbridge`（main @ 07721783）、`/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline`（feat/ios-native-message-timeline @ 07721783，**本方案所在树**）、`/Users/jacklee/Projects/cordcode-macbridge-plan-approval`（detached @ b2b25235）。
@@ -62,6 +65,25 @@
 
 **污染声明**：`docs/2026-09-24-codex-remote-session-list-auto-retry.md` 内残留历史评审轮次的 "Kimi" 命名污染（该文档 F-13 已自证「无 Kimi 系 backend，r1–r3 评审证据均误」，但 F-3/§120/§416 仍有残留）。本方案引用该文档时只取其经本轮亲核的锚点（`catalog_recent_view.go`、`RuntimeManager.swift:205`），不扩散污染命名。本方案全文使用真实命名：codex-remote / ChatGPT Desktop / codex CLI。
 
+**v1.4 修订轮来源亲核记录（2026-09-27，本轮设计师重跑；同样属历史快照，不构成实施来源清单）**：
+- cordcode-macbridge 本树：feat/ios-native-message-timeline @ `5d1c9ae648f15dface4717d97f674d71756b01e5`，未提交状态仅未跟踪 r4 报告一份（只读）；`git diff 07721783..HEAD` 排除 docs 后**零差异**——代码与 main @ 07721783 等价，方案全部 Mac 锚点不受分支推进影响（r4 亦亲核同一事实）。
+- cordcode-ios main @ `fe421cdc136930e3729b6b3d5c4479d5ecb90df4` 干净（本轮 `git status --porcelain` 亲跑为空）；本轮 iOS 锚点核验沿用任务简报指定的 main 工作树。
+- 同族配套树 cordcode-ios-native-message-timeline：已前进至 `c49bdffeca811c6abb33a37969de2310e7e2ef51`（r4 记录时为 bb6f4584 且有三项未提交修改；本轮亲核该三项已随 c49bdffe 提交落盘、树现为**干净**，`git merge-base --is-ancestor` 亲核 bb6f4584 为其祖先，区间唯一提交为 MarkdownView CJK 斜体修复，`git diff --stat bb6f4584..c49bdffe` **不含方案四个 iOS 锚点文件**——ProjectionStore / CCCodeBridgeModels / ChatViewModel / CCCodeBridgeTransport）。
+- openai/codex：FETCH_HEAD @ `e72da2b53805894878023d01949a25a082e0a5cb` 不变（HEAD == FETCH_HEAD，干净）。
+
+**实施来源门模板（R4-A2 处置；实施者在每个门点现场重跑并记录，禁止复制本节任何哈希——配套 iOS 树活跃开发中，任何硬抄「当前值」都会立刻过时）**：
+
+```text
+仓库路径=<实施时实际工作树绝对路径>
+分支=<git branch --show-current，detached 必须明示>
+提交=<git rev-parse HEAD 完整哈希>
+未提交状态=<git status --porcelain 逐项；与任务范围重叠的未提交修改必须纳入来源或先报告>
+任务预期分支=<任务/交接文档指定>
+配套仓库路径/分支/提交=<按 P0 分支族解析出的配套组合；解析不出唯一候选即停止并报告>
+预期产品特性=<产物必须包含的能力/行为；纯 docs 任务标 N/A+理由>
+锚点复核=<对本方案引用的关键锚点文件逐个 git diff <方案记录提交>..HEAD -- <文件> 亲跑；有差异先重核锚点再动工>
+```
+
 ### 2.2 复用调查表
 
 | 能力/需求 | 官方或既有实现与锚点 | 选择 | 必要改动/无法复用的证据 |
@@ -76,8 +98,8 @@
 | token 刷新提前量先例 | 官方 host 对 server token **到期前 5 分钟**刷新（`enroll.rs` `server_token_refresh_requirement_at`，经 `websocket.rs:1511-1652` 每次 connect 前判定）；refresh 失败退避 24–36s 均匀随机（`server_api.rs:27-28, 366-386`，commit `d047c33a1b`） | **参照** | OD-3 的 T 值量级先例：官方取分钟级提前量；E-9 fixture 仍门住 S-4 |
 | 重连退避基准 | 官方 `async-utils/src/backoff.rs:12-19`：**200ms** ×2^(n-1)、jitter 0.9–1.1、**无 cap**（cap 30s 常量在 `websocket.rs:78-79`，cap 后归零在 `websocket.rs:1342-1351` `next_reconnect_delay`——均属 transport 层，非 backoff.rs；v1.2 修正归属，F-6①）；MacBridge `backoff.go:15-56` base **1s** | **维持现状（可选对齐）** | 形状/cap/归零已对齐（cap/归零锚点见左列 websocket.rs）；base 差 5 倍属本仓选择，S-5 仅记录不强制改 |
 | turn 权威状态源（对账用） | `thread/turns/list` 摘要页：MacBridge `ReadColdHistory`/`mapColdPage` 已实现分页冷校准（`history_paginated.go:830-941`） | **复用** | S-2 把同一拉取路径用于重连后对账，不新写协议调用 |
-| iOS 自动重试 loop | `ProjectionStore.swift:164-180` 可重试 code 白名单 + `.retryable` → 灾难重试 1s→30s（`ChatViewModel.swift:438-490`） | **复用+扩展** | S-1b 接上 wire `retryable` 标志消费 |
-| wire `retryable`/`retryAfterMillis` 字段 | 桥已发送：`handlers_projection.go:176-181`（`WireError{Retryable, RetryAfterMillis, Attempts}`）；iOS 已解码：`CCCodeBridgeModels.swift:314-331`（`CCCodeBridgeError.retryable/retryAfterMillis/attempts`） | **复用** | 两头已备、中间未接：iOS `isRetryablePullError` 只看 code 白名单（`ProjectionStore.swift:887-900`），标志被忽略——S-1 的核心事实 |
+| iOS 自动重试 loop | `ProjectionStore.swift:164-180` 可重试 code 白名单 + `.retryable` → 灾难重试 1s→30s（loop `ChatViewModel.swift:438-475`、delay 计算 `:477-494`，v1.4 行号对齐 r4 R4-A1 核验） | **复用+扩展** | S-1b 接上 wire `retryable` 标志消费；灾难 loop 本地退避维持不变 |
+| wire `retryable`/`retryAfterMillis` 字段 | 桥已发送：`handlers_projection.go:176-181`（`WireError{Retryable, RetryAfterMillis, Attempts}`）；iOS 已解码：`CCCodeBridgeModels.swift:314-331`（`CCCodeBridgeError.retryable/retryAfterMillis/attempts`） | **复用** | 两头已备、中间未接：iOS `isRetryablePullError` 只看 code 白名单（`ProjectionStore.swift:887-900`），标志被忽略——S-1 的核心事实。**v1.4（R4-A1）**：`retryAfterMillis` 维持已解码、**不消费**——灾难 loop 用本地退避（`ChatViewModel.swift:477-494`），server 提示节奏的消费属 OD-1 裁决范围，不预承诺（§7.1） |
 | 恢复等待语义 | `WaitForRestore`（`agent.go:103-135`）：瞬态 offline → 5s 后 `ErrRestoreInProgress` → `projection.hydrating` 可重试（`handlers_projection.go:863-871, 152-156`） | **复用现状** | 瞬态断线的冷开已被重试 loop 盖住；缺口在 mid-hydrate 传输失败（E-5） |
 | 重组上限常量 | 官方 100MB：`segment.rs:21`（`REMOTE_CONTROL_REASSEMBLED_MAX_BYTES`）；MacBridge 1GB：`envelope.go:16`（`ReassembledMessageMaxBytes = 1073741824`） | **修正对齐** | 10 倍漂移；入站方向官方不会发超限帧（无功能故障），但常量应镜像官方（S-5） |
 | ctrl token 刷新 | 每次重连 `restoreOnce` 强制 refresh（`pairing_persist.go:186-191`）；`ctrlExp` 已解析持久化（`pairing_persist.go:23-24,60-61,167`）但**无到期前调度**（全仓 grep 无调用） | **扩展** | S-4 补调度；提前量受 owner 方案约束「未取样前不得写死」（plan:508-509），设 E-9 fixture 门 |
@@ -108,26 +130,41 @@
 - `ErrRestoreInProgress` 已单独走 hydrating（`handlers_projection.go:866-868`），不在本分类面内；
 - ctx 取消/其余意外错误 → `retryable=true` + 沿用既有 `RetryAt` 同 revision 退避（2026-09-13 think.md 修复已建立；kernel `MarkFailed` 内 `RetryAt` 计算 `projection_kernel.go:940-942`）。
 
-分类改动**只落在** `source_inspection_failed` call site（`:603-605`）；mid-hydrate 各落点维持 `retryable=true` 不变（瞬态类）：`source_read_failed`（`:1079-1083`）、`hydrate_queue_timeout`（`:1015`）、`bare_source_wait_failed`（`:1142`）、`commit_failed`（`:1157`、`:483`）。wire 侧无需新映射：kernel 失败记录的 `Retryable/RetryAt/Attempts` 已经由 RPC handler default 分支透传（`handlers_projection.go:160-171`），iOS 看到的 code 统一为 `projection.hydrate_failed`（`:147`）。
+分类改动**只落在** `source_inspection_failed` call site（`:603-605`）；mid-hydrate 各落点维持 `retryable=true` 不变（瞬态类）：`source_read_failed`（`:1079-1083`）、`hydrate_queue_timeout`（`:1015`）、`bare_source_wait_failed`（`:1142`）、`commit_failed`（`:1157`、`:483`）。wire 侧无需新映射：kernel 失败记录的 `Retryable/RetryAt/Attempts` 已经由 RPC handler default 分支透传（`handlers_projection.go:161-173`，v1.4 行号精度修正，R2-A4①），iOS 看到的 code 统一为 `projection.hydrate_failed`（`:147`）。
 
-**S-1b（iOS）接上标志消费**：`isRetryablePullError`（`ProjectionStore.swift:164-181`，v1.2 修正行号，F-6②）扩展为——`CCCodeBridgeError.retryable == true` 时返回可重试（尊重 `retryAfterMillis` 作为灾难 loop 的初始等待），code 白名单保留为无标志时的兼容路径（老桥/其他 backend）。revoked 与 source-unavailable 因 S-1a 已是 `retryable=false`，不会被自动重试掩盖。
+**S-1b（iOS）接上标志消费**：`isRetryablePullError`（`ProjectionStore.swift:164-181`，v1.2 修正行号，F-6②）扩展为——`CCCodeBridgeError.retryable == true` 时返回可重试，code 白名单保留为无标志时的兼容路径（老桥/其他 backend）。revoked 与 source-unavailable 因 S-1a 已是 `retryable=false`，不会被自动重试掩盖。**v1.4（R4-A1 处置，选项 b）**：删除 v1.3「尊重 `retryAfterMillis` 作为灾难 loop 的初始等待」的承诺——灾难 loop 维持既有本地退避 1s→30s（`ChatViewModel.swift:477-494`），`retryAfterMillis` 维持已解码、不消费；理由与 OD-1 边界见 §7.1。
 
 **数据流不变量**：不新增错误面、不改投影内容语义；只把「桥已判定的可重试性」如实传导到 iOS 的既有重试 loop。SSV2 无新增 writer。
 
-### 3.2 S-2 重连后 turn 对账
+### 3.2 S-2 重连后 turn 对账（v1.4 重写事务域：READY-safe 专用对账事务，F-R4-1）
 
-对 `turnByThread` 非空的 thread（断线时有 in-flight turn 的小集合）逐个重拉权威摘要页——**复用** `ReadColdHistory` 的 `thread/turns/list` desc 首页路径（`history_paginated.go:871-941`）——经 Projection Kernel 既有 hydrate 事务域提交：
+对 `turnByThread` 非空的 thread（断线时有 in-flight turn 的小集合）逐个重拉权威摘要页，**只消费终态事实**：
+- 权威拉取复用 `ReadColdHistory`（`history_paginated.go:871-941`；桥侧既有消费先例 `handlers_projection.go:1372-1385`。`readTurnsPage` 为 agent 包内私有、桥不可直达，故不另造窄接口）。对账只消费映射结果中的 (turnID, status)，内容丢弃。诚实成本注记：上游仍 in-progress 的 turn 会被 `mapColdPage` 走查 items 到 EOF（`history_paginated.go:832-852`），该内容对账同样丢弃——成本与冷开同价、仅发生在「对账发现仍在跑」的少见分支；
 - 摘要显示 turn 已终结 → 收口该 turn（completed/failed 按权威 status），并同步收口 codec 侧 `turnByThread` 条目（否则已完成 turn 永久留在对账集合，每次重绑重复对账）；
 - 摘要显示仍在跑 → 维持 running（不猜完成，SSV2 规则 7）；
 - 对账失败 → 记日志，thread 留在对账集合，下一轮 3s 周期重试（见下方接线），不新增定时器。
 
-**接线说明（v1.2 补，F-3——四要素各有可指名宿主，实施者不新造机制）**：
+**为什么不能复用既有 hydrate admission（v1.4 亲核补证，F-R4-1 证据链）**：codex-remote 的 hydrate source 是 pathless（`ProjectionSourceDescriptor{Identity, Path:"", Cursor:0}`，`handlers_projection.go:876-881`）。对 READY 会话，`BeginHydrateTransaction` 在 `sourceChanged=false` 时直接返回 `AlreadyReady`（`projection_kernel.go:1020-1026`）——对账成为 no-op；要强制进事务只能 `sourceChanged=true`，但新事务的 reducer 从空起步（codex-remote 不在 `pathlessRichHistoryBackend` 名单 `:969-976` → `pathlessFullRebuildSource=false`，而唯一 restore 分支要求 `!sourceChanged`，`:1069-1083`），commit 时 `k.reducer.Restore(baseline)`（`:1357`）把 committed 投影**整体替换**为 tx baseline——而 `ReadColdHistory` 只返回最新一页（`:856-923`），**已 prepend 的旧页 turns 会被抹掉**。已证：既有 API 的两个分支（不强制=不对账；强制=page-1 rebuild 破坏完整时间线）均不可行，不得用 `sourceChanged=true` 的 page-1 rebuild 冒充增量对账。
+
+**READY-safe 专用对账事务（拟议设计；owner/锁/fence/输入/commit API 逐项如下）**：
+- **Admission**：kernel 新增 `BeginReconcileTransaction(backendID, sessionID) (ProjectionHydrateAdmission, error)`——`k.mu` 下要求 Phase==Ready（否则返回错误，调用方回落既有 hydrate 路径）；复用既有 `projectionHydrateTransaction` 结构体构造 tx：`source` 原样携带 `session.committedSource`、`startCut = session.committedSourceCursor`（commit 写回 `:1393-1394` 时因此保持不变——对账不移动 source cut）、`reducer = NewProjectionReducer()` 后 `Restore(committed snapshot)`——**以当前 committed 投影为 baseline**，older-window turns、goal/detail manifest（随 turns 携带，`projection_reducer.go:377-381` 的 per-turn manifest 字段）全部在 baseline 内保留；`coldArmedTurnIDs` 置空、`liveArrived` 信号就绪；随后与 hydrate 同序安装 `session.status=Hydrating / session.hydrate=tx / hydrateDone`（`:1092-1095`）。**不新增锁、不新增 fence 机制**——`IngestLive` 的既有 fence 分支（`:1203-1211`）自动把窗口期 live 事件深拷贝排队为 `pendingLive` 并返回 Deferred，无需改 `IngestLive`。
+- **输入事件（只允许权威终态更新；经既有 `ApplyHydrateEvent` `:1160` 应用到 tx-local reducer）**。producer 侧过滤规则（ghost-turn 防护）：
+  1. baseline 中存在且非 terminal、摘要中 terminal 的 turn → 发一条终态事件：completed → `turn_completed`；interrupted/failed → `turn_error`（状态映射纪律镜像 codec `decodeTurnCompleted` `codec.go:372-381` + `mapAgentEvent` `events.go:174/211/221`，不造新事件词表；`upsertTurn` 对已存在 turn 是 merge 语义、内容保留，`projection_reducer.go:336-376`）；
+  2. 摘要中存在、baseline 缺席的 turn → **只记日志，不发事件**（对不存在的 turn 发终态事件会经 `upsertTurn` 凭空造 bare terminal ghost turn）；
+  3. baseline 非终态、但掉出摘要首页的 turn → 只记日志、维持 running（不猜完成；掉出首页说明断线窗口内到达了整页新 turn，边界如实登记）；
+  4. 摘要与 baseline 终态不一致（如 baseline completed、摘要 failed）→ 记日志告警，不发事件（不静默改写已终态历史）。
+  armed 集只含收到终态事件的 turn，apply 后全部 terminal → 既有 commit gate（`WaitHydrateCommitReady` 的 `NonTerminalTurnCountInSet==0`）平凡满足；对账 runner 为同步流程（Begin → Apply → Commit），无需 `MarkHydrateSourceIngestComplete`/`Wait`（kernel commit 不检查该标志，gate 语义由 producer 同步性保证）。
+- **Commit**：既有 `CommitHydrateTransaction`（`:1319`）**零改动**——baseline（committed 快照 + 终态更新）经 `Restore` 原子发布，`pendingLive` 按戳序 drain（`:1358-1374`），patch 经 `FlushPatch` 发布。runner 侧复用 hydrate commit 后处理（`releaseDeferredPushCandidates` + `PublishProjectionPatch`，`handlers_projection.go:1161-1177`），但**不调用** `persistCodexProducerSeed`（`:1182-1184`）与 checkpoint 持久化——producer cursor/seed 全程不动。
+- **Abort（对账失败语义，与 hydrate `MarkFailed` 的关键差异）**：kernel 新增 `AbortReconcileTransaction(backendID, sessionID) ([]string, error)`——丢弃 tx（终态更新从未进 committed reducer，committed 投影本就完好），Phase→Ready，**把 `pendingLive` 按戳序 drain 回 committed reducer 并 FlushPatch**，返回 applied EventIDs 供 runner 释放 deferred push candidates。不能用 `MarkFailed`（`:925-951` 置 Failed 且丢弃 pendingLive——依赖下次冷重建兜底；对账中止没有重建，丢 pendingLive 即丢 live 真值，违反 R-4「不静默丢失」）；也不能用 `MarkReady`（`:911-918` 丢弃 tx 但同样不 drain pendingLive）。
+- **并发写者边界（亲核）**：窗口期 older-walk 的 `PrependHistoricalTurns` 因 Phase!=Ready 诚实失败（`:1680-1684` 硬门），不会撕开 baseline（客户端 older 请求可重试，与冷 hydrate 窗口期同型）；`IngestLive` 被 fence；producer state/checkpoint 不被对账触碰；窗口期冷开 pull 加入单飞行（Hydrating 分支返回 Done）等待对账结束。**不新增第二 writer**（SSV2 护栏）：对账事务与 hydrate 事务共用同一 Kernel 锁、同一 reducer 发布路径、同一 fence 语义。
+
+**接线说明（v1.2 补，F-3——四要素各有可指名宿主，实施者不新造机制；v1.4 不变）**：
 1. **触发/完成点**：`BindClient` 既有 per-thread attach goroutine（`session.go:195-211`）即对账触发点——`attachLiveThreadOn` 成功后，agent 检查该 thread 的 `turnByThread`（`codec.go:22`，agent 层 `LiveCodec` 自持，重绑不重置：`ResetNativeSessionState` `:112-126` 刻意不含它）；非空 → 加入 agent 侧 pending 对账集合并发信号。v1.1 的「全部 attach 完成后」按此修正为 per-thread 完成点：不新增 WaitGroup/聚合计数，且单个 attach 卡 15s 超时不阻塞其他 thread 的对账。
 2. **对账集合**：observed（本次重绑 re-attach 的 thread）∩ `turnByThread` 非空——不为无监听者的 thread 造 kernel 会话。
 3. **agent→桥信号 seam**：镜像 `CatalogRefreshSignals` 先例（`agent.go:168-180`：one-slot 合并通道 + 数据不随信号走；桥侧类型断言消费先例 `go-bridge/session_discovery.go:159`）——agent 新增对账信号通道 + pending 集合读取/清除方法（机制同型，命名实施期定）。
 4. **消费/重试宿主**：`attachLiveCatalogPeriodically` 3s 循环（`go-bridge/main.go:1046-1066`）的 `attach()` 步骤之后 drain 信号、拉取 pending 集合、逐 thread 执行对账；失败 thread 留在集合，下一轮 3s 自然重试。
 
-事务域归属：对账是同一 Kernel 的 hydrate 域事务（SSV2 规则 5），走既有 `BeginHydrate`/`BeginHydrateTransaction`/`ApplyHydrateEvent`/`CommitHydrateTransaction`（`projection_kernel.go:889/996/1160/1319`），与冷开同一 fence 串行化；re-observed items 幂等（`codec.go:118-124` 注释已有先例：重连后重观察事件 idempotent）。
+事务域归属（v1.4 重写）：对账走上述**专用 reconcile 事务**（`BeginReconcileTransaction`/`ApplyHydrateEvent`/`CommitHydrateTransaction`/`AbortReconcileTransaction`），与冷开 hydrate 共用同一 Kernel 锁与 fence 语义（SSV2 规则 5——单 writer、单发布路径），但 admission 独立：READY 会话强制进 reconcile 事务且以 committed 快照为 baseline（既有 `BeginHydrateTransaction` 对 READY pathless 会话只能 no-op 或空 reducer 重建，见上）；re-observed items 幂等（`codec.go:118-124` 注释已有先例：重连后重观察事件 idempotent）。
 
 ### 3.3 S-3 入站 seq 缺口检测与去重
 
