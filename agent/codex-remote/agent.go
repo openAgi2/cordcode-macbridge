@@ -17,10 +17,16 @@ var ErrNotConfigured = fmt.Errorf("请先在 Mac 的 CordCode Link 里配对 Cod
 // Agent is the fail-closed Phase 1 identity. Transport, RPC and live turns
 // land in later Phase 1 units.
 type Agent struct {
-	mu               sync.Mutex
-	attachMu         sync.Mutex
-	catalogMu        sync.Mutex
-	catalogWake      chan struct{}
+	mu          sync.Mutex
+	attachMu    sync.Mutex
+	catalogMu   sync.Mutex
+	catalogWake chan struct{}
+	// reconcileMu guards the S-2 turn-reconcile seam (core.TurnReconciler):
+	// the wake channel mirrors catalogWake (one-slot, data-free) and the
+	// pending set is the truth read by the bridge's 3s catalog loop.
+	reconcileMu      sync.Mutex
+	reconcileWake    chan struct{}
+	pendingRec       map[string]struct{}
 	workDir          string
 	stopped          bool
 	client           *Client
@@ -184,6 +190,90 @@ func (a *Agent) signalCatalogRefresh() {
 	default:
 	}
 	a.catalogMu.Unlock()
+}
+
+// TurnReconcileSignals implements core.TurnReconciler (disconnect-resilience
+// plan S-2 wiring element 3): same data-free one-slot mechanism as
+// CatalogRefreshSignals — the pending set is the truth, the channel only
+// wakes the bridge's 3s catalog loop early.
+func (a *Agent) TurnReconcileSignals() <-chan struct{} {
+	a.reconcileMu.Lock()
+	defer a.reconcileMu.Unlock()
+	if a.reconcileWake == nil {
+		a.reconcileWake = make(chan struct{}, 1)
+	}
+	return a.reconcileWake
+}
+
+// addPendingTurnReconcile records a thread whose live codec still tracks an
+// in-flight turn at reconnect time and wakes the reconcile consumer. The
+// missed terminal event inside the disconnect window is never replayed (E-1),
+// so only an authoritative summary read can close the turn.
+func (a *Agent) addPendingTurnReconcile(threadID string) {
+	a.reconcileMu.Lock()
+	if a.pendingRec == nil {
+		a.pendingRec = map[string]struct{}{}
+	}
+	a.pendingRec[threadID] = struct{}{}
+	wake := a.reconcileWake
+	if wake == nil {
+		wake = make(chan struct{}, 1)
+		a.reconcileWake = wake
+	}
+	a.reconcileMu.Unlock()
+	select {
+	case wake <- struct{}{}:
+	default:
+	}
+}
+
+// PendingTurnReconciles implements core.TurnReconciler: snapshot without
+// clearing — failed threads stay pending for the next 3s round.
+func (a *Agent) PendingTurnReconciles() []string {
+	a.reconcileMu.Lock()
+	defer a.reconcileMu.Unlock()
+	out := make([]string, 0, len(a.pendingRec))
+	for threadID := range a.pendingRec {
+		out = append(out, threadID)
+	}
+	return out
+}
+
+// ActiveTurnForReconcile implements core.TurnReconciler: the codec's
+// in-flight turn for the thread ("" when none) — a turn that closed on the
+// live path needs no reconciliation.
+func (a *Agent) ActiveTurnForReconcile(threadID string) string {
+	a.mu.Lock()
+	codec := a.codec
+	a.mu.Unlock()
+	if codec == nil {
+		return ""
+	}
+	return codec.ActiveTurn(threadID)
+}
+
+// ClearPendingTurnReconcile implements core.TurnReconciler: drop the pending
+// entry after a completed reconcile attempt; the codec entry is untouched.
+func (a *Agent) ClearPendingTurnReconcile(threadID string) {
+	a.reconcileMu.Lock()
+	delete(a.pendingRec, threadID)
+	a.reconcileMu.Unlock()
+}
+
+// ClearReconciledTurn implements core.TurnReconciler: drop the pending entry
+// AND the codec's in-flight turn entry — only for turns the reconciliation
+// actually closed, so the closed turn never re-enters the pending set on a
+// later rebind.
+func (a *Agent) ClearReconciledTurn(threadID string) {
+	a.reconcileMu.Lock()
+	delete(a.pendingRec, threadID)
+	a.reconcileMu.Unlock()
+	a.mu.Lock()
+	codec := a.codec
+	a.mu.Unlock()
+	if codec != nil {
+		codec.setActiveTurn(threadID, "")
+	}
 }
 
 // SetWorkDir implements core.WorkDirSwitcher. The bridge calls it before

@@ -933,7 +933,9 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 		backoff = 2 * time.Second
 		slog.Info("go-bridge: passive subscription started", "backend", backendID)
 		if replayFreeLive && catalogAttacher != nil {
-			go attachLiveCatalogPeriodically(ctx, backendID, catalogAttacher)
+			go attachLiveCatalogPeriodically(ctx, backendID, catalogAttacher, func() {
+				h.drainTurnReconciles(ctx, backendID)
+			})
 		}
 
 		for ev := range events {
@@ -1043,7 +1045,13 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 	}
 }
 
-func attachLiveCatalogPeriodically(ctx context.Context, backendID string, attacher core.LiveEventCatalogAttacher) {
+// attachLiveCatalogPeriodically keeps the live catalog attached and, after each
+// attach round, drains the backend's pending turn reconciles (disconnect-
+// resilience plan S-2 wiring element 4). drainTurnReconciles is nil for
+// backends without a reconcile seam; the attacher's TurnReconciler signal
+// (when implemented) wakes the loop immediately instead of waiting for the
+// 3s tick — the drain itself is cheap when the pending set is empty.
+func attachLiveCatalogPeriodically(ctx context.Context, backendID string, attacher core.LiveEventCatalogAttacher, drainTurnReconciles func()) {
 	attach := func() {
 		attachCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 		defer cancel()
@@ -1052,15 +1060,30 @@ func attachLiveCatalogPeriodically(ctx context.Context, backendID string, attach
 			return
 		}
 	}
+	drain := func() {
+		if drainTurnReconciles != nil {
+			drainTurnReconciles()
+		}
+	}
 	attach()
+	drain()
+	// nil channel for backends without the seam: the case never fires.
+	var reconcileSignal <-chan struct{}
+	if reconciler, ok := attacher.(core.TurnReconciler); ok {
+		reconcileSignal = reconciler.TurnReconcileSignals()
+	}
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-reconcileSignal:
+			attach()
+			drain()
 		case <-ticker.C:
 			attach()
+			drain()
 		}
 	}
 }

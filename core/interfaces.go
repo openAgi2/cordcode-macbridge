@@ -1100,6 +1100,36 @@ type CatalogRefreshSignaler interface {
 	CatalogRefreshSignals() <-chan struct{}
 }
 
+// TurnReconciler is the disconnect-resilience S-2 seam (plan §3.2 wiring
+// element 3, mechanism mirrors CatalogRefreshSignaler): a backend whose live
+// codec tracks per-thread in-flight turns reports threads that need
+// authoritative turn-state reconciliation after a reconnect — a turn that
+// terminated inside the disconnect window stays "running" in the projection
+// because the missed terminal event is never replayed (E-1: no controller
+// cursor). The signal is data-free and coalescing; the pending set is the
+// truth. The bridge's 3s catalog loop drains the signal, reconciles each
+// pending thread against the authoritative summary, and clears entries on
+// completion — failed threads stay pending for the next round.
+type TurnReconciler interface {
+	// TurnReconcileSignals is a one-slot, data-free wake-up channel.
+	TurnReconcileSignals() <-chan struct{}
+	// PendingTurnReconciles snapshots the pending thread IDs without clearing.
+	PendingTurnReconciles() []string
+	// ActiveTurnForReconcile returns the thread's current in-flight turn ID
+	// ("" when none) so the runner can skip threads whose turns already
+	// closed on the live path.
+	ActiveTurnForReconcile(threadID string) string
+	// ClearPendingTurnReconcile removes the thread from the pending set after
+	// a completed reconcile attempt (closure, authoritative still-running, or
+	// nothing-to-reconcile). The codec's in-flight entry is NOT touched.
+	ClearPendingTurnReconcile(threadID string)
+	// ClearReconciledTurn removes the thread from the pending set AND drops
+	// the codec's in-flight turn entry — only for turns the reconciliation
+	// actually closed (otherwise a closed turn re-enters the pending set on
+	// every rebind).
+	ClearReconciledTurn(threadID string)
+}
+
 // ProjectSuggestion is one quick-pick directory suggestion for the iOS
 // directory chooser, served by a ProjectLister backend.
 type ProjectSuggestion struct {

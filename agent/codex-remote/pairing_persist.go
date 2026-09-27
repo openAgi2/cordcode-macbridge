@@ -118,18 +118,30 @@ func (p *PairingController) loadPersistedPairing() (*persistedPairing, *deviceKe
 	return &rec, key, nil
 }
 
+// offlineMessageForRestoreError maps a non-revoked restore error to the
+// distinguishable offline banner (disconnect-resilience plan S-6): ChatGPT
+// login / desktop-environment problems say so explicitly instead of
+// collapsing into the generic waiting banner — the 2026-09-26 Desktop-upgrade
+// breakage stayed hidden behind the generic banner for exactly this reason.
+// Shared by reconnectFromStore, restorePersistedPairing and watchBinding so
+// every restore loop surfaces the same category through the readiness seam.
+func offlineMessageForRestoreError(err error) string {
+	switch err.Error() {
+	case "请打开并登录 ChatGPT Desktop", "请先安装并登录 ChatGPT Desktop", "ChatGPT 未登录", "读取 ChatGPT 登录态超时":
+		return "请打开并登录 ChatGPT Desktop"
+	case "no desktop environment":
+		return "请打开 ChatGPT Desktop"
+	default:
+		return "已配对，等待 ChatGPT Desktop"
+	}
+}
+
 func (p *PairingController) reconnectFromStore(ctx context.Context) (PairingSnapshot, error) {
 	if err := p.restoreOnce(ctx); err != nil {
 		if errors.Is(err, errPairingRevoked) {
 			return p.invalidateRevokedPairing("配对已失效，请重新配对 Codex Desktop"), err
 		}
-		msg := "已配对，等待 ChatGPT Desktop"
-		if err.Error() == "请打开并登录 ChatGPT Desktop" || err.Error() == "请先安装并登录 ChatGPT Desktop" || err.Error() == "ChatGPT 未登录" || err.Error() == "读取 ChatGPT 登录态超时" {
-			msg = "请打开并登录 ChatGPT Desktop"
-		} else if err.Error() == "no desktop environment" {
-			msg = "请打开 ChatGPT Desktop"
-		}
-		return p.markOffline(msg), err
+		return p.markOffline(offlineMessageForRestoreError(err)), err
 	}
 	return p.Snapshot(), nil
 }
@@ -232,13 +244,7 @@ func (a *Agent) restorePersistedPairing() {
 				p.invalidateRevokedPairing("配对已失效，请重新配对 Codex Desktop")
 				return
 			}
-			msg := "已配对，等待 ChatGPT Desktop"
-			if err.Error() == "请打开并登录 ChatGPT Desktop" || err.Error() == "请先安装并登录 ChatGPT Desktop" || err.Error() == "ChatGPT 未登录" || err.Error() == "读取 ChatGPT 登录态超时" {
-				msg = "请打开并登录 ChatGPT Desktop"
-			} else if err.Error() == "no desktop environment" {
-				msg = "请打开 ChatGPT Desktop"
-			}
-			p.markOffline(msg)
+			p.markOffline(offlineMessageForRestoreError(err))
 			retryIn := backoff.Next()
 			slog.Warn("codex-remote pairing restore waiting", "retryIn", retryIn, "error", err)
 			a.sleepInterruptible(retryIn)
@@ -288,7 +294,7 @@ func (a *Agent) watchBinding() {
 			a.pairing.invalidateRevokedPairing("配对已失效，请重新配对 Codex Desktop")
 			return
 		}
-		a.pairing.markOffline("已配对，等待 ChatGPT Desktop")
+		a.pairing.markOffline(offlineMessageForRestoreError(err))
 		retryIn := backoff.Next()
 		slog.Warn("codex-remote pairing reconnect waiting", "retryIn", retryIn, "error", err)
 		a.sleepInterruptible(retryIn)

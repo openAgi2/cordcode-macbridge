@@ -456,8 +456,11 @@ func (s *Stream) observeChunk(env Envelope) ([]byte, bool, error) {
 }
 
 // SubscribeCursorHeader returns the reconnect header value only when a real
-// envelope cursor was observed. Owner-accepted known gap: live target never
-// delivered one; callers must not fabricate it.
+// envelope cursor was observed. Decision record (disconnect-resilience plan
+// S-5 / evidence E-1): the official host never delivers a cursor to the
+// controller leg — cursor replay is a host↔relay mechanism only — so this
+// repo deliberately does not implement controller-leg replay. RecordedCursor
+// stays observation-only; callers must not fabricate a cursor.
 func SubscribeCursorHeader(cursor string) (name, value string, ok bool) {
 	if cursor == "" {
 		return "x-codex-subscribe-cursor", "", false
