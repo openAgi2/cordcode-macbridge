@@ -50,18 +50,51 @@ type Stream struct {
 	// each is diagnosed once. Their payloads must never cross the stream/epoch
 	// boundary: JSON-RPC request ids restart for each Client.
 	staleStreams map[string]struct{}
-	// acksDisabled is the transport-ack circuit breaker. Servers that reject
-	// client acks answer each one with a sentinel error notification; acking
-	// those answers again would self-oscillate at relay RTT (2026-09-14
-	// storm). Connection-scoped: a fresh stream re-arms so a server that
-	// later accepts acks regains the documented chunk-retention protocol.
-	acksDisabled bool
-	inbound      chan []byte
-	done         chan struct{}
+	// S-3 (disconnect-resilience plan §3.3): inbound envelope-level high-water
+	// cursor over the HOST-direction seq space. server_message,
+	// server_message_chunk and pong share that space and its monotonic counter
+	// (E-12b attempt-011 live wire: seq 1..136 zero-missing with pongs
+	// interleaved); inbound ack frames carry the client direction's own counter
+	// and never advance this cursor. inSeg/inSegOK remember a mid-message chunk
+	// position (plain and pong leave it unset).
+	inSeq   uint64
+	inSeg   int
+	inSegOK bool
+	// onEnvelopeGap fires once per newly detected envelope-level gap
+	// (seq > lastSeq+1). Stream-level unknown attribution: the fan-out to
+	// reconcilable threads is the Agent's decision (§3.3 bounded fan-out).
+	onEnvelopeGap func()
+	// S-7 (§3.7): the transport-ack breaker state machine. closed ("")
+	// acks per envelope — byte-identical to the pre-S-7 behavior; open and
+	// half-open stop per-envelope acking and send at most one probe ack per
+	// ackBreakerProbeInterval, carrying the highest seen (seq, segment)
+	// cursor. A stream NEVER returns to closed within its lifetime: with no
+	// observable host-acceptance signal, re-arming is the next connection's
+	// fresh stream (E-1 discipline).
+	ackState      string // "" (closed) | ackStateOpen | ackStateHalfOpen
+	ackArmedAt    time.Time
+	probeCount    int
+	sentinelCount int
+	// nowFunc lets the breaker tests fake the clock.
+	nowFunc func() time.Time
+	inbound chan []byte
+	done    chan struct{}
 
 	asmMu    sync.Mutex
 	assembly map[uint64]*chunkAssembly
 }
+
+const (
+	ackStateOpen     = "open"
+	ackStateHalfOpen = "half-open"
+)
+
+// ackBreakerProbeInterval is the S-7 probe cadence (plan §3.7: engineering
+// choice benchmarked against the official refresh-failure backoff 24–36s,
+// NOT a protocol timing claim — the sampling gate applies to S-4's lead, not
+// here). Caps steady-state sentinel noise at 1/T and bounds buffer drain
+// latency on the host side.
+const ackBreakerProbeInterval = 30 * time.Second
 
 type chunkAssembly struct {
 	count int
@@ -303,6 +336,9 @@ func (s *Stream) readLoop() {
 		}
 		switch env.Type {
 		case typeAck:
+			// Client-direction receipt confirmation: carries the CLIENT's seq,
+			// not the host-direction counter (attempt-011) — skip entirely,
+			// never advances the inbound cursor and never probes.
 			continue
 		case typePong:
 			// Match upstream ClientTracker: only Active proves this exact stream
@@ -313,17 +349,39 @@ func (s *Stream) readLoop() {
 				return
 			}
 			s.markHostActivity()
+			// S-3: pong advances the shared host-direction cursor (F-R8-1) and
+			// replays dedup like any envelope; F-R9-1: ack on arrival — the
+			// only bounded drain for the host buffer when a wedged backend
+			// produces no message envelopes at all.
+			s.observeInboundEnvelope(env)
+			s.ack(env)
+			s.maybeProbe()
 			continue
 		case typeServerMessage:
 			s.markHostActivity()
+			// Sentinel FIRST, before the dedup drop (attempt-011 live wire:
+			// the relay's sentinel errors arrive with retro seqs overlapping
+			// already-delivered frames — deduping them away would keep the
+			// breaker from ever arming on the real wire).
+			s.observeTransportErrorSentinel(env.Message)
+			if !s.observeInboundEnvelope(env) {
+				// Duplicate replay: re-ack idempotently (buffer hygiene if the
+				// earlier ack was lost) but never re-deliver.
+				s.ack(env)
+				continue
+			}
 			if err := s.deliver(env.Message); err != nil {
 				s.fail(err)
 				return
 			}
-			s.observeTransportErrorSentinel(env.Message)
 			s.ack(env)
+			s.maybeProbe()
 		case typeServerMessageChunk:
 			s.markHostActivity()
+			if !s.observeInboundEnvelope(env) {
+				s.ack(env)
+				continue
+			}
 			payload, done, err := s.observeChunk(env)
 			if err != nil {
 				s.fail(err)
@@ -337,6 +395,7 @@ func (s *Stream) readLoop() {
 				s.observeTransportErrorSentinel(payload)
 			}
 			s.ack(env)
+			s.maybeProbe()
 		default:
 			// Unknown type: diagnose, do not leak payload, do not crash.
 			continue
@@ -356,19 +415,105 @@ func (s *Stream) deliver(payload []byte) error {
 	}
 }
 
-// observeTransportErrorSentinel arms the ack circuit breaker when an inbound
-// payload carries the transport layer's sentinel thread id. Called before
-// ack(env) so the sentinel error itself is never answered.
-func (s *Stream) observeTransportErrorSentinel(payload []byte) {
-	if bytes.Contains(payload, transportErrorSentinel) {
-		s.mu.Lock()
-		armed := s.acksDisabled
-		s.acksDisabled = true
+// observeInboundEnvelope runs the S-3 (seq, segment) cursor judgment for one
+// host-direction envelope and reports whether it is NEW (true → process and
+// deliver) or a DUPLICATE replay (false → skip delivery; the caller still
+// re-acks idempotently). Judgment table mirrors the official ack-clear
+// cursor semantics (websocket.rs:112-138):
+//
+//	seq < lastSeq                     → duplicate (replayed old envelope)
+//	seq == lastSeq, prev plain/pong   → plain/pong duplicate; chunk is
+//	  officially impossible (whole-or-fully-chunked) — logged, processed
+//	  fail-visible, cursor untouched
+//	seq == lastSeq, prev chunk        → chunk with segment_id <= lastSeg is a
+//	  replay; segment_id > lastSeg is the next segment of the same message
+//	  (F-1: never drop it); plain/pong officially impossible — logged and
+//	  processed
+//	seq > lastSeq                     → advance (chunk sets the segment mark,
+//	  plain/pong clear it); seq > lastSeq+1 additionally records an
+//	  envelope-level gap ONCE and fires the fan-out — the cursor advances
+//	  immediately so one gap cannot re-trigger per frame (R2-A1)
+func (s *Stream) observeInboundEnvelope(env Envelope) bool {
+	if env.SeqID == nil {
+		return true
+	}
+	seq := *env.SeqID
+	isChunk := env.Type == typeServerMessageChunk
+	var gapFrom, gapTo uint64
+	hasGap := false
+	s.mu.Lock()
+	switch {
+	case seq < s.inSeq:
 		s.mu.Unlock()
-		if !armed {
-			slog.Warn("codex-remote transport rejects client acks; disabling acks for this stream",
-				"streamID", s.streamID)
+		return false
+	case seq == s.inSeq:
+		if isChunk && env.SegmentID != nil {
+			if s.inSegOK {
+				if *env.SegmentID <= s.inSeg {
+					s.mu.Unlock()
+					return false
+				}
+				s.inSeg = *env.SegmentID
+			} else {
+				slog.Warn("codex-remote stream: chunk follows non-chunk at same seq (officially impossible); processing fail-visible",
+					"streamID", s.streamID, "seq", seq, "segment", *env.SegmentID)
+			}
+		} else if s.inSegOK {
+			slog.Warn("codex-remote stream: non-chunk follows chunk at same seq (officially impossible); processing fail-visible",
+				"streamID", s.streamID, "seq", seq, "type", env.Type)
+		} else {
+			s.mu.Unlock()
+			return false
 		}
+	default:
+		if seq > s.inSeq+1 {
+			gapFrom, gapTo = s.inSeq+1, seq-1
+			hasGap = true
+		}
+		s.inSeq = seq
+		if isChunk && env.SegmentID != nil {
+			s.inSeg = *env.SegmentID
+			s.inSegOK = true
+		} else {
+			s.inSegOK = false
+		}
+	}
+	s.mu.Unlock()
+	if hasGap {
+		// Any envelope may be lost — possibly just a harmless pong; the lost
+		// payload is gone and thread attribution is unknowable at stream
+		// level (§3.3). Fail-visible: log exactly what is known, fan out to
+		// the reconciler, never fabricate events.
+		slog.Warn("codex-remote stream: inbound envelope gap detected (may be a pong or a message)",
+			"streamID", s.streamID, "gapFrom", gapFrom, "gapTo", gapTo)
+		if s.onEnvelopeGap != nil {
+			s.onEnvelopeGap()
+		}
+	}
+	return true
+}
+
+// observeTransportErrorSentinel transitions the ack breaker to open on an
+// inbound payload carrying the transport layer's sentinel thread id — from
+// ANY state, resetting the probe clock (§3.7). Called before the dedup drop
+// for plain messages and after chunk reassembly.
+func (s *Stream) observeTransportErrorSentinel(payload []byte) {
+	if !bytes.Contains(payload, transportErrorSentinel) {
+		return
+	}
+	s.mu.Lock()
+	prev := s.ackState
+	s.ackState = ackStateOpen
+	s.ackArmedAt = s.nowLocked()
+	s.sentinelCount++
+	count := s.sentinelCount
+	s.mu.Unlock()
+	if prev == "" {
+		slog.Warn("codex-remote transport rejects client acks; opening ack breaker",
+			"streamID", s.streamID)
+	} else {
+		slog.Info("codex-remote ack breaker sentinel",
+			"streamID", s.streamID, "prevState", prev, "sentinelCount", count)
 	}
 }
 
@@ -376,15 +521,97 @@ func (s *Stream) observeTransportErrorSentinel(payload []byte) {
 // error (wired for callers that learn the rejection out-of-band).
 func (s *Stream) DisableAcks() {
 	s.mu.Lock()
-	s.acksDisabled = true
+	s.ackState = ackStateOpen
+	s.ackArmedAt = s.nowLocked()
 	s.mu.Unlock()
 }
 
-// AcksDisabled reports the breaker state (diagnostics/tests).
+// AcksDisabled reports whether the breaker is armed (diagnostics/tests).
 func (s *Stream) AcksDisabled() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.acksDisabled
+	return s.ackState != ""
+}
+
+// AckBreakerSnapshot exposes the S-7 breaker state and counters (S-6
+// diagnostics visibility; E-10 observation surface).
+func (s *Stream) AckBreakerSnapshot() (state string, probes, sentinels int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ackState == "" {
+		state = "closed"
+	} else {
+		state = s.ackState
+	}
+	return state, s.probeCount, s.sentinelCount
+}
+
+func (s *Stream) now() time.Time {
+	s.mu.Lock()
+	fn := s.nowFunc
+	s.mu.Unlock()
+	if fn != nil {
+		return fn()
+	}
+	return time.Now()
+}
+
+// maybeProbe sends at most one probe ack per ackBreakerProbeInterval while
+// the breaker is armed (§3.7). The probe carries the highest seen host-
+// direction (seq, segment) cursor: under the official (seq, segment_id or
+// MAX) clear semantics it drains everything up to that point, so a host that
+// resumed accepting acks drains its backlog at probe cadence even though
+// this stream never returns to closed. Trigger frames are ALL inbound host-
+// direction envelopes — pong included (F-R5-A3: on a wedged backend pong is
+// the only inbound flow); ack frames are excluded upstream in readLoop.
+func (s *Stream) maybeProbe() {
+	s.mu.Lock()
+	if s.ackState == "" || s.nowLocked().Sub(s.ackArmedAt) < ackBreakerProbeInterval {
+		s.mu.Unlock()
+		return
+	}
+	if s.inSeq == 0 {
+		// Nothing seen yet: a probe would carry cursor 0 and clear nothing.
+		// Restart the clock and wait for the next interval.
+		s.ackArmedAt = s.nowLocked()
+		s.mu.Unlock()
+		return
+	}
+	seq := s.inSeq
+	var seg *int
+	if s.inSegOK {
+		v := s.inSeg
+		seg = &v
+	}
+	s.ackState = ackStateHalfOpen
+	s.ackArmedAt = s.nowLocked()
+	s.probeCount++
+	probes := s.probeCount
+	s.mu.Unlock()
+	probe := Envelope{
+		Type:      typeAck,
+		ClientID:  s.clientID,
+		EnvID:     s.envID,
+		StreamID:  s.streamID,
+		SeqID:     &seq,
+		SegmentID: seg,
+	}
+	if err := s.conn.Write(probe); err != nil {
+		slog.Warn("codex-remote ack breaker probe write failed",
+			"streamID", s.streamID, "error", err)
+		return
+	}
+	captureOutboundEnvelope(probe)
+	slog.Info("codex-remote ack breaker probe sent",
+		"streamID", s.streamID, "cursorSeq", seq, "cursorHasSegment", seg != nil, "probeCount", probes)
+}
+
+// nowLocked is now() for callers already holding s.mu.
+func (s *Stream) nowLocked() time.Time {
+	if s.nowFunc != nil {
+		return s.nowFunc()
+	}
+	return time.Now()
 }
 
 func (s *Stream) ack(env Envelope) {
@@ -392,18 +619,29 @@ func (s *Stream) ack(env Envelope) {
 		return
 	}
 	s.mu.Lock()
-	disabled := s.acksDisabled
+	disabled := s.ackState != ""
 	s.mu.Unlock()
 	if disabled {
 		return
 	}
-	_ = s.conn.Write(Envelope{
+	ackEnv := Envelope{
 		Type:     typeAck,
 		ClientID: s.clientID,
 		EnvID:    s.envID,
 		StreamID: s.streamID,
 		SeqID:    env.SeqID,
-	})
+	}
+	// S-3 (E-12a): a chunk ack must carry its segment_id. Without it the ack
+	// is the (seq, MAX) cursor and clears the host's replay buffer for the
+	// WHOLE message — losing the message tail on a host-leg interruption with
+	// no envelope-level gap ever showing (chunks share the message's seq).
+	if env.Type == typeServerMessageChunk && env.SegmentID != nil {
+		ackEnv.SegmentID = env.SegmentID
+	}
+	if err := s.conn.Write(ackEnv); err != nil {
+		return
+	}
+	captureOutboundEnvelope(ackEnv)
 }
 
 func (s *Stream) observeChunk(env Envelope) ([]byte, bool, error) {

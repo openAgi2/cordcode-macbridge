@@ -3,6 +3,7 @@ package codexremote
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -274,6 +275,34 @@ func (a *Agent) ClearReconciledTurn(threadID string) {
 	if codec != nil {
 		codec.setActiveTurn(threadID, "")
 	}
+}
+
+// signalInboundGapReconcile fans a detected envelope-level stream gap
+// (disconnect-resilience plan §3.3 bounded fan-out) out to every observed
+// thread whose live codec still tracks an in-flight turn. A gap is a
+// stream-level unknown-attribution event — the missing envelope's payload is
+// gone, so its thread cannot be inferred — so ALL in-flight observed threads
+// join the reconcile pending set (idempotent union with the attach trigger);
+// observed threads without an in-flight turn are logged and skipped: the
+// reconcile can only close terminal state, and content-level loss keeps its
+// existing lazy-detail/cold-reopen recovery paths.
+func (a *Agent) signalInboundGapReconcile() {
+	a.mu.Lock()
+	codec := a.codec
+	observed := make([]string, 0, len(a.listeners))
+	for threadID := range a.listeners {
+		observed = append(observed, threadID)
+	}
+	a.mu.Unlock()
+	fanned := 0
+	for _, threadID := range observed {
+		if codec != nil && codec.ActiveTurn(threadID) != "" {
+			a.addPendingTurnReconcile(threadID)
+			fanned++
+		}
+	}
+	slog.Warn("codex-remote: inbound gap fan-out",
+		"observedThreads", len(observed), "reconcileThreads", fanned)
 }
 
 // SetWorkDir implements core.WorkDirSwitcher. The bridge calls it before

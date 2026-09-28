@@ -2,14 +2,27 @@ package codexremote
 
 import (
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 )
 
-func startEnvelopePeer(t *testing.T, host FrameConn, handle func(id int64, method string, params json.RawMessage) (any, *RPCError)) {
+// startEnvelopePeer serves JSON-RPC over the host side of a loopback pair.
+// The returned nextSeq draws from the SAME monotonic per-stream seq space the
+// peer uses for its responses — S-3's inbound cursor dedups replays, so test
+// frames hand-written on the same stream must draw their seq_id from here
+// instead of reusing small static numbers.
+func startEnvelopePeer(t *testing.T, host FrameConn, handle func(id int64, method string, params json.RawMessage) (any, *RPCError)) (nextSeq func() uint64) {
 	t.Helper()
+	var seqMu sync.Mutex
+	var seq uint64
+	nextSeq = func() uint64 {
+		seqMu.Lock()
+		defer seqMu.Unlock()
+		seq++
+		return seq
+	}
 	go func() {
-		var seq uint64
 		for {
 			env, err := host.Read()
 			if err != nil {
@@ -36,8 +49,7 @@ func startEnvelopePeer(t *testing.T, host FrameConn, handle func(id int64, metho
 				result = map[string]any{"goal": nil}
 				rpcErr = nil
 			}
-			seq++
-			s := seq
+			s := nextSeq()
 			out := map[string]any{"jsonrpc": "2.0", "id": req.ID}
 			if rpcErr != nil {
 				out["error"] = map[string]any{"code": rpcErr.Code, "message": rpcErr.Message}
@@ -51,6 +63,7 @@ func startEnvelopePeer(t *testing.T, host FrameConn, handle func(id int64, metho
 			})
 		}
 	}()
+	return nextSeq
 }
 
 func TestRPCInitializeAndThreadListOverStream(t *testing.T) {

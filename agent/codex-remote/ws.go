@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,10 +42,19 @@ func (c *wsFrameConn) Write(env Envelope) error {
 }
 
 func (c *wsFrameConn) Read() (Envelope, error) {
-	var env Envelope
-	if err := c.conn.ReadJSON(&env); err != nil {
+	// ReadMessage + explicit Unmarshal (equivalent to ReadJSON) so the raw
+	// frame bytes stay available for the redacted wire capture — the raw view
+	// preserves exact field presence (absent vs null) that the struct's
+	// omitempty serialization cannot (E-12b dual-extraction discipline).
+	_, raw, err := c.conn.ReadMessage()
+	if err != nil {
 		return Envelope{}, err
 	}
+	var env Envelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return Envelope{}, err
+	}
+	captureInboundRaw(raw, env)
 	return env, nil
 }
 
@@ -268,7 +278,15 @@ func (p *PairingController) bindLive(ctx context.Context, env *remoteEnv) error 
 }
 
 func (p *PairingController) activateStream(ctx context.Context, conn FrameConn, clientID, envID, streamID string) error {
+	if p.storePath != "" {
+		// Wire-capture enablement resolves once per process (E-12b/E-9
+		// evidence collection); no-op unless the marker file exists.
+		initWireCaptureFromDataDir(filepath.Dir(p.storePath))
+	}
 	stream := NewStream(conn, clientID, envID, streamID)
+	// S-3 wiring element: envelope-level gap → bounded fan-out into the
+	// reconcile pending set (§3.3).
+	stream.onEnvelopeGap = p.agent.signalInboundGapReconcile
 	p.agent.mu.Lock()
 	p.agent.connEpoch++
 	epoch := p.agent.connEpoch

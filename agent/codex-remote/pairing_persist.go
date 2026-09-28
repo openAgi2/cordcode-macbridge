@@ -16,6 +16,82 @@ import (
 
 const pairingStoreName = "codex-remote-pairing.json"
 
+// S-4 (disconnect-resilience plan §3.4, OD-3): refresh the ctrl token this
+// long before its observed expiry. E-9 (attempt-011, 2026-09-28): the ctrl
+// token lifetime is a constant 600s across 5 refresh samples — 60s is a 10%
+// margin that still leaves two bounded retries before hard expiry.
+const ctrlTokenRefreshLead = 60 * time.Second
+
+// ctrlTokenRefreshMinRetry bounds the proactive refresh retry cadence on
+// persistent failure (var so tests can shrink it; the 2026-09-20 wedge
+// lesson: never hammer a struggling backend).
+var ctrlTokenRefreshMinRetry = 30 * time.Second
+
+// maybeRefreshCtrlToken runs from the healthy-connection watch loop (every
+// 2s tick): once the token enters its lead window, refresh it in place so a
+// long-lived connection never dies of ctrl-token expiry mid-session. Failure
+// handling (plan §3.4): errPairingRevoked → invalidate immediately (same as
+// restoreOnce); any other failure keeps the connection on the existing path
+// (token expiry → connection death → reconnect forces refresh) — no new
+// death paths.
+func (p *PairingController) maybeRefreshCtrlToken() {
+	p.mu.Lock()
+	expStr := p.state.ctrlExp
+	last := p.lastCtrlRefreshAttempt
+	p.mu.Unlock()
+	exp, ok := parseExpiresUnix(expStr)
+	if !ok || exp == 0 {
+		return
+	}
+	now := time.Now()
+	if now.Unix() < exp-int64(ctrlTokenRefreshLead.Seconds()) {
+		return
+	}
+	if !last.IsZero() && now.Sub(last) < ctrlTokenRefreshMinRetry {
+		return
+	}
+	p.mu.Lock()
+	p.lastCtrlRefreshAttempt = now
+	p.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	exec := p.ctrlRefreshExec
+	if exec == nil {
+		exec = p.runCtrlTokenRefresh
+	}
+	if err := exec(ctx); err != nil {
+		if errors.Is(err, errPairingRevoked) {
+			p.invalidateRevokedPairing("配对已失效，请重新配对 Codex Desktop")
+			return
+		}
+		slog.Warn("codex-remote ctrl token proactive refresh failed; keeping connection on existing path",
+			"error", err)
+		return
+	}
+	slog.Info("codex-remote ctrl token proactively refreshed", "lead", ctrlTokenRefreshLead.String())
+}
+
+// runCtrlTokenRefresh mirrors restoreOnce's ordering — fresh ChatGPT account
+// auth FIRST, then the refresh — so a merely stale account token can never
+// surface as errPairingRevoked from this scheduler (a false revocation would
+// force the user through re-pairing). Success updates the persisted token in
+// place; the live connection is untouched.
+func (p *PairingController) runCtrlTokenRefresh(ctx context.Context) error {
+	token, accountID, err := p.chatGPTAuth(ctx)
+	if err != nil {
+		return err
+	}
+	p.mu.Lock()
+	p.state.token = token
+	p.state.accountID = accountID
+	p.mu.Unlock()
+	if err := p.refreshControlToken(ctx); err != nil {
+		return err
+	}
+	p.persistPairingOrLog()
+	return nil
+}
+
 type persistedPairing struct {
 	ClientID               string `json:"clientId"`
 	EnvID                  string `json:"envId"`
@@ -267,7 +343,7 @@ func (a *Agent) watchBinding() {
 			for {
 				time.Sleep(2 * time.Second)
 				a.mu.Lock()
-				stopped = a.stopped
+				stopped := a.stopped
 				still := a.client
 				a.mu.Unlock()
 				if stopped {
@@ -276,6 +352,11 @@ func (a *Agent) watchBinding() {
 				if still == nil || still.IsClosed() {
 					slog.Warn("codex-remote pairing stream lost; reconnecting")
 					break
+				}
+				// S-4: proactive ctrl-token refresh inside the lead window
+				// (no-op outside it; cheap parse + compare per tick).
+				if a.pairing != nil {
+					a.pairing.maybeRefreshCtrlToken()
 				}
 			}
 		}
