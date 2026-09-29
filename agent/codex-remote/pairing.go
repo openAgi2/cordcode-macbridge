@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -76,6 +77,11 @@ type PairingController struct {
 	mu        sync.Mutex
 	restoreMu sync.Mutex
 	state     pairState
+	// S-4 (disconnect-resilience plan §3.4): lastCtrlRefreshAttempt bounds
+	// the proactive ctrl-token refresh retry cadence; ctrlRefreshExec is the
+	// test seam over the real auth→refresh→persist sequence.
+	lastCtrlRefreshAttempt time.Time
+	ctrlRefreshExec        func(context.Context) error
 }
 
 func newPairingController(agent *Agent) *PairingController {
@@ -364,6 +370,18 @@ func (p *PairingController) applyCtrlToken(raw json.RawMessage, schemaName strin
 	p.state.ctrlToken = finish.RemoteControlToken
 	p.state.ctrlExp = ctrlExp
 	p.mu.Unlock()
+	// E-9 evidence sample (disconnect-resilience plan S-4): record the
+	// observed ctrl-token expiry — the token value is never recorded. Refresh
+	// can precede the first stream activation, so the capture facility is
+	// resolved here too (idempotent, once per process).
+	if p.storePath != "" {
+		initWireCaptureFromDataDir(filepath.Dir(p.storePath))
+	}
+	captureCtrlExpiry(ctrlExp, schemaName)
+	if exp, ok := parseExpiresUnix(ctrlExp); ok {
+		slog.Info("codex-remote pairing", "phase", "ctrl_token_applied",
+			"source", schemaName, "expiresInS", exp-time.Now().Unix())
+	}
 	return nil
 }
 

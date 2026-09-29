@@ -13,7 +13,7 @@ const (
 	ProtocolVersion            = "3"
 	SegmentTargetBytes         = 102400
 	WireEnvelopeMaxBytes       = 153600
-	ReassembledMessageMaxBytes = 1073741824
+	ReassembledMessageMaxBytes = 100 * 1024 * 1024
 	MaxConcurrentAssemblies    = 128
 	MaxSegments                = 1024
 )

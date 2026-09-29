@@ -3,6 +3,7 @@ package codexremote
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -469,5 +470,39 @@ func TestStructuredInstanceReadinessPairedOfflineIsNotPairingRequired(t *testing
 	status, detail := agent.StructuredInstanceReadiness()
 	if status != ReadinessServiceNotRunning || detail != "请打开 ChatGPT Desktop" {
 		t.Fatalf("readiness=(%q,%q), want service_not_running with offline detail", status, detail)
+	}
+}
+
+// S-6（断线韧性方案 §3.6）：恢复错误不再折叠为单一「已配对，等待 ChatGPT Desktop」
+// 横幅——env-missing 类错误（ChatGPT 未登录 / 桌面环境缺失）经
+// offlineMessageForRestoreError 与 readiness 面携带可区分文案（2026-09-26 Desktop
+// 升级断裂被折叠横幅掩盖的教训）；revoked 走既有 PairPhaseFailed 路径不在此面内。
+func TestOfflineMessageForRestoreErrorKeepsCategory(t *testing.T) {
+	envMissing := []string{
+		"请打开并登录 ChatGPT Desktop",
+		"请先安装并登录 ChatGPT Desktop",
+		"ChatGPT 未登录",
+		"读取 ChatGPT 登录态超时",
+	}
+	for _, raw := range envMissing {
+		if got := offlineMessageForRestoreError(errors.New(raw)); got != "请打开并登录 ChatGPT Desktop" {
+			t.Fatalf("env-missing error %q collapsed to %q", raw, got)
+		}
+	}
+	if got := offlineMessageForRestoreError(errors.New("no desktop environment")); got != "请打开 ChatGPT Desktop" {
+		t.Fatalf("desktop-missing error collapsed to %q", got)
+	}
+	if got := offlineMessageForRestoreError(errors.New("connection reset by peer")); got != "已配对，等待 ChatGPT Desktop" {
+		t.Fatalf("generic transport error must keep the offline banner, got %q", got)
+	}
+}
+
+func TestStructuredInstanceReadinessCarriesCategorizedOfflineMessage(t *testing.T) {
+	agent := New(nil)
+	agent.paired = true
+	agent.pairing.markOffline(offlineMessageForRestoreError(errors.New("ChatGPT 未登录")))
+	status, detail := agent.StructuredInstanceReadiness()
+	if status != ReadinessServiceNotRunning || detail != "请打开并登录 ChatGPT Desktop" {
+		t.Fatalf("readiness=(%q,%q), want service_not_running with env-missing detail", status, detail)
 	}
 }

@@ -16,6 +16,82 @@ import (
 
 const pairingStoreName = "codex-remote-pairing.json"
 
+// S-4 (disconnect-resilience plan §3.4, OD-3): refresh the ctrl token this
+// long before its observed expiry. E-9 (attempt-011, 2026-09-28): the ctrl
+// token lifetime is a constant 600s across 5 refresh samples — 60s is a 10%
+// margin that still leaves two bounded retries before hard expiry.
+const ctrlTokenRefreshLead = 60 * time.Second
+
+// ctrlTokenRefreshMinRetry bounds the proactive refresh retry cadence on
+// persistent failure (var so tests can shrink it; the 2026-09-20 wedge
+// lesson: never hammer a struggling backend).
+var ctrlTokenRefreshMinRetry = 30 * time.Second
+
+// maybeRefreshCtrlToken runs from the healthy-connection watch loop (every
+// 2s tick): once the token enters its lead window, refresh it in place so a
+// long-lived connection never dies of ctrl-token expiry mid-session. Failure
+// handling (plan §3.4): errPairingRevoked → invalidate immediately (same as
+// restoreOnce); any other failure keeps the connection on the existing path
+// (token expiry → connection death → reconnect forces refresh) — no new
+// death paths.
+func (p *PairingController) maybeRefreshCtrlToken() {
+	p.mu.Lock()
+	expStr := p.state.ctrlExp
+	last := p.lastCtrlRefreshAttempt
+	p.mu.Unlock()
+	exp, ok := parseExpiresUnix(expStr)
+	if !ok || exp == 0 {
+		return
+	}
+	now := time.Now()
+	if now.Unix() < exp-int64(ctrlTokenRefreshLead.Seconds()) {
+		return
+	}
+	if !last.IsZero() && now.Sub(last) < ctrlTokenRefreshMinRetry {
+		return
+	}
+	p.mu.Lock()
+	p.lastCtrlRefreshAttempt = now
+	p.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	exec := p.ctrlRefreshExec
+	if exec == nil {
+		exec = p.runCtrlTokenRefresh
+	}
+	if err := exec(ctx); err != nil {
+		if errors.Is(err, errPairingRevoked) {
+			p.invalidateRevokedPairing("配对已失效，请重新配对 Codex Desktop")
+			return
+		}
+		slog.Warn("codex-remote ctrl token proactive refresh failed; keeping connection on existing path",
+			"error", err)
+		return
+	}
+	slog.Info("codex-remote ctrl token proactively refreshed", "lead", ctrlTokenRefreshLead.String())
+}
+
+// runCtrlTokenRefresh mirrors restoreOnce's ordering — fresh ChatGPT account
+// auth FIRST, then the refresh — so a merely stale account token can never
+// surface as errPairingRevoked from this scheduler (a false revocation would
+// force the user through re-pairing). Success updates the persisted token in
+// place; the live connection is untouched.
+func (p *PairingController) runCtrlTokenRefresh(ctx context.Context) error {
+	token, accountID, err := p.chatGPTAuth(ctx)
+	if err != nil {
+		return err
+	}
+	p.mu.Lock()
+	p.state.token = token
+	p.state.accountID = accountID
+	p.mu.Unlock()
+	if err := p.refreshControlToken(ctx); err != nil {
+		return err
+	}
+	p.persistPairingOrLog()
+	return nil
+}
+
 type persistedPairing struct {
 	ClientID               string `json:"clientId"`
 	EnvID                  string `json:"envId"`
@@ -118,18 +194,30 @@ func (p *PairingController) loadPersistedPairing() (*persistedPairing, *deviceKe
 	return &rec, key, nil
 }
 
+// offlineMessageForRestoreError maps a non-revoked restore error to the
+// distinguishable offline banner (disconnect-resilience plan S-6): ChatGPT
+// login / desktop-environment problems say so explicitly instead of
+// collapsing into the generic waiting banner — the 2026-09-26 Desktop-upgrade
+// breakage stayed hidden behind the generic banner for exactly this reason.
+// Shared by reconnectFromStore, restorePersistedPairing and watchBinding so
+// every restore loop surfaces the same category through the readiness seam.
+func offlineMessageForRestoreError(err error) string {
+	switch err.Error() {
+	case "请打开并登录 ChatGPT Desktop", "请先安装并登录 ChatGPT Desktop", "ChatGPT 未登录", "读取 ChatGPT 登录态超时":
+		return "请打开并登录 ChatGPT Desktop"
+	case "no desktop environment":
+		return "请打开 ChatGPT Desktop"
+	default:
+		return "已配对，等待 ChatGPT Desktop"
+	}
+}
+
 func (p *PairingController) reconnectFromStore(ctx context.Context) (PairingSnapshot, error) {
 	if err := p.restoreOnce(ctx); err != nil {
 		if errors.Is(err, errPairingRevoked) {
 			return p.invalidateRevokedPairing("配对已失效，请重新配对 Codex Desktop"), err
 		}
-		msg := "已配对，等待 ChatGPT Desktop"
-		if err.Error() == "请打开并登录 ChatGPT Desktop" || err.Error() == "请先安装并登录 ChatGPT Desktop" || err.Error() == "ChatGPT 未登录" || err.Error() == "读取 ChatGPT 登录态超时" {
-			msg = "请打开并登录 ChatGPT Desktop"
-		} else if err.Error() == "no desktop environment" {
-			msg = "请打开 ChatGPT Desktop"
-		}
-		return p.markOffline(msg), err
+		return p.markOffline(offlineMessageForRestoreError(err)), err
 	}
 	return p.Snapshot(), nil
 }
@@ -232,13 +320,7 @@ func (a *Agent) restorePersistedPairing() {
 				p.invalidateRevokedPairing("配对已失效，请重新配对 Codex Desktop")
 				return
 			}
-			msg := "已配对，等待 ChatGPT Desktop"
-			if err.Error() == "请打开并登录 ChatGPT Desktop" || err.Error() == "请先安装并登录 ChatGPT Desktop" || err.Error() == "ChatGPT 未登录" || err.Error() == "读取 ChatGPT 登录态超时" {
-				msg = "请打开并登录 ChatGPT Desktop"
-			} else if err.Error() == "no desktop environment" {
-				msg = "请打开 ChatGPT Desktop"
-			}
-			p.markOffline(msg)
+			p.markOffline(offlineMessageForRestoreError(err))
 			retryIn := backoff.Next()
 			slog.Warn("codex-remote pairing restore waiting", "retryIn", retryIn, "error", err)
 			a.sleepInterruptible(retryIn)
@@ -261,7 +343,7 @@ func (a *Agent) watchBinding() {
 			for {
 				time.Sleep(2 * time.Second)
 				a.mu.Lock()
-				stopped = a.stopped
+				stopped := a.stopped
 				still := a.client
 				a.mu.Unlock()
 				if stopped {
@@ -270,6 +352,11 @@ func (a *Agent) watchBinding() {
 				if still == nil || still.IsClosed() {
 					slog.Warn("codex-remote pairing stream lost; reconnecting")
 					break
+				}
+				// S-4: proactive ctrl-token refresh inside the lead window
+				// (no-op outside it; cheap parse + compare per tick).
+				if a.pairing != nil {
+					a.pairing.maybeRefreshCtrlToken()
 				}
 			}
 		}
@@ -288,7 +375,7 @@ func (a *Agent) watchBinding() {
 			a.pairing.invalidateRevokedPairing("配对已失效，请重新配对 Codex Desktop")
 			return
 		}
-		a.pairing.markOffline("已配对，等待 ChatGPT Desktop")
+		a.pairing.markOffline(offlineMessageForRestoreError(err))
 		retryIn := backoff.Next()
 		slog.Warn("codex-remote pairing reconnect waiting", "retryIn", retryIn, "error", err)
 		a.sleepInterruptible(retryIn)

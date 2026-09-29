@@ -74,7 +74,7 @@ func TestVerticalListResumeAndTextDelta(t *testing.T) {
 	clientConn, hostConn := LoopbackPair()
 	stream := NewStream(clientConn, "client_probe", "env_desktop", "stream_primary")
 	defer stream.Close()
-	startEnvelopePeer(t, hostConn, func(_ int64, method string, params json.RawMessage) (any, *RPCError) {
+	nextSeq := startEnvelopePeer(t, hostConn, func(_ int64, method string, params json.RawMessage) (any, *RPCError) {
 		switch method {
 		case "thread/list":
 			return map[string]any{
@@ -124,8 +124,7 @@ func TestVerticalListResumeAndTextDelta(t *testing.T) {
 	}
 
 	inject := func(method string, params any) {
-		seq := time.Now().UnixNano()
-		s := uint64(seq)
+		s := nextSeq()
 		body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
 		_ = hostConn.Write(Envelope{
 			Type: typeServerMessage, ClientID: "client_probe", EnvID: "env_desktop",
@@ -204,7 +203,7 @@ func TestAttachLiveCatalogResumesLoadedThreadWithoutHistory(t *testing.T) {
 	var mu sync.Mutex
 	calls := map[string]int{}
 	resumeParams := map[string]map[string]any{}
-	startEnvelopePeer(t, hostConn, func(_ int64, method string, params json.RawMessage) (any, *RPCError) {
+	nextSeq := startEnvelopePeer(t, hostConn, func(_ int64, method string, params json.RawMessage) (any, *RPCError) {
 		mu.Lock()
 		defer mu.Unlock()
 		calls[method]++
@@ -253,7 +252,7 @@ func TestAttachLiveCatalogResumesLoadedThreadWithoutHistory(t *testing.T) {
 		t.Fatalf("thread/resume excludeTurns=%v, want true (no history replay)", excludeTurns)
 	}
 
-	seq := uint64(1)
+	seq := nextSeq()
 	payload, _ := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "turn/completed",
@@ -282,7 +281,7 @@ func TestProjectionAttachReceivesDesktopTurnBeforeAnySend(t *testing.T) {
 	clientConn, hostConn := LoopbackPair()
 	stream := NewStream(clientConn, "client_projection", "env_desktop", "stream_projection")
 	defer stream.Close()
-	startEnvelopePeer(t, hostConn, func(_ int64, method string, _ json.RawMessage) (any, *RPCError) {
+	nextSeq := startEnvelopePeer(t, hostConn, func(_ int64, method string, _ json.RawMessage) (any, *RPCError) {
 		if method == "thread/resume" {
 			return map[string]any{"thread": map[string]any{"id": "thread_projection"}}, nil
 		}
@@ -298,7 +297,7 @@ func TestProjectionAttachReceivesDesktopTurnBeforeAnySend(t *testing.T) {
 	}
 	defer sess.Close()
 
-	seq := uint64(1)
+	seq := nextSeq()
 	payload := json.RawMessage(`{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thread_projection","turn":{"id":"turn_external"}}}`)
 	if err := hostConn.Write(Envelope{
 		Type: typeServerMessage, ClientID: "client_projection", EnvID: "env_desktop",
@@ -503,7 +502,7 @@ func TestBindClientStartsEventPumpForReplacementEpoch(t *testing.T) {
 	defer cl2.Close()
 	defer host1.Close()
 	resumed := make(chan string, 1)
-	startEnvelopePeer(t, host2, func(_ int64, method string, params json.RawMessage) (any, *RPCError) {
+	nextSeq := startEnvelopePeer(t, host2, func(_ int64, method string, params json.RawMessage) (any, *RPCError) {
 		if method != "thread/resume" {
 			return nil, &RPCError{Code: -32601, Message: method}
 		}
@@ -529,7 +528,7 @@ func TestBindClientStartsEventPumpForReplacementEpoch(t *testing.T) {
 		t.Fatal("replacement Client did not re-resume the observed thread")
 	}
 
-	seq := uint64(1)
+	seq := nextSeq()
 	payload, _ := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "turn/started",

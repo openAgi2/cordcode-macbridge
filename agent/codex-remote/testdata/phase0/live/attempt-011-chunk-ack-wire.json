@@ -1,0 +1,494 @@
+{
+ "schema": "codex-remote live wire capture — disconnect-resilience plan E-12b/E-9 evidence",
+ "captured_at": "2026-09-28T04:02:54Z..04:09:00Z",
+ "version_anchors": {
+  "chatgpt_desktop_app_bundle": "26.924.22138",
+  "app_server_user_agent": "Codex Desktop/0.158.0-alpha.2.1 (Mac OS 27.2.0; arm64) xterm-256color (codex_remote; 0)",
+  "macbridge_checkout": "feat/ios-native-message-timeline @ 11b22660 (capture instrumentation committed later; capture code ran from working tree of 217e343b+instrumentation)"
+ },
+ "capture_mechanism": "CORDCODE_CODEX_WIRE_CAPTURE marker-file gated; wsFrameConn.Read captures raw frame bytes; two extraction views per line: struct-decoded header view (strategy a) + raw_shape map traversal with message/message_chunk_base64 replaced by <redacted:N> markers (strategy b)",
+ "redaction_procedure": {
+  "removed_fields": [
+   "message (payload content)",
+   "message_chunk_base64 (chunk fragment)"
+  ],
+  "kept_fields": [
+   "type",
+   "client_id",
+   "env_id",
+   "stream_id",
+   "seq_id",
+   "segment_id",
+   "segment_count",
+   "message_size_bytes",
+   "cursor presence",
+   "status",
+   "state",
+   "payload top-level key names",
+   "payload method name (an RPC name, not content)",
+   "payload id (numeric)"
+  ],
+  "never_recorded": [
+   "ctrl token value",
+   "remote_control_token",
+   "device keys",
+   "message content"
+  ]
+ },
+ "e12b_findings": {
+  "item1_plain_seq_shape": "plain server_message carries seq_id; segment_id/segment_count/message_size_bytes are ABSENT (not null) — raw_shape key set confirms absence",
+  "item2_chunk_group": "seq=49: 3 chunks seg 0,1,2, same seq, segment_count=3 consistent, message_size_bytes=229041 identical across segments; 10 groups total in capture, all complete",
+  "item3_outbound_chunk_ack": "PENDING — post-S-3 verification round (ack will carry SegmentID)",
+  "item4_plain_negative": "plain frames never carry segment keys (see raw_shape of plain_burst)",
+  "item5_monotonicity": "host-direction frames (server_message+chunk+pong) cover seq 1..136 with ZERO missing; pong interleaves the same space (pong 46 -> message 47, pong 54 -> 55, pong 86 -> 87)",
+  "item6_pong_seq": "pong carries seq_id in the shared monotonic host-direction space; status=active",
+  "NEW_finding_sentinel_seq_not_monotonic": "the closed-source relay's transport sentinel errors (method=error notifications that arm the ack breaker) arrive with seq values OVERLAPPING already-delivered seqs (burst 1..5 then sentinels 3..7 at +250ms; breaker-arming confirmed by go-bridge log 'transport rejects client acks' at the first sentinel timestamp). S-3 dedup must observe the sentinel BEFORE dropping retro-seq frames, or the breaker would never arm on live wire",
+  "inbound_ack_seq_space": "inbound ack frames carry the CLIENT-direction seq (our outbound frames), interleaved in time but a separate counter from the host-direction space — cursor must not advance on typeAck (plan §3.7 already excludes ack frames)",
+  "second_stream": "per-thread notification frames arrive on a different stream_id (9d417736…, seq 395+) with its own seq space; routing drops them on the main Stream (existing behavior)"
+ },
+ "e9_findings": {
+  "samples": [
+   {
+    "ctrl_exp_unix": 1790568774,
+    "expires_in_s": 600,
+    "kind": "ctrl_expiry",
+    "source": "refresh/finish",
+    "ts": "2026-09-28T04:02:54.792758Z"
+   },
+   {
+    "ctrl_exp_unix": 1790569073,
+    "expires_in_s": 600,
+    "kind": "ctrl_expiry",
+    "source": "refresh/finish",
+    "ts": "2026-09-28T04:07:53.630555Z"
+   },
+   {
+    "ctrl_exp_unix": 1790569091,
+    "expires_in_s": 600,
+    "kind": "ctrl_expiry",
+    "source": "refresh/finish",
+    "ts": "2026-09-28T04:08:11.648275Z"
+   },
+   {
+    "ctrl_exp_unix": 1790569109,
+    "expires_in_s": 599,
+    "kind": "ctrl_expiry",
+    "source": "refresh/finish",
+    "ts": "2026-09-28T04:08:30.145114Z"
+   },
+   {
+    "ctrl_exp_unix": 1790569125,
+    "expires_in_s": 599,
+    "kind": "ctrl_expiry",
+    "source": "refresh/finish",
+    "ts": "2026-09-28T04:08:46.026646Z"
+   }
+  ],
+  "distribution": "5/5 refresh/finish samples: expires_in_s = 600,600,600,599,599 — ctrl token lifetime is a constant 600s",
+  "od3_decision": "T=60s (10% of lifetime; failed refresh retries at ~30s gap twice before hard expiry; plan candidate range 30-120s, official server-token precedent 5min/600s-class tokens)"
+ },
+ "samples": {
+  "plain_burst": [
+   {
+    "kind": "env_in",
+    "payload_bytes": 202,
+    "payload_id_raw": "1",
+    "payload_keys": [
+     "id",
+     "result"
+    ],
+    "raw_shape": {
+     "client_id": "cli_e0014965f7f04fa88626753e12c9c41c",
+     "env_id": "env_e_6a0c68fae65c8332a4552b0f56886be5",
+     "message": "<redacted:202 bytes>",
+     "seq_id": 1,
+     "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+     "type": "server_message"
+    },
+    "seq_id": 1,
+    "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+    "ts": "2026-09-28T04:02:58.573525Z",
+    "type": "server_message"
+   },
+   {
+    "kind": "env_in",
+    "payload_bytes": 484,
+    "payload_keys": [
+     "emittedAtMs",
+     "method",
+     "params"
+    ],
+    "payload_method": "configWarning",
+    "raw_shape": {
+     "client_id": "cli_e0014965f7f04fa88626753e12c9c41c",
+     "env_id": "env_e_6a0c68fae65c8332a4552b0f56886be5",
+     "message": "<redacted:484 bytes>",
+     "seq_id": 2,
+     "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+     "type": "server_message"
+    },
+    "seq_id": 2,
+    "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+    "ts": "2026-09-28T04:02:58.573869Z",
+    "type": "server_message"
+   },
+   {
+    "kind": "env_in",
+    "payload_bytes": 258,
+    "payload_keys": [
+     "emittedAtMs",
+     "method",
+     "params"
+    ],
+    "payload_method": "remoteControl/status/changed",
+    "raw_shape": {
+     "client_id": "cli_e0014965f7f04fa88626753e12c9c41c",
+     "env_id": "env_e_6a0c68fae65c8332a4552b0f56886be5",
+     "message": "<redacted:258 bytes>",
+     "seq_id": 3,
+     "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+     "type": "server_message"
+    },
+    "seq_id": 3,
+    "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+    "ts": "2026-09-28T04:02:58.574007Z",
+    "type": "server_message"
+   },
+   {
+    "kind": "env_in",
+    "payload_bytes": 514,
+    "payload_id_raw": "2",
+    "payload_keys": [
+     "id",
+     "result"
+    ],
+    "raw_shape": {
+     "client_id": "cli_e0014965f7f04fa88626753e12c9c41c",
+     "env_id": "env_e_6a0c68fae65c8332a4552b0f56886be5",
+     "message": "<redacted:514 bytes>",
+     "seq_id": 4,
+     "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+     "type": "server_message"
+    },
+    "seq_id": 4,
+    "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+    "ts": "2026-09-28T04:02:58.574102Z",
+    "type": "server_message"
+   },
+   {
+    "kind": "env_in",
+    "payload_bytes": 106,
+    "payload_keys": [
+     "emittedAtMs",
+     "method",
+     "params"
+    ],
+    "payload_method": "account/updated",
+    "raw_shape": {
+     "client_id": "cli_e0014965f7f04fa88626753e12c9c41c",
+     "env_id": "env_e_6a0c68fae65c8332a4552b0f56886be5",
+     "message": "<redacted:106 bytes>",
+     "seq_id": 5,
+     "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+     "type": "server_message"
+    },
+    "seq_id": 5,
+    "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+    "ts": "2026-09-28T04:02:58.643127Z",
+    "type": "server_message"
+   }
+  ],
+  "sentinel_retro": [
+   {
+    "kind": "env_in",
+    "payload_bytes": 195,
+    "payload_keys": [
+     "method",
+     "params"
+    ],
+    "payload_method": "error",
+    "raw_shape": {
+     "client_id": "cli_e0014965f7f04fa88626753e12c9c41c",
+     "env_id": "env_e_6a0c68fae65c8332a4552b0f56886be5",
+     "message": "<redacted:195 bytes>",
+     "seq_id": 3,
+     "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+     "type": "server_message"
+    },
+    "seq_id": 3,
+    "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+    "ts": "2026-09-28T04:02:58.81972Z",
+    "type": "server_message"
+   },
+   {
+    "kind": "env_in",
+    "payload_bytes": 195,
+    "payload_keys": [
+     "method",
+     "params"
+    ],
+    "payload_method": "error",
+    "raw_shape": {
+     "client_id": "cli_e0014965f7f04fa88626753e12c9c41c",
+     "env_id": "env_e_6a0c68fae65c8332a4552b0f56886be5",
+     "message": "<redacted:195 bytes>",
+     "seq_id": 4,
+     "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+     "type": "server_message"
+    },
+    "seq_id": 4,
+    "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+    "ts": "2026-09-28T04:02:58.820076Z",
+    "type": "server_message"
+   },
+   {
+    "kind": "env_in",
+    "payload_bytes": 195,
+    "payload_keys": [
+     "method",
+     "params"
+    ],
+    "payload_method": "error",
+    "raw_shape": {
+     "client_id": "cli_e0014965f7f04fa88626753e12c9c41c",
+     "env_id": "env_e_6a0c68fae65c8332a4552b0f56886be5",
+     "message": "<redacted:195 bytes>",
+     "seq_id": 5,
+     "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+     "type": "server_message"
+    },
+    "seq_id": 5,
+    "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+    "ts": "2026-09-28T04:02:58.820179Z",
+    "type": "server_message"
+   },
+   {
+    "kind": "env_in",
+    "payload_bytes": 195,
+    "payload_keys": [
+     "method",
+     "params"
+    ],
+    "payload_method": "error",
+    "raw_shape": {
+     "client_id": "cli_e0014965f7f04fa88626753e12c9c41c",
+     "env_id": "env_e_6a0c68fae65c8332a4552b0f56886be5",
+     "message": "<redacted:195 bytes>",
+     "seq_id": 6,
+     "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+     "type": "server_message"
+    },
+    "seq_id": 6,
+    "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+    "ts": "2026-09-28T04:02:58.82028Z",
+    "type": "server_message"
+   },
+   {
+    "kind": "env_in",
+    "payload_bytes": 195,
+    "payload_keys": [
+     "method",
+     "params"
+    ],
+    "payload_method": "error",
+    "raw_shape": {
+     "client_id": "cli_e0014965f7f04fa88626753e12c9c41c",
+     "env_id": "env_e_6a0c68fae65c8332a4552b0f56886be5",
+     "message": "<redacted:195 bytes>",
+     "seq_id": 7,
+     "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+     "type": "server_message"
+    },
+    "seq_id": 7,
+    "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+    "ts": "2026-09-28T04:02:58.881207Z",
+    "type": "server_message"
+   }
+  ],
+  "chunk_group_49": [
+   {
+    "chunk_b64_len": 101796,
+    "kind": "env_in",
+    "message_size_bytes": 229041,
+    "raw_shape": {
+     "client_id": "cli_e0014965f7f04fa88626753e12c9c41c",
+     "env_id": "env_e_6a0c68fae65c8332a4552b0f56886be5",
+     "message_chunk_base64": "<redacted:101798 b64 chars>",
+     "message_size_bytes": 229041,
+     "segment_count": 3,
+     "segment_id": 0,
+     "seq_id": 49,
+     "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+     "type": "server_message_chunk"
+    },
+    "segment_count": 3,
+    "segment_id": 0,
+    "seq_id": 49,
+    "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+    "ts": "2026-09-28T04:03:53.813514Z",
+    "type": "server_message_chunk"
+   },
+   {
+    "chunk_b64_len": 101796,
+    "kind": "env_in",
+    "message_size_bytes": 229041,
+    "raw_shape": {
+     "client_id": "cli_e0014965f7f04fa88626753e12c9c41c",
+     "env_id": "env_e_6a0c68fae65c8332a4552b0f56886be5",
+     "message_chunk_base64": "<redacted:101798 b64 chars>",
+     "message_size_bytes": 229041,
+     "segment_count": 3,
+     "segment_id": 1,
+     "seq_id": 49,
+     "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+     "type": "server_message_chunk"
+    },
+    "segment_count": 3,
+    "segment_id": 1,
+    "seq_id": 49,
+    "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+    "ts": "2026-09-28T04:03:53.939596Z",
+    "type": "server_message_chunk"
+   },
+   {
+    "chunk_b64_len": 101796,
+    "kind": "env_in",
+    "message_size_bytes": 229041,
+    "raw_shape": {
+     "client_id": "cli_e0014965f7f04fa88626753e12c9c41c",
+     "env_id": "env_e_6a0c68fae65c8332a4552b0f56886be5",
+     "message_chunk_base64": "<redacted:101798 b64 chars>",
+     "message_size_bytes": 229041,
+     "segment_count": 3,
+     "segment_id": 2,
+     "seq_id": 49,
+     "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+     "type": "server_message_chunk"
+    },
+    "segment_count": 3,
+    "segment_id": 2,
+    "seq_id": 49,
+    "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+    "ts": "2026-09-28T04:03:53.991017Z",
+    "type": "server_message_chunk"
+   }
+  ],
+  "pong_adjoining_msg": [
+   {
+    "kind": "env_in",
+    "raw_shape": {
+     "client_id": "cli_e0014965f7f04fa88626753e12c9c41c",
+     "env_id": "env_e_6a0c68fae65c8332a4552b0f56886be5",
+     "seq_id": 46,
+     "status": "active",
+     "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+     "type": "pong"
+    },
+    "seq_id": 46,
+    "status": "active",
+    "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+    "ts": "2026-09-28T04:03:49.632681Z",
+    "type": "pong"
+   },
+   {
+    "kind": "env_in",
+    "raw_shape": {
+     "client_id": "cli_e0014965f7f04fa88626753e12c9c41c",
+     "env_id": "env_e_6a0c68fae65c8332a4552b0f56886be5",
+     "seq_id": 54,
+     "status": "active",
+     "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+     "type": "pong"
+    },
+    "seq_id": 54,
+    "status": "active",
+    "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+    "ts": "2026-09-28T04:03:59.197472Z",
+    "type": "pong"
+   },
+   {
+    "kind": "env_in",
+    "raw_shape": {
+     "client_id": "cli_e0014965f7f04fa88626753e12c9c41c",
+     "env_id": "env_e_6a0c68fae65c8332a4552b0f56886be5",
+     "seq_id": 86,
+     "status": "active",
+     "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+     "type": "pong"
+    },
+    "seq_id": 86,
+    "status": "active",
+    "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+    "ts": "2026-09-28T04:04:59.305642Z",
+    "type": "pong"
+   }
+  ],
+  "inbound_ack": [
+   {
+    "kind": "env_in",
+    "raw_shape": {
+     "client_id": "cli_e0014965f7f04fa88626753e12c9c41c",
+     "env_id": "env_e_6a0c68fae65c8332a4552b0f56886be5",
+     "seq_id": 16,
+     "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+     "type": "ack"
+    },
+    "seq_id": 16,
+    "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+    "ts": "2026-09-28T04:03:08.835618Z",
+    "type": "ack"
+   },
+   {
+    "kind": "env_in",
+    "raw_shape": {
+     "client_id": "cli_e0014965f7f04fa88626753e12c9c41c",
+     "env_id": "env_e_6a0c68fae65c8332a4552b0f56886be5",
+     "seq_id": 17,
+     "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+     "type": "ack"
+    },
+    "seq_id": 17,
+    "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+    "ts": "2026-09-28T04:03:10.47131Z",
+    "type": "ack"
+   }
+  ]
+ },
+ "outbound_acks": [
+  {
+   "kind": "env_out",
+   "seq_id": 1,
+   "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+   "ts": "2026-09-28T04:02:58.573788Z",
+   "type": "ack"
+  },
+  {
+   "kind": "env_out",
+   "seq_id": 2,
+   "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+   "ts": "2026-09-28T04:02:58.573977Z",
+   "type": "ack"
+  },
+  {
+   "kind": "env_out",
+   "seq_id": 3,
+   "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+   "ts": "2026-09-28T04:02:58.574069Z",
+   "type": "ack"
+  },
+  {
+   "kind": "env_out",
+   "seq_id": 4,
+   "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+   "ts": "2026-09-28T04:02:58.57419Z",
+   "type": "ack"
+  },
+  {
+   "kind": "env_out",
+   "seq_id": 5,
+   "stream_id": "e0270605-bc3c-4114-bb6e-cc753c3dc7cd",
+   "ts": "2026-09-28T04:02:58.643333Z",
+   "type": "ack"
+  }
+ ]
+}

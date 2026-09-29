@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openAgi2/cordcode-macbridge/agent/codex-remote"
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
@@ -580,8 +581,17 @@ func (h *Handlers) ensureProjectionHydrated(
 		if errors.Is(err, errProjectionHydrating) {
 			return err
 		}
+		// Terminal vs transient (disconnect-resilience plan S-1a): a missing pairing
+		// identity (codex-remote ErrNotConfigured, including revoked → phase=failed) or a
+		// statically unavailable source (backend not mounted / capability missing) cannot
+		// heal within this connection cycle — retryable=false keeps the hard error and the
+		// re-pairing semantics on iOS instead of an endless retry loop. ctx cancel and
+		// other unexpected errors stay retryable; mid-hydrate failure sites keep their
+		// own retryable=true.
+		retryable := !errors.Is(err, errProjectionSourceUnavailable) &&
+			!errors.Is(err, codexremote.ErrNotConfigured)
 		h.markHydrateFailed(
-			backendID, sessionID, "projection.source_inspection_failed", err.Error(), true,
+			backendID, sessionID, "projection.source_inspection_failed", err.Error(), retryable,
 		)
 		return err
 	}

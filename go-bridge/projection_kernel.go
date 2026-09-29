@@ -686,6 +686,13 @@ type projectionHydrateTransaction struct {
 	// cut (the in-flight turn), instead of either carrying the stale partial baseline
 	// (old bug: history lost) or dropping pre-admission live turns.
 	unionLiveTurns bool
+	// reconcile marks the READY-safe reconciliation transaction
+	// (disconnect-resilience plan S-2): the tx baseline is the committed
+	// snapshot plus authoritative terminal updates only, so the commit must
+	// skip both live-execution merges — their "live is newer" heuristic is
+	// cold-hydrate-only and would reset the just-reconciled terminal closure
+	// back to running (F-R5-1).
+	reconcile bool
 	// sourceIngestComplete is set true once cold-source ingest finishes (design §3.3 rule #2 /
 	// D6 / K1 of the cold-start plan, guardrail #6). WaitHydrateCommitReady will not commit until
 	// this is true, so readiness is decided from authoritative source-EOF + turn terminal state
@@ -1349,9 +1356,17 @@ func (k *ProjectionKernel) CommitHydrateTransaction(
 	// hydrate committed {"phase":"idle"}). Turns still come from the cold source;
 	// execution takes the in-flight max (running/requires_action > idle).
 	coldPhase := baseline.Execution.Phase
-	if tx.unionLiveTurns {
+	switch {
+	case tx.reconcile:
+		// F-R5-1: reconcile commits publish the tx baseline as-is. The tx
+		// baseline (committed snapshot + authoritative terminal updates) is the
+		// NEW truth; the fence-frozen committed snapshot is the OLD one — the
+		// merge's "live is newer" heuristic belongs to cold hydrate only and
+		// would silently undo the terminal closure this transaction exists to
+		// publish (turn reset to running, CompletedAt zeroed).
+	case tx.unionLiveTurns:
 		baseline = unionColdBaselineWithLiveTurns(baseline, liveSnap, liveOK)
-	} else {
+	default:
 		baseline = mergeHydrateBaselineWithLiveExecution(baseline, liveSnap, liveOK)
 	}
 	k.reducer.Restore(backendID, sessionID, baseline)
@@ -1395,6 +1410,104 @@ func (k *ProjectionKernel) CommitHydrateTransaction(
 	session.hydrate = nil
 	k.finishHydrateLocked(session)
 	session.failureAttempts = 0
+	return ProjectionHydrateCommit{
+		Projection:             committed,
+		PendingLive:            len(tx.pendingLive),
+		PendingPatch:           patch,
+		AppliedPendingEventIDs: appliedPendingIDs,
+	}, nil
+}
+
+// BeginReconcileTransaction opens the READY-safe reconciliation transaction
+// (disconnect-resilience plan S-2, F-R4-1). The tx baseline is the CURRENT
+// committed projection — older-window turns, goal/detail manifest and producer
+// state all survive — and only authoritative terminal updates are applied to
+// it. The existing hydrate admission cannot serve this shape: for a READY
+// pathless session it either no-ops (sourceChanged=false → AlreadyReady) or
+// rebuilds from an EMPTY reducer (sourceChanged=true), whose page-1 Restore
+// would erase prepended older turns. source/startCut carry the committed
+// values so the commit's write-back keeps the source cut unchanged.
+func (k *ProjectionKernel) BeginReconcileTransaction(backendID, sessionID string) (ProjectionHydrateAdmission, error) {
+	if k == nil || backendID == "" || sessionID == "" {
+		return ProjectionHydrateAdmission{}, fmt.Errorf("%w: invalid reconcile admission", ErrProjectionCheckpointInvalid)
+	}
+	k.mu.Lock()
+	session := k.sessionLocked(backendID, sessionID)
+	if session.status.Phase != ProjectionHydrateReady {
+		k.mu.Unlock()
+		return ProjectionHydrateAdmission{}, errors.New("projection reconcile requires a Ready session")
+	}
+	committed, ok := k.reducer.Snapshot(backendID, sessionID)
+	if !ok {
+		k.mu.Unlock()
+		return ProjectionHydrateAdmission{}, errors.New("projection reconcile requires committed state")
+	}
+	tx := &projectionHydrateTransaction{
+		source:           cloneProjectionSourceDescriptor(session.committedSource),
+		startCursor:      session.committedSourceCursor,
+		startCut:         session.committedSourceCursor,
+		reducer:          NewProjectionReducer(),
+		liveArrived:      make(chan struct{}, 1),
+		coldArmedTurnIDs: make(map[string]struct{}),
+		reconcile:        true,
+	}
+	tx.reducer.Restore(backendID, sessionID, committed)
+	// Same install order as BeginHydrateTransaction: the Hydrating phase +
+	// non-nil hydrate tx is what makes IngestLive's fence queue window-period
+	// live events as pendingLive instead of mutating the committed reducer.
+	session.status = ProjectionHydrationStatus{Phase: ProjectionHydrateHydrating}
+	session.hydrate = tx
+	session.hydrateDone = make(chan struct{})
+	done := session.hydrateDone
+	k.mu.Unlock()
+	return ProjectionHydrateAdmission{
+		Leader:      true,
+		StartCursor: tx.startCursor,
+		StartCut:    tx.startCut,
+		Done:        done,
+	}, nil
+}
+
+// AbortReconcileTransaction discards a reconcile transaction. The terminal
+// updates never reached the committed reducer, so the committed projection is
+// intact; the session returns to Ready and the window's pendingLive rows are
+// replayed into the committed reducer in stamp order (unlike MarkFailed, which
+// DROPS them — a reconcile abort has no cold rebuild to bank on, so dropping
+// pendingLive would lose live truth, violating R-4). finishHydrateLocked
+// closes hydrateDone and releases the single-flight waiters (A-R6-1, mirror
+// of MarkReady). The commit-shaped result lets the runner reuse the hydrate
+// post-processing: release deferred push candidates + publish the patch.
+func (k *ProjectionKernel) AbortReconcileTransaction(backendID, sessionID string) (ProjectionHydrateCommit, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	session := k.sessionLocked(backendID, sessionID)
+	if session.status.Phase != ProjectionHydrateHydrating || session.hydrate == nil || !session.hydrate.reconcile {
+		return ProjectionHydrateCommit{}, errors.New("projection reconcile transaction is not active")
+	}
+	tx := session.hydrate
+	appliedPendingIDs := make([]string, 0, len(tx.pendingLive))
+	for _, msg := range tx.pendingLive {
+		before := k.reducer.LastAppliedRev(msg.BackendID, msg.SessionID)
+		k.reducer.Apply(msg)
+		advanced := k.reducer.LastAppliedRev(msg.BackendID, msg.SessionID) != before
+		if advanced && msg.EventID != "" {
+			appliedPendingIDs = append(appliedPendingIDs, msg.EventID)
+		}
+		if !advanced {
+			slog.Info("projection kernel: reconcile abort pendingLive no-op",
+				"backendID", backendID, "sessionID", sessionID,
+				"event", msg.Event, "seq", msg.PerSessionSeq, "eventID", msg.EventID,
+				"turnId", dataStringFromEventData(msg.Data))
+		}
+	}
+	committed, _ := k.reducer.Snapshot(backendID, sessionID)
+	var patch *ProjectionPatch
+	if pendingPatch, ok := k.reducer.FlushPatch(backendID, sessionID); ok {
+		patch = &pendingPatch
+	}
+	session.status = ProjectionHydrationStatus{Phase: ProjectionHydrateReady}
+	session.hydrate = nil
+	k.finishHydrateLocked(session)
 	return ProjectionHydrateCommit{
 		Projection:             committed,
 		PendingLive:            len(tx.pendingLive),

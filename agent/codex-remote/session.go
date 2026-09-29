@@ -201,6 +201,14 @@ func (a *Agent) BindClient(cl *Client) {
 				slog.Warn("codex-remote failed to restore thread subscription", "thread", threadID, "error", err)
 				return
 			}
+			// S-2 (disconnect-resilience plan §3.2 wiring element 1): a thread
+			// whose live codec still tracks an in-flight turn at reconnect time
+			// joins the reconcile pending set — the turn may have terminated
+			// inside the disconnect window and the missed terminal event is
+			// never replayed (E-1: no controller cursor).
+			if a.ActiveTurnForReconcile(threadID) != "" {
+				a.addPendingTurnReconcile(threadID)
+			}
 			if err := a.refreshSessionCollaborationAfterAttach(ctx, cl, threadID); err != nil {
 				slog.Warn("codex-remote failed to restore thread collaboration baseline", "thread", threadID, "error", err)
 			}
