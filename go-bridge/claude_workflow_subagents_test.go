@@ -53,6 +53,19 @@ func writeAgentJSONL(t *testing.T, path, userText, assistantText, tag string) {
 	}
 }
 
+// writeAgentInFlightJSONL writes an unsettled sidechain transcript (user row only)
+// — the honest disk shape of a member that is still executing.
+func writeAgentInFlightJSONL(t *testing.T, path, userText, tag string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	row := `{"uuid":"u-` + tag + `","type":"user","timestamp":"2026-09-30T00:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"` + userText + `"}]},"parentUuid":null}` + "\n"
+	if err := os.WriteFile(path, []byte(row), 0o644); err != nil {
+		t.Fatalf("write jsonl: %v", err)
+	}
+}
+
 // chtimes pins mtime for deterministic StartedAt/UpdatedAt assertions.
 func chtimes(t *testing.T, path string, at time.Time) {
 	t.Helper()
@@ -98,7 +111,7 @@ func TestClaudeBackgroundTasks_WorkflowLayoutRows(t *testing.T) {
 	writeWorkflowAgentMeta(t, filepath.Join(run1, "agent-settled.meta.json"), "workflow-subagent", "pwd", "核对")
 	writeAgentJSONL(t, filepath.Join(run1, "agent-settled.jsonl"), "pwd", "/tmp/x", "settled")
 	writeWorkflowAgentMeta(t, filepath.Join(run1, "agent-live.meta.json"), "workflow-subagent", "plan-hash", "核对")
-	writeAgentJSONL(t, filepath.Join(run1, "agent-live.jsonl"), "hash", "abc123", "live")
+	writeAgentInFlightJSONL(t, filepath.Join(run1, "agent-live.jsonl"), "hash", "live")
 	writeWorkflowJournal(t, run1,
 		`{"type":"launched"}`+"\n"+
 			`{"type":"started","key":"v2:k1","agentId":"settled","label":"pwd","phase":"核对"}`+"\n"+
@@ -219,13 +232,19 @@ func TestClaudeWorkflowTaskStatus_Composition(t *testing.T) {
 		hasTurns   bool
 		want       string
 	}{
-		{"journal running", running, "completed", true, "running"},
+		{"journal 未收口 + reducer completed → completed（transcript 已终）", running, "completed", true, "completed"},
 		{"settled + reducer completed", settled, "completed", true, "completed"},
 		{"settled + reducer failed（不被压成 completed，r1 F-5）", settled, "failed", true, "failed"},
 		{"settled + reducer 无终态 → completed", settled, "running", true, "completed"},
 		{"journal 缺席 → reducer", nil, "running", true, "running"},
 		{"journal 缺席 + reducer 无证据 → running（r2 F-12）", nil, "completed", false, "running"},
 		{"逐 agent 缺席（journal 有他行）→ 同构回落", map[string]claudeWorkflowAgentJournal{"other": {Started: true}}, "completed", false, "running"},
+		// 中断修订（2026-09-30）：journal 未收口 + reducer 终态（aborted→failed）→
+		// reducer 优先——被 workflow 重试弃置的成员不再永久「运行中」。
+		{"journal 未收口 + reducer aborted/failed → failed（中断弃置）", running, "failed", true, "failed"},
+		{"journal 未收口 + reducer completed → completed", running, "completed", true, "completed"},
+		{"journal 未收口 + reducer running → running（真在跑）", running, "running", true, "running"},
+		{"journal 未收口 + reducer 无证据 → running", running, "completed", false, "running"},
 	}
 	for _, c := range cases {
 		if got := claudeWorkflowTaskStatus(c.journal, "a", c.reducer, c.hasTurns); got != c.want {
@@ -246,6 +265,74 @@ func TestParseClaudeWorkflowJournal_MultiExecutionLastKey(t *testing.T) {
 	st := states["a"]
 	if !st.Started || st.Settled {
 		t.Fatalf("multi-exec last key: got %+v, want started+unsettled（末次 k2 无 result）", st)
+	}
+}
+
+// 中断弃置端到端（2026-09-30 owner 真机验收修复）：复刻 wf_f5a59b21 的真实形状——
+// 评审员实例被 workflow 重试中断：journal 只有 started 无 result；sidechain jsonl 尾部
+// 是 user tool_result + "[Request interrupted by user]" 标记行。mapper 须把中断标记
+// 转 turn_aborted（reducer 归 failed），合成层以 reducer 终态压过 journal 沉默——
+// 不得永久「运行中」。
+func TestWorkflowInterruptedMember_NotRunningForever(t *testing.T) {
+	root := t.TempDir()
+	subagentsDir := filepath.Join(root, "sess-int", "subagents")
+	run := writeWorkflowRun(t, subagentsDir, "wf_int")
+
+	writeWorkflowAgentMeta(t, filepath.Join(run, "agent-abandoned.meta.json"), "workflow-subagent", "评审员-第5轮", "评审")
+	writeWorkflowAgentMeta(t, filepath.Join(run, "agent-retry.meta.json"), "workflow-subagent", "评审员-第5轮", "评审")
+	writeAgentJSONL(t, filepath.Join(run, "agent-retry.jsonl"), "review", "approved", "retry")
+	// 被弃置实例：真实尾部形状——user 行(tool_result) 后跟中断标记 user 行。
+	abandonedJSONL := `{"uuid":"u-ab","type":"user","timestamp":"2026-09-30T00:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"review the plan"}]},"parentUuid":null}` + "\n" +
+		`{"uuid":"a-ab","type":"assistant","timestamp":"2026-09-30T00:00:01.000Z","message":{"id":"m-ab","role":"assistant","content":[{"type":"text","text":"reviewing"}]},"parentUuid":"u-ab"}` + "\n" +
+		`{"uuid":"u-ab2","type":"user","timestamp":"2026-09-30T00:00:02.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_x","content":"probe output"}]},"parentUuid":"a-ab"}` + "\n" +
+		`{"uuid":"u-ab3","type":"user","timestamp":"2026-09-30T00:00:03.000Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]},"parentUuid":"a-ab"}` + "\n"
+	if err := os.WriteFile(filepath.Join(run, "agent-abandoned.jsonl"), []byte(abandonedJSONL), 0o644); err != nil {
+		t.Fatalf("write abandoned jsonl: %v", err)
+	}
+	writeWorkflowJournal(t, run,
+		`{"type":"started","key":"v2:ab","agentId":"abandoned","label":"评审员-第5轮","phase":"评审"}`+"\n"+
+			`{"type":"started","key":"v2:rt","agentId":"retry","label":"评审员-第5轮","phase":"评审"}`+"\n"+
+			`{"type":"result","key":"v2:rt","agentId":"retry","result":{"verdict":"approved"}}`+"\n")
+
+	// 1) mapper 层：中断标记 → turn_aborted（reducer 终态证据）。
+	reducerStatus, hasTurns := claudeSidechainReducerEvidence(filepath.Join(run, "agent-abandoned.jsonl"))
+	if !hasTurns {
+		t.Fatalf("abandoned agent must have turns (hasTurns)")
+	}
+	if reducerStatus != "failed" {
+		t.Fatalf("interrupted sidechain reducer status = %q, want failed（turn_aborted→aborted→failed）", reducerStatus)
+	}
+
+	// 2) 合成层：journal 未收口 + reducer failed → failed，不再永久 running。
+	tasks, err := claudeBackgroundTasks(root)
+	if err != nil {
+		t.Fatalf("claudeBackgroundTasks: %v", err)
+	}
+	byID := map[string]core.BackgroundTask{}
+	for _, task := range tasks {
+		byID[task.TaskID] = task
+	}
+	if got := byID["abandoned"].Status; got != "failed" {
+		t.Fatalf("abandoned member status = %q, want failed（中断弃置不残留运行中）", got)
+	}
+	if got := byID["retry"].Status; got != "completed" {
+		t.Fatalf("retry member status = %q, want completed", got)
+	}
+
+	// 3) workflow 卡成员同合成（run 聚合：无 running、含 failed → failed）。
+	anchors := map[string]claudeWorkflowAnchor{"wf_int": {TurnID: "turn-main"}}
+	var events []projectionHydrateEvent
+	if err := produceClaudeWorkflowRunEvents(context.Background(), subagentsDir, anchors, func(ev projectionHydrateEvent) bool {
+		events = append(events, ev)
+		return true
+	}); err != nil {
+		t.Fatalf("produce: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+	if got := events[0].Data["workflowStatus"]; got != "failed" {
+		t.Fatalf("run status = %v, want failed（成员聚合：无 running、含 failed）", got)
 	}
 }
 
@@ -312,7 +399,7 @@ func TestProduceClaudeWorkflowRunEvents_CardShapeAndAggregation(t *testing.T) {
 	run := writeWorkflowRun(t, subagentsDir, "wf_card")
 
 	writeWorkflowAgentMeta(t, filepath.Join(run, "agent-r.meta.json"), "workflow-subagent", "评审", "r1")
-	writeAgentJSONL(t, filepath.Join(run, "agent-r.jsonl"), "review", "done", "r")
+	writeAgentInFlightJSONL(t, filepath.Join(run, "agent-r.jsonl"), "review", "r")
 	writeWorkflowAgentMeta(t, filepath.Join(run, "agent-s.meta.json"), "workflow-subagent", "修订", "r2")
 	writeAgentJSONL(t, filepath.Join(run, "agent-s.jsonl"), "revise", "ok", "s")
 	// meta-only 成员（journal 无记录，r3 F-16 → 归 meta.workflowPhase 组）。
@@ -436,7 +523,7 @@ func TestProduceClaudeWorkflowRunEvents_RunStatusAggregationForms(t *testing.T) 
 
 	live := writeWorkflowRun(t, subagentsDir, "wf_live")
 	writeWorkflowAgentMeta(t, filepath.Join(live, "agent-l.meta.json"), "workflow-subagent", "l", "p")
-	writeAgentJSONL(t, filepath.Join(live, "agent-l.jsonl"), "q", "a", "l")
+	writeAgentInFlightJSONL(t, filepath.Join(live, "agent-l.jsonl"), "q", "l")
 	writeWorkflowJournal(t, live, `{"type":"started","key":"v2:l","agentId":"l","label":"l","phase":"p"}`+"\n")
 
 	anchors := map[string]claudeWorkflowAnchor{

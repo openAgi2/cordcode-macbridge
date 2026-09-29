@@ -2316,7 +2316,19 @@ func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *
 			out = append(out, projectionHydrateEvent{Event: "tool_finished", Data: data})
 		}
 		if isClaudeUserInterruptRelayEntry(e) {
-			return out // interrupt marker — no user_message, no new turn
+			// Interrupt marker: the in-flight turn was terminated by the user/runtime.
+			// Live legacy consumers already map this to turn_completed(user_interrupt)
+			// (watch loop above); the kernel/hydrate path now gets the projection-native
+			// equivalent — turn_aborted settles the turn so interrupted executions
+			// (mainstream turns AND sidechain/workflow agents abandoned by a retry)
+			// cannot render forever-running. No user_message, no new turn.
+			if turnID := strings.TrimSpace(*currentTurnID); turnID != "" {
+				out = append(out, projectionHydrateEvent{Event: "turn_aborted", Data: map[string]interface{}{
+					"turnId": turnID,
+					"reason": "user_interrupt",
+				}})
+			}
+			return out
 		}
 		text := claudeNormalizedUserText(blocks)
 		if strings.TrimSpace(text) == "" {

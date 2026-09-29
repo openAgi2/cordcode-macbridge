@@ -195,6 +195,12 @@ func claudeRootSessionFromAgentPath(agentMetaPath string) string {
 // once settled the terminal quality comes from the sidechain reducer (the only source
 // of "failed"); a journal-absent agent falls back to the reducer entirely, and with no
 // reducer evidence either it stays running (never guessed completed — r2 F-12).
+//
+// 中断修订（2026-09-30 owner 真机验收）：journal started-无-result 且 reducer 已出
+// 终态（aborted/completed）时以 reducer 为准——workflow 重试会中断并弃置首实例，
+// 其 journal 永远等不到 result，但 sidechain jsonl 的 "[Request interrupted by
+// user]" 标记经 mapper 发 turn_aborted（reducer 归 failed）。reducer 仍 running/
+// 无证据才保持 running。
 func claudeWorkflowTaskStatus(
 	journalStates map[string]claudeWorkflowAgentJournal,
 	agentID string,
@@ -210,7 +216,13 @@ func claudeWorkflowTaskStatus(
 		return reducerStatus
 	}
 	if !st.Settled {
-		return "running" // last execution has no result yet
+		// Journal's last execution has no result. The reducer having TERMINAL
+		// evidence outranks the journal's silence (interrupted/abandoned member);
+		// a mid-flight or not-yet-materialized member keeps running.
+		if reducerHasTurns && reducerStatus != "running" {
+			return reducerStatus
+		}
+		return "running"
 	}
 	// Settled: terminal quality from the reducer; a reducer still mid-scan (no terminal)
 	// counts as completed — journal result closed the execution with no error signal.
