@@ -2775,3 +2775,42 @@ GET /project 过滤规则。
   2. **「未验证所以不翻译」的 verdict 要有退役条件**：E2 verdict 注释里写着「需要同版本 direct-SSE 样本才能翻译」——样本其实早就随 owner 的日常使用产生了（serve 消息行带完整 reasoning parts），但没人回去核对。带前置条件的保守裁决必须把前置条件写进可检索的 TODO/验证清单，否则保守变成永久。
   3. **既有测试的 fixture 形状错误会锁死错误行为**：两个旧测试用 `field:"reasoning"`（serve 从不发送的形状）断言「不产生 thinking」——测试全绿但真实形状（field:"text"）下行为完全相反。改语义时先抓真实流量样本核对 fixture（同日模型替换事故教训 5 的复刻）。
   4. **同链路对照是最好的定位器**：「grok/claude/dsh 有思考视窗、opencode-web 没有」→ 反查 `core.EventThinking` 的全部 producer，发现 opencode-web 是唯一不发它的 agent，断点立刻收敛。
+
+## 2026-09-30：Claude workflow 子代理可见性 + 中断成员永久「运行中」（owner 两轮验收通过）
+
+**状态：已修复**（`559bf0ca` S1/S2/S3/G4 + `0ad1f335` 中断修复；方案见 iOS 仓
+`docs/2026-09-29-claude-workflow-subagent-scan-plan.md` v6，plan-review-loop
+r1-r5 通过；iOS 零改动）。
+
+- **现象一**：owner 跑 plan-review-loop（大量 workflow 子代理），iOS 打开该
+  session 看不到子代理——后台任务圆钮整体不渲染（不只是没徽标）。
+- **根因一（布局漂移）**：新版 Claude Code 把 workflow 子代理移到
+  `subagents/workflows/wf_<runId>/`（深两层，带 journal.jsonl）；
+  `claudeBackgroundTasks` 与 B4 `readClaudeSidechainMeta` 都只读 `subagents/`
+  直下。普通 Agent 子代理仍在直下——两种布局同会话共存。
+- **根因二（id 失配 G3/G4）**：`backend_capabilities.go` 与
+  `session_discovery.go` 的门写死 `id=="claudecode"`，生产注册键是 `"claude"`
+  （main.go alias 只喂 CreateAgent）→ descriptor 不含 background_tasks 两项
+  （按钮不渲染）、`background_tasks_changed` 从未发布。RPC 分发用
+  `agent.Name()=="claudecode"` 正常——这正是断点被掩盖的原因。同类隐患
+  `hooks_sink.go` 直取 `h.agents["claudecode"]` 已登记待独立修。
+- **现象二（验收轮 1）**：被 workflow 重试中断弃置的成员（journal 只有
+  started 无 result，如第 5 轮评审员首实例）在任务列表与 workflow 卡永久
+  「运行中」。
+- **根因三**：两层——① `claudeEntryToProjectionEvents` 对
+  `[Request interrupted by user]` 标记行只跳过不发事件，被中断的 turn 在
+  kernel 投影永久 running（主流会话同病）；② 状态合成让 journal「started
+  无 result」无条件压过 reducer。修复：mapper 发
+  `turn_aborted(reason=user_interrupt)`（对齐 live 总线 watch loop 既有先例
+  ：1180）；合成层 reducer 终态优先。
+- **journal 语义（磁盘实测契约）**：launched/started/result 三类；
+  started−result=running；result 无错误信号（failed 唯一来源是 sidechain
+  reducer）；会话根 `workflows/wf_<id>.json` 完成才写（运行中缺席）——不可
+  作运行中状态源。锚点：Workflow tool_result 启动确认文本的「Transcript
+  dir:」basename 与目录精确等值（无结构化 runId 字段；resume 一 run 多锚
+  → first-wins）。
+- **教训**：① 只读源码会漏「源码看着对、生产没生效」的门——评审员直查
+  生产 runtime `/internal/agents`（management-token）才抓到 G4；② agent
+  alias 映射只覆盖一处时，下游一切 id 字面量门都是隐患，统一走
+  `isClaudeBackendID`；③ 保守裁决（如 E2 类「未验证不翻译」）与跳过型
+  no-op（中断标记）都要写明退役条件，否则保守变成永久假状态。
