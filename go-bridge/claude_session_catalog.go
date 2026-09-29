@@ -51,6 +51,13 @@ type claudeSessionFingerprint struct {
 	// delete do not touch the JSONL transcript, so this is required for those
 	// state changes to invalidate the cached entry.
 	DesktopModTimeUnixNano int64
+	// SubagentsMtimeUnixNano aggregates the subagents-side mtimes (S3, 方案
+	// §3.4.1)：max of <uuid>/subagents dir, <uuid>/subagents/workflows dir,
+	// each wf_* run dir, and each wf_*/journal.jsonl. POSIX dir mtimes only
+	// change on direct-child create/remove — run-internal spawns and journal
+	// appends do NOT bubble up, hence reading the run/journal level. Zero when
+	// the session has no subagents directory at all.
+	SubagentsMtimeUnixNano int64
 }
 
 type claudeSessionIndexEntry struct {
@@ -138,6 +145,65 @@ func newDefaultClaudeSessionCatalog() *claudeSessionCatalog {
 		return newClaudeSessionCatalog("")
 	}
 	return newClaudeSessionCatalog(filepath.Join(homeDir, ".claude", "projects"))
+}
+
+// claudeSubagentsAggregateMtime folds the subagents-side mtimes for one session into a
+// single max value (S3, 方案 §3.4.1). Covers the three change classes the two-level
+// directory mtimes cannot see: new run creation (workflows dir mtime), in-run agent
+// spawn (run dir mtime), and journal started/result flips (journal mtime). Missing
+// directories contribute zero. Called once per session per buildSnapshot refresh —
+// cost is one failed stat for the common no-subagents case.
+func claudeSubagentsAggregateMtime(projectPath, sessionID string) int64 {
+	subagentsDir := filepath.Join(projectPath, sessionID, "subagents")
+	var maxNano int64
+	touch := func(path string) {
+		if info, err := os.Stat(path); err == nil {
+			if nano := info.ModTime().UnixNano(); nano > maxNano {
+				maxNano = nano
+			}
+		}
+	}
+	touch(subagentsDir)
+	workflowsDir := filepath.Join(subagentsDir, "workflows")
+	touch(workflowsDir)
+	runs, err := os.ReadDir(workflowsDir)
+	if err != nil {
+		return maxNano
+	}
+	for _, run := range runs {
+		if !run.IsDir() || !strings.HasPrefix(run.Name(), "wf_") {
+			continue
+		}
+		runDir := filepath.Join(workflowsDir, run.Name())
+		touch(runDir)
+		touch(filepath.Join(runDir, "journal.jsonl"))
+	}
+	return maxNano
+}
+
+// subagentsAggregateDigest hashes the subagents-side fingerprint column of the current
+// snapshot for the discovery poller (S3, 方案 §3.4.2). Input set mirrors the visible
+// (non-archived) sessions — archived entries are excluded so subagent churn inside an
+// archived session cannot fire discovery broadcasts for sessions clients never see
+// (r2 F-11). Sorted order keeps the digest deterministic. Never refreshes.
+func (c *claudeSessionCatalog) subagentsAggregateDigest() string {
+	c.mu.Lock()
+	snapshot := c.snapshot
+	c.mu.Unlock()
+	if snapshot == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, entry := range snapshot.Sorted {
+		if !entry.ArchivedAt.IsZero() {
+			continue
+		}
+		b.WriteString(entry.Key.SessionID)
+		b.WriteString("|")
+		b.WriteString(strconv.FormatInt(entry.Fingerprint.SubagentsMtimeUnixNano, 10))
+		b.WriteString("\n")
+	}
+	return passiveFingerprint(b.String())
 }
 
 func (c *claudeSessionCatalog) list(projectKey string, metrics *core.SessionLoadMetrics) []map[string]interface{} {
@@ -273,6 +339,7 @@ func (c *claudeSessionCatalog) buildSnapshot(
 					SizeBytes:              size,
 					SidecarModTimeUnixNano: sidecarModNano,
 					DesktopModTimeUnixNano: desktopState.modNano(sessionID),
+					SubagentsMtimeUnixNano: claudeSubagentsAggregateMtime(projectPath, sessionID),
 				},
 				modTime: info.ModTime(),
 			})

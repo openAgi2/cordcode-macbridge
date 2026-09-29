@@ -234,18 +234,21 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 	// registry 服务——与 B4 同源派生，C1）；`background_task_details` = detail 面
 	// （BackgroundTaskDetailReader 或 claude registry detail）。未声明的 backend
 	// 完全无任务面，iOS 不显示入口。
+	// G4（2026-09-29 方案）：生产注册键是 "claude"（alias "claudecode" 只喂
+	// CreateAgent），旧门 `id=="claudecode"` 从不命中 → 按钮整体不渲染。扩为
+	// isClaudeBackendID 双匹配。
 	if _, ok := agent.(core.BackgroundTaskProvider); ok {
 		caps = append(caps, "background_tasks")
 	} else if _, ok := agent.(core.SessionBackgroundTaskProvider); ok {
 		caps = append(caps, "background_tasks")
 	}
-	if id == "claudecode" {
+	if isClaudeBackendID(id) {
 		caps = append(caps, "background_tasks")
 	}
 	if _, ok := agent.(core.BackgroundTaskDetailReader); ok {
 		caps = append(caps, "background_task_details")
 	}
-	if id == "claudecode" {
+	if isClaudeBackendID(id) {
 		caps = append(caps, "background_task_details")
 	}
 	// Phase 5：cancel 只在 backend 有真实取消面时声明（dsh-web 官方

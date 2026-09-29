@@ -444,8 +444,10 @@ func (h *Handlers) snapshotBackendSessionResult(ctx context.Context, seen map[st
 		// 是 session 行、Claude sidechain 挂在 session 目录下）。对有任务面的
 		// backend 追加一条 background_tasks.changed invalidate 通知——客户端
 		// 重新 background_tasks.list 拿真值（事件本身不携带任务数据，不做
-		// 双真值）。
-		if id == "claudecode" {
+		// 双真值）。G3 断点①（方案 §3.4.3）：生产注册键是 "claude"，旧门
+		// id=="claudecode" 从不命中——扩为 isClaudeBackendID 双匹配；事件
+		// BackendID 保持注册键原值（iOS 侧按注册键过滤，归一化反而被丢）。
+		if isClaudeBackendID(id) {
 			h.publishBackgroundTasksChanged(id, catalogGeneration)
 		} else if _, ok := agent.(core.BackgroundTaskProvider); ok {
 			h.publishBackgroundTasksChanged(id, catalogGeneration)
@@ -494,7 +496,12 @@ func (h *Handlers) discoveryFingerprint(ctx context.Context, id string, agent co
 			}
 			visible = append(visible, wire)
 		}
-		return wireFingerprint(visible), len(visible), len(all), nil
+		// S3（方案 §3.4.2）：wireFingerprint 只哈希 id|updatedAtMillis，updatedAt 来自主
+		// transcript——主 transcript 静默时子代理侧（run 创建/spawn/journal 翻转）不会
+		// 改变它。并入 subagents 聚合摘要（catalog 侧 Fingerprint.SubagentsMtimeUnixNano
+		// 的有序哈希，输入集与 visible 同构排除 archived），子代理-only 变化即可进入
+		// discovery 指纹 → sessions_changed + background_tasks_changed。
+		return wireFingerprint(visible) + "|" + h.claudeSessions.subagentsAggregateDigest(), len(visible), len(all), nil
 	}
 	requestTimeout := catalogRequestTimeout
 	if id == "codex-remote" {

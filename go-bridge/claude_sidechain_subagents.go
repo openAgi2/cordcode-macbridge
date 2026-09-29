@@ -40,7 +40,26 @@ type claudeSidechainMeta struct {
 	// B4 投影不消费它（projection 无 cancelled 概念）；仅 background_tasks
 	// summary 层据此把状态映射为 cancelled。
 	StoppedByUser bool `json:"stoppedByUser"`
+	// WorkflowPhase: workflow 子代理 meta 专属（subagents/workflows/wf_*/
+	// 布局，实测 61/61 在场，如「核对」）。旧布局 sidechain 不携带（零值）。
+	// 消费方：后台任务行 Title 拼接（OD-W1）与 workflow 卡 phase 归属兜底（F-16）。
+	WorkflowPhase string `json:"workflowPhase"`
 	agentID       string // derived from filename, not JSON
+}
+
+// readClaudeSidechainMetaFile reads one agent-*.meta.json sidecar. Parse errors are
+// the caller's fail-open skip (same policy as the directory variant below).
+func readClaudeSidechainMetaFile(path, agentID string) (claudeSidechainMeta, bool) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return claudeSidechainMeta{}, false
+	}
+	var m claudeSidechainMeta
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return claudeSidechainMeta{}, false
+	}
+	m.agentID = agentID
+	return m, true
 }
 
 // readClaudeSidechainMeta enumerates subagents/agent-*.meta.json in subagentsDir. A missing
@@ -68,16 +87,9 @@ func readClaudeSidechainMeta(subagentsDir string) (map[string]claudeSidechainMet
 		if agentID == "" {
 			continue
 		}
-		raw, err := os.ReadFile(filepath.Join(subagentsDir, name))
-		if err != nil {
-			continue
+		if m, ok := readClaudeSidechainMetaFile(filepath.Join(subagentsDir, name), agentID); ok {
+			out[agentID] = m
 		}
-		var m claudeSidechainMeta
-		if err := json.Unmarshal(raw, &m); err != nil {
-			continue
-		}
-		m.agentID = agentID
-		out[agentID] = m
 	}
 	return out, nil
 }
@@ -100,9 +112,18 @@ type sidechainAgentNode struct {
 // child reducer's output is NEVER committed to the Kernel — it is only read to populate the
 // SubagentBlocks of the single subagent part the Kernel anchors (guardrail §3: no second writer).
 func buildSidechainAgentBlocks(ctx context.Context, agentPath string) (blocks []ProjectionPart, status string) {
+	blocks, status, _ = buildSidechainAgentBlocksDetailed(ctx, agentPath)
+	return blocks, status
+}
+
+// buildSidechainAgentBlocksDetailed additionally reports whether the sidechain jsonl
+// produced any turns at all. Workflow-agent status grading (plan §3.2.3) needs that
+// distinction: the base status defaults to "completed" both for real settled turns and
+// for a not-yet-materialized jsonl, and only the former may outrank journal silence.
+func buildSidechainAgentBlocksDetailed(ctx context.Context, agentPath string) (blocks []ProjectionPart, status string, hasTurns bool) {
 	status = "completed"
 	if _, err := os.Stat(agentPath); err != nil {
-		return nil, status // .meta.json present but .jsonl missing → empty content, fail-open
+		return nil, status, false // .meta.json present but .jsonl missing → empty content, fail-open
 	}
 	child := NewProjectionReducer()
 	seq := 0
@@ -112,12 +133,13 @@ func buildSidechainAgentBlocks(ctx context.Context, agentPath string) (blocks []
 		return ctx.Err() == nil
 	})
 	if scanErr != nil || ctx.Err() != nil {
-		return nil, status
+		return nil, status, false
 	}
 	snap, ok := child.Snapshot("claude", "sidechain")
 	if !ok {
-		return nil, status
+		return nil, status, false
 	}
+	hasTurns = len(snap.Turns) > 0
 	running := false
 	failed := false
 	for _, turn := range snap.Turns {
@@ -137,7 +159,17 @@ func buildSidechainAgentBlocks(ctx context.Context, agentPath string) (blocks []
 	case failed:
 		status = "failed"
 	}
-	return blocks, status
+	return blocks, status, hasTurns
+}
+
+// claudeSidechainReducerEvidence is the workflow-agent grading view of one sidechain
+// jsonl: the reducer status plus whether any turn exists (see Detailed variant).
+func claudeSidechainReducerEvidence(agentPath string) (status string, hasTurns bool) {
+	if agentPath == "" {
+		return "completed", false
+	}
+	_, status, hasTurns = buildSidechainAgentBlocksDetailed(context.Background(), agentPath)
+	return status, hasTurns
 }
 
 // computeSidechainDiagnostic walks the parentAgentId chain from a depth≥2 node up to a depth-1

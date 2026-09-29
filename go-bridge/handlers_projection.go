@@ -1105,6 +1105,15 @@ func (h *Handlers) runProjectionHydrateTransaction(
 				slog.Warn("go-bridge: Claude sidechain subagent source-read failed; failing open",
 					"backendID", backendID, "sessionPrefix", projectionSessionLogPrefix(sessionID), "error", err)
 			}
+			// S2（方案 §3.3）：workflow run 卡——锚点 = 主流 Workflow tool_result 启动确认
+			// 文本的 "Transcript dir:" basename（first-wins）；每个 run 单发一次
+			// workflow_run 事件（挂首锚 turn），零 started 成员/未锚定 run 不进投影。
+			// 与 B4 同一 hydrate 事务域（ApplyHydrateEvent），不新增第二 writer。
+			workflowAnchors := buildClaudeWorkflowAnchors(hydrated.Turns)
+			if err := produceClaudeWorkflowRunEvents(ctx, subagentsDir, workflowAnchors, sidechainEmit); err != nil {
+				slog.Warn("go-bridge: Claude workflow run source-read failed; failing open",
+					"backendID", backendID, "sessionPrefix", projectionSessionLogPrefix(sessionID), "error", err)
+			}
 		}
 	}
 	// §4.3 coverage（设计 v6，Claude）：冷折叠完成后识别尾部未答 Ask，向当前

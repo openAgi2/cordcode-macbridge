@@ -39,6 +39,10 @@ func claudeBackgroundTasks(projectsDir string) ([]core.BackgroundTask, error) {
 		modTime   time.Time
 	}
 	var found []located
+	type workflowLocated struct {
+		agent claudeWorkflowLocatedAgent
+	}
+	var workflowFound []workflowLocated
 	err := filepath.WalkDir(projectsDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || !d.IsDir() || d.Name() != "subagents" {
 			return nil
@@ -73,13 +77,28 @@ func claudeBackgroundTasks(projectsDir string) ([]core.BackgroundTask, error) {
 				modTime:   info.ModTime(),
 			})
 		}
+		// Workflow 布局（方案 §3.2.1）：subagents/workflows/wf_*/ 一层枚举——上游
+		// 契约两层，未知更深结构 fail-open 跳过。
+		workflowRuns, err := os.ReadDir(filepath.Join(path, "workflows"))
+		if err != nil {
+			return nil
+		}
+		for _, run := range workflowRuns {
+			if !run.IsDir() || !strings.HasPrefix(run.Name(), "wf_") {
+				continue
+			}
+			runDir := filepath.Join(path, "workflows", run.Name())
+			for _, agent := range scanClaudeWorkflowRunAgents(runDir) {
+				workflowFound = append(workflowFound, workflowLocated{agent: agent})
+			}
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	tasks := make([]core.BackgroundTask, 0, len(found))
+	tasks := make([]core.BackgroundTask, 0, len(found)+len(workflowFound))
 	for _, f := range found {
 		// Same reducer walk as B4 (single status derivation, C1).
 		_, baseStatus := buildSidechainAgentBlocks(context.Background(), f.jsonlPath)
@@ -90,6 +109,12 @@ func claudeBackgroundTasks(projectsDir string) ([]core.BackgroundTask, error) {
 		toolUses := claudeSidechainToolUseCount(f.jsonlPath)
 		rootSession := filepath.Base(filepath.Dir(f.dir))
 		_, jsonlErr := os.Stat(f.jsonlPath)
+		// StartedAt=meta mtime（spawn 时刻）、UpdatedAt=agent jsonl mtime（activity
+		// 时刻；jsonl 缺席回落 meta mtime）——r1 F-6。
+		updatedAt := f.modTime
+		if info, err := os.Stat(f.jsonlPath); err == nil {
+			updatedAt = info.ModTime()
+		}
 		tasks = append(tasks, core.BackgroundTask{
 			TaskID:              f.meta.agentID,
 			BackendID:           "claudecode",
@@ -100,7 +125,40 @@ func claudeBackgroundTasks(projectsDir string) ([]core.BackgroundTask, error) {
 			AgentName:           strings.TrimSpace(f.meta.AgentType),
 			Status:              status,
 			StartedAt:           f.modTime,
-			UpdatedAt:           f.modTime,
+			UpdatedAt:           updatedAt,
+			ToolUseCount:        toolUses,
+			TranscriptAvailable: jsonlErr == nil,
+		})
+	}
+	journalCache := map[string]map[string]claudeWorkflowAgentJournal{}
+	for _, wf := range workflowFound {
+		a := wf.agent
+		journalStates, cached := journalCache[a.RunDir]
+		if !cached {
+			_, journalStates = parseClaudeWorkflowJournal(a.RunDir)
+			journalCache[a.RunDir] = journalStates
+		}
+		reducerStatus, reducerHasTurns := claudeSidechainReducerEvidence(a.JsonlPath)
+		status := claudeWorkflowTaskStatus(journalStates, a.Meta.agentID, reducerStatus, reducerHasTurns)
+		toolUses := claudeSidechainToolUseCount(a.JsonlPath)
+		rootSession := claudeRootSessionFromAgentPath(a.MetaPath)
+		_, jsonlErr := os.Stat(a.JsonlPath)
+		// 与旧布局同一字段语义（r1 F-6）；Title 按 OD-W1 拼接 phase。
+		updatedAt := a.MetaModTime
+		if info, err := os.Stat(a.JsonlPath); err == nil {
+			updatedAt = info.ModTime()
+		}
+		tasks = append(tasks, core.BackgroundTask{
+			TaskID:              a.Meta.agentID,
+			BackendID:           "claudecode",
+			RootSessionID:       rootSession,
+			ParentTaskID:        "", // workflow meta 无 parentAgentId——置空，不猜（§3.2.5）
+			AgentID:             a.Meta.agentID,
+			Title:               claudeWorkflowTaskTitle(a.Meta),
+			AgentName:           strings.TrimSpace(a.Meta.AgentType),
+			Status:              status,
+			StartedAt:           a.MetaModTime,
+			UpdatedAt:           updatedAt,
 			ToolUseCount:        toolUses,
 			TranscriptAvailable: jsonlErr == nil,
 		})
