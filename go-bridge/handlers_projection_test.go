@@ -167,6 +167,8 @@ func TestLegacyCodexRemoteLiveCompletionIsInlineLoaded(t *testing.T) {
 
 // TestHandleGetSessionProjectionEmptyWhenNoState: without a source inspection, absence of reducer
 // state is not proof of a real empty session and must never become Ready(empty).
+// S-1a（断线韧性 §3.1）后 source-unavailable 归终态：backend 未挂载/能力缺失是静态
+// 条件，本连接周期内不会自愈，retryable=false（同语义见 projection_hydrate_retryable_test.go）。
 func TestHandleGetSessionProjectionEmptyWhenNoState(t *testing.T) {
 	handlers := NewHandlers()
 	conn := &readFileCaptureConn{}
@@ -180,8 +182,8 @@ func TestHandleGetSessionProjectionEmptyWhenNoState(t *testing.T) {
 	if conn.err == nil || conn.err.Code != "projection.hydrate_failed" {
 		t.Fatalf("expected honest projection.hydrate_failed, got %+v", conn.err)
 	}
-	if conn.err.Retryable == nil || !*conn.err.Retryable {
-		t.Fatalf("source-unavailable failure must be retryable: %+v", conn.err)
+	if conn.err.Retryable == nil || *conn.err.Retryable {
+		t.Fatalf("source-unavailable failure must be terminal (retryable=false, S-1a): %+v", conn.err)
 	}
 }
 
