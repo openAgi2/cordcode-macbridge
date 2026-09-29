@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openAgi2/cordcode-macbridge/agent/dsh"
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
@@ -541,25 +540,6 @@ func (h *Handlers) ensureProjectionHydrated(
 	// Cold OpenCode pulls may force a pathless rich-history rebuild below.
 	if ready && !forceColdInspection {
 		return nil
-	}
-	if backendID == "deepseek" {
-		// Store-bridge baseline selection (design §4.4, corrected 2026-08-16
-		// after the real-device hydrating loop): a session that is LIVE in the
-		// registry or carries kernel state owns this bridge epoch — its
-		// authoritative baseline is the kernel's live-ingested state (the
-		// verified live-only admission), never a file rebuild racing the live
-		// stream. Dead sessions cold-hydrate from the user store; a forced
-		// cold re-inspection of an already-hydrated dead session rebuilds from
-		// the store (dsh web growth becomes visible). Ids known neither to the
-		// kernel nor the store fail honestly via admission's not_found.
-		_, live := h.getSession(sessionID)
-		hasKernel := h.projectionKernel.HasReducerState(backendID, sessionID)
-		storeBacked := dsh.StoreHasSession(sessionID)
-		useKernelBaseline := live || hasKernel && !(forceColdInspection && storeBacked)
-		if useKernelBaseline || !storeBacked {
-			return h.ensureLiveOnlyProjectionAdmission(backendID, sessionID)
-		}
-		// else: dead + store-backed → fall through to the pathless file hydrate.
 	}
 	if backendID == "dsh-web" {
 		// dsh-web 真机矩阵 2026-08-16（坑 4 同类；设计 §4.3.2 的「deepseek 分支

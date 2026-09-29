@@ -469,7 +469,8 @@ brief `连接中` blip on iOS clients.
 | `MacBridge/` | SwiftUI macOS app. Owns the go-bridge process lifecycle, UI, settings, pairing UI. |
 | `go-bridge/` | Go WebSocket runtime — the actual bridge. Entry: [go-bridge/cmd/cordcode-bridge-runtime/main.go](go-bridge/cmd/cordcode-bridge-runtime/main.go) → `gobridge.Main()` in [go-bridge/main.go](go-bridge/main.go). |
 | `core/` | Agent abstraction + shared interfaces. Imported by go-bridge. 根目录已无 `config/` 目录。 |
-| `agent/{claudecode,codex,codex-remote,codex-web,grokbuild,opencode,opencode-web,dsh,dsh-web}` | Agent backends. Each registers itself via `init()` → `core.RegisterAgent`. `agent/codex-appserver/` 是 app-server RPC 客户端库（非 backend），`agent/providerseedtest/` 是测试辅助包。 |
+| `agent/{claudecode,codex,codex-remote,codex-web,grokbuild,opencode-web,dsh-web}` | Agent backends. Each registers itself via `init()` → `core.RegisterAgent`. `agent/codex-appserver/` 是 app-server RPC 客户端库（非 backend），`agent/providerseedtest/` 是测试辅助包。 |
+| `deprecated/{dsh,opencode}` | 退役 backend 源码归档（2026-09-29 迁入）：仍在 module 内编译/测试，但**生产代码禁止 import**（`go-bridge/deprecated_import_guard_test.go` CI 强制）；回滚 = git revert。见 `deprecated/README.md`。 |
 | `transcriptindex/` | Boundary-safe transcript page index for paginated session loading (see `docs/2026-06-13-session-loading-systemic-redesign.md`). |
 | `pinstore/` | Session pin 持久化（`session_pin` capability 的后端存储）。 |
 | `relay-server/` | **Independent Go module** for the public encrypted relay (VPS deployment). Deliberately separate per CONTRIBUTING. |
@@ -612,8 +613,10 @@ GO_BRIDGE_ARCHITECTURE.md 对应节）：
   承接。iOS 侧枚举与解码路径保留（已保存的 Codex Web 服务器标记不可用）。
 - `opencode`（managed_local / external_http / legacy_64667 server source 模型）——
   2026-08-19 owner 裁决退役：与 opencode-web 双订阅同一 serve，事件/投影双流互相
-  覆盖，干扰 opencode-web。
-- `deepseek`（SDK stdio 路线，`agent/dsh`）——更早退役，新接入走 dsh-web。
+  覆盖，干扰 opencode-web。2026-09-29 起源码移入 `deprecated/opencode`，驱动不再注册
+  （回滚 = git revert，drivers 加回 id 已无效）。
+- `deepseek`（SDK stdio 路线）——更早退役，新接入走 dsh-web。2026-09-29 起源码移入
+  `deprecated/dsh`，驱动不再注册（回滚 = git revert，drivers 加回 id 已无效）。
 
 ### Codex app-server（legacy `codex` backend，产品 lineup 已退役）
 
@@ -690,7 +693,8 @@ no-auth `/global/health` 返回 `401` 表示 server 要求认证，可继续做 
 no-auth `200` 的 OpenCode server 会被判为 `server_unauthenticated` 并拒绝
 （`legacy_64667` 例外，但会标 `legacy_insecure_unverified`）。OpenCode 的
 create/resume/get/abort/list projects 等 server 专属语义仍可走
-`go-bridge/opencode-proxy.go`，实时外部事件走 `agent/opencode/sse_subscriber.go`。
+`go-bridge/opencode-proxy.go`，实时外部事件走 `deprecated/opencode/sse_subscriber.go`
+（legacy opencode 已移入 deprecated/，驱动不注册；本节仅描述显式挂载的历史行为）。
 
 ### Claude Code
 

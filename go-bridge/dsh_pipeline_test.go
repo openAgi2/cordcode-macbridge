@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openAgi2/cordcode-macbridge/agent/dsh"
+	"github.com/openAgi2/cordcode-macbridge/deprecated/dsh"
 )
 
 // dshFakeRuntimeTemplate: mode is baked in at write time (the driver env

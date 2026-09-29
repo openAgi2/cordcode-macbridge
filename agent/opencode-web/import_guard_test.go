@@ -12,7 +12,7 @@ import (
 
 // legacyImportPath is the hybrid package this backend physically replaces at
 // the entry level but must never import (design §2.2 纪律 6 / §4.5).
-const legacyImportPath = "github.com/openAgi2/cordcode-macbridge/agent/opencode"
+const legacyImportPath = "github.com/openAgi2/cordcode-macbridge/deprecated/opencode"
 
 // TestSourceContainsNoForbiddenSurfaces scans the package's non-test source
 // files for the legacy hybrid's dirty surfaces (design §2.1 / §4.5):

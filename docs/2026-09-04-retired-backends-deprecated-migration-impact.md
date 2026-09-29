@@ -1,10 +1,11 @@
-# 退役 backend 目录迁入 deprecated/ 影响清单（2026-09-04，未执行）
+# 退役 backend 目录迁入 deprecated/ 影响清单（2026-09-04；2026-09-29 部分执行）
 
-> 状态：**调查清单，尚未执行任何文件操作**。Owner 倾向方案：新建 `deprecated/`
-> 目录，把 4 个退役 backend 目录（`agent/codex`、`agent/codex-web`、`agent/dsh`、
-> `agent/opencode`）移入。本文档列出全部影响面供 owner 与其他 agent 审阅。
-> 执行前须 owner 拍板「module 内移动 + 删 dead branch / 保留 branch / 移出
-> module」三选一（见 §六）。
+> 状态：**dsh + opencode 已于 2026-09-29 执行迁移（§六 方案 2：module 内移动 +
+> 删 dead branch，见文末执行记录）；codex / codex-web 仍在 `agent/`，另行决策**。
+> 原调查动机：Owner 倾向新建 `deprecated/` 目录，把 4 个退役 backend 目录
+> （`agent/codex`、`agent/codex-web`、`agent/dsh`、`agent/opencode`）移入。
+> 2026-09-29 owner 裁决「对 dsh / opencode 两个目录做真正的废弃」（agent 执行任务
+> 老是走错目录），codex / codex-web 暂不动。
 
 ## 来源清单（P0 门）
 
@@ -139,3 +140,65 @@ grep -rln 'agent/codex-appserver' --include='*.go' .   # → codex-web(退役) +
 # 4. CI 测试范围（§三 预期差的依据）
 grep -n 'go test\|go build' .github/workflows/ci.yml
 ```
+
+## 八、执行记录（2026-09-29，dsh + opencode 范围）
+
+Owner 裁决「对 agent/dsh、agent/opencode 做真正的废弃」（动机：退役包留在 agent/
+里，其他 agent 执行任务时老是走错目录）。按 §六 方案 2 执行，范围仅两包；codex /
+codex-web 留在 agent/ 原地不动。
+
+来源清单（P0 门，执行基线）：
+
+```text
+仓库路径=/Users/jacklee/Projects/cordcode-macbridge-deprecate-legacy
+分支=chore/deprecate-legacy-dsh-opencode（自 main 73539b71c0c3552a3c16548d05417813ba907869 新建）
+提交=73539b71c0c3552a3c16548d05417813ba907869（起点，改动见本仓 git log）
+未提交状态=执行时干净；改动以单个 coherent commit 交付
+任务范围=仅本仓；iOS 仓不涉及（RuntimeManager.swift 仅注释级更新）
+```
+
+执行内容（对照本文 §一/§二，行号为 2026-09-29 main 基线）：
+
+1. **目录移动**：`git mv agent/dsh deprecated/dsh`、`git mv agent/opencode
+   deprecated/opencode`（91 个文件；dsh 的 vendor/ JS 参考码与两包 deprecated.md 随迁）。
+   新增 `deprecated/README.md`（承接者指针 + 回滚 + 禁令）。
+2. **生产死分支删除（§一B 中属 dsh/opencode 的全部 5 处）**：
+   - `go-bridge/main.go:26/:29` 两个 blank import；
+   - `main.go:192-198` agentAliases 删 `"opencode"`、`"deepseek"` 两项；
+   - `agent_descriptor.go` 删 `case "deepseek"` + `detectDSHRuntime` 函数 + dsh import；
+   - `handlers.go:2858-2871` 删 dsh store-bridge resume 拒绝分支 + dsh import；
+   - `handlers_projection.go:545-563` 删 deepseek 冷水合基线选择块 + dsh import。
+   字符串层（descriptor `case "opencode"`、projection/server 的 deepseek/opencode
+   字符串分派、`-opencode-url` flag 与 opts 传参）按原方案保留——Swift
+   RuntimeManager.swift:1490 仍在传 `-opencode-url`，删 flag 会炸 runtime 启动。
+3. **测试处置（§二）**：
+   - import path 改 `deprecated/…`：`dsh_pipeline_test.go`、`opencode_provider_test.go`、
+     `handlers_projection_real_test.go`、`agent/opencode-web/import_guard_test.go`
+     （legacyImportPath 常量改指新路径，守护语义不变）；
+   - 整文件删：`dsh_resume_guard_test.go`（专测被删 resume 分支；驱动级守护随包走）；
+   - `handlers_projection_liveonly_test.go` 重做：`TestLiveOnlyProjection*` 两个核心
+     用例改 dsh-web 车具（注册 live session + `dshw-*-t1` 回合 ID——sinceRev=0 对
+     dsh-web 是 forceCold，无 live 会话会落 pathless 重建）；死会话 not_found /
+     死进程照常服务 / store 冷拉三个 deepseek 分支专属用例随分支删除（dsh-web 对
+     同类场景刻意走冷重建，2026-09-06 矩阵，已有 dshweb 测试覆盖）；字符串层守卫
+     （PathGuards、ObservationPrunes）保留不动。
+4. **防误用守护（新增）**：`go-bridge/deprecated_import_guard_test.go`——go/parser
+   遍历仓库，非 `_test.go` 生产文件 import `deprecated/` 即失败；测试文件豁免。
+5. **文档同步**：CLAUDE.md + AGENTS.md（component map + legacy 清单）、
+   GO_BRIDGE_ARCHITECTURE.md（DeepSeek/OpenCode 节路径与回滚表述）、
+   RuntimeManager.swift:196-198 注释、think.md 2026-09-29 条目、CHANGELOG [Unreleased]。
+
+验证：
+
+- `go build ./...` 全 module 通过（本会话因 GOSUMDB=off + toolchain go1.26.6 冲突用
+  `GOTOOLCHAIN=local`，系统 go 1.26.2 满足 go 1.25.0 语言版本；与本次改动无关）；
+- `go test -count=1 ./go-bridge/... ./deprecated/...` 全绿（go-bridge 187.9s、
+  deprecated/dsh 6.0s、deprecated/opencode 12.9s）；
+- `go test -run ZZZNoMatchCompileOnly ./agent/... ./core/... ...` 全部测试二进制编译通过；
+- 旧 import 路径（`agent/dsh`、`agent/opencode`）在 Go 文件中零残留；
+- Release 构建 → 覆盖安装 /Applications → 重启 → 运行态核验（8777 监听者为新
+  runtime、hello_ack 挂载面与改前一致）：见交付报告。
+
+回滚语义变化（重要）：「drivers 加回 id」一键回滚路径就此死亡——blank import 与
+别名已删，`-drivers` 传 `deepseek`/`opencode` 只会记一条 `failed to create agent`
+日志后 fail-soft 跳过。**回滚 = git revert 本迁移提交**。

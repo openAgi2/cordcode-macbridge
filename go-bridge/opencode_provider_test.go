@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	ccopencode "github.com/openAgi2/cordcode-macbridge/agent/opencode"
+	ccopencode "github.com/openAgi2/cordcode-macbridge/deprecated/opencode"
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 

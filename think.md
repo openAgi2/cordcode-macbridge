@@ -1,4 +1,33 @@
 
+## 2026-09-29 legacy dsh/opencode 目录级废弃：agent/dsh、agent/opencode 移入 deprecated/，驱动不再注册
+
+背景：owner 裁决「对这两个目录做真正的废弃」——退役包留在 agent/ 里，其他 agent 执行
+任务时老是走错目录（把 agent/dsh / agent/opencode 当现役源码读）。影响面调查见
+`docs/2026-09-04-retired-backends-deprecated-migration-impact.md`（该文档 §六 方案 2，
+本次只执行 dsh + opencode 两个包；codex / codex-web 仍在 agent/，另行决策）。
+
+关键认知（防误判）：
+- **「drivers 加回 id」回滚路径已死**：迁移同时删除了 main.go 的 blank import 与
+  agentAliases 的 `deepseek`→`dsh`、`opencode`→`opencode` 别名，驱动不再注册。
+  `-drivers` 传旧 id 只会记一条 `failed to create agent` 日志后 fail-soft 跳过。
+  **回滚 = git revert 迁移提交**。
+- **生产代码禁止 import `deprecated/`**：新增 `go-bridge/deprecated_import_guard_test.go`
+  （go/parser 遍历仓库，非 `_test.go` 生产文件 import deprecated/ 即 CI 失败）。测试文件
+  允许 import（dsh_pipeline_test 等继续守护退役包自身行为）。
+- **产品运行时行为零变化**：deepseek/opencode 本就不在任何 drivers 列表（MacBridge
+  Swift 与 defaultDrivers 都没有），挂载面为零；删除的 5 处生产死分支全部只在显式挂载
+  时可达。
+- live-only 投影测试的教训：`handlers_projection_liveonly_test.go` 原以 deepseek 分支为
+  车具测通用 admission 机制。deepseek 分支删除后，`TestLiveOnlyProjection*` 两个核心用例
+  改挂 dsh-web 车具（须注册 live session + `dshw-*-t1` 回合 ID——sinceRev=0 对 dsh-web 是
+  forceCold，无 live 会话会落 pathless 重建）；死会话 not_found / 死进程照常服务两个用例
+  是 deepseek 分支独有语义（dsh-web 对同类场景刻意走冷重建，2026-09-06 矩阵），随分支
+  删除。`errProjectionSessionNotFound` 经 admission 的生产路径随之不可达（错误映射字符串层
+  保留）。
+- 本机 `go build` 环境坑（与本次改动无关）：go.mod toolchain go1.26.6 + GOSUMDB=off 会报
+  `verifying module: checksum database disabled`，本会话用 `GOTOOLCHAIN=local`（系统
+  go 1.26.2 满足 go 1.25.0 语言版本）绕过。owner 交互环境若无此问题则无需处理。
+
 ## 2026-09-26 ChatGPT Desktop 26.924.20706 升级打断 codex-remote：内嵌 codex CLI 迁移包布局，桥硬编码旧路径断裂（已修复，运行态验证 ✅）
 
 现象：owner 升级 Mac 端 ChatGPT App 后，iPhone 切到 Codex Desktop 报「已配对，等待

@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/agent/claudecode"
-	"github.com/openAgi2/cordcode-macbridge/agent/dsh"
 	dshweb "github.com/openAgi2/cordcode-macbridge/agent/dsh-web"
 	"github.com/openAgi2/cordcode-macbridge/core"
 	"github.com/openAgi2/cordcode-macbridge/go-bridge/admission"
@@ -2854,20 +2853,6 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 				conn.SendResult(msg.RequestID, nil, wireErr)
 				return
 			}
-		}
-		// DSH store bridge: a requested id that exists in the user's harness
-		// store is a dead session — the pinned SDK has no cross-process resume
-		// (design §2.1; persistence refuses to rematerialize an existing log).
-		// Fail fast with the typed wire error instead of surfacing the harness
-		// materialization refusal at the first session/prompt.
-		if resumeID != "" && agent.Name() == "dsh" && dsh.StoreHasSession(resumeID) {
-			retryable := false
-			conn.SendResult(msg.RequestID, nil, &WireError{
-				Code:      "session_resume_not_supported",
-				Message:   "this DeepSeek session has ended; the current DSH SDK (0.1.0-rc.6) does not support resuming it from another client — start a new session to continue",
-				Retryable: &retryable,
-			})
-			return
 		}
 		slog.Info("go-bridge: handleSendMessage: session not found in registry. Starting new agent session.", "sessionID", params.SessionID, "resumeID", resumeID, "agent", agent.Name())
 		startAt := time.Now()

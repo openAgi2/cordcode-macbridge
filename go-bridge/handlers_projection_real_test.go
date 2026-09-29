@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/agent/codex"
-	"github.com/openAgi2/cordcode-macbridge/agent/opencode"
+	"github.com/openAgi2/cordcode-macbridge/deprecated/opencode"
 )
 
 // largestJSONLUnder walks root and returns the path of the largest *.jsonl file (proxy for a

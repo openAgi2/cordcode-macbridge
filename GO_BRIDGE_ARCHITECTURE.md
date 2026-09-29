@@ -54,9 +54,11 @@ runtime 不再挂载）；`agent/codex-web` 源码保留、仍可显式挂载，
 （Codex Desktop / Remote Control）承接。
 
 flag 里的 id 与 Go 包名/注册名不完全相同：`claude` → 注册名 `claudecode`，
-`deepseek` → 注册名 `dsh`（别名表在 `go-bridge/main.go`），其余同名注册；
-`dsh-web` 包名是 `dshweb`、wire kind 是 `deepseek-web`。旧 `deepseek` → `agent/dsh`
-源码保留、仍可显式挂上，但产品 lineup 已退役（2026-08-17）。
+其余同名注册；`dsh-web` 包名是 `dshweb`、wire kind 是 `deepseek-web`。旧
+`deepseek`（`deprecated/dsh`）与 `opencode`（`deprecated/opencode`）已于
+2026-09-29 移入 `deprecated/` 且**驱动不再注册**（blank import 与别名表已删，
+回滚 = git revert；`-drivers` 传旧 id 只会记一条 `failed to create agent`
+日志后跳过）。
 
 ## Backend 语义锚点表（source-first 入口，2026-09-09 立）
 
@@ -418,10 +420,11 @@ Grok Build 由 `agent/grokbuild` ACP driver 提供，产品 runtime 默认注册
   如 Mac grok 重启）走统一循环 10s dial 探测自动 reclaim。
 - 能力仍由 `core` 可选接口和 `WireDescriptor` 推导，客户端不得只按名称猜。
 
-### DeepSeek（`deepseek` → `agent/dsh`，产品入口已退役）
+### DeepSeek（`deepseek` → `deprecated/dsh`，产品入口已退役、驱动不注册）
 
-旧 SDK stdio 路线。源码与 `dsh-web` **并行保留、互不 import**，但 **默认
-drivers 不再注册**，iOS 将其标为 deprecated。会话数据在 `~/.dsh/sessions`，
+旧 SDK stdio 路线。2026-09-29 起源码移入 `deprecated/dsh`，**驱动不再注册**
+（go-bridge 生产代码零 import，CI 由 `deprecated_import_guard_test.go` 强制）；
+回滚 = git revert。会话数据在 `~/.dsh/sessions`，
 DeepSeek Web 经官方 API 可读可续。不要在这条路上再扩功能。
 
 每个活跃 session 一个 `dsh-jsonrpc-agent`（或用户全局 npm `dsh` 的
@@ -550,12 +553,13 @@ shadow-tree 启动）子进程，协议是 SDK JSON-RPC 2.0 over stdio，不是�
 - 投影：pathless 家族，冷基线 = 官方 `session.history`，**不进** deepseek
   的 store-file 分支。live/kernel 会话以 kernel 为基线，重建只服务冷开。
 
-### OpenCode（`opencode`，产品 lineup 已退役；显式挂载仍可用）
+### OpenCode（`opencode` → `deprecated/opencode`，产品 lineup 已退役、驱动不注册）
 
 > 2026-09-02 定位注记：产品 lineup 已不含 `opencode`——iPhone 产品面由
-> `opencode-web`（官方 `opencode serve` Web API）承接。本节的 managed_local /
-> server source / proxy 混合路径描述的是该 legacy backend，显式 `-drivers` 挂载
-> 或旧部署排查时适用。
+> `opencode-web`（官方 `opencode serve` Web API）承接。2026-09-29 起源码移入
+> `deprecated/opencode`，**驱动不再注册**（回滚 = git revert）。本节的
+> managed_local / server source / proxy 混合路径描述的是该 legacy backend 的
+> 历史行为，仅旧部署排查时适用。
 
 OpenCode 不再隐式硬编码 `127.0.0.1:64667`。MacBridge 在 Swift 端解析出明确的
 **Server Source**（`managed_local` / `external_http` / `legacy_64667` /
@@ -566,12 +570,13 @@ go-bridge；endpoint 未解析（disabled / external_http 未填 URL / managed s
 时**不传** `-opencode-url`，go-bridge 把该 backend 的 descriptor 状态报为
 `not_configured`，绝不 dial `64667`。
 
-- agent session 与历史/模型等通用能力位于 `agent/opencode/`；`agent/opencode.New` 在
+- agent session 与历史/模型等通用能力位于 `deprecated/opencode/`（历史行为描述）；
+  `opencode.New` 在
   无 URL 时进入 degraded（CLI 能力可用，HTTP 数据面返回 `ErrNotSupported` / 未配置诊断），
   不再 fallback `http://localhost:64667`。
 - OpenCode server 专属的 create/resume/get/abort 等语义仍可走
   `go-bridge/opencode-proxy.go`（仅 URL 非空时注册）。
-- `agent/opencode/sse_subscriber.go` 被动订阅 OpenCode SSE；无 URL 时
+- `deprecated/opencode/sse_subscriber.go` 被动订阅 OpenCode SSE；无 URL 时
   `shouldStartPassiveSubscription` 直接返回 false，避免无意义重连退避（Subscribe 本身也会
   拒绝空 URL）。
 - descriptor 当前仍声明 `requiresPollingForExternalTurns=true`，iOS 可保留低频历史
@@ -602,7 +607,7 @@ curl -i --max-time 3 http://127.0.0.1:<managed-port>/global/health
 | --- | --- |
 | 通用 agent/interface dispatch | provider、models、agents、todos、usage、diagnostics、workspace diff、memory、content chunk、read file、rename/archive/delete、compression、permission mode、完整消息历史 |
 | OpenCode HTTP proxy | get/list/create/resume session、list projects |
-| 混合路径 | send：先用 proxy 校验 server session，再由 `agent/opencode` 发送并 relay events；abort：先通知 HTTP server，再关闭 registry session |
+| 混合路径 | send：先用 proxy 校验 server session，再由 `deprecated/opencode`（历史行为）发送并 relay events；abort：先通知 HTTP server，再关闭 registry session |
 | 明确不支持 | share session、Bridge 代答 OpenCode permission |
 
 新增 OpenCode 能力时，先判断它是通用 agent capability 还是 OpenCode server 专属资源。不要
@@ -786,8 +791,8 @@ gate（`core/turn_detail_lazy_gate.go` / `core/turn_detail_chunks_gate.go`，当
 
 - WebSocket/auth/relay 是 agent core 之外的额外失败面；先分层定位，不同时改 driver 和客户端。
 - OpenCode 仍是 hybrid path，职责边界需要显式维护。
-- `agent/dsh` 与 `agent/dsh-web` 并行、禁止互相 import；新功能接官方 web 面，不要在 SDK
-  stdio 路线上重做归组/审批。
+- `deprecated/dsh` 与 `agent/dsh-web` 并行归档、禁止互相 import；新功能接官方 web 面，不要在 SDK
+  stdio 路线上重做归组/审批。生产代码禁止 import `deprecated/`（CI 守护）。
 - dsh-web 不得盲写 `~/.dsh/workspace.json`（两写恢复协议，外部进程不可代写）。
   归组只走官方 `session.create{workspaceId}` / `workspace.list`。
 - 控制面 secret 不能进入 agent subprocess；错误和 stderr 必须脱敏。

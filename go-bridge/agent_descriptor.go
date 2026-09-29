@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/openAgi2/cordcode-macbridge/agent/dsh"
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
@@ -236,8 +235,6 @@ func detectAgentStatus(id string, agent core.Agent, codexBackendMode string, cfg
 		return detectCodexService(codexBackendMode, codexURL)
 	case "grokbuild":
 		return detectGrokCLI()
-	case "deepseek":
-		return detectDSHRuntime()
 	case "dsh-web":
 		// 2026-09-22 方案 §3：结构化就绪（not_detected / service_not_running /
 		// port_conflict / available），不再走布尔折叠（available=false 一律
@@ -283,18 +280,6 @@ func detectInstanceStatusProber(backendID string, agent core.Agent) (AgentStatus
 		return AgentStatusAvailable, detail
 	}
 	return AgentStatusNotConfigured, detail
-}
-
-// detectDSHRuntime 检测 DeepSeek Harness runtime 可用性。与 driver 共用
-// agent/dsh.DiscoverRuntime（同一获取路径：PATH → wheel pkg exe → nvm →
-// python wheel Resolution API），保证 hello_ack 状态与 StartSession 的
-// spawn 目标一致；缺失时如实报 not_detected 并给出获取途径。
-func detectDSHRuntime() (AgentStatus, string) {
-	bin, source := dsh.DiscoverRuntime()
-	if bin == "" && source == "" {
-		return AgentStatusNotDetected, "DeepSeek Harness runtime not found (install Node.js/npm for the managed runtime, dsh-jsonrpc-agent on PATH, or pip install deepseek-harness-runtime-bin)"
-	}
-	return AgentStatusAvailable, source
 }
 
 // detectClaudeCLI 检测 Claude Code CLI 可用性。

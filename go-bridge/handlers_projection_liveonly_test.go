@@ -1,22 +1,22 @@
 package gobridge
 
-// DSH projection baseline tests. Primary path since the 2026-08-16 store bridge:
-// file-backed pathless hydrate over the user harness store (~/.dsh/sessions) —
-// the deepseek rows in these tests run against an isolated DSH_HOME. The
-// live-only admission (kernel-state baseline, C1) remains as the fallback
-// window: fresh live sessions whose store log is not flushed yet, and honest
-// projection.not_found for ids known nowhere (C2).
-// 附带修复 A：观察心跳剪枝（deepseek v1 无外部事件源）。
+// Live-only projection admission tests. The legacy deepseek store-bridge branch
+// (agent/dsh) that originally routed these scenarios was removed with the
+// deprecated/dsh migration (2026-09-29); the admission machinery is now driven
+// through the dsh-web branch (live registry session + dshw-*-t1 coverage →
+// admission), mirroring TestDSHWebColdPullDuringLiveTurnKeepsKernelBaseline.
+// The former dead-session not_found / dead-process-serves cases were
+// deepseek-branch-specific semantics and died with the branch: dsh-web
+// deliberately cold-rebuilds those cases instead (2026-09-06 matrix, see
+// TestDSHWebRestartMidTurnColdPullRebuildsHistory). String-level deepseek
+// guards (hydrate allowlist, source prep, observation pruning) remain in
+// production code and remain covered below.
 import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
-	dsh "github.com/openAgi2/cordcode-macbridge/agent/dsh"
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
@@ -44,7 +44,7 @@ func liveOnlyPublishTurn(h *Handlers, backend, session, turnID string, deltas []
 func liveOnlyProjectionPull(h *Handlers, sessionID string, sinceRev int) (*readFileCaptureConn, WireMessage) {
 	conn := &readFileCaptureConn{}
 	params, _ := json.Marshal(map[string]interface{}{"sessionId": sessionID, "sinceRev": sinceRev})
-	msg := WireMessage{RequestID: "r-liveonly-" + sessionID, BackendID: "deepseek", Method: "get_session_projection", Params: params}
+	msg := WireMessage{RequestID: "r-liveonly-" + sessionID, BackendID: "dsh-web", Method: "get_session_projection", Params: params}
 	h.handleGetSessionProjection(conn, msg, nil)
 	return conn, msg
 }
@@ -69,15 +69,23 @@ func liveOnlyProjectionOf(t *testing.T, conn *readFileCaptureConn) SessionProjec
 }
 
 // T1+T7（C1/C5）：live 注入的 kernel 状态经 admission 成为基线——sinceRev=0 成功返回
-// 完整投影，rev 连续，kernel Ready；全程无 agent、无 transcript（零磁盘源）。
+// 完整投影，rev 连续，kernel Ready；全程无 transcript（零磁盘源）。车具 dsh-web：
+// sinceRev=0 对 dsh-web 是 forceCold，须注册 live registry 会话才命中 admission
+// （deepseek 分支已随 deprecated/dsh 迁移删除，2026-09-29）。
 func TestLiveOnlyProjectionAdmissionServesKernelBaseline(t *testing.T) {
 	h := newDshProjectionHandlers(t)
+	sessionID := "dshweb-live-1"
+	t1 := "dshw-live1-t1"
 
-	liveOnlyPublishTurn(h, "deepseek", "dsh-live-1", "T1", []string{"Hello", " ", "world"}, "turn_completed")
+	liveOnlyPublishTurn(h, "dsh-web", sessionID, t1, []string{"Hello", " ", "world"}, "turn_completed")
 
-	conn, _ := liveOnlyProjectionPull(h, "dsh-live-1", 0)
+	h.mu.Lock()
+	h.putSession(sessionID, &fakeAgentSession{id: sessionID, events: make(chan core.Event)})
+	h.mu.Unlock()
+
+	conn, _ := liveOnlyProjectionPull(h, sessionID, 0)
 	proj := liveOnlyProjectionOf(t, conn)
-	if len(proj.Turns) != 1 || proj.Turns[0].TurnID != "T1" {
+	if len(proj.Turns) != 1 || proj.Turns[0].TurnID != t1 {
 		t.Fatalf("turns = %+v", proj.Turns)
 	}
 	if got := proj.Turns[0].Status; got != "completed" {
@@ -95,11 +103,11 @@ func TestLiveOnlyProjectionAdmissionServesKernelBaseline(t *testing.T) {
 	if proj.SyncRev < 3 {
 		t.Fatalf("SyncRev = %d, want >= 3 (deltas+terminal must commit)", proj.SyncRev)
 	}
-	if st := h.projectionKernel.Status("deepseek", "dsh-live-1"); st.Phase != ProjectionHydrateReady {
+	if st := h.projectionKernel.Status("dsh-web", sessionID); st.Phase != ProjectionHydrateReady {
 		t.Fatalf("kernel phase = %q, want ready after admission", st.Phase)
 	}
-	// 第二次 pull 走 Ready 快路径，依旧成功。
-	conn2, _ := liveOnlyProjectionPull(h, "dsh-live-1", 0)
+	// 第二次 pull 重复走 admission（sinceRev=0 恒 forceCold），幂等无重复提交。
+	conn2, _ := liveOnlyProjectionPull(h, sessionID, 0)
 	if proj2 := liveOnlyProjectionOf(t, conn2); proj2.SyncRev != proj.SyncRev {
 		t.Fatalf("second pull head %d != first %d", proj2.SyncRev, proj.SyncRev)
 	}
@@ -111,12 +119,18 @@ func TestLiveOnlyProjectionAdmissionServesKernelBaseline(t *testing.T) {
 // 是 backend 无关的既有契约（projection_snapshot_fence_test.go），此处锁端到端 rev 连续。
 func TestLiveOnlyProjectionPatchesBeforeBaselineAndContinuity(t *testing.T) {
 	h := newDshProjectionHandlers(t)
+	sessionID := "dshweb-live-2"
+	t1, t2 := "dshw-live2-t1", "dshw-live2-t2"
 
-	liveOnlyPublishTurn(h, "deepseek", "dsh-live-2", "T1", []string{"a", "b", "c"}, "turn_completed")
+	liveOnlyPublishTurn(h, "dsh-web", sessionID, t1, []string{"a", "b", "c"}, "turn_completed")
 	// 第二个 turn 保持 running：turn_started 不提交，两个 text_delta 提交 → head=6。
-	liveOnlyPublishTurn(h, "deepseek", "dsh-live-2", "T2", []string{"d", "e"}, "")
+	liveOnlyPublishTurn(h, "dsh-web", sessionID, t2, []string{"d", "e"}, "")
 
-	conn, _ := liveOnlyProjectionPull(h, "dsh-live-2", 0)
+	h.mu.Lock()
+	h.putSession(sessionID, &fakeAgentSession{id: sessionID, events: make(chan core.Event)})
+	h.mu.Unlock()
+
+	conn, _ := liveOnlyProjectionPull(h, sessionID, 0)
 	proj := liveOnlyProjectionOf(t, conn)
 	if proj.SyncRev != 6 {
 		t.Fatalf("head = %d, want 6 (T1: 3 deltas + terminal = 4; T2: 2 deltas = 2)", proj.SyncRev)
@@ -129,8 +143,8 @@ func TestLiveOnlyProjectionPatchesBeforeBaselineAndContinuity(t *testing.T) {
 	}
 
 	// rev7 续接：delta 请求 base=6。
-	h.eventPublisher.PublishLogical(LogicalEvent{BackendID: "deepseek", SessionID: "dsh-live-2", Event: "text_delta", Data: map[string]interface{}{"itemId": "T2", "delta": "f"}})
-	connDelta, _ := liveOnlyProjectionPull(h, "dsh-live-2", 6)
+	h.eventPublisher.PublishLogical(LogicalEvent{BackendID: "dsh-web", SessionID: sessionID, Event: "text_delta", Data: map[string]interface{}{"itemId": t2, "delta": "f"}})
+	connDelta, _ := liveOnlyProjectionPull(h, sessionID, 6)
 	if connDelta.err != nil {
 		t.Fatalf("delta pull failed: %+v", connDelta.err)
 	}
@@ -151,7 +165,7 @@ func TestLiveOnlyProjectionPatchesBeforeBaselineAndContinuity(t *testing.T) {
 	}
 
 	// at-head：再次 delta 请求 base=7 → 空补丁集。
-	connHead, _ := liveOnlyProjectionPull(h, "dsh-live-2", 7)
+	connHead, _ := liveOnlyProjectionPull(h, sessionID, 7)
 	if connHead.err != nil {
 		t.Fatalf("at-head pull failed: %+v", connHead.err)
 	}
@@ -164,52 +178,10 @@ func TestLiveOnlyProjectionPatchesBeforeBaselineAndContinuity(t *testing.T) {
 	}
 }
 
-// T4+T9（C2/C4）：死会话（kernel 无痕 + registry 无会话，如 bridge 重启后重开）→
-// 诚实 projection.not_found、retryable=false、不携带 data（禁止空壳）。
-func TestLiveOnlyProjectionDeadSessionIsNotFound(t *testing.T) {
-	h := newDshProjectionHandlers(t)
-
-	conn, _ := liveOnlyProjectionPull(h, "dsh-ghost", 0)
-	if conn.err == nil {
-		t.Fatalf("dead live-only session must fail honestly, got success data=%T", conn.data)
-	}
-	if conn.data != nil {
-		t.Fatalf("error must not pair with data (no empty shell): %T", conn.data)
-	}
-	if conn.err.Code != "projection.not_found" {
-		t.Fatalf("code = %q, want projection.not_found", conn.err.Code)
-	}
-	if conn.err.Retryable == nil || *conn.err.Retryable {
-		t.Fatalf("not_found must be explicitly nonretryable: %+v", conn.err)
-	}
-	if conn.err.Message == "" {
-		t.Fatal("not_found must carry a message")
-	}
-}
-
-// T5（C2）：kernel 有状态、live 进程已死（registry 无会话）→ 照常服务最后已知状态
-// （含终态 execution），不报错、不空壳。
-func TestLiveOnlyProjectionDeadProcessWithStateStillServes(t *testing.T) {
-	h := newDshProjectionHandlers(t)
-
-	liveOnlyPublishTurn(h, "deepseek", "dsh-dead-1", "T1", []string{"last", "words"}, "turn_aborted")
-
-	conn, _ := liveOnlyProjectionPull(h, "dsh-dead-1", 0)
-	proj := liveOnlyProjectionOf(t, conn)
-	if len(proj.Turns) != 1 {
-		t.Fatalf("turns = %+v, want the dead session's last-known turn", proj.Turns)
-	}
-	if got := proj.Turns[0].Status; got != "aborted" {
-		t.Fatalf("terminal status = %q, want aborted", got)
-	}
-	if proj.Execution.Phase == "running" {
-		t.Fatalf("execution phase = running after terminal event, want settled: %+v", proj.Execution)
-	}
-}
-
 // T6（store bridge 后语义）：deepseek 已入投影 hydrate 允许清单（file-backed
 // pathless 重建）；source 准备在无注册 agent 且无已提交 turn 时诚实拒绝
 // errProjectionSourceUnavailable（不是 not_migrated——那是未迁移后端）。
+// 字符串层守卫：deepseek 分支删除后 allowlist/source-prep 仍在生产代码中。
 func TestLiveOnlyProjectionPathGuards(t *testing.T) {
 	h := newDshProjectionHandlers(t)
 	if !backendSupportsProjectionHydrate("deepseek") {
@@ -225,86 +197,9 @@ func TestLiveOnlyProjectionPathGuards(t *testing.T) {
 	}
 }
 
-// Store bridge 主路径：store 持有会话 id + 注册 dsh agent（RichHistoryProvider）→
-// 冷 pull 走 pathless 全量重建，file 基线提交为投影（grokbuild 同款断言）。
-func TestDeepSeekProjectionHydrateFromStoreRichHistory(t *testing.T) {
-	h := newDshProjectionHandlers(t)
-	// Store 侧只需 id 可解析（内容经 fake agent 的 rich history 注入）。
-	sessionID := "session-store-1"
-	storeDir := filepath.Join(os.Getenv("DSH_HOME"), "sessions", "--demo--", sessionID)
-	if err := os.MkdirAll(storeDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(storeDir, "session.jsonl"), []byte(`{"type":"session","version":0,"id":"`+sessionID+`","createdAt":1,"cwd":"/demo","delegationDepth":0}`+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if !dsh.StoreHasSession(sessionID) {
-		t.Fatal("store fixture must resolve")
-	}
-
-	agent := &fakeAgent{
-		name: "dsh",
-		richHistory: []core.RichHistoryEntry{
-			{ID: "u1", Role: "user", Content: "看看仓库结构"},
-			{
-				ID:       "a1",
-				Role:     "assistant",
-				Content:  "有 store.go 和 history.go",
-				Thinking: "先扫描目录",
-				Parts: []map[string]any{
-					{"type": "reasoning", "content": "先扫描目录"},
-					{"type": "tool", "step": map[string]any{
-						"id": "tool-1", "toolName": "bash", "status": "completed",
-						"output": map[string]any{"kind": "inline", "text": "store.go"},
-					}},
-					{"type": "text", "content": "有 store.go 和 history.go"},
-				},
-			},
-		},
-	}
-	h.mu.Lock()
-	h.agents = map[string]core.Agent{"dsh": agent}
-	h.mu.Unlock()
-
-	conn, _ := liveOnlyProjectionPull(h, sessionID, 0)
-	if conn.err != nil {
-		t.Fatalf("file-backed hydrate error: %+v", conn.err)
-	}
-	raw, _ := json.Marshal(conn.data)
-	for _, want := range []string{"看看仓库结构", "有 store.go 和 history.go", "tool-1"} {
-		if !strings.Contains(string(raw), want) {
-			t.Fatalf("projection missing %q: %s", want, string(raw))
-		}
-	}
-	if st := h.projectionKernel.Status("deepseek", sessionID); st.Phase != ProjectionHydrateReady {
-		t.Fatalf("kernel phase = %q, want ready", st.Phase)
-	}
-}
-
-// Store bridge 边界：id 在 store 中存在，但 dsh agent 未注册（极端：driver 探测
-// 失败）→ 不允许空壳成功，也不允许静默 fallback 到 admission——诚实失败。
-func TestDeepSeekProjectionStoreSessionWithoutAgentFailsHonestly(t *testing.T) {
-	h := newDshProjectionHandlers(t)
-	sessionID := "session-store-2"
-	storeDir := filepath.Join(os.Getenv("DSH_HOME"), "sessions", "--demo--", sessionID)
-	if err := os.MkdirAll(storeDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(storeDir, "session.jsonl"), []byte(`{"type":"session","version":0,"id":"`+sessionID+`","createdAt":1,"cwd":"/demo","delegationDepth":0}`+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	conn, _ := liveOnlyProjectionPull(h, sessionID, 0)
-	if conn.err == nil {
-		t.Fatalf("store id without agent must fail honestly, got data=%T", conn.data)
-	}
-	if conn.data != nil {
-		t.Fatalf("error must not pair with data: %T", conn.data)
-	}
-}
-
 // T8（附带修复 A）：live-only backend 的死会话（无 live registry 会话、无 kernel 状态）
 // 从观察集剪枝；其他 backend 的未知会话观察不受影响（外部 turn 不是 registry 会话）。
+// deepseek 仍是 backendHasNoExternalEventSource 的唯一成员（字符串层，随生产代码保留）。
 func TestObservationPrunesDeadLiveOnlySessions(t *testing.T) {
 	h := newDshProjectionHandlers(t)
 
@@ -337,28 +232,5 @@ func TestObservationPrunesDeadLiveOnlySessions(t *testing.T) {
 	}
 	if targets := h.broadcaster.Targets("claude", "ext-unknown", ""); len(targets) != 1 {
 		t.Fatalf("claude unknown session must stay subscribed, targets=%d", len(targets))
-	}
-}
-
-// 真机 2026-08-16 复盘：活会话（kernel 有状态 + store 已落盘）曾被推向 file
-// 重建并与 live 流竞争 → hydrating 循环。矩阵修正后：live/kernel 会话一律走
-// admission 基线（本 epoch 权威），store 重建只服务死会话。
-func TestDeepSeekLiveSessionWithStoreFileUsesKernelBaseline(t *testing.T) {
-	h := newDshProjectionHandlers(t)
-	writeDshStoreSessionMarker(t, "dsh-live-store-1")
-	// Real-device form: the registry still holds the live driver session.
-	h.mu.Lock()
-	h.putSessionWithMeta("dsh-live-store-1", "deepseek", "", &fakeAgentSession{id: "dsh-live-store-1", events: make(chan core.Event, 1)})
-	h.mu.Unlock()
-
-	liveOnlyPublishTurn(h, "deepseek", "dsh-live-store-1", "T1", []string{"kernel", " ", "wins"}, "turn_completed")
-
-	conn, _ := liveOnlyProjectionPull(h, "dsh-live-store-1", 0)
-	proj := liveOnlyProjectionOf(t, conn)
-	if len(proj.Turns) != 1 || proj.Turns[0].TurnID != "T1" {
-		t.Fatalf("live session must serve the kernel baseline, turns=%+v", proj.Turns)
-	}
-	if st := h.projectionKernel.Status("deepseek", "dsh-live-store-1"); st.Phase != ProjectionHydrateReady {
-		t.Fatalf("kernel phase = %q, want ready (no file-hydrate race)", st.Phase)
 	}
 }

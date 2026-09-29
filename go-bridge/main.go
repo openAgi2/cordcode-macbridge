@@ -23,10 +23,8 @@ import (
 	_ "github.com/openAgi2/cordcode-macbridge/agent/codex"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/codex-remote"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/codex-web"
-	_ "github.com/openAgi2/cordcode-macbridge/agent/dsh"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/dsh-web"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/grokbuild"
-	_ "github.com/openAgi2/cordcode-macbridge/agent/opencode"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/opencode-web"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -49,7 +47,8 @@ const defaultBridgeMemoryLimitBytes int64 = 512 << 20
 func Main() {
 	port := flag.Int("port", 8777, "WebSocket listen port")
 	// 老 opencode backend 移除（owner 2026-08-19：与 opencode-web 双订阅同一 serve 互扰）；
-	// 代码保留，回滚加回 "opencode" 即可。
+	// 2026-09-29 起源码移入 deprecated/opencode 且不再注册——回滚 = git revert，
+	// drivers 加回 "opencode" 已无效（驱动未注册，解析失败仅记日志跳过）。
 	drivers := flag.String("drivers", defaultDrivers, "Comma-separated agent list")
 	workDir := flag.String("work-dir", "", "Working directory for agents (default: cwd)")
 	showVersion := flag.Bool("version", false, "Print runtime version and exit")
@@ -191,10 +190,8 @@ func Main() {
 
 	agentAliases := map[string]string{
 		"claude":    "claudecode",
-		"opencode":  "opencode",
 		"codex":     "codex",
 		"grokbuild": "grokbuild",
-		"deepseek":  "dsh",
 	}
 
 	// Phase 3：claude hooks 事件层。holder 先于 agents 创建（agent 构造时注入
