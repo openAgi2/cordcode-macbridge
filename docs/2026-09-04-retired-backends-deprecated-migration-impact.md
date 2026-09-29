@@ -1,7 +1,8 @@
 # 退役 backend 目录迁入 deprecated/ 影响清单（2026-09-04；2026-09-29 部分执行）
 
-> 状态：**dsh + opencode 已于 2026-09-29 执行迁移（§六 方案 2：module 内移动 +
-> 删 dead branch，见文末执行记录）；codex / codex-web 仍在 `agent/`，另行决策**。
+> 状态：**dsh + opencode 已于 2026-09-29 执行迁移并 owner 真机验收通过（§六 方案 2：
+> module 内移动 + 删 dead branch，见文末执行记录）；codex / codex-web 仍在 `agent/`，
+> 另行决策**。
 > 原调查动机：Owner 倾向新建 `deprecated/` 目录，把 4 个退役 backend 目录
 > （`agent/codex`、`agent/codex-web`、`agent/dsh`、`agent/opencode`）移入。
 > 2026-09-29 owner 裁决「对 dsh / opencode 两个目录做真正的废弃」（agent 执行任务
@@ -196,8 +197,16 @@ codex-web 留在 agent/ 原地不动。
   deprecated/dsh 6.0s、deprecated/opencode 12.9s）；
 - `go test -run ZZZNoMatchCompileOnly ./agent/... ./core/... ...` 全部测试二进制编译通过；
 - 旧 import 路径（`agent/dsh`、`agent/opencode`）在 Go 文件中零残留；
-- Release 构建 → 覆盖安装 /Applications → 重启 → 运行态核验（8777 监听者为新
-  runtime、hello_ack 挂载面与改前一致）：见交付报告。
+- Release 构建 → 覆盖安装 /Applications → 重启 → 运行态核验通过：8777 由新 runtime
+  监听（进程代际晚于构建、安装二进制含迁移提交哈希）、恰好 5 个现役 backend 注册
+  （无 dsh/opencode）、日志正常滚动；
+- 合并 feat/ios-native-message-timeline（65bb481e 断线韧性两批）后组合态复验：冲突
+  2 处（handlers_projection.go import 块 / CHANGELOG）机械解决，全量定向测试全绿；
+  期间发现并修复 feat 单边即红的 S-1a 漏改断言（ccf08262，
+  TestHandleGetSessionProjectionEmptyWhenNoState 仍断言 source-unavailable
+  retryable=true，与断线韧性新终态语义矛盾）；
+- **owner 真机验收通过（2026-09-29）**：DeepSeek Harness（dsh-web）与 OpenCode Web
+  模式发送消息正常。
 
 回滚语义变化（重要）：「drivers 加回 id」一键回滚路径就此死亡——blank import 与
 别名已删，`-drivers` 传 `deepseek`/`opencode` 只会记一条 `failed to create agent`

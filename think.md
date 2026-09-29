@@ -1,5 +1,5 @@
 
-## 2026-09-29 legacy dsh/opencode 目录级废弃：agent/dsh、agent/opencode 移入 deprecated/，驱动不再注册
+## 2026-09-29 legacy dsh/opencode 目录级废弃：agent/dsh、agent/opencode 移入 deprecated/，驱动不再注册（owner 真机验收 ✅）
 
 背景：owner 裁决「对这两个目录做真正的废弃」——退役包留在 agent/ 里，其他 agent 执行
 任务时老是走错目录（把 agent/dsh / agent/opencode 当现役源码读）。影响面调查见
@@ -17,6 +17,12 @@
 - **产品运行时行为零变化**：deepseek/opencode 本就不在任何 drivers 列表（MacBridge
   Swift 与 defaultDrivers 都没有），挂载面为零；删除的 5 处生产死分支全部只在显式挂载
   时可达。
+- **owner 真机验收通过（2026-09-29）**：dsh-web / opencode-web 发消息正常。随后
+  feat/ios-native-message-timeline（65bb481e 断线韧性两批）合入本分支（ff23ac57，
+  冲突 2 处机械解决），组合态全量定向测试全绿。合并时发现 feat 单边即红的 S-1a
+  漏改断言：TestHandleGetSessionProjectionEmptyWhenNoState 仍断言 source-unavailable
+  retryable=true，与断线韧性新终态语义矛盾（feat 那两批只跑了定向测试没跑全量套件）；
+  修复在 ccf08262，feat 分支本体曾带此红测试（合并后已随 fast-forward 消除）。
 - live-only 投影测试的教训：`handlers_projection_liveonly_test.go` 原以 deepseek 分支为
   车具测通用 admission 机制。deepseek 分支删除后，`TestLiveOnlyProjection*` 两个核心用例
   改挂 dsh-web 车具（须注册 live session + `dshw-*-t1` 回合 ID——sinceRev=0 对 dsh-web 是
