@@ -3994,6 +3994,7 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 		}
 		mappingStarted := time.Now()
 		wireSessions := sessionsToWire(sessions)
+		plantRuntimeStateHints(wireSessions, sessions)
 		// Serve-registry backends (opencode-web) list per project worktree and
 		// can still carry rows whose directory died since the registry fetch —
 		// apply the same ghost-directory visibility rule the other catalogs
@@ -5383,6 +5384,18 @@ func sessionsToWire(sessions []core.AgentSessionInfo) []map[string]interface{} {
 		result = append(result, wire)
 	}
 	return result
+}
+
+// plantRuntimeStateHints（session 列表执行态 hint，codex-remote 官方 ThreadStatus）：
+// 把 AgentSessionInfo.RuntimeStateHint 以临时键植入 wire 行（index 对齐，过滤前调用），
+// 由 applyListRuntimeState / enrichSessionStateWithAgent 消费并删除——不泄漏到 wire。
+// 调用点紧跟 sessionsToWire（generic 列表分支 / codexVisibleMembership / recent default）。
+func plantRuntimeStateHints(wireSessions []map[string]interface{}, infos []core.AgentSessionInfo) {
+	for i := range wireSessions {
+		if i < len(infos) && infos[i].RuntimeStateHint != "" {
+			wireSessions[i]["runtimeStateHint"] = infos[i].RuntimeStateHint
+		}
+	}
 }
 
 func diagnosticResultsToWire(results []core.DiagnosticResult) []map[string]interface{} {

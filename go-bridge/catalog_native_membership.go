@@ -31,7 +31,9 @@ func (h *Handlers) codexVisibleMembership(ctx context.Context, backendID, dir st
 	if err != nil {
 		return nil, nil, err
 	}
-	return filterCodexCatalogSessions(sessionsToWire(sessions)), agent, nil
+	wire := sessionsToWire(sessions)
+	plantRuntimeStateHints(wire, sessions)
+	return filterCodexCatalogSessions(wire), agent, nil
 }
 
 // codexVisibleMembershipCounts 同 codexVisibleMembership 但同一次 fetch 内返回

@@ -811,6 +811,13 @@ type AgentSessionInfo struct {
 	// AgentPreset is the official dsh-web agent preset id (standard/code/minimal/cordis).
 	// Empty for backends that do not have presets. Wire field: agentPreset.
 	AgentPreset string
+	// RuntimeStateHint is a per-fetch catalog-derived execution hint ("running" |
+	// "requiresAction"; empty = none). Filled only by backends whose catalog response
+	// carries authoritative per-session status (codex-remote official thread/list
+	// ThreadStatus). Consumed by the list/single-session runtime-state overlay points
+	// as an UPGRADE-only signal (never downgrades registry live state); never emitted
+	// on the wire (planted as a temp key, stripped at the overlay).
+	RuntimeStateHint string `json:"-"`
 }
 
 // BackgroundTask is the backend-neutral read-only background-task summary

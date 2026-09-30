@@ -213,6 +213,7 @@ func (h *Handlers) recentHandleListSessions(conn Connection, msg WireMessage, ag
 				return nil, err
 			}
 			wire := sessionsToWire(sessions)
+			plantRuntimeStateHints(wire, sessions)
 			if _, scoped := agent.(core.DirectorySessionLister); scoped {
 				wire = filterSessionsMissingWorkspace(wire)
 			}
@@ -271,6 +272,7 @@ func (h *Handlers) recentHandleListSessions(conn Connection, msg WireMessage, ag
 					return nil, err
 				}
 				wire := sessionsToWire(sessions)
+				plantRuntimeStateHints(wire, sessions)
 				if _, scoped := agent.(core.DirectorySessionLister); scoped {
 					wire = filterSessionsMissingWorkspace(wire)
 				}

@@ -45,6 +45,15 @@ type catalogThreadRow struct {
 		Name string `json:"name"`
 	} `json:"section"`
 	SectionEnteredAt int64 `json:"sectionEnteredAt"`
+	// Official ThreadStatus (upstream thread.rs: {"type":"notLoaded"|"idle"|
+	// "systemError"|"active","activeFlags":["waitingOnApproval"|"waitingOnUserInput"]}).
+	// The ChatGPT/Codex official session list renders its spinner from this field —
+	// mirrored here so externally-running threads light the iOS list badge without
+	// iOS having to open the session first.
+	Status *struct {
+		Type        string   `json:"type"`
+		ActiveFlags []string `json:"activeFlags"`
+	} `json:"status"`
 }
 
 func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, error) {
@@ -155,6 +164,15 @@ func mapCatalogThread(row catalogThreadRow) core.AgentSessionInfo {
 	if rowPinned(row) {
 		info.PinnedAt = time.Unix(row.SectionEnteredAt, 0)
 	}
+	if row.Status != nil && row.Status.Type == "active" {
+		if len(row.Status.ActiveFlags) > 0 {
+			info.RuntimeStateHint = "requiresAction"
+		} else {
+			info.RuntimeStateHint = "running"
+		}
+	}
+	// idle / notLoaded / systemError：无 hint——执行态由 registry / unknown 支配
+	// （「不知道就不亮灯」，不把 notLoaded 冒充 idle）。
 	return info
 }
 

@@ -200,7 +200,7 @@ func (h *Handlers) enrichSessionStateWithAgent(mapped map[string]interface{}, ag
 				}
 			}
 		}
-		mapped["runtimeState"] = state
+		mapped["runtimeState"] = applyRuntimeStateHint(state, mapped)
 		// lastOutcome（session-list-status-badges §3.4）：get_session 单 session 叠加
 		// 与列表叠加点同语义——outcome 非空才发。
 		if outcome, outcomeAt := h.sessions.lastOutcomeFor(sessionID); outcome != "" {
@@ -290,11 +290,6 @@ func (h *Handlers) applyListRuntimeState(mapped map[string]interface{}, runningM
 		if ts, ok := h.sessions.get(sessionID); ok && string(ts.state) != "" {
 			state = string(ts.state)
 		}
-		// lastOutcome（session-list-status-badges §3.4）：可选字段，outcome 非空才发。
-		if outcome, outcomeAt := h.sessions.lastOutcomeFor(sessionID); outcome != "" {
-			mapped["lastOutcome"] = outcome
-			mapped["lastOutcomeAtMillis"] = outcomeAt.UnixMilli()
-		}
 		if runningMap != nil {
 			if runningMap[sessionID] {
 				state = "running"
@@ -302,9 +297,41 @@ func (h *Handlers) applyListRuntimeState(mapped map[string]interface{}, runningM
 				state = "idle"
 			}
 		}
+		state = applyRuntimeStateHint(state, mapped)
+		// lastOutcome（session-list-status-badges §3.4）：可选字段，outcome 非空才发。
+		if outcome, outcomeAt := h.sessions.lastOutcomeFor(sessionID); outcome != "" {
+			mapped["lastOutcome"] = outcome
+			mapped["lastOutcomeAtMillis"] = outcomeAt.UnixMilli()
+		}
 	}
 	mapped["runtimeState"] = state
 	return mapped
+}
+
+// applyRuntimeStateHint 消费 wire 行上的 catalog 执行态 hint 临时键（codex-remote
+// 官方 ThreadStatus，见 plantRuntimeStateHints），只升不降：
+//   - requiresAction（active+waitingOnApproval/waitingOnUserInput）绝对生效——同一
+//     fetch 的新鲜观测，registry 无该词形；
+//   - running 只在非 requiresAction 时生效——不把等待输入降级成转圈；
+//   - 任何 hint 不清 registry/runningMap 的 live 态——stale catalog 至多让已收口的
+//     turn 多亮到下一次 fetch。
+//
+// 键在此删除，绝不泄漏到 wire。
+func applyRuntimeStateHint(state string, mapped map[string]interface{}) string {
+	hint, _ := mapped["runtimeStateHint"].(string)
+	if hint == "" {
+		return state
+	}
+	delete(mapped, "runtimeStateHint")
+	switch hint {
+	case "requiresAction":
+		return "requiresAction"
+	case "running":
+		if state != "requiresAction" {
+			return "running"
+		}
+	}
+	return state
 }
 
 // injectClaudeReasoningEffort fills reasoningEffort from the agent's in-memory

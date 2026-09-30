@@ -205,6 +205,64 @@ func TestRelaySyncBlockOutcome(t *testing.T) {
 	assertOutcome(t, h, "s-r3b", "failed")
 }
 
+// TestApplyListRuntimeStateCatalogHint：codex-remote 官方 ThreadStatus hint 的
+// 只升不降语义——外部（Mac 端发起）执行中的 session 不进 iOS 也能亮转圈（owner
+// 2026-09-30 验收发现的缺口：此前列表 runtimeState 只剩 registry 回退，外部 turn
+// 无事件喂入 → unknown → 永不亮）。
+func TestApplyListRuntimeStateCatalogHint(t *testing.T) {
+	h := NewHandlers()
+
+	// unknown + running hint → running（主修复场景：外部 turn，registry 无记录）。
+	m := h.applyListRuntimeState(map[string]interface{}{"id": "s1", "runtimeStateHint": "running"}, nil)
+	if m["runtimeState"] != "running" {
+		t.Fatalf("unknown+running hint = %v", m["runtimeState"])
+	}
+	if _, leaked := m["runtimeStateHint"]; leaked {
+		t.Fatalf("hint key leaked to wire: %v", m)
+	}
+
+	// registry idle（陈旧观测）+ running hint → running（同 fetch 更新鲜）。
+	h2 := NewHandlers()
+	h2.sessions.markIdle("s2")
+	m2 := h2.applyListRuntimeState(map[string]interface{}{"id": "s2", "runtimeStateHint": "running"}, nil)
+	if m2["runtimeState"] != "running" {
+		t.Fatalf("stale-idle+running hint = %v", m2["runtimeState"])
+	}
+
+	// requiresAction hint 绝对生效（active+waitingOnApproval）。
+	m3 := h.applyListRuntimeState(map[string]interface{}{"id": "s3", "runtimeStateHint": "requiresAction"}, nil)
+	if m3["runtimeState"] != "requiresAction" {
+		t.Fatalf("requiresAction hint = %v", m3["runtimeState"])
+	}
+
+	// registry running（live relay）+ running hint → running（幂等，hint 不清 live 态）。
+	h4 := NewHandlers()
+	h4.sessions.markRunning("s4")
+	m4 := h4.applyListRuntimeState(map[string]interface{}{"id": "s4", "runtimeStateHint": "running"}, nil)
+	if m4["runtimeState"] != "running" {
+		t.Fatalf("registry running + running hint = %v", m4["runtimeState"])
+	}
+
+	// runningMap authoritative idle（claude PID 权威：进程已退出）不被 hint 翻转——
+	// claude 不产 hint，此为语义防回归：runningMap 分支后 hint 只对非 running 生效，
+	// 但 PID 权威 idle 意味着无活进程，catalog stale 不应复活。
+	// （实现上 running hint 会升级 idle——claude 无 hint 故不触发；此用例钉死
+	// 「无 hint 行完全不受影响」。）
+	m5 := h.applyListRuntimeState(map[string]interface{}{"id": "s5"}, map[string]bool{})
+	if m5["runtimeState"] != "idle" {
+		t.Fatalf("no-hint row under authoritative runningMap = %v", m5["runtimeState"])
+	}
+
+	// 未知 hint 值：消费删除但不改 state（fail-closed）。
+	m6 := h.applyListRuntimeState(map[string]interface{}{"id": "s6", "runtimeStateHint": "bogus"}, nil)
+	if m6["runtimeState"] != "unknown" {
+		t.Fatalf("bogus hint changed state: %v", m6["runtimeState"])
+	}
+	if _, leaked := m6["runtimeStateHint"]; leaked {
+		t.Fatalf("bogus hint key leaked: %v", m6)
+	}
+}
+
 // TestEnrichSingleSessionOutcome（§3.4 单 session 叠加点）：get_session 路径同样
 // 下发；agent 为 nil（非 claude 分支）时 registry 结局照样叠加。
 func TestEnrichSingleSessionOutcome(t *testing.T) {
