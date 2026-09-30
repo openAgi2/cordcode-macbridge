@@ -10,6 +10,28 @@ import (
 // building a new business EventMessage (enforced by TestBusinessEventConstructionHasNoProductionBypass).
 // See docs/protocol/bridge-v1.md「Session Projection Stream」and design §6.2.
 
+// SetConnSessionStateEvents marks a connection as a session_state_events_v1 client
+// (it advertised the capability in hello; the server accepted). O-1 of
+// docs/2026-09-30-session-badges-upstream-alignment-plan.md §10 D3: unseals the
+// control-plane raw frame session_state_changed for THIS connection only — the
+// frame is pure control-plane (reducer has zero cases for it; consumers are the
+// registry/runtimeStateStore), so the seal-list entry criterion "already reduced
+// into SessionProjection" is false for it. Connections without the declaration
+// keep byte-identical sealed behavior (client-capability gating precedent:
+// session_sync_v2 / recovery_v1).
+func (p *EventPublisher) SetConnSessionStateEvents(conn Connection, enabled bool) {
+	if p == nil || conn == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if enabled {
+		p.sessionStateEventsV1[conn] = true
+	} else {
+		delete(p.sessionStateEventsV1, conn)
+	}
+}
+
 // SetConnSyncV2 marks a connection as a session_sync_v2 client (it advertised session_sync_v2 in
 // hello and the server enabled it). Called from the hello handlers. Since Phase 4, this capability
 // is an unambiguous projection-only ownership promise: timeline-semantic raw events are filtered
@@ -125,6 +147,12 @@ func (p *EventPublisher) shouldDeliverRawEventLocked(conn Connection, backendID,
 	// question UI — legacy conns only (isDerivedLegacyQuestionEvent semantics).
 	if backendID != "" && sessionID != "" && isDerivedLegacyQuestionEvent(event) && p.syncV2[conn] {
 		return false
+	}
+	// O-1（session-badges 上游对齐方案 §10 D3）：session_state_changed 对声明
+	// session_state_events_v1 的连接解封——纯控制面帧（reducer 零 case），封印
+	// 入选前提对该词为假；解封后仍经下游观察过滤（isLiveControlPlaneEvent 家族）。
+	if event == "session_state_changed" && p.sessionStateEventsV1[conn] {
+		return true
 	}
 	return !p.syncV2[conn] || backendID == "" || sessionID == "" || !isSessionSyncV2RawTimelineEvent(event)
 }

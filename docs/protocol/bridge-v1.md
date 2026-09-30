@@ -2455,7 +2455,28 @@ domain, settle time). Emitted by the shared list/single-session enrichment point
 grok, recent view) and `get_session` carry them — **only when the Mac registry has recorded an
 outcome**; absence means unknown and clients MUST render no failure badge (「不知道就不亮灯」).
 
-Semantics:
+### Capability: `session_state_events_v1`（session_state_changed 解封门）
+
+Client-declared hello capability (alignment plan `docs/2026-09-30-session-badges-upstream-alignment-plan.md`
+§10 D3 O-1). MacBridge echoes it in `hello_ack.capabilities` and unseals the **control-plane** raw frame
+`session_state_changed` for that connection only.
+
+- Background: `session_state_changed` sits in the syncV2 raw-timeline seal list historically, but the
+  seal's entry criterion ("already reduced into SessionProjection") is false for it — the reducer has
+  zero cases for the word; its consumers are the session registry and the client runtime-state store
+  (session-list badges). Sealing it starves syncV2 clients of real-time execution-state transitions.
+- The frame is now produced for codex-remote from the official `thread/status/changed` push
+  (`{state: "running" | "requiresAction" | "idle"}`) via a narrow control-plane publish entry that
+  skips Kernel ingestion entirely (no reducer entries for never-opened sessions). Claude/grok/relay
+  same-name frames keep their existing producers and timeline-mode paths.
+- Connections that did NOT declare the capability keep byte-identical sealed behavior (legacy
+  clients unaffected). Delivery still passes the observation filter afterward
+  (`session_state_changed` is a live control-plane event: scopeless devices and scoped devices with
+  running-signal interest receive it).
+- No prerequisites, no server rollout flag. Additive; no major bump.
+
+Semantics of `lastOutcome`:
+
 
 - Recorded when a turn settle is observed live: `turn_completed` (any reason) → `completed`;
   `turn_error` / `error` → `failed`; `turn_aborted` reason vocabulary — `user_interrupt` (claude

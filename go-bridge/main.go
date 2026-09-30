@@ -582,6 +582,11 @@ func Main() {
 			server.eventPublisher.SetConnSyncV2(conn, true)
 			server.eventPublisher.SetConnProjectionEpoch(conn, hello.LastBridgeEpoch)
 		}
+		// session_state_events_v1（O-1）：session_state_changed 控制面帧解封门（direct 镜像）。
+		if helloSupportsSessionStateEventsV1(&hello) && ack.Ok {
+			ack.Capabilities["session_state_events_v1"] = true
+			server.eventPublisher.SetConnSessionStateEvents(conn, true)
+		}
 		// projection_window_v1 relay path mirrors the direct hello negotiation exactly.
 		if !server.negotiateProjectionWindowV1(ack, &hello, conn) {
 			conn.SendJSON(ack)

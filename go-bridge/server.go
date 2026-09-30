@@ -403,6 +403,18 @@ func helloSupportsSessionSyncV2(hello *HelloMessage) bool {
 	return false
 }
 
+// helloSupportsSessionStateEventsV1 returns true when the client advertised
+// session_state_events_v1（O-1 解封门，session-badges 上游对齐方案 §10 D3——
+// 纯客户端声明，无服务端 rollout 开关、无前置；未声明连接封印行为逐字节不变）。
+func helloSupportsSessionStateEventsV1(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "session_state_events_v1" {
+			return true
+		}
+	}
+	return false
+}
+
 func helloSupportsReadFileV2(hello *HelloMessage) bool {
 	for _, capability := range hello.Capabilities {
 		if capability == "read_file_v2" {
@@ -769,6 +781,11 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 		advertiseSessionSyncV2Backend(ack.Backends)
 		s.eventPublisher.SetConnSyncV2(connection, true)
 		s.eventPublisher.SetConnProjectionEpoch(connection, hello.LastBridgeEpoch)
+	}
+	// session_state_events_v1（O-1）：session_state_changed 控制面帧解封门。
+	if helloSupportsSessionStateEventsV1(&hello) && ack.Ok {
+		ack.Capabilities["session_state_events_v1"] = true
+		s.eventPublisher.SetConnSessionStateEvents(connection, true)
 	}
 	// projection_window_v1 (frozen §Projection Window): prerequisite validation may fail
 	// hello; echo + per-conn mark only when the rollout flag is enabled.

@@ -202,3 +202,41 @@ func TestSettleOutcomeIgnoresSessionStateChanged(t *testing.T) {
 		t.Fatalf("session_state_changed must not settle outcome: %q", outcome)
 	}
 }
+
+// D3-O-1 投递门（方案 §10）：session_state_changed 对声明 session_state_events_v1
+// 的 syncV2 连接解封；未声明的 syncV2 连接封印行为逐字节不变；legacy（未声明
+// syncV2）连接本就不受封印、行为不变。
+func TestSessionStateEventsV1DeliveryGate(t *testing.T) {
+	h := NewHandlers()
+	sealed := newPublisherCaptureConn(nil)   // syncV2、无能力 → 封印
+	unsealed := newPublisherCaptureConn(nil) // syncV2 + session_state_events_v1 → 解封
+	legacy := newPublisherCaptureConn(nil)   // 非 syncV2 → 本就收到
+	for _, c := range []*publisherCaptureConn{sealed, unsealed, legacy} {
+		h.broadcaster.RegisterConn(c)
+	}
+	h.eventPublisher.SetConnSyncV2(sealed, true)
+	h.eventPublisher.SetConnSyncV2(unsealed, true)
+	h.eventPublisher.SetConnSessionStateEvents(unsealed, true)
+
+	h.eventPublisher.PublishSessionStateControlPlane("codex-remote", "th-gate", "running")
+
+	unsealed.waitCount(t, 1)
+	legacy.waitCount(t, 1)
+	time.Sleep(150 * time.Millisecond)
+	if got := len(sealed.snapshot()); got != 0 {
+		t.Fatalf("undeclared syncV2 conn received %d frames; seal must stay byte-identical", got)
+	}
+	frames := unsealed.snapshot()
+	if frame, ok := frames[0].(EventMessage); !ok || frame.Event != "session_state_changed" {
+		t.Fatalf("unsealed frame = %#v", frames[0])
+	}
+}
+
+// hello 能力解析（O-1 门的生产入口形状）。
+func TestHelloSupportsSessionStateEventsV1(t *testing.T) {
+	yes := HelloMessage{Capabilities: []string{"session_sync_v2", "session_state_events_v1"}}
+	no := HelloMessage{Capabilities: []string{"session_sync_v2"}}
+	if !helloSupportsSessionStateEventsV1(&yes) || helloSupportsSessionStateEventsV1(&no) {
+		t.Fatalf("capability parsing mismatch")
+	}
+}

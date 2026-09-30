@@ -241,6 +241,7 @@ type EventPublisher struct {
 	projection               *ProjectionReducer
 	kernel                   *ProjectionKernel
 	syncV2                   map[Connection]bool
+	sessionStateEventsV1     map[Connection]bool
 	projectionEpochMismatch  map[Connection]bool
 	readFileV2               map[Connection]bool
 	catalogCursorEpochV2     map[Connection]bool
@@ -309,6 +310,7 @@ func NewEventPublisher(bridgeEpoch string, broadcaster ...*Broadcaster) *EventPu
 		completed:               make(map[Connection]string),
 		projection:              NewProjectionReducer(),
 		syncV2:                  make(map[Connection]bool),
+		sessionStateEventsV1:    make(map[Connection]bool),
 		projectionEpochMismatch: make(map[Connection]bool),
 		readFileV2:              make(map[Connection]bool),
 		catalogCursorEpochV2:    make(map[Connection]bool),
@@ -477,6 +479,7 @@ func (p *EventPublisher) UnregisterConnection(conn Connection) {
 	delete(p.recoveries, conn)
 	delete(p.completed, conn)
 	delete(p.syncV2, conn)
+	delete(p.sessionStateEventsV1, conn)
 	delete(p.projectionEpochMismatch, conn)
 	delete(p.readFileV2, conn)
 	delete(p.catalogCursorEpochV2, conn)
