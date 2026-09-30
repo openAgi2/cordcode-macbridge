@@ -2446,6 +2446,34 @@ Retrieval decisions (recorded for reviewers): `turn_detail_lazy_v1` / `turn_deta
 "latest turn by session ID"; `get_session_projection` is the live-subscription pull path.
 Neither is reused as the preview entry (plan §6.3).
 
+## Session Last Outcome (`lastOutcome`)
+
+Optional session-summary fields (plan `docs/2026-09-30-session-list-status-badges-plan.md` §3.4, r8 APPROVED v9):
+`BridgeSessionInfo.lastOutcome?: "completed" | "failed"` + `lastOutcomeAtMillis?: number` (Mac clock
+domain, settle time). Emitted by the shared list/single-session enrichment points
+(`applyListRuntimeState` / `enrichSessionStateWithAgent`) — every list path (generic, claude, codex,
+grok, recent view) and `get_session` carry them — **only when the Mac registry has recorded an
+outcome**; absence means unknown and clients MUST render no failure badge (「不知道就不亮灯」).
+
+Semantics:
+
+- Recorded when a turn settle is observed live: `turn_completed` (any reason) → `completed`;
+  `turn_error` / `error` → `failed`; `turn_aborted` reason vocabulary — `user_interrupt` (claude
+  hydrate), literal `"turn_aborted"` (codex), `official_turn_status` (codex-remote) → `completed`
+  (deliberate close, incl. user interrupt; upstream codex `TurnAbortReason` has no accident
+  variants and real failures go through the separate `terminal_error` path); `leader_disconnect` /
+  `process_death` → `failed`; unknown reason → `failed` (fail-closed).
+- Cleared when a new turn starts (`markRunning`) — a later success supersedes an earlier failure.
+- In-memory registry state: MacBridge restart loses historical outcomes (honest absence). Not
+  persisted, not part of `SessionProjection` — control-plane list metadata only, same family as
+  `runtimeState`/`pinnedAtMillis`.
+- Intentionally NOT settled from: cold-hydrate/projection replay and replay-free push-only paths
+  (historical replay must not become a second truth source for outcomes), and the relay
+  negative-evidence fallbacks (events_channel_closed / idle-timeout synthesized `turn_completed` —
+  "true outcome unknown" must never be recorded as completed).
+- Additive optional fields: no capability negotiation, no major bump. Old clients ignore them;
+  old bridges omit them (clients render no ❗).
+
 ## Recent Session Catalog (`session_catalog_recent`)
 
 The `session_catalog_recent` capability backs the time-ordered session list mode

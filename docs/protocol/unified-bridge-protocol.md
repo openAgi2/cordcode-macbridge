@@ -442,6 +442,8 @@ type UnifiedSession = {
   effectiveProviderId?: string
   agentName?: string
   runtimeState?: 'idle' | 'running' | 'requiresAction' | 'compactingHint' | 'requestingHint' | 'unknown'
+  lastOutcome?: 'completed' | 'failed'
+  lastOutcomeAtMillis?: number
 }
 ```
 
@@ -473,6 +475,8 @@ session 运行态徽标值域。`unknown` = Mac 侧确实查不到该 session �
 | `effectiveProviderId` | `effectiveProviderID` | wire `Id` → Swift `ID` |
 | `agentName` | (无直接字段，adapter 层处理) | |
 | `runtimeState` | `runtimeState` | 可选；值域与 unknown 语义见上方补记；Swift 侧为 `String?` 原样保存 |
+| `lastOutcome` | `lastOutcome` | 可选（"completed"/"failed"）；上次执行结局，缺席＝不知道（不渲染失败徽标）。语义/清除时机/reason 归类词表见 bridge-v1.md「Session Last Outcome」 |
+| `lastOutcomeAtMillis` | `lastOutcomeAt` | `Date?`，`Date(timeIntervalSince1970: ms / 1000)`；仅与 lastOutcome 同现，Mac 时钟域 settle 时刻 |
 
 Swift 派生属性：`isPrimarySession` = `parentId` 为空，`isArchived` = `archivedAt != nil`，`isChildSession` = `!isPrimarySession`。
 

@@ -646,6 +646,16 @@ export interface BridgeSessionInfo {
   isReadOnlyHistory?: boolean;
   /** OpenCode only (literal "idle", later overwritten by runtime-state enrichment). */
   runtimeState?: string;
+  /**
+   * Shared. Outcome of the session's last observed turn settle: "completed" | "failed".
+   * Present only when the Mac registry has recorded an outcome (in-memory; cleared when a
+   * new turn starts). Control-plane list metadata — NOT timeline content. Clients use it
+   * for the session-row failure badge (❗); absence means unknown → render nothing.
+   * See bridge-v1.md「Session Last Outcome」.
+   */
+  lastOutcome?: string;
+  /** Shared epoch-ms (Mac clock domain) settle time; present only with lastOutcome. */
+  lastOutcomeAtMillis?: number;
 }
 
 export interface BridgeListSessionsResult {
