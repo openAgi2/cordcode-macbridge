@@ -369,6 +369,7 @@ const (
 	EventSessionGoalRecord        EventType = "session_goal_record"        // Codex thread/goal 官方记录（权威 payload 在 Event.GoalRecord；Goal nil = cleared）
 	EventContextInjection         EventType = "context_injection"          // dsh-web 上下文注入行（user/message source.kind!="user"，当前仅 subagent-settled；权威 payload 在 Event.ContextInjection）
 	EventWorkflowRun              EventType = "workflow_run"               // dsh-web 并行子代理 workflow 卡整值快照（tool-workflow/* 四事件按 runId 折叠；权威 payload 在 Event.WorkflowRun）
+	EventSessionState             EventType = "session_state"              // 控制面执行态投影（codex-remote 官方 thread/status/changed；权威 payload 在 Event.SessionState；词表 running|requiresAction|idle——session-badges 上游对齐方案 §5.2）
 )
 
 // UserQuestion represents a structured question from AskUserQuestion.
@@ -489,6 +490,14 @@ type SessionModeEvent struct {
 	Mode   *string `json:"mode,omitempty"`
 	CanSet bool    `json:"canSet"`
 	Reason string  `json:"reason,omitempty"`
+}
+
+// SessionStateEvent 是控制面执行态投影的权威 payload（session-badges 上游对齐
+// 方案 §5.2）：State ∈ running|requiresAction|idle，源自官方 thread/status/changed
+// 的 ThreadStatus 词表映射（Active 无 flags→running、Active 含 flags→requiresAction、
+// Idle→idle；SystemError/NotLoaded 不映射——诚实不冒充）。
+type SessionStateEvent struct {
+	State string `json:"state"`
 }
 
 // ContextInjectionEvent 是 dsh-web 上下文注入行的权威 payload（官方
@@ -694,6 +703,10 @@ type Event struct {
 	PlanMode *PlanModeEvent
 	// typed 模式状态投影（EventSessionMode 的权威 payload；Grok 方案 §5.1）。
 	SessionMode *SessionModeEvent
+	// 控制面执行态投影（EventSessionState 的权威 payload；codex-remote 官方
+	// thread/status/changed 按 §5.2 词表映射——running|requiresAction|idle）。
+	// 纯控制面：消费面是 registry/runtimeStateStore，绝不写 timeline。
+	SessionState *SessionStateEvent
 	// Codex collaboration mode is an official per-thread settings snapshot.
 	// It never aliases permission mode or the Grok/dsh mode projections.
 	CollaborationMode *SessionCollaborationMode

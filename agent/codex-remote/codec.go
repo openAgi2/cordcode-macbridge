@@ -210,13 +210,15 @@ func (c *LiveCodec) Decode(n Notification) []core.Event {
 		return decodeRemotePlanUpdated(n)
 	case "thread/settings/updated":
 		return c.decodeThreadSettingsUpdated(n)
+	case "thread/status/changed":
+		return c.decodeThreadStatusChanged(n)
 	case "thread/goal/updated":
 		return c.decodeThreadGoalUpdated(n)
 	case "thread/goal/cleared":
 		return c.decodeThreadGoalCleared(n)
 	case "error":
 		return c.decodeErrorNotification(n)
-	case "warning", "thread/status/changed", "thread/started", "thread/name/updated",
+	case "warning", "thread/started", "thread/name/updated",
 		"thread/archived", "thread/unarchived", "thread/deleted", "account/rateLimits/updated",
 		"remoteControl/status/changed", "serverRequest/resolved",
 		"turn/diff/updated":
@@ -273,6 +275,45 @@ func collaborationModesEqual(a, b core.SessionCollaborationMode) bool {
 		return a.ReasoningEffort == nil && b.ReasoningEffort == nil
 	}
 	return *a.ReasoningEffort == *b.ReasoningEffort
+}
+
+// decodeThreadStatusChanged 消费官方 thread/status/changed（app-server
+// ThreadStatusChangedNotification，进程级广播——官方本地客户端转圈/黄点的同源通道）。
+// 词表（session-badges 上游对齐方案 §5.2）：Active 无 flags→running、Active 含
+// waitingOnApproval/waitingOnUserInput→requiresAction、Idle→idle；SystemError/
+// NotLoaded 不映射（线程级系统态/卸载，诚实不冒充 idle/running）。缺 threadId→nil。
+func (c *LiveCodec) decodeThreadStatusChanged(n Notification) []core.Event {
+	var params struct {
+		ThreadID string `json:"threadId"`
+		Status   *struct {
+			Type        string   `json:"type"`
+			ActiveFlags []string `json:"activeFlags"`
+		} `json:"status"`
+	}
+	if json.Unmarshal(n.Params, &params) != nil {
+		return nil
+	}
+	params.ThreadID = strings.TrimSpace(params.ThreadID)
+	if params.ThreadID == "" || params.Status == nil {
+		return nil
+	}
+	var state string
+	switch params.Status.Type {
+	case "active":
+		state = "running"
+		if len(params.Status.ActiveFlags) > 0 {
+			state = "requiresAction"
+		}
+	case "idle":
+		state = "idle"
+	default:
+		return nil
+	}
+	return []core.Event{{
+		Type:        core.EventSessionState,
+		SessionID:   params.ThreadID,
+		SessionState: &core.SessionStateEvent{State: state},
+	}}
 }
 
 func (c *LiveCodec) decodeThreadSettingsUpdated(n Notification) []core.Event {

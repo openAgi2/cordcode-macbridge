@@ -440,6 +440,18 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		}
 		return "session_mode", data, false
 
+	case core.EventSessionState:
+		// 控制面执行态投影（session-badges 上游对齐方案 §5.2）：映射到既有 wire 词
+		// session_state_changed（现网该词生产者原全在 handler 层——此为首个 core 事件
+		// 生产者，r1 F-2）。消费面＝被动泵/relay 环路的 registry 簿记分支 + iOS
+		// runtimeStateStore；reducer 对该词零 case，永不写 timeline。
+		if ev.SessionState == nil || ev.SessionState.State == "" {
+			return "", nil, false
+		}
+		return "session_state_changed", map[string]interface{}{
+			"state": ev.SessionState.State,
+		}, false
+
 	case core.EventSessionCollaborationMode:
 		if ev.CollaborationMode == nil {
 			return "", nil, false

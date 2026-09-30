@@ -985,6 +985,16 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 				}
 			}
 
+			// S1（session-badges 上游对齐方案 §5.1④，F-10）：官方 thread/status/changed
+			// 的控制面投影——registry 簿记已在上方既有分支完成；发布走窄验证控制面入口
+			// （PublishSessionStateControlPlane，跳过 Kernel 摄入——不为从未打开的
+			// session 创建空 reducer 条目），不进下方受门 deltaBatcher 区（同一事件双出），
+			// 也不落 replay-free preview 分支。
+			if ev.Type == core.EventSessionState && ev.SessionState != nil {
+				h.eventPublisher.PublishSessionStateControlPlane(backendID, ev.SessionID, ev.SessionState.State)
+				continue
+			}
+
 			// Audit-008 W1.1 — single timeline-ingest owner. The passive
 			// path may only PUBLISH events for sessions that are observed
 			// WITHOUT an active session-route relay (set_observation_scope

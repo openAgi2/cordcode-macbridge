@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -1019,6 +1020,47 @@ func validateControlPlaneEvent(logical LogicalEvent) error {
 		return fmt.Errorf("control-plane %s must not be session-scoped", logical.Event)
 	}
 	return nil
+}
+
+// PublishSessionStateControlPlane（session-badges 上游对齐方案 §5.1④/§5.2，r4/r5
+// APPROVED v6）是 session_state_changed 的窄验证控制面发布入口：事件名固定、
+// backend+session 必填、无 PushIntent、state 词表受限于 running|requiresAction|idle。
+// 内部走 publishControlPlaneEvent 模式——跳过 Kernel 摄入（不为从未打开的 session
+// 创建空 reducer 条目，F-6 六环链；白名单隐含前提「有 kernel 态 ⇒ 曾打开」保持
+// 成立），EventBuffer append 与投递循环不变。与 validateControlPlaneEvent 并列的
+// 独立验证（有意不按名扩展后者：那会放宽 backend 级词与 session-scoped 禁令、全局
+// 改变 claude/grok 的摄入行为）——claude/grok 的 sendSessionEvent timeline 模式
+// 通路逐字节不变。
+// 返回盖章后的 EventMessage（发布原语成功的直接证据；连接级投递过滤在投递
+// 循环，属 D3/U4 面）。空返回值＝验证拒绝或发布失败。
+func (p *EventPublisher) PublishSessionStateControlPlane(backendID, sessionID, state string) EventMessage {
+	backendID = strings.TrimSpace(backendID)
+	sessionID = strings.TrimSpace(sessionID)
+	state = strings.TrimSpace(state)
+	if backendID == "" || sessionID == "" {
+		return EventMessage{}
+	}
+	switch state {
+	case "running", "requiresAction", "idle":
+	default:
+		slog.Debug("go-bridge: session_state control-plane dropped unknown state",
+			"backendID", backendID, "state", state)
+		return EventMessage{}
+	}
+	logical := LogicalEvent{
+		SessionID: sessionID,
+		BackendID: backendID,
+		Event:     "session_state_changed",
+		Data:      map[string]interface{}{"state": state},
+		Broadcast: true,
+	}
+	msg, err := p.publish(logical, publishControlPlaneEvent)
+	if err != nil {
+		slog.Warn("go-bridge: session_state control-plane publish failed",
+			"backendID", backendID, "error", err)
+		return EventMessage{}
+	}
+	return msg
 }
 
 // publish is the single stamping and delivery primitive for timeline and
