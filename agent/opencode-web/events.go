@@ -715,10 +715,23 @@ func (s *sseSubscriber) handleSessionStatus(properties map[string]any, sessionID
 	}
 	if status == "running" && sessionID != "" {
 		s.resetCompletion(sessionID)
+		// badges 验收轮：官方 session.status running/idle 即官方 web 会话列表的状态
+		// 信号——镜像为控制面执行态投影（go-bridge S1 分派 → session_state_changed），
+		// 外部/后台 session 的列表徽标由此获得实时鲜度（此前无任何状态事件）。
+		s.emit(core.Event{
+			Type:        core.EventSessionState,
+			SessionID:   sessionID,
+			SessionState: &core.SessionStateEvent{State: "running"},
+		})
 	}
 	if status == "idle" && sessionID != "" {
 		s.agent.clearRetrySnapshot(sessionID)
 		s.emitResultOnce(sessionID)
+		s.emit(core.Event{
+			Type:        core.EventSessionState,
+			SessionID:   sessionID,
+			SessionState: &core.SessionStateEvent{State: "idle"},
+		})
 	}
 }
 

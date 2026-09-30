@@ -3399,14 +3399,17 @@ func (h *Handlers) settleTurnOutcomeFromEvent(sessionID, eventName string, data 
 	h.sessions.markSettled(sessionID, outcome, time.Now())
 }
 
-// publishQuestionPendingState（badges 验收轮，黄点实时）：问题/结构化输入挂起→
+// publishQuestionPendingState（badges 验收轮，黄点实时）：需要用户注意的挂起→
 // requiresAction、解决→running 的控制面发布。调用方须保证单一摄入所有者互斥
 //（被动泵在 agentRelayRunning 时不调；relayEvents 循环对 owned session 调同款）。
+// 词表＝各官方「需要用户」信号：问题/结构化输入（question_*/user_input_*）与
+// 权限（permission_*，opencode/claude AskUserQuestion 家族——官方前端 needsAttention
+// ＝ hasPermissions || hasQuestions 同源）。
 func publishQuestionPendingState(h *Handlers, backendID, sessionID, eventName string) {
 	switch eventName {
-	case "question_asked", "user_input_requested":
+	case "question_asked", "user_input_requested", "permission_request":
 		h.eventPublisher.PublishSessionStateControlPlane(backendID, sessionID, "requiresAction")
-	case "question_resolved", "user_input_resolved":
+	case "question_resolved", "user_input_resolved", "permission_resolved":
 		h.eventPublisher.PublishSessionStateControlPlane(backendID, sessionID, "running")
 	}
 }

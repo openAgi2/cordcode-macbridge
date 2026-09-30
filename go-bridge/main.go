@@ -1011,6 +1011,21 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 			// agent relay 在跑时由 relayEvents 循环同款钩子发布（单一摄入所有者互斥）。
 			if !h.agentRelayRunningFor(ev.SessionID) {
 				publishQuestionPendingState(h, backendID, ev.SessionID, eventName)
+				// 蓝点及时性（owner 实测 opencode-web 全无徽标）：turn 终态 ⇒ 该 session
+				// 的 catalog updatedAt 刚刚变化——按 sessions_changed 的既有语义广播
+				// backend 级 invalidate（iOS 200ms 防抖刷新拿新 updatedAt/runtimeState）。
+				// 被动喂入的 backend（opencode-web/dsh/codex-remote attach）的 60s
+				// discovery 档由此在终态时刻即时补一拍。
+				if eventName == "turn_completed" || eventName == "turn_error" || eventName == "turn_aborted" {
+					if _, err := h.eventPublisher.PublishControlPlane(LogicalEvent{
+						BackendID: backendID,
+						Event:     "sessions_changed",
+						Broadcast: true,
+					}); err != nil {
+						slog.Debug("go-bridge: terminal sessions_changed control-plane publish failed",
+							"backend", backendID, "error", err)
+					}
+				}
 			}
 
 			// Audit-008 W1.1 — single timeline-ingest owner. The passive
