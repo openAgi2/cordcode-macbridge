@@ -667,9 +667,9 @@ func (h *Handlers) ocHandleAbortGeneration(conn Connection, msg WireMessage, dir
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
 	// 只有 session 确实被删除时才发完成事件，避免伪造状态
 	if ok {
-		// R4（session-list-status-badges §3.3）：直发一次性位点——abort 应答合成
-		// turn_completed(aborted)，按词表归 completed。
-		h.settleTurnOutcomeFromEvent(sessionID, "turn_completed", map[string]interface{}{"reason": "aborted"})
+		// R4 有意不 settle（u6-review-fix）：上方 deleteSession 已移除 registry 条目，
+		// settle 的缺席创建会重建条目、打破 abort 守卫测试的驱逐不变量。用户
+		// abort＝刻意收口（无 ❗）；未读走 updatedAt 锚点路径。
 		h.publishEvent(LogicalEvent{SessionID: sessionID, BackendID: msg.BackendID, Event: "turn_completed", Data: map[string]interface{}{"done": true, "reason": "aborted"}, Targets: []Connection{conn}})
 		h.publishEvent(LogicalEvent{SessionID: sessionID, BackendID: msg.BackendID, Event: "session_state_changed", Data: map[string]interface{}{"state": "idle"}, Targets: []Connection{conn}})
 	}

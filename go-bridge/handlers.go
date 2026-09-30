@@ -3604,9 +3604,9 @@ func (h *Handlers) handleAbortGeneration(conn Connection, msg WireMessage) {
 	// 真实终止，turn_completed → idle 由本层合成收口。共享 daemon 后端在本分支已
 	// 提前返回（见上），不适用。
 	if deleted && !sharedDaemonCodexBackend(backendID, h.codexBackendMode) {
-		// R4（session-list-status-badges §3.3）：直发一次性位点——用户发起的
-		// abort 合成 turn_completed(aborted)，按词表归 completed。
-		h.settleTurnOutcomeFromEvent(sessionID, "turn_completed", map[string]interface{}{"reason": "aborted"})
+		// R4 有意不 settle（u6-review-fix）：本分支上方 deleteSession 已移除 registry
+		// 条目，settle 的缺席创建会重建条目、打破 slot 驱逐不变量（abort 守卫测试）。
+		// 用户 abort＝刻意收口（无 ❗ 语义）；未读信号走 updatedAt 锚点路径。
 		h.publishEvent(LogicalEvent{
 			BackendID: backendID,
 			SessionID: sessionID,
