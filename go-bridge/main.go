@@ -265,6 +265,12 @@ func Main() {
 		}
 		slog.Info("go-bridge: agent registered", "backendId", id, "agent", agentName, "workDir", *workDir)
 
+		// badges 验收轮：claude stub 官方 status 轮询（~/.claude/sessions/*.json 的
+		// busy/idle 即官方桌面端同源信号）——外部 session 列表徽标秒级鲜度。
+		if isClaudeBackendID(id) {
+			startClaudeStubStatusPoller(handlers, id)
+		}
+
 		if sub, ok := agent.(core.LiveEventSubscriber); ok {
 			attacher, _ := agent.(core.LiveEventCatalogAttacher)
 			go startPassiveSubscription(ctx, handlers, id, sub.SubscribeLive, true, attacher)
@@ -998,6 +1004,13 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 			if ev.Type == core.EventSessionState && ev.SessionState != nil {
 				h.eventPublisher.PublishSessionStateControlPlane(backendID, ev.SessionID, ev.SessionState.State)
 				continue
+			}
+			// 黄点实时（badges 验收轮）：问题/结构化输入挂起 → requiresAction；解决 →
+			// running。官方同源信号（opencode permission/question、dsh journal、codex
+			// user_input）此前只进 timeline/投影词（syncV2 封印），列表行黄点无实时路径。
+			// agent relay 在跑时由 relayEvents 循环同款钩子发布（单一摄入所有者互斥）。
+			if !h.agentRelayRunningFor(ev.SessionID) {
+				publishQuestionPendingState(h, backendID, ev.SessionID, eventName)
 			}
 
 			// Audit-008 W1.1 — single timeline-ingest owner. The passive

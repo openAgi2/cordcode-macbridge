@@ -3170,6 +3170,8 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 
 			// Sync session runtimeState from relayed events to memory sessionRegistry
 			h.applyRelayEventRegistrySync(sessionID, eventName, data)
+			// 黄点实时（relay 侧同款钩子——本循环是该 session 的摄入所有者）。
+			publishQuestionPendingState(h, backendID, sessionID, eventName)
 
 			if eventCount <= 3 || eventName == "todos_updated" || eventName == "turn_completed" || eventName == "error" {
 				slog.Info("go-bridge: relayEvents forwarding", "backendID", backendID, "sessionID", sessionID, "event", eventName, "seq", eventCount)

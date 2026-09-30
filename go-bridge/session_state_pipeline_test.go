@@ -7,6 +7,9 @@ package gobridge
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -238,5 +241,111 @@ func TestHelloSupportsSessionStateEventsV1(t *testing.T) {
 	no := HelloMessage{Capabilities: []string{"session_sync_v2"}}
 	if !helloSupportsSessionStateEventsV1(&yes) || helloSupportsSessionStateEventsV1(&no) {
 		t.Fatalf("capability parsing mismatch")
+	}
+}
+
+// 黄点实时钩子（badges 验收轮）：问题挂起→requiresAction、解决→running、其他词 no-op。
+func TestPublishQuestionPendingState(t *testing.T) {
+	h := NewHandlers()
+	conn := newPublisherCaptureConn(nil)
+	h.broadcaster.RegisterConn(conn)
+
+	publishQuestionPendingState(h, "dsh-web", "s-q", "user_input_requested")
+	publishQuestionPendingState(h, "dsh-web", "s-q", "question_asked")
+	conn.waitCount(t, 2)
+	for i, f := range conn.snapshot() {
+		frame, ok := f.(EventMessage)
+		if !ok || frame.Event != "session_state_changed" {
+			t.Fatalf("frame %d = %#v", i, f)
+		}
+		if m, _ := frame.Data.(map[string]interface{}); m["state"] != "requiresAction" {
+			t.Fatalf("frame %d state = %#v", i, frame.Data)
+		}
+	}
+
+	publishQuestionPendingState(h, "dsh-web", "s-q", "question_resolved")
+	publishQuestionPendingState(h, "dsh-web", "s-q", "user_input_resolved")
+	conn.waitCount(t, 4)
+	tail := conn.snapshot()[2:]
+	for i, f := range tail {
+		if frame, ok := f.(EventMessage); !ok {
+			t.Fatalf("resolved frame %d = %#v", i, f)
+		} else if m, _ := frame.Data.(map[string]interface{}); m["state"] != "running" {
+			t.Fatalf("resolved frame %d state = %#v", i, frame.Data)
+		}
+	}
+
+	// 无关词 no-op。
+	publishQuestionPendingState(h, "dsh-web", "s-q", "text_delta")
+	if got := len(conn.snapshot()); got != 4 {
+		t.Fatalf("unrelated word published: %d frames", got)
+	}
+}
+
+// claude stub 官方 status 轮询器：busy/idle 转移 → 控制面发布；死进程残桩收口 idle；
+// 首轮只登记不发布（启动风暴防护）；状态不变不重复发布。
+func TestClaudeStubStatusPollerTransitions(t *testing.T) {
+	h := NewHandlers()
+	conn := newPublisherCaptureConn(nil)
+	h.broadcaster.RegisterConn(conn)
+
+	dir := t.TempDir()
+	p := &claudeStubStatusPoller{
+		h:             h,
+		backendID:     "claude",
+		sessionsDir:   dir,
+		lastPublished: nil,
+		stop:          make(chan struct{}),
+	}
+	livePID := os.Getpid()
+	writeStub := func(sid string, pid int, status string) {
+		t.Helper()
+		data := fmt.Sprintf(`{"pid":%d,"sessionId":%q,"cwd":"/tmp","status":%q}`, pid, sid, status)
+		if err := os.WriteFile(filepath.Join(dir, "stub.json"), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 首轮（busy，活进程）：只登记。
+	writeStub("s-stub", livePID, "busy")
+	p.pollOnce()
+	if got := len(conn.snapshot()); got != 0 {
+		t.Fatalf("first poll must not publish: %d frames", got)
+	}
+	// idle 转移 → 发布 idle。
+	writeStub("s-stub", livePID, "idle")
+	p.pollOnce()
+	conn.waitCount(t, 1)
+	// 同态不重复。
+	p.pollOnce()
+	time.Sleep(50 * time.Millisecond)
+	if got := len(conn.snapshot()); got != 1 {
+		t.Fatalf("same-state poll republished: %d", got)
+	}
+	// busy 转移 → running。
+	writeStub("s-stub", livePID, "busy")
+	p.pollOnce()
+	conn.waitCount(t, 2)
+	frames := conn.snapshot()
+	if m, _ := frames[1].(EventMessage).Data.(map[string]interface{}); m["state"] != "running" {
+		t.Fatalf("busy frame = %#v", frames[1])
+	}
+	// 死进程残桩（上次在转）→ 收口 idle。
+	deadPID := 9999999
+	writeStub("s-stub", deadPID, "busy")
+	p.pollOnce()
+	conn.waitCount(t, 3)
+	latest := conn.snapshot()[2].(EventMessage)
+	if m, _ := latest.Data.(map[string]interface{}); m["state"] != "idle" {
+		t.Fatalf("dead-stub close frame = %#v", latest.Data)
+	}
+	// stub 消失且上次不在转 → 无发布。
+	if err := os.Remove(filepath.Join(dir, "stub.json")); err != nil {
+		t.Fatal(err)
+	}
+	p.pollOnce()
+	time.Sleep(50 * time.Millisecond)
+	if got := len(conn.snapshot()); got != 3 {
+		t.Fatalf("vanished non-running stub published: %d", got)
 	}
 }
