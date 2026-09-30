@@ -201,6 +201,12 @@ func (h *Handlers) enrichSessionStateWithAgent(mapped map[string]interface{}, ag
 			}
 		}
 		mapped["runtimeState"] = state
+		// lastOutcome（session-list-status-badges §3.4）：get_session 单 session 叠加
+		// 与列表叠加点同语义——outcome 非空才发。
+		if outcome, outcomeAt := h.sessions.lastOutcomeFor(sessionID); outcome != "" {
+			mapped["lastOutcome"] = outcome
+			mapped["lastOutcomeAtMillis"] = outcomeAt.UnixMilli()
+		}
 	}
 	return mapped
 }
@@ -283,6 +289,11 @@ func (h *Handlers) applyListRuntimeState(mapped map[string]interface{}, runningM
 	if sessionID, _ := mapped["id"].(string); sessionID != "" {
 		if ts, ok := h.sessions.get(sessionID); ok && string(ts.state) != "" {
 			state = string(ts.state)
+		}
+		// lastOutcome（session-list-status-badges §3.4）：可选字段，outcome 非空才发。
+		if outcome, outcomeAt := h.sessions.lastOutcomeFor(sessionID); outcome != "" {
+			mapped["lastOutcome"] = outcome
+			mapped["lastOutcomeAtMillis"] = outcomeAt.UnixMilli()
 		}
 		if runningMap != nil {
 			if runningMap[sessionID] {
@@ -629,6 +640,9 @@ func (h *Handlers) ocHandleAbortGeneration(conn Connection, msg WireMessage, dir
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
 	// 只有 session 确实被删除时才发完成事件，避免伪造状态
 	if ok {
+		// R4（session-list-status-badges §3.3）：直发一次性位点——abort 应答合成
+		// turn_completed(aborted)，按词表归 completed。
+		h.settleTurnOutcomeFromEvent(sessionID, "turn_completed", map[string]interface{}{"reason": "aborted"})
 		h.publishEvent(LogicalEvent{SessionID: sessionID, BackendID: msg.BackendID, Event: "turn_completed", Data: map[string]interface{}{"done": true, "reason": "aborted"}, Targets: []Connection{conn}})
 		h.publishEvent(LogicalEvent{SessionID: sessionID, BackendID: msg.BackendID, Event: "session_state_changed", Data: map[string]interface{}{"state": "idle"}, Targets: []Connection{conn}})
 	}

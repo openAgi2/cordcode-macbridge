@@ -3357,7 +3357,50 @@ func (h *Handlers) rebindSessionIDIfResolved(currentID string, sess core.AgentSe
 	return realID
 }
 
+// settleTurnOutcomeFromEvent（session-list-status-badges §3.3）按 (eventName, reason)
+// 词表把 turn 终态归类为上次执行结局写入 registry。只写控制面字段，不改执行态、不触
+// projection。词表依据（r4 F-15 上游核验 codex e72da2b5）：
+//   - turn_completed（任意 reason）→ completed；claude live 用户中断走
+//     turn_completed(user_interrupt)，天然落此分支
+//   - turn_error / error → failed
+//   - turn_aborted: user_interrupt（claude hydrate）/ 字面量 "turn_aborted"（codex）/
+//     official_turn_status（codex-remote）→ completed（刻意收口，上游 TurnAbortReason
+//     全为刻意变体、真实失败走 terminal_error 独立路径）；leader_disconnect /
+//     process_death → failed；未知 reason → failed（fail-closed，D2 可改）
+//
+// 有意不接入的生产者见方案 R5（hydrate/重放/push-only——历史重放不得成为 outcome
+// 第二真相）与 R8（events_channel_closed / idle 超时兜底合成——负证据收口非结局观测，
+// 「真结局未知」不得记 completed）。
+func (h *Handlers) settleTurnOutcomeFromEvent(sessionID, eventName string, data interface{}) {
+	if sessionID == "" {
+		return
+	}
+	var outcome string
+	switch eventName {
+	case "turn_completed":
+		outcome = "completed"
+	case "turn_error", "error":
+		outcome = "failed"
+	case "turn_aborted":
+		reason := ""
+		if m, ok := data.(map[string]interface{}); ok {
+			reason = dataString(m, "reason")
+		}
+		switch reason {
+		case "user_interrupt", "turn_aborted", "official_turn_status":
+			outcome = "completed"
+		default:
+			// leader_disconnect / process_death / 未知 reason。
+			outcome = "failed"
+		}
+	default:
+		return
+	}
+	h.sessions.markSettled(sessionID, outcome, time.Now())
+}
+
 func (h *Handlers) sendSessionEvent(sessionID, backendID, eventName string, data interface{}) {
+	h.settleTurnOutcomeFromEvent(sessionID, eventName, data)
 	h.mu.Lock()
 	dir := h.sessions.directoryForSession(sessionID)
 	h.mu.Unlock()
@@ -3386,6 +3429,7 @@ func (h *Handlers) sendSessionEventWithPushIntent(sessionID, backendID, eventNam
 // sendSessionEventWithPushIntentPreview 在 sendSessionEventWithPushIntent 基础上携带
 // 完成正文预览覆盖（claude relay 循环累积器提供，见 pushIntentForRelayTerminal）。
 func (h *Handlers) sendSessionEventWithPushIntentPreview(sessionID, backendID, eventName string, data interface{}, previewOverride string) {
+	h.settleTurnOutcomeFromEvent(sessionID, eventName, data)
 	h.mu.Lock()
 	dir := h.sessions.directoryForSession(sessionID)
 	h.mu.Unlock()
@@ -3560,6 +3604,9 @@ func (h *Handlers) handleAbortGeneration(conn Connection, msg WireMessage) {
 	// 真实终止，turn_completed → idle 由本层合成收口。共享 daemon 后端在本分支已
 	// 提前返回（见上），不适用。
 	if deleted && !sharedDaemonCodexBackend(backendID, h.codexBackendMode) {
+		// R4（session-list-status-badges §3.3）：直发一次性位点——用户发起的
+		// abort 合成 turn_completed(aborted)，按词表归 completed。
+		h.settleTurnOutcomeFromEvent(sessionID, "turn_completed", map[string]interface{}{"reason": "aborted"})
 		h.publishEvent(LogicalEvent{
 			BackendID: backendID,
 			SessionID: sessionID,

@@ -300,6 +300,12 @@ type trackedSession struct {
 	// put/putRaw/claimRunning/markIdle/markUnknown 都盖新 gen，使旧的被动
 	// claim（releasePassiveClaim 携带的 gen）在任意后续变更后自动失效。
 	gen uint64
+	// lastOutcome / lastOutcomeAt（session-list-status-badges §3.3）：上次执行
+	// 结局（"" | "completed" | "failed"）与 settle 时刻（Mac 时钟域）。只由
+	// markSettled 写入、claimRunning 清空；markIdle/markUnknown 不动它（执行态
+	// 收口但结局未知的信号不得抹掉已观测的结局）。内存态，进程重启即失。
+	lastOutcome   string
+	lastOutcomeAt time.Time
 }
 
 type sessionRegistry struct {
@@ -395,19 +401,26 @@ func (r *sessionRegistry) claimRunning(sessionID string) uint64 {
 	var backendID string
 	r.genCounter++
 	gen := r.genCounter
+	clearOutcome := func(t *trackedSession) {
+		// 新 turn 取代旧结局（session-list-status-badges §3.3）。
+		t.lastOutcome = ""
+		t.lastOutcomeAt = time.Time{}
+	}
 	if t, ok := r.sessions[sessionID]; ok {
 		t.state = sessionStateRunning
 		t.lastUsedAt = time.Now()
 		t.gen = gen
+		clearOutcome(t)
 		backendID = t.backendID
 	} else {
-		r.sessions[sessionID] = &trackedSession{
+		t := &trackedSession{
 			sessionID:   sessionID,
 			state:       sessionStateRunning,
 			lastUsedAt:  time.Now(),
 			lastEventAt: time.Now(),
 			gen:         gen,
 		}
+		r.sessions[sessionID] = t
 	}
 	cb := r.onStateChange
 	r.mu.Unlock()
@@ -472,6 +485,44 @@ func (r *sessionRegistry) markUnknown(sessionID string) {
 	if cb != nil {
 		cb(backendID, sessionID, string(sessionStateUnknown))
 	}
+}
+
+// markSettled（session-list-status-badges §3.3）记录上次执行结局；不改执行态
+// （执行态仍由 markIdle 收口）、不触发 onStateChange。条目缺席时创建 idle 行
+// （与 markIdle 同纪律——settle 调用点的 sessionID 都来自真实事件流）。
+func (r *sessionRegistry) markSettled(sessionID, outcome string, settledAt time.Time) {
+	if sessionID == "" || (outcome != "completed" && outcome != "failed") {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.genCounter++
+	if t, ok := r.sessions[sessionID]; ok {
+		t.lastOutcome = outcome
+		t.lastOutcomeAt = settledAt
+		t.gen = r.genCounter
+	} else {
+		r.sessions[sessionID] = &trackedSession{
+			sessionID:     sessionID,
+			state:         sessionStateIdle,
+			lastUsedAt:    time.Now(),
+			lastEventAt:   time.Now(),
+			gen:           r.genCounter,
+			lastOutcome:   outcome,
+			lastOutcomeAt: settledAt,
+		}
+	}
+}
+
+// lastOutcomeFor 在锁内拷贝结局字段，供列表叠加点安全读取。
+func (r *sessionRegistry) lastOutcomeFor(sessionID string) (string, time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.sessions[sessionID]
+	if !ok || t == nil || t.lastOutcome == "" {
+		return "", time.Time{}
+	}
+	return t.lastOutcome, t.lastOutcomeAt
 }
 
 // isKnownActive（D-G2，§3.5.2）：known-active = 已登记且 running/closing。

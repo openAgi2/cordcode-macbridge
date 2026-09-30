@@ -317,16 +317,7 @@ func (h *Handlers) coverClaudeTrailingUnansweredAsk(
 	}
 	switch res.outcome {
 	case claudeCoverageDead:
-		// 同一 hydrate 内追加 turn_aborted：未答 Ask 的 turn 收口为 terminal
-		//（reducer 按 §4.4 把 pending user_input 翻 pending+turn_terminated）。
-		for _, turnID := range pendingTurnIDs {
-			h.projectionKernel.ApplyHydrateEvent(
-				backendID, sessionID, h.eventPublisher.BridgeEpoch(),
-				"turn_aborted", map[string]interface{}{
-					"turnId": turnID, "reason": "process_death",
-				},
-			)
-		}
+		h.settleClaudeCoverageDeadTurns(backendID, sessionID, pendingTurnIDs)
 		slog.Info("go-bridge: claude hydrate coverage dead; synthesized turn_aborted",
 			"backendID", backendID, "sessionPrefix", projectionSessionLogPrefix(sessionID),
 			"turns", len(pendingTurnIDs))
@@ -339,6 +330,24 @@ func (h *Handlers) coverClaudeTrailingUnansweredAsk(
 		}
 		return false, errors.New("claude relay coverage: unexpected failed outcome")
 	}
+}
+
+// settleClaudeCoverageDeadTurns（session-list-status-badges §3.3 R7）：coverage
+// 探测判定进程死亡的活观测——同一 hydrate 内追加 turn_aborted：未答 Ask 的 turn
+// 收口为 terminal（reducer 按 §4.4 把 pending user_input 翻 pending+turn_terminated）；
+// 并按词表 (turn_aborted, process_death)→failed settle registry outcome（同分支各
+// turn 的 (eventName, reason) 相同，幂等纪律下一次 settle 即可）。不接则该失败子路径
+// 的 ❗ 静默缺位。
+func (h *Handlers) settleClaudeCoverageDeadTurns(backendID, sessionID string, pendingTurnIDs []string) {
+	for _, turnID := range pendingTurnIDs {
+		h.projectionKernel.ApplyHydrateEvent(
+			backendID, sessionID, h.eventPublisher.BridgeEpoch(),
+			"turn_aborted", map[string]interface{}{
+				"turnId": turnID, "reason": "process_death",
+			},
+		)
+	}
+	h.settleTurnOutcomeFromEvent(sessionID, "turn_aborted", map[string]interface{}{"reason": "process_death"})
 }
 
 // commitClaudeHydrateWithCoverage 是 lease 持有下的最终 commit（设计 v6 §4.3.3）：

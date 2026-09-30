@@ -183,6 +183,9 @@ func (h *Handlers) reconcileThreadTurns(
 	epoch := h.eventPublisher.BridgeEpoch()
 	for _, c := range closures {
 		h.projectionKernel.ApplyHydrateEvent(backendID, threadID, epoch, c.event, c.data)
+		// R6（session-list-status-badges §3.3）：官方 summary 已终态的活观测（非历史
+		// 重放）——settle registry outcome；闭包只封口基线中仍 running 的 turn。
+		h.settleTurnOutcomeFromEvent(threadID, c.event, c.data)
 	}
 	commit, err := h.projectionKernel.CommitHydrateTransaction(backendID, threadID)
 	if err != nil {

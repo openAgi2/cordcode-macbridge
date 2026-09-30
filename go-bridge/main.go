@@ -964,6 +964,8 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 					// 报错、旧 opencode 81ms 零输出）结束后 registry 永远 running，
 					// 列表 runtimeState 卡「执行中」且冷开复种（owner 实测 2026-08-19）。
 					h.sessions.markIdle(ev.SessionID)
+					// R2（session-list-status-badges §3.3）：被动泵终态 settle outcome。
+					h.settleTurnOutcomeFromEvent(ev.SessionID, eventName, data)
 				} else if eventName == "session_state_changed" {
 					if dataMap, ok := data.(map[string]interface{}); ok {
 						if state, ok := dataMap["state"].(string); ok {

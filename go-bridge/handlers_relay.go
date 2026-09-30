@@ -3045,6 +3045,39 @@ func (h *Handlers) rebindRelayKind(fromID, toID, kind string) {
 // 且事件通道没有跨进程共享事件总线，它的 relayEvents goroutine 在完成一轮（EventResult）或空闲时
 // 绝不能退出（通过 continue 忽略）。这也意味着该 goroutine 和底层 session 会常驻在内存中，
 // 其最终生命周期的释放依赖于 session 显式关闭/删除导致 events channel 关闭。这需要注意潜在的泄漏风险。
+// applyRelayEventRegistrySync（session-list-status-badges §3.3 R3）：agent 连接
+// relay 主转发路径的 registry 同步块（原内联于 relayEvents）。markIdle 词表维持
+// 原状——turn_error/turn_aborted 的执行态收口由 EventResult 后置分支
+// broadcastIdleState 兜底（r4 F-14 亲核），词表对齐与否两分支都与 ❗ 保全相容。
+// settle 覆盖经主转发路径的终态族：EventResult(Done+Error)→turn_error 的合成本身
+// 绕块直发，但同一 core.EventError 先经 mapAgentEvent 映射 "error"（events.go:221-228）
+// 过本块，失败 settle 由 "error" 那遍功能等价覆盖。R8 两兜底合成
+// （events_channel_closed / idle 超时）不经本块、有意不 settle（负证据收口非结局观测）。
+func (h *Handlers) applyRelayEventRegistrySync(sessionID, eventName string, data interface{}) {
+	if eventName == "turn_started" {
+		h.sessions.markRunning(sessionID)
+	} else if eventName == "turn_completed" || eventName == "error" {
+		h.sessions.markIdle(sessionID)
+		h.settleTurnOutcomeFromEvent(sessionID, eventName, data)
+	} else if eventName == "session_state_changed" {
+		if dataMap, ok := data.(map[string]interface{}); ok {
+			if state, ok := dataMap["state"].(string); ok {
+				if state == "running" || state == "requiresAction" {
+					h.sessions.markRunning(sessionID)
+				} else if state == "idle" {
+					h.sessions.markIdle(sessionID)
+				}
+			}
+		}
+	} else if eventName == "session_status_changed" {
+		if dataMap, ok := data.(map[string]interface{}); ok {
+			if isIdle, ok := dataMap["isIdle"].(bool); ok && isIdle {
+				h.sessions.markIdle(sessionID)
+			}
+		}
+	}
+}
+
 func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionID, backendID string, gen ...uint64) {
 	var relayGen uint64
 	if len(gen) > 0 {
@@ -3136,27 +3169,7 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 			h.backfillClaudeStreamTurnID(backendID, sessionID, eventName, data)
 
 			// Sync session runtimeState from relayed events to memory sessionRegistry
-			if eventName == "turn_started" {
-				h.sessions.markRunning(sessionID)
-			} else if eventName == "turn_completed" || eventName == "error" {
-				h.sessions.markIdle(sessionID)
-			} else if eventName == "session_state_changed" {
-				if dataMap, ok := data.(map[string]interface{}); ok {
-					if state, ok := dataMap["state"].(string); ok {
-						if state == "running" || state == "requiresAction" {
-							h.sessions.markRunning(sessionID)
-						} else if state == "idle" {
-							h.sessions.markIdle(sessionID)
-						}
-					}
-				}
-			} else if eventName == "session_status_changed" {
-				if dataMap, ok := data.(map[string]interface{}); ok {
-					if isIdle, ok := dataMap["isIdle"].(bool); ok && isIdle {
-						h.sessions.markIdle(sessionID)
-					}
-				}
-			}
+			h.applyRelayEventRegistrySync(sessionID, eventName, data)
 
 			if eventCount <= 3 || eventName == "todos_updated" || eventName == "turn_completed" || eventName == "error" {
 				slog.Info("go-bridge: relayEvents forwarding", "backendID", backendID, "sessionID", sessionID, "event", eventName, "seq", eventCount)
