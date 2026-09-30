@@ -1,3 +1,23 @@
+## 2026-09-30：registry lastOutcome（session 列表三态徽标的数据半边）——settle 路由 R1–R8 复盘
+
+iOS session 列表三态徽标（转圈/红❗/蓝点，方案 docs/2026-09-30-session-list-status-badges-plan.md
+v9，iOS 仓）的 Mac 侧半边：registry `trackedSession` 增 `lastOutcome/lastOutcomeAt`，
+`markSettled` 写入、`claimRunning` 清空、`markIdle` 不动（执行态收口≠结局未知要抹结局——
+该不变量有定向测试锁死）；列表/单 session 叠加点（applyListRuntimeState/
+enrichSessionStateWithAgent）下发可选 `lastOutcome`/`lastOutcomeAtMillis`（0a60b8d，
+7 用例含 -race；protocol pack 入册 e9d3734，已部署）。
+
+方案评审的最大教训在接线面：v1 假设「两个 registry 同步块」能拦截全部终态，被 r2 F-6
+证伪——claude/codex file-relay 的 turn 终态经 sendSessionEvent*→publishEvent 直发，
+根本不经那两个块（2026-08-27 生产取证注释早就写在 handlers.go:3376 一带）。修订后的
+settle 按「终态出站路由」清点（R1–R8）：send 层两入口内嵌（自动覆盖全部经 send 层的
+调用方）、被动泵/relay 同步块、两一次性 abort 位点、reconcile 提交循环、coverage dead
+分支；**有意不接** R5（hydrate/重放/push-only——历史重放不得成为 outcome 第二真相）
+与 R8（channel_closed/idle 超时兜底合成——负证据收口把「真结局未知」记成 completed
+违反「不知道就不亮」，且机械接 settle 会让 ❗ 正确性依赖 relay 块词表不对称这一脆弱
+不变量）。relay 块的 markIdle 词表维持原状（EventResult 后置 broadcastIdleState 兜底，
+r4 亲核）——「只加 markSettled 不动 markIdle」是评估覆写微决策后的显式选择。
+
 
 ## 2026-09-29 legacy dsh/opencode 目录级废弃：agent/dsh、agent/opencode 移入 deprecated/，驱动不再注册（owner 真机验收 ✅）
 
