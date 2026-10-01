@@ -280,6 +280,11 @@ const (
 	sessionStateIdle    sessionState = "idle"
 	sessionStateRunning sessionState = "running"
 	sessionStateClosing sessionState = "closing"
+	// sessionStateRequiresAction（黄点耐久性，2026-10-01）：question/结构化输入
+	// 挂起中的 turn 执行态——turn 在飞、等用户输入。列表快照由此携带 requiresAction
+	// （iOS 徽标跨刷新/冷启动耐久）；计入 isKnownActive（挂起＝turn in flight）；
+	// 不被 cleanupIdleSessions 逐出（只逐出 idle）。
+	sessionStateRequiresAction sessionState = "requiresAction"
 	// sessionStateUnknown（D-G2，§3.5.2）：只读 leader relay 主动下线后真实
 	// session 的「状态未知」——订阅者已离开、turn 结果未观测，真值靠重开冷拉 +
 	// 新 relay 重建。unknown 不是 idle（不冒充空闲），也不计 known-active
@@ -458,6 +463,38 @@ func (r *sessionRegistry) markRunning(sessionID string) {
 	r.claimRunning(sessionID)
 }
 
+// markRequiresAction（黄点耐久性，2026-10-01）：question 挂起 → registry 执行态
+// requiresAction。纪律镜像 markRunning（盖新 gen、刷新时间戳、缺席创建、锁外
+// fire onStateChange）；有意偏离 claimRunning 的 outcomes 清空——turn 在飞，
+// outcome 已被先前 claimRunning 清空，此处不得触碰（iOS 徽标 resolve 时
+// requiresAction 优先于 lastOutcome，保留已观测结局）。user_input_resolved 后
+// 由 markRunning 恢复；turn 终态由既有 markIdle 收口。
+func (r *sessionRegistry) markRequiresAction(sessionID string) {
+	r.mu.Lock()
+	var backendID string
+	r.genCounter++
+	gen := r.genCounter
+	if t, ok := r.sessions[sessionID]; ok {
+		t.state = sessionStateRequiresAction
+		t.lastUsedAt = time.Now()
+		t.gen = gen
+		backendID = t.backendID
+	} else {
+		r.sessions[sessionID] = &trackedSession{
+			sessionID:   sessionID,
+			state:       sessionStateRequiresAction,
+			lastUsedAt:  time.Now(),
+			lastEventAt: time.Now(),
+			gen:         gen,
+		}
+	}
+	cb := r.onStateChange
+	r.mu.Unlock()
+	if cb != nil {
+		cb(backendID, sessionID, string(sessionStateRequiresAction))
+	}
+}
+
 func (r *sessionRegistry) touch(sessionID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -572,7 +609,10 @@ func (r *sessionRegistry) isKnownActive(sessionID string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	t, ok := r.sessions[sessionID]
-	return ok && t != nil && (t.state == sessionStateRunning || t.state == sessionStateClosing)
+	// requiresAction 计入（黄点耐久性，2026-10-01）：挂起 question 是「turn in
+	// flight」（handlers_relay.go isKnownActive 注释同义）；对 turn_started 先行
+	// 观测的正常序列，挂起期此前即 running=known-active，行为不变。
+	return ok && t != nil && (t.state == sessionStateRunning || t.state == sessionStateClosing || t.state == sessionStateRequiresAction)
 }
 
 // passiveClaimReleaseOutcome（D-G2，§3.5.2）：被动 claim 下线的三种结局。

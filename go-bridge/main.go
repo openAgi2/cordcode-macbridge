@@ -980,8 +980,13 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 				} else if eventName == "session_state_changed" {
 					if dataMap, ok := data.(map[string]interface{}); ok {
 						if state, ok := dataMap["state"].(string); ok {
-							if state == "running" || state == "requiresAction" {
+							// requiresAction 不并入 markRunning（黄点耐久性，2026-10-01）：
+							// codex-remote ThreadStatus(active+activeFlags) 经此路径发
+							// requiresAction，降级成 running 会让快照与控制面分歧。
+							if state == "running" {
 								h.sessions.markRunning(ev.SessionID)
+							} else if state == "requiresAction" {
+								h.sessions.markRequiresAction(ev.SessionID)
 							} else if state == "idle" {
 								h.sessions.markIdle(ev.SessionID)
 							}
@@ -1010,6 +1015,9 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 			// user_input）此前只进 timeline/投影词（syncV2 封印），列表行黄点无实时路径。
 			// agent relay 在跑时由 relayEvents 循环同款钩子发布（单一摄入所有者互斥）。
 			if !h.agentRelayRunningFor(ev.SessionID) {
+				// 黄点耐久性（2026-10-01）：同门同步 registry——快照携带 requiresAction，
+				// iOS 徽标才能跨列表刷新存活（live 发布只解决瞬时点亮）。
+				h.applyQuestionRegistrySync(ev.SessionID, eventName)
 				publishQuestionPendingState(h, backendID, ev.SessionID, eventName)
 				// 蓝点及时性（owner 实测 opencode-web 全无徽标）：turn 终态 ⇒ 该 session
 				// 的 catalog updatedAt 刚刚变化——按 sessions_changed 的既有语义广播

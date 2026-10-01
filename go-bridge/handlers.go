@@ -3414,6 +3414,21 @@ func publishQuestionPendingState(h *Handlers, backendID, sessionID, eventName st
 	}
 }
 
+// applyQuestionRegistrySync（黄点耐久性，2026-10-01）：question 挂起/解除 →
+// registry 执行态，与 publishQuestionPendingState 同调用点成对出现（被动泵经
+// agentRelayRunningFor 门、relay 循环作为摄入 owner），保持单一写入者纪律。
+// registry 是 list_sessions 快照执行态的唯一 owner——live 控制面发布只解决
+// 瞬时点亮，快照携带才能让 iOS 徽标跨列表刷新/冷启动存活。permission_* 不在
+// 此接线（A-2 冻结：无 1.18.32 permission 双帧样本不得实现）。
+func (h *Handlers) applyQuestionRegistrySync(sessionID, eventName string) {
+	switch eventName {
+	case "user_input_requested", "question_asked":
+		h.sessions.markRequiresAction(sessionID)
+	case "user_input_resolved", "question_resolved":
+		h.sessions.markRunning(sessionID)
+	}
+}
+
 func (h *Handlers) sendSessionEvent(sessionID, backendID, eventName string, data interface{}) {
 	h.settleTurnOutcomeFromEvent(sessionID, eventName, data)
 	h.mu.Lock()

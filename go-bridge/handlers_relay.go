@@ -3062,8 +3062,12 @@ func (h *Handlers) applyRelayEventRegistrySync(sessionID, eventName string, data
 	} else if eventName == "session_state_changed" {
 		if dataMap, ok := data.(map[string]interface{}); ok {
 			if state, ok := dataMap["state"].(string); ok {
-				if state == "running" || state == "requiresAction" {
+				// requiresAction 不并入 markRunning（黄点耐久性，2026-10-01）：
+				// 降级成 running 会让快照与控制面 requiresAction 分歧。
+				if state == "running" {
 					h.sessions.markRunning(sessionID)
+				} else if state == "requiresAction" {
+					h.sessions.markRequiresAction(sessionID)
 				} else if state == "idle" {
 					h.sessions.markIdle(sessionID)
 				}
@@ -3171,6 +3175,8 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 			// Sync session runtimeState from relayed events to memory sessionRegistry
 			h.applyRelayEventRegistrySync(sessionID, eventName, data)
 			// 黄点实时（relay 侧同款钩子——本循环是该 session 的摄入所有者）。
+			// 黄点耐久性（2026-10-01）：同位同步 registry——快照携带 requiresAction。
+			h.applyQuestionRegistrySync(sessionID, eventName)
 			publishQuestionPendingState(h, backendID, sessionID, eventName)
 
 			if eventCount <= 3 || eventName == "todos_updated" || eventName == "turn_completed" || eventName == "error" {
