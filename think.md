@@ -2878,3 +2878,14 @@ Track A 两修复部署后 owner 实测转圈 ✅、黄点不亮，交接怀疑 
 硅谷故事 question 15:02:21 asked → 16:02:23 resolved → 16:02:32 turn_completed（挂起约 1 小时，registry 全程 running；owner 看到的「转圈正常」在该窗口内实为陈旧 running）。修复＝registry 增加 requiresAction 表达＋两条摄入路径 question 事件接线（permission 不动，A-2 冻结）＋isKnownActive 计入＋列表路径零改动＋iOS 零改动；cleanupIdleSessions 只逐出 idle 条目，requiresAction 不会被槽位清理误杀，无需 outcome 式侧存。方案与评审记录在 iOS 仓 docs/2026-10-01-question-badge-registry-requires-action-plan.md。
 
 修复 0dc76aa55616（方案 v2 r2 APPROVED，iOS 仓 docs/2026-10-01-question-badge-registry-requires-action-plan.md）：registry 增 sessionStateRequiresAction＋markRequiresAction（镜像 markRunning 纪律、不动 outcomes）＋isKnownActive 计入；applyQuestionRegistrySync 与 publishQuestionPendingState 同位成对接线两条摄入路径（permission 不动，A-2 冻结）；两处同步块 session_state_changed(requiresAction) 不再降级 markRunning（codex-remote ThreadStatus 现存路径）。定向 6 用例＋opencode-web/codex-remote 全包绿，go-bridge 全包仅既有基线红（TestRelayEventsForwardsUserInputRequested，task_93af8314，HEAD 无改动复现确认）。已部署（runtime 自报 0dc76aa55616，SSE 订阅在线零 panic）。覆盖边界：dsh-web/claudecode 列表快照仍由权威 runningMap 决定（快照耐久性维持现状，实时黄点不受影响）；bridge 重启丢内存态（恢复属 A-2 §5 证据门）。owner 耐久性复测（触发→回前台仍黄→答复收口）待验收。
+
+## 2026-10-01：opencode-web 执行态徽标四根因链收口（busy 词表缺口补记＋全链 owner 验收）
+
+Track A（方案 v4，iOS 仓 docs/2026-10-01-opencode-web-v2-event-stream-migration-plan.md）四条根因链全部修复，owner 2026-10-01 复测验收：opencode web 模式正常同步 Mac 端 4096 状态——转圈、黄色等待、蓝色完成全 ✅。
+
+1. **busy 词表缺口（A-1，e4992455）**：v1 方案猜测 session.status 执行态词为 "running"，官方 1.18 实词是 "busy"（1.18.32 捕获件＋上游 schema 双证）——镜像分支从未触发，iOS 转圈零路径。修复：busy→EventSessionState{running} 镜像＋per-session lastState 幂等守卫＋session.idle 别名补镜像；retry 分支零改动。
+2. **SSE 孤儿连接（777c3527，详见上条目）**：45s 心跳看门狗超时 Close→既有 heal+reconnect 自愈。
+3. **failed outcome 被 idle 槽位逐出（777c3527，详见上条目）**：registry outcomes 侧存存活于逐出＋"error" 入终态广播词表。
+4. **黄点快照断层（0dc76aa5，详见「黄点最后一米」条目）**：registry requiresAction 表达＋两条摄入路径接线。
+
+完整证据、验收矩阵与 attestation 标注见 iOS 仓 docs/2026-10-01-opencode-web-v2-event-stream-migration-plan完成情况.md。A-2（permission 生命周期）维持冻结（无 1.18.32 permission 双帧样本）；B-2/B-3 owner 裁决 pending。
