@@ -9,6 +9,7 @@
 ## [Unreleased]
 
 ### Fixed
+- **黄点（question 挂起徽标）跨列表刷新/冷启动耐久**：question/结构化输入挂起期间，会话列表快照恒报 running（registry 词表无 requiresAction），iPhone 黄点被任何列表刷新覆写回转圈——打开列表本身即触发刷新，挂起态结构性不可见。现 registry 增加 requiresAction 表达并在两条摄入路径（被动泵＋agent relay）接线 question 事件，列表快照携带挂起态；答复后随 turn 终态收口。顺带修正 codex-remote ThreadStatus 挂起态被同步块降级成 running 的同类分歧。覆盖无权威 runningMap 的 backend（opencode-web/opencode/codex 系/grokbuild）；dsh-web/claudecode 的列表快照仍由权威 runningMap 决定（实时黄点不受影响，快照耐久性维持现状）。permission 黄点属 A-2 冻结范围未动。
 - **dsh-web 探活请求失败误结束流式回复**：业务/HTTP 错误、取消、超时和单次连接读错保留原错误，不再直接宣告实例死亡；明确的连接拒绝仍进入原有失联收口。并发探测只产生一次失联边沿，迟到的失败不能清除已恢复实例。补充不含正文的错误分类日志，便于区分请求故障与实例失联。
 
 ### Added
