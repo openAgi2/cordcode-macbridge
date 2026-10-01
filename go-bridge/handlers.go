@@ -5420,10 +5420,18 @@ func sessionsToWire(sessions []core.AgentSessionInfo) []map[string]interface{} {
 // 把 AgentSessionInfo.RuntimeStateHint 以临时键植入 wire 行（index 对齐，过滤前调用），
 // 由 applyListRuntimeState / enrichSessionStateWithAgent 消费并删除——不泄漏到 wire。
 // 调用点紧跟 sessionsToWire（generic 列表分支 / codexVisibleMembership / recent default）。
+// 红❗持久化（2026-10-01）：同 pass 种植 OutcomeHint（codex-remote systemError→failed），
+// 由列表 outcome overlay 消费（键存在即删，同纪律）。
 func plantRuntimeStateHints(wireSessions []map[string]interface{}, infos []core.AgentSessionInfo) {
 	for i := range wireSessions {
-		if i < len(infos) && infos[i].RuntimeStateHint != "" {
+		if i >= len(infos) {
+			continue
+		}
+		if infos[i].RuntimeStateHint != "" {
 			wireSessions[i]["runtimeStateHint"] = infos[i].RuntimeStateHint
+		}
+		if infos[i].OutcomeHint != "" {
+			wireSessions[i]["outcomeHint"] = infos[i].OutcomeHint
 		}
 	}
 }

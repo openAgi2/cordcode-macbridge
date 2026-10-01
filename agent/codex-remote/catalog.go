@@ -171,8 +171,16 @@ func mapCatalogThread(row catalogThreadRow) core.AgentSessionInfo {
 			info.RuntimeStateHint = "running"
 		}
 	}
-	// idle / notLoaded / systemError：无 hint——执行态由 registry / unknown 支配
-	// （「不知道就不亮灯」，不把 notLoaded 冒充 idle）。
+	// systemError（红❗持久化，2026-10-01）：官方 ThreadStatus.SystemError＝上一 turn
+	// 系统错误收尾、持续到下一 turn 开始（上游 thread_status.rs loaded_thread_status，
+	// 桌面渲染❗）——映射为 settle-outcome hint，让列表 lastOutcome 跨 bridge 重启
+	// 存活（registry outcome 侧存是内存态）。outcomeAt 复用行 updatedAt（失败 turn
+	// 的最后活动时刻）。不猜错误类别（官方无分级）。
+	if row.Status != nil && row.Status.Type == "systemError" {
+		info.OutcomeHint = "failed"
+	}
+	// idle / notLoaded：无 hint——执行态由 registry / unknown 支配（「不知道就不亮灯」，
+	// 不把 notLoaded 冒充 idle）。
 	return info
 }
 

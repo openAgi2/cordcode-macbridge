@@ -831,6 +831,17 @@ type AgentSessionInfo struct {
 	// as an UPGRADE-only signal (never downgrades registry live state); never emitted
 	// on the wire (planted as a temp key, stripped at the overlay).
 	RuntimeStateHint string `json:"-"`
+	// OutcomeHint is a per-fetch catalog-derived settle-outcome hint ("failed";
+	// empty = none). Filled only by codex-remote: official thread/list ThreadStatus
+	// "systemError" (upstream thread_status.rs — last turn ended in a system error,
+	// persists until the next turn starts; the ChatGPT desktop renders it as the
+	// thread's ❗). Consumed by the list outcome overlay as the persistent official
+	// truth (survives bridge restarts, unlike the in-memory registry outcome
+	// side-store); never emitted on the wire (planted as a temp key, stripped at
+	// the overlay). Fresh per fetch on the list/membership paths; the recent view
+	// serves a TTL snapshot so it may lag there (same accepted staleness as
+	// RuntimeStateHint).
+	OutcomeHint string `json:"-"`
 }
 
 // BackgroundTask is the backend-neutral read-only background-task summary

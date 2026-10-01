@@ -202,10 +202,14 @@ func (h *Handlers) enrichSessionStateWithAgent(mapped map[string]interface{}, ag
 		}
 		mapped["runtimeState"] = applyRuntimeStateHint(state, mapped)
 		// lastOutcome（session-list-status-badges §3.4）：get_session 单 session 叠加
-		// 与列表叠加点同语义——outcome 非空才发。
-		if outcome, outcomeAt := h.sessions.lastOutcomeFor(sessionID); outcome != "" {
-			mapped["lastOutcome"] = outcome
-			mapped["lastOutcomeAtMillis"] = outcomeAt.UnixMilli()
+		// 与列表叠加点同语义——outcome 非空才发。红❗持久化（2026-10-01）：outcomeHint
+		// 在场即胜（该路径的行不经 plantRuntimeStateHints 种键，分支为防御性对称——
+		// 同 RuntimeStateHint 现状）。
+		if !applyOutcomeHint(mapped) {
+			if outcome, outcomeAt := h.sessions.lastOutcomeFor(sessionID); outcome != "" {
+				mapped["lastOutcome"] = outcome
+				mapped["lastOutcomeAtMillis"] = outcomeAt.UnixMilli()
+			}
 		}
 	}
 	return mapped
@@ -299,13 +303,46 @@ func (h *Handlers) applyListRuntimeState(mapped map[string]interface{}, runningM
 		}
 		state = applyRuntimeStateHint(state, mapped)
 		// lastOutcome（session-list-status-badges §3.4）：可选字段，outcome 非空才发。
-		if outcome, outcomeAt := h.sessions.lastOutcomeFor(sessionID); outcome != "" {
-			mapped["lastOutcome"] = outcome
-			mapped["lastOutcomeAtMillis"] = outcomeAt.UnixMilli()
+		// 红❗持久化（2026-10-01）：catalog outcomeHint（官方 systemError→failed）在场
+		// 即胜——跨 bridge 重启的持久官方真相（registry outcome 侧存是内存态）；缺席
+		// 走既有 registry 路径。
+		if !applyOutcomeHint(mapped) {
+			if outcome, outcomeAt := h.sessions.lastOutcomeFor(sessionID); outcome != "" {
+				mapped["lastOutcome"] = outcome
+				mapped["lastOutcomeAtMillis"] = outcomeAt.UnixMilli()
+			}
 		}
 	}
 	mapped["runtimeState"] = state
 	return mapped
+}
+
+// applyOutcomeHint（红❗持久化，2026-10-01）：消费 wire 行上的 outcomeHint 临时键
+// （codex-remote catalog systemError→failed，plantRuntimeStateHints 种植）。键存在即删
+// （不泄漏到 wire，同 runtimeStateHint 纪律）；hint=="failed" 且行带 updatedAtMillis 时
+// 写 lastOutcome=failed/lastOutcomeAtMillis 并返回 true（在场即胜——官方持久真相）。
+// 非 failed 词或行缺时间戳＝不命中，调用方回退 registry lastOutcomeFor。
+func applyOutcomeHint(mapped map[string]interface{}) bool {
+	hint, _ := mapped["outcomeHint"].(string)
+	delete(mapped, "outcomeHint")
+	if hint != "failed" {
+		return false
+	}
+	var at int64
+	switch v := mapped["updatedAtMillis"].(type) {
+	case int64:
+		at = v
+	case int:
+		at = int64(v)
+	case float64:
+		at = int64(v)
+	}
+	if at <= 0 {
+		return false
+	}
+	mapped["lastOutcome"] = "failed"
+	mapped["lastOutcomeAtMillis"] = at
+	return true
 }
 
 // applyRuntimeStateHint 消费 wire 行上的 catalog 执行态 hint 临时键（codex-remote

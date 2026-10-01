@@ -9,7 +9,9 @@ import (
 
 // 官方 thread/status/changed → 控制面执行态投影（session-badges 上游对齐方案 §5.2
 // 词表；官方 ThreadStatusChangedNotification 形状 thread.rs:1979-1983，部署版
-// 0.159.0 已含）。SystemError/NotLoaded 不映射（诚实不冒充）。
+// 0.159.0 已含）。NotLoaded 不映射（诚实不冒充）；SystemError→idle（红❗持久化
+// 2026-10-01：官方语义＝非 active＋上 turn 错误收尾——执行态 idle，失败 outcome 由
+// error 通知实时 settle＋catalog systemError 拉路径持久承担）。
 func TestDecodeThreadStatusChanged(t *testing.T) {
 	codec := NewLiveCodec()
 
@@ -24,7 +26,7 @@ func TestDecodeThreadStatusChanged(t *testing.T) {
 		{"active-waiting-approval", `{"threadId":"th1","status":{"type":"active","activeFlags":["waitingOnApproval"]}}`, 1, "requiresAction"},
 		{"active-waiting-input", `{"threadId":"th1","status":{"type":"active","activeFlags":["waitingOnUserInput"]}}`, 1, "requiresAction"},
 		{"idle", `{"threadId":"th1","status":{"type":"idle"}}`, 1, "idle"},
-		{"system-error-unmapped", `{"threadId":"th1","status":{"type":"systemError"}}`, 0, ""},
+		{"system-error-maps-idle", `{"threadId":"th1","status":{"type":"systemError"}}`, 1, "idle"},
 		{"not-loaded-unmapped", `{"threadId":"th1","status":{"type":"notLoaded"}}`, 0, ""},
 		{"missing-thread-id", `{"status":{"type":"idle"}}`, 0, ""},
 		{"missing-status", `{"threadId":"th1"}`, 0, ""},

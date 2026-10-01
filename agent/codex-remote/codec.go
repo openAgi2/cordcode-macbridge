@@ -306,6 +306,12 @@ func (c *LiveCodec) decodeThreadStatusChanged(n Notification) []core.Event {
 		}
 	case "idle":
 		state = "idle"
+	case "systemError":
+		// 官方 ThreadStatus.SystemError（红❗持久化，2026-10-01）＝非 active（无在飞
+		// turn/挂起）＋上一 turn 系统错误收尾——执行态分解为 idle（防 error 通知丢失时
+		// registry 卡 running，status/changed 是权威转移信号）；失败 outcome 由 error
+		// 通知实时 settle＋catalog systemError 拉路径持久承担（mapCatalogThread）。
+		state = "idle"
 	default:
 		return nil
 	}
