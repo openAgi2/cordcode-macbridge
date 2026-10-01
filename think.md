@@ -2868,3 +2868,11 @@ r1-r5 通过；iOS 零改动）。
 真实 iPhone 长回复期间，held session/list 的任意 error 被升格为实例死亡；官方正文仍到达，iOS 消费错误终态后停止 pacer，变成重复整表派生。第一处分歧在 Mac resolver，不能在 iOS 加假 running、延时或调弹簧掩盖。目标官方 dsh-v0.1.7-rc.2 的 list/gateway 保留业务/取消错误，不拥有 turn 终止语义。历史日志没有原始 probe error，不能补推具体触发类型。
 
 修复 8e5205bd05e3698708169d72f4232d4cd9db6999：RPC/HTTP/取消/超时/读错返回原错误并保留 held 身份；仅未取消调用的 carrier Status0 + dial ECONNREFUSED 进入原有 seat-loss。锁外探测回锁后核对同一 held 指针，避免并发重发 loss 与迟到失败清除 rebound；cache 时间不是失联证据。增加无正文错误分类与启动 policy 日志。真实 listener 死亡、宽限期、stream 重连仍有效。19 项定向 race 测试通过，Mac Release 已部署且原 dsh PID 保持；owner 视觉验收待回归。源码/双仓/上游完整身份、成本、部署五后端核验及限制见 [修复交付](docs/2026-10-01-dsh-web-probe-error-terminal-fix.md)。
+
+## 2026-10-01：黄点「最后一米」＝registry 无法表达 requiresAction——快照路径把 live 黄点覆写回转圈（prekey 红鲱鱼）
+
+Track A 两修复部署后 owner 实测转圈 ✅、黄点不亮，交接怀疑 relay prekey exhausted。实测否定该怀疑：iPhone（dev_c5ad42a3）走 LAN 直连（K4Patch/hello_ack 全部 remote=192.168.1.2），prekey exhausted 只涉及两台离线设备（dev_9ea011ca/156f4fa0a34a）的 relay 邮箱投递路径，不挡 iPhone 帧到达。15:02:21 硅谷故事（ses_fdd00e2a）user_input_requested 的 session_state_changed(requiresAction) 投递结果 enqueued=1（LAN gen13 连接存活、窗口零发送错误）——live 发布链路全通。
+
+真根因是状态模型断层：publishQuestionPendingState（go-bridge/handlers.go:3408）只发控制面事件、不写 sessionRegistry；registry 词表只有 running/idle/closing/unknown（无 requiresAction），被动泵（main.go:968 块）与 relay 路径（applyRelayEventRegistrySync，handlers_relay.go:3056）的 registry 同步块都没有 user_input_requested/question_asked 分支。question 挂起期间 registry 停留在 turn_started 写入的 running → list_sessions 快照恒报 running；iOS 每次列表 fetch（SessionsView.syncRuntimeStatesFromSessions，两条 fetch 路径必调）用快照非 idle 状态无条件覆写徽标 store——live 事件点亮的黄点在下一次列表刷新（重连/回前台/sessions_changed 防抖）即被覆写回转圈，而打开列表这个动作本身就触发刷新，owner 结构性无法观察到黄点。iOS 侧零缺陷：BackendSessionRuntimeState 已含 requiresAction rawValue、快照播种路径就绪，只是 Mac 从不在快照里发这个词。
+
+硅谷故事 question 15:02:21 asked → 16:02:23 resolved → 16:02:32 turn_completed（挂起约 1 小时，registry 全程 running；owner 看到的「转圈正常」在该窗口内实为陈旧 running）。修复＝registry 增加 requiresAction 表达＋两条摄入路径 question 事件接线（permission 不动，A-2 冻结）＋isKnownActive 计入＋列表路径零改动＋iOS 零改动；cleanupIdleSessions 只逐出 idle 条目，requiresAction 不会被槽位清理误杀，无需 outcome 式侧存。方案与评审记录在 iOS 仓 docs/2026-10-01-question-badge-registry-requires-action-plan.md。
