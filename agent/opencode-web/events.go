@@ -79,6 +79,12 @@ type sseSubscriber struct {
 	// is the only carrier iOS renders (owner-verified 2026-08-19 twice: the
 	// wire event carried the text, iOS showed nothing).
 	lastTerminalError map[string]string
+	// sessionStateMirror is the A-1 execution-state mirror's idempotency
+	// guard: sessionID → last mirrored core state ("running"/"idle"). The
+	// serve emits session.status idle AND the deprecated session.idle alias
+	// for one transition, and busy on every step — without the guard the
+	// mirror would fire per frame. Only a CHANGED state mirrors.
+	sessionStateMirror map[string]string
 
 	// Active-mode filter (§8-4 session binding): filterActive drops events
 	// whose SessionID != sessionFilter. Empty filter = pending (drops all).
@@ -107,6 +113,7 @@ func newSSESubscriber(ctx context.Context, a *Agent, c *Client) *sseSubscriber {
 		turnSawAssistantOutput: make(map[string]bool),
 		lastSessionError:       make(map[string]string),
 		lastTerminalError:      make(map[string]string),
+		sessionStateMirror:     make(map[string]string),
 	}
 }
 
@@ -374,6 +381,9 @@ func (s *sseSubscriber) handleServerEvent(payload map[string]any) {
 		if sessionID != "" {
 			s.agent.clearRetrySnapshot(sessionID)
 			s.emitResultOnce(sessionID)
+			// A-1：别名也承载状态镜像（别名-only 的服务器版本不缺镜）；与
+			// status:idle 双帧到达时经 sessionStateMirror 幂等为单发。
+			s.emitSessionStateMirror(sessionID, "idle")
 		}
 	case "session.updated":
 		s.handleSessionUpdated(properties, sessionID)
@@ -713,26 +723,40 @@ func (s *sseSubscriber) handleSessionStatus(properties map[string]any, sessionID
 			})
 		}
 	}
-	if status == "running" && sessionID != "" {
+	if status == "busy" && sessionID != "" {
 		s.resetCompletion(sessionID)
-		// badges 验收轮：官方 session.status running/idle 即官方 web 会话列表的状态
-		// 信号——镜像为控制面执行态投影（go-bridge S1 分派 → session_state_changed），
-		// 外部/后台 session 的列表徽标由此获得实时鲜度（此前无任何状态事件）。
-		s.emit(core.Event{
-			Type:        core.EventSessionState,
-			SessionID:   sessionID,
-			SessionState: &core.SessionStateEvent{State: "running"},
-		})
+		// badges 验收轮→opencode-web v4 方案 A-1：官方执行态词是 busy（1.18.32
+		// 捕获件 probe-20261001＋上游 schema session-status-event.ts 双证；早前
+		// "running" 分支是 v1 方案的错误猜测、从未被官方帧触发）。镜像为控制面
+		// 执行态投影（go-bridge S1 分派/relay PublishLogical → session_state_changed），
+		// 外部/后台 session 的列表徽标由此获得实时鲜度。
+		s.emitSessionStateMirror(sessionID, "running")
 	}
 	if status == "idle" && sessionID != "" {
 		s.agent.clearRetrySnapshot(sessionID)
 		s.emitResultOnce(sessionID)
-		s.emit(core.Event{
-			Type:        core.EventSessionState,
-			SessionID:   sessionID,
-			SessionState: &core.SessionStateEvent{State: "idle"},
-		})
+		s.emitSessionStateMirror(sessionID, "idle")
 	}
+}
+
+// emitSessionStateMirror mirrors one official execution-state transition to
+// core.EventSessionState, deduped per session: the serve pairs session.status
+// idle with the deprecated session.idle alias and repeats busy per step, so
+// only a CHANGED state emits (busy,busy→running once; busy→idle→busy→idle all
+// fire; idle then alias→idle once).
+func (s *sseSubscriber) emitSessionStateMirror(sessionID, state string) {
+	s.stateMu.Lock()
+	if s.sessionStateMirror[sessionID] == state {
+		s.stateMu.Unlock()
+		return
+	}
+	s.sessionStateMirror[sessionID] = state
+	s.stateMu.Unlock()
+	s.emit(core.Event{
+		Type:         core.EventSessionState,
+		SessionID:    sessionID,
+		SessionState: &core.SessionStateEvent{State: state},
+	})
 }
 
 // handleSessionUpdated: the idle/running transition carries the same
