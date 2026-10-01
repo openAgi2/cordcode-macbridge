@@ -2834,3 +2834,30 @@ r1-r5 通过；iOS 零改动）。
   alias 映射只覆盖一处时，下游一切 id 字面量门都是隐患，统一走
   `isClaudeBackendID`；③ 保守裁决（如 E2 类「未验证不翻译」）与跳过型
   no-op（中断标记）都要写明退役条件，否则保守变成永久假状态。
+
+## 2026-10-01：opencode-web 桌面 turn 静默＝SSE 连接被服务器侧孤儿化（H-T 否定）；codex 红❗ vs iOS 蓝点＝failed outcome 被 idle 清理逐出
+
+（Track A 部署 e4992455 后 owner 矩阵 r1 分析；暂不修码，证据先落盘防日志滚动）
+
+### 问题一：opencode-web 桌面 turn，iOS 列表零反应
+
+- **H-T 被否定（本场景）**：owner 桌面 turn 确实经过 4096——session `ses_fdd00e2a`（硅谷故事，dir `/Users/jacklee/Projects/Chat`，created 08-21）updated **2026-10-01 13:30:45**（4096 /session 实查）。桌面 turn 用 managed server，不经 sidecar。
+- **根因＝长连 SSE 被服务器侧静默孤儿化＋无心跳看门狗**：runtime（PID 47368，10:44 部署）10:45:19 connected 到 4096（server PID **27740**，09:46:52 起——早于本次部署，MacBridge 重启收养既有 serve），此后零掉线零重连零业务帧（窗内零 opencode-web text_delta INFO、零 relay forwarding）；而**新开** /global/event 监听 40s 内正常收 connected＋15s 心跳；netstat 该连接 **Recv-Q/Send-Q 全 0**（服务器对我们这条连接停止写入，非客户端读停滞——读停滞会堆 Recv-Q）。11:55:28 曾有 4096 `/session` 8.6s 超时（服务器侧 stall 窗口，孤儿化疑似发生于此类窗口）。
+- **产品缺口**：`sseSubscriber.run()` 只在 body 结束/错误时 heal＋reconnect（events.go run/readStream）；`streamClient` 无超时是 C1 刻意设计（保 turn 中流），但 **server.heartbeat（15s/条）从未被用作活性判据**——半开/孤儿连接永远检测不到。
+- **修法方向**：心跳截止看门狗（如 3×15s 无任何帧→强制断开→既有 healArmedTurnsAfterDrop＋recoverPendingAfterReconnect 自愈）；顺带 Debug 记 last-frame 时间便于复发取证。A-1 词表修复本身正确且已部署，只是没帧可镜像。
+
+### 问题二：codex desktop/ChatGPT 红❗ vs iOS 蓝点（thread 01a0f035-6208-…）
+
+三钟对齐实证失败信号**已到达且被正确判 failed**，随后被自家清理逐出：
+
+1. turn 3：11:09:07 turn_started → 11:22:13 最后 text_delta（passive 泵摄入；iOS 未打开该 session）。
+2. codex 侧失败落地 **11:25**（rollout jsonl mtime＝Oct 1 11:25）；bridge 收 error 事件 **11:25:00.712**（aggregated observe；「cleaning idle session」idle=5m18.443s 回推 last-touch 11:25:00.727，±15ms 吻合）。
+3. passive 泵 error 分支（main.go:972-979）→ settleTurnOutcomeFromEvent：`"turn_error","error"→failed`（handlers.go:3374-3397）→ **registry outcome=failed @11:25:00**。
+4. **11:30:19.167 cleanupIdleSessions**（idle 5m18s>_ttl）→ `deleteSession`→`sessionRegistry.delete`→`delete(r.sessions,…)`（handlers.go:1027-1043 / types.go:604-618）——**整条 trackedSession（含 failed outcome）被删**。
+5. iOS 13:28-33 拉列表：registry miss → 行无 lastOutcome（runtimeState unknown）→ `updatedAt(11:25)>readAnchor` → 蓝点。iOS 11:20:29 起离线（websocket 1006），失败瞬间也不在场。
+6. 次级缺口：终态 sessions_changed 广播词表只有 `turn_completed|turn_error|turn_aborted`（main.go:1017-1020），**plain "error" 不广播**——即使 iOS 在线也不会被拍刷新。
+7. iOS 侧解析（SessionRuntimeBadgeView.resolve）：failed 需 `lastOutcome==failed && outcomeAt>readAnchor`；本例 updatedAt≈outcomeAt（同一秒），蓝点在「行带 failed」前提下几乎不可能出现——反证行确实没带。
+
+**修法方向**：① outcome 持久化到能在 slot 逐出后存活的侧存（或清理只删 handle 不删 outcome）；② `"error"` 加入终态 sessions_changed 广播词表。次要残留：若 wire updatedAt 来自 codex 云端且晚于 outcomeAt，读锚窗口压制仍可能把红变蓝——修复时用真机矩阵复核。
+
+**教训**：① 「connection ESTABLISHED」≠「流活着」——长连 SSE 必须以服务器心跳为活性锚；② registry 是带 TTL 的活 session 槽，不是结局持久层——settle 数据放会被逐出的槽里＝静默丢失；③ 归因要抓「同一事件三个独立时钟」（codex 磁盘 mtime/error 事件时刻/idle 计时回推）这种秒级吻合再下结论。
