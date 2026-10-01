@@ -1,9 +1,9 @@
 package dshweb
 
 // §12 item 3 / §12.1-3: the seat-loss terminal producer must close every
-// running session exactly once per alive→dark edge — grace entry and stream
-// 1006 funnel through one transition, the edge-sequence guard makes
-// double-firing structurally impossible, and a later edge re-arms.
+// running session exactly once per confirmed alive→dark edge. Request errors
+// and stream reconnects alone are not loss edges; the sequence guard prevents
+// duplicate terminal delivery, and a later confirmed edge re-arms.
 
 import (
 	"context"

@@ -376,6 +376,8 @@ func NewResolver(opts ...ResolverOption) *Resolver {
 	if r.gracePeriod <= 0 {
 		r.gracePeriod = gracePeriodDefault
 	}
+	slog.Info("dsh-web: held probe loss policy", "policy", "dial-refused-only",
+		"requestFailuresTerminateTurn", false)
 	return r
 }
 
@@ -513,6 +515,8 @@ func (r *Resolver) saveState(inst *ResolvedInstance) {
 // 2026-09-22 plan §5):
 //
 //   - seat answers             → use it (label by ownership, never a dead PID)
+//   - held probe request fails → preserve its error and the held identity;
+//     only a refused dial establishes loss of the seat
 //   - held instance died       → grace window: typed error, no adopt, no spawn
 //   - grace elapsed (this process once held) → spawn ON the seat
 //     (single-flight, outside mu) — the 2026-08-19 respawn contract
@@ -528,21 +532,27 @@ func (r *Resolver) Resolve(ctx context.Context) (*ResolvedInstance, error) {
 	r.mu.Lock()
 	if r.resolved != nil {
 		inst := r.resolved
-		if time.Now().Before(r.negUntil) {
-			// A probe failed <1s ago and the loss transition already ran;
-			// defensively re-run it for the resolved!=nil case.
-			err := r.loseSeatLocked(inst)
-			r.mu.Unlock()
-			return nil, err
-		}
 		r.mu.Unlock()
-		if err := probeInstance(ctx, r.httpClient, inst.BaseURL, r.auth); err == nil {
+		probeErr := probeInstance(ctx, r.httpClient, inst.BaseURL, r.auth)
+		if probeErr == nil {
 			return inst, nil
 		}
+		confirmedLoss := heldProbeConfirmsLoss(ctx, probeErr)
+		logHeldProbeFailure(ctx, probeErr, confirmedLoss)
+		if !confirmedLoss {
+			return nil, probeErr
+		}
 		r.mu.Lock()
-		err := r.loseSeatLocked(inst)
-		r.mu.Unlock()
-		return nil, err
+		defer r.mu.Unlock()
+		// Another probe may already have lost or rebound this instance while
+		// we were outside mu. Never lose a newer identity or emit another edge.
+		if r.resolved == inst {
+			return nil, r.loseSeatLocked(inst)
+		}
+		if r.resolved == nil && !r.lostAt.IsZero() {
+			return nil, &ErrInstanceReconnecting{BaseURL: seat, Until: r.lostAt.Add(r.gracePeriod)}
+		}
+		return nil, probeErr
 	}
 
 	if inGrace, until := r.graceStateLocked(); inGrace {
@@ -625,6 +635,55 @@ func (r *Resolver) Resolve(ctx context.Context) (*ResolvedInstance, error) {
 		"source", string(inst.Source), "baseURL", inst.BaseURL,
 		"reason", spawnReason(everResolved))
 	return inst, nil
+}
+
+// A failed session/list is not a turn terminal in dsh. An HTTP/RPC response,
+// timeout, cancellation or broken request connection cannot establish that
+// the listening instance disappeared. A refused dial to the held seat can.
+func heldProbeConfirmsLoss(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	var carrier *carrierError
+	var transport *net.OpError
+	return errors.As(err, &carrier) && carrier.Status == 0 &&
+		errors.As(err, &transport) && transport.Op == "dial" &&
+		errors.Is(err, syscall.ECONNREFUSED)
+}
+
+// Record shape, never response bodies or RPC messages/details: probes may
+// carry private session data. Historical logs lacked this distinction.
+func logHeldProbeFailure(ctx context.Context, err error, confirmedLoss bool) {
+	category := "request_error"
+	fields := []any{"operation", "session/list", "confirmedSeatLoss", confirmedLoss}
+	var rpc *RPCError
+	var carrier *carrierError
+	var transport *net.OpError
+	switch {
+	case ctx.Err() != nil:
+		category = "caller_context"
+		fields = append(fields, "contextError", ctx.Err().Error())
+	case errors.Is(err, context.DeadlineExceeded):
+		category = "probe_timeout"
+	case errors.As(err, &rpc):
+		category = "rpc_error"
+		fields = append(fields, "rpcCode", rpc.Code)
+	case errors.As(err, &carrier):
+		category = "transport_error"
+		fields = append(fields, "httpStatus", carrier.Status)
+		if carrier.Status != 0 {
+			category = "http_response_error"
+		}
+	}
+	if errors.As(err, &transport) {
+		fields = append(fields, "transportOp", transport.Op)
+		var errno syscall.Errno
+		if errors.As(err, &errno) {
+			fields = append(fields, "errno", int(errno))
+		}
+	}
+	fields = append(fields, "category", category)
+	slog.Warn("dsh-web: held seat probe failed", fields...)
 }
 
 // StartSeat is the explicit user-driven seat start (2026-09-22 plan §5: the

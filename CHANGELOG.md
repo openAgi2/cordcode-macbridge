@@ -8,6 +8,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **dsh-web 探活请求失败误结束流式回复**：业务/HTTP 错误、取消、超时和单次连接读错保留原错误，不再直接宣告实例死亡；明确的连接拒绝仍进入原有失联收口。并发探测只产生一次失联边沿，迟到的失败不能清除已恢复实例。补充不含正文的错误分类日志，便于区分请求故障与实例失联。
+
 ### Added
 - **（工程/退役归档）legacy dsh / opencode 目录级废弃——移入 `deprecated/`，驱动不再注册（2026-09-29 定向测试 + Release 运行态验证 + owner 真机验收 ✅）**：`agent/dsh`、`agent/opencode` 迁入 `deprecated/`（module 内归档，仍参与编译与 CI 测试），go-bridge 删除全部生产死分支（deepseek descriptor 检测 / dsh store-bridge resume 拒绝 / deepseek 冷水合基线选择）与 blank import、`agentAliases` 别名——两驱动不再注册，生产代码零 import `deprecated/`（新增 `deprecated_import_guard_test.go` CI 守护）。动机：退役包留在 `agent/` 里，其他 agent 执行任务时老是走错目录。产品行为零变化（两驱动本就不在任何 drivers 列表，挂载面为零）；回滚从「drivers 加回 id」变为 git revert 迁移提交。`codex`、`codex-web` 仍在 `agent/`，另行决策。owner 真机验收：DeepSeek Harness（dsh-web）与 OpenCode Web 发送消息正常。
 - **（产品/codex-remote）断线韧性第二批：seq 缺口检测与去重（S-3）、token 提前刷新（S-4）、ack 熔断有界化（S-7）（2026-09-28 定向测试 + 运行态验证 ✅，Mac；断线韧性方案 v1.9，E-12b/E-9 证据门已捕后解锁）**：①入站信封游标去重与缺口检测——官方 Remote Control 下行按 (seq, segment) 单调编号，此前桥完全不追踪（host 重放会重复投递、丢帧无感知）；现按官方 ack 游标语义去重重放，检测到信封级缺口时把该流所有「有在飞回合」的观察会话并入 S-2 对账集（有界 fan-out，无在飞回合的只记日志不误伤），chunk ack 补上官方要求的 `segment_id`（此前首段 ack 等价 (seq,MAX)，host 腿中断会丢消息尾部且不留缺口痕迹），pong 信封到达即 ack（楔死场景下未 ack pong 不再无界累积撑爆 host 128 全局缓冲——F-R9-1 停摆路径消除）。②ctrl token 提前刷新——实测有效期恒定 10 分钟（E-9 五样本），现到期前 60 秒主动刷新（OD-3），长会话不再中途死于 token 过期；刷新失败不杀连接、配对撤销立即失效。③ack 熔断 closed/open/half-open 状态机——此前 sentinel 触发后本连接永久停 ack（host 侧缓冲只增不减，与全局反压叠加成整腿停摆）；现每 30 秒一条 probe ack 携带最高已见 (seq, segment) 游标，host 恢复接受后缓冲按 probe 节奏排空，sentinel 噪声从风暴级降到 1 条/30 秒。配套：脱敏 wire 采样设施（marker 文件开关，帧形状/seq/时间戳，永不记录内容与凭据）+ attempt-011 fixture 归档（含活体新发现：sentinel 错误帧 seq 不单调，去重层先观测 sentinel 再丢弃——否则熔断在真实 wire 上永不触发）。运行态实测：本机 Desktop 0.158.0-alpha.2.1 仍拒绝一切客户端 ack（每次重连即触发熔断），probe 以 30.4s 间隔实测运行、游标含 chunk segment 标记，行为与设计一致。

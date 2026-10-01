@@ -207,9 +207,9 @@ func (a *Agent) Stop() error {
 // every live bound session whose official running flag was up receives ONE
 // terminal error event — the instance died mid-turn and iOS must never hang
 // on 「执行中」 (坑 8 red line). Idempotence is keyed on the resolver's loss
-// sequence: grace entry, stream 1006, and any probe path all funnel through
-// the single loseSeat transition, and this guard makes double-firing
-// structurally impossible while re-arming on the next edge (§12.1-3).
+// sequence: only a confirmed seat-loss transition invokes this hook; request
+// failures and stream reconnects alone do not terminate a turn. This guard
+// prevents duplicate delivery while re-arming on the next edge (§12.1-3).
 func (a *Agent) handleSeatLost() {
 	seq := a.resolver.LossSeq()
 	a.termMu.Lock()
