@@ -2861,3 +2861,10 @@ r1-r5 通过；iOS 零改动）。
 **修法方向**：① outcome 持久化到能在 slot 逐出后存活的侧存（或清理只删 handle 不删 outcome）；② `"error"` 加入终态 sessions_changed 广播词表。次要残留：若 wire updatedAt 来自 codex 云端且晚于 outcomeAt，读锚窗口压制仍可能把红变蓝——修复时用真机矩阵复核。
 
 **教训**：① 「connection ESTABLISHED」≠「流活着」——长连 SSE 必须以服务器心跳为活性锚；② registry 是带 TTL 的活 session 槽，不是结局持久层——settle 数据放会被逐出的槽里＝静默丢失；③ 归因要抓「同一事件三个独立时钟」（codex 磁盘 mtime/error 事件时刻/idle 计时回推）这种秒级吻合再下结论。
+
+
+## 2026-10-01 dsh-web：请求探活错误不是 turn terminal
+
+真实 iPhone 长回复期间，held session/list 的任意 error 被升格为实例死亡；官方正文仍到达，iOS 消费错误终态后停止 pacer，变成重复整表派生。第一处分歧在 Mac resolver，不能在 iOS 加假 running、延时或调弹簧掩盖。目标官方 dsh-v0.1.7-rc.2 的 list/gateway 保留业务/取消错误，不拥有 turn 终止语义。历史日志没有原始 probe error，不能补推具体触发类型。
+
+修复 8e5205bd05e3698708169d72f4232d4cd9db6999：RPC/HTTP/取消/超时/读错返回原错误并保留 held 身份；仅未取消调用的 carrier Status0 + dial ECONNREFUSED 进入原有 seat-loss。锁外探测回锁后核对同一 held 指针，避免并发重发 loss 与迟到失败清除 rebound；cache 时间不是失联证据。增加无正文错误分类与启动 policy 日志。真实 listener 死亡、宽限期、stream 重连仍有效。19 项定向 race 测试通过，Mac Release 已部署且原 dsh PID 保持；owner 视觉验收待回归。源码/双仓/上游完整身份、成本、部署五后端核验及限制见 [修复交付](docs/2026-10-01-dsh-web-probe-error-terminal-fix.md)。
