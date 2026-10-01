@@ -1,0 +1,16 @@
+data: {"id":"evt_0f502cb78001pqBiET5ZVYBbbI","type":"server.connected","data":{}}
+
+: heartbeat
+
+data: {"id":"evt_0f502d74a0013zY89eMQo2i915","type":"session.created","durable":{"aggregateID":"ses_f0afd28b7ffe3oO6fgYExSA29B","seq":0,"version":1},"location":{"directory":"/"},"data":{"sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","info":{"id":"ses_f0afd28b7ffe3oO6fgYExSA29B","slug":"witty-sailor","projectID":"global","directory":"/","path":"","cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"title":"New session - 2026-10-01T01:09:59.241Z","version":"1.18.32","time":{"created":1790816999241,"updated":1790816999241}}}}
+
+: heartbeat
+
+data: {"id":"evt_0f5033a12001frpNQHj0ok4aj5","type":"session.updated","durable":{"aggregateID":"ses_f0afd28b7ffe3oO6fgYExSA29B","seq":1,"version":1},"location":{"directory":"/"},"data":{"sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","info":{"id":"ses_f0afd28b7ffe3oO6fgYExSA29B","slug":"witty-sailor","projectID":"global","directory":"/","path":"","cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"title":"New session - 2026-10-01T01:09:59.241Z","agent":"build","model":{"id":"glm-4.7","providerID":"zhipuai-coding-plan","variant":"default"},"version":"1.18.32","time":{"created":1790816999241,"updated":1790817024529}}}}
+
+data: {"id":"evt_0f5033a22001WGFqR0Y5n7FLqh","type":"message.updated","durable":{"aggregateID":"ses_f0afd28b7ffe3oO6fgYExSA29B","seq":2,"version":1},"location":{"directory":"/"},"data":{"sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","info":{"id":"msg_0f5033a0e001IfhSf1OlYXWwlI","sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","role":"user","time":{"created":1790817024529},"agent":"build","model":{"providerID":"zhipuai-coding-plan","modelID":"glm-4.7"}}}}
+
+data: {"id":"evt_0f5033a32001uTDrYIDTobavRf","type":"message.part.updated","durable":{"aggregateID":"ses_f0afd28b7ffe3oO6fgYExSA29B","seq":3,"version":1},"location":{"directory":"/"},"data":{"sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","part":{"id":"prt_0f5033a1f001Rof08S7iYzJe3U","sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","messageID":"msg_0f5033a0e001IfhSf1OlYXWwlI","type":"text","text":"只回复两个字：收到"},"time":1790817024562}}
+
+data: {"id":"evt_0f5033a3d001ZXCq2shCqwrpcx","type":"session.updated","durable":{"aggregateID":"ses_f0afd28b7ffe3oO6fgYExSA29B","seq":4,"version":1},"location":{"directory":"/"},"data":{"sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","info":{"id":"ses_f0afd28b7ffe3oO6fgYExSA29B","slug":"witty-sailor","projectID":"global","directory":"/","path":"","cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"title":"New session - 2026-10-01T01:09:59.241Z","agent":"build","model":{"id":"glm-4.7","providerID":"zhipuai-coding-plan","variant":"default"},"version":"1.18.32","time":{"created":1790816999241,"updated":1790817024573}}}}
+

@@ -1,0 +1,142 @@
+data: {"payload":{"id":"evt_0f502cb90001CuPdE4tBKdmZu3","type":"server.connected","properties":{}}}
+
+data: {"directory":"/","project":"global","payload":{"id":"evt_0f502d74a0013zY89eMQo2i915","type":"session.created","properties":{"sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","info":{"id":"ses_f0afd28b7ffe3oO6fgYExSA29B","slug":"witty-sailor","version":"1.18.32","projectID":"global","directory":"/","path":"","title":"New session - 2026-10-01T01:09:59.241Z","cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"time":{"created":1790816999241,"updated":1790816999241}}}}}
+
+data: {"directory":"/","project":"global","payload":{"type":"sync","syncEvent":{"id":"evt_0f502d74a0013zY89eMQo2i915","type":"session.created.1","seq":0,"aggregateID":"ses_f0afd28b7ffe3oO6fgYExSA29B","data":{"sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","info":{"id":"ses_f0afd28b7ffe3oO6fgYExSA29B","slug":"witty-sailor","version":"1.18.32","projectID":"global","directory":"/","path":"","title":"New session - 2026-10-01T01:09:59.241Z","cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"time":{"created":1790816999241,"updated":1790816999241}}}},"id":"evt_0f502d74a0013zY89eMQo2i915"}}
+
+data: {"payload":{"id":"evt_0f502f2bb0017hNSere9PRmdFg","type":"server.heartbeat","properties":{}}}
+
+data: {"payload":{"id":"evt_0f50319d6001DZ5WKFsbigdkEz","type":"server.heartbeat","properties":{}}}
+
+data: {"directory":"/","project":"global","payload":{"id":"evt_0f5033a12001frpNQHj0ok4aj5","type":"session.updated","properties":{"sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","info":{"id":"ses_f0afd28b7ffe3oO6fgYExSA29B","slug":"witty-sailor","projectID":"global","directory":"/","path":"","title":"New session - 2026-10-01T01:09:59.241Z","agent":"build","model":{"id":"glm-4.7","providerID":"zhipuai-coding-plan","variant":"default"},"version":"1.18.32","cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"time":{"created":1790816999241,"updated":1790817024529}}}}}
+
+data: {"directory":"/","project":"global","payload":{"type":"sync","syncEvent":{"id":"evt_0f5033a12001frpNQHj0ok4aj5","type":"session.updated.1","seq":1,"aggregateID":"ses_f0afd28b7ffe3oO6fgYExSA29B","data":{"sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","info":{"id":"ses_f0afd28b7ffe3oO6fgYExSA29B","slug":"witty-sailor","projectID":"global","directory":"/","path":"","title":"New session - 2026-10-01T01:09:59.241Z","agent":"build","model":{"id":"glm-4.7","providerID":"zhipuai-coding-plan","variant":"default"},"version":"1.18.32","cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"time":{"created":1790816999241,"updated":1790817024529}}}},"id":"evt_0f5033a12001frpNQHj0ok4aj5"}}
+
+data: {"directory":"/","project":"global","payload":{"id":"evt_0f5033a22001WGFqR0Y5n7FLqh","type":"message.updated","properties":{"sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","info":{"id":"msg_0f5033a0e001IfhSf1OlYXWwlI","role":"user","sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","time":{"created":1790817024529},"agent":"build","model":{"providerID":"zhipuai-coding-plan","modelID":"glm-4.7"}}}}}
+
+data: {"directory":"/","project":"global","payload":{"type":"sync","syncEvent":{"id":"evt_0f5033a22001WGFqR0Y5n7FLqh","type":"message.updated.1","seq":2,"aggregateID":"ses_f0afd28b7ffe3oO6fgYExSA29B","data":{"sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","info":{"id":"msg_0f5033a0e001IfhSf1OlYXWwlI","role":"user","sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","time":{"created":1790817024529},"agent":"build","model":{"providerID":"zhipuai-coding-plan","modelID":"glm-4.7"}}}},"id":"evt_0f5033a22001WGFqR0Y5n7FLqh"}}
+
+data: {"directory":"/","project":"global","payload":{"id":"evt_0f5033a32001uTDrYIDTobavRf","type":"message.part.updated","properties":{"sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","part":{"type":"text","text":"只回复两个字：收到","messageID":"msg_0f5033a0e001IfhSf1OlYXWwlI","sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","id":"prt_0f5033a1f001Rof08S7iYzJe3U"},"time":1790817024562}}}
+
+data: {"directory":"/","project":"global","payload":{"type":"sync","syncEvent":{"id":"evt_0f5033a32001uTDrYIDTobavRf","type":"message.part.updated.1","seq":3,"aggregateID":"ses_f0afd28b7ffe3oO6fgYExSA29B","data":{"sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","part":{"type":"text","text":"只回复两个字：收到","messageID":"msg_0f5033a0e001IfhSf1OlYXWwlI","sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","id":"prt_0f5033a1f001Rof08S7iYzJe3U"},"time":1790817024562}},"id":"evt_0f5033a32001uTDrYIDTobavRf"}}
+
+data: {"directory":"/","project":"global","payload":{"id":"evt_0f5033a3d001ZXCq2shCqwrpcx","type":"session.updated","properties":{"sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","info":{"id":"ses_f0afd28b7ffe3oO6fgYExSA29B","slug":"witty-sailor","projectID":"global","directory":"/","path":"","title":"New session - 2026-10-01T01:09:59.241Z","agent":"build","model":{"id":"glm-4.7","providerID":"zhipuai-coding-plan","variant":"default"},"version":"1.18.32","cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"time":{"created":1790816999241,"updated":1790817024573}}}}}
+
+data: {"directory":"/","project":"global","payload":{"type":"sync","syncEvent":{"id":"evt_0f5033a3d001ZXCq2shCqwrpcx","type":"session.updated.1","seq":4,"aggregateID":"ses_f0afd28b7ffe3oO6fgYExSA29B","data":{"sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","info":{"id":"ses_f0afd28b7ffe3oO6fgYExSA29B","slug":"witty-sailor","projectID":"global","directory":"/","path":"","title":"New session - 2026-10-01T01:09:59.241Z","agent":"build","model":{"id":"glm-4.7","providerID":"zhipuai-coding-plan","variant":"default"},"version":"1.18.32","cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"time":{"created":1790816999241,"updated":1790817024573}}}},"id":"evt_0f5033a3d001ZXCq2shCqwrpcx"}}
+
+data: {"directory":"/","project":"global","payload":{"id":"evt_0f5033a54001KRFs27i4qYjDdU","type":"session.status","properties":{"sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","status":{"type":"busy"}}}}
+
+data: {"directory":"/","project":"global","payload":{"id":"evt_0f5033a5d001SNuwuUo6RNlAhK","type":"session.error","properties":{"sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","error":{"name":"UnknownError","data":{"message":"Model not found: zhipuai-coding-plan/glm-4.7. Did you mean: glm-4.6v, glm-5.3, glm-5.3-flash?"}}}}}
+
+data: {"directory":"/","project":"global","payload":{"id":"evt_0f5033a60001oGQwSNy5t4gdSr","type":"session.status","properties":{"sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B","status":{"type":"idle"}}}}
+
+data: {"directory":"/","project":"global","payload":{"id":"evt_0f5033a60002pJBZKHHxFVeHjP","type":"session.idle","properties":{"sessionID":"ses_f0afd28b7ffe3oO6fgYExSA29B"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b2c001xlEQa5NShStR7O","type":"plugin.added","properties":{"id":"core/config-reference"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b2d001W46TBzMMZl21zF","type":"plugin.added","properties":{"id":"agent"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b2d002r5k17MMrcoDIc6","type":"plugin.added","properties":{"id":"command"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b2d0038RKml42cqwTiJi","type":"plugin.added","properties":{"id":"skill"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b2e001mXnN9uxMcTPnYe","type":"plugin.added","properties":{"id":"models-dev"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b2e002ea0ymWSFAD93v4","type":"plugin.added","properties":{"id":"config-agent"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b2e003rd7fUilVPWYp6f","type":"plugin.added","properties":{"id":"config-command"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b2e0043tGtANTRcjs6sq","type":"plugin.added","properties":{"id":"config-skill"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b3a001BAMsWdiIX1YMwm","type":"plugin.added","properties":{"id":"alibaba"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b3b001BoASOh7T5cp6Ye","type":"plugin.added","properties":{"id":"amazon-bedrock"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b3b002Bf397wjJVNvTu2","type":"plugin.added","properties":{"id":"anthropic"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b3b003QZmNd5LK2Exz7T","type":"plugin.added","properties":{"id":"azure-cognitive-services"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b3b0042oswJahECStpMD","type":"plugin.added","properties":{"id":"azure"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b3b005Lci29tSjpJ1x1k","type":"plugin.added","properties":{"id":"cerebras"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b3b0068nPDGZ5WJWwDqc","type":"plugin.added","properties":{"id":"cloudflare-ai-gateway"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b4c001fjLklviEgR83TE","type":"plugin.added","properties":{"id":"cloudflare-workers-ai"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b4c002X2auDInDnXlioD","type":"plugin.added","properties":{"id":"cohere"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b4c003VhG82IRfy47T7y","type":"plugin.added","properties":{"id":"deepinfra"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b4c004PjArhH1qOY3amV","type":"plugin.added","properties":{"id":"gateway"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b4c005bpgKIYQN2d5Ux6","type":"plugin.added","properties":{"id":"github-copilot"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b4c006MnjQHi2bITJLrP","type":"plugin.added","properties":{"id":"gitlab"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b4c007crCcgsKaaf9ozy","type":"plugin.added","properties":{"id":"google"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b4c008PNZWfpcQMXbTte","type":"plugin.added","properties":{"id":"google-vertex-anthropic"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b520010JbeIlQc5ibUBc","type":"plugin.added","properties":{"id":"google-vertex"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b52002gDEF8zbddry5sP","type":"plugin.added","properties":{"id":"groq"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b52003iakfAe9oWn3EnH","type":"plugin.added","properties":{"id":"kilo"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b52004DtxyrLB5uQeJDi","type":"plugin.added","properties":{"id":"llmgateway"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b53001u7iDi71Q1MujUE","type":"plugin.added","properties":{"id":"mistral"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b53002putluSQGoNVPQj","type":"plugin.added","properties":{"id":"nvidia"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b540019UaaHFucg4rrAK","type":"plugin.added","properties":{"id":"opencode"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033b5500136nzTX57PYpX5K","type":"plugin.added","properties":{"id":"snowflake-cortex"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033c82001qExuLpquOBPD7N","type":"catalog.updated","properties":{}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033c82002gQd8k9gnKOnnul","type":"plugin.added","properties":{"id":"openai-compatible"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033c830018Lb9CnHksNm65V","type":"plugin.added","properties":{"id":"openai"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033c83002N2FpEc4KX36cdk","type":"plugin.added","properties":{"id":"openrouter"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033c83003iu0oq6kGO435KV","type":"plugin.added","properties":{"id":"perplexity"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033c83004KPe1Qcudmp95sB","type":"plugin.added","properties":{"id":"sap-ai-core"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033c83005TU7bI3RVTcEy6X","type":"plugin.added","properties":{"id":"togetherai"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033c83006Vv3TKwZxh8MHjd","type":"plugin.added","properties":{"id":"vercel"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033c8a001EvGdDOKVK95hiu","type":"plugin.added","properties":{"id":"venice"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033c8b001onRsUqSEgsToFi","type":"plugin.added","properties":{"id":"xai"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033c8b002NcPbeF2jnYfFhB","type":"plugin.added","properties":{"id":"zenmux"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033c8b003v0INF3prgQDcLi","type":"plugin.added","properties":{"id":"dynamic-provider"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033c8c001ekkplePVcYFZhD","type":"plugin.added","properties":{"id":"config-plugin"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033c8d0010hY27von97xzdt","type":"plugin.added","properties":{"id":"config-provider"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033c8e0010Hk9XYtq2X5171","type":"plugin.added","properties":{"id":"variant"}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033c8f001O4pLChQ7rv09wq","type":"reference.updated","properties":{}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f5033f5a001niwNdXYJeFJsB9","type":"integration.updated","properties":{}}}
+
+data: {"directory":"/","payload":{"id":"evt_0f503404c001aqTrEpQ6xswX9b","type":"catalog.updated","properties":{}}}
+
+data: {"payload":{"id":"evt_0f50340ec001nfwp1NPO7Tj1KM","type":"server.heartbeat","properties":{}}}
+
+data: {"payload":{"id":"evt_0f50367fd001oeeHprpcPTSw4U","type":"server.heartbeat","properties":{}}}
+
+data: {"payload":{"id":"evt_0f5038f0e001cntruODLa7Ph6o","type":"server.heartbeat","properties":{}}}
+
+data: {"payload":{"id":"evt_0f503b620001w1LGMkSPSA3VD4","type":"server.heartbeat","properties":{}}}
+
+data: {"payload":{"id":"evt_0f503dd32001CoXf1rB34K6N2m","type":"server.heartbeat","properties":{}}}
+
