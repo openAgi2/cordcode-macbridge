@@ -2889,3 +2889,11 @@ Track A（方案 v4，iOS 仓 docs/2026-10-01-opencode-web-v2-event-stream-migra
 4. **黄点快照断层（0dc76aa5，详见「黄点最后一米」条目）**：registry requiresAction 表达＋两条摄入路径接线。
 
 完整证据、验收矩阵与 attestation 标注见 iOS 仓 docs/2026-10-01-opencode-web-v2-event-stream-migration-plan完成情况.md。A-2（permission 生命周期）维持冻结（无 1.18.32 permission 双帧样本）；B-2/B-3 owner 裁决 pending。
+
+## 2026-10-01：codex 红❗ vs iOS 蓝点（二）＝官方 ThreadStatus.SystemError 双路径丢弃＋outcome 内存态重启即失
+
+owner 报告 thread 01a0f035-6208-…（codex 桌面红❗、CordCode iOS 蓝点）。取证：rollout 尾事件 `task_complete` **带 error payload**（`usage_limit_exceeded`，17:26:58＝当日第二次自然失败 turn；11:25 那次是 r1 矩阵场景）。上游源码（/Users/jacklee/Projects/codex，app-server-protocol/src/protocol/v2/thread.rs:1649）：官方 `ThreadStatus` 枚举＝NotLoaded/Idle/**SystemError**/Active{flags}，serde `tag="type", camelCase`→wire 词 `"systemError"`；语义（app-server/src/thread_status.rs:448-467 `loaded_thread_status`）＝优先级 Active>SystemError>Idle，**SystemError＝上一 turn 系统错误收尾、持续到下一 turn 开始**——与 CordCode lastOutcome=failed（claimRunning 清除）精确同构，桌面 ❗ 即此状态。
+
+MacBridge 两条路径都丢弃 systemError：①live——codec.go decodeThreadStatusChanged 的 switch 只认 active/idle，`systemError` 落 default return nil；②catalog——mapCatalogThread 只对 `Status.Type=="active"` 产 RuntimeStateHint，注释明写「idle / notLoaded / systemError：无 hint」。因此 CordCode 的 codex 红❗唯一来源是 error 通知→被动泵 settle 的 **registry/side-store 内存态 outcome**：17:26 settle 的 failed outcome 在 18:11 runtime 重部署（黄点修复）时随内存一起丢失（side-store 明确「内存态，进程重启即失」，T5 修复只保槽位逐出不保重启）；此后 iOS 拉列表＝catalog 无 hint＋registry 空＋无 outcome→蓝点。预 18:11 日志已被重启截断（17:26 settle 帧不可复核，但 codec error 路径与 r1 取证同型）。
+
+修复方向（上游对齐，待 owner 裁决后走方案评审）：catalog 路径把 `row.Status.Type=="systemError"` 映射为 lastOutcome=failed（outcomeAt 取行 updatedAt）——thread/list 每次都携带该状态，红❗由此跨重启/冷启动存活且源自官方真相；live 路径 decodeThreadStatusChanged 补 `systemError` case（映射到既有 error/settle 语义，幂等）。iOS 零改动（lastOutcome/resolve 已就绪）。
