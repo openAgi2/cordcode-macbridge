@@ -1871,6 +1871,9 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if v, ok := data["detailUnavailable"]; ok {
 			part.DetailUnavailable = v
 		}
+		if v, ok := data["activityActions"]; ok {
+			part.ActivityActions = v
+		}
 		if status := dataString(data, "toolStatus"); status != "" {
 			part.ToolStatus = status
 		} else if msg.Event == "tool_started" {
@@ -2536,6 +2539,9 @@ func mergeToolPart(dst *ProjectionPart, src ProjectionPart) {
 	if src.DetailUnavailable != nil {
 		dst.DetailUnavailable = src.DetailUnavailable
 	}
+	if src.ActivityActions != nil {
+		dst.ActivityActions = src.ActivityActions
+	}
 	if src.ToolStatus != "" {
 		dst.ToolStatus = src.ToolStatus
 	}
@@ -2969,6 +2975,7 @@ func projectionTurnExceeds(turn *TurnProjection, limit int) bool {
 			projectionValueExceeds(part.FileDisplay, &budget) ||
 			projectionValueExceeds(part.EditRegions, &budget) ||
 			projectionValueExceeds(part.DetailUnavailable, &budget) ||
+			projectionValueExceeds(part.ActivityActions, &budget) ||
 			projectionValueExceeds(part.UserInputQuestions, &budget) {
 			return true
 		}
@@ -3369,6 +3376,7 @@ func cloneProjectionPart(part ProjectionPart) ProjectionPart {
 	out.FileDisplay = cloneProjectionJSONValue(part.FileDisplay)
 	out.EditRegions = cloneProjectionJSONValue(part.EditRegions)
 	out.DetailUnavailable = cloneProjectionJSONValue(part.DetailUnavailable)
+	out.ActivityActions = cloneProjectionJSONValue(part.ActivityActions)
 	out.UserInputQuestions = cloneProjectionJSONValue(part.UserInputQuestions)
 	out.PermissionPlan = cloneProjectionJSONValue(part.PermissionPlan)
 	if len(part.PermissionPatterns) > 0 {

@@ -483,7 +483,9 @@ func (c *LiveCodec) decodeItemStarted(n Notification) []core.Event {
 	case "contextCompaction":
 		return []core.Event{{Type: core.EventContextCompressing, SessionID: params.ThreadID, ThreadID: params.ThreadID, TurnID: params.TurnID, ItemID: item.ID}}
 	case "commandExecution":
-		return []core.Event{remoteToolUseEvent(params, item, "Bash", item.Command)}
+		event := remoteToolUseEvent(params, item, "Bash", item.Command)
+		event.ActivityActions = canonicalActivityActions(item.CommandActions)
+		return []core.Event{event}
 	case "fileChange":
 		event := remoteToolUseEvent(params, item, "Patch", remoteJSONField(item.Raw, "changes"))
 		event.FileChanges = remoteFileChanges(item)
@@ -551,7 +553,7 @@ func (c *LiveCodec) decodeItemCompleted(n Notification) []core.Event {
 	}
 	switch item.Type {
 	case "commandExecution":
-		event := core.Event{Type: core.EventToolResult, SessionID: params.ThreadID, ThreadID: params.ThreadID, TurnID: params.TurnID, ItemID: item.ID, ToolName: "Bash", RequestID: item.ID, ToolStatus: item.CommandStatus}
+		event := core.Event{Type: core.EventToolResult, SessionID: params.ThreadID, ThreadID: params.ThreadID, TurnID: params.TurnID, ItemID: item.ID, ToolName: "Bash", RequestID: item.ID, ToolStatus: item.CommandStatus, ActivityActions: canonicalActivityActions(item.CommandActions)}
 		if item.AggregatedOutput != nil {
 			event.ToolResult = *item.AggregatedOutput
 		}

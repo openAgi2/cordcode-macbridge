@@ -28,6 +28,20 @@ func TestRemoteCodecDecodesTurnItemsAndTerminalStates(t *testing.T) {
 	}
 }
 
+func TestRemoteCodecKeepsOfficialCommandActionsOnStartAndComplete(t *testing.T) {
+	codec := NewLiveCodec()
+	raw := `{"threadId":"th","turnId":"turn","item":{"type":"commandExecution","id":"cmd","command":"rg foo","cwd":"/tmp","status":"inProgress","commandActions":[{"type":"search","command":"rg foo","query":"foo","path":"/tmp"}]}}`
+	started := codec.Decode(Notification{Method: "item/started", Params: json.RawMessage(raw)})
+	if len(started) != 1 || len(started[0].ActivityActions) != 1 || started[0].ActivityActions[0].Kind != "search" {
+		t.Fatalf("started actions=%+v", started)
+	}
+	completedRaw := `{"threadId":"th","turnId":"turn","item":{"type":"commandExecution","id":"cmd","status":"completed","exitCode":0,"commandActions":[{"type":"search","command":"rg foo","query":"foo","path":"/tmp"}]}}`
+	completed := codec.Decode(Notification{Method: "item/completed", Params: json.RawMessage(completedRaw)})
+	if len(completed) != 1 || len(completed[0].ActivityActions) != 1 || completed[0].ActivityActions[0].Query != "foo" {
+		t.Fatalf("completed actions=%+v", completed)
+	}
+}
+
 func TestRemoteCodecProjectsAuthoritativeCollaborationSettings(t *testing.T) {
 	codec := NewLiveCodec()
 	events := codec.Decode(Notification{Method: "thread/settings/updated", Params: json.RawMessage(`{

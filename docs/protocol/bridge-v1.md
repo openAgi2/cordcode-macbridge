@@ -1699,6 +1699,15 @@ The original `output` payload is **retained** alongside these fields (web lane /
 summary parsing still consume it) — the clean fields are additive, never a replacement.
 Older clients ignore unknown optional fields.
 
+#### Tool part additive field: `activityActions` (official Codex commandActions)
+
+`activityActions` is an optional array on the tool part. It is the official Codex
+`CommandAction` list (`read` / `listFiles` / `search` / `unknown`) after canonical
+kind mapping (`read` / `list_files` / `search` / `run`). CordCode does not re-parse
+the shell command. Absent means the producer did not send the field; clients keep
+the existing tool display. Present means display must follow the official actions.
+remote-web does not mirror this native-only field.
+
 #### Part vocabulary: `context_compaction` (native Codex lifecycle)
 
 `BridgeProjectionPart` gains an additive `type: "context_compaction"` variant with required

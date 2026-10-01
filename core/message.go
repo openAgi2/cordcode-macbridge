@@ -627,6 +627,16 @@ type PlanPayload struct {
 	PlanFilePath  string `json:"planFilePath,omitempty"`
 }
 
+// ActivityAction is one official CommandAction after canonical kind mapping.
+// Kind is read | list_files | search | run. Command is the official redacted command.
+type ActivityAction struct {
+	Kind    string `json:"kind"`
+	Command string `json:"command"`
+	Name    string `json:"name,omitempty"`
+	Path    string `json:"path,omitempty"`
+	Query   string `json:"query,omitempty"`
+}
+
 // Event represents a single piece of agent output streamed back to the engine.
 type Event struct {
 	Type         EventType
@@ -634,6 +644,9 @@ type Event struct {
 	ToolName     string         // populated for EventToolUse, EventPermissionRequest
 	ToolInput    string         // human-readable summary of tool input
 	ToolInputRaw map[string]any // raw tool input (for EventPermissionRequest, used in allow response)
+	// ActivityActions is the official Codex commandActions array, already
+	// normalized to canonical kind names. Nil when the producer did not send it.
+	ActivityActions []ActivityAction
 	ToolResult   string         // populated for EventToolResult
 	ToolStatus   string         // optional status for EventToolResult (e.g. completed/failed)
 	ToolExitCode *int           // optional exit code for EventToolResult

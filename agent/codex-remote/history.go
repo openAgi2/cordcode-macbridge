@@ -163,6 +163,9 @@ type remoteThreadItem struct {
 	ProcessID        *string
 	CommandSource    string
 	CommandDuration  *int64
+	// CommandActions is the official commandActions array (item.rs CommandAction).
+	// CordCode does not re-parse the shell command.
+	CommandActions []remoteCommandAction
 
 	Changes     []remoteFileUpdateChange
 	PatchStatus string
@@ -269,19 +272,21 @@ func decodeRemoteThreadItem(raw json.RawMessage) remoteThreadItem {
 		it.Summary, it.Tail = value.Summary, value.Content
 	case "commandExecution":
 		var value struct {
-			Command          string  `json:"command"`
-			Cwd              string  `json:"cwd"`
-			Status           string  `json:"status"`
-			AggregatedOutput *string `json:"aggregatedOutput"`
-			ExitCode         *int32  `json:"exitCode"`
-			ProcessID        *string `json:"processId"`
-			Source           string  `json:"source"`
-			DurationMs       *int64  `json:"durationMs"`
+			Command          string                `json:"command"`
+			Cwd              string                `json:"cwd"`
+			Status           string                `json:"status"`
+			AggregatedOutput *string               `json:"aggregatedOutput"`
+			ExitCode         *int32                `json:"exitCode"`
+			ProcessID        *string               `json:"processId"`
+			Source           string                `json:"source"`
+			DurationMs       *int64                `json:"durationMs"`
+			CommandActions   []remoteCommandAction `json:"commandActions"`
 		}
 		_ = json.Unmarshal(raw, &value)
 		it.Command, it.CommandCwd, it.CommandStatus = value.Command, value.Cwd, value.Status
 		it.AggregatedOutput, it.ExitCode, it.ProcessID = value.AggregatedOutput, value.ExitCode, value.ProcessID
 		it.CommandSource, it.CommandDuration = value.Source, value.DurationMs
+		it.CommandActions = value.CommandActions
 	case "fileChange":
 		var value struct {
 			Changes []remoteFileUpdateChange `json:"changes"`
@@ -496,6 +501,9 @@ func (h *remoteCollabHistoryFolds) mapItem(turn *core.TurnScopedHistoryTurn, ite
 		if item.CommandDuration != nil {
 			step["duration"] = *item.CommandDuration
 		}
+		if actions := activityActionsWire(canonicalActivityActions(item.CommandActions)); len(actions) > 0 {
+			step["activityActions"] = actions
+		}
 		turn.Parts = append(turn.Parts, map[string]any{"type": "tool", "step": step, "itemId": item.ID})
 	case "fileChange":
 		step := map[string]any{"id": item.ID, "toolName": "Patch", "status": remoteCommandStepStatus(item.PatchStatus)}
@@ -684,6 +692,69 @@ func (a *Agent) IsSessionActive(ctx context.Context, sessionID string) bool {
 	default:
 		return true
 	}
+}
+
+// remoteCommandAction is the official CommandAction tagged union
+// (codex-rs/app-server-protocol/src/protocol/v2/item.rs, serde camelCase).
+// Optional strings are a decode tolerance; official Read.name/path are required.
+type remoteCommandAction struct {
+	Type    string `json:"type"`
+	Command string `json:"command"`
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	Query   string `json:"query"`
+}
+
+// canonicalActivityActions maps official commandActions onto the projection
+// vocabulary. Unknown types become run and keep the official command. Empty
+// input stays nil so older snapshots are unchanged.
+func canonicalActivityActions(actions []remoteCommandAction) []core.ActivityAction {
+	if len(actions) == 0 {
+		return nil
+	}
+	out := make([]core.ActivityAction, 0, len(actions))
+	for _, action := range actions {
+		kind := "run"
+		switch action.Type {
+		case "read":
+			kind = "read"
+		case "listFiles":
+			kind = "list_files"
+		case "search":
+			kind = "search"
+		case "unknown", "":
+			kind = "run"
+		}
+		out = append(out, core.ActivityAction{
+			Kind:    kind,
+			Command: action.Command,
+			Name:    action.Name,
+			Path:    action.Path,
+			Query:   action.Query,
+		})
+	}
+	return out
+}
+
+func activityActionsWire(actions []core.ActivityAction) []any {
+	if len(actions) == 0 {
+		return nil
+	}
+	out := make([]any, 0, len(actions))
+	for _, action := range actions {
+		item := map[string]any{"kind": action.Kind, "command": action.Command}
+		if action.Name != "" {
+			item["name"] = action.Name
+		}
+		if action.Path != "" {
+			item["path"] = action.Path
+		}
+		if action.Query != "" {
+			item["query"] = action.Query
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 var (

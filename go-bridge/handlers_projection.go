@@ -1435,6 +1435,7 @@ func hydrateToolEventsFromStep(step map[string]any) []projectionHydrateEvent {
 	copyOptionalStepField(started, step, "fileDisplay")
 	copyOptionalStepField(started, step, "editRegions")
 	copyOptionalStepField(started, step, "detailUnavailable")
+	copyOptionalStepField(started, step, "activityActions")
 
 	finished := map[string]interface{}{
 		"itemId":     toolID,
@@ -1453,6 +1454,7 @@ func hydrateToolEventsFromStep(step map[string]any) []projectionHydrateEvent {
 	copyOptionalStepField(finished, step, "fileDisplay")
 	copyOptionalStepField(finished, step, "editRegions")
 	copyOptionalStepField(finished, step, "detailUnavailable")
+	copyOptionalStepField(finished, step, "activityActions")
 
 	return []projectionHydrateEvent{
 		{Event: "tool_started", Data: started},

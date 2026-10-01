@@ -57,6 +57,9 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		if ev.ToolMatches != nil {
 			payload["matches"] = ev.ToolMatches
 		}
+		if actions := activityActionsPayload(ev.ActivityActions); len(actions) > 0 {
+			payload["activityActions"] = actions
+		}
 		return "tool_started", eventData(ev, payload), false
 
 	case core.EventToolResult:
@@ -89,6 +92,9 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		}
 		if ev.ToolMatches != nil {
 			payload["matches"] = ev.ToolMatches
+		}
+		if actions := activityActionsPayload(ev.ActivityActions); len(actions) > 0 {
+			payload["activityActions"] = actions
 		}
 		return "tool_finished", eventData(ev, payload), false
 
@@ -636,6 +642,27 @@ func planToWire(p *core.PlanPayload) map[string]interface{} {
 		plan["planFilePath"] = p.PlanFilePath
 	}
 	return plan
+}
+
+func activityActionsPayload(actions []core.ActivityAction) []any {
+	if len(actions) == 0 {
+		return nil
+	}
+	out := make([]any, 0, len(actions))
+	for _, action := range actions {
+		item := map[string]any{"kind": action.Kind, "command": action.Command}
+		if action.Name != "" {
+			item["name"] = action.Name
+		}
+		if action.Path != "" {
+			item["path"] = action.Path
+		}
+		if action.Query != "" {
+			item["query"] = action.Query
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func fileChangesToWire(changes []core.FileChange) []map[string]interface{} {

@@ -50,6 +50,10 @@ type ProjectionPart struct {
 	// Presence means clients must NOT fall back to raw output rendering.
 	// Additive; see bridge-v1.types.ts tool.detailUnavailable.
 	DetailUnavailable interface{} `json:"detailUnavailable,omitempty"`
+	// ActivityActions is the official Codex commandActions array, normalized to
+	// canonical kinds (read | list_files | search | run). Additive. Clients must
+	// not re-parse the shell command when this field is present.
+	ActivityActions interface{} `json:"activityActions,omitempty"`
 	// RequiresPermissionConfirmation marks a pending tool that must be approved
 	// before the turn continues (dsh-web approval/requested → permission_request).
 	// Additive; absent/false on older producers. SSV2 clients render the existing

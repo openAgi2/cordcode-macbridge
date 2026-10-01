@@ -778,6 +778,19 @@ export type BridgeProjectionPart =
         path?: string;
       };
       /**
+       * Optional official Codex commandActions, normalized to canonical kinds.
+       * kind is read | list_files | search | run. Present means the producer
+       * already classified the command; clients must not re-parse the shell
+       * text. Additive; absent on other backends and older snapshots.
+       */
+      activityActions?: Array<{
+        kind: "read" | "list_files" | "search" | "run";
+        command: string;
+        name?: string;
+        path?: string;
+        query?: string;
+      }>;
+      /**
        * Optional: this pending tool must be approved before the turn continues
        * (dsh-web approval/requested → permission_request). Additive; absent/false
        * on older producers. Clients map to the existing permission card.

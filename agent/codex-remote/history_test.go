@@ -90,6 +90,31 @@ func TestHistoryReadFailClosedWithoutClient(t *testing.T) {
 	}
 }
 
+func TestRemoteHistoryKeepsOfficialCommandActions(t *testing.T) {
+	thread := &remoteThread{ID: "thread_actions", Turns: []remoteTurn{{
+		ID: "turn_actions", Status: remoteTurnStatusCompleted,
+		Items: []json.RawMessage{
+			json.RawMessage(`{"type":"commandExecution","id":"cmd1","command":"sed -n 1,20p a.go | rg foo","cwd":"/tmp","status":"completed","commandActions":[{"type":"read","command":"sed -n 1,20p a.go","name":"a.go","path":"/tmp/a.go"},{"type":"search","command":"rg foo","query":"foo","path":"/tmp"},{"type":"listFiles","command":"ls","path":"/tmp"},{"type":"weird","command":"weird cmd"}]}`),
+		},
+	}}}
+	turn := mapRemoteHistoryTurns(thread, 0, newRemoteCollabHistoryFolds("th"))[0]
+	step := turn.Parts[0]["step"].(map[string]any)
+	actions := step["activityActions"].([]any)
+	if len(actions) != 4 {
+		t.Fatalf("actions=%d, want 4: %#v", len(actions), actions)
+	}
+	want := []string{"read", "search", "list_files", "run"}
+	for i, kind := range want {
+		got := actions[i].(map[string]any)["kind"]
+		if got != kind {
+			t.Fatalf("action %d kind=%v, want %s", i, got, kind)
+		}
+	}
+	if actions[0].(map[string]any)["name"] != "a.go" || actions[1].(map[string]any)["query"] != "foo" {
+		t.Fatalf("official fields dropped: %#v", actions)
+	}
+}
+
 func TestRemoteHistoryCarriesOfficialAgentMessagePhase(t *testing.T) {
 	thread := &remoteThread{ID: "thread_phase", Turns: []remoteTurn{{
 		ID: "turn_phase", Status: remoteTurnStatusCompleted,
