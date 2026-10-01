@@ -318,7 +318,25 @@ type sessionRegistry struct {
 	// the cached Claude running map so the next list_sessions reflects owned-turn
 	// transitions immediately instead of after the running-map TTL window.
 	onStateChange func(backendID, sessionID, newState string)
+
+	// outcomes（2026-10-01 取证修复）：settle 结局的持久侧存，键 sessionID。
+	// trackedSession 会随 idle 槽位清理被整条 delete（cleanupIdleSessions→
+	// registry.delete）——owner 矩阵 r1 实证：codex failed outcome 在 settle
+	// 后 5 分钟被逐出、iOS 3 小时后拉列表拿不到结局而错显蓝点。侧存不随
+	// delete/deleteIfSame 逐出；claimRunning（新 turn 取代旧结局）同步清除；
+	// 超过 registryOutcomeCap 时按 settle 时刻逐旧。内存态，进程重启即失。
+	outcomes map[string]registryOutcome
 }
+
+// registryOutcome is the durable-side settle record (同 trackedSession 的
+// lastOutcome 语义，独立于活 session 槽位存活)。
+type registryOutcome struct {
+	outcome string
+	at      time.Time
+}
+
+// registryOutcomeCap bounds the outcome side store; overridable in tests.
+var registryOutcomeCap = 4096
 
 type sessionActivityIdentity struct {
 	backendID string
@@ -326,7 +344,10 @@ type sessionActivityIdentity struct {
 }
 
 func newSessionRegistry() *sessionRegistry {
-	return &sessionRegistry{sessions: make(map[string]*trackedSession)}
+	return &sessionRegistry{
+		sessions: make(map[string]*trackedSession),
+		outcomes: make(map[string]registryOutcome),
+	}
 }
 
 func (r *sessionRegistry) get(sessionID string) (*trackedSession, bool) {
@@ -398,6 +419,9 @@ func (r *sessionRegistry) putRaw(sessionID string, sess core.AgentSession) {
 // releasePassiveClaim 做 CAS 语义的释放。
 func (r *sessionRegistry) claimRunning(sessionID string) uint64 {
 	r.mu.Lock()
+	// 新 turn 取代旧结局——tracked 字段与 outcomes 侧存同步清（2026-10-01 修复：
+	// 侧存成为 lastOutcomeFor 的读取源后，漏清会让已废结局复活）。
+	delete(r.outcomes, sessionID)
 	var backendID string
 	r.genCounter++
 	gen := r.genCounter
@@ -497,6 +521,20 @@ func (r *sessionRegistry) markSettled(sessionID, outcome string, settledAt time.
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.genCounter++
+	r.outcomes[sessionID] = registryOutcome{outcome: outcome, at: settledAt}
+	if len(r.outcomes) > registryOutcomeCap {
+		// 超限逐旧：O(n) 扫描仅在溢出时发生，cap 足够大使其罕见。
+		var oldestID string
+		var oldestAt time.Time
+		for id, o := range r.outcomes {
+			if oldestID == "" || o.at.Before(oldestAt) {
+				oldestID, oldestAt = id, o.at
+			}
+		}
+		if oldestID != "" && oldestID != sessionID {
+			delete(r.outcomes, oldestID)
+		}
+	}
 	if t, ok := r.sessions[sessionID]; ok {
 		t.lastOutcome = outcome
 		t.lastOutcomeAt = settledAt
@@ -514,15 +552,17 @@ func (r *sessionRegistry) markSettled(sessionID, outcome string, settledAt time.
 	}
 }
 
-// lastOutcomeFor 在锁内拷贝结局字段，供列表叠加点安全读取。
+// lastOutcomeFor 在锁内拷贝结局字段，供列表叠加点安全读取。读取源＝outcomes
+// 侧存（2026-10-01 修复）：trackedSession 的 lastOutcome 仍在 markSettled 同步
+// 维护（兼容既有读者），但槽位清理会删掉整条 tracked 记录——侧存让结局活过
+// cleanupIdleSessions 的逐出，iOS 晚到的列表拉取仍能拿到 failed/completed。
 func (r *sessionRegistry) lastOutcomeFor(sessionID string) (string, time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	t, ok := r.sessions[sessionID]
-	if !ok || t == nil || t.lastOutcome == "" {
-		return "", time.Time{}
+	if o, ok := r.outcomes[sessionID]; ok && o.outcome != "" {
+		return o.outcome, o.at
 	}
-	return t.lastOutcome, t.lastOutcomeAt
+	return "", time.Time{}
 }
 
 // isKnownActive（D-G2，§3.5.2）：known-active = 已登记且 running/closing。

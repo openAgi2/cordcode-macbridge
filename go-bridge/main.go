@@ -1016,7 +1016,7 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 				// backend 级 invalidate（iOS 200ms 防抖刷新拿新 updatedAt/runtimeState）。
 				// 被动喂入的 backend（opencode-web/dsh/codex-remote attach）的 60s
 				// discovery 档由此在终态时刻即时补一拍。
-				if eventName == "turn_completed" || eventName == "turn_error" || eventName == "turn_aborted" {
+				if isTerminalInvalidateEvent(eventName) {
 					if _, err := h.eventPublisher.PublishControlPlane(LogicalEvent{
 						BackendID: backendID,
 						Event:     "sessions_changed",
@@ -1272,4 +1272,18 @@ func clearControlPlaneEnv() {
 			_ = os.Unsetenv(k)
 		}
 	}
+}
+
+// isTerminalInvalidateEvent reports whether one mapped event word is a turn
+// terminal that must immediately broadcast the backend-level sessions_changed
+// invalidate. "error" joins the family 2026-10-01: the passive pump settles
+// plain "error" as failed (settleTurnOutcomeFromEvent), and codex-remote turn
+// failures surface as "error" rather than "turn_error" (owner 矩阵 r1 取证:
+// 11:25 error settle failed 后无 invalidate，iOS 错过结局刷新窗口)。
+func isTerminalInvalidateEvent(eventName string) bool {
+	switch eventName {
+	case "turn_completed", "turn_error", "turn_aborted", "error":
+		return true
+	}
+	return false
 }

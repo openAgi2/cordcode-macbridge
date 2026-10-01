@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -131,7 +130,7 @@ func (s *sseSubscriber) connect() error {
 		return err
 	}
 	s.wg.Add(1)
-	go s.run(resp.Body)
+	go s.run(resp)
 	return nil
 }
 
@@ -171,11 +170,11 @@ func (s *sseSubscriber) dial() (*http.Response, error) {
 // alive) heal armed turns, backoff, redial. A dropped stream otherwise
 // leaves iOS stuck in 执行中 forever — the terminal session-idle event dies
 // with the connection.
-func (s *sseSubscriber) run(body io.ReadCloser) {
+func (s *sseSubscriber) run(resp *http.Response) {
 	defer s.wg.Done()
 	backoff := sseReconnectMinBackoff
 	for {
-		s.readStream(body)
+		s.readStream(resp)
 		if s.ctx.Err() != nil {
 			return
 		}
@@ -190,9 +189,9 @@ func (s *sseSubscriber) run(body io.ReadCloser) {
 			if backoff < sseReconnectMaxBackoff {
 				backoff *= 2
 			}
-			resp, err := s.dial()
-			if err == nil {
-				body = resp.Body
+			redialed, derr := s.dial()
+			if derr == nil {
+				resp = redialed
 				// Directive-010: an asked frame lost inside the stream gap is
 				// re-derived after the redial from GET /question plus the same
 				// source-proven rules (bounded; failure = honest no-recovery).
@@ -202,7 +201,7 @@ func (s *sseSubscriber) run(body io.ReadCloser) {
 			if s.ctx.Err() != nil {
 				return
 			}
-			slog.Debug("opencode-web SSE: reconnect attempt failed", "error", err)
+			slog.Debug("opencode-web SSE: reconnect attempt failed", "error", derr)
 		}
 		backoff = sseReconnectMinBackoff
 	}
@@ -261,16 +260,53 @@ func (s *sseSubscriber) recoverPendingAfterReconnect() {
 	}
 }
 
+// sseHeartbeatWatchdog bounds how long the stream may stay silent before the
+// connection is declared orphaned (2026-10-01 owner 矩阵 r1 取证：4096 对长连
+// SSE 出现服务器侧静默孤儿化——连接 ESTABLISHED、双向队列全零、新连接心跳正
+// 常——原实现只在 body 结束/报错时自愈，这种死法永远检测不到）。官方 serve
+// 每 15s 一条 heartbeat（turn 进行中亦然，probe-20261001 捕获件窗内
+// heartbeat×7 佐证），任何帧（含心跳）都会重置本截止；45s＝连续错失 3 拍。
+// 这是活性截止，不是 C1 反对的请求级超时——streamClient 仍无 Timeout；客户端
+// body 无官方 deadline 面（ResponseController 仅服务端），故由 watchdog
+// goroutine 超时主动 Close 解除阻塞的 Read。
+var sseHeartbeatWatchdog = 45 * time.Second
+
 // readStream reads one SSE connection to its end (data: lines, blank-line
-// separators); a bare JSON line is tolerated as NDJSON compat.
-func (s *sseSubscriber) readStream(body io.ReadCloser) {
+// separators); a bare JSON line is tolerated as NDJSON compat. Every received
+// line refreshes the heartbeat watchdog's activity mark; a silent orphan is
+// closed by the watchdog and run() heals + redials.
+func (s *sseSubscriber) readStream(resp *http.Response) {
+	body := resp.Body
 	defer body.Close()
+
+	var lastFrame atomic.Int64
+	lastFrame.Store(time.Now().UnixNano())
+	watchDone := make(chan struct{})
+	defer close(watchDone)
+	go func() {
+		ticker := time.NewTicker(sseHeartbeatWatchdog / 3)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-watchDone:
+				return
+			case <-ticker.C:
+				if time.Since(time.Unix(0, lastFrame.Load())) > sseHeartbeatWatchdog {
+					slog.Warn("opencode-web SSE: heartbeat watchdog fired (no frame within deadline), closing orphaned stream",
+						"watchdog", sseHeartbeatWatchdog.String())
+					_ = body.Close()
+					return
+				}
+			}
+		}
+	}()
 
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 
 	var currentData strings.Builder
 	for scanner.Scan() {
+		lastFrame.Store(time.Now().UnixNano())
 		line := scanner.Text()
 		if line == "" {
 			data := currentData.String()
