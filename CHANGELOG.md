@@ -9,6 +9,7 @@
 ## [Unreleased]
 
 ### Fixed
+- **明细缓存 mappingVersion 2→3：旧缓存自动丢弃重建（commandActions parity 收尾）**：parity 之前写入的 codex-remote 明细缓存只含 `toolName=Bash`（无 activityActions），且被当成兼容数据无限期复用——升级后 iPhone 展开回合明细仍是清一色「执行 XXX」。版本栅栏触发 DropTurn，下次展开从官方分页整批重建，工具行重新携带官方 commandActions。无该参数的重复请求仍只回 ack、不重发。
 - **已加载回合的明细对空 overlay 连接回放缓存**：iPhone 重连或重装后点「用时」不再走上游重拉。带 `replaySinceChunkSeq` 时从本机明细缓存把已提交 chunk 发给该连接，不打 Codex。无该参数的重复请求仍只回 ack、不重发。
 - **codex 失败 turn 的红❗跨 bridge 重启/冷启动存活（官方 SystemError 对齐）**：ChatGPT 桌面对「上一 turn 系统错误收尾」的 thread 显红❗（官方 `ThreadStatus.SystemError`，持续到下一 turn 开始），CordCode 此前在 live 与 catalog 两条路径都丢弃该状态——红❗唯一来源是 runtime 内存态 outcome，bridge 重启即忘、iOS 错显蓝点。现 catalog 拉路径把官方 systemError 映射为列表 `lastOutcome=failed`（thread/list 每次携带，跨重启/冷启动存活且直接源自官方真相）；live 路径 `thread/status/changed{systemError}` 映射执行态 idle（防 error 通知丢失时卡转圈）。不猜错误类别（官方无分级）；已读 session 按读锚语义无徽标（设计）。iOS 零改动。
 - **opencode-web 执行态徽标实时化三修复（转圈/红❗/蓝点）**：①`session.status` 执行态镜像此前挂在 v1 方案猜测词 "running" 上（官方 1.18 实词 "busy"，1.18.32 捕获件＋上游 schema 双证），镜像分支从未触发——现按官方词表 busy→running 徽标镜像（per-session 幂等守卫，含 `session.idle` deprecated 别名补镜像）；②长连 SSE 被服务器侧静默孤儿化后永远检测不到（连接 ESTABLISHED 但服务器停止写入、心跳不再到达）——现 45s 心跳看门狗（3×官方 15s 心跳）超时强制断开并经既有 heal+reconnect 自愈，孤儿连接 45-60s 内恢复；③失败 turn 的红❗结局存在会被 idle 槽位清理整条逐出的 registry 槽里（settle 约 5 分钟后被逐出，iOS 拉列表拿不到结局、错显蓝点）——现 settle 结局写入独立侧存（存活于逐出、新 turn 同步清除、上限 4096 逐旧），plain `error` 加入终态 sessions_changed 广播词表。owner 真机验收（2026-10-01）：opencode-web 转圈/黄色等待/蓝色完成全状态同步正常（黄点耐久性另见上一条目）。

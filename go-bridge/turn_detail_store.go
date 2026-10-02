@@ -59,9 +59,11 @@ var (
 
 // turnDetailMappingVersion fences persisted ProjectionPart semantics. Version 2
 // additionally defers mutable collaboration workflow snapshots until upstream
-// EOF. Older manifests are rebuilt from official pagination instead of replaying
-// a first-page workflow image with missing members forever after an upgrade.
-const turnDetailMappingVersion = 2
+// EOF. Version 3 adds official commandActions to persisted tool parts
+// (activityActions): caches written by pre-parity runtimes carry toolName=Bash
+// only, so every upgrade across that boundary must drop the dir and rebuild
+// from official pagination instead of replaying action-less parts forever.
+const turnDetailMappingVersion = 3
 
 // safeBackendSeg: the only raw-ish segment allowed in paths (backend ids come
 // from internal config; handles are store-derived hex — both still validated;
