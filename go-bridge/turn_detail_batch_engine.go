@@ -167,17 +167,24 @@ func (h *Handlers) handleSessionTurnItemsV2(
 		if mErr == nil && manifest != nil &&
 			manifest.MappingVersion == turnDetailMappingVersion &&
 			manifest.Generation == target.TurnGeneration && manifest.Resume.EOF {
-			sendAck(&TurnDetailBatchAck{
-				DetailLoadState: DetailStateLoaded,
-				SyncRev:         h.loadedDetailWatermark(msg.BackendID, sessionID, turnID, currentSyncRev),
-				TurnGeneration:  target.TurnGeneration,
-				ManifestRev:     manifest.ManifestRev,
-				DeliveryID:      newDeliveryID(),
-				Progress:        h.detailStoreProgress(store, msg.BackendID, sessionID, turnID, target),
-			})
-			return
+			if !hasReplay {
+				// Idempotent repeat from a connection that already has the overlay:
+				// ack only, no chunk fanout, no upstream.
+				sendAck(&TurnDetailBatchAck{
+					DetailLoadState: DetailStateLoaded,
+					SyncRev:         h.loadedDetailWatermark(msg.BackendID, sessionID, turnID, currentSyncRev),
+					TurnGeneration:  target.TurnGeneration,
+					ManifestRev:     manifest.ManifestRev,
+					DeliveryID:      newDeliveryID(),
+					Progress:        h.detailStoreProgress(store, msg.BackendID, sessionID, turnID, target),
+				})
+				return
+			}
+			// Overlay empty on this connection (replaySinceChunkSeq present).
+			// Replay the committed cache; do not rehydrate from upstream.
+		} else {
+			rehydrate = true
 		}
-		rehydrate = true
 	}
 
 	flightKey := projectionDeliveryKey(msg.BackendID, sessionID) + "|" + turnID
@@ -432,7 +439,7 @@ func (h *Handlers) runTurnDetailBatch(
 	// 1. Loading admission (v2 op: loading carries the CURRENT summary).
 	// Skipped in rehydrate mode: the kernel turn is loaded-terminal and no
 	// state commit is legal — the batch rebuilds the STORE only.
-	if !rehydrate {
+	if !rehydrate && turn.DetailLoadState != DetailStateLoaded {
 		_, patches, err := h.projectionKernel.CommitTurnStateOpsV2(backendID, sessionID, []TurnStateOp{{
 			TurnID: turnID, DetailLoadState: DetailStateLoading, TurnGeneration: generation,
 			ManifestRev: turn.DetailManifestRev, ItemCount: turn.DetailItemCount, TotalBytes: turn.DetailTotalBytes,
@@ -511,6 +518,24 @@ func (h *Handlers) runTurnDetailBatch(
 					}
 				}
 			}
+		}
+	}
+
+	if manifest != nil && manifest.Resume.EOF && deliveredLast > 0 {
+		turn := currentTurn()
+		if turn == nil {
+			return failTerminal("stale_turn", deliveredFirst, deliveredLast)
+		}
+		rev, items, bytes := mergeTurnSummary(turn, manifest)
+		return &TurnDetailBatchAck{
+			DetailLoadState: DetailStateLoaded,
+			SyncRev:         h.loadedDetailWatermark(backendID, sessionID, turnID, kernelSyncRev(h, backendID, sessionID)),
+			TurnGeneration:  generation,
+			ManifestRev:     rev,
+			DeliveryID:      deliveryID,
+			FirstChunkSeq:   deliveredFirst,
+			LastChunkSeq:    deliveredLast,
+			Progress:        progressOf(manifest, items, bytes),
 		}
 	}
 

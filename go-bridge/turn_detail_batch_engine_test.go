@@ -389,6 +389,47 @@ func TestSessionTurnItemsV2IdempotentLoadedAck(t *testing.T) {
 	}
 }
 
+// TestSessionTurnItemsV2LoadedReplayFromCache pins reconnect: overlay-empty
+// clients send replaySinceChunkSeq=0 against an already-loaded turn. The
+// committed cache is replayed to this connection with no upstream refetch.
+func TestSessionTurnItemsV2LoadedReplayFromCache(t *testing.T) {
+	h, conn, sessionID, agent := turnDetailV2Harness(t)
+	agent.itemPages[""] = itemsPage([]map[string]any{
+		{"type": "agentMessage", "id": "a1", "text": "only answer"},
+		{"type": "commandExecution", "id": "c1", "command": "echo hi", "aggregatedOutput": "hi\n"},
+	}, "")
+	olderWalkDispatch(h, conn, map[string]any{
+		"direction": "window_0", "backendId": "codex-remote", "sessionId": sessionID, "limit": 10,
+	})
+	quiesceProjectionWrites(t, h)
+	_, first := turnItemsDispatchV2(t, h, conn, sessionID, "T1", nil)
+	if first.DetailLoadState != DetailStateLoaded || first.FirstChunkSeq < 1 {
+		t.Fatalf("first ack = %+v", first)
+	}
+	fetches := atomic.LoadInt64(&agent.pageFetches)
+	conn.mu.Lock()
+	conn.frames = nil
+	conn.mu.Unlock()
+
+	wireErr, ack := turnItemsDispatchV2(t, h, conn, sessionID, "T1", map[string]any{"replaySinceChunkSeq": 0})
+	if wireErr != nil {
+		t.Fatalf("replay err = %+v", wireErr)
+	}
+	if ack.DetailLoadState != DetailStateLoaded {
+		t.Fatalf("replay ack = %+v", ack)
+	}
+	if ack.FirstChunkSeq != first.FirstChunkSeq || ack.LastChunkSeq != first.LastChunkSeq {
+		t.Fatalf("replay range = [%d,%d], want [%d,%d]", ack.FirstChunkSeq, ack.LastChunkSeq, first.FirstChunkSeq, first.LastChunkSeq)
+	}
+	frames := waitChunkFrames(t, conn, ack.LastChunkSeq)
+	if len(frames) < 1 {
+		t.Fatalf("expected replayed chunk frames, got %d", len(frames))
+	}
+	if got := atomic.LoadInt64(&agent.pageFetches); got != fetches {
+		t.Fatalf("loaded replay refetched upstream: %d → %d", fetches, got)
+	}
+}
+
 // A cache created by the pre-phase mapper must never remain the loaded
 // fast-path forever. The runtime rebuilds it from official pagination and the
 // replacement chunks preserve commentary/final provenance.
