@@ -216,8 +216,9 @@ mirror/source/test、定向 build/test、以及无法执行项的诚实报告。
 需要 owner 额外授权的仍然仅限：`CCCodeUITests` / XCUITest / snapshot-test target、非
 `agent-device` 的 simulator/真机 UI automation、生产 VPS/Relay 部署、真实账号或外部环境操作、
 破坏性命令、以及会改变产品语义但任务未明确要求的取舍。配套 iOS 仓自 2026-09-13 起已常设
-授权 `agent-device` 模拟器与真机自验，必须按配套工作树的 `IOS_VERIFICATION_ENTRY.md` 执行，
-不得把该授权扩张成其他 UI test 或设备操作。
+授权 `agent-device` 模拟器与真机自验，必须按配套工作树的 `IOS_VERIFICATION_ENTRY.md` 执行
+（执行前三步前置与清理义务见下方「验证快路径」节），不得把该授权扩张成其他 UI test 或
+设备操作。
 
 ## 构建与测试成本纪律（P0，禁止 50 分钟式默认验证）
 
@@ -278,7 +279,12 @@ MacBridge 改动若影响 CordCode iOS 上的视觉布局、位置、间距、�
 
 执行前必须先按 P0 来源门解析配套 iOS 工作树，再读取该工作树的 `IOS_VERIFICATION_ENTRY.md`。
 `agent-device` 常设授权包括模拟器和连接真机上的启动、点击、输入、滑动、AX snapshot 与截图；
-不包含 `CCCodeUITests`、XCUITest 或 snapshot-test target。
+不包含 `CCCodeUITests`、XCUITest 或 snapshot-test target。**三步前置不可跳过**：①读入口文档
+§1.5 的「当前状态」标记——标记为不可用时直接报告阻塞，禁止重试、禁止自行修签名/换 team；
+②`agent-device session list` 检查占用——发现其他会话/工作树的 live session 时报冲突、不硬抢；
+③会话结束（含失败、超时、被拒）必须 `agent-device close` 清理并确认 `session list` 为空，close
+失效时 `pkill -f 'agent-device/dist/src/internal/daemon'` 兜底——残留 session 会绑死设备，阻塞
+其他会话甚至模拟器 lane（2026-10-02 事故）。
 
 ### 时间预算与异常止损
 

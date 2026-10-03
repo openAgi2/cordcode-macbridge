@@ -1,3 +1,16 @@
+## 2026-10-03：agent-device 残留 session 绑死真机——授权核验 ≠ 可用性核验（流程门补丁）
+
+agent 每次执行前认真核验「常设授权声明」（CLAUDE.md → 解析工作树 → 入口文档），却跳过同一
+入口文档 §1.5 的「当前状态」标记（2026-09-28 起真机自动化不可用），改完代码直跑真机
+`snapshot`，被 `xcodebuild build-for-testing failed` 挡住；失败后又未 `close` 清理，default
+session 残留绑死 iPhone 16 Pro，阻塞另一工作树的 agent-device（对方报 live 占用，2026-10-03
+已释放并杀孤儿 daemon）。根因：规则只写了「必须按入口文档执行」，没把文档内的状态标记设为
+执行 gate；清理义务只出现在正常循环的 `close`，失败路径无人管。修复：Mac/iOS 两仓
+CLAUDE.md（AGENTS.md 同步）与 `IOS_VERIFICATION_ENTRY.md` 增加「三步前置」（状态标记 gate
++ session list 占用检查 + 失败也清理）。教训：常设授权免除的是申请，不是运行态可用性检查；
+文档里的维护状态块是 gate，不是附注。
+
+
 ## 2026-09-30：registry lastOutcome（session 列表三态徽标的数据半边）——settle 路由 R1–R8 复盘
 
 iOS session 列表三态徽标（转圈/红❗/蓝点，方案 docs/2026-09-30-session-list-status-badges-plan.md
