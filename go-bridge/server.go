@@ -208,9 +208,12 @@ func (c *Conn) isClosed() bool {
 
 // Server manages WebSocket connections.
 type Server struct {
-	authMiddleware          *AuthMiddleware
-	handlers                *Handlers
-	activeConns             *ActiveConnRegistry
+	authMiddleware *AuthMiddleware
+	handlers       *Handlers
+	activeConns    *ActiveConnRegistry
+	// identityMu 保护 hello 身份与 LAN 候选：启动注入与运行期 DHCP 刷新共用。
+	// handleHello / relay hello 读快照；RefreshAdvertisedLocalURLs 写 localURL/locals。
+	identityMu              sync.RWMutex
 	bridgeID                string
 	displayName             string
 	runtimeVersion          string
@@ -480,31 +483,42 @@ func (s *Server) SetAuthMiddleware(m *AuthMiddleware) {
 
 // SetBridgeIdentity 设置 Bridge 身份信息，用于 hello 握手。
 func (s *Server) SetBridgeIdentity(bridgeID, displayName, runtimeVersion, localURL, remoteURL string, remoteURLs ...string) {
+	s.identityMu.Lock()
 	s.bridgeID = bridgeID
 	s.displayName = displayName
 	s.runtimeVersion = runtimeVersion
 	s.localURL = localURL
 	s.remoteURL = remoteURL
 	s.remoteURLs = uniqueNonEmptyStrings(append([]string{remoteURL}, remoteURLs...))
-	s.handlers.SetBridgeID(bridgeID)
+	s.identityMu.Unlock()
+	if s.handlers != nil {
+		s.handlers.SetBridgeID(bridgeID)
+	}
 }
 
 // SetLocalCandidateURLs 设置 LAN 直连候选列表,用于 hello_ack.currentURLs.locals(secondary 候选)。
+// 启动注入与运行期 DHCP 刷新共用；读路径走 helloIdentitySnapshot。
 func (s *Server) SetLocalCandidateURLs(urls []string) {
+	s.identityMu.Lock()
 	s.localCandidateURLs = uniqueNonEmptyStrings(urls)
+	s.identityMu.Unlock()
 }
 
 // SetConnectionPolicy 设置 control-plane 连接策略,经 hello_ack.bridge.connectionPolicy 下发。
 // 与 LAN 候选独立:关闭 preferLocalNetwork 时仍发布 LAN 候选,iOS 只是不把它们纳入自动优先。
 // 由 main.go 在启动时从 -prefer-local-network flag 注入一次;config 变更走 applyConfigAndRestart
-// 重启新进程,故运行期内该字段不被并发改写(与 localCandidateURLs/remoteURLs 同为启动期注入)。
+// 重启新进程。运行期 DHCP 刷新只改 localURL/locals，不改本字段。
 // SSV2:纯 control-plane,不进入 timeline/projection。
 func (s *Server) SetConnectionPolicy(policy ConnectionPolicy) {
+	s.identityMu.Lock()
 	s.connectionPolicy = policy
+	s.identityMu.Unlock()
 }
 
 // ConnectionPolicy 返回当前 control-plane 连接策略(供 direct 与 relay 两处 hello handler 读取)。
 func (s *Server) ConnectionPolicy() ConnectionPolicy {
+	s.identityMu.RLock()
+	defer s.identityMu.RUnlock()
 	return s.connectionPolicy
 }
 
@@ -742,16 +756,17 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 		agents = s.handlers.Agents()
 	}
 
+	id := s.helloIdentitySnapshot()
 	ack := HandleHelloWithRemoteURLs(
 		&hello,
 		conn.authedDevice,
-		s.bridgeID,
-		s.displayName,
-		s.runtimeVersion,
-		s.localURL,
-		s.remoteURL,
-		s.remoteURLs,
-		s.localCandidateURLs,
+		id.bridgeID,
+		id.displayName,
+		id.runtimeVersion,
+		id.localURL,
+		id.remoteURL,
+		id.remoteURLs,
+		id.localCandidateURLs,
 		agents,
 		codexMode,
 		s.detectionCfg,
@@ -759,7 +774,8 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 	)
 	// control-plane 连接策略随每次 hello_ack 权威下发(默认 false=Relay 底座)。
 	if ack.Bridge != nil {
-		ack.Bridge.ConnectionPolicy = &s.connectionPolicy
+		policy := id.connectionPolicy
+		ack.Bridge.ConnectionPolicy = &policy
 	}
 	ack.BridgeEpoch = s.bridgeEpoch
 	// web_push_v1 协商（direct 路径；与 relay 路径共用 ApplyWebPushHelloProfile，语义一致）。

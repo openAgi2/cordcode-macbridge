@@ -140,6 +140,7 @@ func (s *ManagementServer) approveRelayPairing(ctx context.Context, session *Pai
 	s.dnMu.RLock()
 	displayName := s.cfg.DisplayName
 	s.dnMu.RUnlock()
+	_, localURLs := s.localURLSnapshot()
 	result := &RelayFirstResult{
 		DeviceID:                session.ClaimingDeviceID,
 		DeviceToken:             deviceToken,
@@ -151,7 +152,7 @@ func (s *ManagementServer) approveRelayPairing(ctx context.Context, session *Pai
 		BridgeIdentityPublicKey: base64.StdEncoding.EncodeToString(s.cfg.RelayIdentity.PublicKeyBytes()),
 		BridgeFingerprint:       s.cfg.RelayIdentity.Fingerprint(),
 		ChannelGeneration:       1,
-		LocalURLs:               s.cfg.LocalURLs,
+		LocalURLs:               localURLs,
 		ConnectionPolicy:        &ConnectionPolicy{PreferLocalNetwork: s.cfg.PreferLocalNetwork},
 	}
 	plaintext, err := json.Marshal(result)

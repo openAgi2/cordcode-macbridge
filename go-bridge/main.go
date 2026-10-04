@@ -497,6 +497,9 @@ func Main() {
 	server.SetLocalCandidateURLs(advertisedLocalURLs)
 	// control-plane 连接策略注入 Server,供 direct 与 relay 两处 hello handler 在 hello_ack 下发。
 	server.SetConnectionPolicy(ConnectionPolicy{PreferLocalNetwork: *preferLocalNetwork})
+	// DHCP 刷新：周期重算 LAN 广播地址，变化时更新 hello 身份、Management API 并向
+	// 已连接设备（直连 + Relay）推送 bridge_current_urls。显式 advertise host 时 no-op。
+	go runAdvertisedLocalURLRefresher(ctx, server, mgmtSrv, *port)
 	server.SetDetectionConfig(&AgentDetectionConfig{
 		OpenCodeURL:       *ocBaseURL,
 		OpenCodeUser:      *ocUser,
@@ -522,16 +525,17 @@ func Main() {
 		hello.LastBridgeEpoch = msg.LastBridgeEpoch
 		hello.LastEventID = msg.LastEventID
 		hello.LastSeenBySession = msg.LastSeenBySession
+		id := server.helloIdentitySnapshot()
 		ack := HandleHelloWithRemoteURLs(
 			&hello,
 			device,
-			server.bridgeID,
-			server.displayName,
-			server.runtimeVersion,
-			server.localURL,
-			server.remoteURL,
-			server.remoteURLs,
-			server.localCandidateURLs,
+			id.bridgeID,
+			id.displayName,
+			id.runtimeVersion,
+			id.localURL,
+			id.remoteURL,
+			id.remoteURLs,
+			id.localCandidateURLs,
 			handlers.Agents(),
 			handlers.CodexBackendMode(),
 			server.detectionCfg,
@@ -539,7 +543,8 @@ func Main() {
 		)
 		// relay 路径同样权威下发 control-plane 连接策略(与 direct hello 同源 server.connectionPolicy)。
 		if ack.Bridge != nil {
-			ack.Bridge.ConnectionPolicy = &server.connectionPolicy
+			policy := id.connectionPolicy
+			ack.Bridge.ConnectionPolicy = &policy
 		}
 		ack.BridgeEpoch = bridgeEpoch
 		// web_push_v1 协商（relay 路径；与 direct server.go handleHello 共用同一 helper）。

@@ -487,7 +487,7 @@ func classifyRelayPayload(payload []byte) relayOutboundClass {
 		return relayOutboundNormal
 	}
 	switch header.Type {
-	case "hello_ack", "hello_error", "ping", "pong", "recovery_barrier", "recovery_complete":
+	case "hello_ack", "hello_error", "ping", "pong", "recovery_barrier", "recovery_complete", "bridge_current_urls":
 		return relayOutboundControl
 	case "event":
 		return classifyRelayEvent(header.Event)

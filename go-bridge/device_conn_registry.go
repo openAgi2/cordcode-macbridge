@@ -83,6 +83,26 @@ func (r *DeviceConnRegistry) AllDeviceIDs() []string {
 	return out
 }
 
+// AllConnections returns a snapshot of every live direct and relay connection.
+// Used to push control-plane frames (e.g. advertised LAN URL refresh) without
+// going through EventPublisher.
+func (r *DeviceConnRegistry) AllConnections() []Connection {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var n int
+	for _, conns := range r.conns {
+		n += len(conns)
+	}
+	if n == 0 {
+		return nil
+	}
+	out := make([]Connection, 0, n)
+	for _, conns := range r.conns {
+		out = append(out, conns...)
+	}
+	return out
+}
+
 // DisconnectDevice 关闭指定设备的所有连接，发送 device_revoked 事件后主动 Close。
 // 修复场景4：补 Close 确保撤销即时生效（原 direct 仅 SendJSON 不 Close，依赖 iOS 侧断开；
 // 现统一发事件 + Close，relay 路径也能即时断开）。

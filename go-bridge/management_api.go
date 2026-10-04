@@ -100,6 +100,7 @@ type ManagementServer struct {
 	httpServer                  *http.Server
 	listener                    net.Listener
 	dnMu                        sync.RWMutex // 保护 cfg.DisplayName 的并发读写
+	urlMu                       sync.RWMutex // 保护 cfg.LocalURL/LocalURLs 的运行期 DHCP 刷新
 	agentMu                     sync.RWMutex
 	agentDescriptors            []AgentProviderDescriptor
 	agentDescriptorsInitialized bool
@@ -175,6 +176,29 @@ func (s *ManagementServer) SetDisplayName(name string) {
 	if s.cfg.DataDir != nil {
 		saveDisplayNameToDir(s.cfg.DataDir, name)
 	}
+}
+
+// SetLocalURLs 更新 LAN 广播地址（运行期 DHCP 刷新专用）。只改内存值：
+// 配对二维码 / pairing_complete / remote status 后续读取即拿到新地址，无需重启。
+func (s *ManagementServer) SetLocalURLs(local string, locals []string) {
+	s.urlMu.Lock()
+	s.cfg.LocalURL = local
+	s.cfg.LocalURLs = uniqueNonEmptyStrings(locals)
+	s.urlMu.Unlock()
+}
+
+// localURLSnapshot 读取当前 LAN 广播地址（主候选在前）。
+func (s *ManagementServer) localURLSnapshot() (string, []string) {
+	s.urlMu.RLock()
+	defer s.urlMu.RUnlock()
+	return s.cfg.LocalURL, append([]string(nil), s.cfg.LocalURLs...)
+}
+
+// currentLocalURL 读取当前主候选 LAN URL。
+func (s *ManagementServer) currentLocalURL() string {
+	s.urlMu.RLock()
+	defer s.urlMu.RUnlock()
+	return s.cfg.LocalURL
 }
 
 // remoteURL 返回当前配置的远程 URL，供 pairing_complete 推送给 iOS 端。
@@ -923,7 +947,7 @@ func (s *ManagementServer) handlePairingCreate(w http.ResponseWriter, _ *http.Re
 	session := NewPairingSessionWithRemoteURLs(
 		s.cfg.BridgeID,
 		displayName,
-		s.cfg.LocalURL,
+		s.currentLocalURL(),
 		s.remoteURLs(),
 		5*time.Minute,
 	)
@@ -1105,7 +1129,7 @@ func (s *ManagementServer) handlePairingApprove(w http.ResponseWriter, r *http.R
 			Bridge: PairingCompleteBridge{
 				BridgeID:         s.cfg.BridgeID,
 				DisplayName:      displayName,
-				LocalURL:         s.cfg.LocalURL,
+				LocalURL:         s.currentLocalURL(),
 				RemoteURL:        s.remoteURL(),
 				RemoteURLs:       s.remoteURLs(),
 				TLSPin:           s.cfg.TLSPin,
@@ -1226,7 +1250,7 @@ func (s *ManagementServer) handleSetDisplayName(w http.ResponseWriter, r *http.R
 // ── GET /internal/remote/status ──────────────────────────────────────────────
 // 返回远程连接诊断信息，只读取本机配置，不向外部发起探测。
 func (s *ManagementServer) handleRemoteStatus(w http.ResponseWriter, _ *http.Request) {
-	localURL := s.cfg.LocalURL
+	localURL := s.currentLocalURL()
 	tailscaleURL := s.cfg.TailscaleURL
 	remoteURL := s.cfg.RemoteURL
 	remoteURLs := s.remoteURLs()
