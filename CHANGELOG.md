@@ -9,6 +9,9 @@
 ## [Unreleased]
 
 ### Fixed
+- **DHCP 换 IP 后 LAN 广播地址运行期刷新（Mac 不再需要重启）**：此前 LAN WebSocket 地址只在进程启动时计算一次，DHCP 把 Mac 换到新地址后 8777 一直监听新地址，但 iPhone 收到的仍是旧地址，按「优先局域网」连不存在的旧 IP、退回 Relay。现 go-bridge 每 10 秒重算 LAN 地址，变化时向所有已连接设备（直连 + Relay）推送新增的 top-level `bridge_current_urls` 帧（同 `hello_ack.bridge.currentURLs` 形状），配对二维码 / `pairing_complete` / remote status 同步读新地址；显式 `GO_BRIDGE_ADVERTISE_HOST` 覆盖保持不变。旧版 iPhone 忽略该帧、自然重连后从 `hello_ack` 拿到新地址。
+
+### Fixed
 - **明细缓存 mappingVersion 2→3：旧缓存自动丢弃重建（commandActions parity 收尾）**：parity 之前写入的 codex-remote 明细缓存只含 `toolName=Bash`（无 activityActions），且被当成兼容数据无限期复用——升级后 iPhone 展开回合明细仍是清一色「执行 XXX」。版本栅栏触发 DropTurn，下次展开从官方分页整批重建，工具行重新携带官方 commandActions。无该参数的重复请求仍只回 ack、不重发。
 - **已加载回合的明细对空 overlay 连接回放缓存**：iPhone 重连或重装后点「用时」不再走上游重拉。带 `replaySinceChunkSeq` 时从本机明细缓存把已提交 chunk 发给该连接，不打 Codex。无该参数的重复请求仍只回 ack、不重发。
 - **codex 失败 turn 的红❗跨 bridge 重启/冷启动存活（官方 SystemError 对齐）**：ChatGPT 桌面对「上一 turn 系统错误收尾」的 thread 显红❗（官方 `ThreadStatus.SystemError`，持续到下一 turn 开始），CordCode 此前在 live 与 catalog 两条路径都丢弃该状态——红❗唯一来源是 runtime 内存态 outcome，bridge 重启即忘、iOS 错显蓝点。现 catalog 拉路径把官方 systemError 映射为列表 `lastOutcome=failed`（thread/list 每次携带，跨重启/冷启动存活且直接源自官方真相）；live 路径 `thread/status/changed{systemError}` 映射执行态 idle（防 error 通知丢失时卡转圈）。不猜错误类别（官方无分级）；已读 session 按读锚语义无徽标（设计）。iOS 零改动。
