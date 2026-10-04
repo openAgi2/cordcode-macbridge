@@ -28,6 +28,7 @@ Server messages use:
 | `pong` | MacBridge -> iOS | Keepalive response. |
 | `recovery_barrier` | MacBridge -> client | Replay input is complete; client must apply/persist and acknowledge. |
 | `recovery_complete` | MacBridge -> client | Recovery is committed; pending live events follow this frame. |
+| `bridge_current_urls` | MacBridge -> client | Runtime refresh of `currentURLs` LAN candidates after a DHCP/interface change (additive, control-plane). |
 
 ## Version Negotiation
 
@@ -591,6 +592,30 @@ Relay-first pairing can hand iOS both Relay credentials and current LAN candidat
 include Tailscale self-signed `wss://100.x` candidates, because those require a separate authenticated
 SPKI pin. Clients should treat `local` as primary, race or fallback across `locals` inside the direct
 phase, and keep Relay as the remote path when available.
+
+### Runtime LAN URL refresh (`bridge_current_urls`)
+
+LAN addresses are also recomputed at runtime (poll, ~10s). When the Mac's LAN IP set changes
+(DHCP lease change, interface flap) the server updates the values it would put in
+`hello_ack.bridge.currentURLs` and pushes the new set to every authenticated connected client —
+direct and Relay — as a top-level frame:
+
+```json
+{ "type": "bridge_current_urls", "currentURLs": { "local": "ws://192.168.1.2:8777/bridge", "locals": ["ws://192.168.1.7:8777/bridge"] } }
+```
+
+Semantics:
+
+- Same shape as `hello_ack.bridge.currentURLs` (`local` primary, `locals` secondary, primary
+  excluded from `locals`). `remote`/`remotes` are intentionally omitted; remote candidates do not
+  change at runtime.
+- Control-plane only: the frame is NOT an `event`, carries no `seq`/`eventId`, never enters the
+  event sequence, replay/recovery, or any timeline/projection. It only refreshes transport
+  candidates (`SavedBridge.localURL/localURLs` on iOS) exactly like a `hello_ack` refresh.
+- An explicit advertise host override (`GO_BRIDGE_ADVERTISE_HOST`) stays sticky; no frames are
+  emitted in that mode.
+- Old clients that do not know the type ignore the frame; they still receive the new URLs in the
+  next `hello_ack` after a natural reconnect.
 
 ## Connection policy (control-plane)
 

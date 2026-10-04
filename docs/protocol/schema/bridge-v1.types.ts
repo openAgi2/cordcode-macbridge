@@ -166,6 +166,24 @@ export interface BridgeHelloAck {
   error?: BridgeWireError;
 }
 
+/**
+ * Runtime refresh of `hello_ack.bridge.currentURLs` LAN candidates after a DHCP/interface
+ * change. Pushed to every authenticated connected client (direct and Relay) whenever the
+ * recomputed advertise set differs. Control-plane only: not an event, no seq/eventId, never
+ * enters the event sequence, replay/recovery, or any timeline/projection. `remote`/`remotes`
+ * are intentionally omitted. Old clients ignore the frame. See bridge-v1.md
+ * 「Runtime LAN URL refresh (bridge_current_urls)」.
+ */
+export interface BridgeCurrentURLsFrame {
+  type: "bridge_current_urls";
+  currentURLs: {
+    local: string;
+    // Secondary LAN direct candidates (ws://<lan-ip>:<port>/bridge); local is the primary.
+    // Does not carry Tailscale candidates (those need a separate TLS pin).
+    locals?: string[];
+  };
+}
+
 export interface BridgeRegisterAck {
   type: "register_ack";
   ok: boolean;
