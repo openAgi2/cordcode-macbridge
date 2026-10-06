@@ -1070,6 +1070,11 @@ class RuntimeManager: ObservableObject {
             } else {
                 config.opencodeURL = ""
             }
+            // 失败分支同样要刷新行状态输入（owner 2026-10-06 反馈发现的缺口）：
+            // 不刷新则 openCodeSeatAction 停留在默认 source=.disabled，行按钮
+            // 矩阵按 disabled 走——什么按钮都不出。CLI 在不在（cliFound）与
+            // source 无关冷启动成败，必须每次 resolve 后都反映真实值。
+            refreshOpenCodeSeatActionInputs()
             return
         }
         config.opencodeURL = endpoint.url

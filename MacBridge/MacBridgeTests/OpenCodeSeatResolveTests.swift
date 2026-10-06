@@ -78,6 +78,27 @@ final class OpenCodeSeatResolveTests: XCTestCase {
         XCTAssertEqual(manager.config.opencodeURL, "", "无状态文件时 URL 必须留空（not_configured）")
     }
 
+    /// 失败分支也必须刷新行状态输入（owner 2026-10-06 反馈发现的缺口）：
+    /// 不刷新则 openCodeSeatAction 停留在默认 source=.disabled，行按钮矩阵
+    /// 按 disabled 走——什么按钮都不出。CLI 在不在与冷启动成败无关。
+    @MainActor
+    func testResolveFailureStillRefreshesSeatActionInputs() {
+        let manager = makeManager(source: .managedLocal)
+        XCTAssertEqual(manager.openCodeSeatAction.source, .disabled, "初始默认值应为 .disabled")
+
+        manager.openCodeManagedServer = OpenCodeManagedServer(
+            dataDir: manager.config.dataDir,
+            logDir: "/tmp",
+            cliSearchPath: manager.config.cliSearchPath,
+            cliResolver: NilCLIResolver()
+        )
+        manager.resolveManagedOpenCodeIfNeeded()
+
+        XCTAssertEqual(manager.openCodeSeatAction.source, .managedLocal, "失败分支必须刷新 source（否则行无按钮）")
+        XCTAssertFalse(manager.openCodeSeatAction.installing)
+        XCTAssertFalse(manager.openCodeSeatAction.starting)
+    }
+
     /// 非 managed_local：resolve 不触碰 config（external_http 用户自管 URL 不被覆盖）。
     @MainActor
     func testResolveSkipsNonManagedSource() {
