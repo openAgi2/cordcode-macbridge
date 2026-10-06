@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-10-06T17:32:00+08:00",
+  "updated_at": "2026-10-06T18:25:00+08:00",
   "todos": [
     {
       "id": "u1-gobridge-readiness-impl",
@@ -576,6 +576,82 @@
         "summary": "",
         "artifacts": [],
         "checked_at": null,
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "u3-review-fix-failure-refresh-impl",
+      "title": "u3-review-fix-failure-refresh-impl",
+      "description": "owner 2026-10-06 反馈的 review-fix（resolve 失败分支刷新缺失）",
+      "status": "done",
+      "phase": "u3-review-fix",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "owner 反馈 2026-10-06",
+      "notes": "review-fix-for:u3-seat-action-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "owner 2026-10-06 反馈（「先 check mac 上有没有 opencode 再出安装按钮」）暴露的真缺口：resolve 失败分支 return 前未调 refreshOpenCodeSeatActionInputs()，openCodeSeatAction 停留默认 source=.disabled → 行按钮矩阵按 disabled 走、任何按钮都不出（本机正是该路径：CLI 在但 serve 起不来）。修复：失败分支补刷新（CLI 在不在与冷启动成败无关）。review-fix-for:u3-seat-action-impl",
+        "artifacts": [
+          "MacBridge/MacBridge/Services/RuntimeManager.swift",
+          "git:9e221e98f97c"
+        ],
+        "checked_at": "2026-10-06T18:25:00+08:00",
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "u3-review-fix-failure-refresh-tests",
+      "title": "u3-review-fix-failure-refresh-tests",
+      "description": "owner 2026-10-06 反馈的 review-fix（resolve 失败分支刷新缺失）",
+      "status": "done",
+      "phase": "u3-review-fix",
+      "kind": "tests",
+      "depends_on": [],
+      "source": "owner 反馈 2026-10-06",
+      "notes": "review-fix-for:u3-seat-action-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "回归测试 testResolveFailureStillRefreshesSeatActionInputs：失败后 source 必须为 .managedLocal（非 .disabled 默认）；OpenCodeSeatResolveTests 5 用例全过（build-for-testing + test-without-building）。",
+        "artifacts": [
+          "MacBridge/MacBridgeTests/OpenCodeSeatResolveTests.swift",
+          "cmd:xcodebuild test-without-building -only-testing:OpenCodeSeatResolveTests => 5 passed"
+        ],
+        "checked_at": "2026-10-06T18:25:00+08:00",
+        "upstream_anchor": null
+      }
+    },
+    {
+      "id": "u3-review-fix-failure-refresh-regression",
+      "title": "u3-review-fix-failure-refresh-regression",
+      "description": "owner 2026-10-06 反馈的 review-fix（resolve 失败分支刷新缺失）",
+      "status": "done",
+      "phase": "u3-review-fix",
+      "kind": "regression",
+      "depends_on": [],
+      "source": "owner 反馈 2026-10-06",
+      "notes": "review-fix-for:u3-seat-action-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Release 重建（commit 9e221e98f97c）覆盖安装重启：runtime PID 17869 启动于 18:22:12（晚于 18:21:18 构建）、8777 监听者为新 runtime、描述符 service_not_running 诚实。行上「启动」按钮的可见性由单测锁定（Swift 内部状态无外部探针）；owner E-7 点按时将直接看到按钮。",
+        "artifacts": [
+          "cmd:build-unsigned-release.sh => commit 9e221e98f97c",
+          "cmd:ps/lsof => PID 17869 18:22:12",
+          "cmd:curl /internal/agents => service_not_running"
+        ],
+        "checked_at": "2026-10-06T18:25:00+08:00",
         "upstream_anchor": null
       }
     }
