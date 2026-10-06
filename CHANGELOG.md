@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+### 2026-10-06 — OpenCode 行区分未安装/未启动：点「安装」代装、点「启动」拉起 4096 段服务
+
+- 工作站「AI 工具」的 OpenCode Web 行此前把「没装 opencode」「4096 服务没拉起来」「拉起后进程死了」「探针认证失败」全部显示成同一句「未配置」，且没有任何地方能启动服务（只能重启整个 Link）。现该行区分三态：**未安装**（CLI 缺失）给「安装」按钮——用已发现的 npm 绝对路径执行 `npm install -g opencode-ai@1.18`（无 sudo/npx；全局 prefix 不可写时自动回退装到 CordCode 数据目录并在字幕注明；`opencode --version` exit 0 才算成功；0600 安装记录无凭据且 record-first 并入 CLI 解析，GUI PATH 缺口下跨重启仍可发现），安装后半段自动走「启动」；无 node/npm 时按钮变「需要 Node.js」直达官网（Link 不代装 Node）。**未启动**（服务没在听/中途死掉/认证失败/v2 隔离）给「启动」按钮——重置失败熔断后拉起 4096…4196 段 managed server（收养已在监听的健康进程，不起第二个）；URL 已在 runtime 手里时无需重启 bridge，探针恢复行即变绿。**就绪**无按钮。go-bridge 侧 opencode-web 描述符从布尔折叠切到结构化就绪：探针失败诚实报 `service_not_running` 而非 `not_configured`（401 认证失败/服务未启用认证/v2 隔离各带专属字幕），resolve 失败时保留状态文件持久 endpoint。external_http/disabled 用户零变化（无按钮、字幕透传探针错误）；iOS 零改动（wire 枚举复用双仓既有值）。
+
 ### 2026-10-06 — DSH 图片行高度跳动根治：get_session_media_dimensions 批量尺寸探针
 
 - 新增 bridge-v1 RPC `get_session_media_dimensions`（capability `session_media_dimensions`，scope `workspace.read`）：批量探针会话 cwd 内媒体文件的内在尺寸（PNG IHDR / JPEG SOF / GIF logical screen / WebP VP8X / SVG 声明尺寸——SVG 解析语义与 iOS `SessionSVGSupport.declaredSize` 镜像）。iOS 据此在图字节到达前预留终高，消灭上划时 44pt 占位 → 真实高度的高度跳动。探针走同一官方认证 `/api/file` 路由的 head 限读（512 KiB，绝不本地文件旁路）；hint 语义——per-path 失败不在结果 map（字节读取路径仍是权威失败面），仅 session 级失败报 media.* 错误。协议 pack 同步（schema `2026-10-06-r1`）。

@@ -278,6 +278,22 @@ struct RuntimeConfig {
 
 // MARK: - RuntimeManager
 
+/// OpenCode 行的动作状态（2026-10-06 方案 §5.5）。字段即 WorkspaceView 行文本
+/// 与按钮矩阵的完整决策输入；「安装中」「启动中」是行本地态，不新增 wire 枚举。
+struct OpenCodeSeatActionState: Equatable {
+    var source: OpenCodeServerSource = .disabled
+    /// managed_local 下 CLI（搜索路径 + 安装记录）是否可发现 opencode 可执行。
+    var cliFound = false
+    /// npm 是否可发现（搜索路径 + nvm 最新版 bin）——「安装」按钮的前置。
+    var npmFound = false
+    var installing = false
+    var starting = false
+    var lastInstallError: String?
+    var lastStartError: String?
+    /// 安装结果备注（如 CordCode-prefix 回退的 scope 说明）。
+    var lastInstallNote: String?
+}
+
 /// 管理 go-bridge 子进程生命周期。
 ///
 /// MacBridge 拥有 go-bridge 进程：启动、监控、崩了重启、退出时终止。
@@ -297,6 +313,14 @@ class RuntimeManager: ObservableObject {
     // ~/.codex/config.toml 变更检测（cc-switch 切 provider 后提示重启共享 daemon 生效）。
     @Published private(set) var codexDaemonConfigChanged = false
 
+    // OpenCode 行的动作状态（2026-10-06 方案 §5.5）。source / cliFound / npmFound
+    // 是 §3 行文本与按钮矩阵的决策输入（source 读 config.opencodeSource）；
+    // installing / starting 是 Mac 行本地态（不新增 wire 枚举），动作进行时行自己
+    // 盖住按钮文案，不闪回「未配置」。数据源 = CLI 解析 + npm 发现 + installer +
+    // managed server state 快照；行直接读本属性（先例：codex-web 行读
+    // codexDaemonConfigChanged）。
+    @Published private(set) var openCodeSeatAction = OpenCodeSeatActionState()
+
     var supervisorObservation: RuntimeSupervisorObservation {
         RuntimeSupervisorObservation(supervisorState: supervisorState)
     }
@@ -310,7 +334,9 @@ class RuntimeManager: ObservableObject {
 
     private var apiClient: ManagementAPIClient?
     private var latestManagementStatus: ManagementStatus?
-    private var openCodeManagedServer: OpenCodeManagedServer?
+    // internal for @testable injection（2026-10-06 方案 §5/§8：resolve 失败
+    // 保留持久 URL 与显式启动动作的测试都需要注入 stub server）。
+    var openCodeManagedServer: OpenCodeManagedServer?
     private let processController = RuntimeProcessController()
     private var monitorTask: Task<Void, Never>?
     private var userStopped = false
@@ -1012,12 +1038,18 @@ class RuntimeManager: ObservableObject {
         )
     }
 
-    private func resolveManagedOpenCodeIfNeeded() {
+    // internal for @testable（2026-10-06 方案 §8：持久 URL 回退测试直调）。
+    func resolveManagedOpenCodeIfNeeded() {
         guard config.opencodeSource == .managedLocal else {
             openCodeManagedServer?.stop()
             openCodeManagedServer = nil
+            refreshOpenCodeSeatActionInputs()
             return
         }
+        // 显式启动动作进行中时跳过本轮 resolve（2026-10-06 方案 §5 执行上下文
+        // 专节）：动作收口时自己写 config 并按需 restart，主线程不为 in-flight
+        // ensureRunning 排队（避免与后台启动动作在串行域上互相等待）。
+        guard !openCodeSeatAction.starting else { return }
         if openCodeManagedServer == nil {
             openCodeManagedServer = OpenCodeManagedServer(
                 dataDir: config.dataDir,
@@ -1026,7 +1058,18 @@ class RuntimeManager: ObservableObject {
             )
         }
         guard let endpoint = openCodeManagedServer?.ensureRunning(timeout: 5.0) else {
-            config.opencodeURL = ""
+            // 2026-10-06 方案 §5.1：失败时保留持久 endpoint——runtime 拿到 URL 后
+            // 探针失败报 service_not_running（行显示「未启动」而非误导性「未配置」）；
+            // 服务被「启动」拉起后探针恢复即绿，无需重启 bridge。状态文件可能已在
+            // 健康超时前保存了新端口（saveState 先于 waitUntilReady）。无状态文件
+            // （全新机器/从未成功保存）才留空 URL → not_configured。
+            if let persisted = openCodeManagedServer?.persistedEndpoint() {
+                config.opencodeURL = persisted.url
+                config.opencodeUser = persisted.username
+                config.opencodePass = persisted.password
+            } else {
+                config.opencodeURL = ""
+            }
             return
         }
         config.opencodeURL = endpoint.url
@@ -1037,6 +1080,129 @@ class RuntimeManager: ObservableObject {
             username: endpoint.username,
             password: endpoint.password
         )
+        refreshOpenCodeSeatActionInputs()
+    }
+
+    /// refreshOpenCodeSeatActionInputs refreshes the row-local decision
+    /// inputs（source / cliFound / npmFound，方案 §5.5）。文件系统探测足够轻，
+    /// MainActor 直跑；在 bridge 冷启动收口、动作收口与行出现时调用。
+    func refreshOpenCodeSeatActionInputs() {
+        let source = config.opencodeSource
+        openCodeSeatAction.source = source
+        if source == .managedLocal {
+            openCodeSeatAction.cliFound = DefaultOpenCodeCLIResolver(dataDir: config.dataDir).resolveOpenCodeCLI(searchPath: config.cliSearchPath) != nil
+            openCodeSeatAction.npmFound = OpenCodeInstaller.discoverNpm(cliSearchPath: config.cliSearchPath) != nil
+        } else {
+            openCodeSeatAction.cliFound = false
+            openCodeSeatAction.npmFound = false
+        }
+    }
+
+    /// installOpenCode is the explicit 「安装」 action（2026-10-06 方案
+    /// §2.1/§4）：npm 代装（opencode-ai@1.18，无 sudo、无 npx）→
+    /// `opencode --version` exit 0 验证 → 0600 安装记录（无凭据）→ CLI 解析
+    /// record-first 并入 → 后半段走与「启动」按钮完全相同的显式启动路径。
+    /// 已有可执行 opencode 时不跑 npm（行不显示按钮，动作侧双保险）；无
+    /// node/npm 时停在「需要 Node.js」语义（Link 不下载、不安装 Node）。
+    /// 单飞：安装/启动进行中时第二次点击无效。
+    func installOpenCode() async {
+        guard config.opencodeSource == .managedLocal else { return }
+        guard !openCodeSeatAction.installing, !openCodeSeatAction.starting else { return }
+        refreshOpenCodeSeatActionInputs()
+        guard !openCodeSeatAction.cliFound else { return }
+        guard let npm = OpenCodeInstaller.discoverNpm(cliSearchPath: config.cliSearchPath) else {
+            openCodeSeatAction.lastInstallError = "未找到 node/npm（需要 Node.js：https://nodejs.org）"
+            return
+        }
+        openCodeSeatAction.installing = true
+        openCodeSeatAction.lastInstallError = nil
+        openCodeSeatAction.lastInstallNote = nil
+        let dataDir = config.dataDir
+        let result = await Task.detached(priority: .userInitiated) { () -> Result<OpenCodeInstaller.InstallSuccess, OpenCodeInstaller.InstallError> in
+            OpenCodeInstaller.install(npmPath: npm, dataDir: dataDir)
+        }.value
+        openCodeSeatAction.installing = false
+        switch result {
+        case .success(let success):
+            openCodeSeatAction.lastInstallNote = success.note
+            refreshOpenCodeSeatActionInputs()
+            // 安装后半段（§2.1 第 3 拍）：与「启动」按钮完全相同的路径。
+            await startOpenCodeManagedServer()
+        case .failure(let error):
+            openCodeSeatAction.lastInstallError = error.message
+        }
+    }
+
+    /// startOpenCodeManagedServer is the explicit 「启动」 action（2026-10-06
+    /// 方案 §5.2）：重置失败熔断窗口（显式用户动作不是 spawn 循环），在后台
+    /// 跑 ensureRunning（Thread.sleep 等待不占主线程——await 挂起 MainActor 而非
+    /// 阻塞；OpenCodeManagedServer 的串行执行域保证与冷启动 resolve / shutdown
+    /// 互斥），完成后回到 MainActor 发布状态并按需把 URL 送进 runtime。
+    /// async 可等待：按钮 Task 在动作返回后调
+    /// backendViewModel.testAgent(id: "opencode-web") 触发行收口刷新（§5.2
+    /// 收口刷新，OpenCode 无 action-state 端点可轮询）。
+    func startOpenCodeManagedServer() async {
+        guard config.opencodeSource == .managedLocal else { return }
+        // 单飞：动作进行中时第二次点击无效。
+        guard !openCodeSeatAction.starting, !openCodeSeatAction.installing else { return }
+        openCodeSeatAction.starting = true
+        openCodeSeatAction.lastStartError = nil
+        if openCodeManagedServer == nil {
+            openCodeManagedServer = OpenCodeManagedServer(
+                dataDir: config.dataDir,
+                logDir: config.logDir,
+                cliSearchPath: config.cliSearchPath
+            )
+        }
+        guard let server = openCodeManagedServer else { return }
+        // 显式用户动作：先清熔断窗口，让这次尝试拿到完整预算。阻塞段
+        // （ensureRunning 含 Thread.sleep 健康等待）跑在 detached task 上。
+        let endpoint = await Task.detached(priority: .userInitiated) { () -> OpenCodeManagedEndpoint? in
+            server.resetFailureLimit()
+            return server.ensureRunning(timeout: 5.0)
+        }.value
+        let finalState = server.currentState()
+        openCodeSeatAction.starting = false
+        // 退出竞态守卫（方案 §5 执行上下文专节）：动作进行中 App 开始
+        // shutdown（state 已 .disabled）时不发布就绪。
+        if case .disabled = finalState { return }
+        guard let endpoint else {
+            openCodeSeatAction.lastStartError = Self.openCodeStartErrorReason(from: finalState)
+            return
+        }
+        if endpoint.url != config.opencodeURL {
+            // URL 首次进 runtime（新装机器/端口迁移）：config 三元组 + Desktop
+            // sidecar 同步 + restart（iOS 短暂重连，与任何配置变更一致）。
+            // syncDesktopConfig 是 AppKit 边界，留在 MainActor。
+            _ = server.syncDesktopConfig(
+                url: endpoint.url,
+                username: endpoint.username,
+                password: endpoint.password
+            )
+            applyConfigAndRestart { c in
+                c.opencodeURL = endpoint.url
+                c.opencodeUser = endpoint.username
+                c.opencodePass = endpoint.password
+            }
+        }
+        // URL 未变 → 只刷新行状态：runtime 探针对失败结果每次重探，行刷新
+        // （testAgent 收口）即绿，无需重启 bridge。
+        refreshOpenCodeSeatActionInputs()
+    }
+
+    /// openCodeStartErrorReason maps the managed server's final state to the
+    /// row subtitle text（失败 → 真实原因原文，方案 §5.2）。
+    nonisolated static func openCodeStartErrorReason(from state: OpenCodeManagedServerState) -> String? {
+        switch state {
+        case .unavailable(let reason):
+            return reason
+        case .crashed(let reason):
+            return reason
+        case .starting:
+            return "opencode managed server is starting"
+        case .running, .disabled:
+            return nil
+        }
     }
 
     private nonisolated static func readRuntimeJSON(in dataDir: String) -> (managementUrl: String?, port: Int?, pid: Int?, epoch: String?)? {

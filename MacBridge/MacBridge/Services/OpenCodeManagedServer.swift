@@ -49,8 +49,22 @@ protocol OpenCodeManagedHealthProbing {
 }
 
 struct DefaultOpenCodeCLIResolver: OpenCodeCLIResolving {
+    /// 安装记录所在 dataDir（record-first：记录里的 bin 可执行即用，再走搜索
+    /// 路径——镜像 dsh findDSHBinary 的顺序，保证 CordCode-prefix 安装在 GUI
+    /// PATH 缺口下跨重启仍可发现，2026-10-06 方案 §4）。nil = 只走搜索路径。
+    private let dataDir: String?
+
+    init(dataDir: String? = nil) {
+        self.dataDir = dataDir
+    }
+
     func resolveOpenCodeCLI(searchPath: [String]) -> String? {
         let fm = FileManager.default
+        if let dataDir,
+           let record = OpenCodeInstaller.readInstallRecord(dataDir: dataDir),
+           fm.isExecutableFile(atPath: record.binPath) {
+            return record.binPath
+        }
         for directory in searchPath {
             let candidate = URL(fileURLWithPath: directory).appendingPathComponent("opencode").path
             if fm.isExecutableFile(atPath: candidate) {
@@ -153,6 +167,9 @@ final class OpenCodeManagedServer {
     private let processFactory: OpenCodeProcessFactory
     private let processStartResolver: (Int32) -> Date?
     let desktopController: OpenCodeDesktopProcessControlling
+    /// Desktop sidecar 写入目录；nil = 真实
+    /// ~/Library/Application Support/ai.opencode.desktop（测试注入临时目录）。
+    private let desktopConfigDir: URL?
 
     private var process: Process?
     private var stderrPipe: Pipe?
@@ -160,29 +177,66 @@ final class OpenCodeManagedServer {
     private var consecutiveFailures: [Date] = []
     private(set) var state: OpenCodeManagedServerState = .disabled
 
+    /// 串行执行域（2026-10-06 方案 §5 执行上下文专节，r1 F-2）：全部可变状态
+    /// （process / stderrPipe / stderrHandle / consecutiveFailures / state）只在
+    /// 该队列上触碰。公开入口内部派发（queue.sync），签名不变——任何线程的调用
+    /// 互斥串行，把此前「只在主线程访问」的未成文不变量升级为显式机制。私有
+    /// 辅助只在队列上下文内直调，不再二次派发（避免 sync 重入死锁）；队列内的
+    /// 代码不回调主线程、不调用其他公开入口（r2 评审死锁审计）。stderr 的
+    /// readabilityHandler 不捕获 self（handler-local state only），不经队列。
+    private let executionQueue = DispatchQueue(label: "org.openagi2.cordcode.link.OpenCodeManagedServer")
+
     init(
         dataDir: String,
         logDir: String,
         cliSearchPath: [String],
-        cliResolver: OpenCodeCLIResolving = DefaultOpenCodeCLIResolver(),
+        cliResolver: OpenCodeCLIResolving? = nil,
         portProber: OpenCodePortProbing = DefaultOpenCodePortProber(),
         healthProbe: OpenCodeManagedHealthProbing = DefaultOpenCodeManagedHealthProbe(),
         processFactory: OpenCodeProcessFactory = DefaultOpenCodeProcessFactory(),
         desktopController: OpenCodeDesktopProcessControlling = DefaultOpenCodeDesktopProcessController(),
-        processStartResolver: ((Int32) -> Date?)? = nil
+        processStartResolver: ((Int32) -> Date?)? = nil,
+        // 测试注入：Desktop sidecar 写入目录（默认真实
+        // ~/Library/Application Support/ai.opencode.desktop；测试传临时目录，
+        // 不写用户真实 Desktop 配置）。
+        desktopConfigDir: URL? = nil
     ) {
         self.dataDir = dataDir
         self.logDir = logDir
         self.cliSearchPath = cliSearchPath
-        self.cliResolver = cliResolver
+        // 默认 resolver 带 dataDir：安装记录 record-first（方案 §4）。
+        self.cliResolver = cliResolver ?? DefaultOpenCodeCLIResolver(dataDir: dataDir)
         self.portProber = portProber
         self.healthProbe = healthProbe
         self.processFactory = processFactory
         self.desktopController = desktopController
         self.processStartResolver = processStartResolver ?? OpenCodeManagedServer.processStartDate(pid:)
+        self.desktopConfigDir = desktopConfigDir
     }
 
     func ensureRunning(timeout: TimeInterval = 5.0) -> OpenCodeManagedEndpoint? {
+        executionQueue.sync {
+            ensureRunningOnQueue(timeout: timeout)
+        }
+    }
+
+    /// resetFailureLimit clears the consecutive-failure circuit breaker. An
+    /// explicit user action（「启动」）is not a spawn loop — the window resets
+    /// so the action gets a full attempt (2026-10-06 plan §5.2).
+    func resetFailureLimit() {
+        executionQueue.sync {
+            consecutiveFailures.removeAll()
+        }
+    }
+
+    /// currentState returns a consistent snapshot taken on the serial
+    /// execution domain — thread-safe from any caller. The bare `state`
+    /// property is only meaningful on the queue (or in single-threaded tests).
+    func currentState() -> OpenCodeManagedServerState {
+        executionQueue.sync { state }
+    }
+
+    private func ensureRunningOnQueue(timeout: TimeInterval) -> OpenCodeManagedEndpoint? {
         state = .starting
         guard let cliPath = cliResolver.resolveOpenCodeCLI(searchPath: cliSearchPath) else {
             state = .unavailable(reason: "opencode CLI not found")
@@ -245,12 +299,27 @@ final class OpenCodeManagedServer {
     }
 
     func stop() {
-        stopOwnedProcess()
-        state = .disabled
+        executionQueue.sync {
+            stopOwnedProcess()
+            state = .disabled
+        }
+    }
+
+    /// persistedEndpoint returns the last saved endpoint from
+    /// opencode-managed-server.json without touching the process. Pure file
+    /// read (no shared mutable state), safe from any thread. Used by
+    /// RuntimeManager when ensureRunning fails: keeping the URL lets the
+    /// runtime probe report service_not_running (「未启动」) instead of a
+    /// misleading not_configured, and a later start flips the row green
+    /// without a bridge restart (2026-10-06 plan §5.1). A fresh machine with
+    /// no state file returns nil → the URL stays empty → not_configured.
+    func persistedEndpoint() -> OpenCodeManagedEndpoint? {
+        guard let persisted = loadState() else { return nil }
+        return OpenCodeManagedEndpoint(url: persisted.url, username: persisted.username, password: persisted.password)
     }
 
     func syncDesktopConfig(url: String, username: String, password: String) -> OpenCodeDesktopSyncResult {
-        let desktopDir = FileManager.default.homeDirectoryForCurrentUser
+        let desktopDir = desktopConfigDir ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/ai.opencode.desktop")
         let result = RuntimeManager.configureOpenCodeDesktopSettings(
             desktopDir: desktopDir,

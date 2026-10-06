@@ -332,33 +332,15 @@ func unsupportedGenerationDetail(gen generation, detail string) string {
 	return fmt.Sprintf("unsupported-generation (quarantined): probe detected generation %s; the only verified product generation is OpenCode 1.18.18 — no prompt, no SSE ingest, no Kernel writes; %s", gen, detail)
 }
 
-// InstanceStatus mirrors the endpoint state for hello_ack detection. The probe
-// is a read-only GET sequence; it never spawns, binds, or writes. States stay
-// distinct (C1): not configured / probe failed (unreachable, unauthorized,
+// InstanceStatus is the boolean view over the structured readiness seam
+// (readiness.go), retained for internal callers. The probe is a read-only
+// GET sequence; it never spawns, binds, or writes. States stay distinct
+// (C1): not configured / probe failed (unreachable, unauthorized,
 // server_unauthenticated — the probe error names which) / unsupported
 // generation (detected but quarantined) / supported 1.18.18.
 func (a *Agent) InstanceStatus() (available bool, detail string) {
-	if a.baseURL == "" {
-		return false, NotConfiguredDetail
-	}
-	a.probeMu.Lock()
-	if a.probe == nil || a.probe.err != nil || time.Since(a.probe.at) > instanceStatusProbeTTL {
-		ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
-		a.runProbe(ctx)
-		cancel()
-	}
-	res := a.probe
-	a.probeMu.Unlock()
-	if res == nil {
-		return false, "probe failed: no result"
-	}
-	if res.err != nil {
-		return false, "probe failed: " + res.err.Error()
-	}
-	if res.gen != generation118 {
-		return false, unsupportedGenerationDetail(res.gen, res.detail)
-	}
-	return true, res.detail
+	status, detail := a.StructuredInstanceReadiness()
+	return status == ReadinessAvailable, detail
 }
 
 // refreshProbe re-probes when the cached outcome is missing, failed, or stale.

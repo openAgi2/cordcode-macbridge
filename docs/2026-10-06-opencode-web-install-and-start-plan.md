@@ -1,7 +1,9 @@
 # OpenCode Web：未安装可代装、未启动可点启动
 
 Date: 2026-10-06
-Status: 方案 v2，未实施。评审通过前不改业务代码。
+Status: 方案 v2（r2 APPROVED）+ 实施期登记（OD-1/OD-2 裁决落定、r2 建议
+F-6/F-7 随本次触碰一并处理）；实施进行中（exec-plan 队列
+`.exec-plan/state/plan-50370998b41d.json`）。
 Branch: `feat/ios-native-message-timeline`
 HEAD: `f23124125cb6f967227887665932029680dd81c3`
 参照实现: `docs/2026-09-22-dsh-web-install-and-start-plan.md`（dsh-web 同款交互，已实施；
@@ -42,24 +44,25 @@ v2 逐条亲核后全部采纳，处置见下节）
 仓库路径=/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline
 分支=feat/ios-native-message-timeline
 提交=f23124125cb6f967227887665932029680dd81c3
-  （v1 编写于 2e39e805；f2312412 在其上只加本方案文档一个文件，无代码变更，
-  round 1 评审已核实——全部源码锚点在两提交下内容一致。v2 修订基于 f2312412，
-  修订后另行提交。）
-未提交状态=（与本方案无重叠，均属另一进行中任务 dsh session-media）
-  M  CHANGELOG.md / agent/dsh-web/fakedsh_test.go / docs/protocol/*（3）
-  M  go-bridge/{backend_capabilities,handlers,rpc_scopes,rpc_scopes_test,types}.go
-  ?? agent/dsh-web/session_media{,_test}.go / core/session_media.go
-  ?? go-bridge/handlers_session_media{,_test}.go / session_media_protocol_test.go
-  ?? docs/protocol/samples/session-media/
-  ?? docs/2026-10-06-opencode-web-install-and-start-plan-review-r1.md
-     （本方案 round 1 评审报告，属本方案任务，随 v2 一并提交）
+  （v1/v2 编写与 r1/r2 评审时的基线。实施启动时实际基线为
+  a50946c4ddaf123bf009e944ba442b53cd1525a7——并行会话已把 session-media
+  任务提交为 a50946c4，工作树转干净；该提交与本方案目标文件零重叠
+  （实施启动时 git diff --name-only 3fb49252..a50946c4 核实），全部源码
+  锚点在两提交下内容一致。r2 F-6 据此更新。）
+未提交状态=（实施期）本方案的实施改动：agent/opencode-web/readiness{,_test}.go、
+  agent/opencode-web/{probe,opencodeweb}.go、go-bridge/agent_descriptor{,_test}.go、
+  MacBridge Services/{OpenCodeInstaller,OpenCodeManagedServer,RuntimeManager}.swift、
+  MacBridge Views/WorkspaceView.swift、Services/Localization.swift、
+  MacBridgeTests/OpenCode{SeatResolve,SeatAction,SeatRow,Installer}Tests.swift、
+  CHANGELOG.md、本方案文档、.exec-plan/state/plan-50370998b41d.json。
 任务预期分支=feat/ios-native-message-timeline
 配套 iOS 路径=/Users/jacklee/Projects/cordcode-ios-native-message-timeline
 配套 iOS 分支=feat/ios-native-message-timeline
 配套 iOS 提交=4666b5a5bdb23552472523db9171ed22c9369390
 配套 iOS 未提交=（与本方案无重叠，属 session-markdown-image 任务；本方案不改 iOS）
 上游=/Users/jacklee/Projects/opencode
-上游提交=2fa3363c92（dev 分支，github-v1.2.25-2107-g2fa3363c92）
+上游提交=2fa3363c924c5c3e367b84a87ae478296a0ed59b（dev 分支，
+  github-v1.2.25-2107-g2fa3363c92；r2 F-6 补全为完整 40 位哈希）
 上游说明=dev 分支已是 v2 generation 形态；npm 发布线仍是 1.18.x。
   本 checkout 无 v1.18.x tag；`opencode serve` 的 1.18 语义以本仓生产代码
   （OpenCodeManagedServer，与本机 1.18.34 活体协同运行）为准，见 §1。
@@ -293,18 +296,23 @@ Node 不在范围内。没有 `node`/`npm` 时代装不能开始（「需要 Nod
    而不是误导性的「未配置」）。服务后来被「启动」拉起后，探针恢复，行变绿，
    **无需重启 bridge**。无状态文件（全新机器/从未成功保存）才留空 URL →
    `not_configured`。
-   Desktop sidecar 交互（round 1 F-5）：`launchBridgeProcess` 在 resolve 之后
-   立即调 `configureOpenCodeDesktopServerIfNeeded`
-   （`RuntimeManager.swift:467`），后者在 URL/User/Pass 非空时把
+   Desktop sidecar 交互（round 1 F-5；r2 F-7 精化守卫描述）：
+   `launchBridgeProcess` 在 resolve 之后立即调
+   `configureOpenCodeDesktopServerIfNeeded`（`RuntimeManager.swift:467`），
+   后者的守卫是**四条件**（`:994-997`）：`config.drivers.contains("opencode")`
+   （legacy opencode 驱动显式启用）**且** URL/User/Pass 非空，才把
    `config.opencodeURL` 写进 OpenCode Desktop 的 sidecar 设置
-   （`:993-1012`）。今天冷启动失败 URL 被置空（`:1029`），sidecar 不写；
-   改为持久 URL 后，冷启动失败场景 sidecar 会收到一个**暂时不可达的
-   loopback URL**。本方案选择接受：持久 endpoint（端口持久优先）就是服务
-   将被拉起的地址，服务被「启动」拉起后 Desktop 自然恢复。反过来在失败
-   路径跳过 Desktop 同步不可取——状态文件可能已在健康超时前保存了新端口
-   （`OpenCodeManagedServer.swift:228` 的 `saveState` 先于 `waitUntilReady`），
-   跳过会让 sidecar 停在旧端口，而显式启动成功且 URL 未变时（config 已是
-   持久值）§5.2 不触发 `syncDesktopConfig`，旧端口更难收敛。
+   （`:993-1012`）。默认 drivers 列表（`RuntimeManager.swift:206`）不含
+   legacy `"opencode"`——默认配置下冷启动失败路径根本不写 sidecar；「冷启动
+   失败场景 sidecar 会收到一个**暂时不可达的 loopback URL**」仅在 legacy
+   opencode 驱动被显式启用时出现。本方案选择接受：持久 endpoint（端口持久
+   优先）就是服务将被拉起的地址，服务被「启动」拉起后 Desktop 自然恢复。
+   反过来在失败路径跳过 Desktop 同步不可取——状态文件可能已在健康超时前
+   保存了新端口（`OpenCodeManagedServer.swift:228` 的 `saveState` 先于
+   `waitUntilReady`），跳过会让 sidecar 停在旧端口，而显式启动成功且 URL
+   未变时（config 已是持久值）§5.2 不触发 `syncDesktopConfig`，旧端口更难
+   收敛。默认配置下 sidecar 的端口收敛依赖下一次冷启动成功路径（`:1035`）
+   ——自愈、瞬态，与本方案「接受暂时不可达」的取向一致。
    `configureOpenCodeDesktopServerIfNeeded` 的现有守卫（`:994-997`）不动。
 2. **新增显式 `startOpenCodeManagedServer()`**（RuntimeManager，
    `@MainActor` 入口 + 后台执行，避免 `ensureRunning` 的 `Thread.sleep`
@@ -493,8 +501,8 @@ OpenCode 的 managed server 在 **Swift**：`OpenCodeManagedServer` 持有进程
 
 | ID | 问题 | 选项 | 推荐 | 状态 | 影响切片 | 验收 |
 | --- | --- | --- | --- | --- | --- | --- |
-| OD-1 | 冷启动自动拉起保留还是移除（dsh 为让「启动」按钮有机会出现而移除了自动补拉——那是该方案的推导结论，非 owner 改令，见 §7） | A 保留自动拉起（按钮只覆盖失败/中途死亡场景）；B 移除（对齐 dsh 的推导路线，重启后一律等用户点启动） | A：owner 本次只要求补恢复路径，未要求移除；移除是行为回退 | pending | §9 条目 2/3/5（B 需改 `resolveManagedOpenCodeIfNeeded` 语义与 §2.2 场景） | A：重启 Link 后服务自动就绪，行绿；B：重启后行「未启动」+「启动」 |
-| OD-2 | 安装的版本 spec | A `opencode-ai@1.18`（钉 generation 线，装最高 1.18.x）；B `@latest`（官方 README 原文） | A：backend 硬门只认 generation118（`clientFor` fail-closed），装已知会被隔离的版本等于制造失败；backend 支持 v2 后随代码升 spec | pending | §9 条目 4（installer argv 与测试断言） | A：装完探针过门、行就绪；B：v2 上 npm 后新装机器行「未启动」+ 隔离字幕（诚实但卡死） |
+| OD-1 | 冷启动自动拉起保留还是移除（dsh 为让「启动」按钮有机会出现而移除了自动补拉——那是该方案的推导结论，非 owner 改令，见 §7） | A 保留自动拉起（按钮只覆盖失败/中途死亡场景）；B 移除（对齐 dsh 的推导路线，重启后一律等用户点启动） | A：owner 本次只要求补恢复路径，未要求移除；移除是行为回退 | **resolved=A**（2026-10-06 实施启动时 owner 未单独作答，按推荐 A 执行：A 即现状行为、无新语义，方案全文按 A 设计，r2 亦确认「按 A 设计不构成绕过」） | §9 条目 2/3/5（B 需改 `resolveManagedOpenCodeIfNeeded` 语义与 §2.2 场景） | A：重启 Link 后服务自动就绪，行绿；B：重启后行「未启动」+「启动」 |
+| OD-2 | 安装的版本 spec | A `opencode-ai@1.18`（钉 generation 线，装最高 1.18.x）；B `@latest`（官方 README 原文） | A：backend 硬门只认 generation118（`clientFor` fail-closed），装已知会被隔离的版本等于制造失败；backend 支持 v2 后随代码升 spec | **resolved=A**（owner 2026-10-06 实施启动时确认「A opencode-ai@1.18（推荐）」） | §9 条目 4（installer argv 与测试断言） | A：装完探针过门、行就绪；B：v2 上 npm 后新装机器行「未启动」+ 隔离字幕（诚实但卡死） |
 
 ## 证据索引（E，方案阶段已核）
 
@@ -541,11 +549,11 @@ OpenCode 的 managed server 在 **Swift**：`OpenCodeManagedServer` 持有进程
 
 ```
 plan_path: /Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/docs/2026-10-06-opencode-web-install-and-start-plan.md
-plan_version: v2
-plan_sha256: 673318c7923830fab95ad44ca115dc91ae2667696787b4a95a18a69ce05e81fe  # 正文哈希：文档头至修订处置表末行（537 行，不含其后的 --- 分隔线与本交接块）；复算：head -n 537 <plan_path> | shasum -a 256。v1 SHA-256 = cde35669…（round 1 评审对象，已被本版替代，处置关系见「本轮修订」与「修订处置」两节）
+plan_version: v2（+ 实施期登记：OD-1/OD-2 裁决、r2 建议 F-6/F-7 修订）
+plan_sha256: 44d7f642dde45e048ff003cdc3d0ce18859b23ca98e29652abfb74ae7c9a6192  # 正文哈希：文档头至修订处置表末行（545 行，不含其后的 --- 分隔线与本交接块）；复算：head -n 545 <plan_path> | shasum -a 256。r2 评审对象（v2 原文）SHA-256 = 6fd983ce86b7966003df3d77b2a25632420a1bc39b3e3b68900b5edbcd8fedd2（全文）/ 673318c7923830fab95ad44ca115dc91ae2667696787b4a95a18a69ce05e81fe（正文 537 行）——实施期登记改动仅限 Status 行、§0 来源清单、§5.1 守卫描述、OD 表状态列与本交接块，设计内容零变更
 scope: full
-open_gates: [OD-1, OD-2, E-5(运行推断部分,实施门复核), E-7]
+open_gates: [E-5(运行推断部分,实施门复核), E-7]  # OD-1/OD-2 已于 2026-10-06 实施启动时裁决（均=A），见 OD 表
 brief_attached: true
 contract_version: plan-contract-v1.1
-review_round: r1（REVISION_REQUIRED：F-1/F-2 阻塞 + F-3/F-4/F-5 建议）→ v2 修订轮（5 条意见全部亲核采纳，处置表见文末）→ 待 r2
+review_round: r1（REVISION_REQUIRED）→ v2 → r2（APPROVED，0 阻塞 + F-6/F-7 建议）→ 实施期登记（本版）
 ```

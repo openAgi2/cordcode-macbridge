@@ -542,6 +542,18 @@ struct WorkspaceView: View {
         agent.kind.lowercased() == "deepseek-web" || agent.id == "dsh-web"
     }
 
+    /// 行状态文本：dsh / OpenCode 行走各自的本地覆盖，其余走全局映射。
+    private func rowStatusText(for agent: BackendAgentStatus) -> String {
+        if isDeepSeekWeb(agent) {
+            return Self.deepSeekRowStatusText(agent.status)
+        }
+        if isOpenCodeWeb(agent) {
+            let seat = runtimeManager.openCodeSeatAction
+            return Self.openCodeRowStatusText(source: seat.source, wireStatus: agent.status, cliFound: seat.cliFound)
+        }
+        return agent.displayStatus
+    }
+
     /// DeepSeek 行的座位动作决策（§3 状态表 → 按钮），纯函数供单测锁定。
     enum DeepSeekSeatAction: Equatable {
         case none
@@ -578,6 +590,57 @@ struct WorkspaceView: View {
         }
     }
 
+    private func isOpenCodeWeb(_ agent: BackendAgentStatus) -> Bool {
+        agent.kind.lowercased() == "opencode-web" || agent.id == "opencode-web"
+    }
+
+    /// OpenCode 行的座位动作决策（2026-10-06 方案 §3 按钮矩阵），纯函数供
+    /// 单测锁定：进行中 → 禁用态；source != managed_local 或 wire available →
+    /// 无按钮（external_http 用户自管服务）；cliFound==false → npmFound ?
+    /// 安装 : 需要Node.js；其余 → 启动。
+    enum OpenCodeSeatActionKind: Equatable {
+        case none
+        case install
+        case needNode
+        case start
+        case installing
+        case starting
+    }
+
+    static func openCodeSeatAction(
+        source: OpenCodeServerSource,
+        wireStatus: String,
+        cliFound: Bool,
+        npmFound: Bool,
+        installing: Bool,
+        starting: Bool
+    ) -> OpenCodeSeatActionKind {
+        if installing { return .installing }
+        if starting { return .starting }
+        if source != .managedLocal || wireStatus == "available" { return .none }
+        if !cliFound { return npmFound ? .install : .needNode }
+        return .start
+    }
+
+    /// OpenCode 行的状态文本（方案 §3 行文本决策）：managed_local 下本地覆盖
+    /// 「未安装 / 未启动」（含无持久 endpoint 的 not_configured——managed_local
+    /// 下它表示「从未成功启动」，前进动作是启动）；其余沿用全局映射
+    /// （external_http 未配置 / disabled → 未配置；external_http 服务没起 →
+    /// 未启动）。与 8 行状态表逐行一致（r1 F-1）。
+    static func openCodeRowStatusText(
+        source: OpenCodeServerSource,
+        wireStatus: String,
+        cliFound: Bool
+    ) -> String {
+        if wireStatus == "available" {
+            return BackendStatusText.display(wireStatus)
+        }
+        if source == .managedLocal {
+            return cliFound ? L10n.openCodeWebStatusNotRunning : L10n.openCodeWebStatusNotInstalled
+        }
+        return BackendStatusText.display(wireStatus)
+    }
+
     private func agentRow(for agent: BackendAgentStatus) -> some View {
         HStack(spacing: 0) {
             AgentBrandMark(kind: agent.kind)
@@ -602,15 +665,16 @@ struct WorkspaceView: View {
                 if isDeepSeekWeb(agent) {
                     deepSeekSeatHint(for: agent)
                 }
+                if isOpenCodeWeb(agent) {
+                    openCodeSeatHint(for: agent)
+                }
             }
 
             HStack(spacing: 12) {
                 Image(systemName: agent.isAvailable ? "checkmark.circle" : "exclamationmark.circle")
                     .font(.system(size: 23, weight: .light))
                     .frame(width: 23, height: 23)
-                Text(isDeepSeekWeb(agent)
-                     ? Self.deepSeekRowStatusText(agent.status)
-                     : agent.displayStatus)
+                Text(rowStatusText(for: agent))
                     .font(.system(size: 16, weight: .semibold))
             }
             .foregroundStyle(agent.isAvailable ? Color.green : Color.orange)
@@ -653,6 +717,10 @@ struct WorkspaceView: View {
 
             if isDeepSeekWeb(agent) {
                 deepSeekSeatControls(for: agent)
+            }
+
+            if isOpenCodeWeb(agent) {
+                openCodeSeatControls(for: agent)
             }
 
             if !agent.isAvailable {
@@ -747,6 +815,92 @@ struct WorkspaceView: View {
             hintText(err, full: err, color: .orange)
         } else if agent.status == "port_conflict", let reason = agent.reason, !reason.isEmpty {
             hintText(reason, full: reason, color: .orange)
+        } else if agent.status == "service_not_running", let reason = agent.reason, !reason.isEmpty {
+            hintText(reason, full: reason, color: .secondary)
+        } else {
+            EmptyView()
+        }
+    }
+
+    // MARK: - OpenCode 座位动作（2026-10-06 方案 §2.1/§2.2/§2.4）
+
+    /// 行按钮：未安装 → 安装（无 node/npm 时改为「需要 Node.js」，点开官网）；
+    /// 未启动 → 启动；进行中 → 禁用态。样式对齐 dsh 行。动作收口后由按钮
+    /// Task 调 testAgent 重取描述符（§5.2 收口刷新——OpenCode 无 action-state
+    /// 端点可轮询，3 秒可用性轮询只覆盖 codex-remote）。
+    @ViewBuilder
+    private func openCodeSeatControls(for agent: BackendAgentStatus) -> some View {
+        let state = runtimeManager.openCodeSeatAction
+        switch Self.openCodeSeatAction(
+            source: state.source,
+            wireStatus: agent.status,
+            cliFound: state.cliFound,
+            npmFound: state.npmFound,
+            installing: state.installing,
+            starting: state.starting
+        ) {
+        case .installing:
+            Button(L10n.openCodeWebInstalling) {}
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(true)
+                .frame(width: 72, height: 32)
+        case .starting:
+            Button(L10n.openCodeWebStarting) {}
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(true)
+                .frame(width: 72, height: 32)
+        case .install:
+            Button(L10n.openCodeWebInstall) {
+                Task {
+                    await runtimeManager.installOpenCode()
+                    await backendViewModel.testAgent(id: "opencode-web")
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .frame(width: 72, height: 32)
+        case .needNode:
+            Button(L10n.openCodeWebNeedNode) {
+                if let url = URL(string: "https://nodejs.org") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .frame(width: 110, height: 32)
+        case .start:
+            Button(L10n.openCodeWebStart) {
+                Task {
+                    await runtimeManager.startOpenCodeManagedServer()
+                    await backendViewModel.testAgent(id: "opencode-web")
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .frame(width: 72, height: 32)
+        case .none:
+            EmptyView()
+        }
+    }
+
+    /// 名字下方字幕（§2.4：一行，hover 全文）。优先级：进行中提示 → npm 真实
+    /// 错误 → prefix 回退说明 → 启动失败原文 → service_not_running 的 reason
+    /// 透传（探针/认证/隔离原文）。
+    @ViewBuilder
+    private func openCodeSeatHint(for agent: BackendAgentStatus) -> some View {
+        let state = runtimeManager.openCodeSeatAction
+        if state.installing {
+            hintText(L10n.openCodeWebInstallingHint, full: L10n.openCodeWebInstallingHint, color: .secondary)
+        } else if state.starting {
+            hintText(L10n.openCodeWebStartingHint, full: L10n.openCodeWebStartingHint, color: .secondary)
+        } else if let err = state.lastInstallError, !err.isEmpty {
+            hintText(err, full: err, color: .orange)
+        } else if let note = state.lastInstallNote, !note.isEmpty {
+            hintText(note, full: note, color: .secondary)
+        } else if let err = state.lastStartError, !err.isEmpty {
+            hintText(err, full: err, color: .orange)
         } else if agent.status == "service_not_running", let reason = agent.reason, !reason.isEmpty {
             hintText(reason, full: reason, color: .secondary)
         } else {

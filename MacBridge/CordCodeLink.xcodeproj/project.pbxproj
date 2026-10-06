@@ -7,9 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0011472C74481193D5C54251 /* OpenCodeInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = E41A7CB83294BBA77096BAA5 /* OpenCodeInstaller.swift */; };
 		060AAD30FED3CB9F10307692 /* OpenCodeCredentialsGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BE70B669DDB9B3C1522465B /* OpenCodeCredentialsGenerator.swift */; };
 		0A0B7AE785F788173FEA48D0 /* OpenCodeCredentialsGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BE70B669DDB9B3C1522465B /* OpenCodeCredentialsGenerator.swift */; };
 		12130C2708D1C62CBA31EF54 /* SettingsNativeInformationArchitectureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21F3F59070DF74BE2D52C5E0 /* SettingsNativeInformationArchitectureTests.swift */; };
+		1BED7F580F0AEA07BE33523E /* OpenCodeInstallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D166D94F8445E3D6441E226 /* OpenCodeInstallerTests.swift */; };
 		1D81901D44708D56630436AB /* WorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A4CAD0F5FF22B0EA70BF382 /* WorkspaceView.swift */; };
 		2603ACFBDD4E05B80E330A0B /* WebPushMaintenanceViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1476716433B93BA8EDE304F /* WebPushMaintenanceViewModel.swift */; };
 		2E07EDF1D105A17DF1E32E1C /* AppDependencies.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDEFE8AC08BD94B695F061C5 /* AppDependencies.swift */; };
@@ -20,6 +22,7 @@
 		3E22271B2C9EB6BC61D5824A /* OpenCodeEndpointResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2036DC77D36E009E80B5713D /* OpenCodeEndpointResolver.swift */; };
 		41432C4B5D2E651AF4363D6E /* TopologyMonitorStatusStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9895BBFDD35A0A701986612D /* TopologyMonitorStatusStoreTests.swift */; };
 		41F39EDDEC981563BE3BFDB0 /* WebPushMaintenanceViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F75F0357623C9DE9A3951300 /* WebPushMaintenanceViewModelTests.swift */; };
+		447AAFBD44D74EF7956EFB73 /* OpenCodeSeatActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E77BE11CA9FD973E2C417411 /* OpenCodeSeatActionTests.swift */; };
 		447E4F6B2D40906387C480D3 /* ProductCopyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D520B55E2B0291B2A887DD34 /* ProductCopyTests.swift */; };
 		4B50BCF0B76C6FCCD9AEA84C /* ManagementAPIClientTimeoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC2125905A5A283AE86C6A43 /* ManagementAPIClientTimeoutTests.swift */; };
 		54874B8A27F019CA85BC36D0 /* RuntimeProcessControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DBE09B439CABFD23581BB11 /* RuntimeProcessControllerTests.swift */; };
@@ -31,6 +34,7 @@
 		6C16208F195F6B5A3AFD9869 /* DiagnosticsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 188D1E5EB3FF10C4DA60F22F /* DiagnosticsSheet.swift */; };
 		702CB92FA9C414256AE827A0 /* DiagnosticsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00ABD47819FA9EA1DAE6BAFB /* DiagnosticsViewModel.swift */; };
 		71351CD15777887FD222B7D5 /* BridgeStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B458091E2090B6530F3C0468 /* BridgeStatusView.swift */; };
+		742820E9402FE38F72C8864D /* OpenCodeSeatResolveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC1ED7A9AA4245B568A2F2E4 /* OpenCodeSeatResolveTests.swift */; };
 		786AA7E7D49157B38619003B /* RuntimeManagerRestartTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC22FD66FBF5F720584F8421 /* RuntimeManagerRestartTests.swift */; };
 		7BE491FC9C32F55DFDD8366F /* WorkspaceViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E116F8D2EB44EF494A149825 /* WorkspaceViewTests.swift */; };
 		7F1302ED24887EA2D603700C /* MacBridgeBehaviorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC64B170A23E565E7D8F8251 /* MacBridgeBehaviorTests.swift */; };
@@ -58,6 +62,7 @@
 		C451F091B0FC627C0F7E31DE /* TopologyMonitorStatusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8197EF3067C37980C65B8B65 /* TopologyMonitorStatusStore.swift */; };
 		C79D8133ED6E5322FDA50842 /* RuntimeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAAF39AC99F7BCB4449CD1B1 /* RuntimeManager.swift */; };
 		CBE5D1D8D9A1E610B5856C05 /* PairingWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E003468DFD71B379E19E4C7F /* PairingWorkspaceTests.swift */; };
+		CCED9E988A21E535B356E3F1 /* OpenCodeSeatRowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94CD4C9128C19E90FDD24C69 /* OpenCodeSeatRowTests.swift */; };
 		CF8F96FB45BE884424D61687 /* ManagementAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D63472C43A4F245F5009A40 /* ManagementAPIClient.swift */; };
 		CFDB9CBD55CAF5664B16F62D /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A204996433530BDF7624A227 /* PairingView.swift */; };
 		D569470390299186BBFDE5C6 /* LayoutConstantsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F173AAE61BE3560D237E35B /* LayoutConstantsTests.swift */; };
@@ -114,6 +119,7 @@
 		53BCC29BA17D8F56035A8068 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		55AD0E5417D58D858A510711 /* GrokLeaderModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokLeaderModeTests.swift; sourceTree = "<group>"; };
 		59ACDDE8C5E5047CD28C7B85 /* AgentStatusRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStatusRow.swift; sourceTree = "<group>"; };
+		5D166D94F8445E3D6441E226 /* OpenCodeInstallerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeInstallerTests.swift; sourceTree = "<group>"; };
 		684E9C0C288ED1ED58423396 /* CordCodeLinkTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CordCodeLinkTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7A30F1DC335ECE32B9287C2D /* ManagementAPIClientRevokeDecodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementAPIClientRevokeDecodeTests.swift; sourceTree = "<group>"; };
 		816D0925391B834EE9F44199 /* LayoutConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutConstants.swift; sourceTree = "<group>"; };
@@ -122,6 +128,7 @@
 		907DBA7297AA1E62F927C199 /* OpenCodeManagedServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeManagedServer.swift; sourceTree = "<group>"; };
 		9161FDEC7C3FB55BE3EB3CA6 /* AccessibilityPolishTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityPolishTests.swift; sourceTree = "<group>"; };
 		925DD08E60CAB8D17159E176 /* AppDependenciesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDependenciesTests.swift; sourceTree = "<group>"; };
+		94CD4C9128C19E90FDD24C69 /* OpenCodeSeatRowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeSeatRowTests.swift; sourceTree = "<group>"; };
 		9636D58939952047C44B0937 /* CodexDesktopPairingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexDesktopPairingSheet.swift; sourceTree = "<group>"; };
 		974E6D4F31954BBCE23287AF /* DeviceStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceStoreTests.swift; sourceTree = "<group>"; };
 		9895BBFDD35A0A701986612D /* TopologyMonitorStatusStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopologyMonitorStatusStoreTests.swift; sourceTree = "<group>"; };
@@ -145,11 +152,14 @@
 		E003468DFD71B379E19E4C7F /* PairingWorkspaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingWorkspaceTests.swift; sourceTree = "<group>"; };
 		E116F8D2EB44EF494A149825 /* WorkspaceViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceViewTests.swift; sourceTree = "<group>"; };
 		E18C638B10992A839E98CC26 /* ConnectionStatusSheetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStatusSheetTests.swift; sourceTree = "<group>"; };
+		E41A7CB83294BBA77096BAA5 /* OpenCodeInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeInstaller.swift; sourceTree = "<group>"; };
+		E77BE11CA9FD973E2C417411 /* OpenCodeSeatActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeSeatActionTests.swift; sourceTree = "<group>"; };
 		E8B3652AECFCE53A8D9E40B4 /* OpenCodeEndpointResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeEndpointResolverTests.swift; sourceTree = "<group>"; };
 		EDEFE8AC08BD94B695F061C5 /* AppDependencies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDependencies.swift; sourceTree = "<group>"; };
 		F2991FD84D19DF3530941541 /* NotificationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationCoordinator.swift; sourceTree = "<group>"; };
 		F2D28621DF47FFFEA3F80696 /* OpenCodeLaunchAgentCredentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeLaunchAgentCredentials.swift; sourceTree = "<group>"; };
 		F75F0357623C9DE9A3951300 /* WebPushMaintenanceViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPushMaintenanceViewModelTests.swift; sourceTree = "<group>"; };
+		FC1ED7A9AA4245B568A2F2E4 /* OpenCodeSeatResolveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeSeatResolveTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -244,7 +254,11 @@
 				07A6B4332BC9879A154F32C8 /* ManagementV1ProducerFixtureTests.swift */,
 				3F2FC3E11BEA5EE407C00BC1 /* NotificationCoordinatorTests.swift */,
 				E8B3652AECFCE53A8D9E40B4 /* OpenCodeEndpointResolverTests.swift */,
+				5D166D94F8445E3D6441E226 /* OpenCodeInstallerTests.swift */,
 				44FFCCB621A45144903369DD /* OpenCodeManagedServerTests.swift */,
+				E77BE11CA9FD973E2C417411 /* OpenCodeSeatActionTests.swift */,
+				FC1ED7A9AA4245B568A2F2E4 /* OpenCodeSeatResolveTests.swift */,
+				94CD4C9128C19E90FDD24C69 /* OpenCodeSeatRowTests.swift */,
 				E003468DFD71B379E19E4C7F /* PairingWorkspaceTests.swift */,
 				D520B55E2B0291B2A887DD34 /* ProductCopyTests.swift */,
 				2CA203BE633607FF96ED2F9C /* RemoteAccessNavCollapseTests.swift */,
@@ -306,6 +320,7 @@
 				A3FA4E481B8955CF8BAEA716 /* ManagementV1Codec.swift */,
 				F2991FD84D19DF3530941541 /* NotificationCoordinator.swift */,
 				2036DC77D36E009E80B5713D /* OpenCodeEndpointResolver.swift */,
+				E41A7CB83294BBA77096BAA5 /* OpenCodeInstaller.swift */,
 				907DBA7297AA1E62F927C199 /* OpenCodeManagedServer.swift */,
 				BAAF39AC99F7BCB4449CD1B1 /* RuntimeManager.swift */,
 				2A183F62A649B623AA5D1FBA /* RuntimeProcessController.swift */,
@@ -449,8 +464,12 @@
 				823404E84CB481A19EA410EB /* NotificationCoordinatorTests.swift in Sources */,
 				0A0B7AE785F788173FEA48D0 /* OpenCodeCredentialsGenerator.swift in Sources */,
 				5D0B21799DC704A01C433785 /* OpenCodeEndpointResolverTests.swift in Sources */,
+				1BED7F580F0AEA07BE33523E /* OpenCodeInstallerTests.swift in Sources */,
 				D75F0766D4679AD85CC83AB9 /* OpenCodeLaunchAgentCredentials.swift in Sources */,
 				994A46DC8D86071D4388F8CA /* OpenCodeManagedServerTests.swift in Sources */,
+				447AAFBD44D74EF7956EFB73 /* OpenCodeSeatActionTests.swift in Sources */,
+				742820E9402FE38F72C8864D /* OpenCodeSeatResolveTests.swift in Sources */,
+				CCED9E988A21E535B356E3F1 /* OpenCodeSeatRowTests.swift in Sources */,
 				CBE5D1D8D9A1E610B5856C05 /* PairingWorkspaceTests.swift in Sources */,
 				447E4F6B2D40906387C480D3 /* ProductCopyTests.swift in Sources */,
 				E424D21FAF49BB0D3791AAF3 /* RemoteAccessNavCollapseTests.swift in Sources */,
@@ -490,6 +509,7 @@
 				37041435E8DF4098E9803090 /* NotificationCoordinator.swift in Sources */,
 				060AAD30FED3CB9F10307692 /* OpenCodeCredentialsGenerator.swift in Sources */,
 				3E22271B2C9EB6BC61D5824A /* OpenCodeEndpointResolver.swift in Sources */,
+				0011472C74481193D5C54251 /* OpenCodeInstaller.swift in Sources */,
 				9DCAB02C23C6F97F756A87AC /* OpenCodeLaunchAgentCredentials.swift in Sources */,
 				93F28913A9FF61FF95D071B7 /* OpenCodeManagedServer.swift in Sources */,
 				8FAE152DB77346F49144328B /* PageContainer.swift in Sources */,

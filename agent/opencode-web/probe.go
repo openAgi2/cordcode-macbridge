@@ -30,8 +30,23 @@ type probeResult struct {
 	gen    generation
 	detail string
 	err    error
+	kind   probeErrKind
 	at     time.Time
 }
+
+// probeErrKind classifies probe failures for the readiness seam (2026-10-06
+// plan §3): auth rejection and unauthenticated servers carry distinct wire
+// wording; every other failure surfaces the raw probe error.
+type probeErrKind int
+
+const (
+	probeErrOther probeErrKind = iota
+	// probeErrAuthRejected: 401 with credentials (or 401 with none configured).
+	probeErrAuthRejected
+	// probeErrUnauthenticated: 200 without auth — server_unauthenticated
+	// policy rejection.
+	probeErrUnauthenticated
+)
 
 type healthOutcome int
 
@@ -152,7 +167,7 @@ func probeInstance(ctx context.Context, c *Client) probeResult {
 	candidate := generationUnknown
 	switch legacyHealth {
 	case healthNoAuthOK:
-		return probeResult{err: fmt.Errorf("endpoint refuses nothing: %s (server_unauthenticated)", legacyDetail), at: time.Now()}
+		return probeResult{err: fmt.Errorf("endpoint refuses nothing: %s (server_unauthenticated)", legacyDetail), kind: probeErrUnauthenticated, at: time.Now()}
 	case healthOK:
 		candidate = generation118
 	case healthNotFound:
@@ -160,14 +175,22 @@ func probeInstance(ctx context.Context, c *Client) probeResult {
 		tried = append(tried, v2Detail)
 		switch v2Health {
 		case healthNoAuthOK:
-			return probeResult{err: fmt.Errorf("endpoint refuses nothing: %s (server_unauthenticated)", v2Detail), at: time.Now()}
+			return probeResult{err: fmt.Errorf("endpoint refuses nothing: %s (server_unauthenticated)", v2Detail), kind: probeErrUnauthenticated, at: time.Now()}
 		case healthOK:
 			candidate = generationV2
 		default:
-			return probeResult{err: fmt.Errorf("no usable health route (tried: %s)", strings.Join(tried, "; ")), at: time.Now()}
+			kind := probeErrOther
+			if v2Health == healthAuthRejected {
+				kind = probeErrAuthRejected
+			}
+			return probeResult{err: fmt.Errorf("no usable health route (tried: %s)", strings.Join(tried, "; ")), kind: kind, at: time.Now()}
 		}
 	default:
-		return probeResult{err: fmt.Errorf("health probe failed (tried: %s)", strings.Join(tried, "; ")), at: time.Now()}
+		kind := probeErrOther
+		if legacyHealth == healthAuthRejected {
+			kind = probeErrAuthRejected
+		}
+		return probeResult{err: fmt.Errorf("health probe failed (tried: %s)", strings.Join(tried, "; ")), kind: kind, at: time.Now()}
 	}
 
 	// Final shape arbiter on the candidate generation's session route.

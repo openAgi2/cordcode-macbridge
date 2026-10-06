@@ -962,11 +962,39 @@ func TestOpenCodeWebV2QuarantineDescriptorNotAvailable(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = a.Stop() })
 
-	status, reason := detectInstanceStatusProber("opencode-web", a)
-	if status == AgentStatusAvailable {
-		t.Fatalf("quarantined v2 endpoint must not be available, got reason=%q", reason)
+	status, reason := detectStructuredInstanceReadiness("opencode-web", a)
+	if status != AgentStatusServiceNotRunning {
+		t.Fatalf("quarantined v2 endpoint must be service_not_running (2026-10-06 plan §3; the boolean fold into not_configured is a forbidden regression), got status=%q reason=%q", status, reason)
 	}
 	if !strings.Contains(reason, "unsupported-generation") || !strings.Contains(reason, "quarantined") {
 		t.Fatalf("reason must name the quarantine verdict, got %q", reason)
+	}
+}
+
+// TestOpenCodeWebUnreachableDescriptorNotCollapsedToNotConfigured — the
+// 禁止回归 guard from the 2026-10-06 plan §8: a probe failure (unreachable
+// endpoint) must surface as service_not_running through the descriptor path,
+// never collapsed back into not_configured (the boolean-fold behavior the
+// structured readiness seam replaced).
+func TestOpenCodeWebUnreachableDescriptorNotCollapsedToNotConfigured(t *testing.T) {
+	dead := httptest.NewServer(http.NotFoundHandler())
+	url := dead.URL
+	dead.Close() // port now closed → probe fails
+
+	a, err := opencodeweb.New(map[string]any{
+		"work_dir":         "/tmp/proj",
+		"opencode_web_url": url,
+	})
+	if err != nil {
+		t.Fatalf("opencodeweb.New: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Stop() })
+
+	status, reason := detectAgentStatus("opencode-web", a, "", &AgentDetectionConfig{OpenCodeURL: url})
+	if status != AgentStatusServiceNotRunning {
+		t.Fatalf("unreachable endpoint must be service_not_running, got status=%q reason=%q", status, reason)
+	}
+	if !strings.Contains(reason, "probe failed") {
+		t.Fatalf("reason must carry the probe failure, got %q", reason)
 	}
 }
