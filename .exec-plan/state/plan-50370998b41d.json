@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-10-06T18:25:00+08:00",
+  "updated_at": "2026-10-06T18:55:00+08:00",
   "todos": [
     {
       "id": "u1-gobridge-readiness-impl",
@@ -566,7 +566,7 @@
         "u7-integration-regression"
       ],
       "source": "方案 §8 E-7 / OD 表验收列",
-      "notes": "外部依赖：owner 手工点按（Mac app UI）。agent 侧无授权执行 UI automation。 [2026-10-06 17:30] 外部阻塞：需要 owner 在工作站 OpenCode 行点一次「安装」或「启动」（Mac app UI 点按，agent 无 UI automation 授权）。前置环境问题：owner 的 ~/.config/opencode/opencode.json 配置无效（缺 provider.ctyun.models.glm-5.3-oc.limit.output 与 kimi-k3-oc.limit.output 键）导致 opencode serve 启动即退出——点「启动」会真实重试并失败，字幕显示真实原因；修复该配置后启动才能成功。owner 完成点按并回报后：agent 读 opencode-install-record.json（若走安装）与 go-bridge.log 本次窗口日志核对，通过后置 done 并生成完成报告。",
+      "notes": "外部依赖：owner 手工点按（Mac app UI）。agent 侧无授权执行 UI automation。 [2026-10-06 17:30] 外部阻塞：需要 owner 在工作站 OpenCode 行点一次「安装」或「启动」（Mac app UI 点按，agent 无 UI automation 授权）。前置环境问题：owner 的 ~/.config/opencode/opencode.json 配置无效（缺 provider.ctyun.models.glm-5.3-oc.limit.output 与 kimi-k3-oc.limit.output 键）导致 opencode serve 启动即退出——点「启动」会真实重试并失败，字幕显示真实原因；修复该配置后启动才能成功。owner 完成点按并回报后：agent 读 opencode-install-record.json（若走安装）与 go-bridge.log 本次窗口日志核对，通过后置 done 并生成完成报告。 [2026-10-06 18:55] 配置前置已解除：owner 授权后 agent 修复 ~/.config/opencode/opencode.json（两个模型 limit 补 output:131072——models.dev 目录中 GLM-5.3 与 Kimi K3 的 output 限额跨 provider 一致为 131072；备份 opencode.json.bak-20261006）；真实配置下临时 serve 实例验证存活 + 401/200 健康。剩余：owner 点「启动」（另有点击无动作的未解观察项——上次点击未产生任何 spawn/testAgent/线程痕迹，若再点仍无反应需 owner 提供行按钮文案与字幕文字）。",
       "verification": {
         "required": true,
         "status": "missing",
