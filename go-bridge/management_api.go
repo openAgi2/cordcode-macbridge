@@ -665,6 +665,19 @@ func (s *ManagementServer) liveAgentDescriptors() []AgentProviderDescriptor {
 		if !ok {
 			continue
 		}
+		// 2026-10-06 方案 §3：opencode-web 的描述符状态面已切结构化就绪，live
+		// 重读必须与 detectAgentStatus 的路由一致（该函数对 opencode-web 走
+		// detectStructuredInstanceReadiness）。该 backend 同时保留 InstanceStatus
+		// 布尔视图（内部 caller/既有测试）——若落入下方布尔分支，探针失败会被
+		// 折回 not_configured，Mac 行显示误导性「未配置」。
+		if descs[i].ID == "opencode-web" {
+			if _, ok := agent.(structuredInstanceReadinessProber); ok {
+				status, reason := detectStructuredInstanceReadiness(descs[i].ID, agent)
+				descs[i].Status = status
+				descs[i].Reason = reason
+			}
+			continue
+		}
 		if _, ok := agent.(instanceStatusProber); !ok {
 			if _, ok := agent.(structuredInstanceReadinessProber); ok {
 				status, reason := detectStructuredInstanceReadiness(descs[i].ID, agent)

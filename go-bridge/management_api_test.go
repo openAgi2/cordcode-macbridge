@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openAgi2/cordcode-macbridge/agent/opencode-web"
 	"github.com/openAgi2/cordcode-macbridge/core"
 	"github.com/openAgi2/cordcode-macbridge/go-bridge/admission"
 )
@@ -320,6 +321,46 @@ func TestMgmtAgents(t *testing.T) {
 	// 按 ID 字典序
 	if descs[0].ID != "claude" || descs[1].ID != "opencode" {
 		t.Errorf("顺序错误: %s, %s", descs[0].ID, descs[1].ID)
+	}
+}
+
+// TestMgmtAgentsLiveReadKeepsOpencodeWebStructuredStatus — 2026-10-06 方案 §3
+// 禁止回归（live 路径）：GET /internal/agents 的 live 重读不得把 opencode-web
+// 的探针失败折回 not_configured。该 backend 同时保留 InstanceStatus 布尔视图
+// （内部 caller/既有测试），若 live 路由落入布尔分支就会折叠；live 路由必须
+// 与 detectAgentStatus 一致走结构化 seam。
+func TestMgmtAgentsLiveReadKeepsOpencodeWebStructuredStatus(t *testing.T) {
+	dead := httptest.NewServer(http.NotFoundHandler())
+	url := dead.URL
+	dead.Close() // port now closed → probe fails
+
+	a, err := opencodeweb.New(map[string]any{
+		"work_dir":         "/tmp/proj",
+		"opencode_web_url": url,
+	})
+	if err != nil {
+		t.Fatalf("opencodeweb.New: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Stop() })
+
+	srv := newTestMgmtServer(map[string]core.Agent{"opencode-web": a})
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, authRequest(http.MethodGet, "/internal/agents"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var descs []AgentProviderDescriptor
+	if err := json.Unmarshal(rec.Body.Bytes(), &descs); err != nil {
+		t.Fatalf("JSON decode: %v", err)
+	}
+	if len(descs) != 1 || descs[0].ID != "opencode-web" {
+		t.Fatalf("descriptors = %#v, want opencode-web only", descs)
+	}
+	if descs[0].Status != AgentStatusServiceNotRunning {
+		t.Fatalf("live status = %q, want service_not_running (probe failure must not fold into not_configured on the live re-read path)", descs[0].Status)
+	}
+	if descs[0].Reason == "" {
+		t.Fatalf("live reason must carry the probe failure")
 	}
 }
 
