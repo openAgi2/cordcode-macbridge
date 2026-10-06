@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-10-06T17:18:00+08:00",
+  "updated_at": "2026-10-06T17:32:00+08:00",
   "todos": [
     {
       "id": "u1-gobridge-readiness-impl",
@@ -80,16 +80,16 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "readiness_test.go 7 用例全过：空 URL→not_configured（精确 NotConfiguredDetail）；unreachable→service_not_running+错误原文；401→service_not_running+认证失败文案（含 401 证据）；no-auth 200→service_not_running+未启用认证；v2→service_not_running+隔离原文；118→available+generation=1.18；失败探针重读重探（恢复即绿）。agent_descriptor_test.go:965 断言切到 detectStructuredInstanceReadiness 并加强为 status==service_not_running；新增 TestOpenCodeWebUnreachableDescriptorNotCollapsedToNotConfigured（描述符级禁止回归，走 detectAgentStatus 全路径）。既有 opencode-web 包测试全绿（9s）。go-bridge TestOpenCodeWeb* 全过。",
+        "summary": "readiness_test.go 7 用例全过：空 URL→not_configured（精确 NotConfiguredDetail）；unreachable→service_not_running+错误原文；401→service_not_running+认证失败文案（含 401 证据）；no-auth 200→service_not_running+未启用认证；v2→service_not_running+隔离原文；118→available+generation=1.18；失败探针重读重探（恢复即绿）。agent_descriptor_test.go:965 断言切到 detectStructuredInstanceReadiness 并加强为 status==service_not_running；新增 TestOpenCodeWebUnreachableDescriptorNotCollapsedToNotConfigured（描述符级禁止回归，走 detectAgentStatus 全路径）。既有 opencode-web 包测试全绿（9s）。go-bridge TestOpenCodeWeb* 全过。 【审计复验 17:31：go test ./agent/opencode-web/... ok 9.246s；descriptor 定向 ok】",
         "artifacts": [
           "agent/opencode-web/readiness_test.go",
           "go-bridge/agent_descriptor_test.go",
           "cmd:GOSUMDB=sum.golang.org go test ./agent/opencode-web/... -count=1 => ok 9.000s",
           "cmd:GOSUMDB=sum.golang.org go test ./go-bridge/ -run 'TestOpenCodeWeb' -count=1 => ok 0.576s"
         ],
-        "checked_at": "2026-10-06T16:45:00+08:00",
+        "checked_at": "2026-10-06T17:32:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -161,14 +161,14 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "OpenCodeSeatResolveTests 4 用例全过：失败+状态文件在→保留持久三元组（url/user/pass 精确断言）；失败+无状态文件→URL 空；external_http→config 不被覆盖；persistedEndpoint 读状态文件/无文件 nil。注入模式：NilCLIResolver 使 ensureRunning 失败，状态文件按 PersistedState wire 格式预写。",
+        "summary": "OpenCodeSeatResolveTests 4 用例全过：失败+状态文件在→保留持久三元组（url/user/pass 精确断言）；失败+无状态文件→URL 空；external_http→config 不被覆盖；persistedEndpoint 读状态文件/无文件 nil。注入模式：NilCLIResolver 使 ensureRunning 失败，状态文件按 PersistedState wire 格式预写。 【审计复验 17:27：OpenCodeSeatResolveTests passed（test-without-building）】",
         "artifacts": [
           "MacBridge/MacBridgeTests/OpenCodeSeatResolveTests.swift",
           "cmd:xcodebuild test-without-building -only-testing:CordCodeLinkTests/OpenCodeSeatResolveTests => 4 passed 0.012s"
         ],
-        "checked_at": "2026-10-06T16:48:00+08:00",
+        "checked_at": "2026-10-06T17:32:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -241,15 +241,15 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "OpenCodeSeatActionTests 7 用例全过：URL 变化→config 更新+launchCount==1；URL 未变→不 restart；失败→lastStartError 原文（CLI not found）+不 restart；熔断重置（5 失败熔断后显式启动再 spawn，starts 5→6）；冷启动互斥（starting 进行中 resolve 跳过、无双重 spawn）；.disabled 完成回执不发布（不写 config 不 restart）；跨线程 stop/ensureRunning 交错串行化（state 一致 .disabled、单 spawn）。既有 OpenCodeManagedServerTests 9/9 复跑全绿（串行域无回归）。testAgent 收口重取断言归 u5（按钮 Task 所在层）。",
+        "summary": "OpenCodeSeatActionTests 7 用例全过：URL 变化→config 更新+launchCount==1；URL 未变→不 restart；失败→lastStartError 原文（CLI not found）+不 restart；熔断重置（5 失败熔断后显式启动再 spawn，starts 5→6）；冷启动互斥（starting 进行中 resolve 跳过、无双重 spawn）；.disabled 完成回执不发布（不写 config 不 restart）；跨线程 stop/ensureRunning 交错串行化（state 一致 .disabled、单 spawn）。既有 OpenCodeManagedServerTests 9/9 复跑全绿（串行域无回归）。testAgent 收口重取断言归 u5（按钮 Task 所在层）。 【复验 17:12：OpenCodeSeatActionTests 7 用例 passed；其后无 Swift 源码变更】",
         "artifacts": [
           "MacBridge/MacBridgeTests/OpenCodeSeatActionTests.swift",
           "cmd:xcodebuild test-without-building -only-testing:CordCodeLinkTests/OpenCodeSeatActionTests => 7 passed",
           "cmd:xcodebuild test-without-building -only-testing:CordCodeLinkTests/OpenCodeManagedServerTests => 9 passed"
         ],
-        "checked_at": "2026-10-06T17:00:00+08:00",
+        "checked_at": "2026-10-06T17:32:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -322,14 +322,14 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "OpenCodeInstallerTests 8 用例全过（注入式 StubProcessRunner，不访问真实 registry）：argv 契约（install -g opencode-ai@1.18 / prefix -g / --version 三调用、直接 exec npm 无 sh -c、无 sudo/npx、10 分钟预算、extraPATH）；prefix 回退（argv --prefix、bin 落 node_modules/.bin、scope= cordcode-prefix、备注含 CordCode 目录）；--version 失败=安装失败且不写记录；超时文案；双路径失败携带两段真实错误；CLI 解析 record-first（记录优先/失效回落/无记录纯搜索）；打码；lastNonEmptyLine。",
+        "summary": "OpenCodeInstallerTests 8 用例全过（注入式 StubProcessRunner，不访问真实 registry）：argv 契约（install -g opencode-ai@1.18 / prefix -g / --version 三调用、直接 exec npm 无 sh -c、无 sudo/npx、10 分钟预算、extraPATH）；prefix 回退（argv --prefix、bin 落 node_modules/.bin、scope= cordcode-prefix、备注含 CordCode 目录）；--version 失败=安装失败且不写记录；超时文案；双路径失败携带两段真实错误；CLI 解析 record-first（记录优先/失效回落/无记录纯搜索）；打码；lastNonEmptyLine。 【审计复验 17:27：OpenCodeInstallerTests passed】",
         "artifacts": [
           "MacBridge/MacBridgeTests/OpenCodeInstallerTests.swift",
           "cmd:xcodebuild test-without-building -only-testing:CordCodeLinkTests/OpenCodeInstallerTests => 8 passed"
         ],
-        "checked_at": "2026-10-06T17:08:00+08:00",
+        "checked_at": "2026-10-06T17:32:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -401,15 +401,15 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "OpenCodeSeatRowTests 6 用例全过（镜像 DeepSeekSeatActionTests）：行文本 8 行状态表逐行对拍（managedLocal 覆盖未安装/未启动/就绪；external_http 未配置→未配置、服务没起→未启动、disabled→未配置——r1 F-1 断言）；全局映射不动（其他 backend not_detected 仍「未找到」）；按钮矩阵全状态（安装/需要Node.js/启动/无按钮/external_http 与 disabled 无按钮）；进行中态盖字（含盖过 wire available）；L10n 9 键非空且两语言表有值。既有 DeepSeekSeatActionTests + WorkspaceViewTests 复跑全绿（dsh 行与视图结构无回归）；U3 恢复文件 OpenCodeSeatActionTests 7 用例复跑全绿。",
+        "summary": "OpenCodeSeatRowTests 6 用例全过（镜像 DeepSeekSeatActionTests）：行文本 8 行状态表逐行对拍（managedLocal 覆盖未安装/未启动/就绪；external_http 未配置→未配置、服务没起→未启动、disabled→未配置——r1 F-1 断言）；全局映射不动（其他 backend not_detected 仍「未找到」）；按钮矩阵全状态（安装/需要Node.js/启动/无按钮/external_http 与 disabled 无按钮）；进行中态盖字（含盖过 wire available）；L10n 9 键非空且两语言表有值。既有 DeepSeekSeatActionTests + WorkspaceViewTests 复跑全绿（dsh 行与视图结构无回归）；U3 恢复文件 OpenCodeSeatActionTests 7 用例复跑全绿。 【审计复验 17:27：OpenCodeSeatRowTests passed】",
         "artifacts": [
           "MacBridge/MacBridgeTests/OpenCodeSeatRowTests.swift",
           "cmd:xcodebuild test-without-building -only-testing:CordCodeLinkTests/OpenCodeSeatRowTests => 6 passed",
           "cmd:xcodebuild test-without-building -only-testing:OpenCodeSeatActionTests+DeepSeekSeatActionTests+WorkspaceViewTests => all passed"
         ],
-        "checked_at": "2026-10-06T17:14:00+08:00",
+        "checked_at": "2026-10-06T17:32:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -417,7 +417,7 @@
       "id": "u5-row-ui-regression",
       "title": "U5 行 UI 真实表面回归",
       "description": "在 u7-integration-regression 的 Release 构建安装上核验 OpenCode 行状态数据链诚实：GET /internal/agents 描述符状态真实（本机 opencode 服务在跑→available；探针失败→service_not_running 而非 not_configured）、行文本决策输入（source/cliFound/wire）与矩阵一致、日志出现本次提交独有特征。真实点按（安装/启动按钮走通）归 u8 owner E-7（方案 §8 明确不在 agent 默认验证；MacBridge UI automation 需 owner 明确授权）。UI 工作保留 required=true：本回归覆盖行状态真实表面，点按面由 u8 承接。",
-      "status": "pending",
+      "status": "done",
       "phase": "u5-row-ui",
       "kind": "regression",
       "depends_on": [
@@ -428,13 +428,17 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "在 u7 第二轮 Release 构建安装上核验 OpenCode 行状态数据链诚实：GET /internal/agents 返回 opencode-web 描述符 status=service_not_running（探针失败的真实状态，非折叠 not_configured）；行文本决策输入全部真实在位（source=managedLocal、cliFound=true——/opt/homebrew/bin/opencode 1.18.34 在、wire=service_not_running）→ 行文本「未启动」+「启动」按钮（矩阵第 2 行）；日志出现本次提交独有特征（探针重试行）。真实点按（安装/启动按钮走通）归 u8 owner E-7（方案 §8 明确不在 agent 默认验证；MacBridge UI automation 需 owner 明确授权）。",
+        "artifacts": [
+          "cmd:curl /internal/agents => service_not_running + reason 原文",
+          "cmd:ls /opt/homebrew/bin/opencode + opencode --version => 1.18.34 (cliFound=true)",
+          "cmd:grep go-bridge.log => 探针重试行为"
+        ],
+        "checked_at": "2026-10-06T17:30:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -482,16 +486,16 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "§8 收口测试组全绿：go-bridge（./agent/opencode-web/... 全包 9.5s ok；./go-bridge/ -run 'TestOpenCodeWeb|TestOpenCodeDescriptor|TestUnknownDescriptor|TestFullAgentCapabilities|TestBuildAgentDescriptor' ok）；Swift 8 套件全过（OpenCodeSeatResolve/SeatAction/SeatRow/Installer/ManagedServer/EndpointResolver + DeepSeekSeatAction + WorkspaceView——既有 OpenCodeManagedServerTests/OpenCodeEndpointResolverTests 全绿即方案 §8 要求的收口项）。一次增量 MacBridge 编译（Debug build-for-testing，稳定 DerivedData，无 clean）。既有失败 TestRelayEventsForwardsUserInputRequested 为基线失败（3fb49252/a50946c4 均复现，与本方案无关），不在收口范围。",
+        "summary": "§8 收口测试组全绿：go-bridge（./agent/opencode-web/... 全包 9.5s ok；./go-bridge/ -run 'TestOpenCodeWeb|TestOpenCodeDescriptor|TestUnknownDescriptor|TestFullAgentCapabilities|TestBuildAgentDescriptor' ok）；Swift 8 套件全过（OpenCodeSeatResolve/SeatAction/SeatRow/Installer/ManagedServer/EndpointResolver + DeepSeekSeatAction + WorkspaceView——既有 OpenCodeManagedServerTests/OpenCodeEndpointResolverTests 全绿即方案 §8 要求的收口项）。一次增量 MacBridge 编译（Debug build-for-testing，稳定 DerivedData，无 clean）。既有失败 TestRelayEventsForwardsUserInputRequested 为基线失败（3fb49252/a50946c4 均复现，与本方案无关），不在收口范围。 【审计复验 17:31：go-bridge 定向组 ok + Swift 套件 passed】",
         "artifacts": [
           "cmd:GOSUMDB=sum.golang.org go test ./agent/opencode-web/... -count=1 => ok 9.503s",
           "cmd:GOSUMDB=sum.golang.org go test ./go-bridge/ -run '<descriptor 定向>' -count=1 => ok",
           "cmd:xcodebuild test-without-building -only-testing:8 套件 => all passed",
           "cmd:xcodebuild build-for-testing => TEST BUILD SUCCEEDED"
         ],
-        "checked_at": "2026-10-06T17:18:00+08:00",
+        "checked_at": "2026-10-06T17:32:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -523,7 +527,7 @@
       "id": "u7-integration-regression",
       "title": "U7 Release 构建覆盖安装 + 运行态核验（含 E-5 复核）",
       "description": "CLAUDE.md 常规交付路径：Release 构建（./scripts/build-unsigned-release.sh 或 xcodebuild Release）→ rm -rf /Applications/CordCodeLink.app → cp -R 覆盖 → killall CordCodeLink + pkill -f cordcode-bridge-runtime → open 重启。部署后逐项核验（缺一不可）：(1) 进程代际 ps -o pid,ppid,lstart（runtime 启动时间晚于本次构建）；(2) 8777 监听者是 /Applications/CordCodeLink.app 内嵌 cordcode-bridge-runtime（lsof -nP -iTCP:8777 -sTCP:LISTEN）；(3) 日志出现本次提交独有特征（新增 readiness/seat 行为日志字段）；(4) GET /internal/agents 返回 opencode-web 描述符且状态诚实（本机 opencode 服务在跑→available；探针失败→service_not_running 而非 not_configured）；(5) E-5 实施门复核：真实 1.18.34 服务 /global/health + /session 形状=generation118；(6) pgrep 核对无 /tmp、DerivedData、build/ 路径残留进程。禁止用临时构建产物测试（硬约束）。方案 §8 一次增量编译之上的常规交付 + BUILD_INSTALL_AND_RUNTIME.md。",
-      "status": "pending",
+      "status": "done",
       "phase": "u7-integration",
       "kind": "regression",
       "depends_on": [
@@ -533,13 +537,21 @@
       "notes": "本机环境：opencode 1.18.34 npm 全局（/opt/homebrew/bin/opencode）；构建前重新生成本次来源清单（P0 构建门）。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "两轮 Release 构建覆盖安装 + 运行态核验（第一轮发现 live 路径折叠 bug → 修复提交 6b928ca → 第二轮全过）。第二轮六项核验：(1) 进程代际：runtime PID 4703 启动于 17:26:04（晚于 17:25:15 构建），PPID=新 app 4672，旧进程 1945/72035 已杀（killall CordCodeLink + pkill cordcode-bridge-runtime 两进程名都杀）；(2) 8777 监听者 = /Applications/CordCodeLink.app 内嵌 cordcode-bridge-runtime（PID 4703）；(3) 新版本特征：runtime commit 6b928ca56e36（构建输出）+ 日志 13 条 opencode-web 探针重试行（新行为：持久 URL 在手、失败每次重探——旧版 URL 为空根本不探）；(4) GET /internal/agents：opencode-web status=service_not_running + reason 透传探针错误原文（不再误导性 not_configured）；(5) E-5 实施门复核：临时 HOME+临时端口起真实 opencode 1.18.34 服务——no-auth /global/health=401、authed=200 {healthy:true,version:1.18.34}、/session=bare array[] = generation118 形状（运行推断转实证，临时实例已清理）；(6) 无 /tmp/DerivedData/build 残留进程。发现并修复：liveAgentDescriptors 对 opencode-web 走布尔 seam 折回 not_configured（描述符切换只覆盖静态路径）——修复走结构化 seam + 回归测试 TestMgmtAgentsLiveReadKeepsOpencodeWebStructuredStatus。环境发现（非本方案回归）：用户 ~/.config/opencode/opencode.json 无效（缺 provider.ctyun.models.glm-5.3-oc/kimi-k3-oc.limit.output 键）→ opencode serve 启动即退出 → managed server 起不来（旧 runtime 同样失败，行此前显示「未配置」）；新行为按设计显示「未启动」+「启动」+ 字幕真实原因。构建环境发现：go env GOSUMDB=off 与 go.mod toolchain go1.26.6 冲突阻断裸 go build 与 Xcode prebuild（基线即坏，命令级 GOSUMDB=sum.golang.org 覆盖绕过，未改用户全局配置）。",
+        "artifacts": [
+          "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED (commit 6b928ca56e36)",
+          "cmd:killall+pkill+cp -R /Applications+open => redeployed",
+          "cmd:ps/lsof => PID 4703 17:26:04, 8777 listener",
+          "cmd:curl /internal/agents => opencode-web service_not_running",
+          "cmd:curl 4096 temp instance => 401/200/[] generation118",
+          "git:6b928ca56e36 (live seam fix)",
+          "git:0bacda228004 (implementation)"
+        ],
+        "checked_at": "2026-10-06T17:30:00+08:00",
         "upstream_anchor": null
       }
     },
@@ -547,14 +559,14 @@
       "id": "u8-owner-acceptance-e7",
       "title": "U8 owner E-7 验收：工作站行点一次安装或启动",
       "description": "方案 §8/E-7：真实 npm 安装与真实 4096 启动不在 agent 默认验证里——由 owner 在工作站 OpenCode 行点一次「安装」或「启动」；agent 只核对日志里出现本次独有的安装/启动结果（安装记录文件、npm 输出、ensureRunning 拉起、行变就绪），不用旧「未配置」截图当证据。MacBridge UI automation 需 owner 明确授权，agent 不代点。owner 完成点按并回报后：agent 读 opencode-install-record.json（若走安装）与 go-bridge.log 本次窗口日志核对，通过后本 todo 置 done 并生成完成报告。",
-      "status": "pending",
+      "status": "blocked",
       "phase": "u8-owner-acceptance",
       "kind": "regression",
       "depends_on": [
         "u7-integration-regression"
       ],
       "source": "方案 §8 E-7 / OD 表验收列",
-      "notes": "外部依赖：owner 手工点按（Mac app UI）。agent 侧无授权执行 UI automation。",
+      "notes": "外部依赖：owner 手工点按（Mac app UI）。agent 侧无授权执行 UI automation。 [2026-10-06 17:30] 外部阻塞：需要 owner 在工作站 OpenCode 行点一次「安装」或「启动」（Mac app UI 点按，agent 无 UI automation 授权）。前置环境问题：owner 的 ~/.config/opencode/opencode.json 配置无效（缺 provider.ctyun.models.glm-5.3-oc.limit.output 与 kimi-k3-oc.limit.output 键）导致 opencode serve 启动即退出——点「启动」会真实重试并失败，字幕显示真实原因；修复该配置后启动才能成功。owner 完成点按并回报后：agent 读 opencode-install-record.json（若走安装）与 go-bridge.log 本次窗口日志核对，通过后置 done 并生成完成报告。",
       "verification": {
         "required": true,
         "status": "missing",
