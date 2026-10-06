@@ -30,11 +30,11 @@
   },
   "reports": {
     "completion_report_path": "docs/2026-10-06-opencode-web-install-and-start-plan完成情况.md",
-    "completion_report_status": "missing",
-    "last_generated_at": null,
-    "based_on_queue_hash": null
+    "completion_report_status": "current",
+    "last_generated_at": "2026-10-06T20:58:00+08:00",
+    "based_on_queue_hash": "5877be26d8fd"
   },
-  "updated_at": "2026-10-06T18:55:00+08:00",
+  "updated_at": "2026-10-06T20:58:00+08:00",
   "todos": [
     {
       "id": "u1-gobridge-readiness-impl",
@@ -559,7 +559,7 @@
       "id": "u8-owner-acceptance-e7",
       "title": "U8 owner E-7 验收：工作站行点一次安装或启动",
       "description": "方案 §8/E-7：真实 npm 安装与真实 4096 启动不在 agent 默认验证里——由 owner 在工作站 OpenCode 行点一次「安装」或「启动」；agent 只核对日志里出现本次独有的安装/启动结果（安装记录文件、npm 输出、ensureRunning 拉起、行变就绪），不用旧「未配置」截图当证据。MacBridge UI automation 需 owner 明确授权，agent 不代点。owner 完成点按并回报后：agent 读 opencode-install-record.json（若走安装）与 go-bridge.log 本次窗口日志核对，通过后本 todo 置 done 并生成完成报告。",
-      "status": "blocked",
+      "status": "done",
       "phase": "u8-owner-acceptance",
       "kind": "regression",
       "depends_on": [
@@ -569,13 +569,19 @@
       "notes": "外部依赖：owner 手工点按（Mac app UI）。agent 侧无授权执行 UI automation。 [2026-10-06 17:30] 外部阻塞：需要 owner 在工作站 OpenCode 行点一次「安装」或「启动」（Mac app UI 点按，agent 无 UI automation 授权）。前置环境问题：owner 的 ~/.config/opencode/opencode.json 配置无效（缺 provider.ctyun.models.glm-5.3-oc.limit.output 与 kimi-k3-oc.limit.output 键）导致 opencode serve 启动即退出——点「启动」会真实重试并失败，字幕显示真实原因；修复该配置后启动才能成功。owner 完成点按并回报后：agent 读 opencode-install-record.json（若走安装）与 go-bridge.log 本次窗口日志核对，通过后置 done 并生成完成报告。 [2026-10-06 18:55] 配置前置已解除：owner 授权后 agent 修复 ~/.config/opencode/opencode.json（两个模型 limit 补 output:131072——models.dev 目录中 GLM-5.3 与 Kimi K3 的 output 限额跨 provider 一致为 131072；备份 opencode.json.bak-20261006）；真实配置下临时 serve 实例验证存活 + 401/200 健康。剩余：owner 点「启动」（另有点击无动作的未解观察项——上次点击未产生任何 spawn/testAgent/线程痕迹，若再点仍无反应需 owner 提供行按钮文案与字幕文字）。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "manual",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null,
+        "summary": "owner 2026-10-06 20:48 在工作站 OpenCode 行点「启动」成功（前置：owner 授权修复 opencode 配置 limit.output=131072）。agent 日志核对（E-7 要求的本次独有结果，非截图）：(1) managed server 进程 PID 51404 = opencode serve --hostname 127.0.0.1 --port 4096 --print-logs（启动动作的精确 argv），监听 127.0.0.1:4096；(2) opencode-managed-server.err.log 出现 20:48:47 完整启动序列（init count=14 / watcher backend / project copy refresh / global event connected——与冷启动即退出的 5 行配置错误形成对照）；(3) 状态文件新 pid=51404、updated_at=12:48:28Z；(4) go-bridge.log 探针恢复 endpoint probe ok generation=1.18；(5) GET /internal/agents 描述符 status=available。全链路（按钮→动作→熔断重置→ensureRunning→spawn→健康→行绿）生产路径验证完成。",
+        "artifacts": [
+          "cmd:pgrep/lsof => PID 51404 opencode serve port 4096",
+          "cmd:tail opencode-managed-server.err.log => 20:48:47 完整启动序列",
+          "cmd:cat opencode-managed-server.json => pid 51404 updated 12:48:28Z",
+          "cmd:grep go-bridge.log => endpoint probe ok generation=1.18",
+          "cmd:curl /internal/agents => available"
+        ],
+        "checked_at": "2026-10-06T20:55:00+08:00",
         "upstream_anchor": null
       }
     },
