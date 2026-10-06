@@ -8,6 +8,15 @@
 
 ## [Unreleased]
 
+### 2026-10-06 — DSH 图片行高度跳动根治：get_session_media_dimensions 批量尺寸探针
+
+- 新增 bridge-v1 RPC `get_session_media_dimensions`（capability `session_media_dimensions`，scope `workspace.read`）：批量探针会话 cwd 内媒体文件的内在尺寸（PNG IHDR / JPEG SOF / GIF logical screen / WebP VP8X / SVG 声明尺寸——SVG 解析语义与 iOS `SessionSVGSupport.declaredSize` 镜像）。iOS 据此在图字节到达前预留终高，消灭上划时 44pt 占位 → 真实高度的高度跳动。探针走同一官方认证 `/api/file` 路由的 head 限读（512 KiB，绝不本地文件旁路）；hint 语义——per-path 失败不在结果 map（字节读取路径仍是权威失败面），仅 session 级失败报 media.* 错误。协议 pack 同步（schema `2026-10-06-r1`）。
+
+
+### Added
+- **DSH 会话正文本地 Markdown 图片读取通道（`session_media_read` / `get_session_media`）**：DeepSeek Harness 会话里 assistant 定稿正文引用的 workspace 相对路径图片（如 `![alt](assets/render-test-gray.png)`）此前在 iPhone 上只能当纯文本看到；现 dsh-web driver 新增 `ReadSessionMedia`——解析根取 session cwd（与官方 ChatView session store 同源，非 workspace 分组 directory），词法预检+symlink 复核防逃逸，经官方 `/api/file` 认证读取（20MiB 限界、401 刷新重试、FsError→10 个稳定 `media.*` 错误码 fail-closed 映射）；go-bridge 暴露 `get_session_media` RPC（scope workspace.read，base64+SHA256 wire result，capability 按接口推导自动广告）。协议 pack canonical+iOS mirror 已同步（schema revision 2026-10-05-r1，含真实样本 fixture）。iPhone 端原生时间线据此把图片行渲染为真实图片（自然宽度不放大、高封顶 360pt、WebKit 栅格化 SVG）。用户上传附件仍走既有 `get_attachment`，两通道不混用。
+- **SVG 图片支持（2026-10-05-r1）**：官方 `/api/file` 对 MIME 不设限且官方 Web `<img>` 原生渲染 SVG——白名单加入 `image/svg+xml` 对齐官方语义；桥原样携带字节，iOS 端经离屏 WebKit 栅格化后按普通图片渲染（声明尺寸 width/height/viewBox 解析，无尺寸 fail closed）。
+
 ### Fixed
 - **DHCP 换 IP 后 LAN 广播地址运行期刷新（Mac 不再需要重启）**：此前 LAN WebSocket 地址只在进程启动时计算一次，DHCP 把 Mac 换到新地址后 8777 一直监听新地址，但 iPhone 收到的仍是旧地址，按「优先局域网」连不存在的旧 IP、退回 Relay。现 go-bridge 每 10 秒重算 LAN 地址，变化时向所有已连接设备（直连 + Relay）推送新增的 top-level `bridge_current_urls` 帧（同 `hello_ack.bridge.currentURLs` 形状），配对二维码 / `pairing_complete` / remote status 同步读新地址；显式 `GO_BRIDGE_ADVERTISE_HOST` 覆盖保持不变。旧版 iPhone 忽略该帧、自然重连后从 `hello_ack` 拿到新地址。
 

@@ -218,6 +218,28 @@ type GetAttachmentParams struct {
 	Directory    string `json:"directory,omitempty"`
 }
 
+// GetSessionMediaParams is the session-media read RPC payload
+// (get_session_media, DSH markdown image display plan §4.2). Path is the
+// authored Markdown destination exactly after one URL percent-decode. The
+// request deliberately carries NO root/directory field: the resolution root
+// (session cwd) is resolved by the driver from backend session truth,
+// mirroring the official ChatView resolve closure (root from the session
+// store, path only — F-B1).
+type GetSessionMediaParams struct {
+	SessionID string `json:"sessionId"`
+	Path      string `json:"path"`
+}
+
+// GetSessionMediaDimensionsParams is the batch dimension-probe RPC payload
+// (get_session_media_dimensions, height-jump fix 2026-10-06). Paths are the
+// already-decoded send shapes (same shape as get_session_media's `path`);
+// per-path failures are absent from the result map (hint semantics — the
+// client falls back to sizing at byte arrival).
+type GetSessionMediaDimensionsParams struct {
+	SessionID string   `json:"sessionId"`
+	Paths     []string `json:"paths"`
+}
+
 type SetProviderParams struct {
 	Provider  string `json:"provider"`
 	Directory string `json:"directory,omitempty"`

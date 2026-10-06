@@ -30,6 +30,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -117,6 +118,17 @@ type fakeDSHServer struct {
 		list []recordedUpload
 	}
 
+	// file scripts the next /api/file response (session media tests); files
+	// records every /api/file request seen.
+	file  fileScript
+	files struct {
+		mu   sync.Mutex
+		list []recordedFile
+	}
+	// fileByPath scripts per-path /api/file responses (dimension probe batch
+	// tests); paths without an entry fall through to the single-shot script.
+	fileByPath map[string]fileScript
+
 	mu sync.Mutex
 }
 
@@ -140,6 +152,7 @@ func newFakeDSHServer(t testingT) *fakeDSHServer {
 		hooks:         map[string]func(payload []byte) fakeRPCResponse{},
 		upgradeSeen:   map[string]int{},
 		followScripts: map[string]fakeFollowScript{},
+		fileByPath:    map[string]fileScript{},
 	}
 	f.followOpens.byID = map[string]json.RawMessage{}
 	mux := http.NewServeMux()
@@ -228,6 +241,59 @@ type recordedUpload struct {
 	data      []byte
 }
 
+// fileScript scripts the /api/file route's next response (session media
+// tests), mirroring media-references.ts serveFile.
+type fileScript struct {
+	// contentType + data are served as 200 when status == 0.
+	contentType string
+	data        []byte
+	// status + body are served verbatim when status != 0: the body is the
+	// FsError code text (FS_NOT_FOUND …) or the 400 pre-check text.
+	status int
+	body   string
+}
+
+// recordedFile is one captured /api/file request (the decoded path query).
+type recordedFile struct {
+	path string
+}
+
+// handleFile mirrors the official authenticated file route
+// (media-references.ts): GET only, path query required and absolute.
+func (f *fakeDSHServer) handleFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "", http.StatusMethodNotAllowed)
+		return
+	}
+	path := r.URL.Query().Get("path")
+	f.files.mu.Lock()
+	f.files.list = append(f.files.list, recordedFile{path: path})
+	f.files.mu.Unlock()
+	if path == "" {
+		http.Error(w, "missing path", http.StatusBadRequest)
+		return
+	}
+	if strings.ContainsRune(path, 0) || !strings.HasPrefix(path, "/") {
+		http.Error(w, "absolute path required", http.StatusBadRequest)
+		return
+	}
+	f.mu.Lock()
+	script, hasByPath := f.fileByPath[path]
+	if !hasByPath {
+		script = f.file
+		f.file = fileScript{}
+	}
+	f.mu.Unlock()
+	if script.status != 0 {
+		http.Error(w, script.body, script.status)
+		return
+	}
+	w.Header().Set("Content-Type", script.contentType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(script.data)))
+	_, _ = w.Write(script.data)
+}
+
 // handleAPI routes unary POSTs, the $events/result RPC, the raw
 // uploadFileBinary byte route, and the remote.mux upgrade (all under /api/).
 func (f *fakeDSHServer) handleAPI(w http.ResponseWriter, r *http.Request) {
@@ -237,6 +303,10 @@ func (f *fakeDSHServer) handleAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/api/session/uploadFileBinary" {
 		f.handleUploadFileBinary(w, r)
+		return
+	}
+	if r.URL.Path == "/api/file" {
+		f.handleFile(w, r)
 		return
 	}
 	if r.Method != http.MethodPost || !strings.HasPrefix(r.URL.Path, "/api/") {

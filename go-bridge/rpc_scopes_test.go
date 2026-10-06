@@ -27,6 +27,8 @@ var dispatchedRPCMethods = []string{
 	"get_workspace_diff", "get_turn_diff", "get_full_thread_diff",
 	"get_usage", "run_diagnostics", "list_memory_files", "read_memory_file",
 	"fetch_content_chunk", "read_file_v2", "list_directory", "get_git_context",
+	"get_session_media", // DSH markdown 图片（plan §4.1，workspace.read）
+	"get_session_media_dimensions", // height-jump fix 2026-10-06（同媒体读取面，workspace.read）
 	"checkout_git_branch", "create_git_branch", "create_git_worktree",
 	"create_pull_request", // §7.1
 	"check_pull_request_support",

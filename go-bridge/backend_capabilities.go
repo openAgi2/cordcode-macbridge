@@ -77,6 +77,20 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 	if _, ok := agent.(core.AttachmentReader); ok {
 		caps = append(caps, "attachment_read")
 	}
+	// session_media_read（DSH markdown image display plan §4.1）：会话 cwd 内
+	// Markdown 媒体文件经 backend 官方认证通道懒读（dsh-web /api/file）。
+	// 未实现 SessionMediaReader 的 backend 不广告 → iOS 不发起请求、不显示
+	// 假图片（handler 侧 fail-closed media.backend_not_supported）。
+	if _, ok := agent.(core.SessionMediaReader); ok {
+		caps = append(caps, "session_media_read")
+	}
+	// session_media_dimensions（height-jump fix 2026-10-06）：批量探针会话
+	// cwd 内媒体文件的内在尺寸（iOS 据此在字节到达前预留终高——上划高度
+	// 跳动根治）。未实现 SessionMediaDimensionProber 的 backend 不广告 →
+	// iOS 不发探针、退回「字节到达即定型」（B1）路径。
+	if _, ok := agent.(core.SessionMediaDimensionProber); ok {
+		caps = append(caps, "session_media_dimensions")
+	}
 	if readiness, ok := agent.(core.ContextCompactionReadinessProvider); ok && readiness.ContextCompactionReady() {
 		caps = append(caps, "context_compaction")
 	}

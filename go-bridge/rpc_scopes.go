@@ -105,6 +105,8 @@ var rpcScopeTable = map[string]string{
 	"get_git_context":            ScopeWorkspaceRead,
 	"fetch_content_chunk":        ScopeWorkspaceRead,
 	"check_pull_request_support": ScopeWorkspaceRead,
+	"get_session_media":          ScopeWorkspaceRead, // DSH markdown 图片：session cwd 内媒体读取（plan §4.1）
+	"get_session_media_dimensions": ScopeWorkspaceRead, // DSH markdown 图片：批量尺寸探针（height-jump fix 2026-10-06，同媒体读取面）
 
 	// workspace.mutate
 	"checkout_git_branch": ScopeWorkspaceMutate,

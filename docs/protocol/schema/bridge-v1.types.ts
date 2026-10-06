@@ -293,6 +293,17 @@ export type BridgeRPCMethod =
   // read, keyed by the attachmentId from a user message's attachment descriptor.
   // Capability "attachment_read".
   | "get_attachment"
+  // DSH markdown image display (plan 2026-10-05): workspace-relative media
+  // read through the backend's authenticated file channel (dsh-web /api/file).
+  // Capability "session_media_read". The request carries NO root field — the
+  // driver resolves the session cwd from backend session truth (F-B1).
+  | "get_session_media"
+  // Height-jump fix 2026-10-06: batch intrinsic-dimension probe over the
+  // session cwd's media files (head-only read through the same official
+  // /api/file route) so the client can reserve exact row heights before the
+  // image bytes arrive. Capability "session_media_dimensions". Per-path
+  // failures are absent from the result map (hint semantics).
+  | "get_session_media_dimensions"
   // S5 (dsh-web, OD-1=A): official archive-set restore (workspace/unarchiveSession
   // — idempotent; unknown/not-archived ids succeed as no-ops). Capability
   // "session_unarchive".
@@ -1025,6 +1036,73 @@ export interface GetAttachmentResult {
   attachment: BridgeAttachmentDescriptor & { kind: "image" };
   /** Canonical base64 of the stored (normalized) image bytes. */
   data: string;
+}
+
+/**
+ * get_session_media request (DSH markdown image display plan §4.2, capability
+ * "session_media_read"). path is the authored Markdown destination exactly
+ * after ONE URL percent-decode. The request deliberately carries NO
+ * root/directory field: the resolution root (session cwd) is resolved by the
+ * MacBridge driver from backend session truth (the session/list row's cwd),
+ * mirroring the official ChatView resolve closure.
+ */
+export interface GetSessionMediaParams {
+  sessionId: string;
+  path: string;
+}
+
+/**
+ * get_session_media result: the canonical absolute path actually read, the
+ * provider-reported image MIME type, the byte count, the lowercase-hex
+ * SHA-256 of the bytes (client cache validity token), and canonical base64
+ * data. Provider failures map onto the stable media.* error codes with the
+ * official detail preserved (e.g. media.permission_denied for HTTP 403
+ * FS_PERMISSION_DENIED). image/svg+xml (2026-10-05-r1): official /api/file
+ * serves SVG and the official Web <img> renders it; the bridge carries the
+ * bytes verbatim and iOS rasterizes client-side via WebKit.
+ */
+export interface GetSessionMediaResult {
+  /** Canonical absolute path actually read. */
+  resolvedPath: string;
+  mediaType: "image/png" | "image/jpeg" | "image/webp" | "image/gif" | "image/svg+xml";
+  bytes: number;
+  /** SHA-256 of the returned bytes, lowercase hex. */
+  contentSha256: string;
+  /** Canonical base64 image bytes. */
+  data: string;
+}
+
+/**
+ * get_session_media_dimensions request (height-jump fix 2026-10-06, capability
+ * "session_media_dimensions"). paths are the already-decoded send shapes (the
+ * same shape as get_session_media's path). Max 64 paths per request; per-path
+ * failures are ABSENT from the result map (hint semantics — the client falls
+ * back to sizing at byte arrival; the read RPC stays the authoritative
+ * failure surface).
+ */
+export interface GetSessionMediaDimensionsParams {
+  sessionId: string;
+  paths: string[];
+}
+
+/**
+ * get_session_media_dimensions result: intrinsic dimensions keyed by the
+ * authored path exactly as requested. width/height are intrinsic pixels
+ * (SVG: declared size) — the same numbers the client settles from the full
+ * bytes on read, so a reserved row height never flips when pixels arrive.
+ * Parsed from the file head only (PNG IHDR / JPEG SOF / GIF logical screen /
+ * WebP VP8X / SVG declared size); formats or files whose head cannot be
+ * parsed are absent from the map.
+ */
+export interface GetSessionMediaDimensionsResult {
+  dimensions: Record<
+    string,
+    {
+      mediaType: "image/png" | "image/jpeg" | "image/webp" | "image/gif" | "image/svg+xml";
+      width: number;
+      height: number;
+    }
+  >;
 }
 
 /**

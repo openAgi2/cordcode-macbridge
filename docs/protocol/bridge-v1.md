@@ -1469,6 +1469,89 @@ action——创建即 `/goal` host command（`execute_session_command`）。
 座位 `goal/change` → `session_goal` → projection patch 链路权威承载，客户端不得
 本地乐观改 phase。
 
+### Capability: `session_media_read`（DSH Markdown 图片）
+
+会话 cwd 内 Markdown 媒体文件懒读（dsh-web：官方认证 `GET /api/file` 经 DSH
+filesystem provider）。capability 由 `core.SessionMediaReader` optional 接口派生；
+未实现的 backend 不广告 → 客户端不发起请求、不显示假图片（handler fail-closed
+`media.backend_not_supported`）。方案：iOS 仓
+`docs/2026-10-05-dsh-session-markdown-image-display-plan.md`。
+
+### RPC: `get_session_media`（capability `session_media_read`，scope `workspace.read`）
+
+params: `{ sessionId, path }`。`path` 是 assistant 已定稿 Markdown 中独立 image
+block 的 authored destination，**经一次 URL percent-decode 后**的形态（CommonMark
+destination 的 `%20` 等转义已解码，不再二次解码）。请求**不携带任何根目录字段**：
+解析根（session cwd）由 MacBridge driver 从 backend session truth（`session/list`
+行的 `cwd`，与官方 ChatView session store 同源）解析——workspace 分组 directory、
+「未分组」哨兵或客户端声明根不得冒充解析根（F-B1，think.md 2026-08-16/17 事故面）。
+
+→ result: `{ resolvedPath, mediaType, bytes, contentSha256, data }`。
+`resolvedPath` 是实际读取的 canonical 绝对路径；`mediaType` ∈
+`image/png|image/jpeg|image/webp|image/gif|image/svg+xml`（provider Content-Type
+白名单；SVG 自 2026-10-05-r1 加入——官方 `/api/file` 对 MIME 不设限且官方 Web
+`<img>` 原生渲染 SVG，bridge 原样携带字节，iOS 端经 WebKit 栅格化后按普通
+UIImage 渲染）；
+`bytes` 为字节数；`contentSha256` 是返回字节的小写十六进制 SHA-256（客户端缓存的
+有效性 token，非查找键）；`data` 是 canonical base64。读取经 provider 认证通道
+（dsh-web 复用 seat cookie + 401 refresh），上限 20 MiB（与官方 attachment image
+limit 默认对齐）。结果不进 projection/event 流；不复用 `read_file_v2` 的
+bulk/cancel 语义。
+
+错误码（稳定、可区分；message 保留官方 provider 信号原文，如
+`HTTP 403: FS_PERMISSION_DENIED`）：
+
+| code | 触发 |
+| --- | --- |
+| `media.invalid_params` | 空 sessionId/path、绝对路径、URL scheme、protocol-relative、控制字符、session cwd 缺失、官方 400 前置拒绝 |
+| `media.session_not_found` | session 不在 backend session truth |
+| `media.path_escape` | 词法 `..` 逃逸，或 cwd 内 symlink 指向 cwd 外 |
+| `media.not_found` | 404 / `FS_NOT_FOUND` |
+| `media.not_regular_file` | 403 / `FS_NOT_REGULAR_FILE` |
+| `media.permission_denied` | 403 / `FS_PERMISSION_DENIED`、`FS_SANDBOX_DENIED` |
+| `media.too_large` | 413 / `FS_TOO_LARGE`（或本地 20 MiB bounded read 兜底） |
+| `media.unsupported_media_type` | provider Content-Type 不在四 MIME 白名单 |
+| `media.transport_failed` | 499 / `FS_ABORTED`、5xx、未知 status/body、座位不可达 |
+| `media.backend_not_supported` | backend 未实现 `SessionMediaReader`（fail closed） |
+
+大 payload 通道算术：20 MiB 图片 base64 后 ≈26.7 MiB + JSON 信封 < Relay 默认
+`MaxFrameBytes` 32 MiB（余量 ≈20%）；**生产 relay 实际 max-frame-bytes 必须在
+Relay 路径验收前确认**（`RELAY_MAX_FRAME_BYTES` 可覆盖），不得默认 32 MiB 成立。
+direct 路径 iOS 入站帧上限只作用于请求方向（本请求很小，无碍）。样本：
+`samples/session-media/`（§1 真实样本 session 的请求/响应/错误 fixture）。
+
+### Capability: `session_media_dimensions`（height-jump fix 2026-10-06）
+
+会话 cwd 内媒体文件的**批量内在尺寸探针**（dsh-web：同一官方认证
+`GET /api/file` 路由的 head 限读——绝不本地文件旁路）。capability 由
+`core.SessionMediaDimensionProber` optional 接口派生；未实现的 backend 不
+广告 → 客户端不发探针、退回「字节到达即定型」路径。与 `session_media_read`
+互不隐含（读取面与探针面各自派生）。
+
+### RPC: `get_session_media_dimensions`（capability `session_media_dimensions`，scope `workspace.read`）
+
+params: `{ sessionId, paths }`。`paths` 是已 percent-decode 的发送形状
+（与 `get_session_media` 的 `path` 同形态），单批上限 64 条。请求**不携带
+任何根目录字段**（F-B1 同款：解析根由 driver 从 backend session truth
+解析）。
+
+→ result: `{ dimensions: { "<path>": { mediaType, width, height } } }`。
+`width/height` 是内在像素数（SVG = 声明尺寸）——与 `get_session_media`
+结算的 pixelWidth/Height 同口径，客户端据此在字节到达前预留**终高**
+（行高不再从 44pt 占位跳到真实高度）。尺寸只从文件头解析（PNG IHDR /
+JPEG SOF / GIF logical screen / WebP VP8X / SVG 声明尺寸——SVG 解析语义
+与 iOS `SessionSVGSupport.declaredSize` 镜像：width/height 绝对值优先、
+viewBox 回退）；head 不可解析的文件不在 map 中。
+
+**hint 语义（与读取面的关键差异）**：per-path 失败（校验不过、`..` 逃逸、
+404、非白名单 MIME、head 不可解析、空 path）一律**不在结果 map 中**——
+探针是布局提示，不冒充读取结果；读取失败面仍由 `get_session_media` 的
+稳定 media.* 错误承担。仅 session 级失败报错（空 sessionId →
+`media.invalid_params`；session 不在 truth → `media.session_not_found`；
+座位不可达 → `media.transport_failed`；未实现 prober →
+`media.backend_not_supported`）。响应每 path 三个标量——relay 链路友好
+（先于兆级图字节到达）。
+
 ### Event: `background_tasks_changed`（Phase 5）
 
 backend 级 control-plane invalidate 通知（与 `sessions_changed` 同形：带 backendId、非 session-scoped、broadcast）。触发源：session catalog 指纹变化（DSH 事件驱动 refresh 信号 / 各 backend discovery 周期）——同一变化同时意味着任务面可能变化。事件**不携带任务数据**：客户端收到后重新 `background_tasks.list` 拿权威真值（事件不做第二真值）。Claude 的 mid-run 子代理 live 推送仍属未来增强（B4 hydrate-only 现状，roadmap §2.1）；Claude 任务列表新鲜度由同一 discovery 指纹机制覆盖。

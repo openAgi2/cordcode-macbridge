@@ -1823,6 +1823,10 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleUpdateSessionQueue(conn, msg, agent)
 	case "get_attachment":
 		h.handleGetAttachment(conn, msg, agent)
+	case "get_session_media":
+		h.handleGetSessionMedia(conn, msg, agent)
+	case "get_session_media_dimensions":
+		h.handleGetSessionMediaDimensions(conn, msg, agent)
 	case "list_collaboration_modes":
 		h.handleListCollaborationModes(conn, msg, agent)
 	case "update_collaboration_mode":
