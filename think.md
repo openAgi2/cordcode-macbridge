@@ -1,3 +1,12 @@
+## 2026-10-10：配套 iOS agent-device 永久停用
+
+owner 裁决“以后永远不再使用 agent-device，包括模拟器”。MacBridge 活文档不再把 iOS 视觉/交互
+验证路由到 agent-device，历史常设授权全部作废。后续跨仓 UI 影响由定向 unit、一次 iOS 交付
+安装、CLI 只读取证和 owner 合并矩阵人工验收覆盖；自动化只能使用当前任务明确授权的非
+agent-device 方案。
+
+---
+
 ## 2026-10-03：agent-device 残留 session 绑死真机——授权核验 ≠ 可用性核验（流程门补丁）
 
 agent 每次执行前认真核验「常设授权声明」（CLAUDE.md → 解析工作树 → 入口文档），却跳过同一

@@ -213,12 +213,11 @@ mirror/source/test、定向 build/test、以及无法执行项的诚实报告。
 或“这要跨仓改”作为阻塞问题抛给 owner；除非任务明确限制“只改 MacBridge”，否则跨仓
 协议/运行时修复应直接实施。
 
-需要 owner 额外授权的仍然仅限：`CCCodeUITests` / XCUITest / snapshot-test target、非
-`agent-device` 的 simulator/真机 UI automation、生产 VPS/Relay 部署、真实账号或外部环境操作、
-破坏性命令、以及会改变产品语义但任务未明确要求的取舍。配套 iOS 仓自 2026-09-13 起已常设
-授权 `agent-device` 模拟器与真机自验，必须按配套工作树的 `IOS_VERIFICATION_ENTRY.md` 执行
-（执行前三步前置与清理义务见下方「验证快路径」节），不得把该授权扩张成其他 UI test 或
-设备操作。
+需要 owner 额外授权的仍然仅限：`CCCodeUITests` / XCUITest / snapshot-test target、
+simulator/真机 UI automation、生产 VPS/Relay 部署、真实账号或外部环境操作、破坏性命令、
+以及会改变产品语义但任务未明确要求的取舍。owner 已于 2026-10-10 裁决永久停用 agent-device；
+配套 iOS 任务的视觉/交互验收改为 owner 人工矩阵或其他当前任务明确授权的非 agent-device
+测试方案，不得把历史授权当作回退路径。
 
 ## 构建与测试成本纪律（P0，禁止 50 分钟式默认验证）
 
@@ -253,38 +252,21 @@ mirror/source/test、定向 build/test、以及无法执行项的诚实报告。
 - 已有有效构建产物时直接复用。交接文档写明 build-for-testing 已成功时，接手 agent 应先用该
   产物跑定向测试，不能从 clean build 重来。
 
-### iOS UI / 布局问题的验证快路径（跨仓任务强制）
+### iOS UI / 布局问题的验证边界（跨仓任务，agent-device 永久停用）
 
-MacBridge 改动若影响 CordCode iOS 上的视觉布局、位置、间距、键盘避让、滚动或点按反馈，默认
-采用“**最小单测一次收口 + agent-device 快速验证真实效果**”，不得用反复运行模拟器测试类代替
-真实 UI 验证：
+owner 已于 2026-10-10 裁决永久停用 agent-device；模拟器、真机、CLI、MCP、daemon、自带 runner
+与 `npx agent-device` 全部禁止。MacBridge 改动若影响 CordCode iOS 的视觉布局、位置、间距、
+键盘避让、滚动或点按反馈：
 
-1. 先完成代码阅读、静态检查和一次编译，集中修完语法、类型与链接错误；不要每修一个编译错
-   就启动一轮完整测试。
-2. 单元测试从能覆盖改动的**最小方法**开始。首次失败后优先只复跑失败方法；只有多个方法共同
-   覆盖同一状态契约时才跑测试类，不得为调 fixture 或断言反复重跑整个类。
-3. 单元测试负责状态机、边界条件、纯计算与回归保护；coherent edit 和断言稳定后，把直接相关
-   的最小测试集合跑绿一次收口。agent-device 不能替代这些逻辑测试。
-4. 真实布局、AX 几何、间距、键盘、滚动和交互由配套 iOS 工作树中的 `agent-device` 验证。
-   优先读取 AX snapshot 的 frame、可见性、label/value 等结构化数据，再用截图辅助视觉判断；
-   单凭截图或“没有崩溃”不算验证完成。
-5. coherent edit 和最小单测完成后，只做一次增量构建/安装，再连续完成 agent-device 验证。
-   禁止“改一点 → 跑一类测试 → 装机 → 再改一点”的往返循环。
-6. 测试前校验 fixture 的关键前置条件，包括内容高度、边界区间、初始 offset、可见行数和状态
-   转换起点。数值不得凭经验估算；前置条件不成立时先修 fixture，不要靠反复构建试数。
+1. 先完成代码阅读、静态检查和相关定向 unit，收口可组件化的状态与几何逻辑。
+2. 按 P0 来源门解析配套 iOS 工作树；需要交付 iOS 包时，由该工作树做一次增量构建/安装。
+3. 真实观感和交互由 owner 按合并矩阵人工验收；agent 提供前提条件、动作和应看到，不做碎片化
+   多轮人工测试。
+4. XCUITest、snapshot test 或其他 UI automation 仍须 owner 在当前任务明确授权；这些授权不能
+   复活 agent-device。
+5. 测试前置条件不成立时先修 fixture，不要靠反复构建试数。
 
-若同一视觉问题已因 fixture、断言或预估错误触发第二次重编译/重跑，必须暂停扩大验证，先检查
-测试前置条件和实际 AX 几何。单元测试通过不证明设备 UI 正确，agent-device 通过也不证明底层
-状态契约完整；两者各自提供不同证据，不能互相冒充。
-
-执行前必须先按 P0 来源门解析配套 iOS 工作树，再读取该工作树的 `IOS_VERIFICATION_ENTRY.md`。
-`agent-device` 常设授权包括模拟器和连接真机上的启动、点击、输入、滑动、AX snapshot 与截图；
-不包含 `CCCodeUITests`、XCUITest 或 snapshot-test target。**三步前置不可跳过**：①读入口文档
-§1.5 的「当前状态」标记——标记为不可用时直接报告阻塞，禁止重试、禁止自行修签名/换 team；
-②`agent-device session list` 检查占用——发现其他会话/工作树的 live session 时报冲突、不硬抢；
-③会话结束（含失败、超时、被拒）必须 `agent-device close` 清理并确认 `session list` 为空，close
-失效时 `pkill -f 'agent-device/dist/src/internal/daemon'` 兜底——残留 session 会绑死设备，阻塞
-其他会话甚至模拟器 lane（2026-10-02 事故）。
+单元测试通过不证明真实 UI 正确，owner 验收也不替代状态逻辑回归；证据分开报告，不得互相冒充。
 
 ### 时间预算与异常止损
 
@@ -292,7 +274,7 @@ MacBridge 改动若影响 CordCode iOS 上的视觉布局、位置、间距、�
   超过 5 分钟且无有效进展，都视为异常，立即停止并检查 destination、锁、测试挂死、重复
   DerivedData、诊断收集或意外 UI test；不得静默等到 50 分钟。
 - 全量 unit test 不是默认步骤。确需执行时先记录原因和 10 分钟上限；`CCCodeUITests`、XCUITest
-  和 snapshot-test target 仍需 owner 明确授权，配套 iOS 的 `agent-device` 按上方常设授权执行。
+  和 snapshot-test target 仍需 owner 明确授权，agent-device 已永久停用。
 - 汇报必须分别列出编辑、编译、测试、安装的真实耗时和命令。不得把整轮排障墙钟时间写成
   “编译耗时”，也不得把 simulator boot、xcresult diagnose 或挂死等待算成正常编译。
 

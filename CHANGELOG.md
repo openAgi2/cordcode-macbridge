@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+### 2026-10-10 — 移除配套 iOS agent-device 验证指引
+
+- owner 裁决永久停用 agent-device，包括模拟器与真机。MacBridge 工作流不再把 iOS 视觉/交互影响路由到 agent-device；后续使用定向 unit、一次 iOS 交付安装、CLI 只读取证与 owner 合并矩阵人工验收。历史授权与事故记录保留在 Git 历史，不再作为执行依据。
+
 ### 2026-10-06 — OpenCode 行区分未安装/未启动：点「安装」代装、点「启动」拉起 4096 段服务
 
 - 工作站「AI 工具」的 OpenCode Web 行此前把「没装 opencode」「4096 服务没拉起来」「拉起后进程死了」「探针认证失败」全部显示成同一句「未配置」，且没有任何地方能启动服务（只能重启整个 Link）。现该行区分三态：**未安装**（CLI 缺失）给「安装」按钮——用已发现的 npm 绝对路径执行 `npm install -g opencode-ai@1.18`（无 sudo/npx；全局 prefix 不可写时自动回退装到 CordCode 数据目录并在字幕注明；`opencode --version` exit 0 才算成功；0600 安装记录无凭据且 record-first 并入 CLI 解析，GUI PATH 缺口下跨重启仍可发现），安装后半段自动走「启动」；无 node/npm 时按钮变「需要 Node.js」直达官网（Link 不代装 Node）。**未启动**（服务没在听/中途死掉/认证失败/v2 隔离）给「启动」按钮——重置失败熔断后拉起 4096…4196 段 managed server（收养已在监听的健康进程，不起第二个）；URL 已在 runtime 手里时无需重启 bridge，探针恢复行即变绿。**就绪**无按钮。go-bridge 侧 opencode-web 描述符从布尔折叠切到结构化就绪：探针失败诚实报 `service_not_running` 而非 `not_configured`（401 认证失败/服务未启用认证/v2 隔离各带专属字幕），resolve 失败时保留状态文件持久 endpoint。external_http/disabled 用户零变化（无按钮、字幕透传探针错误）；iOS 零改动（wire 枚举复用双仓既有值）。
