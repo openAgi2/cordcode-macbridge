@@ -1375,6 +1375,12 @@ func (k *ProjectionKernel) CommitHydrateTransaction(
 	default:
 		baseline = mergeHydrateBaselineWithLiveExecution(baseline, liveSnap, liveOK)
 	}
+	// 2026-10-11 补收尾：被 commit 闸门豁免的「未回应命令回显」turn 不能以 running
+	// 状态发布——否则 iOS 永远显示执行中。CLI 本地命令（/model 等）确已执行完毕
+	//（transcript 的 local-command-stdout 行即证据），按 completed 结算；若执行态的
+	// activeTurn 正是其中之一，执行态一并回到 idle。真实 in-flight turn 不在豁免集
+	// 内，不受影响。
+	baseline = settleUnansweredCommandEchoTurns(baseline, tx.coldArmedTurnIDs)
 	k.reducer.Restore(backendID, sessionID, baseline)
 	appliedPendingIDs := make([]string, 0, len(tx.pendingLive))
 	for _, msg := range tx.pendingLive {
@@ -1569,6 +1575,47 @@ func dataStringFromEventData(data interface{}) string {
 // composer stays in stop mode; no rev ever flips it). Live terminal state wins: the
 // turn_completed event is the authoritative lifecycle signal; a cold cut that predates
 // it is simply stale.
+// settleUnansweredCommandEchoTurns 是 2026-10-11 冷启动卡加载/永执行中事故的提交侧
+// 收尾：WaitHydrateCommitReady 豁免的「未回应命令回显」turn（User 有、Assistant 无、
+// 归一化 user 文本为 /cmd 形态、无终态——CLI 本地命令不会产生 assistant turn）在
+// baseline 发布前结算为 completed。这不是伪造完成：transcript 的
+// local-command-stdout 回显行就是命令已本地执行完毕的权威证据；真正的 in-flight
+// turn（带 assistant 内容）不在豁免集内，永不经过此处。若执行态 activeTurn 恰是被
+// 结算的 turn 之一，执行态同步回 idle——否则 iOS 会永远显示执行中。
+func settleUnansweredCommandEchoTurns(baseline SessionProjection, ids map[string]struct{}) SessionProjection {
+	if len(ids) == 0 || len(baseline.Turns) == 0 {
+		return baseline
+	}
+	settled := make(map[string]struct{})
+	for i := range baseline.Turns {
+		t := &baseline.Turns[i]
+		if _, ok := ids[t.TurnID]; !ok {
+			continue
+		}
+		switch t.Status {
+		case "completed", "aborted", "error":
+			continue
+		}
+		if t.User == nil || t.Assistant != nil || !claudeUserTextIsCommandEcho(t.User) {
+			continue
+		}
+		t.Status = "completed"
+		settled[t.TurnID] = struct{}{}
+	}
+	if len(settled) == 0 {
+		return baseline
+	}
+	if baseline.Execution.Phase == "running" {
+		if active := baseline.Execution.ActiveTurnID; active != "" {
+			if _, ok := settled[active]; ok {
+				baseline.Execution.Phase = "idle"
+				baseline.Execution.ActiveTurnID = ""
+			}
+		}
+	}
+	return baseline
+}
+
 func mergeHydrateBaselineWithLiveExecution(cold, live SessionProjection, liveOK bool) SessionProjection {
 	if !liveOK {
 		return cold

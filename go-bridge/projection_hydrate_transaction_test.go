@@ -928,6 +928,12 @@ func TestProjectionHydrateUnansweredTrailingCommandEchoCommits(t *testing.T) {
 	if model.TurnID != "turn-model" || model.User == nil || model.Assistant != nil {
 		t.Fatalf("trailing turn must stay the honest unanswered user row, got %+v", model)
 	}
+	if model.Status != "completed" {
+		t.Fatalf("command-echo turn must settle to completed at commit, got %q", model.Status)
+	}
+	if commit.Projection.Execution.Phase != "idle" || commit.Projection.Execution.ActiveTurnID != "" {
+		t.Fatalf("execution must return idle with no active turn, got %+v", commit.Projection.Execution)
+	}
 }
 
 // TestProjectionHydrateInFlightContentTurnStillGates locks the exemption boundary: a
