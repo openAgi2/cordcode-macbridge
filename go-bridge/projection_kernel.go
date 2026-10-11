@@ -1306,8 +1306,14 @@ func (k *ProjectionKernel) WaitHydrateCommitReady(
 		// `turnCount == 0 || HasContentTurn(...)` gate guessed from count/content shape; it left
 		// empty/aborted/crashed sessions stuck hydrating forever and could commit a half-seen
 		// in-flight turn on partial content.
+		// Unanswered command-echo exemption (2026-10-11): a trailing turn whose only content is a
+		// CLI command echo the exited CLI never answers (local /command rows like /model) can never
+		// reach a terminal; ignoring it lets the hydrate commit the honest unanswered echo instead
+		// of staying projection.hydrating forever. Ordinary unanswered prompts, turns with assistant
+		// content (real in-flight partials) and bare task_started turns still gate exactly as before.
 		ready := tx.sourceIngestComplete &&
-			(tx.sourceIsLive || preview.NonTerminalTurnCountInSet(backendID, sessionID, tx.coldArmedTurnIDs) == 0)
+			(tx.sourceIsLive ||
+				preview.NonTerminalTurnCountInSetIgnoringUnansweredCommandEchoTurns(backendID, sessionID, tx.coldArmedTurnIDs) == 0)
 		liveArrived := tx.liveArrived
 		k.mu.Unlock()
 		if ready {

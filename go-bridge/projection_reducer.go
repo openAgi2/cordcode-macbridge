@@ -3162,6 +3162,61 @@ func (r *ProjectionReducer) NonTerminalTurnCountInSet(backendID, sessionID strin
 	return count
 }
 
+// NonTerminalTurnCountInSetIgnoringUnansweredCommandEchoTurns 同
+// NonTerminalTurnCountInSet，但跳过「仅有一条未获回应的 CLI 命令回显」的 turn
+// （User != nil 且 Assistant == nil、无终态，且 user 文本经归一化后是 "/cmd" 紧凑
+// 形态）。本地命令（/model 等）不产生 assistant turn；冷源 EOF 且源进程不活跃时
+// 这类 turn 永远不会有终态，按诚实的「未回应命令回显」提交，而不是永远
+// hydrating（2026-10-11 d9e61f32 卡加载事故：transcript 尾部 /model 行毒化冷启动）。
+// 边界（M3 §5.1 语义保持）：普通未回应提问（非 "/" 前缀）仍等待终态；bare
+// task_started（无 User）仍等待；带 assistant 内容的 in-flight turn 仍等待。
+func (r *ProjectionReducer) NonTerminalTurnCountInSetIgnoringUnansweredCommandEchoTurns(
+	backendID, sessionID string, ids map[string]struct{},
+) int {
+	if r == nil || len(ids) == 0 {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ps := r.sessions[projectionSessionKey(backendID, sessionID)]
+	if ps == nil {
+		return 0
+	}
+	count := 0
+	for i := range ps.projection.Turns {
+		t := &ps.projection.Turns[i]
+		if _, ok := ids[t.TurnID]; !ok {
+			continue
+		}
+		st := t.Status
+		if st == "completed" || st == "aborted" || st == "error" {
+			continue
+		}
+		if t.User != nil && t.Assistant == nil && claudeUserTextIsCommandEcho(t.User) {
+			continue // 本地命令回显：CLI 不会回应，源尽后永无终态
+		}
+		count++
+	}
+	return count
+}
+
+// claudeUserTextIsCommandEcho 判定 turn 的 user 文本是否为 CLI 命令回显（归一化
+// 后的 "/cmd args" 紧凑形态，handlers_relay.go isClaudeEchoOnlyUserRow 同源语义）。
+func claudeUserTextIsCommandEcho(user *MessageProjection) bool {
+	if user == nil {
+		return false
+	}
+	for _, part := range user.Parts {
+		if part.Type != "text" {
+			continue
+		}
+		if !strings.HasPrefix(strings.TrimLeft(part.Text, " \t\n"), "/") {
+			return false
+		}
+	}
+	return len(user.Parts) > 0
+}
+
 // --- deep-copy helpers (Snapshot must be independent of later reduce activity) ---
 
 func cloneSessionProjection(s SessionProjection) SessionProjection {

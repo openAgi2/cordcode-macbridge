@@ -886,6 +886,76 @@ func TestProjectionHydrateAbortedTurnWithSourceCompleteReady(t *testing.T) {
 	}
 }
 
+// TestProjectionHydrateUnansweredTrailingCommandEchoCommits is the 2026-10-11 stuck-loading
+// incident: a transcript whose tail carries a local /command echo row (e.g. /model) ends
+// the cold source with a turn whose only content is an unanswered user message — the CLI
+// exited without responding, so no terminal will ever arrive. With ingest complete and a
+// non-live source the hydrate must commit the honest unanswered prompt instead of staying
+// projection.hydrating forever (owner: iOS opened the session and spun indefinitely).
+func TestProjectionHydrateUnansweredTrailingCommandEchoCommits(t *testing.T) {
+	kernel := NewProjectionKernel(nil, nil)
+	admission, err := kernel.BeginHydrateTransaction(
+		"claude", "unanswered-user-src",
+		ProjectionSourceDescriptor{Identity: "unanswered-user-src"},
+		false, false, false,
+	)
+	if err != nil || !admission.Leader {
+		t.Fatalf("admission=%+v err=%v", admission, err)
+	}
+	// 上一轮：正常收口（settled）。
+	kernel.ApplyHydrateEvent("claude", "unanswered-user-src", "epoch", "turn_started",
+		map[string]interface{}{"turnId": "turn-settled"})
+	kernel.ApplyHydrateEvent("claude", "unanswered-user-src", "epoch", "text_delta",
+		map[string]interface{}{"itemId": "turn-settled", "delta": "回复全文"})
+	kernel.ApplyHydrateEvent("claude", "unanswered-user-src", "epoch", "turn_completed",
+		map[string]interface{}{"turnId": "turn-settled", "done": true})
+	// 尾部：/model 命令回显行 —— 只有 user 消息，无 assistant 回应、无终态。
+	kernel.ApplyHydrateEvent("claude", "unanswered-user-src", "epoch", "user_message",
+		map[string]interface{}{"turnId": "turn-model", "itemId": "turn-model", "text": "/model"})
+	kernel.MarkHydrateSourceIngestComplete("claude", "unanswered-user-src")
+
+	if err := kernel.WaitHydrateCommitReady(context.Background(), "claude", "unanswered-user-src"); err != nil {
+		t.Fatalf("unanswered trailing user turn + source-complete must be ready, got err=%v", err)
+	}
+	commit, err := kernel.CommitHydrateTransaction("claude", "unanswered-user-src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commit.Projection.Turns) != 2 {
+		t.Fatalf("want 2 turns committed, got %d", len(commit.Projection.Turns))
+	}
+	model := commit.Projection.Turns[1]
+	if model.TurnID != "turn-model" || model.User == nil || model.Assistant != nil {
+		t.Fatalf("trailing turn must stay the honest unanswered user row, got %+v", model)
+	}
+}
+
+// TestProjectionHydrateInFlightContentTurnStillGates locks the exemption boundary: a
+// non-live in-flight turn that already carries assistant content must keep waiting for
+// its terminal event — the unanswered-user exemption must never leak into real partials.
+func TestProjectionHydrateInFlightContentTurnStillGates(t *testing.T) {
+	kernel := NewProjectionKernel(nil, nil)
+	admission, err := kernel.BeginHydrateTransaction(
+		"claude", "inflight-content-src",
+		ProjectionSourceDescriptor{Identity: "inflight-content-src"},
+		false, false, false,
+	)
+	if err != nil || !admission.Leader {
+		t.Fatalf("admission=%+v err=%v", admission, err)
+	}
+	kernel.ApplyHydrateEvent("claude", "inflight-content-src", "epoch", "user_message",
+		map[string]interface{}{"turnId": "turn-live", "itemId": "turn-live", "text": "问题"})
+	kernel.ApplyHydrateEvent("claude", "inflight-content-src", "epoch", "text_delta",
+		map[string]interface{}{"itemId": "turn-live", "delta": "部分回复"})
+	kernel.MarkHydrateSourceIngestComplete("claude", "inflight-content-src")
+
+	short, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if err := kernel.WaitHydrateCommitReady(short, "claude", "inflight-content-src"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("in-flight turn with assistant content must keep gating, got err=%v", err)
+	}
+}
+
 // TestProjectionHydrateErrorTurnWithSourceCompleteReady covers the crash sibling of the aborted
 // case (§5.1 #7). A turn_error event must settle the turn to status=error and satisfy the
 // commit gate once the source is fully ingested. Crash and abort are distinct terminal states;
