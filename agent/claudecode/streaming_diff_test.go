@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -226,6 +227,61 @@ func TestHandleAssistant_DivergentMultiBlockReplacesJoinedFullText(t *testing.T)
 	}
 	if texts := eventContents(evts, core.EventText); len(texts) != 2 {
 		t.Fatalf("text events = %#v, want only the two streamed deltas before replace", texts)
+	}
+}
+
+// 2026-10-11 事故回归：同一条 API message 为 thinking(idx0)+text(idx1)（Claude
+// CLI 2.1.296 实测形态），完成帧只携带 text 单块（帧内数组下标 0）。旧实现用帧
+// 内下标查 streamedTextByIdx[0]（空）→ 走「无流式状态」分支把整份正文当 delta
+// 追加 → 收尾正文翻倍（2994 = 官方 1497×2，hash 实证）。流式累计差最后 1 字时，
+// 完成帧只允许补尾部增量。
+func TestHandleAssistant_ThinkingThenTextFrameEmitsOnlyTailByBlockOrdinal(t *testing.T) {
+	cs := newTestClaudeSession(t)
+
+	cs.handleStreamEvent(map[string]any{"event": map[string]any{"type": "message_start", "message": map[string]any{"id": "m1"}}})
+	cs.handleStreamEvent(map[string]any{"event": map[string]any{"type": "content_block_start", "index": float64(0), "content_block": map[string]any{"type": "thinking"}}})
+	cs.handleStreamEvent(map[string]any{"event": map[string]any{"type": "content_block_delta", "index": float64(0), "delta": map[string]any{"type": "thinking_delta", "thinking": "先想想"}}})
+	cs.handleStreamEvent(map[string]any{"event": map[string]any{"type": "content_block_start", "index": float64(1), "content_block": map[string]any{"type": "text"}}})
+	cs.handleStreamEvent(map[string]any{"event": map[string]any{"type": "content_block_delta", "index": float64(1), "delta": map[string]any{"type": "text_delta", "text": "两段散文的前半，后半"}}})
+	cs.handleAssistant(map[string]any{"message": map[string]any{"id": "m1", "content": []any{map[string]any{"type": "text", "text": "两段散文的前半，后半。"}}}})
+
+	evts := collectAllEvents(cs)
+	texts := eventContents(evts, core.EventText)
+	want := []string{"两段散文的前半，后半", "。"}
+	if len(texts) != len(want) {
+		t.Fatalf("text events = %#v, want %#v; all events=%#v", texts, want, evts)
+	}
+	for i := range want {
+		if texts[i] != want[i] {
+			t.Fatalf("text[%d] = %q, want %q", i, texts[i], want[i])
+		}
+	}
+	for _, evt := range evts {
+		if evt.Type == core.EventText && strings.Contains(evt.Content, "两段散文的前半，后半两段") {
+			t.Fatalf("completion frame duplicated full text: %#v", evts)
+		}
+	}
+}
+
+// 同形态下的分歧路径：thinking 先行时完成帧 text 与流式累计分歧必须走整文替换，
+// 而不是把分歧全文再追加一份。
+func TestHandleAssistant_ThinkingThenTextDivergentFrameReplaces(t *testing.T) {
+	cs := newTestClaudeSession(t)
+
+	cs.handleStreamEvent(map[string]any{"event": map[string]any{"type": "message_start", "message": map[string]any{"id": "m1"}}})
+	cs.handleStreamEvent(map[string]any{"event": map[string]any{"type": "content_block_start", "index": float64(0), "content_block": map[string]any{"type": "thinking"}}})
+	cs.handleStreamEvent(map[string]any{"event": map[string]any{"type": "content_block_start", "index": float64(1), "content_block": map[string]any{"type": "text"}}})
+	cs.handleStreamEvent(map[string]any{"event": map[string]any{"type": "content_block_delta", "index": float64(1), "delta": map[string]any{"type": "text_delta", "text": "Hel"}}})
+	cs.handleAssistant(map[string]any{"message": map[string]any{"id": "m1", "content": []any{map[string]any{"type": "text", "text": "Hi"}}}})
+
+	evts := collectAllEvents(cs)
+	replacements := eventContents(evts, core.EventTextReplace)
+	if len(replacements) != 1 || replacements[0] != "Hi" {
+		t.Fatalf("replacements = %#v, want [Hi]; all events=%#v", replacements, evts)
+	}
+	texts := eventContents(evts, core.EventText)
+	if len(texts) != 1 || texts[0] != "Hel" {
+		t.Fatalf("text events = %#v, want only streamed prefix [Hel]", texts)
 	}
 }
 

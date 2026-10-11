@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -542,10 +543,27 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 	}
 	hasStreamState := msgID != "" && cs.streamState.currentMsgID == msgID
 
+	// 完成帧 content 数组的下标与流式累计键（API content_block index）不是同一
+	// 身份：同一条 API message 混排块类型时（如 thinking idx0 + text idx1），完成
+	// 帧只携带该 message 交付的块（SDK 契约：content typically holds the single
+	// block this message delivers），帧内 text 落在数组下标 0——直接查
+	// streamedTextByIdx[0] 会当成「无流式状态」把整份正文当 delta 追加，正文翻倍
+	// （2026-10-11 Claude 收尾 2994=官方 1497×2 事故）。按「第 k 个 text 块」对应
+	// 流式累计的第 k 个 text 块（API index 升序），帧携带单块或全量两种形态下都
+	// 是同一身份。
+	var streamedTextIdx []int
+	if hasStreamState {
+		for idx := range cs.streamState.streamedTextByIdx {
+			streamedTextIdx = append(streamedTextIdx, idx)
+		}
+		sort.Ints(streamedTextIdx)
+	}
+
 	fullText := fullAssistantText(contentArr)
 	divergent := false
 	if hasStreamState {
-		for i, contentItem := range contentArr {
+		textOrdinal := 0
+		for _, contentItem := range contentArr {
 			item, ok := contentItem.(map[string]any)
 			if !ok {
 				continue
@@ -555,7 +573,14 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 				continue
 			}
 			text, _ := item["text"].(string)
-			streamed := cs.streamState.streamedTextByIdx[i]
+			if text == "" {
+				continue // 空 text 块不占流式序号（发射侧同规则跳过）
+			}
+			streamed := ""
+			if textOrdinal < len(streamedTextIdx) {
+				streamed = cs.streamState.streamedTextByIdx[streamedTextIdx[textOrdinal]]
+			}
+			textOrdinal++
 			if streamed != "" && text != streamed && !strings.HasPrefix(text, streamed) {
 				divergent = true
 				break
@@ -573,7 +598,8 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 	}
 
 	// 单次有序遍历：按原始 content block 顺序 emit thinking/text/tool_use
-	for i, contentItem := range contentArr {
+	textOrdinal := 0
+	for _, contentItem := range contentArr {
 		item, ok := contentItem.(map[string]any)
 		if !ok {
 			continue
@@ -619,16 +645,26 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 				}
 				delta := ""
 				if hasStreamState {
-					streamed := cs.streamState.streamedTextByIdx[i]
+					streamIdx := -1
+					streamed := ""
+					if textOrdinal < len(streamedTextIdx) {
+						streamIdx = streamedTextIdx[textOrdinal]
+						streamed = cs.streamState.streamedTextByIdx[streamIdx]
+					}
+					textOrdinal++
 					switch {
 					case streamed == text:
 						continue
 					case streamed != "" && strings.HasPrefix(text, streamed):
 						delta = text[len(streamed):]
-						cs.streamState.streamedTextByIdx[i] = text
+						if streamIdx >= 0 {
+							cs.streamState.streamedTextByIdx[streamIdx] = text
+						}
 					case streamed == "":
 						delta = text
-						cs.streamState.streamedTextByIdx[i] = text
+						if streamIdx >= 0 {
+							cs.streamState.streamedTextByIdx[streamIdx] = text
+						}
 					default:
 						continue
 					}
