@@ -1127,6 +1127,10 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 					// journals as a gap (dead-epoch conns are gone).
 					RecoverOrphanDetailLoadingV2(&restored)
 				}
+				// 2026-10-11：checkpoint 可能携带重启前遗留的 running 命令回显 turn
+				//（本地命令即时完成，重启后不可能仍在执行）。恢复时同谓词结算，
+				// 否则该投影一经命中恢复就永远显示执行中（d9e61f32 /model 实证）。
+				restored = settleStaleCheckpointCommandEchoTurns(restored)
 				tx.reducer.Restore(backendID, sessionID, restored)
 			}
 			if len(source.Segments) > 0 {
@@ -1614,6 +1618,17 @@ func settleUnansweredCommandEchoTurns(baseline SessionProjection, ids map[string
 		}
 	}
 	return baseline
+}
+
+// settleStaleCheckpointCommandEchoTurns 把 checkpoint 恢复路径上的结算作用于恢复
+// 快照全集：重启边界上任何 running 的未回应命令回显 turn 都是陈旧残留（本地命令
+// 即时完成），不是可等待的活跃执行。
+func settleStaleCheckpointCommandEchoTurns(restored SessionProjection) SessionProjection {
+	ids := make(map[string]struct{}, len(restored.Turns))
+	for _, t := range restored.Turns {
+		ids[t.TurnID] = struct{}{}
+	}
+	return settleUnansweredCommandEchoTurns(restored, ids)
 }
 
 func mergeHydrateBaselineWithLiveExecution(cold, live SessionProjection, liveOK bool) SessionProjection {

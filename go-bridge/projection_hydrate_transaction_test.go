@@ -936,6 +936,40 @@ func TestProjectionHydrateUnansweredTrailingCommandEchoCommits(t *testing.T) {
 	}
 }
 
+// TestSettleStaleCheckpointCommandEchoTurns pins the checkpoint-restore settle
+// (2026-10-11 d9e61f32): a checkpoint carrying a running unanswered /model turn
+// (with execution running on it) must settle to completed/idle at restore; a real
+// unanswered prompt and an in-flight content turn must pass through untouched.
+func TestSettleStaleCheckpointCommandEchoTurns(t *testing.T) {
+	proj := SessionProjection{
+		SessionID: "s1",
+		Execution: ExecutionView{Phase: "running", ActiveTurnID: "t-model"},
+		Turns: []TurnProjection{
+			{TurnID: "t-prompt", Status: "running", User: &MessageProjection{Role: "user",
+				Parts: []ProjectionPart{{Type: "text", Text: "普通提问"}}}},
+			{TurnID: "t-model", Status: "running", User: &MessageProjection{Role: "user",
+				Parts: []ProjectionPart{{Type: "text", Text: "/model opus"}}}},
+			{TurnID: "t-live", Status: "running", User: &MessageProjection{Role: "user",
+				Parts: []ProjectionPart{{Type: "text", Text: "/init 全仓"}}},
+				Assistant: &MessageProjection{Role: "assistant",
+					Parts: []ProjectionPart{{Type: "text", Text: "部分回复"}}}},
+		},
+	}
+	settled := settleStaleCheckpointCommandEchoTurns(proj)
+	if settled.Turns[0].Status != "running" {
+		t.Fatalf("ordinary unanswered prompt must stay running, got %q", settled.Turns[0].Status)
+	}
+	if settled.Turns[1].Status != "completed" {
+		t.Fatalf("stale command-echo turn must settle to completed, got %q", settled.Turns[1].Status)
+	}
+	if settled.Turns[2].Status != "running" {
+		t.Fatalf("in-flight content turn must stay running, got %q", settled.Turns[2].Status)
+	}
+	if settled.Execution.Phase != "idle" || settled.Execution.ActiveTurnID != "" {
+		t.Fatalf("execution must return idle when its active turn settled, got %+v", settled.Execution)
+	}
+}
+
 // TestProjectionHydrateInFlightContentTurnStillGates locks the exemption boundary: a
 // non-live in-flight turn that already carries assistant content must keep waiting for
 // its terminal event — the unanswered-user exemption must never leak into real partials.
