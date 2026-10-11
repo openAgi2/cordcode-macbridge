@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+### 2026-10-11 — Claude 完成帧正文去重与历史执行态恢复
+
+- 完成帧按非空文本块的顺序核对官方流式累计，兼容 thinking 块先于 text、完成帧只携带 text 的形态；同会话 `system/status` 保留累计状态，只有 init、会话变化及 result 才按原边界重置。避免收尾再次追加全文；最新 CLI 2.1.296 真实回复走 `equal_skip`、追加 0 字节，文件观测未重复写入正文。iOS 收尾观感待人工验收。
+- 只有 `/model` 等本地命令回显、没有 assistant 的历史回合不再阻塞冷加载，并在 hydrate 提交及旧 checkpoint 恢复时结算；普通未完成提问和真实执行中的回合仍受原终态门约束。
+
 ### 2026-10-10 — 移除配套 iOS agent-device 验证指引
 
 - owner 裁决永久停用 agent-device，包括模拟器与真机。MacBridge 工作流不再把 iOS 视觉/交互影响路由到 agent-device；后续使用定向 unit、一次 iOS 交付安装、CLI 只读取证与 owner 合并矩阵人工验收。历史授权与事故记录保留在 Git 历史，不再作为执行依据。
