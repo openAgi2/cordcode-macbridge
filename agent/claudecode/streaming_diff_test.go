@@ -377,6 +377,29 @@ func TestHistoryDrainingSuppressesStreamAndAssistant(t *testing.T) {
 	}
 }
 
+// 2026-10-11 事故回归（system 帧中途 reset）：turn 中途到达的同会话 status 帧
+//（work_dir/model 同步）不得清空流式状态——否则完成帧掉进 legacy 分支把整份
+// 正文当 delta 追加，收尾正文翻倍（真机 2990=1495×2，assistant_frame_trace 实证
+// currentMsgID="" → legacy_full_delta）。
+func TestHandleSystemStatusMidMessageKeepsStreamState(t *testing.T) {
+	cs := newTestClaudeSession(t)
+
+	cs.handleSystem(map[string]any{"type": "system", "subtype": "init", "session_id": "s1"})
+	cs.handleStreamEvent(map[string]any{"event": map[string]any{"type": "message_start", "message": map[string]any{"id": "m1"}}})
+	cs.handleStreamEvent(map[string]any{"event": map[string]any{"type": "content_block_delta", "index": float64(0), "delta": map[string]any{"type": "text_delta", "text": "Hel"}}})
+	// 中途 status 帧：同会话、非 init——真实形态（work_dir/permission_mode 同步）。
+	cs.handleSystem(map[string]any{"type": "system", "subtype": "status", "session_id": "s1"})
+	cs.handleAssistant(map[string]any{"message": map[string]any{"id": "m1", "content": []any{map[string]any{"type": "text", "text": "Hello"}}}})
+
+	texts := eventContents(collectAllEvents(cs), core.EventText)
+	if slices.Contains(texts, "Hello") {
+		t.Fatalf("mid-message status frame must not reset stream state (full text re-emitted): %#v", texts)
+	}
+	if len(texts) == 0 || texts[len(texts)-1] != "lo" {
+		t.Fatalf("completion frame must emit only the tail after a mid-message status frame, got %#v", texts)
+	}
+}
+
 func TestHandleResultAndSystemResetStreamState(t *testing.T) {
 	cs := newTestClaudeSession(t)
 

@@ -491,7 +491,18 @@ func (cs *claudeSession) handleSystem(raw map[string]any) {
 	case "status":
 		cs.syncPermissionModeFromStatus(raw)
 	}
-	if sid, ok := raw["session_id"].(string); ok && sid != "" {
+	// 2026-10-11 修复：只有会话边界（init，或 session_id 变化）才清空逐消息状态。
+	// 此前任何 system 帧都无条件 reset——CLI 在 turn 中途发的 status 帧（work_dir/
+	// model 同步，日志高频出现）落在 message_start 与完成帧之间时，完成帧查不到
+	// 流式状态，legacy 分支把整份正文当 delta 追加，收尾正文翻倍（2990=1495×2
+	// 实证；assistant_frame_trace: currentMsgID="" → legacy_full_delta 4394）。
+	subtype, _ := raw["subtype"].(string)
+	sid, _ := raw["session_id"].(string)
+	sessionBoundary := subtype == "init"
+	if sid != "" {
+		if prev, _ := cs.sessionID.Load().(string); prev != sid {
+			sessionBoundary = true
+		}
 		cs.sessionID.Store(sid)
 		if cs.historyDraining.Load() {
 			cs.activeMsgID.Store("")
@@ -506,9 +517,11 @@ func (cs *claudeSession) handleSystem(raw map[string]any) {
 			return
 		}
 	}
-	cs.activeMsgID.Store("")
-	cs.emittedText.Store("")
-	cs.streamState.reset()
+	if sessionBoundary {
+		cs.activeMsgID.Store("")
+		cs.emittedText.Store("")
+		cs.streamState.reset()
+	}
 }
 
 func (cs *claudeSession) handleAssistant(raw map[string]any) {
@@ -542,6 +555,22 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 		cs.activeMsgID.Store(msgID)
 	}
 	hasStreamState := msgID != "" && cs.streamState.currentMsgID == msgID
+
+	// 2026-10-11 间歇正文翻倍取证：env 门控的完成帧行级 trace（默认关闭，零开销）。
+	// 记录每帧的身份判定与每个 text 块的差量决策，用于区分 ordinal 失配与 legacy
+	// 分支两条「发全文」路径（GO_BRIDGE_CLAUDE_ASSISTANT_TRACE=1 启用）。
+	assistantTrace := os.Getenv("GO_BRIDGE_CLAUDE_ASSISTANT_TRACE") == "1"
+	traceTextBlock := func(ordinal, streamIdx, streamedLen, frameLen int, outcome string, deltaLen int) {
+		if assistantTrace {
+			slog.Info("claudeSession: assistant_frame_trace",
+				"msgID", msgID, "hasStreamState", hasStreamState,
+				"currentMsgID", cs.streamState.currentMsgID,
+				"activeMsgID", cs.activeMsgID.Load(),
+				"textOrdinal", ordinal, "streamIdx", streamIdx,
+				"streamedLen", streamedLen, "frameTextLen", frameLen,
+				"outcome", outcome, "deltaLen", deltaLen)
+		}
+	}
 
 	// 完成帧 content 数组的下标与流式累计键（API content_block index）不是同一
 	// 身份：同一条 API message 混排块类型时（如 thinking idx0 + text idx1），完成
@@ -654,18 +683,22 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 					textOrdinal++
 					switch {
 					case streamed == text:
+						traceTextBlock(textOrdinal-1, streamIdx, len(streamed), len(text), "equal_skip", 0)
 						continue
 					case streamed != "" && strings.HasPrefix(text, streamed):
 						delta = text[len(streamed):]
 						if streamIdx >= 0 {
 							cs.streamState.streamedTextByIdx[streamIdx] = text
 						}
+						traceTextBlock(textOrdinal-1, streamIdx, len(streamed), len(text), "prefix_tail", len(delta))
 					case streamed == "":
 						delta = text
 						if streamIdx >= 0 {
 							cs.streamState.streamedTextByIdx[streamIdx] = text
 						}
+						traceTextBlock(textOrdinal-1, streamIdx, len(streamed), len(text), "unmapped_full_delta", len(delta))
 					default:
+						traceTextBlock(textOrdinal-1, streamIdx, len(streamed), len(text), "divergent_skip", 0)
 						continue
 					}
 				} else if msgID != "" {
@@ -676,17 +709,21 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 					}
 					prev, _ := cs.emittedText.Load().(string)
 					if text == prev {
+						traceTextBlock(-1, -1, len(prev), len(text), "legacy_equal_skip", 0)
 						continue // 文本未变，跳过
 					}
 					if prev != "" && strings.HasPrefix(text, prev) {
 						delta = text[len(prev):] // 增量
+						traceTextBlock(-1, -1, len(prev), len(text), "legacy_prefix_tail", len(delta))
 					} else {
 						delta = text
+						traceTextBlock(-1, -1, len(prev), len(text), "legacy_full_delta", len(delta))
 					}
 					// 非前缀匹配时保守发全文，不丢文本
 					cs.emittedText.Store(text)
 				} else {
 					delta = text
+					traceTextBlock(-1, -1, -1, len(text), "no_id_full_delta", len(delta))
 				}
 				if delta == "" {
 					continue
@@ -721,6 +758,10 @@ func (cs *claudeSession) handleStreamEvent(raw map[string]any) {
 	switch subType {
 	case "message_start":
 		id, _ := nestedString(ev, "message", "id")
+		if os.Getenv("GO_BRIDGE_CLAUDE_ASSISTANT_TRACE") == "1" {
+			slog.Info("claudeSession: assistant_frame_trace message_start",
+				"msgID", id, "prevCurrentMsgID", cs.streamState.currentMsgID)
+		}
 		cs.streamState.onMessageStart(id)
 		if id != "" {
 			cs.activeMsgID.Store(id)
