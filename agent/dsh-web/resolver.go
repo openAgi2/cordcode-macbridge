@@ -238,6 +238,26 @@ func (s *execManagedStarter) Start(ctx context.Context, port int) (int, error) {
 		return 0, fmt.Errorf("dshweb: spawn %s: %w", bin, err)
 	}
 	s.cmd = cmd
+	// The reaper goroutine is the SINGLE owner of this child's Wait
+	// (incidents/2026-10-12-bridge-zombie-process-exhaustion.md §5.1-3): it
+	// reaps the seat process on any exit — spontaneous death included, which
+	// previously left one zombie holding s.cmd so the Start guard above kept
+	// rejecting the grace-expiry respawn — and frees the slot so the guard
+	// re-admits. Stop and other signal paths never Wait; they rely on this
+	// goroutine (avoids the "waitid: no child processes" double-Wait race).
+	go func() {
+		waitErr := cmd.Wait()
+		s.mu.Lock()
+		if s.cmd == cmd {
+			s.cmd = nil
+		}
+		s.mu.Unlock()
+		pid := 0
+		if cmd.Process != nil {
+			pid = cmd.Process.Pid
+		}
+		slog.Info("dshweb: managed seat process exited", "pid", pid, "waitErr", waitErr)
+	}()
 	return cmd.Process.Pid, nil
 }
 
@@ -261,9 +281,14 @@ func (s *execManagedStarter) Stop() error {
 	if s.cmd == nil || s.cmd.Process == nil {
 		return nil
 	}
-	err := terminateProcessGroup(s.cmd)
+	// Signal-only stop (incidents/2026-10-12): the single Wait belongs to the
+	// reaper goroutine started in Start — waiting here would race it
+	// ("waitid: no child processes"). KILL without TERM grace is fine for the
+	// only callers (spawnOnSeat failure paths against an unresponsive/failed
+	// child); Resolver.Stop deliberately never kills the seat at all.
+	killProcessGroupNoWait(s.cmd.Process.Pid)
 	s.cmd = nil
-	return err
+	return nil
 }
 
 // Resolver owns the seat lifecycle for one dshweb Agent.

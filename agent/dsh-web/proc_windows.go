@@ -3,33 +3,25 @@
 package dshweb
 
 import (
+	"os"
 	"os/exec"
-	"syscall"
-	"time"
 )
-
-const graceTermSeconds = 5
 
 // prepareCmdForProcessGroup is the windows no-op (mirrors agent/dsh posture:
 // process groups are a unix concept; windows relies on Process.Kill).
 func prepareCmdForProcessGroup(cmd *exec.Cmd) {}
 
-// terminateProcessGroup kills the spawned process directly on windows.
-func terminateProcessGroup(cmd *exec.Cmd) error {
-	if cmd == nil || cmd.Process == nil {
-		return nil
+// killProcessGroupNoWait kills the direct child WITHOUT waiting — windows has
+// no process groups, and the single Wait belongs to the starter's reaper
+// goroutine (incidents/2026-10-12).
+func killProcessGroupNoWait(pid int) {
+	if pid <= 0 {
+		return
 	}
-	_ = cmd.Process.Kill()
-	_, _ = cmd.Process.Wait()
-	return nil
+	if p, err := os.FindProcess(pid); err == nil {
+		_ = p.Kill()
+	}
 }
-
-var _ = time.Second // keep time imported for future pacing parity
-var _ = syscall.SIGTERM
-
-// killProcessGroupNoWait is the windows no-op: process groups are a unix
-// concept, and exec.CommandContext already killed the direct child.
-func killProcessGroupNoWait(pid int) {}
 
 // processCommandLine is the windows placeholder: tasklist-based matching is
 // not wired; the legacy cleanup falls back to warn-and-remove (never a wrong
