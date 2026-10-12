@@ -30,12 +30,12 @@
   },
   "reports": {
     "completion_report_path": "docs/2026-10-12-bridge-zombie-process-exhaustion完成情况.md",
-    "completion_report_status": "missing",
-    "last_generated_at": null,
-    "based_on_queue_hash": null
+    "completion_report_status": "current",
+    "last_generated_at": "2026-10-12T12:12:00Z",
+    "based_on_queue_hash": "05ea56a4d6b8"
   },
   "scope_note": "实施范围 = 事故文档 §5.1 P0（r2 评审 APPROVED，owner 2026-10-12 授权实施）。P1（探针经济性）被上游刷新语义证据门挡住（须先查证 /Users/jacklee/Projects/codex checkout，未查证前不得定缓存窗口），P2（缺席语义加固）可选不阻塞——两者均不入本队列，待 owner 另行授权。P0 完成门 = §5.4：三处收尸修复+定向测试绿+Release 覆盖安装+运行态核验+对账数字（关 Desktop N 分钟 token_refreshed≥N 且僵尸恒 0）+think.md/CHANGELOG/事故文档回填。",
-  "updated_at": "2026-10-12T11:56:00Z",
+  "updated_at": "2026-10-12T12:12:00Z",
   "todos": [
     {
       "id": "p0-auth-reap-impl",
@@ -77,9 +77,9 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "新增 chatgpt_auth_reap_test.go（3 用例：success/not-logged-in/timeout，假 codex 探针经 chatGPTCodexBin 注入，断言 ESRCH=已收尸）+ pairing_oauth_reap_test.go（openBrowser stub 断言）。单跑 -run Reaps 全过；整包 ./agent/codex-remote/... -count=1 全绿 6.7s。",
+        "summary": "新增 chatgpt_auth_reap_test.go（3 用例：success/not-logged-in/timeout，假 codex 探针经 chatGPTCodexBin 注入，断言 ESRCH=已收尸）+ pairing_oauth_reap_test.go（openBrowser stub 断言）。单跑 -run Reaps 全过；整包 ./agent/codex-remote/... -count=1 全绿 6.7s。 [出口审计 12:0x 重跑：ok 7.171s/24.797s]",
         "artifacts": [
           "agent/codex-remote/chatgpt_auth_reap_test.go",
           "agent/codex-remote/pairing_oauth_reap_test.go",
@@ -151,9 +151,9 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "openBrowser 收尸测试并入 codex-remote 整包跑（TestOpenBrowserReapsLauncherChild PASS 0.62s，与 auth reap 测试同一命令覆盖）。",
+        "summary": "openBrowser 收尸测试并入 codex-remote 整包跑（TestOpenBrowserReapsLauncherChild PASS 0.62s，与 auth reap 测试同一命令覆盖）。 [出口审计 12:0x 重跑：ok 7.171s/24.797s]",
         "artifacts": [
           "agent/codex-remote/pairing_oauth_reap_test.go",
           "cmd:go test ./agent/codex-remote/ -run Reaps -count=1 => PASS"
@@ -227,9 +227,9 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "新增 starter_reap_test.go（3 用例：自发死亡→收尸+守卫恢复放行、Stop 信号-only+reaper 收尸、守卫仍拒双 spawn）。dsh-web 整包 -count=1 全绿 24.4s。",
+        "summary": "新增 starter_reap_test.go（3 用例：自发死亡→收尸+守卫恢复放行、Stop 信号-only+reaper 收尸、守卫仍拒双 spawn）。dsh-web 整包 -count=1 全绿 24.4s。 [出口审计 12:0x 重跑：ok 7.171s/24.797s]",
         "artifacts": [
           "agent/dsh-web/starter_reap_test.go",
           "cmd:go test ./agent/dsh-web/... -count=1 => ok 24.381s"
@@ -315,7 +315,7 @@
       "id": "p0-build-install-regression",
       "title": "P0 部署后运行态核验（进程代际 + 8777 监听者 + 无临时产物）",
       "description": "按 CLAUDE.md 部署后运行态验证逐项：（1）ps -o pid,ppid,lstart -p <runtime-pid> 启动时间晚于本次构建；（2）lsof -nP -iTCP:8777 -sTCP:LISTEN 监听者是 /Applications/CordCodeLink.app 内嵌 cordcode-bridge-runtime（新 pid）；（3）pgrep -fl \"CordCodeLink|cordcode-bridge-runtime\" 无 /Applications 之外路径（无临时产物混入）；（4）runtime.json pid/bridgeEpoch 更新。旧 runtime 81192 名下既有 ~50 僵尸应随重启被 launchd 回收（僵尸总数回落）。",
-      "status": "pending",
+      "status": "done",
       "phase": "p0-verify",
       "kind": "regression",
       "depends_on": [
@@ -325,13 +325,17 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "manual",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "运行态核验五项全过：新 runtime pid 95438（lstart 19:15:30 晚于构建 19:13:49）；8777 LISTEN=95438；pgrep 无 /Applications 之外实例；内嵌 -version=0.1.0 commit 0c6016ad13a6；runtime.json pid=95438 新 bridgeEpoch。旧 runtime 81192 名下 ~50 僵尸随重启回收（全系统 56→3）。",
+        "artifacts": [
+          "cmd:ps -o pid,ppid,lstart -p 95438 => 19:15:30",
+          "cmd:lsof -nP -iTCP:8777 -sTCP:LISTEN => 95438",
+          "cmd:cordcode-bridge-runtime -version => 0c6016ad13a6"
+        ],
+        "checked_at": "2026-10-12T12:10:00Z"
       }
     },
     {
@@ -352,13 +356,12 @@
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "运行态核验五项全过：新 runtime pid 95438（lstart 19:15:30 晚于构建 19:13:49）；8777 LISTEN=95438；pgrep 无 /Applications 之外实例；内嵌 -version=0.1.0 commit 0c6016ad13a6；runtime.json pid=95438 新 bridgeEpoch。旧 runtime 81192 名下 ~50 僵尸随重启回收（56→3，余 3 属其他父进程）。",
+        "summary": "对账数字（产物门）双态通过。离线态（owner 配合退 Desktop，19:42:29-19:53:59=11.5min）：token_refreshed 7→60（53 次刷新 ≈4.6/min，与修复前风暴节奏一致）+ no desktop environment×57（restore 失败循环全速运行）+ runtime 95438 名下僵尸 7 次采样恒 0；修复前同条件 53 刷新≈53 僵尸（§3.3/§3.4 1:1 基线）。延展证据：截至 19:58:21 累计 81 次刷新（T0 后 74 个探针）仍 0 僵尸。在线态（19:16-19:42）：每 ~9.5min 一次刷新 spawn 探针，僵尸恒 0。全系统僵尸父进程仅剩无关的 899×2/1540×1。",
         "artifacts": [
-          "cmd:ps -o pid,ppid,lstart -p 95438 => Mon Oct 12 19:15:30 2026",
-          "cmd:lsof -nP -iTCP:8777 -sTCP:LISTEN => 95438",
-          "cmd:/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime -version => commit 0c6016ad13a6"
+          "build/zombie-reconcile-95438-offline.log",
+          "build/zombie-reconcile-95438-online.log"
         ],
-        "checked_at": "2026-10-12T11:17:00Z"
+        "checked_at": "2026-10-12T12:10:00Z"
       }
     },
     {
@@ -379,20 +382,21 @@
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "对账数字（产物门）双态通过。离线态（owner 配合退 Desktop，19:42:29-19:53:59=11.5min）：token_refreshed 7→60（53 次刷新，≈4.6/min 与修复前风暴节奏一致）+ no desktop environment×57（restore 失败循环全速运行）+ runtime 95438 名下僵尸 7 次采样恒 0；修复前同条件 53 刷新≈53 僵尸。在线态（19:16-19:42 观测）：Desktop 在线时每 ~9.5min 一次主动刷新 spawn 探针，僵尸恒 0。全系统僵尸父进程仅剩 899×2/1540×1（与 CordCode 无关既有项）。",
+        "summary": "think.md 复盘条目 + CHANGELOG [Unreleased] 2026-10-12 节 + 事故档案状态行改已修复/§5.5 实施记录（含 53 刷新/0 僵尸对账）/§8.1 实施段来源清单/§4 规约标注已取代；连同 r1/r2 评审文档提交（commit 1eb234ee）。git diff --check 通过，D0 级无 build/test。",
         "artifacts": [
-          "build/zombie-reconcile-95438-offline.log",
-          "build/zombie-reconcile-95438-online.log",
-          "cmd:ps -axo ppid=,stat= sample×7 => zombies_under_runtime=0"
+          "think.md",
+          "CHANGELOG.md",
+          "docs/incidents/2026-10-12-bridge-zombie-process-exhaustion.md",
+          "git:1eb234ee"
         ],
-        "checked_at": "2026-10-12T11:56:00Z"
+        "checked_at": "2026-10-12T12:10:00Z"
       }
     },
     {
       "id": "p0-doc-sync-tests",
       "title": "P0 文档单元自动化测试面：不适用",
       "description": "纯文档改动（D0 级），git diff --check 即可，无 build/test。",
-      "status": "in_progress",
+      "status": "done",
       "phase": "p0-docs",
       "kind": "tests",
       "depends_on": [
@@ -402,20 +406,20 @@
       "notes": "",
       "verification": {
         "required": false,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": "D0 文档改动：CLAUDE.md 分级表规定不 build、不 test；git diff --check 在 impl 内执行。回填的对账数字来源由 p0-runtime-reconcile-regression 证明。",
-        "summary": "",
+        "summary": "required:false 按既定 na_reason 收口（D0 文档，不 build/test）。",
         "artifacts": [],
-        "checked_at": null
+        "checked_at": "2026-10-12T12:10:00Z"
       }
     },
     {
       "id": "p0-doc-sync-regression",
       "title": "P0 文档单元端到端回归：不适用",
       "description": "纯文档改动，无用户可见行为面。",
-      "status": "pending",
+      "status": "done",
       "phase": "p0-docs",
       "kind": "regression",
       "depends_on": [
@@ -425,13 +429,13 @@
       "notes": "",
       "verification": {
         "required": false,
-        "status": "missing",
+        "status": "present",
         "method": "manual",
         "attestation": "self-attested",
         "na_reason": "纯文档（think.md/CHANGELOG/事故档案）无运行时行为；本事故的行为回归已由 p0-runtime-reconcile-regression 承担。",
-        "summary": "",
+        "summary": "required:false 按既定 na_reason 收口（纯文档无行为面；行为回归由 p0-runtime-reconcile-regression 承担）。",
         "artifacts": [],
-        "checked_at": null
+        "checked_at": "2026-10-12T12:10:00Z"
       }
     }
   ]
