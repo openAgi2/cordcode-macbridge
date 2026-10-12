@@ -87,6 +87,12 @@ type PairingController struct {
 	// results are reused within the token's own JWT exp window instead of
 	// spawning a probe per restore retry. Nil = no cache.
 	auth *authCache
+	// lastRestoreClass is the absence class of the most recent restoreOnce
+	// outcome (P2 absence-hardening plan §3 D1): written at restoreOnce's
+	// single exit point (failure sets, success clears), read by
+	// StructuredInstanceReadiness. Empty = cleared/unknown → fail-closed
+	// service_not_running.
+	lastRestoreClass restoreErrClass
 }
 
 // authCache is the cached ChatGPT account auth (P1 §3 D2). hasExp=false

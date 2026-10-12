@@ -239,6 +239,37 @@ func (p *PairingController) loadPersistedPairing() (*persistedPairing, *deviceKe
 // breakage stayed hidden behind the generic banner for exactly this reason.
 // Shared by reconnectFromStore, restorePersistedPairing and watchBinding so
 // every restore loop surfaces the same category through the readiness seam.
+// restoreErrClass categorizes restore failures for the readiness state
+// machine and the retry budget (P2 absence-hardening plan §3 D1/D2). The
+// string values are log-field values, not wire values.
+type restoreErrClass string
+
+const (
+	errClassNotInstalled   restoreErrClass = "not_installed"
+	errClassNotLoggedIn    restoreErrClass = "not_logged_in"
+	errClassDesktopOffline restoreErrClass = "desktop_offline"
+	errClassTransient      restoreErrClass = "transient"
+)
+
+// classifyRestoreError maps a restoreOnce failure onto the absence class —
+// the single classification source for readiness (D1) and both retry loops
+// (D2). Text matching follows the established offlineMessageForRestoreError
+// pattern below (same error strings, same producers).
+func classifyRestoreError(err error) restoreErrClass {
+	switch err.Error() {
+	case "请先安装并登录 ChatGPT Desktop":
+		return errClassNotInstalled
+	case "ChatGPT 未登录":
+		return errClassNotLoggedIn
+	case "no desktop environment":
+		return errClassDesktopOffline
+	default:
+		return errClassTransient
+	}
+}
+
+// offlineMessageForRestoreError stays as the user-facing view layer
+// (banner text); the class above drives the state machine.
 func offlineMessageForRestoreError(err error) string {
 	switch err.Error() {
 	case "请打开并登录 ChatGPT Desktop", "请先安装并登录 ChatGPT Desktop", "ChatGPT 未登录", "读取 ChatGPT 登录态超时":
@@ -260,9 +291,27 @@ func (p *PairingController) reconnectFromStore(ctx context.Context) (PairingSnap
 	return p.Snapshot(), nil
 }
 
+// restoreOnce drives one restore attempt and maintains the absence class
+// for the readiness seam at this single exit point (P2 plan §3 D1): set on
+// failure, cleared on success (including the already-connected early
+// return) — so all three consumers (reconnectFromStore /
+// restorePersistedPairing / watchBinding) share one class without each
+// maintaining its own.
 func (p *PairingController) restoreOnce(ctx context.Context) error {
 	p.restoreMu.Lock()
 	defer p.restoreMu.Unlock()
+	err := p.restoreOnceLocked(ctx)
+	p.mu.Lock()
+	if err != nil {
+		p.lastRestoreClass = classifyRestoreError(err)
+	} else {
+		p.lastRestoreClass = ""
+	}
+	p.mu.Unlock()
+	return err
+}
+
+func (p *PairingController) restoreOnceLocked(ctx context.Context) error {
 	if p.agent != nil {
 		p.agent.mu.Lock()
 		cl := p.agent.client
@@ -335,6 +384,24 @@ func (p *PairingController) restoreOnce(ctx context.Context) error {
 	return nil
 }
 
+// restorePermanentRetryInterval is the fixed wait for permanent-class
+// restore failures (not installed — P2 plan §3 D2/OD-1): an environment
+// fact is not jitter, so the backoff sequence does not apply. Var so tests
+// can shrink it; sleepInterruptible keeps Stop responsive in 2s slices.
+var restorePermanentRetryInterval = 120 * time.Second
+
+// restoreRetryWait picks the retry wait for a failed restore round shared
+// by BOTH restore loops (restorePersistedPairing and watchBinding — P2
+// plan §3 D2, r1 F-2): notInstalled → fixed 120s WITHOUT advancing the
+// backoff sequence (a later class flip resumes the sequence where it was);
+// every other failure keeps the official-mirrored backoff.
+func (a *Agent) restoreRetryWait(class restoreErrClass, backoff *reconnectBackoff) time.Duration {
+	if class == errClassNotInstalled {
+		return restorePermanentRetryInterval
+	}
+	return backoff.Next()
+}
+
 func (a *Agent) restorePersistedPairing() {
 	p := a.pairing
 	if p == nil || p.storePath == "" {
@@ -360,9 +427,10 @@ func (a *Agent) restorePersistedPairing() {
 				return
 			}
 			p.markOffline(offlineMessageForRestoreError(err))
-			retryIn := backoff.Next()
+			class := classifyRestoreError(err)
+			retryIn := a.restoreRetryWait(class, backoff)
 			slog.Warn("codex-remote pairing restore waiting", "retryIn", retryIn,
-				"ctrlFresh", p.ctrlTokenFresh(), "error", err)
+				"absence", string(class), "ctrlFresh", p.ctrlTokenFresh(), "error", err)
 			a.sleepInterruptible(retryIn)
 		}
 	}
@@ -416,8 +484,10 @@ func (a *Agent) watchBinding() {
 			return
 		}
 		a.pairing.markOffline(offlineMessageForRestoreError(err))
-		retryIn := backoff.Next()
-		slog.Warn("codex-remote pairing reconnect waiting", "retryIn", retryIn, "error", err)
+		class := classifyRestoreError(err)
+		retryIn := a.restoreRetryWait(class, backoff)
+		slog.Warn("codex-remote pairing reconnect waiting", "retryIn", retryIn,
+			"absence", string(class), "error", err)
 		a.sleepInterruptible(retryIn)
 	}
 }

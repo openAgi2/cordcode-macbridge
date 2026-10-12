@@ -11,11 +11,29 @@ const (
 	ReadinessAvailable         = "available"
 	ReadinessPairingRequired   = "pairing_required"
 	ReadinessServiceNotRunning = "service_not_running"
+	// ReadinessNotDetected / ReadinessNotLoggedIn reuse existing wire enum
+	// values (agent_descriptor.go:20-34) — the absence classes of P2 plan
+	// §3 D1. iOS shows the reason text through the generic not-available
+	// branch (raw String decode); the Mac row has its own copy per status.
+	ReadinessNotDetected = "not_detected"
+	ReadinessNotLoggedIn = "not_logged_in"
 )
+
+// restoreAbsenceClass returns the class of the most recent restoreOnce
+// failure ("" once a restore succeeded or before the first attempt).
+func (p *PairingController) restoreAbsenceClass() restoreErrClass {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lastRestoreClass
+}
 
 // StructuredInstanceReadiness is the descriptor-facing, read-only readiness
 // seam. It preserves the distinction between a missing/revoked controller
-// identity and an enrolled controller whose Desktop environment is offline.
+// identity, an enrolled controller whose dependency is absent, and one
+// whose Desktop environment is merely offline (P2 plan §3 D1):
+// not_installed → not_detected, not_logged_in → not_logged_in, everything
+// else (desktop offline, transient, or class cleared after a successful
+// restore) → service_not_running, fail-closed — never not_configured.
 func (a *Agent) StructuredInstanceReadiness() (string, string) {
 	a.mu.Lock()
 	cl := a.client
@@ -26,10 +44,22 @@ func (a *Agent) StructuredInstanceReadiness() (string, string) {
 	}
 	snap := a.pairingSnapshot()
 	if paired || (a.pairing != nil && a.pairing.hasPersistedIdentity()) {
-		if snap.Message != "" {
-			return ReadinessServiceNotRunning, snap.Message
+		detail := snap.Message
+		if detail == "" {
+			detail = "已配对，等待 ChatGPT Desktop"
 		}
-		return ReadinessServiceNotRunning, "已配对，等待 ChatGPT Desktop"
+		var class restoreErrClass
+		if a.pairing != nil {
+			class = a.pairing.restoreAbsenceClass()
+		}
+		switch class {
+		case errClassNotInstalled:
+			return ReadinessNotDetected, detail
+		case errClassNotLoggedIn:
+			return ReadinessNotLoggedIn, detail
+		default:
+			return ReadinessServiceNotRunning, detail
+		}
 	}
 	return ReadinessPairingRequired, ErrNotConfigured.Error()
 }

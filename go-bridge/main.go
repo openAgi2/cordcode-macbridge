@@ -500,6 +500,9 @@ func Main() {
 	// DHCP 刷新：周期重算 LAN 广播地址，变化时更新 hello 身份、Management API 并向
 	// 已连接设备（直连 + Relay）推送 bridge_current_urls。显式 advertise host 时 no-op。
 	go runAdvertisedLocalURLRefresher(ctx, server, mgmtSrv, *port)
+	// zombie watchdog：周期自检本进程直接子进程/僵尸数，超阈值 WARN（只观测不处置，
+	// incidents/2026-10-12-bridge-zombie-process-exhaustion.md §5.3-3）。
+	go runZombieWatchdog(ctx, nil)
 	server.SetDetectionConfig(&AgentDetectionConfig{
 		OpenCodeURL:       *ocBaseURL,
 		OpenCodeUser:      *ocUser,
