@@ -125,6 +125,14 @@ func (p *PairingController) exchangeStepUp(ctx context.Context, code, redirectUR
 	return parsed.AccessToken, nil
 }
 
+// openBrowserBin is the launcher openBrowser execs; a package-level var so
+// the zombie-reaping regression can point it at a stub (incidents/2026-10-12).
+var openBrowserBin = "/usr/bin/open"
+
+// openBrowser launches the user's browser at rawURL. /usr/bin/open execs the
+// handler and returns in milliseconds; Run() (not Start()) so the child is
+// reaped — Start() left one zombie per pairing click
+// (incidents/2026-10-12-bridge-zombie-process-exhaustion.md §3.5).
 func openBrowser(rawURL string) error {
-	return exec.Command("/usr/bin/open", rawURL).Start()
+	return exec.Command(openBrowserBin, rawURL).Run()
 }

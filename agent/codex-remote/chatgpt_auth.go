@@ -43,8 +43,14 @@ func defaultChatGPTCodexPath() string {
 	})
 }
 
+// chatGPTCodexBin resolves the probe binary loadChatGPTAuth execs. It is a
+// package-level var so tests can point the auth probe at a stub binary
+// (zombie-reaping regression, incidents/2026-10-12-bridge-zombie-process-
+// exhaustion.md §5.1).
+var chatGPTCodexBin = defaultChatGPTCodexPath
+
 func loadChatGPTAuth(ctx context.Context) (token, accountID string, err error) {
-	bin := defaultChatGPTCodexPath()
+	bin := chatGPTCodexBin()
 	if _, statErr := os.Stat(bin); statErr != nil {
 		return "", "", fmt.Errorf("请先安装并登录 ChatGPT Desktop")
 	}
@@ -69,7 +75,16 @@ func loadChatGPTAuth(ctx context.Context) (token, accountID string, err error) {
 	if err := cmd.Start(); err != nil {
 		return "", "", err
 	}
-	defer func() { _ = cmd.Process.Kill() }()
+	// Reap on every exit path (incidents/2026-10-12 zombie process
+	// exhaustion): close stdin, then Kill, then Wait. os/exec requires Wait
+	// once StdoutPipe is used; without it each probe leaves a zombie under the
+	// runtime and 1s~30s restore retries exhaust kern.maxprocperuid. Wait
+	// returning "signal: killed" is the expected outcome and is ignored.
+	defer func() {
+		_ = stdin.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
 	init := `{"id":1,"method":"initialize","params":{"clientInfo":{"name":"codex_remote","title":"CordCode","version":"0"},"capabilities":{"experimentalApi":true}}}` + "\n"
 	if _, err := stdin.Write([]byte(init)); err != nil {
 		return "", "", err
