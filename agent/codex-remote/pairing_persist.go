@@ -27,6 +27,47 @@ const ctrlTokenRefreshLead = 60 * time.Second
 // lesson: never hammer a struggling backend).
 var ctrlTokenRefreshMinRetry = 30 * time.Second
 
+// ctrlTokenSkewSecs mirrors the official refresh window
+// REMOTE_CONTROL_SERVER_TOKEN_REFRESH_SKEW_SECS = 5*60 (codex
+// app-server-transport enroll.rs:26 @ cc7ba336): a ctrl token with more than
+// this many seconds left is NOT refreshed (P1 plan §3 D1).
+const ctrlTokenSkewSecs = 300
+
+// ctrlTokenRequirementLevel mirrors the official three-level refresh
+// requirement (enroll.rs:246-263): required (missing/expired), notNeeded
+// (>ctrlTokenSkewSecs remaining), proactive (final window). Deliberately not
+// mirrored: the official next_refresh_at failure-deferral side — the restore
+// loop's own backoff and maybeRefreshCtrlToken's minRetry already bound
+// retry pacing (plan §3 D1 有意差异).
+type ctrlTokenRequirementLevel int
+
+const (
+	ctrlTokenRequired ctrlTokenRequirementLevel = iota
+	ctrlTokenProactive
+	ctrlTokenNotNeeded
+)
+
+func ctrlTokenRequirement(ctrlExp string, now time.Time) ctrlTokenRequirementLevel {
+	exp, ok := parseExpiresUnix(ctrlExp)
+	if !ok || exp == 0 || exp <= now.Unix() {
+		return ctrlTokenRequired
+	}
+	if exp > now.Unix()+int64(ctrlTokenSkewSecs) {
+		return ctrlTokenNotNeeded
+	}
+	return ctrlTokenProactive
+}
+
+// ctrlTokenFresh reports whether the current ctrl token is outside the
+// refresh window — P1 §3 D4 observability (the restore-waiting Warn carries
+// it as ctrlFresh so a gated round is distinguishable from a refreshing one).
+func (p *PairingController) ctrlTokenFresh() bool {
+	p.mu.Lock()
+	exp := p.state.ctrlExp
+	p.mu.Unlock()
+	return ctrlTokenRequirement(exp, time.Now()) == ctrlTokenNotNeeded
+}
+
 // maybeRefreshCtrlToken runs from the healthy-connection watch loop (every
 // 2s tick): once the token enters its lead window, refresh it in place so a
 // long-lived connection never dies of ctrl-token expiry mid-session. Failure
@@ -71,21 +112,18 @@ func (p *PairingController) maybeRefreshCtrlToken() {
 	slog.Info("codex-remote ctrl token proactively refreshed", "lead", ctrlTokenRefreshLead.String())
 }
 
-// runCtrlTokenRefresh mirrors restoreOnce's ordering — fresh ChatGPT account
-// auth FIRST, then the refresh — so a merely stale account token can never
-// surface as errPairingRevoked from this scheduler (a false revocation would
-// force the user through re-pairing). Success updates the persisted token in
-// place; the live connection is untouched.
+// runCtrlTokenRefresh mirrors restoreOnce's ordering — account auth FIRST,
+// then the refresh — so a merely stale account token can never surface as
+// errPairingRevoked from this scheduler (a false revocation would force the
+// user through re-pairing). The auth comes from the cache (P1 §3 D1: no
+// probe per refresh tick) and the refresh goes through recovery-first
+// (P1 §3 D3). Success updates the persisted token in place; the live
+// connection is untouched.
 func (p *PairingController) runCtrlTokenRefresh(ctx context.Context) error {
-	token, accountID, err := p.chatGPTAuth(ctx)
-	if err != nil {
+	if _, _, err := p.chatGPTAuthCached(ctx); err != nil {
 		return err
 	}
-	p.mu.Lock()
-	p.state.token = token
-	p.state.accountID = accountID
-	p.mu.Unlock()
-	if err := p.refreshControlToken(ctx); err != nil {
+	if err := p.refreshControlTokenWithRecovery(ctx); err != nil {
 		return err
 	}
 	p.persistPairingOrLog()
@@ -263,19 +301,20 @@ func (p *PairingController) restoreOnce(ctx context.Context) error {
 		p.agent.paired = true
 		p.agent.mu.Unlock()
 	}
-	token, accountID, err := p.chatGPTAuth(ctx)
-	if err != nil {
+	// P1 §3 D1 (r1 F-1 structure): auth is fetched EVERY round through the
+	// cache — never gated by ctrl freshness — so state.token is always
+	// populated for lookupDesktopEnv, even right after a cold start whose
+	// persisted ctrl token is still fresh. Only the refresh is gated.
+	if _, _, err := p.chatGPTAuthCached(ctx); err != nil {
 		return err
 	}
-	p.mu.Lock()
-	p.state.token = token
-	p.state.accountID = accountID
-	p.mu.Unlock()
-	if err := p.refreshControlToken(ctx); err != nil {
-		if errors.Is(err, errPairingRevoked) {
-			return err
+	if ctrlTokenRequirement(rec.CtrlExp, time.Now()) != ctrlTokenNotNeeded {
+		if err := p.refreshControlTokenWithRecovery(ctx); err != nil {
+			if errors.Is(err, errPairingRevoked) {
+				return err
+			}
+			slog.Warn("codex-remote pairing token refresh failed; trying saved token")
 		}
-		slog.Warn("codex-remote pairing token refresh failed; trying saved token")
 	}
 	env, err := p.lookupDesktopEnv(ctx, rec.EnvID)
 	if err != nil {
@@ -322,7 +361,8 @@ func (a *Agent) restorePersistedPairing() {
 			}
 			p.markOffline(offlineMessageForRestoreError(err))
 			retryIn := backoff.Next()
-			slog.Warn("codex-remote pairing restore waiting", "retryIn", retryIn, "error", err)
+			slog.Warn("codex-remote pairing restore waiting", "retryIn", retryIn,
+				"ctrlFresh", p.ctrlTokenFresh(), "error", err)
 			a.sleepInterruptible(retryIn)
 		}
 	}

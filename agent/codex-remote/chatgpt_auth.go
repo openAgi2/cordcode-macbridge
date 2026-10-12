@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -116,10 +117,39 @@ func loadChatGPTAuth(ctx context.Context) (token, accountID string, err error) {
 			if err != nil {
 				return "", "", err
 			}
+			// P1 §3 D4: the real-spawn counter for the probe-economy
+			// reconciliation (grep auth_probe). Emitted only on a successful
+			// probe that actually spawned the child; the Stat early-exit
+			// (not installed) never reaches here, and cache hits live on the
+			// caller side (Debug) — this line is caller-independent.
+			slog.Info("codex-remote auth_probe")
 			return msg.Result.AuthToken, accountID, nil
 		}
 	}
 	return "", "", fmt.Errorf("读取 ChatGPT 登录态超时")
+}
+
+// authJWTExpiry returns the token's top-level `exp` claim (ok=false when
+// absent or unparseable — the P1 auth cache then serves it until explicitly
+// invalidated, the official no-TTL posture; plan §3 D2). `exp` is a
+// top-level claim, outside the https://api.openai.com/auth namespace
+// accountIDFromJWT reads.
+func authJWTExpiry(token string) (time.Time, bool) {
+	parts := strings.Split(token, ".")
+	if len(parts) < 2 {
+		return time.Time{}, false
+	}
+	payload, err := decodeJWTSegment(parts[1])
+	if err != nil {
+		return time.Time{}, false
+	}
+	var claims struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil || claims.Exp == 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(claims.Exp, 0), true
 }
 
 func accountIDFromJWT(token string) (string, error) {

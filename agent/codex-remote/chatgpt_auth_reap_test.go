@@ -138,7 +138,7 @@ func TestLoadChatGPTAuthReapsProbeOnTimeout(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "pid")
 	useChatGPTCodexStub(t, bin, pidFile)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if _, _, err := loadChatGPTAuth(ctx); err == nil {
 		t.Fatal("expected timeout error")

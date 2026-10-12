@@ -82,6 +82,65 @@ type PairingController struct {
 	// test seam over the real auth→refresh→persist sequence.
 	lastCtrlRefreshAttempt time.Time
 	ctrlRefreshExec        func(context.Context) error
+	// authCache caches the ChatGPT account auth (P1 probe economy,
+	// docs/2026-10-12-codex-remote-probe-economy-p1-plan.md §3 D2): probe
+	// results are reused within the token's own JWT exp window instead of
+	// spawning a probe per restore retry. Nil = no cache.
+	auth *authCache
+}
+
+// authCache is the cached ChatGPT account auth (P1 §3 D2). hasExp=false
+// means the token carried no parseable top-level `exp` claim — it then stays
+// cached until explicitly invalidated (official no-TTL posture,
+// auth.rs:1-2 login-lifetime binding).
+type authCache struct {
+	token     string
+	accountID string
+	expAt     time.Time
+	hasExp    bool
+}
+
+// authCacheExpiryMargin is how early a cached auth stops being served before
+// its own exp — a freshness margin on the token's claim, not a TTL constant
+// (P1 r1 F-7: validity comes from the token's exp alone; no hardcoded TTLs).
+const authCacheExpiryMargin = 60 * time.Second
+
+// chatGPTAuthCached serves account auth from cache when valid; on miss it
+// runs the real probe via the existing chatGPTAuth seam (authTokenFn) and
+// caches ONLY successes — a failed probe must not occupy the cache, or the
+// 401-recovery path would skip a genuine re-probe (P1 §3 D2, r1 F-6).
+func (p *PairingController) chatGPTAuthCached(ctx context.Context) (string, string, error) {
+	p.mu.Lock()
+	if c := p.auth; c != nil && (!c.hasExp || time.Now().Before(c.expAt.Add(-authCacheExpiryMargin))) {
+		token, accountID := c.token, c.accountID
+		p.state.token = token
+		p.state.accountID = accountID
+		p.mu.Unlock()
+		slog.Debug("codex-remote auth_probe", "cache", "hit")
+		return token, accountID, nil
+	}
+	p.mu.Unlock()
+
+	token, accountID, err := p.chatGPTAuth(ctx)
+	if err != nil {
+		return token, accountID, err
+	}
+	expAt, hasExp := authJWTExpiry(token)
+	p.mu.Lock()
+	p.auth = &authCache{token: token, accountID: accountID, expAt: expAt, hasExp: hasExp}
+	p.state.token = token
+	p.state.accountID = accountID
+	p.mu.Unlock()
+	return token, accountID, nil
+}
+
+// invalidateAuthCache drops the cached account auth. Invalidation sources
+// (P1 §3 D2): ctrl-refresh auth-rejection recovery (D3), env-list 401/403,
+// and pairing revocation — auth is bound to the pairing identity lifetime.
+func (p *PairingController) invalidateAuthCache() {
+	p.mu.Lock()
+	p.auth = nil
+	p.mu.Unlock()
 }
 
 func newPairingController(agent *Agent) *PairingController {
@@ -166,6 +225,10 @@ func (p *PairingController) invalidateRevokedPairing(message string) PairingSnap
 		return PairingSnapshot{Phase: PairPhaseFailed, Message: message}
 	}
 	p.forgetPersistedPairing()
+	// Revocation ends the pairing identity the cached auth is bound to —
+	// drop it so a fresh pairing cannot inherit the old account auth
+	// (P1 §3 D2 invalidation source).
+	p.invalidateAuthCache()
 
 	var cl *Client
 	if p.agent != nil {
@@ -399,7 +462,7 @@ func (p *PairingController) refreshControlToken(ctx context.Context) error {
 		"client_id": clientID,
 	})
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		return errPairingRevoked
+		return fmt.Errorf("%w (refresh/start)", errCtrlAuthRejected)
 	}
 	if err != nil {
 		return err
@@ -424,7 +487,7 @@ func (p *PairingController) refreshControlToken(ctx context.Context) error {
 		"device_key_proof": proof,
 	})
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		return errPairingRevoked
+		return fmt.Errorf("%w (refresh/finish)", errCtrlAuthRejected)
 	}
 	if err != nil {
 		return err
@@ -437,6 +500,34 @@ func (p *PairingController) refreshControlToken(ctx context.Context) error {
 	return nil
 }
 
+// errCtrlAuthRejected marks a 401/403 from the refresh endpoints: the
+// account auth was rejected — recoverable with fresh auth, distinct from
+// errPairingRevoked (P1 §3 D3).
+var errCtrlAuthRejected = errors.New("codex-remote: refresh rejected the account auth")
+
+// refreshControlTokenWithRecovery mirrors the official recovery-first
+// posture (auth.rs:177-214 recover_remote_control_auth; websocket.rs:1512-1520
+// clear-token→refresh→reconnect): on a rejected auth, first drop the cached
+// auth, re-probe once and retry the refresh; only a second rejection becomes
+// errPairingRevoked. Non-auth errors pass through untouched so the callers'
+// existing fallback contracts keep applying (P1 §3 D3, r1 F-2).
+func (p *PairingController) refreshControlTokenWithRecovery(ctx context.Context) error {
+	err := p.refreshControlToken(ctx)
+	if err == nil || !errors.Is(err, errCtrlAuthRejected) {
+		return err
+	}
+	p.invalidateAuthCache()
+	if _, _, authErr := p.chatGPTAuthCached(ctx); authErr != nil {
+		return authErr
+	}
+	if err := p.refreshControlToken(ctx); err != nil && errors.Is(err, errCtrlAuthRejected) {
+		return errPairingRevoked
+	} else if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (p *PairingController) lookupDesktopEnv(ctx context.Context, preferID string) (*remoteEnv, error) {
 	p.mu.Lock()
 	token := p.state.token
@@ -446,8 +537,14 @@ func (p *PairingController) lookupDesktopEnv(ctx context.Context, preferID strin
 	if token == "" || clientID == "" {
 		return nil, fmt.Errorf("pairing state incomplete")
 	}
-	raw, _, err := p.jsonRequest(ctx, token, accountID, http.MethodGet, "/codex/remote/control/clients/"+clientID+"/environments?limit=100", nil)
+	raw, status, err := p.jsonRequest(ctx, token, accountID, http.MethodGet, "/codex/remote/control/clients/"+clientID+"/environments?limit=100", nil)
 	if err != nil {
+		if status == http.StatusUnauthorized || status == http.StatusForbidden {
+			// A stale account auth surfacing on the env list must force a
+			// re-probe (P1 §3 D2 invalidation source) — otherwise the
+			// refresh-gate window would keep retrying against a dead token.
+			p.invalidateAuthCache()
+		}
 		return nil, err
 	}
 	var list struct {
