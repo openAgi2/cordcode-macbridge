@@ -19,9 +19,14 @@ reaper goroutine 独占 Wait + Stop 信号化（不与 reaper 双 Wait）。对�
 （auth.rs:177-214）——对账 48 分钟缺席 1 次探针（修复前 ~4.6 次/分钟）、在线态 9min 刷新
 零探针、僵尸恒 0；教训补充：**「评审通过 ≠ 实施授权」与「预授权」要显式区分**（owner
 过审即实施的预授权当晚效率翻倍）；上游证据门（不得凭感觉定缓存窗口）由真实探针取证
-exp ≈96h 闭合。遗留：P2 缺席语义加固方案在审（docs/2026-10-13-codex-remote-absence-
-hardening-p2-plan.md，就绪五态复用既有枚举零 iOS 改动 + 未安装降频 120s + zombie
-watchdog）。档案：`docs/incidents/2026-10-12-bridge-zombie-process-exhaustion.md`（§5.5/§5.6）。
+exp ≈96h 闭合。P2 缺席语义加固已实施闭环（e51fbc3f，方案 v4 经 r1→r4 四轮评审：五态
+就绪复用既有枚举零 iOS 改动 + 双恢复循环重试预算 notInstalled→120s 不推进序列 +
+zombie watchdog armed 特征行/5min 采样/超阈值 WARN 只观测）。档案：
+`docs/incidents/2026-10-12-bridge-zombie-process-exhaustion.md`（§5.5/§5.6/§5.7）。
+另一教训：**评审循环的机械收口与实质过审可能错位**——r3 已 APPROVED、修订者再修
+措辞级建议出 v4 后撞轮次上限被机械判「未通过」；按 resume 契约补一轮定向验证
+（start_round 递增 + continued 模式）即可弥合，不必重跑全循环。既有红测试用多基线
+worktree bisect 证明与本轮无关后 -skip 跑绿并挂独立任务（task_5b253f6c），不掩盖不冒充。
 
 ---
 

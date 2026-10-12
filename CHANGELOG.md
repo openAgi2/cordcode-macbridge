@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+### 2026-10-13 — 恢复循环探针经济性优化与缺席语义加固（事故 P1/P2 收尾）
+
+- **P1 探针经济性**：ChatGPT Desktop 已安装未打开时，恢复循环此前每轮（~4.6 次/分钟）完整 spawn 一个 auth 探针进程再丢弃。现镜像官方 codex app-server-transport 语义：ctrl token 刷新按需求分级（剩余 >5 分钟直接跳过）、auth 结果按其自身有效期缓存复用、刷新遭 401/403 先重取凭据重试一次再判配对撤销。实测 48 分钟缺席全程仅 1 次探针（修复前 ~220 次），在线态刷新零探针，进程表不再有无谓开销。
+- **P2 缺席语义加固**：Codex Desktop（codex-remote）行就绪状态细化为五态（`not_detected` 未安装 / `not_logged_in` 未登录 / `service_not_running` Desktop 离线 / `pairing_required` / `available`——Mac 工作站行对前两态已有独立文案，iPhone 显示原因文案，无需 iOS 更新）；依赖未安装时恢复重试降为 120 秒固定间隔（不再 1–30 秒空转刷日志），两个恢复循环同规则；runtime 新增 zombie watchdog（每 5 分钟自检名下子进程/僵尸数，异常即告警，只观测不处置）——同类僵尸积压将在首个采样点报警而非 7.7 小时后整机瘫痪。事故三层修复完整档案见 `docs/incidents/2026-10-12-bridge-zombie-process-exhaustion.md`（§5.5–§5.7）。
+
 ### 2026-10-12 — 修复 codex-remote 探针僵尸进程泄漏（整机 fork 配额耗尽事故）
 
 - go-bridge 三处子进程补收尸（Kill≠收尸，os/exec 要求 spawn 后必须 Wait）：`loadChatGPTAuth` 的 auth 探针此前每轮 restore/token 刷新 spawn 后只 Kill 不 Wait——ChatGPT Desktop「已安装但未运行」时恢复循环 ~4.6 个/分钟、7.7 小时攒 2142 个僵尸占满系统进程表配额（`kern.maxprocperuid`），导致 Claude/xcodebuild/终端集体 `EAGAIN` 无法建进程；OAuth 配对的 `/usr/bin/open` 与 dsh-web 托管 seat（自发死亡后僵尸占位，自动恢复被卡）同批修复。修复后同条件 11.5 分钟 53 次刷新、runtime 名下僵尸恒 0（修复前 1:1 泄漏）。完整根因、缺席矩阵与遗留项（探针经济性 P1、缺席状态机 P2）见 `docs/incidents/2026-10-12-bridge-zombie-process-exhaustion.md`。

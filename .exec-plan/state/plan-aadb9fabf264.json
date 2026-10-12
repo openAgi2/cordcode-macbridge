@@ -1,0 +1,417 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+  "plan_file": "docs/2026-10-13-codex-remote-absence-hardening-p2-plan.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-aadb9fabf264.json",
+    "legacy_path": ".claude/exec-plans/plan-aadb9fabf264.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "todo-write-optional-mirror",
+    "invocation_policy": "slash-or-natural-language-equivalent",
+    "persistence_rule": "persist-on-every-status-transition"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-10-13-codex-remote-absence-hardening-p2-plan完成情况.md",
+    "completion_report_status": "current",
+    "last_generated_at": "2026-10-13T04:46:00Z",
+    "based_on_queue_hash": "e92c1b699ca4"
+  },
+  "scope_note": "P2 缺席语义加固实施（方案 v4 r4 APPROVED 0/0 + META-OK, SHA 97a97624; owner 预授权过审即实施）。S-4 部署重启时机: iOS agent 空闲则直接做, 忙碌则避开。S-5 含 CHANGELOG 条目（r1 F-5, 用户可见变化）。",
+  "updated_at": "2026-10-13T04:46:00Z",
+  "todos": [
+    {
+      "id": "p2-s1-readiness-impl",
+      "title": "S-1 就绪五态",
+      "description": "classifyRestoreError(4类)+lastRestoreClass(restoreOnce 出口单一写入点:失败写/成功清,包装器形态)+StructuredInstanceReadiness 五态映射(not_installed→not_detected/not_logged_in→not_logged_in/其余→service_not_running;未知/已清除 fail-closed→service_not_running)。D1。",
+      "status": "done",
+      "phase": "p2-s1",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "方案 v4 §5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "S-1 impl: classifyRestoreError 4 类(文本匹配沿用 offlineMessageForRestoreError 既有模式)+restoreOnce 包装器单一写入点(失败写/成功清, restoreOnceLocked 承载原体)+lastRestoreClass 字段+StructuredInstanceReadiness 五态映射(未知/清除 fail-closed service_not_running)。",
+        "artifacts": [
+          "agent/codex-remote/pairing_persist.go",
+          "agent/codex-remote/pairing.go",
+          "agent/codex-remote/diagnostics.go",
+          "agent/codex-remote/readiness_states_test.go"
+        ],
+        "checked_at": "2026-10-13T03:25:00Z"
+      }
+    },
+    {
+      "id": "p2-s1-readiness-tests",
+      "title": "S-1 单测：五态映射",
+      "description": "五态映射+class 未知/已清除 fail-closed+探针超时→transient+成功后类别清除(断连首窗口不再陈旧显示)+readiness 在 restore 失败后即时反映。",
+      "status": "done",
+      "phase": "p2-s1",
+      "kind": "tests",
+      "depends_on": [
+        "p2-s1-readiness-impl"
+      ],
+      "source": "方案 v4 §5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "S-1 单测 5 用例全过: 分类 6 输入/五态映射(含空类 fail-closed)/notInstalled 失败即反映 not_detected/成功清除类(断连窗口不再陈旧)/探针超时 transient。 [出口审计 04:4x 重跑: 定向全过]",
+        "artifacts": [
+          "agent/codex-remote/pairing_persist.go",
+          "agent/codex-remote/pairing.go",
+          "agent/codex-remote/diagnostics.go",
+          "agent/codex-remote/readiness_states_test.go"
+        ],
+        "checked_at": "2026-10-13T03:25:00Z"
+      }
+    },
+    {
+      "id": "p2-s1-readiness-regression",
+      "title": "S-1 回归：运行态五态核验并入 S-4",
+      "description": "由 S-4 部署验证覆盖。",
+      "status": "done",
+      "phase": "p2-s1",
+      "kind": "regression",
+      "depends_on": [
+        "p2-s1-readiness-tests"
+      ],
+      "source": "方案 v4 §5",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": "五态的运行态面由 p2-s4-deploy-regression 覆盖(armed 行+P1 口径复测+未安装态 N/A 如实记录);单测覆盖映射全态。",
+        "summary": "required:false 按 na_reason 收口。",
+        "artifacts": [],
+        "checked_at": "2026-10-13T03:25:00Z"
+      }
+    },
+    {
+      "id": "p2-s2-retry-budget-impl",
+      "title": "S-2 重试预算（双循环）",
+      "description": "restorePersistedPairing 与 watchBinding 失败分支同规则: notInstalled→sleepInterruptible(120s, 分片保证 Stop ≤2s)不推进 backoff; 其余→backoff.Next(); 两处 Warn 补 absence 特征字段。D2/E-9。",
+      "status": "done",
+      "phase": "p2-s2",
+      "kind": "impl",
+      "depends_on": [
+        "p2-s1-readiness-tests"
+      ],
+      "source": "方案 v4 §5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "S-2 impl: restoreRetryWait 共享 helper(notInstalled→固定120s不推进序列/其余→backoff.Next())+双循环失败分支接入(restore waiting/reconnect waiting 两处 Warn 均加 absence 字段)。sleepInterruptible 既有 2s 分片满足 Stop 响应要求。",
+        "artifacts": [
+          "agent/codex-remote/pairing_persist.go",
+          "agent/codex-remote/retry_budget_test.go"
+        ],
+        "checked_at": "2026-10-13T03:32:00Z"
+      }
+    },
+    {
+      "id": "p2-s2-retry-budget-tests",
+      "title": "S-2 单测：节奏分流",
+      "description": "notInstalled→120s 不走 backoff; transient→backoff.Next(); watchBinding 失败分支同规则; 错误类型翻转后恢复 backoff。",
+      "status": "done",
+      "phase": "p2-s2",
+      "kind": "tests",
+      "depends_on": [
+        "p2-s2-retry-budget-impl"
+      ],
+      "source": "方案 v4 §5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "S-2 单测 4 用例全过: notInstalled 固定 120s 且 attempt 不推进(4 轮)/transient 三类推进(attempt=3)/类别翻转续接序列/interval var 可缩。 [出口审计 04:4x 重跑: 定向全过]",
+        "artifacts": [
+          "agent/codex-remote/pairing_persist.go",
+          "agent/codex-remote/retry_budget_test.go"
+        ],
+        "checked_at": "2026-10-13T03:32:00Z"
+      }
+    },
+    {
+      "id": "p2-s2-retry-budget-regression",
+      "title": "S-2 回归：运行态节奏对账并入 S-4",
+      "description": "由 S-4 部署验证覆盖。",
+      "status": "done",
+      "phase": "p2-s2",
+      "kind": "regression",
+      "depends_on": [
+        "p2-s2-retry-budget-tests"
+      ],
+      "source": "方案 v4 §5",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": "未安装态本机难构造(ChatGPT.app 在装),节奏以单测为准;运行态由 S-4 如实记录 N/A。",
+        "summary": "required:false 按 na_reason 收口。",
+        "artifacts": [],
+        "checked_at": "2026-10-13T03:32:00Z"
+      }
+    },
+    {
+      "id": "p2-s3-watchdog-impl",
+      "title": "S-3 zombie watchdog",
+      "description": "go-bridge/zombie_watchdog.go: 启动一次性 armed INFO 特征行(pid/period/childrenThreshold)+5min ticker+采样(exec ps Output 收尸合规)/判定(zombies>0 或 children>64)分离+超标 WARN 不节流+采样失败只 Warn。启动接线。D3。",
+      "status": "done",
+      "phase": "p2-s3",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "方案 v4 §5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "S-3 impl: go-bridge/zombie_watchdog.go(armed 一次性特征行[pid/period/childrenThreshold]+5min ticker+采样 seam sampleChildProcesses[ps 同步 Output]+纯判定 zombieWatchdogAssess[zombies>0 或 children>64]+超标 WARN 不节流+采样失败仅 WARN)+main.go 接线(advertised refresher 同层)。",
+        "artifacts": [
+          "go-bridge/zombie_watchdog.go",
+          "go-bridge/main.go",
+          "go-bridge/zombie_watchdog_test.go"
+        ],
+        "checked_at": "2026-10-13T04:00:00Z"
+      }
+    },
+    {
+      "id": "p2-s3-watchdog-tests",
+      "title": "S-3 单测：判定纯函数+采样注入+冒烟",
+      "description": "判定边界(0/1 僵尸、children 64/65);fake 采样注入;启动接线冒烟含 armed 特征行。",
+      "status": "done",
+      "phase": "p2-s3",
+      "kind": "tests",
+      "depends_on": [
+        "p2-s3-watchdog-impl"
+      ],
+      "source": "方案 v4 §5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "S-3 单测 4 用例全过: 判定边界 7 组/确定性构造子进程与僵尸(活计入/未收尸计僵尸/收尸后精确减一)/armed 行+超标 WARN+采样失败存活+一次性/健康静默 3s。 [出口审计 04:4x 重跑: 定向全过]",
+        "artifacts": [
+          "go-bridge/zombie_watchdog.go",
+          "go-bridge/main.go",
+          "go-bridge/zombie_watchdog_test.go"
+        ],
+        "checked_at": "2026-10-13T04:00:00Z"
+      }
+    },
+    {
+      "id": "p2-s3-watchdog-regression",
+      "title": "S-3 回归：armed 行运行态核验并入 S-4",
+      "description": "由 S-4 部署验证覆盖。",
+      "status": "done",
+      "phase": "p2-s3",
+      "kind": "regression",
+      "depends_on": [
+        "p2-s3-watchdog-tests"
+      ],
+      "source": "方案 v4 §5",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": "armed 特征行为部署后运行态核验锚点,在 p2-s4-deploy-regression;超标 WARN 以单测为准(健康部署不出现)。",
+        "summary": "required:false 按 na_reason 收口。",
+        "artifacts": [],
+        "checked_at": "2026-10-13T04:00:00Z"
+      }
+    },
+    {
+      "id": "p2-s4-deploy-impl",
+      "title": "S-4 Release 部署",
+      "description": "kickoff 来源清单→构建→覆盖安装→重启(iOS agent 空闲直接做/忙碌避开)。",
+      "status": "done",
+      "phase": "p2-s4",
+      "kind": "impl",
+      "depends_on": [
+        "p2-s2-retry-budget-tests",
+        "p2-s3-watchdog-tests"
+      ],
+      "source": "方案 v4 §5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Release 构建(e51fbc3fefd4, 20:21:12Z)→覆盖安装→重启(ios 会话全 idle 直接执行)。S-4 全项: 五项核验(pid 5318/8777/无残留/-version/runtime.json epoch dc58615b)+watchdog armed 特征行启动即出(pid=5318 period=5m0s childrenThreshold=64)+mgmt API codex-remote status=available(五态经 descriptor 全链路)+E-8 P1 口径复测(12min 在线: token_refreshed 04:29:20 一次 lead 窗口节奏/auth_probe 恒 1/僵尸 0; 冷启动 1 探针 5s restored ctrl 新鲜零刷新)+watchdog 健康静默(0 WARN)+五态缺席分布如实记录(notInstalled 本机 N/A—ChatGPT.app 在装, 以单测为准)。",
+        "artifacts": [
+          "/tmp/p2-online-watch.log",
+          "dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip"
+        ],
+        "checked_at": "2026-10-13T04:36:00Z"
+      }
+    },
+    {
+      "id": "p2-s4-deploy-tests",
+      "title": "S-4 部署测试面：不适用",
+      "description": "运维动作。",
+      "status": "done",
+      "phase": "p2-s4",
+      "kind": "tests",
+      "depends_on": [
+        "p2-s4-deploy-impl"
+      ],
+      "source": "方案 v4 §5",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": "部署无自动化断言面;代码由 S-1..S-3 tests 覆盖,运行态由 regression 核验。",
+        "summary": "required:false 按 na_reason 收口。",
+        "artifacts": [],
+        "checked_at": "2026-10-13T04:36:00Z"
+      }
+    },
+    {
+      "id": "p2-s4-deploy-regression",
+      "title": "S-4 运行态核验",
+      "description": "五项核验+watchdog armed 特征行核验(启动即出)+P1 口径复测(探针/刷新节奏不劣化, E-8)+五态真实分布如实记录(未安装态 N/A)。",
+      "status": "done",
+      "phase": "p2-s4",
+      "kind": "regression",
+      "depends_on": [
+        "p2-s4-deploy-tests"
+      ],
+      "source": "方案 v4 §5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "S-4 运行态核验全过(见 deploy-impl 证明): armed 行/E-8/五项/健康静默。既有红测试(TestRelayEventsForwardsUserInputRequested)以基线证据(535f447a/bc311b6c/e6a37c88 均红)如实登记并挂 task_5b253f6c, go-bridge 全量以 -skip 该用例验证绿——不掩盖不冒充。",
+        "artifacts": [
+          "/tmp/p2-online-watch.log"
+        ],
+        "checked_at": "2026-10-13T04:36:00Z"
+      }
+    },
+    {
+      "id": "p2-s5-doc-sync-impl",
+      "title": "S-5 文档收口",
+      "description": "事故档案 P2 状态回填(全档案 P0+P1+P2 闭环)+think.md+完成报告+CHANGELOG [Unreleased](r1 F-5: 用户可见变化)。D0。",
+      "status": "done",
+      "phase": "p2-s5",
+      "kind": "impl",
+      "depends_on": [
+        "p2-s4-deploy-regression"
+      ],
+      "source": "方案 v4 §5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "事故档案头部改 P0/P1/P2 全闭环 + §5.7 P2 实施记录(五态/预算/watchdog/运行态核验/既有红披露); think.md 收口+循环错位教训; CHANGELOG 补记 2026-10-13 P1+P2 节(含误归因前提勘误, 见完成报告附录); P2 完成报告。git diff --check 过。",
+        "artifacts": [
+          "docs/incidents/2026-10-12-bridge-zombie-process-exhaustion.md",
+          "think.md",
+          "CHANGELOG.md",
+          "docs/2026-10-13-codex-remote-absence-hardening-p2-plan完成情况.md"
+        ],
+        "checked_at": "2026-10-13T04:46:00Z"
+      }
+    },
+    {
+      "id": "p2-s5-doc-sync-tests",
+      "title": "S-5 文档测试面：不适用",
+      "description": "纯文档。",
+      "status": "done",
+      "phase": "p2-s5",
+      "kind": "tests",
+      "depends_on": [
+        "p2-s5-doc-sync-impl"
+      ],
+      "source": "方案 v4 §5",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": "D0 文档;git diff --check 在 impl 内。",
+        "summary": "required:false 按 na_reason 收口(D0 文档)。",
+        "artifacts": [],
+        "checked_at": "2026-10-13T04:46:00Z"
+      }
+    },
+    {
+      "id": "p2-s5-doc-sync-regression",
+      "title": "S-5 文档回归：不适用",
+      "description": "纯文档。",
+      "status": "done",
+      "phase": "p2-s5",
+      "kind": "regression",
+      "depends_on": [
+        "p2-s5-doc-sync-tests"
+      ],
+      "source": "方案 v4 §5",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": "纯文档;行为回归由 S-4 承担。",
+        "summary": "required:false 按 na_reason 收口(纯文档;行为回归由 S-4 承担)。",
+        "artifacts": [],
+        "checked_at": "2026-10-13T04:46:00Z"
+      }
+    }
+  ]
+}

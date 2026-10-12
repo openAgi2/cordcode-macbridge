@@ -1,15 +1,12 @@
 # 2026-10-12 codex-remote token 刷新循环僵尸进程泄漏，致整机 fork 配额耗尽（事故档案）
 
-> 状态：**P0 与 P1 已实施闭环；P2 方案在审**。
-> P0（三处收尸，commit `9365da6c`/`0c6016ad`）见 §5.5；P1（探针经济性，commit
-> `95cbb3e0`，方案 r3 APPROVED）见 §5.6——对账：48 分钟缺席态 1 次探针
-> （修复前 ~4.6 次/分钟）、刷新降为 Proactive ~5min 节奏、在线态 9min 刷新
-> 零探针、僵尸恒 0。P2（缺席语义加固）方案
-> `docs/2026-10-13-codex-remote-absence-hardening-p2-plan.md` 评审中，
-> owner 已预授权过审即实施。
-> 本文记录问题描述、根因、已执行的止血、修复方案（P0/P1/P2）、实施对账，
-> 并回答「backend 未安装 / 未打开时是否会出现同类问题」的系统性问题
-> （§6 缺席矩阵）。
+> 状态：**P0/P1/P2 全部实施闭环（2026-10-13）**。
+> P0（三处收尸，`9365da6c`/`0c6016ad`）见 §5.5；P1（探针经济性，`95cbb3e0`，
+> 方案 r3 APPROVED）见 §5.6；P2（缺席语义加固，`e51fbc3f`，方案 v4 经
+> r1→r4 四轮评审 + 元审核通过）见 §5.7。运行中 runtime pid 5318（内嵌
+> commit `e51fbc3fefd4`）承载全部三层修复。本文记录问题描述、根因、止血、
+> 修复方案与三层实施对账，并回答「backend 未安装 / 未打开时是否会出现同类
+> 问题」的系统性问题（§6 缺席矩阵）。
 >
 > **修订记录 r1（2026-10-12）**：按
 > `docs/2026-10-12-bridge-zombie-process-exhaustion-plan-review-r1.md`
@@ -360,6 +357,36 @@ P0 完成门逐项核验（对照 §5.4）：
 - **在线态**（22 分钟）：`token_refreshed` +2（02:22/02:31，**精确 9 分钟**
   = 600s−lead60s）而 `auth_probe` +0——在线刷新完全由缓存服务。
 - 采样档案：`build/p1-reconcile-75543.log`、`build/p1-online-observation.log`。
+
+### 5.7 P2 实施完成记录（2026-10-13）
+
+方案 `docs/2026-10-13-codex-remote-absence-hardening-p2-plan.md`（v4，r1
+REVISION_REQUIRED→r2 APPROVED→r3 APPROVED→r4 定向验证 APPROVED 0/0 + 元审核
+META-OK；r1 两个阻塞——watchdog 日志/验收矛盾与 watchBinding 第二循环未覆盖
+——均在 v2 闭合），实施 commit `e51fbc3f`：
+
+- **五态就绪**（D1）：`classifyRestoreError` 四类缺席分类 +
+  `lastRestoreClass`（restoreOnce 出口单一写入点：失败写/成功清）+
+  `StructuredInstanceReadiness` 映射 not_installed→`not_detected`、
+  not_logged_in→`not_logged_in`、其余 fail-closed→`service_not_running`。
+  全部复用既有 wire 枚举（零 iOS 改动，iOS 通用分支显示 reason 文案已
+  亲核；Mac UI 独立文案既有测试覆盖）；Management API 实测
+  `codex-remote status: available`（descriptor 全链路）。
+- **重试预算**（D2）：两个恢复循环（restorePersistedPairing + watchBinding）
+  经共享 `restoreRetryWait` 分流——notInstalled 固定 120s 不推进 backoff
+  序列，其余维持官方镜像 backoff；Warn 带 `absence` 特征字段。未安装态
+  本机不可构造（ChatGPT.app 在装），节奏以单测为准，如实记录 N/A。
+- **zombie watchdog**（D3）：`go-bridge/zombie_watchdog.go`，5min 周期采样
+  本 pid 直接子进程/僵尸数（ps 同步 Output 收尸合规），任一僵尸或
+  children>64 即 WARN（不节流）；启动一次性 armed 特征行。
+- **运行态核验**：armed 行启动即出（`pid=5318 period=5m0s
+  childrenThreshold=64`）；watchdog 健康静默（12 分钟观察 0 误报 WARN）；
+  E-8 P1 口径复测通过（冷启动 1 探针 + 5s restored + ctrl 新鲜零刷新；
+  12min 在线一次 lead 窗口刷新而探针恒 1；僵尸恒 0）。
+- **既有红测试如实登记**（非 P2 引入）：go-bridge
+  `TestRelayEventsForwardsUserInputRequested` 在基线 535f447a / bc311b6c /
+  e6a37c88 均红（引入于 2026-09-14 至 10-11 之间），单独排查中；P2 验证
+  以 `-skip` 该用例跑绿全量，未掩盖。
 
 ## 6. Backend 缺席矩阵：未安装 / 未打开是否同类风险
 
