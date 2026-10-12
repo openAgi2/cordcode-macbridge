@@ -1,0 +1,418 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+  "plan_file": "docs/2026-10-12-codex-remote-probe-economy-p1-plan.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-92731ca149b2.json",
+    "legacy_path": ".claude/exec-plans/plan-92731ca149b2.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "todo-write-optional-mirror",
+    "invocation_policy": "slash-or-natural-language-equivalent",
+    "persistence_rule": "persist-on-every-status-transition"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-10-12-codex-remote-probe-economy-p1-plan完成情况.md",
+    "completion_report_status": "current",
+    "last_generated_at": "2026-10-13T02:41:00Z",
+    "based_on_queue_hash": "8b7b901b46f1"
+  },
+  "scope_note": "P1 探针经济性实施（方案 v3 r3 APPROVED + META-OK，最终哈希 28bd60b1…；owner 2026-10-13 全量授权实施事故文档任务）。S-4 重启时机须避开配套 iOS 工作树（cordcode-ios-native-message-timeline @ 7e32a621）真机测试窗口。P2 随后另案：先写方案→评审（continued 模式）→实施。",
+  "updated_at": "2026-10-13T02:41:00Z",
+  "todos": [
+    {
+      "id": "p1-s1-auth-cache-impl",
+      "title": "S-1 auth 缓存与 exp 解析",
+      "description": "按方案 §3 D2：PairingController 增 authCache{token,accountID,expAt,hasExp}（p.mu 下）；chatGPTAuthCached 命中(有exp且now<expAt-60s)不 spawn 并写回 state.token/accountID；miss 走既有 chatGPTAuth（authTokenFn seam，不新增平行 seam），仅成功解析顶层 exp（accountIDFromJWT 同源 payload 扩展）写缓存，失败不写缓存（F-6）；invalidateAuthCache()。复用 authTokenFn（pairing.go:73,133-138）。",
+      "status": "done",
+      "phase": "p1-s1",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "方案 §5 S-s1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "authCache{token,accountID,expAt,hasExp} 字段+chatGPTAuthCached（命中不 spawn 且写回 state.token；miss 走既有 authTokenFn seam 仅成功写缓存，失败不缓存 F-6；无 exp 失败驱动 F-7 防御分支）+invalidateAuthCache+撤销清缓存（invalidateRevokedPairing 挂钩）；authJWTExpiry 顶层 exp 解析；loadChatGPTAuth 成功返回处 Info auth_probe（真实 spawn 计数，D4）。7 单测全绿含 -race。",
+        "artifacts": [
+          "agent/codex-remote/pairing.go",
+          "agent/codex-remote/chatgpt_auth.go",
+          "agent/codex-remote/auth_cache_test.go",
+          "cmd:go test -run TestAuthJWTExpiry|TestChatGPTAuthCached|TestInvalidateRevokedPairing -race => 7 PASS"
+        ],
+        "checked_at": "2026-10-13T01:00:00Z"
+      }
+    },
+    {
+      "id": "p1-s1-auth-cache-tests",
+      "title": "S-1 单测：缓存五态",
+      "description": "命中 0 探针（authTokenFn 不被调）/miss 1 探针（调用计数=1）/exp 过期重取/无 exp 失败驱动/探针失败不写缓存（F-6）+ 并发读写 -race。go test ./agent/codex-remote/ -run 缓存用例 -count=1。",
+      "status": "done",
+      "phase": "p1-s1",
+      "kind": "tests",
+      "depends_on": [
+        "p1-s1-auth-cache-impl"
+      ],
+      "source": "方案 §5 S-s1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "S-1 单测七用例（exp 解析正负例/命中 0 探针/近过期重探/无 exp 服务至失效/失败不缓存/撤销清缓存/并发 -race）全绿。 [出口审计 02:3x 重跑: 定向全过]",
+        "artifacts": [
+          "agent/codex-remote/auth_cache_test.go"
+        ],
+        "checked_at": "2026-10-13T01:00:00Z"
+      }
+    },
+    {
+      "id": "p1-s1-auth-cache-regression",
+      "title": "S-1 端到端回归：由 S-4 统一对账覆盖",
+      "description": "运行态对账在 p1-s4-deploy-regression。",
+      "status": "done",
+      "phase": "p1-s1",
+      "kind": "regression",
+      "depends_on": [
+        "p1-s1-auth-cache-tests"
+      ],
+      "source": "方案 §5 S-s1",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": "进程/缓存行为的运行态面由 p1-s4-deploy-regression 统一对账（auth_probe/token_refreshed/僵尸三计数）；单测覆盖缓存五态。",
+        "summary": "required:false 按 na_reason 收口（S-4 统一对账）。",
+        "artifacts": [],
+        "checked_at": "2026-10-13T01:00:00Z"
+      }
+    },
+    {
+      "id": "p1-s2-restore-gate-impl",
+      "title": "S-2 restoreOnce 刷新门控",
+      "description": "按方案 §3 D1：ctrlTokenRequirement(ctrlExp,now) 三级（Required/NotNeeded[>300s]/Proactive[最后300s]，镜像 enroll.rs:26,246-263，SKEW 常量 ctrlTokenSkewSecs=300）；restoreOnce 每轮先 chatGPTAuthCached（auth 不受门控，F-1），仅 requirement!=NotNeeded 才 refreshControlTokenWithRecovery，NotNeeded 直接 lookupDesktopEnv；lookupDesktopEnv 接住 pairing.go:449 丢弃的 status，401/403 → invalidateAuthCache；restore waiting Warn 加 ctrlFresh=true 字段。",
+      "status": "done",
+      "phase": "p1-s2",
+      "kind": "impl",
+      "depends_on": [
+        "p1-s1-auth-cache-tests"
+      ],
+      "source": "方案 §5 S-s2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "S-2 impl：ctrlTokenRequirement 三级（SKEW=300 镜像 enroll.rs:26）+ restoreOnce 每轮 chatGPTAuthCached 仅门控刷新（r1 F-1 结构）+ ctrlTokenFresh 加进 restore waiting Warn（D4）+ lookupDesktopEnv 401/403 失效缓存。",
+        "artifacts": [
+          "agent/codex-remote/pairing_persist.go",
+          "agent/codex-remote/pairing.go",
+          "agent/codex-remote/restore_gate_test.go",
+          "cmd:go test -run TestRestoreColdStart|TestRestoreCacheFilled|TestRestoreProactive|TestRestoreEnvAuthRejected => 4 PASS"
+        ],
+        "checked_at": "2026-10-13T01:05:00Z"
+      }
+    },
+    {
+      "id": "p1-s2-restore-gate-tests",
+      "title": "S-2 单测：门控四态（r1 F-1）",
+      "description": "冷启动+ctrl fresh→1 探针(miss) 0 刷新且 env 查找仍执行；缓存已填+ctrl fresh→0 探针 0 刷新且 env 查找仍执行；Proactive/Required→刷新；env 401→缓存失效下轮重探。go test ./agent/codex-remote/ -count=1 定向。",
+      "status": "done",
+      "phase": "p1-s2",
+      "kind": "tests",
+      "depends_on": [
+        "p1-s2-restore-gate-impl"
+      ],
+      "source": "方案 §5 S-s2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "S-2 单测四态全过（冷启动 1 探针 0 刷新/env 仍跑、缓存填 0 探针、Proactive 窗口刷新、env 401 失效缓存下轮重探）；既有 restore 测试不回归。 [出口审计 02:3x 重跑: 定向全过]",
+        "artifacts": [
+          "agent/codex-remote/pairing_persist.go",
+          "agent/codex-remote/pairing.go",
+          "agent/codex-remote/restore_gate_test.go",
+          "cmd:go test -run TestRestoreColdStart|TestRestoreCacheFilled|TestRestoreProactive|TestRestoreEnvAuthRejected => 4 PASS"
+        ],
+        "checked_at": "2026-10-13T01:05:00Z"
+      }
+    },
+    {
+      "id": "p1-s2-restore-gate-regression",
+      "title": "S-2 端到端回归：由 S-4 统一对账覆盖",
+      "description": "运行态对账在 p1-s4-deploy-regression。",
+      "status": "done",
+      "phase": "p1-s2",
+      "kind": "regression",
+      "depends_on": [
+        "p1-s2-restore-gate-tests"
+      ],
+      "source": "方案 §5 S-s2",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": "由 p1-s4-deploy-regression 的缺席态对账覆盖（auth_probe≈1、token_refreshed≈N/5、僵尸 0）+ Desktop 重开收口验证。",
+        "summary": "required:false 按 na_reason 收口。",
+        "artifacts": [],
+        "checked_at": "2026-10-13T01:05:00Z"
+      }
+    },
+    {
+      "id": "p1-s3-recovery-impl",
+      "title": "S-3 401 恢复优先 + 调用方回退契约",
+      "description": "按方案 §3 D3：refreshControlToken 两位点（pairing.go:401-403,426-428）改返回 errCtrlAuthRejected（携位点）；refreshControlTokenWithRecovery：refresh→errCtrlAuthRejected→invalidateAuthCache→chatGPTAuthCached（miss 探针）→重试一次→仍拒→errPairingRevoked。调用方契约（F-2）：restoreOnce 对非撤销刷新错误保持 Warn trying saved token + 用已存 ctrl token 继续 env 查找；runCtrlTokenRefresh 错误原样透传给 maybeRefreshCtrlToken（既有处理不变）。loadChatGPTAuth 真实 spawn 点（Stat 后）加 Info auth_probe 行（D4）；diagnostics.go:55 与配对显式路径不经缓存（R-5）。",
+      "status": "done",
+      "phase": "p1-s3",
+      "kind": "impl",
+      "depends_on": [
+        "p1-s1-auth-cache-tests"
+      ],
+      "source": "方案 §5 S-s3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "S-3 impl: refreshControlToken 401/403 位点改 errCtrlAuthRejected(携位点); refreshControlTokenWithRecovery(拒->失效缓存->重探->重试一次->仍拒才 revoked, 镜像 auth.rs:177-214 / websocket.rs:1512-1520); restoreOnce/runCtrlTokenRefresh 接入 WithRecovery+缓存; 非认证错误保留 saved-token 回退(F-2); 显式配对/诊断路径不经缓存(R-5)。",
+        "artifacts": [
+          "agent/codex-remote/pairing.go",
+          "agent/codex-remote/pairing_persist.go",
+          "git:95cbb3e0"
+        ],
+        "checked_at": "2026-10-13T01:26:00Z"
+      }
+    },
+    {
+      "id": "p1-s3-recovery-tests",
+      "title": "S-3 单测：恢复与回退四态",
+      "description": "401→失效缓存→重试成功（不撤销）；401×2→errPairingRevoked（TestRestoreRevokedInvalidatesEveryIdentityLayer 语义保持）；403 同；refresh 5xx/网络错→不撤销、Warn 试用已保存 token、env 查找仍执行（F-2）；auth 探针失败原样返回；显式路径不经缓存断言（R-5）。go test ./agent/codex-remote/ -count=1。",
+      "status": "done",
+      "phase": "p1-s3",
+      "kind": "tests",
+      "depends_on": [
+        "p1-s3-recovery-impl"
+      ],
+      "source": "方案 §5 S-s3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "S-3 单测四态+R-5 全过: 401/403 单次拒->恢复成功(2 探针 2 刷新不撤销); 持续拒->revoked(store 删除, 语义对齐既有撤销测试); 5xx->saved-token 回退 env 仍跑(0 恢复探针); 显式配对全流程后 auth cache 恒 nil。全包 4/4 绿(超时用例 300ms->2s 负载预算修复)。 [出口审计 02:3x 重跑: 定向全过]",
+        "artifacts": [
+          "agent/codex-remote/recovery_test.go"
+        ],
+        "checked_at": "2026-10-13T01:26:00Z"
+      }
+    },
+    {
+      "id": "p1-s3-recovery-regression",
+      "title": "S-3 端到端回归：由 S-4 统一对账覆盖",
+      "description": "运行态对账在 p1-s4-deploy-regression。",
+      "status": "done",
+      "phase": "p1-s3",
+      "kind": "regression",
+      "depends_on": [
+        "p1-s3-recovery-tests"
+      ],
+      "source": "方案 §5 S-s3",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": "401 恢复路径的生产触发需真实账号撤销（不可在无授权下端到端演练）；单测覆盖四态，生产由在线态 token_refreshed 正常滚动佐证不误撤销。",
+        "summary": "required:false 按 na_reason 收口。",
+        "artifacts": [],
+        "checked_at": "2026-10-13T01:26:00Z"
+      }
+    },
+    {
+      "id": "p1-s4-deploy-impl",
+      "title": "S-4 Release 覆盖安装 + 重启",
+      "description": "构建前来源清单；./scripts/build-unsigned-release.sh → rm -rf /Applications → cp -R → killall+pkill → open。重启时机避开配套 iOS 工作树（cordcode-ios-native-message-timeline）真机测试窗口——执行前向 owner 确认窗口。",
+      "status": "done",
+      "phase": "p1-s4",
+      "kind": "impl",
+      "depends_on": [
+        "p1-s2-restore-gate-tests",
+        "p1-s3-recovery-tests"
+      ],
+      "source": "方案 §5 S-s4",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Release 构建(95cbb3e0bb47, 2026-10-12T17:25:47Z)→覆盖安装→killall+pkill→open。五项核验过: 新 pid 75543(01:26:55 晚于构建)、8777=75543、无临时产物、-version=95cbb3e0bb47、runtime.json epoch 14c198a7。冷启动恰好 1 次 auth_probe + ctrl 新鲜跳过刷新(设计行为现场验证)。",
+        "artifacts": [
+          "dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip",
+          "cmd:runtime -version => 95cbb3e0bb47"
+        ],
+        "checked_at": "2026-10-13T01:28:00Z"
+      }
+    },
+    {
+      "id": "p1-s4-deploy-tests",
+      "title": "S-4 部署单元自动化测试面：不适用",
+      "description": "部署动作无自动化断言面。",
+      "status": "done",
+      "phase": "p1-s4",
+      "kind": "tests",
+      "depends_on": [
+        "p1-s4-deploy-impl"
+      ],
+      "source": "方案 §5 S-s4",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": "部署是运维动作；代码正确性由 S-1..S-3 tests 覆盖，部署身份与运行态由 p1-s4-deploy-regression 核验。",
+        "summary": "required:false 按 na_reason 收口。",
+        "artifacts": [],
+        "checked_at": "2026-10-13T01:28:00Z"
+      }
+    },
+    {
+      "id": "p1-s4-deploy-regression",
+      "title": "S-4 运行态核验 + 对账（产物门）",
+      "description": "五项核验（进程代际/8777/无临时产物/-version 提交身份/runtime.json）+ 对账：Desktop 关闭 ≥10 分钟 → auth_probe（真实 spawn）≈1、token_refreshed≈N/5（缺席 Proactive 节奏）、runtime 名下僵尸恒 0；Desktop 重开后 backoff 内 restored（含冷启动磁盘 ctrl 仍新鲜场景）。在线态另测：token_refreshed ~每 9min 而 auth_probe 不随刷新递增（两条节奏分开对账）。",
+      "status": "done",
+      "phase": "p1-s4",
+      "kind": "regression",
+      "depends_on": [
+        "p1-s4-deploy-tests"
+      ],
+      "source": "方案 §5 S-s4",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "对账门全过(三段): (1)缺席态 01:26-02:14 共 48min: auth_probe 恒 1(冷启动)/token_refreshed 9 次(每~5.3min Proactive 节奏)/no_desktop_env 全速复现/僵尸 0, 修复前基线~4.6 探针每分钟; (2)Desktop 重开收口: 02:14:56 stream_bound+restored, 探针零新增(r1 F-1 场景实机闭环); (3)在线态 22min: token_refreshed +2(9min 节奏=600s-lead60s)而 auth_probe +0(缓存服务在线刷新), runtime pid 稳定 75543, 僵尸 0。R-1~R-5 全验证。",
+        "artifacts": [
+          "build/p1-reconcile-75543.log",
+          "/tmp/p1-online-observation.log"
+        ],
+        "checked_at": "2026-10-13T02:35:00Z"
+      }
+    },
+    {
+      "id": "p1-s5-doc-sync-impl",
+      "title": "S-5 文档收口",
+      "description": "事故档案 P1 状态回填+对账数字；think.md 补条目（可并入既有 P0 复盘条目或另起）；完成报告；代码 commit 分包提交。CHANGELOG 不记（owner 已裁决同类条目不进）。D0 级 git diff --check。",
+      "status": "done",
+      "phase": "p1-s5",
+      "kind": "impl",
+      "depends_on": [
+        "p1-s4-deploy-regression"
+      ],
+      "source": "方案 §5 S-s5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "事故档案头部改 P0+P1 闭环 + 新增 §5.6 P1 实施记录(三段对账数字); think.md P0 条目遗留段更新为 P1 已闭环+教训补充; P1 完成报告 docs/2026-10-12-codex-remote-probe-economy-p1-plan完成情况.md; CHANGELOG 不记(owner 裁决)。git diff --check 过。",
+        "artifacts": [
+          "docs/incidents/2026-10-12-bridge-zombie-process-exhaustion.md",
+          "think.md",
+          "docs/2026-10-12-codex-remote-probe-economy-p1-plan完成情况.md"
+        ],
+        "checked_at": "2026-10-13T02:41:00Z"
+      }
+    },
+    {
+      "id": "p1-s5-doc-sync-tests",
+      "title": "S-5 文档单元：不适用",
+      "description": "纯文档 D0。",
+      "status": "done",
+      "phase": "p1-s5",
+      "kind": "tests",
+      "depends_on": [
+        "p1-s5-doc-sync-impl"
+      ],
+      "source": "方案 §5 S-s5",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": "D0 文档改动不 build/test；git diff --check 在 impl 内执行。",
+        "summary": "required:false 按 na_reason 收口(D0 文档)。",
+        "artifacts": [],
+        "checked_at": "2026-10-13T02:41:00Z"
+      }
+    },
+    {
+      "id": "p1-s5-doc-sync-regression",
+      "title": "S-5 文档单元回归：不适用",
+      "description": "纯文档无行为面。",
+      "status": "done",
+      "phase": "p1-s5",
+      "kind": "regression",
+      "depends_on": [
+        "p1-s5-doc-sync-tests"
+      ],
+      "source": "方案 §5 S-s5",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": "纯文档；行为回归由 p1-s4-deploy-regression 承担。",
+        "summary": "required:false 按 na_reason 收口(纯文档;行为回归由 S-4 承担)。",
+        "artifacts": [],
+        "checked_at": "2026-10-13T02:41:00Z"
+      }
+    }
+  ]
+}

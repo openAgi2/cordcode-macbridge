@@ -1,11 +1,15 @@
 # 2026-10-12 codex-remote token 刷新循环僵尸进程泄漏，致整机 fork 配额耗尽（事故档案）
 
-> 状态：**已修复（P0 于 2026-10-12 实施完成并通过对账，见 §5.5 与 §8 实施段）**。
-> 修复范围 = §5.1 P0 三处收尸（commit `9365da6c` + `0c6016ad`，Release 0.1.0 内嵌
-> runtime commit `0c6016ad13a6` 已覆盖安装）；P1（探针经济性）仍被上游刷新语义证据门
-> 挡住未实施，P2（缺席语义加固）可选未实施，两者待 owner 另行授权。
-> 本文记录问题描述、根因、已执行的止血、修复方案（P0/P1/P2）、P0 实施对账，并回答
-> 「backend 未安装 / 未打开时是否会出现同类问题」的系统性问题（§6 缺席矩阵）。
+> 状态：**P0 与 P1 已实施闭环；P2 方案在审**。
+> P0（三处收尸，commit `9365da6c`/`0c6016ad`）见 §5.5；P1（探针经济性，commit
+> `95cbb3e0`，方案 r3 APPROVED）见 §5.6——对账：48 分钟缺席态 1 次探针
+> （修复前 ~4.6 次/分钟）、刷新降为 Proactive ~5min 节奏、在线态 9min 刷新
+> 零探针、僵尸恒 0。P2（缺席语义加固）方案
+> `docs/2026-10-13-codex-remote-absence-hardening-p2-plan.md` 评审中，
+> owner 已预授权过审即实施。
+> 本文记录问题描述、根因、已执行的止血、修复方案（P0/P1/P2）、实施对账，
+> 并回答「backend 未安装 / 未打开时是否会出现同类问题」的系统性问题
+> （§6 缺席矩阵）。
 >
 > **修订记录 r1（2026-10-12）**：按
 > `docs/2026-10-12-bridge-zombie-process-exhaustion-plan-review-r1.md`
@@ -335,6 +339,27 @@ P0 完成门逐项核验（对照 §5.4）：
   （19:16–19:42 观测）：Desktop 在线时每 ~9.5 分钟一次主动刷新 spawn 探针，僵尸
   恒 0。采样档案：`build/zombie-reconcile-95438-{offline,online}.log`。
 - **文档**：think.md 复盘条目、CHANGELOG `[Unreleased]`、本节回填。
+
+### 5.6 P1 实施完成记录（2026-10-13）
+
+方案 `docs/2026-10-12-codex-remote-probe-economy-p1-plan.md`（v3，r3 APPROVED
+0/0 + 元审核 META-OK），实施 commit `95cbb3e0`（auth 缓存 + 刷新门控 + 401
+恢复优先，含 7+4+4+R-5 共 16 个单测）。上游证据门已闭合：官方刷新分级
+（enroll.rs SKEW=5min）、auth 生命周期缓存（auth.rs）、401 恢复优先
+（auth.rs:177-214）均亲核 @ codex cc7ba336；真实 token JWT `exp` ≈96h 实测。
+
+运行态对账（runtime pid 75543，内嵌 commit `95cbb3e0bb47`，owner 配合三段）：
+
+- **缺席态**（Desktop 关闭 01:26–02:14 共 48 分钟，`no desktop environment`
+  全速复现）：`auth_probe`（真实 spawn 计数）**恒 1**（仅冷启动）、
+  `token_refreshed` 9 次（**≈每 5.3 分钟**，官方 Proactive 窗口语义）、
+  runtime 名下僵尸恒 0。修复前基线：~4.6 探针/分钟（48 分钟 ≈ 220 个）。
+- **重开收口**：Desktop 打开后 02:14:56 `stream_bound`+`restored`，探针零
+  新增——冷启动磁盘 ctrl 新鲜 + 缓存 auth 直接通过 env 查找（r1 F-1 场景
+  实机闭环）。
+- **在线态**（22 分钟）：`token_refreshed` +2（02:22/02:31，**精确 9 分钟**
+  = 600s−lead60s）而 `auth_probe` +0——在线刷新完全由缓存服务。
+- 采样档案：`build/p1-reconcile-75543.log`、`build/p1-online-observation.log`。
 
 ## 6. Backend 缺席矩阵：未安装 / 未打开是否同类风险
 

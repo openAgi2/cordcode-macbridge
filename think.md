@@ -13,10 +13,15 @@ reaper goroutine 独占 Wait + Stop 信号化（不与 reaper 双 Wait）。对�
 11.5 分钟 53 次 token_refreshed、runtime 名下僵尸 7 次采样恒 0（修复前 1:1 漏，§3.3/§3.4 基线）。
 教训：**spawn 的每个子进程必须有唯一 Wait 属主**，Kill 发信号≠收尸，编译通过与功能正常都不检
 查这条契约；「已安装但不可用」中间态是重试风暴的温床（未安装反而干净早退）；进程级泄漏的验证
-必须落到进程表对账（刷新事件↔僵尸 1:1），「日志正常滚动」不构成证据。遗留：P1 探针经济性
-（恢复循环 1~30s 粒度全量 spawn 探针再丢弃）被上游刷新语义证据门挡住，未查证
-`/Users/jacklee/Projects/codex` 前不得定缓存窗口；P2 缺席状态机/重试预算/runtime zombie watchdog
-可选未实施。档案：`docs/incidents/2026-10-12-bridge-zombie-process-exhaustion.md`。
+必须落到进程表对账（刷新事件↔僵尸 1:1），「日志正常滚动」不构成证据。P1 探针经济性已于
+2026-10-13 实施闭环（95cbb3e0，方案 r3 APPROVED）：镜像官方刷新分级（enroll.rs SKEW=5min，
+缺席态刷新 ~5min 一次）+ auth 结果缓存（JWT exp ≈96h 定界，真实取证）+ 401 先恢复后撤销
+（auth.rs:177-214）——对账 48 分钟缺席 1 次探针（修复前 ~4.6 次/分钟）、在线态 9min 刷新
+零探针、僵尸恒 0；教训补充：**「评审通过 ≠ 实施授权」与「预授权」要显式区分**（owner
+过审即实施的预授权当晚效率翻倍）；上游证据门（不得凭感觉定缓存窗口）由真实探针取证
+exp ≈96h 闭合。遗留：P2 缺席语义加固方案在审（docs/2026-10-13-codex-remote-absence-
+hardening-p2-plan.md，就绪五态复用既有枚举零 iOS 改动 + 未安装降频 120s + zombie
+watchdog）。档案：`docs/incidents/2026-10-12-bridge-zombie-process-exhaustion.md`（§5.5/§5.6）。
 
 ---
 
