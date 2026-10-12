@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+### 2026-10-12 — 修复 codex-remote 探针僵尸进程泄漏（整机 fork 配额耗尽事故）
+
+- go-bridge 三处子进程补收尸（Kill≠收尸，os/exec 要求 spawn 后必须 Wait）：`loadChatGPTAuth` 的 auth 探针此前每轮 restore/token 刷新 spawn 后只 Kill 不 Wait——ChatGPT Desktop「已安装但未运行」时恢复循环 ~4.6 个/分钟、7.7 小时攒 2142 个僵尸占满系统进程表配额（`kern.maxprocperuid`），导致 Claude/xcodebuild/终端集体 `EAGAIN` 无法建进程；OAuth 配对的 `/usr/bin/open` 与 dsh-web 托管 seat（自发死亡后僵尸占位，自动恢复被卡）同批修复。修复后同条件 11.5 分钟 53 次刷新、runtime 名下僵尸恒 0（修复前 1:1 泄漏）。完整根因、缺席矩阵与遗留项（探针经济性 P1、缺席状态机 P2）见 `docs/incidents/2026-10-12-bridge-zombie-process-exhaustion.md`。
+
 ### 2026-10-11 — Claude 完成帧正文去重与历史执行态恢复
 
 - 完成帧按非空文本块的顺序核对官方流式累计，兼容 thinking 块先于 text、完成帧只携带 text 的形态；同会话 `system/status` 保留累计状态，只有 init、会话变化及 result 才按原边界重置。避免收尾再次追加全文；最新 CLI 2.1.296 真实回复走 `equal_skip`、追加 0 字节，文件观测未重复写入正文。配套 iOS 正式 Release 的 Claude Code／dsh 收尾观感已获 owner 人工验收通过。

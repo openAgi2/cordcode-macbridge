@@ -1,3 +1,25 @@
+## 2026-10-12：codex-remote 探针 Kill 不 Wait，僵尸进程打满整机 fork 配额（事故复盘）
+
+`loadChatGPTAuth` 每次调用 spawn 一个 ChatGPT 内嵌 codex `app-server --stdio` 探针，读完登录态只
+`Kill()` 从不 `Wait()`；ChatGPT Desktop「已安装但未运行」时 `restorePersistedPairing` 无限重试
+（1s→30s 退避循环），每轮先刷 auth（+1 僵尸）再失败于 no desktop environment，~4.6 个/分钟，
+7.7 小时攒 2142 僵尸占满 `kern.maxprocperuid=2666`——Claude 崩溃循环、xcodebuild、ZCode、Ghostty
+的 EAGAIN 全是受害者，早期曾把责任误归给「Claude 跑 Xcode 构建拉起上百进程」（果不是因）。
+同批修掉：OAuth 配对 `/usr/bin/open` 的 Start 无收尾（每次点击 +1）、dsh-web 托管 seat 自发死亡
+后僵尸占 `s.cmd` 位、grace 到期 respawn 被 Start 守卫拒绝（自动恢复被卡，非累积型）。修复形态
+（commit 9365da6c/0c6016ad）：`loadChatGPTAuth` defer 关 stdin→Kill→`cmd.Wait()`（同时满足
+`StdoutPipe` 的 os/exec 契约；`signal: killed` 属预期）；openBrowser 改 `Run()`；dsh-web 单一
+reaper goroutine 独占 Wait + Stop 信号化（不与 reaper 双 Wait）。对账（产物门）：Desktop 退出
+11.5 分钟 53 次 token_refreshed、runtime 名下僵尸 7 次采样恒 0（修复前 1:1 漏，§3.3/§3.4 基线）。
+教训：**spawn 的每个子进程必须有唯一 Wait 属主**，Kill 发信号≠收尸，编译通过与功能正常都不检
+查这条契约；「已安装但不可用」中间态是重试风暴的温床（未安装反而干净早退）；进程级泄漏的验证
+必须落到进程表对账（刷新事件↔僵尸 1:1），「日志正常滚动」不构成证据。遗留：P1 探针经济性
+（恢复循环 1~30s 粒度全量 spawn 探针再丢弃）被上游刷新语义证据门挡住，未查证
+`/Users/jacklee/Projects/codex` 前不得定缓存窗口；P2 缺席状态机/重试预算/runtime zombie watchdog
+可选未实施。档案：`docs/incidents/2026-10-12-bridge-zombie-process-exhaustion.md`。
+
+---
+
 ## 2026-10-10：配套 iOS agent-device 永久停用
 
 owner 裁决“以后永远不再使用 agent-device，包括模拟器”。MacBridge 活文档不再把 iOS 视觉/交互
