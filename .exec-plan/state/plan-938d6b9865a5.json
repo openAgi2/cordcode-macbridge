@@ -1,0 +1,438 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+  "plan_file": "docs/incidents/2026-10-12-bridge-zombie-process-exhaustion.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-938d6b9865a5.json",
+    "legacy_path": ".claude/exec-plans/plan-938d6b9865a5.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "todo-write-optional-mirror",
+    "invocation_policy": "slash-or-natural-language-equivalent",
+    "persistence_rule": "persist-on-every-status-transition"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-10-12-bridge-zombie-process-exhaustion完成情况.md",
+    "completion_report_status": "missing",
+    "last_generated_at": null,
+    "based_on_queue_hash": null
+  },
+  "scope_note": "实施范围 = 事故文档 §5.1 P0（r2 评审 APPROVED，owner 2026-10-12 授权实施）。P1（探针经济性）被上游刷新语义证据门挡住（须先查证 /Users/jacklee/Projects/codex checkout，未查证前不得定缓存窗口），P2（缺席语义加固）可选不阻塞——两者均不入本队列，待 owner 另行授权。P0 完成门 = §5.4：三处收尸修复+定向测试绿+Release 覆盖安装+运行态核验+对账数字（关 Desktop N 分钟 token_refreshed≥N 且僵尸恒 0）+think.md/CHANGELOG/事故文档回填。",
+  "updated_at": "2026-10-12T11:56:00Z",
+  "todos": [
+    {
+      "id": "p0-auth-reap-impl",
+      "title": "P0-1 loadChatGPTAuth 补收尸（关stdin→Kill→Wait）+ 测试注入点",
+      "description": "agent/codex-remote/chatgpt_auth.go:46-107 loadChatGPTAuth：当前 defer cmd.Process.Kill() 后无人 Wait，每个探针留僵尸，且违反 StdoutPipe 的 os/exec Wait 契约。改为成功/失败/超时所有返回路径统一收尾：关 stdin → Kill() → cmd.Wait()（Wait 返回 signal: killed 属预期，忽略该错误）。同时把 defaultChatGPTCodexPath() 的产物提为包级可覆盖 var（或参数化），作为回归测试注入假 codex 二进制的入口。覆盖全部调用方（restoreOnce/pairing/diagnostics/runCtrlTokenRefresh）。",
+      "status": "done",
+      "phase": "p0-fix",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "事故文档 §5.1-1、§3.1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "loadChatGPTAuth 收尾改为 defer: stdin.Close→Process.Kill→cmd.Wait（覆盖全部返回路径，Wait 的 signal:killed 忽略）；defaultChatGPTCodexPath 产物提为包级 var chatGPTCodexBin 作测试注入点。go build ./agent/codex-remote/ 通过（缓存工具链 go1.26.6）。",
+        "artifacts": [
+          "agent/codex-remote/chatgpt_auth.go",
+          "cmd:~/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.6.darwin-arm64/bin/go build ./agent/codex-remote/ => BUILD_OK"
+        ],
+        "checked_at": "2026-10-12T11:00:00Z"
+      }
+    },
+    {
+      "id": "p0-auth-reap-tests",
+      "title": "P0-1 回归测试：假 codex 探针的 Wait 契约断言",
+      "description": "agent/codex-remote 包新增测试：注入「假 codex 二进制」（shell 脚本：读 initialize/getAuthStatus 后输出合法 JSON 再挂住，模拟 Desktop 在线/未登录两种形态）。断言以 os/exec Wait 契约为准：loadChatGPTAuth 返回后子进程已收尸（Kill→Wait 顺序、Wait 返回 signal: killed 属预期、无残留 pid）；不以 ps 系统态轮询作 CI 硬断言。命令：go test ./agent/codex-remote/... -count=1 定向绿。",
+      "status": "done",
+      "phase": "p0-fix",
+      "kind": "tests",
+      "depends_on": [
+        "p0-auth-reap-impl"
+      ],
+      "source": "事故文档 §5.1 回归测试段（r1 F-4 修订）",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "新增 chatgpt_auth_reap_test.go（3 用例：success/not-logged-in/timeout，假 codex 探针经 chatGPTCodexBin 注入，断言 ESRCH=已收尸）+ pairing_oauth_reap_test.go（openBrowser stub 断言）。单跑 -run Reaps 全过；整包 ./agent/codex-remote/... -count=1 全绿 6.7s。",
+        "artifacts": [
+          "agent/codex-remote/chatgpt_auth_reap_test.go",
+          "agent/codex-remote/pairing_oauth_reap_test.go",
+          "cmd:go test ./agent/codex-remote/... -count=1 => ok 6.693s"
+        ],
+        "checked_at": "2026-10-12T11:15:00Z"
+      }
+    },
+    {
+      "id": "p0-auth-reap-regression",
+      "title": "P0-1 端到端回归：由统一运行态对账覆盖",
+      "description": "探针收尸的生产端到端面（真实 runtime、真实 Desktop 缺席态）由 p0-runtime-reconcile 统一验证：关 ChatGPT Desktop 跑 N 分钟，日志 token_refreshed ≥ N 而 runtime 名下僵尸恒 0。",
+      "status": "done",
+      "phase": "p0-fix",
+      "kind": "regression",
+      "depends_on": [
+        "p0-auth-reap-tests"
+      ],
+      "source": "事故文档 §5.4 P0 完成门",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": "进程收尸契约已由 p0-auth-reap-tests 的 Wait 契约单测覆盖；生产运行态端到端面与 p0-runtime-reconcile 的对账数字（关 Desktop N 分钟 token_refreshed≥N 且僵尸恒 0）统一验证，不重复设门。",
+        "summary": "required:false 按既定 na_reason 收口：单测 Wait 契约 + 统一运行态对账（p0-runtime-reconcile）覆盖。",
+        "artifacts": [],
+        "checked_at": "2026-10-12T11:15:00Z"
+      }
+    },
+    {
+      "id": "p0-oauth-reap-impl",
+      "title": "P0-2 openBrowser 补收尸（Start→Run）",
+      "description": "agent/codex-remote/pairing_oauth.go:128-130 openBrowser：exec.Command(\"/usr/bin/open\", rawURL).Start() fire-and-forget 无 Wait，每次 OAuth 配对点击泄一个僵尸。改为 Run()（/usr/bin/open 毫秒级返回，内部 Wait）；命令路径提为可注入以便测试。",
+      "status": "done",
+      "phase": "p0-fix",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "事故文档 §5.1-2、§3.5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "openBrowser 由 Start() 改为 Run()（内部 Wait 收尸）；launcher 路径提为包级 var openBrowserBin 作测试注入点。go build 通过。",
+        "artifacts": [
+          "agent/codex-remote/pairing_oauth.go",
+          "cmd:go build ./agent/codex-remote/ => BUILD_OK"
+        ],
+        "checked_at": "2026-10-12T11:02:00Z"
+      }
+    },
+    {
+      "id": "p0-oauth-reap-tests",
+      "title": "P0-2 回归测试：openBrowser 收尸断言",
+      "description": "同 P0-1 测试法：注入假 open 二进制（立即退出的 stub），断言 openBrowser 返回前子进程已收尸（Run 内部 Wait 完成）。命令：go test ./agent/codex-remote/... -count=1 定向绿。",
+      "status": "done",
+      "phase": "p0-fix",
+      "kind": "tests",
+      "depends_on": [
+        "p0-oauth-reap-impl"
+      ],
+      "source": "事故文档 §5.1 回归测试段",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "openBrowser 收尸测试并入 codex-remote 整包跑（TestOpenBrowserReapsLauncherChild PASS 0.62s，与 auth reap 测试同一命令覆盖）。",
+        "artifacts": [
+          "agent/codex-remote/pairing_oauth_reap_test.go",
+          "cmd:go test ./agent/codex-remote/ -run Reaps -count=1 => PASS"
+        ],
+        "checked_at": "2026-10-12T11:15:00Z"
+      }
+    },
+    {
+      "id": "p0-oauth-reap-regression",
+      "title": "P0-2 端到端回归：无独立生产观测面",
+      "description": "OAuth 配对点击路径需要真实浏览器/账号交互，owner 未授权 UI automation（agent-device 永久停用），无法在无授权下端到端触发。",
+      "status": "done",
+      "phase": "p0-fix",
+      "kind": "regression",
+      "depends_on": [
+        "p0-oauth-reap-tests"
+      ],
+      "source": "事故文档 §5.1 回归测试段",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": "配对点击需真实 OAuth 交互且 UI automation 已永久停用；收尸契约由 p0-oauth-reap-tests 的 stub 断言覆盖，生产侧由 p0-runtime-reconcile 的 runtime 名下僵尸总数恒 0 兜底观测。",
+        "summary": "required:false 按既定 na_reason 收口：单测 Wait 契约 + 统一运行态对账（p0-runtime-reconcile）覆盖。",
+        "artifacts": [],
+        "checked_at": "2026-10-12T11:15:00Z"
+      }
+    },
+    {
+      "id": "p0-dsh-reap-impl",
+      "title": "P0-3 execManagedStarter 挂单一 reaper goroutine + 停止路径信号化",
+      "description": "agent/dsh-web/resolver.go:191-242 execManagedStarter.Start：spawn 成功后挂单一后台 reaper goroutine cmd.Wait()——子进程退出即收尸并清 s.cmd，Start 守卫（resolver.go:194-196）恢复放行，修复「托管 seat 自发死亡→1 僵尸滞留+respawn 被拒（自动恢复被卡）」。Stop()/terminateProcessGroup 改为只发信号不 Wait（复用 killProcessGroupNoWait，proc_unix.go:58-67；不新造第三套信号函数），避免与 reaper 双 Wait 竞态（waitid: no child processes）。保持 GO_BRIDGE_ARCHITECTURE.md 约定：只杀自己 spawn 的 managed 实例，不碰用户自己的 3080。",
+      "status": "done",
+      "phase": "p0-fix",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "事故文档 §5.1-3、§3.5（r1 F-2 勘正后失效模式）",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "execManagedStarter.Start 成功后挂单一 reaper goroutine cmd.Wait()（退出即收尸并清 s.cmd，Start 守卫恢复放行）；Stop() 改信号-only（复用 killProcessGroupNoWait，不新造第三套信号函数）；删除 terminateProcessGroup（unix/windows 两个实现，唯一调用方已改）；windows killProcessGroupNoWait 由 no-op 改为杀直接子进程（不 Wait）。darwin/linux 交叉编译 + go vet 绿；windows 交叉编译失败为 HEAD 既有（migrate.go/resolver.go syscall.Kill，非本次引入）。",
+        "artifacts": [
+          "agent/dsh-web/resolver.go",
+          "agent/dsh-web/proc_unix.go",
+          "agent/dsh-web/proc_windows.go",
+          "cmd:go build ./agent/dsh-web/ (darwin+linux) => OK",
+          "cmd:go vet ./agent/dsh-web/ ./agent/codex-remote/ => OK"
+        ],
+        "checked_at": "2026-10-12T11:10:00Z"
+      }
+    },
+    {
+      "id": "p0-dsh-reap-tests",
+      "title": "P0-3 回归测试：seat 自发死亡收尸 + Start 守卫恢复放行",
+      "description": "agent/dsh-web 包测试：用会自发退出的假 seat 进程验证（a）子进程死后 reaper 收尸（Wait 被调用，pid 不留 Z 态）；（b）s.cmd 被清，grace 到期后 Start 守卫恢复放行（可再次 Start）；（c）Stop 路径与 reaper 不双 Wait（无 waitid: no child processes 错误路径）。不断言「respawn N 次堆 N 僵尸」（与 Start 守卫语义不符，见 §3.5 勘正）。命令：go test ./agent/dsh-web/... -count=1 定向绿（含既有测试不回归）。",
+      "status": "done",
+      "phase": "p0-fix",
+      "kind": "tests",
+      "depends_on": [
+        "p0-dsh-reap-impl"
+      ],
+      "source": "事故文档 §5.1 回归测试段",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "新增 starter_reap_test.go（3 用例：自发死亡→收尸+守卫恢复放行、Stop 信号-only+reaper 收尸、守卫仍拒双 spawn）。dsh-web 整包 -count=1 全绿 24.4s。",
+        "artifacts": [
+          "agent/dsh-web/starter_reap_test.go",
+          "cmd:go test ./agent/dsh-web/... -count=1 => ok 24.381s"
+        ],
+        "checked_at": "2026-10-12T11:15:00Z"
+      }
+    },
+    {
+      "id": "p0-dsh-reap-regression",
+      "title": "P0-3 端到端回归：由统一运行态对账覆盖",
+      "description": "seat 自发死亡属低频路径，生产触发需人为杀 seat；单测已直接覆盖死亡→收尸→守卫恢复链。生产侧由 p0-runtime-reconcile 的 runtime 名下僵尸总数恒 0 兜底。",
+      "status": "done",
+      "phase": "p0-fix",
+      "kind": "regression",
+      "depends_on": [
+        "p0-dsh-reap-tests"
+      ],
+      "source": "事故文档 §5.4 P0 完成门",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": "seat 自发死亡→收尸→守卫恢复链已由 p0-dsh-reap-tests 用会自杀的假 seat 进程直接覆盖；生产运行态由 p0-runtime-reconcile 的 runtime 名下僵尸总数恒 0 兜底观测，不重复设门。",
+        "summary": "required:false 按既定 na_reason 收口：单测 Wait 契约 + 统一运行态对账（p0-runtime-reconcile）覆盖。",
+        "artifacts": [],
+        "checked_at": "2026-10-12T11:15:00Z"
+      }
+    },
+    {
+      "id": "p0-build-install-impl",
+      "title": "P0 Release 构建覆盖安装 + 重启 runtime",
+      "description": "按 CLAUDE.md 硬约束走正式路径（严禁临时构建产物）：./scripts/build-unsigned-release.sh → rm -rf /Applications/CordCodeLink.app → cp -R build/unsigned-release/Build/Products/Release/CordCodeLink.app /Applications/ → killall CordCodeLink 且 pkill -f cordcode-bridge-runtime（两进程名不同，须都杀）→ open /Applications/CordCodeLink.app。构建前记录来源清单（路径+分支+完整提交+未提交状态），构建/安装两门分别落清单。",
+      "status": "done",
+      "phase": "p0-verify",
+      "kind": "impl",
+      "depends_on": [
+        "p0-auth-reap-tests",
+        "p0-oauth-reap-tests",
+        "p0-dsh-reap-tests"
+      ],
+      "source": "事故文档 §5.4、CLAUDE.md 构建纪律",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Release 构建（build-unsigned-release.sh，GOTOOLCHAIN 经 PATH 挂缓存 1.26.6 绕过 GOSUMDB=off 校验问题）→ 产物门全过（codesign/无 get-task-allow/-version 匹配 0c6016ad13a6/arch 一致/dist zip+sha256）→ rm -rf /Applications → cp -R → killall + pkill runtime → open。构建前来源清单已落（提交 0c6016ad13a67d0a，含 9365da6c）。",
+        "artifacts": [
+          "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED, dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip",
+          "git:0c6016ad13a67d0aead5c34b55ff6b02376d2f37"
+        ],
+        "checked_at": "2026-10-12T11:17:00Z"
+      }
+    },
+    {
+      "id": "p0-build-install-tests",
+      "title": "P0 部署单元自动化测试面：不适用",
+      "description": "部署动作本身无自动化测试面；构建产物门（产物路径、内嵌 runtime 提交身份）在 impl 内核对，运行态证据在 regression 核验。",
+      "status": "done",
+      "phase": "p0-verify",
+      "kind": "tests",
+      "depends_on": [
+        "p0-build-install-impl"
+      ],
+      "source": "事故文档 §5.4",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": "部署是运维动作，无可自动化断言面；代码正确性已由三个修复单元的 -tests 覆盖，部署身份与运行态由 p0-build-install-regression + p0-runtime-reconcile 核验。",
+        "summary": "required:false 按既定 na_reason 收口（部署动作无自动化测试面；产物门+运行态核验已覆盖）。",
+        "artifacts": [],
+        "checked_at": "2026-10-12T11:17:00Z"
+      }
+    },
+    {
+      "id": "p0-build-install-regression",
+      "title": "P0 部署后运行态核验（进程代际 + 8777 监听者 + 无临时产物）",
+      "description": "按 CLAUDE.md 部署后运行态验证逐项：（1）ps -o pid,ppid,lstart -p <runtime-pid> 启动时间晚于本次构建；（2）lsof -nP -iTCP:8777 -sTCP:LISTEN 监听者是 /Applications/CordCodeLink.app 内嵌 cordcode-bridge-runtime（新 pid）；（3）pgrep -fl \"CordCodeLink|cordcode-bridge-runtime\" 无 /Applications 之外路径（无临时产物混入）；（4）runtime.json pid/bridgeEpoch 更新。旧 runtime 81192 名下既有 ~50 僵尸应随重启被 launchd 回收（僵尸总数回落）。",
+      "status": "pending",
+      "phase": "p0-verify",
+      "kind": "regression",
+      "depends_on": [
+        "p0-build-install-tests"
+      ],
+      "source": "事故文档 §5.4、CLAUDE.md 部署后运行态验证",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p0-runtime-reconcile-regression",
+      "title": "P0 对账数字（产物门）：关 Desktop N 分钟，token_refreshed≥N 且僵尸恒 0",
+      "description": "保持 ChatGPT Desktop 关闭（当前即关闭态，泄漏在跑=基线），新 runtime 运行 ≥10 分钟：日志（~/Library/Application Support/CordCode Link/logs/go-bridge.log）token_refreshed 出现 ≥N 次而 ps 下 runtime 名下僵尸数恒为 0（窗口内多次采样+末次采样）。修复前同条件为 N 次刷新≈N 个僵尸（§3.3/§3.4 已留存基线：~4.5 僵尸/分钟）。对账数字写入事故文档与完成报告。若 N 次刷新不出现（如 Desktop 被打开、backoff 行为变化），如实记录实际节奏并复核。",
+      "status": "done",
+      "phase": "p0-verify",
+      "kind": "regression",
+      "depends_on": [
+        "p0-build-install-regression"
+      ],
+      "source": "事故文档 §5.4 P0 完成门对账数字（产物门）",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "运行态核验五项全过：新 runtime pid 95438（lstart 19:15:30 晚于构建 19:13:49）；8777 LISTEN=95438；pgrep 无 /Applications 之外实例；内嵌 -version=0.1.0 commit 0c6016ad13a6；runtime.json pid=95438 新 bridgeEpoch。旧 runtime 81192 名下 ~50 僵尸随重启回收（56→3，余 3 属其他父进程）。",
+        "artifacts": [
+          "cmd:ps -o pid,ppid,lstart -p 95438 => Mon Oct 12 19:15:30 2026",
+          "cmd:lsof -nP -iTCP:8777 -sTCP:LISTEN => 95438",
+          "cmd:/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime -version => commit 0c6016ad13a6"
+        ],
+        "checked_at": "2026-10-12T11:17:00Z"
+      }
+    },
+    {
+      "id": "p0-doc-sync-impl",
+      "title": "P0 文档收口：think.md + CHANGELOG + 事故文档状态回填",
+      "description": "（1）think.md 补复盘条目（僵尸进程泄漏→进程表配额、Kill≠Wait、探针经济性遗留 P1/P2）；（2）CHANGELOG.md [Unreleased] 按现有格式记一节；（3）事故文档 docs/incidents/2026-10-12-bridge-zombie-process-exhaustion.md 状态行改「已修复」并回填对账数字（N 分钟/刷新次数/僵尸数）；（4）r1/r2 评审文档与事故文档一并按 docs/ 惯例提交；（5）代码修复按包分 commit 提交到本 worktree（feat/ios-native-message-timeline）。D0 级：git diff --check，不 build/test。",
+      "status": "done",
+      "phase": "p0-docs",
+      "kind": "impl",
+      "depends_on": [
+        "p0-runtime-reconcile-regression"
+      ],
+      "source": "事故文档 §5.4 P0 完成门",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "对账数字（产物门）双态通过。离线态（owner 配合退 Desktop，19:42:29-19:53:59=11.5min）：token_refreshed 7→60（53 次刷新，≈4.6/min 与修复前风暴节奏一致）+ no desktop environment×57（restore 失败循环全速运行）+ runtime 95438 名下僵尸 7 次采样恒 0；修复前同条件 53 刷新≈53 僵尸。在线态（19:16-19:42 观测）：Desktop 在线时每 ~9.5min 一次主动刷新 spawn 探针，僵尸恒 0。全系统僵尸父进程仅剩 899×2/1540×1（与 CordCode 无关既有项）。",
+        "artifacts": [
+          "build/zombie-reconcile-95438-offline.log",
+          "build/zombie-reconcile-95438-online.log",
+          "cmd:ps -axo ppid=,stat= sample×7 => zombies_under_runtime=0"
+        ],
+        "checked_at": "2026-10-12T11:56:00Z"
+      }
+    },
+    {
+      "id": "p0-doc-sync-tests",
+      "title": "P0 文档单元自动化测试面：不适用",
+      "description": "纯文档改动（D0 级），git diff --check 即可，无 build/test。",
+      "status": "in_progress",
+      "phase": "p0-docs",
+      "kind": "tests",
+      "depends_on": [
+        "p0-doc-sync-impl"
+      ],
+      "source": "CLAUDE.md 构建与测试成本纪律 D0",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": "D0 文档改动：CLAUDE.md 分级表规定不 build、不 test；git diff --check 在 impl 内执行。回填的对账数字来源由 p0-runtime-reconcile-regression 证明。",
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "p0-doc-sync-regression",
+      "title": "P0 文档单元端到端回归：不适用",
+      "description": "纯文档改动，无用户可见行为面。",
+      "status": "pending",
+      "phase": "p0-docs",
+      "kind": "regression",
+      "depends_on": [
+        "p0-doc-sync-tests"
+      ],
+      "source": "CLAUDE.md D0 分级",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "missing",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": "纯文档（think.md/CHANGELOG/事故档案）无运行时行为；本事故的行为回归已由 p0-runtime-reconcile-regression 承担。",
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    }
+  ]
+}
