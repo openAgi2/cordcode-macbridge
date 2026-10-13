@@ -1854,10 +1854,17 @@ func TestRelayEventsForwardsUserInputRequested(t *testing.T) {
 	// user_input_requested 是 projection-only canonical 事件（isProjectionOnlyCanonicalEvent）：
 	// raw 帧按设计被滤（shouldDeliverRawEventLocked=false），只经 kernel patch 投递。
 	// 本 harness 无 syncV2 协商连接 → patch 无投递目标 → 客户端只见
-	// turn_completed + session_state_changed。此测试钉住「泵转发 + kernel ingest Applied」
+	// session_state_changed + turn_completed。此测试钉住「泵转发 + kernel ingest Applied」
 	//（日志断言），不预设 raw 帧。
+	//
+	// 顺序（15ec0ce3 黄点实时语义，owner 2026-10-01 验收）：user_input_requested
+	// 在投影直投之外还经 publishQuestionPendingState 同步发布
+	// session_state_changed:{"state":"requiresAction"}，先于随后 EventResult 的
+	// turn_completed（提问挂起发生在 turn 完成之前——生命周期正确）。旧期望
+	// [turn_completed, session_state_changed] 是该钩子落地前的顺序，15ec0ce3
+	// 漏更本断言致红（2026-10-01 至 2026-10-13，bisect 定位），本轮修正。
 	events := readEventNames(t, clientConn, 2)
-	want := []string{"turn_completed", "session_state_changed"}
+	want := []string{"session_state_changed", "turn_completed"}
 	if len(events) != 2 || events[0] != want[0] || events[1] != want[1] {
 		t.Fatalf("events = %#v, want %#v", events, want)
 	}

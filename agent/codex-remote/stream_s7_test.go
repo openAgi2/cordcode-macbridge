@@ -8,6 +8,7 @@ package codexremote
 import (
 	"encoding/json"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 )
@@ -16,7 +17,11 @@ type s7Harness struct {
 	stream *Stream
 	host   FrameConn
 	acks   chan Envelope
-	clock  time.Time
+	// mu guards clock: nowFunc runs on the stream's read-loop goroutine
+	// while advance runs on the test goroutine — a bare field raced under
+	// go test -race (found 2026-10-13, pre-existing).
+	mu    sync.Mutex
+	clock time.Time
 }
 
 func newS7Harness(t *testing.T) *s7Harness {
@@ -31,7 +36,11 @@ func newS7Harness(t *testing.T) *s7Harness {
 		acks:   make(chan Envelope, 64),
 		clock:  time.Unix(1700000000, 0),
 	}
-	stream.nowFunc = func() time.Time { return h.clock }
+	stream.nowFunc = func() time.Time {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return h.clock
+	}
 	go func() {
 		for {
 			env, err := hostConn.Read()
@@ -46,7 +55,11 @@ func newS7Harness(t *testing.T) *s7Harness {
 	return h
 }
 
-func (h *s7Harness) advance(d time.Duration) { h.clock = h.clock.Add(d) }
+func (h *s7Harness) advance(d time.Duration) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.clock = h.clock.Add(d)
+}
 
 func (h *s7Harness) writeMsg(seq uint64) error {
 	s := strconv.FormatUint(seq, 10)

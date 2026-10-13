@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -245,8 +246,11 @@ func TestStreamS3ChunkAckCarriesSegmentID(t *testing.T) {
 // the gap so subsequent frames do not re-trigger; a NEW gap fires again.
 func TestStreamS3GapFiresFanOutOncePerNewGap(t *testing.T) {
 	h := newS3Harness(t)
-	gaps := 0
-	h.stream.onEnvelopeGap = func() { gaps++ }
+	// onEnvelopeGap runs on the stream's read-loop goroutine while this test
+	// polls — the counter must be atomic (bare int raced under -race,
+	// found 2026-10-13, pre-existing).
+	var gaps atomic.Int64
+	h.stream.onEnvelopeGap = func() { gaps.Add(1) }
 	if err := h.writeMsg(1, `{"n":1}`); err != nil {
 		t.Fatal(err)
 	}
@@ -260,16 +264,16 @@ func TestStreamS3GapFiresFanOutOncePerNewGap(t *testing.T) {
 		t.Fatal(err)
 	}
 	deadline := time.After(2 * time.Second)
-	for gaps < 2 {
+	for gaps.Load() < 2 {
 		select {
 		case <-deadline:
-			t.Fatalf("gap fan-out fired %d times, want 2", gaps)
+			t.Fatalf("gap fan-out fired %d times, want 2", gaps.Load())
 		case <-time.After(20 * time.Millisecond):
 		}
 	}
 	time.Sleep(200 * time.Millisecond)
-	if gaps != 2 {
-		t.Fatalf("gap fan-out fired %d times, want exactly 2 (once per new gap)", gaps)
+	if got := gaps.Load(); got != 2 {
+		t.Fatalf("gap fan-out fired %d times, want exactly 2 (once per new gap)", got)
 	}
 }
 
