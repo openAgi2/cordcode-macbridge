@@ -711,6 +711,7 @@ type claudeSessionStub struct {
 	PID       int
 	SessionID string
 	Cwd       string
+	Status    string
 }
 
 func readSessionStubs(ctx context.Context, homeDir string) ([]claudeSessionStub, error) {
@@ -743,6 +744,7 @@ func readSessionStubs(ctx context.Context, homeDir string) ([]claudeSessionStub,
 			Pid       int    `json:"pid"`
 			SessionID string `json:"sessionId"`
 			Cwd       string `json:"cwd"`
+			Status    string `json:"status"`
 		}
 		if err := json.Unmarshal(data, &state); err != nil {
 			continue
@@ -754,16 +756,23 @@ func readSessionStubs(ctx context.Context, homeDir string) ([]claudeSessionStub,
 			PID:       state.Pid,
 			SessionID: state.SessionID,
 			Cwd:       state.Cwd,
+			Status:    state.Status,
 		})
 	}
 	return stubs, nil
 }
 
-// claudeStubExecuting reports whether a live session stub's transcript proves
-// an in-flight turn. Fail-open-idle: cwd/project-dir/transcript unresolvable
-// all default to false — same rule GetRunningSessionIDs has used since the
-// permanently-locked-sessions fix.
+// claudeStubExecuting reports whether a live session stub is executing. Claude's
+// session registry status is authoritative for background-agent turns that do
+// not continuously advance the mainstream transcript; transcript reduction is
+// retained only as the compatibility path for older registries without status.
 func claudeStubExecuting(homeDir string, stub claudeSessionStub) bool {
+	switch stub.Status {
+	case "busy":
+		return true
+	case "idle":
+		return false
+	}
 	if stub.Cwd == "" {
 		return false
 	}

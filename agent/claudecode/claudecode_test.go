@@ -627,6 +627,68 @@ func TestGetRunningSessionIDs_ExternalTurnViaInjectableSeam(t *testing.T) {
 	}
 }
 
+func TestSessionRegistryStatusWinsOverSettledMainTranscript(t *testing.T) {
+	prev := procIdentityAlive
+	procIdentityAlive = func(_ context.Context, pid int, _ string) bool { return pid == 4242 }
+	t.Cleanup(func() { procIdentityAlive = prev })
+
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	sessionsDir := filepath.Join(tempHome, ".claude", "sessions")
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		t.Fatalf("sessions dir: %v", err)
+	}
+	workDir := t.TempDir()
+	projectKey := encodeClaudeProjectKey(workDir)
+	projectsDir := filepath.Join(tempHome, ".claude", "projects", projectKey)
+	if err := os.MkdirAll(projectsDir, 0755); err != nil {
+		t.Fatalf("projects dir: %v", err)
+	}
+	transcriptPath := filepath.Join(projectsDir, "background-ses.jsonl")
+	settled := `{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"done"}]}}` + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(settled), 0644); err != nil {
+		t.Fatalf("transcript: %v", err)
+	}
+	stubPath := filepath.Join(sessionsDir, "4242.json")
+	writeStub := func(status string) {
+		stub := []byte(fmt.Sprintf(`{"pid":4242,"sessionId":"background-ses","cwd":%q,"status":%q}`, workDir, status))
+		if err := os.WriteFile(stubPath, stub, 0644); err != nil {
+			t.Fatalf("stub: %v", err)
+		}
+	}
+
+	a, err := New(map[string]any{"work_dir": "/tmp"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ag := a.(*Agent)
+
+	writeStub("busy")
+	proc, err := ag.LiveSessionProcess(context.Background(), "background-ses")
+	if err != nil {
+		t.Fatalf("LiveSessionProcess: %v", err)
+	}
+	if !proc.Live || !proc.Executing {
+		t.Fatalf("busy registry status must win: %+v", proc)
+	}
+	running, err := ag.GetRunningSessionIDs(context.Background())
+	if err != nil {
+		t.Fatalf("GetRunningSessionIDs: %v", err)
+	}
+	if !running["background-ses"] {
+		t.Fatalf("busy registry status not reflected in running map: %v", running)
+	}
+
+	writeStub("idle")
+	proc, err = ag.LiveSessionProcess(context.Background(), "background-ses")
+	if err != nil {
+		t.Fatalf("idle LiveSessionProcess: %v", err)
+	}
+	if proc.Executing {
+		t.Fatalf("idle registry status must not be overridden by settled transcript: %+v", proc)
+	}
+}
+
 func TestLiveSessionProcess_LiveButIdleIsNotRunning(t *testing.T) {
 	prev := procIdentityAlive
 	procIdentityAlive = func(_ context.Context, pid int, _ string) bool { return pid == 4242 }

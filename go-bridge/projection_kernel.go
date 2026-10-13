@@ -868,6 +868,23 @@ func (k *ProjectionKernel) HasReducerState(backendID, sessionID string) bool {
 	return ok
 }
 
+// ApplyExternalExecutionState mutates only an already-hydrated projection with a
+// backend-owned execution signal (currently Claude's official session registry).
+// It deliberately does not create state and is skipped during hydrate so the cold
+// source transaction remains the baseline authority; the next poll re-applies the
+// signal after MarkReady.
+func (k *ProjectionKernel) ApplyExternalExecutionState(backendID, sessionID, phase string) bool {
+	if k == nil {
+		return false
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.sessionLocked(backendID, sessionID).status.Phase != ProjectionHydrateReady {
+		return false
+	}
+	return k.reducer.ApplyExternalExecutionState(backendID, sessionID, phase)
+}
+
 // HasColdBaseline reports whether the committed baseline for the session ever came
 // from a full cold-source hydrate this bridge epoch. Live-only seeding (mux events
 // since a runtime restart) leaves it false: that state may cover only the in-flight

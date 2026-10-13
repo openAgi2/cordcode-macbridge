@@ -533,6 +533,38 @@ func (ps *projectionSession) markRunning(turnID string) {
 	ps.settleOtherOpenTurns(turnID, ps.projection.UpdatedAt)
 }
 
+// ApplyExternalExecutionState applies a backend-owned session execution signal
+// without inventing a turn. It never creates reducer state and never overrides a
+// source-proven active turn; idle only clears the identity-less external state.
+func (r *ProjectionReducer) ApplyExternalExecutionState(backendID, sessionID, phase string) bool {
+	if r == nil || backendID == "" || sessionID == "" || (phase != "running" && phase != "idle") {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ps := r.sessions[projectionSessionKey(backendID, sessionID)]
+	if ps == nil {
+		return false
+	}
+	current := ps.projection.Execution
+	next := ExecutionView{Phase: phase}
+	switch phase {
+	case "running":
+		if current.Phase == "running" || current.Phase == "requires_action" {
+			return false
+		}
+	case "idle":
+		if current.Phase != "running" || current.ActiveTurnID != "" {
+			return false
+		}
+	}
+	ps.projection.SyncRev++
+	ps.projection.UpdatedAt = r.now()
+	ps.projection.Execution = next
+	ps.execution = &next
+	return true
+}
+
 // settleOtherOpenTurns marks every non-settled turn except activeTurnID as completed.
 // Used when a newer turn becomes live or the session returns to idle, so historical
 // supersession cannot leave zombie running turns in the projection SoT.

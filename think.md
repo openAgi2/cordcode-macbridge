@@ -2955,3 +2955,10 @@ MacBridge 两条路径都丢弃 systemError：①live——codec.go decodeThread
 修复 6588afc8cdcf（方案 iOS 仓 docs/2026-10-01-codex-system-error-outcome-plan.md，r1 APPROVED 5 建议全采纳）：catalog 拉路径 mapCatalogThread 对 systemError 产 OutcomeHint=failed（outcomeAt 复用行 updatedAt）→ plantRuntimeStateHints 同 pass 种植 → applyOutcomeHint 在 applyListRuntimeState/enrichSessionStateWithAgent 消费（键存在即删不泄漏；hint 在场即胜——跨 bridge 重启的持久官方真相）；live 路径 decodeThreadStatusChanged 补 systemError→idle。上游锚点 codex@6ba4bf9e。定向测试全绿（codec 词表更新＋catalog outcome 断言＋种植/消费/优先级/键剥离 6 用例）＋codex-remote 全包 ok＋go-bridge 全包仅既有基线红（task_93af8314）。已部署（runtime 自报 6588afc8cdcf，配对恢复、catalog 附着正常、零 panic）。边界：耐久性限 bridge 重启——app-server 侧 SystemError 亦为其 ThreadWatchManager 内存态（上游同失＝对齐）；recent 视图 ≤10min 快照陈旧（同 RuntimeStateHint 已接受语义）；不猜错误类别；已读 session 按读锚语义无徽标（设计）。owner 复测（thread 01a0f035 现成 systemError 场景）待验收。
 
 owner 验收（2026-10-01 回报）：thread 01a0f035 现成 systemError 场景复测**符合预期**，计划收口。完成情况报告＝iOS 仓 docs/2026-10-01-codex-system-error-outcome-plan完成情况.md（b5508a7c）。
+
+## 2026-10-14：Claude 后台任务执行态错位＝官方 session registry status 被忽略
+
+- 现象：Claude session `bbe396e6-11ea-4754-943e-df5d2effcd14` 后台任务执行中，iOS 时间线已收口、列表不显示执行中、后台任务图标仍显示 1 个任务。
+- 根因：官方 `~/.claude/sessions/*.json` 已有 `status=busy`，旧实现只读 pid/sessionId/cwd，再用主流 transcript 推断执行态。后台 agent 只推进 sidechain 时主 turn 已 settle，被误判 live-but-idle；resume 又生成第二个 Claude 进程，同 session busy/idle 双 stub 每秒交替发布，观察槽 5 分钟后被 idle TTL 清理。
+- 修复：busy/idle 官方状态优先；多 stub 聚合 busy 优先；Ready projection 同步 identity-less execution phase 且不覆盖真实 active turn；外部 busy 期间 touch 观察槽。iOS 零改动。
+- 证据、测试、Release 构建与部署代际见 `docs/2026-10-14-claude-background-task-execution-state-fix.md`。

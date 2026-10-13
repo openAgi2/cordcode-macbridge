@@ -350,6 +350,57 @@ func TestClaudeStubStatusPollerTransitions(t *testing.T) {
 	}
 }
 
+func TestClaudeStubStatusPollerAggregatesDuplicateSessionStubs(t *testing.T) {
+	h := NewHandlers()
+	conn := newPublisherCaptureConn(nil)
+	h.broadcaster.RegisterConn(conn)
+
+	dir := t.TempDir()
+	p := &claudeStubStatusPoller{
+		h:             h,
+		backendID:     "claude",
+		sessionsDir:   dir,
+		lastPublished: nil,
+		stop:          make(chan struct{}),
+	}
+	livePID := os.Getpid()
+	writeStub := func(name, status string) {
+		t.Helper()
+		data := fmt.Sprintf(`{"pid":%d,"sessionId":"same-session","cwd":"/tmp","status":%q}`, livePID, status)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Directory order puts the idle row first; busy still wins for the shared session.
+	writeStub("1-idle.json", "idle")
+	writeStub("2-busy.json", "busy")
+	p.pollOnce()
+	p.pollOnce()
+	time.Sleep(50 * time.Millisecond)
+	if got := len(conn.snapshot()); got != 0 {
+		t.Fatalf("duplicate stubs must aggregate to one stable running state, frames=%d", got)
+	}
+
+	if err := os.Remove(filepath.Join(dir, "2-busy.json")); err != nil {
+		t.Fatal(err)
+	}
+	p.pollOnce()
+	conn.waitCount(t, 1)
+	latest := conn.snapshot()[0].(EventMessage)
+	if m, _ := latest.Data.(map[string]interface{}); m["state"] != "idle" {
+		t.Fatalf("all-idle aggregate = %#v", latest.Data)
+	}
+
+	writeStub("3-busy-again.json", "busy")
+	p.pollOnce()
+	conn.waitCount(t, 2)
+	latest = conn.snapshot()[1].(EventMessage)
+	if m, _ := latest.Data.(map[string]interface{}); m["state"] != "running" {
+		t.Fatalf("busy aggregate = %#v", latest.Data)
+	}
+}
+
 // relay 路径投递门（opencode-web v4 方案 A-1）：relayEvents 环把映射后的
 // session_state_changed 经 deltaBatcher→PublishLogical（Broadcast:true，与
 // handlers_relay.go relay 环同形状）发布——该路径的解封行为必须与控制面入口

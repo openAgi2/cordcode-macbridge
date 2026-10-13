@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+### 2026-10-13 — Claude 后台任务执行态与主会话状态对齐
+
+- Claude Code 2.1.296 的 `~/.claude/sessions/*.json` 官方 `status=busy` 现在优先于主 transcript 的“最后 assistant 已结束”推断；后台 agent 只推进 sidechain 时，MacBridge 不再把外部 worker 误判为 live-but-idle，也不会打开同 session 的第二个 Claude 进程。同一 session 的多个官方 stub 按 busy 优先聚合，不再每秒交替发布 running/idle；已打开 session 的 SSV2 projection 会同步这个官方执行态（不创建假 turn、不覆盖真实 active turn），已有观察连接也不会在长后台任务 5 分钟后被 idle TTL 误收口。iPhone 时间线、session 列表徽标与后台任务图标由此使用一致的执行真相。
+
 ### 2026-10-13 — 恢复循环探针经济性优化与缺席语义加固（事故 P1/P2 收尾）
 
 - **P1 探针经济性**：ChatGPT Desktop 已安装未打开时，恢复循环此前每轮（~4.6 次/分钟）完整 spawn 一个 auth 探针进程再丢弃。现镜像官方 codex app-server-transport 语义：ctrl token 刷新按需求分级（剩余 >5 分钟直接跳过）、auth 结果按其自身有效期缓存复用、刷新遭 401/403 先重取凭据重试一次再判配对撤销。实测 48 分钟缺席全程仅 1 次探针（修复前 ~220 次），在线态刷新零探针，进程表不再有无谓开销。

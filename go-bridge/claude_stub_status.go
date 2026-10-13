@@ -29,8 +29,8 @@ type claudeStubStatus struct {
 }
 
 type claudeStubStatusPoller struct {
-	h          *Handlers
-	backendID  string
+	h           *Handlers
+	backendID   string
 	sessionsDir string
 	// lastPublished：sessionId → 上次已发布的 state（""＝未发布过）。nil 起步，
 	// 首轮不发布（避免启动风暴——列表档会补齐初值）。
@@ -81,6 +81,7 @@ func (p *claudeStubStatusPoller) pollOnce() {
 		return // 目录不存在（无 claude CLI 活动）＝静默空集
 	}
 	seen := make(map[string]bool, len(entries))
+	states := make(map[string]string, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
@@ -103,17 +104,57 @@ func (p *claudeStubStatusPoller) pollOnce() {
 		default:
 			continue // 未知官方 status 词：不映射（不知道就不亮）
 		}
-		if !alive && p.lastPublished[stub.SessionID] != "running" {
-			continue // 死进程且本就没在转：无需收口
+		// Multiple clients can resume one Claude session concurrently. The official
+		// per-process stubs may therefore contain busy and idle rows for the same
+		// session; busy wins instead of emitting a running/idle flip-flop per poll.
+		if state == "running" || states[stub.SessionID] == "" {
+			states[stub.SessionID] = state
 		}
-		p.publishIfChanged(stub.SessionID, state)
+	}
+	if p.lastPublished == nil {
+		// Prime the entire first poll together; otherwise the second file in that
+		// poll would look like a transition after the first file initialized the map.
+		p.lastPublished = make(map[string]string, len(states))
+		for sid, state := range states {
+			p.lastPublished[sid] = state
+		}
+	}
+	for sid, state := range states {
+		if state == "" {
+			continue
+		}
+		p.syncProjectionExecution(sid, state)
+		if state == "running" {
+			// A tracked bridge observer must not hit idle TTL while an external
+			// Claude worker owns the active turn/background task.
+			p.h.sessions.touch(sid)
+		}
+		if state == "idle" && p.lastPublished[sid] != "running" {
+			continue // dead/idle residue needs no transition when it was never running
+		}
+		p.publishIfChanged(sid, state)
 	}
 	// 消失的 stub（正常退出后 register 剪枝/卸载）：上次在转则收口 idle。
 	for sid, last := range p.lastPublished {
 		if last == "running" && !seen[sid] {
+			p.syncProjectionExecution(sid, "idle")
 			p.publishIfChanged(sid, "idle")
 		}
 	}
+}
+
+func (p *claudeStubStatusPoller) syncProjectionExecution(sessionID, state string) {
+	if p.h == nil || p.h.projectionKernel == nil || (state != "running" && state != "idle") {
+		return
+	}
+	if !p.h.projectionKernel.ApplyExternalExecutionState(p.backendID, sessionID, state) {
+		return
+	}
+	patch, ok := p.h.projectionKernel.FlushProjectionPatch(p.backendID, sessionID)
+	if !ok {
+		return
+	}
+	p.h.eventPublisher.PublishProjectionPatch(p.backendID, sessionID, patch)
 }
 
 func (p *claudeStubStatusPoller) publishIfChanged(sessionID, state string) {
