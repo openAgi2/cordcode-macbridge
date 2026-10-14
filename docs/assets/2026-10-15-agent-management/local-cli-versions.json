@@ -1,0 +1,42 @@
+{
+  "capturedAt": "2026-10-14T16:34:52.402773+00:00",
+  "kind": "read-only CLI version probes; not runtime deployment proof",
+  "probes": [
+    {
+      "command": [
+        "claude",
+        "--version"
+      ],
+      "exitCode": 0,
+      "stdout": "2.1.296 (Claude Code)\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "grok",
+        "--version"
+      ],
+      "exitCode": 0,
+      "stdout": "grok 1.0.52 (0920c8169e27) [stable]\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "dsh",
+        "--version"
+      ],
+      "exitCode": 0,
+      "stdout": "0.2.0-rc.2\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "opencode",
+        "--version"
+      ],
+      "exitCode": 0,
+      "stdout": "1.19.0\n",
+      "stderr": ""
+    }
+  ]
+}

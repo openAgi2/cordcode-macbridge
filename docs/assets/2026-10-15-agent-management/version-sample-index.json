@@ -1,0 +1,62 @@
+[
+  {
+    "file": "npm-claude-latest.json",
+    "url": "https://registry.npmjs.org/@anthropic-ai%2fclaude-code/latest",
+    "httpStatus": 200,
+    "capturedAt": "2026-10-14T16:32:54.643515+00:00",
+    "sha256": "8b890e881b6361c8cda43fd7da76d7cb08eb9cc0ddafdb4d4746a85ac85fad9d",
+    "observedVersion": "2.1.299",
+    "rootType": "dict",
+    "versionType": "str"
+  },
+  {
+    "file": "npm-dsh-latest.json",
+    "url": "https://registry.npmjs.org/@deepseek-ai%2fdsh/latest",
+    "httpStatus": 200,
+    "capturedAt": "2026-10-14T16:32:55.390680+00:00",
+    "sha256": "1510cc60fea3ecfd2aca2e4762e10a17ab2353b784a8cdef813b7a412e1c091e",
+    "observedVersion": "0.2.0-rc.2",
+    "rootType": "dict",
+    "versionType": "str"
+  },
+  {
+    "file": "npm-opencode-latest.json",
+    "url": "https://registry.npmjs.org/opencode-ai/latest",
+    "httpStatus": 200,
+    "capturedAt": "2026-10-14T16:32:55.975657+00:00",
+    "sha256": "a67019f08ae99eb3544d7c4b65b686ea034f54ce0c7ac4ba00623a686ca2d833",
+    "observedVersion": "1.19.0",
+    "rootType": "dict",
+    "versionType": "str"
+  },
+  {
+    "file": "grok-update-check.stdout.txt",
+    "command": [
+      "grok",
+      "update",
+      "--check",
+      "--json"
+    ],
+    "runtimeVersion": "grok 1.0.52 (0920c8169e27)",
+    "exitCode": 0,
+    "capturedAt": "2026-10-14T16:32:57.126286+00:00",
+    "sha256": "37d502e44f9cd47f9afb09305634be05619687ae1cbdc10643962b508cbb0320",
+    "sample": {
+      "currentVersion": "1.0.52",
+      "latestVersion": "1.0.52",
+      "updateAvailable": false,
+      "installer": "internal",
+      "channel": "stable",
+      "autoUpdate": true,
+      "error": null
+    }
+  },
+  {
+    "file": "npm-not-found.json",
+    "url": "https://registry.npmjs.org/@cordcode-probe%2fnot-a-real-agent-package/latest",
+    "httpStatus": 404,
+    "capturedAt": "2026-10-14T16:47:17.957355+00:00",
+    "sha256": "57aefd8046010e86f09187427e21bad3376b25a2f9a46ce20452ac7d5448298d",
+    "purpose": "真实 registry HTTP 404 负例；不存在包，不是模拟服务器"
+  }
+]
