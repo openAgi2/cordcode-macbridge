@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-10-14T17:16:45.787100+00:00",
+  "sourceIdentityManifest": "magpie-reuse-source-manifest.json",
+  "method": "Full byte-for-byte read-only capture of located npm package.json; no package manager execution",
+  "scope": "Local installation metadata only; not executable health or runtime-selected path",
+  "samples": [
+    {
+      "sourcePath": "/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/package.json",
+      "sample": "local-claude-package.json",
+      "sha256": "c82bfa35b198f8e4ad0cb44c03faa8d125fa4a99370d5034b6439dd52167e7fd",
+      "bytes": 1476,
+      "name": "@anthropic-ai/claude-code",
+      "version": "2.1.296",
+      "nameType": "string",
+      "versionType": "string",
+      "nonEmpty": true
+    },
+    {
+      "sourcePath": "/opt/homebrew/lib/node_modules/opencode-ai/package.json",
+      "sample": "local-opencode-package.json",
+      "sha256": "3d8d4cdc137d50237711b9da187bd190e5b273cfac25adfad31be5f0ef691bfd",
+      "bytes": 812,
+      "name": "opencode-ai",
+      "version": "1.19.0",
+      "nameType": "string",
+      "versionType": "string",
+      "nonEmpty": true
+    },
+    {
+      "sourcePath": "/opt/homebrew/lib/node_modules/@deepseek-ai/dsh/package.json",
+      "sample": "local-dsh-package.json",
+      "sha256": "0a85203e3e907dd2e3bec34324a2494758ca6cdee234b07090a7c8df0b11acac",
+      "bytes": 7333,
+      "name": "@deepseek-ai/dsh",
+      "version": "0.2.0-rc.2",
+      "nameType": "string",
+      "versionType": "string",
+      "nonEmpty": true
+    }
+  ]
+}

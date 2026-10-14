@@ -1,0 +1,35 @@
+{
+  "capturedAt": "2026-10-14 17:11:19 UTC",
+  "method": "shutil.which using this read-only login-shell PATH; pathlib.resolve and stat; no CLI execution",
+  "scope": "Candidate locations only; does not prove paths used by production runtime",
+  "tools": {
+    "claude": {
+      "found": true,
+      "path": "/opt/homebrew/bin/claude",
+      "realPath": "/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe",
+      "size": 240664432,
+      "mtimeNs": 1791691694471580877
+    },
+    "opencode": {
+      "found": true,
+      "path": "/opt/homebrew/bin/opencode",
+      "realPath": "/opt/homebrew/lib/node_modules/opencode-ai/bin/opencode.exe",
+      "size": 144372192,
+      "mtimeNs": 1791691711855723605
+    },
+    "dsh": {
+      "found": true,
+      "path": "/opt/homebrew/bin/dsh",
+      "realPath": "/opt/homebrew/lib/node_modules/@deepseek-ai/dsh/lib/bin.js",
+      "size": 11697,
+      "mtimeNs": 1791691759150310244
+    },
+    "grok": {
+      "found": true,
+      "path": "/Users/jacklee/.grok/bin/grok",
+      "realPath": "/Users/jacklee/.grok/downloads/grok-1.0.52-macos-aarch64",
+      "size": 172237072,
+      "mtimeNs": 1791836524324024551
+    }
+  }
+}

@@ -1,7 +1,7 @@
 # CordCode Link：设备—服务—Agent 拓扑与接入状态管理
 
 日期：2026-10-15（Asia/Taipei）
-版本：v1，方案待独立评审；本次只交付方案与证据，不修改产品代码。
+版本：v2，补充 Magpie 源码复用；方案待独立评审；本次只交付方案与证据，不修改产品代码。
 目标分支：`feat/ios-native-message-timeline`。
 
 ## 1. 目标与开发入口
@@ -33,9 +33,11 @@
 
 图用于布局、信息层级和控件形态；图里的设备、在线状态、版本号与图标是示意。**本文状态规则高于示意图**：例如图里的 OpenCode `1.20.0` 不是真实更新；本轮 npm 样本的 latest 是 `1.19.0`。CLI 按需执行的 Claude/Grok 不以“有一个常驻 AI 进程”作为可用条件。生产界面必须使用项目实际品牌资源，不能照抄生成图中的近似图标。
 
+v2 变化：将安装与版本查询统一归 Go `toolinventory`，取消拟新增的 Swift `AgentVersionService`；借鉴 Magpie 安装来源识别、同 scope 命令、请求去重及对应测试，保留 CordCode 独立状态轴与安全重启。具体处置、许可证和源码调用链见 [Magpie 源码复用调查](2026-10-15-magpie-agent-management-source-reuse.md)。R/OD/E/S 的 ID 与产品范围不变。
+
 ## 2. 来源冻结与事实调查
 
-### 2.1 完整来源清单
+### 2.1 v1 完整来源清单（历史冻结，未回写）
 
 来源门 1（源码分析前）和门 2（首次文档修改前）均在本轮重新执行 `git worktree list --porcelain`、`git branch --show-current`、`git rev-parse HEAD`、`git status --porcelain`。对应身份相同。所有未提交路径逐项保存在 [source-manifest.json](assets/2026-10-15-agent-management/source-manifest.json)，不能只看下面的计数。
 
@@ -97,6 +99,14 @@
 | legacy 与 app-server 库 | 非本页产品 | 不适用 | 排除，原因见上文 |
 | Relay server | 公网密文中继，不是 Agent | Mac Relay transport connected | 只观察；不新增 VPS 控制接口 |
 
+### 2.5 v2 Magpie 来源与复用门
+
+本轮首次修订前重新核对：M `/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline`，分支 `feat/ios-native-message-timeline`，提交 `2d9836247f8ce2dbda3afd81d1b821aadaccf4ea`，干净；I `/Users/jacklee/Projects/cordcode-ios-native-message-timeline`，同分支，提交 `e479378f8c88338219ad734a7571e41ade356575`，既有274项 docs/.exec-plan dirty；G `/Users/jacklee/Projects/magpie`，分支 `main`，提交 `a36319d607d97e4754e025b82070a32d1d1a58ac`，仅7个未跟踪 `.DS_Store`。各路径逐项未提交状态、worktree 元数据和引用文件 SHA 见 [v2 source manifest](assets/2026-10-15-agent-management/magpie-reuse-source-manifest.json)，G 全部 dirty 亦展开在复用调查 §1。
+
+预期 M/I 配对、分支和5产品身份仍为 §2.1 所列；G 为用户指定的只读参考，不是产品配套仓。M 的新提交只增加 v1 文档与证据，未改变 §2.3 的产品源码锚点。v2 不重新声称已安装产品或截图中 Magpie 的运行版本与 checkout 一致。v1 raw 样本及审计保持原采集身份。
+
+G 复用：`internal/agent/cliupdate.go` 的 `howInstalled/fromNodeModules/installedVersion`、`internal/proc/version.go` 的低成本元数据、`probe.go` 的取消拥有权及其定向测试。界面借 `app.js` 的 `cliTag/paintCLI/paintInstalls`，连线借 `routing.js:1021 layout` 的真实几何；详细实际调用与测试归属见复用调查 §2。不跨模块 import G 的 internal 包，不搬其配置 wiring、静默错误、自动 Node 安装／upgrade repair 或备用更新源。正式抽取代码时遵守 MIT 版权与分发许可。
+
 ## 3. 界面与拓扑契约
 
 ### 3.1 页面与尺寸
@@ -143,7 +153,7 @@ MacBridge 是主要节点；Relay 位于侧边，两者状态独立。运行态�
 | 用户意愿 | enabled / disabled + revision | Swift `AgentSelectionStore`，唯一持久化 writer |
 | 应用过程 | inSync / applying / deferred / failed | RuntimeManager 选择应用 coordinator；当前 runtime identity、selectionRevision 与实际注册集合 |
 | adapter readiness | inactive / checking / available / needsLogin / needsPairing / serviceNotRunning / notConfigured / portConflict / versionUnsupported / permissionDenied / failed | 活动 driver 的已有 descriptor 与 seat-action；disabled 不构造 driver |
-| 版本状态 | unchecked / checking / current / updateAvailable / failed / unsupportedSource | Swift `AgentVersionService`；对应发行源、channel、实际版本样本 |
+| 版本状态 | unchecked / checking / current / updateAvailable / failed / unsupportedSource | Go `toolinventory.VersionService`；对应发行源、channel、实际版本样本 |
 | 用户动作 | idle / starting / installing / error | 原 seat-action/installer manager；复制命令只改变 copied 状态 |
 | 设备连接 | unknown / disconnected / connected(transports) | 现有 DeviceConnRegistry 的同源只读快照 |
 
@@ -156,7 +166,7 @@ MacBridge 是主要节点；Relay 位于侧边，两者状态独立。运行态�
 - `go-bridge/workspace_snapshot.go`（新）：从现有 owning sources 汇总本地管理快照，包含全产品 inventory、活动 descriptors、当前设备 transport presence、Relay 状态。不会启动未选中的 driver。
 - `WorkspaceSnapshotStore`（Swift，新）：只缓存带身份和采集时间的观察结果，不持久化在线状态或推导业务真值。每个 runtime identity 一个 fetch generation；主窗口可见时 3s 一次，有动作时立即刷新；后台停止本页轮询。单次在飞，上一笔未结束不叠加请求。
 - `BackendStatusViewModel` 扩展：消费 snapshot 与 SelectionStore 形成行 presentation，复用现有专用动作；不成为第二个偏好 writer。`DeviceStore` 保持授权列表、revoke 与 reload 所有权，presence 来自快照按 ID join，不覆盖授权记录。
-- `AgentVersionService`（Swift actor，新）：有限并发版本检查、单一来源策略与命令 presentation。已关闭工具只允许轻量版本查询，不恢复 catalog/session/auth 探针。
+- `toolinventory`（Go，新）：纯 locator/classifier、安装元数据、版本探针／已取证 latest provider、typed observation、请求合并及命令 recipe 的唯一拥有者。抽取 Magpie 最小 macOS helper 和测试，接口注入文件／进程／HTTP，不依赖其 GUI/config/auth；详细边界见复用调查。Swift 只把 snapshot 映射成 presentation，不另建版本查询 service。App bundle 元数据如需由 Swift 平台读取，以带路径身份／采集时间的只读 observation 传入该 seam，不扩张成另一套版本调度器。已关闭工具只允许轻量版本查询，不恢复 catalog/session/auth 探针。
 
 `TopologyMonitorStatusStore` 是旧 codex-web Desktop 同步诊断，不是这张设备拓扑的真值；不能用它命名新 snapshot 或把旧诊断失败画成全局连接失败。既有诊断入口保留，本页不重复旧 Desktop 同步区。
 
@@ -171,18 +181,24 @@ selectionRevision: UInt64
 requestedDrivers: [backendId]       // 本次 argv 请求，不是重新读取 UI 意愿
 activeDrivers: [backendId]          // 实际注册成功的集合
 sampledAt: RFC3339
-agents: [{ id, installation, version?, versionSource?, readiness? }]
+agents: [{ id, installation, version?, versionSource?, versionCheck?, readiness? }]
 devicePresence: [{ deviceId, transports: [{ kind, directClass? }] }]
 relay: { enabled, configured, connected }
 ```
 
 `installation` 为 tagged union：`checking`、`installed`（artifactKind、可选 CLI/App 版本、installMethod）、`missing`、`not_required`（external 服务）、`failed`（稳定错误码与脱敏原因）。`readiness` 复用已注册 descriptor 的 status/reason；未注册不填，不新造“available”。`version` 是安装检测的实际值，绝不塞 latest。不返回 token、私钥、用户名密码、配对 URL、prompt、session 文本或 registry 原始远端地址。
 
+`versionCheck` 为本机拟议 tagged union，状态见 §4.1；带 `checkedAt`、`freshUntil`、`source/channel`、安装身份 fingerprint，成功时包含 installed/target 与证据类型，失败时带稳定 code/reason；旧 observation 可作为单独带时间的 previous 字段，不能把它当当前成功。`packageVersion` 只证明所定位包的安装元数据；`executableVersion` 才是本次可执行探针输出，两者明确标记、不相互假冒，更不能直接代替 descriptor readiness。完整 codec 在 S0 冻结并由 producer/consumer 测试验证。
+
+新增 `POST /internal/workspace/rescan`，同一 Management 鉴权和严格白名单 body `{agentIDs:[产品ID], checkVersions:Bool}`；空列表明确表示全部产品，不含 legacy ID。返回接受任务与 operationID，不同步等待所有 CLI/registry。既有业务允许的已启用 readiness 重查仍调用原 owner。按 runtime identity、产品 ID、准确安装身份／source/channel 合并在飞任务；重复请求返回同任务，不叠加探针。手动重查可绕过已完成 TTL，但不能破坏仍在飞去重；runtime 停止取消所属任务，晚结果不得写下一代快照。
+
 新增启动参数 `-agent-selection-revision`，RuntimeConfig 对应字段；`drivers` 改成可由选择应用方法更新的配置字段。snapshot 回显该进程启动时 revision；Mac 只有收到匹配 revision、当前 PID/epoch 且注册集合与目标一致，才确认应用成功。构造失败的 Agent 保留 diagnostic，不能用 requestedDrivers 冒充 activeDrivers。
 
 安装定位：Claude/Grok 复用 runtime 合并后的 PATH；dsh 导出既有 `findDSHBinary` 的纯只读包装；Codex 导出已有 app 内嵌候选纯定位包装，禁止调用 auth probe。OpenCode 由现有 Swift resolver 得到路径，使用新增非 secret 参数 `-opencode-installed-cli` 传给 inventory；产品模式不得另选 PATH 中另一份 binary。独立 CLI 模式只在没有 Swift 指定路径时按其显式运行环境定位，不能读取失效安装记录制造存在事实。
 
 版本执行器每个子进程 3s 上限、stdout/stderr 上限 64KiB、最多 2 个并发；独占 Wait/reap，超时终止本次创建的进程组并收尸。借用已有进程执行 seam，禁止 `shell -c`、app-server/auth/catalog 探针。请求 snapshot 时返回最近 observation 及采集状态，inventory 初次／手动刷新是有界异步任务；snapshot 读请求不每 3s 重新执行全部 CLI。
+
+借 Magpie 的纯文件读取减少执行：所属官方 package 身份明确时，可读对应 package.json 的 version 作 packageVersion；不新增 npm 缺失时执行用户 shell 的扫描。文件格式错误必须记录，不回退为虚假的可执行成功；需要 executableVersion／启用 readiness 时仍走原真实探针。指纹含真实路径、size、mtimeNs、所属 package.json 与安装记录的变更身份，不能只观察未变化的启动脚本。所有文件读取有体积上限；未知 terminal PATH 不做 offPath 断言。
 
 设备 transport 分类在 `Register` 时记录类型及已知 directClass，`Unregister` 按连接对象删除，`DisconnectDevice` 原子删除该 ID。为旧注册调用补齐本任务所有 direct/Relay call site；不要改成字符串前缀猜 Relay。registry 只持锁复制 metadata，不在锁内做网络／文件／等待；授权 join 过滤已撤销记录。多连接按类型去重；移除其中一条不把另一条在线连接抹掉。判活仍使用既有 direct deadline 与 Relay ping/pong/deadAfter，不新增 UI TTL 判死。
 
@@ -286,7 +302,7 @@ web复用 `RemoteWebViewModel.setBackends([], null)`；将 `connectedOnce`、boo
 
 ### 7.1 有证据的版本源
 
-本轮外部内容形状只有两类：npm latest 文档的顶层 `version:string`；Grok 已安装 CLI 的 update-check JSON。原始输出、时间、SHA 与请求见 [version-sample-index.json](assets/2026-10-15-agent-management/version-sample-index.json)；核验结论见 [样本审计](2026-10-15-agent-management-version-samples-audit.md)。不解析任何外部 transcript、会话事件或嵌套模型列表。
+v1 的外部更新源形状只有两类：npm latest 文档的顶层 `version:string`；Grok 已安装 CLI 的 update-check JSON。原始输出、时间、SHA 与请求见 [version-sample-index.json](assets/2026-10-15-agent-management/version-sample-index.json)；核验结论见 [v1 样本审计](2026-10-15-agent-management-version-samples-audit.md)。v2 另增加本地所属 npm package.json 的安装元数据读取，真实全文件样本、name/version 根字段与边界见 [复用调查 §7](2026-10-15-magpie-agent-management-source-reuse.md) 和 [本地样本索引](assets/2026-10-15-agent-management/magpie-reuse-package-sample-index.json)。这是第三类文件格式，并非新增 latest provider。不解析任何外部 transcript、会话事件或嵌套模型列表。
 
 | 工具／安装方式 | 版本来源与更新入口 |
 | --- | --- |
@@ -304,9 +320,13 @@ npm 响应仅接受 HTTP 200、对象根、非空 string version、合法 SemVer
 
 安装方式必须有正面证据（现有installer的scope记录，或已定位binary确实归属于对应官方安装渠道）；不能从 `--version` 文本、`/opt/homebrew/bin` 目录或npm最新响应推断npm安装。缺少正面证据时版本源为unsupportedSource，给官方说明。提供有安装记录的OpenCode/dsh prefix命令时使用该记录的实际prefix，不能仅因某处存在另一个全局binary而改变更新目标。
 
+来源分类移植 G `howInstalled/fromNodeModules` 的精确 package 与本产品 formula/cask 白名单逻辑：本产品自身 brew 包优先于其内嵌 node_modules；Homebrew Node 中 npm 装的 Agent 仍归 npm。记录 managerPath、nodeBinDir、prefix 和 evidence；对应 npm/Node 无法证明时不另选 PATH npm，显示 unsupportedSource。分类函数不执行更新。SemVer 使用成熟库的严格解析，在 S0 锁定库版本和官方契约／测试，不复制 Magpie 宽松 `Newer`；特别覆盖数字与非数字预发布、build metadata、非法版本。
+
 Grok exit 0 不等于检查成功：`error` 非空或目标为 null 时失败；`updateAvailable` 的权威判断优先，不在它 false 时自行建议低版本或切渠道。未来错误输出缺任何必需字段时失败，不能递归猜字段。当前 raw 样本 latest/current 相同、updateAvailable=false；它只证明这一检查形状与同版场景，不冒充实际升级验收。
 
 版本检查：进入页面后每个来源一次，结果 6h 新鲜窗口（工程调度规则，不是上游保证），手动重查可绕过窗口；HTTP 10s／256KiB 上限、并发2，Grok只检查20s上限。结果记录 binary fingerprint/install scope/source/channel；安装身份改变立即失效。6h后旧目标可保留为“上次检查”，但更新按钮需重新查询再打开指引，不能用旧目标执行。失败不复用旧“已最新”；不持久化版本成功作为下次开机真实状态。
+
+Go 单一 `VersionService` 将结果写到本代 observation；Swift 先展示列表，再按稳定 ID 局部补版本，不等最慢来源、不重新排序、不丢焦点。失败短暂重试间隔仅限抑制自动重复探测，不能抹 error；手动请求仍可重查。cache/coalescing key 包含完整安装身份与 source/channel，查询失败返回 typed failed，不照搬 Magpie memo 的旧成功字符串。
 
 ### 7.2 点击“更新到”完整交互
 
@@ -314,7 +334,7 @@ Grok exit 0 不等于检查成功：`error` 非空或目标为 null 时失败；
 
 这一版**不实现自动执行更新**，因此不需要重写每个产品安装器、处理管理员提权或替换官方 Desktop 的 updater。需要直接自动更新是后续产品范围，不能用 `curl | sh` 自动跑来补足按钮行为。
 
-命令模板来自 catalog 白名单和已验证版本，不接受远端返回整段 shell 命令。target 必须 SemVer 验证；prefix 路径使用可靠 shell quoting，绝不能把 URL、错误文案、package description 拼成命令。原已存在的 installer 不扩展版本 pin 的功能，不增加它们历史临时兼容分支。
+命令模板来自 Go catalog 白名单和已验证版本，不接受远端返回整段 shell 命令。Go 生成 argv/environment 结构化 recipe，再统一做完整 POSIX shell quoting；target 必须 SemVer 验证；包括 executable、prefix、必要 Node PATH 在内均定位到同安装 scope。不能复制 Magpie 仅有空格才 Quote 的 shown()，也不能裸 npm 在另一个 Node prefix 更新另一份工具。绝不能把 URL、错误文案、package description 拼成命令。原已存在的 installer 不扩展版本 pin 的功能，不增加它们历史临时兼容分支。
 
 ### 7.3 安装交互
 
@@ -352,7 +372,7 @@ Grok exit 0 不等于检查成功：`error` 非空或目标为 null 时失败；
 | E1 | 工作树唯一配对、路径/分支/完整HEAD/所有dirty路径；source-manifest + 本轮两次git核对。反例：main或另一任务族 | 本次 verified；每次实施/构建/安装必须 fresh，身份不符停全部相关动作 |
 | E2 | 5产品声明/装配/消费、空集当前失败、现有registry；§2源码锚点、文件SHA；反例：默认六驱动/历史注册被错当产品 | 源码 verified；S0须亲核漂移；不证明生产运行 |
 | E3 | 新本机 snapshot、零driver ACK JSON和并发规则 | 拟议内部契约，实施后 producer/codec/epoch/stale单测；阻塞S3/S4完成，不声称已有API |
-| E4 | npm三package顶层version与Grok检查JSON；本轮raw/index/SHA；真实HTTP404负例与字段错误组件负例，禁止改源 | 已采集成功与404样本；负例界定见审计；S5解析范围只限这两类，不推广其他API |
+| E4 | v1 npm三package顶层version与Grok检查JSON；v2本地三package完整package.json根name/version；raw/index/SHA；真实HTTP404与内部字段错误负例，禁止改源 | 已采集；第三类只作安装元数据、不证明执行；边界见v1审计＋复用调查§7，不推广其他API |
 | E5 | 未支持发行源的新latest provider、自动更新、Grok不同输出generation | pending条件门：取得目标版本真实成功/错误输出、channel/方式、官方source/callsite和测试后再改方案评审；仅挡新增provider/自动执行，不卡本版准确指引 |
 | E6 | disabled零后台、空集初连/重连、撤销、direct与Relay观测 | 实施后完成门：定向单测＋部署后真实日志/进程＋owner矩阵。未取证不得宣称生产路径完成 |
 
@@ -362,12 +382,12 @@ Gate A＝E1/E2与本切片使用的外部证据满足；Gate B＝产品集合与
 
 | S | 行为结果、组件与复用 | 前置／依赖 | 最小验证与完成证据 | 失败处理 |
 | --- | --- | --- | --- | --- |
-| S0 来源/契约冻结 | 重新记录M/I+实际触碰上游；确认5项装配、空ACK两消费点、旧专用动作；冻结新内部snapshot schema | 方案独立通过；E1/E2 fresh；不能碰I既有274项dirty文档 | 关键SHA/锚点、产品集合契约；无build | 来源漂移先更新方案；重叠改动停受影响文件，不stash/覆盖 |
-| S1 选择与纯安装观察 | 新SelectionStore/catalog；空选择迁移；纯inventory locator/版本runner、OpenCode实际binary传递 | S0；OD2/范围就绪 | 迁移/损坏/写失败/record优先/无binary/版本timeout/每进程reap测试；关闭时无构造 | 读写/定位错误显式；不得默认全开 |
+| S0 来源/契约冻结 | 重新记录M/I+实际触碰G/上游；确认5项装配、空ACK两消费点、旧专用动作；冻结snapshot/rescan typed schema、SemVer固定依赖与官方契约 | 方案独立通过；E1/E2 fresh；不能碰I既有274项dirty文档 | 关键SHA/锚点、产品集合契约、MIT移植清单；无build | 来源漂移先更新方案；重叠改动停受影响文件，不stash/覆盖 |
+| S1 选择与纯安装观察 | 新SelectionStore/catalog；空选择迁移；Go toolinventory最小classifier/metadata/runner，OpenCode实际binary传递；借G定向用例 | S0；OD2/范围就绪 | 迁移/损坏/写失败/record优先/残留配置/真实package身份/Node keg与Agent formula/同prefix/npm缺失/版本timeout/唯一reap；关闭时无构造 | 读写/定位错误显式；未知scope不给假命令，不默认全开 |
 | S2 应用选择闭环 | RuntimeConfig drivers+revision；安全重启outcome；SwiftOpenCode门；后台启动审计 | S1；原admission机制 | 快速toggle、忙碌defer、lease过期、response-loss、旧PID拒绝、新集合确认；禁用无restore/SSE/scan | 保存意愿但失败未应用；旧活进程仍如实运行；无forcekill |
 | S3 零Agent跨仓 | Main允许显式空；成功ACK []；I初连/重连与App级noAgents/旧target停用；web connected/noAgents与strictavailable；canonical+mirror | S1/S2；不依赖MacUI完成 | Go序列化/空注册集测试；I有效空/missing/unknownkind/旧pump/重新启用；web空bootstrap/softreconnect/无RPC/不可用原因/已保存内容不删 | 非空全创建失败保留fatal；协议不合法保持错误 |
 | S4 设备与Relay快照 | 注册metadata、只读snapshot、本机schema、DeviceStore join、新WorkspaceSnapshotStore | S0；S3保证空集仍可观察 | direct/Relay同时在线、逐个注销、dead pruning、撤销race、auth失败不在线、epoch/stale、Relay connected不等于device在线 | 不展示旧绿色；读取错误有unknown/retry，不用lastSeen |
-| S5 安装/更新交互 | 精确VersionService两类解析、安装scope/channel、版本popover、copy反馈 | S1/E4；E5只挡扩展源 | SemVer/prerelease/降级、failed vs current、Grok error/null/false、指引不用shell执行、不更新错binary/scope | source失败就失败；未知方式给官方说明，不能生成假target |
+| S5 安装/更新交互 | Go VersionService两类解析、typed coalescing/cache、scope/channel与recipe；Swift版本popover/copy反馈，无第二版本owner | S1/E4；E5只挡扩展源 | strict SemVer/numeric-nonnumeric prerelease/降级、failed vs current、Grok error/null/false、指纹变化/同在飞/旧代拒绝、metadata新版但执行坏、shell quoting/同scope | source失败就失败；未知方式给官方说明，不能生成假target；不搬G自动repair |
 | S6 三层工作站 | Workspace重排、单Canvasanchors、设备两按钮/点、服务节点、Agent行与Leader disclosure、L10n/AX | S1–S5状态输入就绪 | presentation/几何纯计算测试；静态核对交互可达；owner一张人工矩阵 | 不用截图mock代生产；旧专用动作仍可达 |
 | S7 统一验证/交付 | coherent增量build/test；Mac正式Release安装；I一次安装；web按既有发布纪律；更新活文档与完成报告 | 各片组件验证通过，来源/产物门fresh | §11定向组、单次部署身份、运行态特征与owner验收分别归档 | 失败保留现场；不换main、不清DD、不部署错产物 |
 
@@ -376,13 +396,13 @@ Gate A＝E1/E2与本切片使用的外部证据满足；Gate B＝产品集合与
 ```text
 M MacBridge/MacBridge/Services/AgentSelectionStore.swift
 M MacBridge/MacBridge/Services/ProductAgentCatalog.swift
-M MacBridge/MacBridge/Services/AgentVersionService.swift
 M MacBridge/MacBridge/Services/WorkspaceSnapshotStore.swift
 M MacBridge/MacBridge/Views/Components/WorkspaceTopologyConnections.swift
 M go-bridge/workspace_snapshot.go
 M go-bridge/agent_inventory.go
+M toolinventory/{origin,metadata,version,recipe}.go 与对应 *_test.go
 M 对应 *_test.go 与 MacBridge/MacBridgeTests/AgentSelectionStoreTests.swift
-M AgentVersionServiceTests.swift / WorkspaceSnapshotStoreTests.swift / AgentRowPresentationTests.swift
+M WorkspaceSnapshotStoreTests.swift / AgentRowPresentationTests.swift
 I OpenCodeiOS/OpenCodeiOSTests/BridgeProviderNoAgentsTests.swift
 I remote-web/src/app/__tests__/ 的no-agent初连/重连定向测试
 ```
@@ -401,6 +421,9 @@ I remote-web/src/app/__tests__/ 的no-agent初连/重连定向测试
 | 活跃turn/待交互 | 不切断任务来应用选择；显示deferred；安全收口后新代际生效；旧响应不能覆盖 |
 | 全构造失败 | 与合法空集不同，真实失败，不伪ready |
 | CLI存在但version失败 | 安装存在＋检测失败；不推安装命令掩盖权限/timeout |
+| 配置残留／npm metadata新版但binary失败 | 配置不证明安装；packageVersion不证明可执行／readiness；保留真实失败 |
+| 多Node/npm／Brew Node keg／本产品formula | 分类与实际binary/scope一致；缺对应管理器不换PATH副本；recipe正确引用路径与环境 |
+| 版本异步／请求合并／身份变化 | 同身份一笔在飞；列表先显示且不重排；失败不是旧current；包文件变化失效；旧代结果不提交 |
 | 卸载仍enabled／external无需CLI | 意愿不删；可关闭；external未安装本地不等于服务不可用 |
 | direct+Relay同ID／多连接 | 点按至少一条存活；逐条断开不早灰；多路径诚实显示 |
 | 设备撤销/失败/cleanup警告 | 原15行矩阵不回退；当代快照不复活授权 |
@@ -442,6 +465,6 @@ S3触碰I客户端后按匹配工作树定向build/unit；可用physical iPhone�
 
 ## 12. 本次交付与已知限制
 
-方案已完成源代码调查与外部版本成功样本核验；产品代码、跨仓协议修改、单元测试、构建、部署与人工验收均未执行。I的已有274项dirty文档保持原样。图中目标版本/设备在线组合仅示意，未加入生产逻辑。
+方案已完成 CordCode／上游调查、v1 外部版本样本核验与 v2 Magpie 源码复用调查；产品代码、跨仓协议修改、单元测试、构建、部署与人工验收均未执行。I的已有274项dirty文档、G的7项未跟踪文件保持原样。图中目标版本/设备在线组合仅示意，未加入生产逻辑。v2 处置登记与源文件 SHA 见 Magpie 复用报告／manifest；自检不等于独立评审通过。
 
 开发就绪的边界是本文规定的5产品、显式接入、两类已采集版本源、官方更新指引及合法空连接。未知发行源自动检查／自动升级与未验证目标版本的新协议受E5阻断；它们不是本版完成条件。独立评审入口为本文，外部内容形状复核入口为伴随审计与raw样本索引。
