@@ -200,11 +200,15 @@ final class WorkspaceSnapshotStoreTests: XCTestCase {
 
         viewModel.applyWorkspaceSnapshotPhase(.available(snapshot), isObservationCurrent: true)
 
-        XCTAssertEqual(viewModel.agents.first?.snapshotVersion, "1.19.0")
-        XCTAssertEqual(viewModel.agents.first?.versionCheck?.targetVersion, "1.19.1")
-        XCTAssertEqual(viewModel.agents.first?.installGuidance?.recipe?.display, "PATH='/tools/bin' '/tools/bin/npm' 'install' '-g' 'opencode-ai'")
+        let opencode = viewModel.agents.first { $0.id == "opencode-web" }
+        XCTAssertEqual(opencode?.snapshotVersion, "1.19.0")
+        XCTAssertEqual(opencode?.versionCheck?.targetVersion, "1.19.1")
+        XCTAssertEqual(opencode?.installGuidance?.recipe?.display, "PATH='/tools/bin' '/tools/bin/npm' 'install' '-g' 'opencode-ai'")
 
         viewModel.applyWorkspaceSnapshotPhase(.available(snapshot), isObservationCurrent: false)
-        XCTAssertEqual(viewModel.agents.first?.versionCheck?.targetVersion, "1.19.1")
+        XCTAssertEqual(
+            viewModel.agents.first { $0.id == "opencode-web" }?.versionCheck?.targetVersion,
+            "1.19.1"
+        )
     }
 }

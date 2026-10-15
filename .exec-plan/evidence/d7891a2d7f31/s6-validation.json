@@ -1,0 +1,49 @@
+{
+  "captured_at": "2026-10-15T10:05:31.919641+00:00",
+  "scope": "S6 full-width three-layer workstation UI",
+  "implementation": {
+    "layout": "Removed focused-width container; page now uses available window width with existing page padding.",
+    "devices": "Two-row device cards, adaptive 1-3 column layout, breathing/static presence dot, icon-only copy/remove actions, and Add New Device in the section header.",
+    "service": "Single MacBridge service control area plus independent Relay side node using workspace snapshot relay state.",
+    "agents": "Five-product rows split by installation fact; fixed product order; inline missing-install command; version pill; existing specialized actions; Grok Leader disclosure; no table headers or vertical separators.",
+    "topology": "Single background Canvas consumes anchored device/service/agent bounds and draws direct, Relay, and enabled-agent dashed/solid orthogonal polylines.",
+    "state": "Backend view model expands rows from ProductAgentCatalog, joins active readiness with inventory/version snapshot, and marks stale observations."
+  },
+  "commands": [
+    {
+      "command": "GOTOOLCHAIN=local xcodebuild -project MacBridge/CordCodeLink.xcodeproj -scheme CordCodeLink -configuration Debug -destination platform=macOS build -quiet",
+      "result": "passed",
+      "duration": "9.001s after first repair; earlier first attempt exposed Swift explicit-return error"
+    },
+    {
+      "command": "GOTOOLCHAIN=local xcodebuild ... -only-testing:CordCodeLinkTests/WorkspaceTopologyTests -only-testing:CordCodeLinkTests/WorkspaceViewTests -only-testing:CordCodeLinkTests/WorkspaceSnapshotStoreTests -only-testing:CordCodeLinkTests/AccessibilityPolishTests test -quiet",
+      "result": "passed",
+      "duration": "12.901s final run"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ],
+  "failure_repairs": [
+    {
+      "observed": "Initial S6 build failed because deviceRow used a local let before an opaque-return view without explicit return.",
+      "fix": "Added explicit return."
+    },
+    {
+      "observed": "Old snapshot merge assertion assumed agents.first was OpenCode after the model expanded to all five products.",
+      "fix": "Updated test to look up opencode-web by stable ID."
+    }
+  ],
+  "boundaries": {
+    "ui_automation": "not run; owner approval and final manual matrix remain S7",
+    "production_deployment": "not run; formal Release install remains S7",
+    "agent_switch_interaction": "Rendered switch is disabled while selectionRevision is nil because the full iOS/web empty-backend consumer rollout is blocked by owner steering; no fake switch behavior is claimed.",
+    "automatic_updates": "none added or executed",
+    "ios": "read-only source identity only; no code changes"
+  },
+  "source_gates": [
+    ".exec-plan/evidence/d7891a2d7f31/s6-edit-source.json",
+    ".exec-plan/evidence/d7891a2d7f31/s6-build-source.json"
+  ]
+}

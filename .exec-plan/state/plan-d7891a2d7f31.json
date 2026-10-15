@@ -33,7 +33,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-10-15T07:51:36.107350+00:00",
+  "updated_at": "2026-10-15T10:05:31.945953+00:00",
   "approved_plan_sha256": "e49e2d5d00e6216bd70d0127c02949351be96474aef1c8b6cd0b14f91d74121a",
   "scope_gates": {
     "E5": "blocked extensions only: unverified latest sources and all automatic update execution",
@@ -510,7 +510,7 @@
       "description": "Full-width devices (two icon actions and breathing/gray dot), bridge and side Relay nodes with one lifecycle control area; installed/uninstalled rows inline name/version/pill/command; anchored Canvas, existing specialized actions, Leader disclosure, localization/AX.",
       "phase": "s6",
       "kind": "impl",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "s5-tests"
       ],
@@ -518,13 +518,16 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Implemented full-width devices/service/agents three-layer UI with anchored Canvas topology, snapshot-backed presence/relay/agent rows, installation grouping, inline version/install guidance, icon-only device actions, service controls, and Grok Leader disclosure.",
+        "artifacts": [
+          ".exec-plan/evidence/d7891a2d7f31/s6-edit-source.json",
+          ".exec-plan/evidence/d7891a2d7f31/s6-validation.json"
+        ],
+        "checked_at": "2026-10-15T10:05:31.943788+00:00"
       }
     },
     {
@@ -533,7 +536,7 @@
       "description": "Full-width devices (two icon actions and breathing/gray dot), bridge and side Relay nodes with one lifecycle control area; installed/uninstalled rows inline name/version/pill/command; anchored Canvas, existing specialized actions, Leader disclosure, localization/AX.",
       "phase": "s6",
       "kind": "tests",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "s6-impl"
       ],
@@ -541,13 +544,15 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Workspace topology/presentation tests, workspace snapshot merge tests, workspace copy tests, accessibility copy tests, and incremental macOS build passed.",
+        "artifacts": [
+          ".exec-plan/evidence/d7891a2d7f31/s6-validation.json"
+        ],
+        "checked_at": "2026-10-15T10:05:31.945275+00:00"
       }
     },
     {
@@ -556,7 +561,7 @@
       "description": "Full-width devices (two icon actions and breathing/gray dot), bridge and side Relay nodes with one lifecycle control area; installed/uninstalled rows inline name/version/pill/command; anchored Canvas, existing specialized actions, Leader disclosure, localization/AX. Require integration evidence appropriate to this slice; final UX matrix remains s7-regression; do not block coding on post-implementation evidence.",
       "phase": "s6",
       "kind": "regression",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "s6-tests"
       ],
@@ -564,13 +569,16 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Component-level UI/model regression passed through fixed-product snapshot expansion, stale observation handling, installation grouping, presence transport text, and stable orthogonal topology geometry. Real visual/interaction acceptance remains assigned to S7 and is not claimed.",
+        "artifacts": [
+          ".exec-plan/evidence/d7891a2d7f31/s6-build-source.json",
+          ".exec-plan/evidence/d7891a2d7f31/s6-validation.json"
+        ],
+        "checked_at": "2026-10-15T10:05:31.945952+00:00"
       }
     },
     {

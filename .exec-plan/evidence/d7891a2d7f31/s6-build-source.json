@@ -1,0 +1,60 @@
+{
+  "gate": "S6 final pre-test build",
+  "recorded_at": "2026-10-15T10:04:37.547208+00:00",
+  "mac": {
+    "path": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "580e35fdd5f174bf091376bcea343bb33b410dca",
+    "uncommitted": [
+      "M .exec-plan/state/plan-d7891a2d7f31.json",
+      " M MacBridge/MacBridge/Services/Localization.swift",
+      " M MacBridge/MacBridge/ViewModels/BackendStatusViewModel.swift",
+      " M MacBridge/MacBridge/Views/ContentView.swift",
+      " M MacBridge/MacBridge/Views/WorkspaceView.swift",
+      " M MacBridge/MacBridgeTests/WorkspaceSnapshotStoreTests.swift",
+      "?? .exec-plan/evidence/d7891a2d7f31/s6-build-source.json",
+      "?? .exec-plan/evidence/d7891a2d7f31/s6-edit-source.json",
+      "?? MacBridge/MacBridgeTests/WorkspaceTopologyTests.swift"
+    ]
+  },
+  "ios_read_only": {
+    "path": "/Users/jacklee/Projects/cordcode-ios-native-message-timeline",
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "09984ae985ce068c13c5c604e22071a44ac2c012",
+    "uncommitted": [
+      "M OpenCodeiOS/CordCode.xcodeproj/project.pbxproj",
+      " M OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/NarrativeRevealPacer.swift",
+      " M OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/NativeTimelineViewController.swift",
+      " M OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/TimelineMarkdownCell.swift",
+      " M OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/TimelineStreamingMarkdownCell.swift",
+      "D  OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/WordFadeAppendEligibility.swift",
+      "D  OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/WordFadeDisplayTransaction.swift",
+      "D  OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/WordFadeFrozenFragments.swift",
+      "D  OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/WordFadeLedger.swift",
+      "D  OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/WordFadeMarkdownAdapter.swift",
+      "D  OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/WordFadeMarkdownDisplayMap.swift",
+      "D  OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/WordFadeTextKitLayout.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/LitextWordFadeDrawTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/LitextWordFadeRasterTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/MarkdownRenderedOriginTests.swift",
+      "RM OpenCodeiOS/OpenCodeiOSTests/WordFadeApparatusV2.swift -> OpenCodeiOS/OpenCodeiOSTests/TimelineRenderApparatus.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/TimelineStreamingTextWordFadeTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadeApparatusV2Tests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadeCarrierHandoffTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadeCostDecompositionTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadeFrozenReference.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadeFrozenTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadeIncrementalTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadeLedgerTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadeLifecycleTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadePairedCostTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadeS1WiringTests.swift",
+      "?? OpenCodeiOS/OpenCodeiOSTests/MarkdownLibraryVersion.swift",
+      "?? OpenCodeiOS/OpenCodeiOSTests/MarkdownRenderCorpus.swift",
+      "?? OpenCodeiOS/OpenCodeiOSTests/TimelineRenderApparatusTests.swift",
+      "?? OpenCodeiOS/OpenCodeiOSTests/UpstreamMigrationPerfTests.swift",
+      "?? OpenCodeiOS/OpenCodeiOSTests/UpstreamMigrationTapeTests.swift"
+    ]
+  },
+  "boundary": "MacBridge-only; no iOS edits, no automatic updates, no UI automation, no production deployment"
+}

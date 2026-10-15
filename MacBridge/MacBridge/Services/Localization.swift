@@ -94,6 +94,33 @@ enum L10n {
     static var workspacePausedSubtitle: String { tr("workspace_paused_subtitle") }
     static var workspaceStart: String { tr("workspace_start") }
     static var workspaceRecheck: String { tr("workspace_recheck") }
+    static var addNewDevice: String { tr("add_new_device") }
+    static var removeDevice: String { tr("remove_device") }
+    static var workspaceNoAuthorizedDevices: String { tr("workspace_no_authorized_devices") }
+    static var workspaceServiceTitle: String { tr("workspace_service_title") }
+    static var workspaceServiceRunning: String { tr("workspace_service_running") }
+    static var workspaceServiceRunningNoAgents: String { tr("workspace_service_running_no_agents") }
+    static var workspaceServiceStopped: String { tr("workspace_service_stopped") }
+    static var workspaceRelayTitle: String { tr("workspace_relay_title") }
+    static var workspaceInstalledAgents: String { tr("workspace_installed_agents") }
+    static var workspaceMissingAgents: String { tr("workspace_missing_agents") }
+    static var workspaceExternalAgents: String { tr("workspace_external_agents") }
+    static var workspacePendingAgents: String { tr("workspace_pending_agents") }
+    static var workspaceRecheckTools: String { tr("workspace_recheck_tools") }
+    static var workspaceAgentMissing: String { tr("workspace_agent_missing") }
+    static var workspaceOpenInstallGuide: String { tr("workspace_open_install_guide") }
+    static var workspaceAgentNotConnected: String { tr("workspace_agent_not_connected") }
+    static var workspaceAgentConnect: String { tr("workspace_agent_connect") }
+    static var workspaceAgentConnectHelp: String { tr("workspace_agent_connect_help") }
+    static var workspaceAgentConnectDeferred: String { tr("workspace_agent_connect_deferred") }
+    static var workspaceAgentConnectFormat: String { tr("workspace_agent_connect_format") }
+    static var workspaceObservationStale: String { tr("workspace_observation_stale") }
+    static var workspaceRelayDisabled: String { tr("workspace_relay_disabled") }
+    static var workspaceRelayNotConfigured: String { tr("workspace_relay_not_configured") }
+    static var workspaceRelayConnected: String { tr("workspace_relay_connected") }
+    static var workspaceRelayNotConnected: String { tr("workspace_relay_not_connected") }
+    static var workspaceRelayStatusUnknown: String { tr("workspace_relay_status_unknown") }
+    static var workspaceRelayUnavailableWhileStopped: String { tr("workspace_relay_unavailable_while_stopped") }
     static var codexRestartSharedService: String { tr("codex_restart_shared_service") }
     static var codexConfigChangedHint: String { tr("codex_config_changed_hint") }
     static var codexConfigChangedHintFull: String { tr("codex_config_changed_hint_full") }
@@ -305,6 +332,14 @@ enum L10n {
     static var devicesPushCleanupUnknownDetail: String { tr("devices_push_cleanup_unknown_detail") }
     static var devicesActions: String { tr("devices_actions") }
     static var devicesUnknownDevice: String { tr("devices_unknown_device") }
+    static var devicePresenceUnknown: String { tr("device_presence_unknown") }
+    static var devicePresenceDisconnected: String { tr("device_presence_disconnected") }
+    static var devicePresenceDirect: String { tr("device_presence_direct") }
+    static var devicePresenceRelay: String { tr("device_presence_relay") }
+    static var devicePresenceSwitching: String { tr("device_presence_switching") }
+    static var devicePresenceConnectedAccessibility: String { tr("device_presence_connected_accessibility") }
+    static var devicePresenceUnknownAccessibility: String { tr("device_presence_unknown_accessibility") }
+    static var devicePresenceDisconnectedAccessibility: String { tr("device_presence_disconnected_accessibility") }
 
     // MARK: - AI Tools
 
@@ -567,6 +602,33 @@ enum L10n {
             "workspace_paused_subtitle": "Authorized devices can't reach this Mac right now.",
             "workspace_start": "Start Workstation",
             "workspace_recheck": "Recheck",
+            "add_new_device": "Add New Device",
+            "remove_device": "Remove Device",
+            "workspace_no_authorized_devices": "No authorized devices yet",
+            "workspace_service_title": "MacBridge Service",
+            "workspace_service_running": "Running on this Mac",
+            "workspace_service_running_no_agents": "Running · no agents enabled",
+            "workspace_service_stopped": "Service stopped",
+            "workspace_relay_title": "Relay",
+            "workspace_installed_agents": "Installed",
+            "workspace_missing_agents": "Not Installed",
+            "workspace_external_agents": "Configured External Services",
+            "workspace_pending_agents": "Pending Detection",
+            "workspace_recheck_tools": "Recheck tools",
+            "workspace_agent_missing": "Not installed",
+            "workspace_open_install_guide": "Install guide",
+            "workspace_agent_not_connected": "Not connected",
+            "workspace_agent_connect": "Connect",
+            "workspace_agent_connect_help": "Changing this switch safely restarts MacBridge and briefly reconnects devices.",
+            "workspace_agent_connect_deferred": "Agent switching becomes available after every installed client supports an empty agent list.",
+            "workspace_agent_connect_format": "Connect %@",
+            "workspace_observation_stale": "Status may have changed",
+            "workspace_relay_disabled": "Relay is off.",
+            "workspace_relay_not_configured": "Relay is not configured.",
+            "workspace_relay_connected": "Relay connected.",
+            "workspace_relay_not_connected": "Relay is not connected.",
+            "workspace_relay_status_unknown": "Relay status is unknown.",
+            "workspace_relay_unavailable_while_stopped": "The local service is stopped, so Relay cannot be observed.",
             "workspace_no_tools_title": "One step away",
             "workspace_no_tools_subtitle": "CordCode Link is running, but no AI tools are available yet.",
             "topology_title": "Desktop Sync",
@@ -797,6 +859,14 @@ enum L10n {
             "devices_push_cleanup_unknown_detail": " The cleanup result of its push subscription is unknown; if it is still pending, the runtime retries it automatically on later notifications.",
             "devices_actions": "Device actions",
             "devices_unknown_device": "Device",
+            "device_presence_unknown": "Unknown",
+            "device_presence_disconnected": "Not connected",
+            "device_presence_direct": "Direct",
+            "device_presence_relay": "Relay",
+            "device_presence_switching": "Switching paths",
+            "device_presence_connected_accessibility": "Connected",
+            "device_presence_unknown_accessibility": "Connection status unknown",
+            "device_presence_disconnected_accessibility": "Not connected",
             "refresh_all": "Refresh All",
             "no_ai_tools_configured": "No AI tools configured",
             "all_unavailable_guidance": "CordCode Link is ready. Install or log in to an AI coding tool to get started.",
@@ -1000,6 +1070,33 @@ enum L10n {
             "workspace_paused_subtitle": "已授权设备暂时无法连接此 Mac。",
             "workspace_start": "启动工作站",
             "workspace_recheck": "重新检查",
+            "add_new_device": "添加新设备",
+            "remove_device": "移除设备",
+            "workspace_no_authorized_devices": "暂无已授权设备",
+            "workspace_service_title": "MacBridge 服务",
+            "workspace_service_running": "正在这台 Mac 上运行",
+            "workspace_service_running_no_agents": "运行中 · 尚未启用 Agent",
+            "workspace_service_stopped": "服务已停止",
+            "workspace_relay_title": "Relay",
+            "workspace_installed_agents": "已安装",
+            "workspace_missing_agents": "未安装",
+            "workspace_external_agents": "已配置的外部服务",
+            "workspace_pending_agents": "待检测",
+            "workspace_recheck_tools": "重新检测工具",
+            "workspace_agent_missing": "未安装",
+            "workspace_open_install_guide": "安装说明",
+            "workspace_agent_not_connected": "未接入",
+            "workspace_agent_connect": "接入",
+            "workspace_agent_connect_help": "修改接入开关会安全重启 MacBridge，设备会短暂重连。",
+            "workspace_agent_connect_deferred": "所有已安装客户端支持空 Agent 列表后，接入开关才会开放。",
+            "workspace_agent_connect_format": "接入%@",
+            "workspace_observation_stale": "状态可能已变化",
+            "workspace_relay_disabled": "Relay 已关闭。",
+            "workspace_relay_not_configured": "Relay 未配置。",
+            "workspace_relay_connected": "Relay 已连接。",
+            "workspace_relay_not_connected": "Relay 未连接。",
+            "workspace_relay_status_unknown": "Relay 状态未知。",
+            "workspace_relay_unavailable_while_stopped": "本机服务已停止，无法观测 Relay。",
             "workspace_no_tools_title": "还差一步才能开始",
             "workspace_no_tools_subtitle": "CordCode Link 正在运行，但还没有可用的 AI 工具。",
             "topology_title": "Desktop 同步",
@@ -1230,6 +1327,14 @@ enum L10n {
             "devices_push_cleanup_unknown_detail": "其推送订阅的清理结果未知；若仍待清理，runtime 会在后续通知投递时自动重试。",
             "devices_actions": "设备操作",
             "devices_unknown_device": "设备",
+            "device_presence_unknown": "状态未知",
+            "device_presence_disconnected": "未连接",
+            "device_presence_direct": "直连",
+            "device_presence_relay": "Relay",
+            "device_presence_switching": "切换路径中",
+            "device_presence_connected_accessibility": "已连接",
+            "device_presence_unknown_accessibility": "连接状态未知",
+            "device_presence_disconnected_accessibility": "未连接",
             "refresh_all": "全部刷新",
             "no_ai_tools_configured": "未配置 AI 工具",
             "all_unavailable_guidance": "CordCode Link 已就绪。安装或登录 AI 编程工具以开始使用。",

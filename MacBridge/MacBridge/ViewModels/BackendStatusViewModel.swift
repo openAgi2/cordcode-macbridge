@@ -13,6 +13,9 @@ struct BackendAgentStatus: Identifiable, Equatable {
     let installGuidance: WorkspaceSnapshot.InstallGuidance?
     let snapshotVersion: String?
     let versionCheck: WorkspaceSnapshot.VersionCheck?
+    let installation: WorkspaceSnapshot.Installation?
+    let isActive: Bool
+    let isObservationCurrent: Bool
 
     init(
         id: String,
@@ -24,7 +27,10 @@ struct BackendAgentStatus: Identifiable, Equatable {
         requiresPollingForExternalTurns: Bool,
         installGuidance: WorkspaceSnapshot.InstallGuidance? = nil,
         snapshotVersion: String? = nil,
-        versionCheck: WorkspaceSnapshot.VersionCheck? = nil
+        versionCheck: WorkspaceSnapshot.VersionCheck? = nil,
+        installation: WorkspaceSnapshot.Installation? = nil,
+        isActive: Bool = true,
+        isObservationCurrent: Bool = true
     ) {
         self.id = id
         self.displayName = displayName
@@ -36,6 +42,9 @@ struct BackendAgentStatus: Identifiable, Equatable {
         self.installGuidance = installGuidance
         self.snapshotVersion = snapshotVersion
         self.versionCheck = versionCheck
+        self.installation = installation
+        self.isActive = isActive
+        self.isObservationCurrent = isObservationCurrent
     }
 
     /// 用户友好的状态文案
@@ -67,6 +76,13 @@ class BackendStatusViewModel: ObservableObject {
     @Published var isShowingStaleResults = false
     @Published var isRescanningVersions = false
     @Published var versionRescanError: String?
+    @Published var isRescanningInventory = false
+    @Published var inventoryRescanError: String?
+    @Published private(set) var activeDrivers: Set<String> = []
+    @Published private(set) var requestedDrivers: Set<String> = []
+    @Published private(set) var selectionRevision: UInt64?
+    @Published private(set) var workspaceRelay: WorkspaceSnapshot.Relay?
+    @Published private(set) var isWorkspaceObservationCurrent = false
     /// dsh-web 座位动作状态（2026-09-22 方案：安装/启动按钮与字幕的数据源）。
     @Published var dshWebSeatAction = DSHWebSeatActionState()
 
@@ -74,6 +90,7 @@ class BackendStatusViewModel: ObservableObject {
     private var refreshTask: Task<Void, Never>?
     private var dshWebPollTask: Task<Void, Never>?
     private var didStartInitialVersionRescan = false
+    private var lastWorkspaceSnapshot: WorkspaceSnapshot?
 
     /// 配置 API 客户端
     func configure(apiClient: ManagementAPIClient) {
@@ -85,28 +102,82 @@ class BackendStatusViewModel: ObservableObject {
         _ phase: WorkspaceSnapshotStore.Phase,
         isObservationCurrent: Bool
     ) {
+        isWorkspaceObservationCurrent = isObservationCurrent
         guard isObservationCurrent, case .available(let snapshot) = phase else {
+            activeDrivers = []
+            requestedDrivers = []
+            workspaceRelay = nil
+            agents = agents.map { agent in
+                BackendAgentStatus(
+                    id: agent.id,
+                    displayName: agent.displayName,
+                    kind: agent.kind,
+                    status: agent.status,
+                    reason: agent.reason,
+                    isRefreshing: agent.isRefreshing,
+                    requiresPollingForExternalTurns: agent.requiresPollingForExternalTurns,
+                    installGuidance: agent.installGuidance,
+                    snapshotVersion: agent.snapshotVersion,
+                    versionCheck: agent.versionCheck,
+                    installation: agent.installation,
+                    isActive: agent.isActive,
+                    isObservationCurrent: false
+                )
+            }
             return
         }
+        lastWorkspaceSnapshot = snapshot
+        activeDrivers = Set(snapshot.activeDrivers)
+        requestedDrivers = Set(snapshot.requestedDrivers)
+        selectionRevision = snapshot.selectionRevision
+        workspaceRelay = snapshot.relay
+        rebuildProductAgents(from: snapshot)
+        startInitialVersionRescanIfNeeded(snapshot: snapshot)
+    }
+
+    private func rebuildProductAgents(from snapshot: WorkspaceSnapshot?) {
+        guard let snapshot else { return }
+        let activeAgents = Dictionary(
+            agents.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         let observations = Dictionary(
             snapshot.agents.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        agents = agents.map { agent in
-            BackendAgentStatus(
-                id: agent.id,
-                displayName: agent.displayName,
-                kind: agent.kind,
-                status: agent.status,
-                reason: agent.reason,
-                isRefreshing: agent.isRefreshing,
-                requiresPollingForExternalTurns: agent.requiresPollingForExternalTurns,
-                installGuidance: observations[agent.id]?.installGuidance,
-                snapshotVersion: observations[agent.id]?.version,
-                versionCheck: observations[agent.id]?.versionCheck
+
+        agents = ProductAgentCatalog.products.map { product in
+            let observation = observations[product.id]
+            let active = activeAgents[product.id] ??
+                agents.first { $0.kind.lowercased() == product.kind.lowercased() }
+            let readiness = observation?.readiness
+            let activeStatus = active ?? readiness.map {
+                BackendAgentStatus(
+                    id: product.id,
+                    displayName: product.name,
+                    kind: product.kind,
+                    status: $0.status,
+                    reason: $0.reason,
+                    isRefreshing: false,
+                    requiresPollingForExternalTurns: $0.requiresPollingForExternalTurns
+                )
+            }
+            return BackendAgentStatus(
+                id: product.id,
+                displayName: activeStatus?.displayName ?? product.name,
+                kind: product.kind,
+                status: activeStatus?.status ?? "inactive",
+                reason: activeStatus?.reason ?? readiness?.reason,
+                isRefreshing: activeStatus?.isRefreshing ?? false,
+                requiresPollingForExternalTurns: activeStatus?.requiresPollingForExternalTurns ?? readiness?.requiresPollingForExternalTurns ?? false,
+                installGuidance: observation?.installGuidance,
+                snapshotVersion: observation?.version,
+                versionCheck: observation?.versionCheck,
+                installation: observation?.installation,
+                isActive: activeStatus != nil || readiness != nil,
+                isObservationCurrent: true
             )
         }
-        startInitialVersionRescanIfNeeded(snapshot: snapshot)
     }
 
     private func startInitialVersionRescanIfNeeded(snapshot: WorkspaceSnapshot) {
@@ -131,6 +202,18 @@ class BackendStatusViewModel: ObservableObject {
             versionRescanError = error.localizedDescription
         }
         isRescanningVersions = false
+    }
+
+    func rescanInventory(agentIDs: [String] = []) async {
+        guard let client = apiClient, !isRescanningInventory else { return }
+        isRescanningInventory = true
+        inventoryRescanError = nil
+        do {
+            _ = try await client.rescanWorkspace(agentIDs: agentIDs, checkVersions: false)
+        } catch {
+            inventoryRescanError = error.localizedDescription
+        }
+        isRescanningInventory = false
     }
 
     /// Codex Desktop restore is async. Keep GET /internal/agents until that row becomes available.

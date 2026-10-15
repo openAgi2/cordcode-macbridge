@@ -1,0 +1,20 @@
+{
+  "gate": "S6 source before analysis/edit",
+  "recorded_at": "2026-10-15T07:52:17.604199+00:00",
+  "mac": {
+    "path": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "580e35fdd5f174bf091376bcea343bb33b410dca",
+    "uncommitted": [],
+    "expected_branch": "feat/ios-native-message-timeline"
+  },
+  "ios_read_only": {
+    "path": "/Users/jacklee/Projects/cordcode-ios-native-message-timeline",
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "9e35a045ca3cdae3f94ebb76b5ac595ce01d2a67",
+    "uncommitted": [],
+    "expected_branch": "feat/ios-native-message-timeline",
+    "authorization": "owner restricted this task to MacBridge edits"
+  },
+  "boundary": "MacBridge-only; no automatic updates; no UI automation; production deployment remains S7"
+}

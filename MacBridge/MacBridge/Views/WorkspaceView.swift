@@ -1,21 +1,14 @@
 import SwiftUI
 
-/// 工作站首屏（UX 重设计 2026-07-13 P0-2）。
-///
-/// 取代 `BridgeStatusView` 的四段状态表，改为围绕用户任务的三段纵向工作面：
-/// 1. 健康结论行（可以连接 / 还差一步 / 需要处理）+ 设备摘要 + 主动作；
-/// 2. 「需要留意」段仅在异常时出现，行内 CTA 复用既有健康探测；
-/// 3. AI 工具健康摘要 + 安全连接段（仅呈现 Relay 结果，唯一连接入口）。
-///
-/// 三种状态：首次使用（无设备）、全就绪、异常。正常状态不显示端口/版本/endpoint，
-/// 这些进入「连接状态」或「帮助与诊断」。运行语义不变，仍由 `BridgeStatusViewModel` 提供。
+/// 工作站首屏：已授权设备 → MacBridge 服务/Relay → Agent 安装与接入状态。
+/// 三层共享一个只读拓扑画布；业务状态仍分别由 DeviceStore、RuntimeManager、
+/// workspace snapshot 和既有 seat-action owner 提供。
 struct WorkspaceView: View {
     @ObservedObject var viewModel: BridgeStatusViewModel
     @ObservedObject var backendViewModel: BackendStatusViewModel
     @ObservedObject var deviceStore: DeviceStore
     @ObservedObject var pairingViewModel: PairingViewModel
     @ObservedObject var runtimeManager: RuntimeManager
-    @ObservedObject var topologyStore: TopologyMonitorStatusStore
     let onStartBridge: () -> Void
     let onStopBridge: () -> Void
     let onRestartBridge: () -> Void
@@ -34,8 +27,12 @@ struct WorkspaceView: View {
     @State private var versionDetailAgentID: String?
     @State private var copiedVersionRecipeAgentID: String?
     @State private var copiedInstallRecipeAgentID: String?
+    @State private var topologyAnchors: [String: Anchor<CGRect>] = [:]
+    @State private var isShowingGrokLeaderDetail = false
     @StateObject private var grokLeaderManager = GrokLeaderModeManager()
     @State private var grokLeaderFailureAlert: GrokLeaderToggleFailure?
+
+    private let topologyCoordinateSpace = "workspace-topology"
 
     struct GrokLeaderToggleFailure: Identifiable {
         let id = UUID()
@@ -64,22 +61,18 @@ struct WorkspaceView: View {
         }
     }
 
-    /// 首次使用：尚无设备且 Bridge 处于可连接状态。
-    private var isFirstUse: Bool {
-        deviceStore.hasLoadedDevices && deviceStore.devices.isEmpty && viewModel.status.isConnectable
-    }
-
     var body: some View {
-        PageContainer(maxContentWidth: LayoutConstants.workspaceFocusedContainerWidth) {
-            VStack(alignment: .leading, spacing: 24) {
-                headlineSection
-                    .padding(.top, 20)
-                Divider()
-                    .padding(.top, 10)
-                topologySection
-                devicesSection
-                toolsAndConnectionSection
+        PageContainer(maxContentWidth: .greatestFiniteMagnitude) {
+            ZStack {
+                topologyCanvas
+                VStack(alignment: .leading, spacing: 24) {
+                    devicesSection
+                        .padding(.top, 18)
+                    serviceSection
+                    agentSection
+                }
             }
+            .coordinateSpace(name: topologyCoordinateSpace)
         }
         .confirmationDialog(
             L10n.overviewStopConfirmTitle,
@@ -139,61 +132,8 @@ struct WorkspaceView: View {
 
     // MARK: - 健康结论
 
-    @ViewBuilder
-    private var headlineSection: some View {
-        if isFirstUse {
-            firstUseHeadline
-        } else {
-            standardHeadline
-        }
-    }
-
-    private var firstUseHeadline: some View {
-        VStack(spacing: 12) {
-            Text(L10n.workspaceFirstDeviceTitle)
-                .font(.title.weight(.semibold))
-            Text(L10n.workspaceFirstDeviceSubtitle)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            pairDeviceButton
-                .padding(.top, 4)
-        }
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
-    }
-
-    private var standardHeadline: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                if viewModel.status == .starting {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Image(systemName: conclusionAppearance.icon)
-                        .font(.system(size: 38, weight: .light))
-                        .foregroundStyle(conclusionAppearance.color)
-                        .frame(width: 40, height: 40)
-                }
-                Text(conclusionTitle)
-                    .font(.system(size: 28, weight: .semibold))
-            }
-            Text(conclusionSubtitle)
-                .font(.system(size: 15.5))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .multilineTextAlignment(.center)
-            pairDeviceButton
-                .padding(.top, 2)
-            headlineActions
-                .padding(.top, 6)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
     private var pairDeviceButton: some View {
-        PairDeviceButton(title: L10n.pairNewDevice) {
+        PairDeviceButton(title: L10n.addNewDevice) {
             onPairDevice()
         }
     }
@@ -239,88 +179,10 @@ struct WorkspaceView: View {
         }
     }
 
-    // MARK: - Desktop 同步状态（UI-3）
-
-    /// 只按 store 的 display 分支渲染；healthy/disabled/idle 返回空视图。
-    @ViewBuilder
-    private var topologySection: some View {
-        switch topologyStore.phase.display {
-        case .hidden:
-            EmptyView()
-        case .infoNotApplicable:
-            topologyCard(
-                icon: "desktopcomputer",
-                tint: Color.secondary,
-                title: L10n.topologyNotApplicable,
-                body: nil
-            )
-        case .diagnosticFailure:
-            topologyCard(
-                icon: "info.circle",
-                tint: Color.secondary,
-                title: L10n.topologyDiagnosticFailed,
-                body: topologyStore.lastDiagnosticDetail
-            )
-        case .warning(let kind):
-            topologyCard(
-                icon: "exclamationmark.triangle.fill",
-                tint: .orange,
-                title: warningTitle(kind),
-                body: nil
-            )
-        }
-    }
-
-    private func warningTitle(_ kind: TopologyWarningKind) -> String {
-        switch kind {
-        case .desktopDetached: return L10n.topologyWarningDevDesktopDetached
-        case .partialSync: return L10n.topologyWarningPartialSync
-        case .observerUnattached: return L10n.topologyWarningObserverUnattached
-        case .general: return L10n.topologyWarningGeneral
-        }
-    }
-
-    private func topologyCard(icon: String, tint: Color, title: String, body: String?) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 22, weight: .light))
-                .foregroundStyle(tint)
-                .frame(width: 24, height: 24)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Text(L10n.topologyTitle)
-                        .font(.system(size: 17, weight: .semibold))
-                    Text(title)
-                        .font(.system(size: 14))
-                        .foregroundStyle(tint)
-                }
-                if let body {
-                    Text(body)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if let updatedAt = topologyStore.lastUpdatedAt {
-                    Text("\(L10n.topologyUpdatedPrefix) \(Self.timeFormatter.string(from: updatedAt))")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            Spacer()
-        }
-        .padding(.vertical, 10)
-    }
-
-    private static let timeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        return formatter
-    }()
-
     // MARK: - 设备与配对
 
-    private var devicesSection: some View {        VStack(alignment: .leading, spacing: 12) {
+    private var devicesSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
                 Text(L10n.authorizedDevices)
                     .font(.title3.weight(.semibold))
@@ -331,6 +193,7 @@ struct WorkspaceView: View {
                         .offset(y: 1.5)
                 }
                 Spacer()
+                pairDeviceButton
             }
 
             if let devicesError = deviceStore.devicesError {
@@ -347,11 +210,15 @@ struct WorkspaceView: View {
                 ProgressView(L10n.loadingDevices)
                     .controlSize(.small)
             } else if deviceStore.devices.isEmpty {
-                Label(L10n.noAuthorizedDevices, systemImage: "iphone.slash")
+                Label(L10n.workspaceNoAuthorizedDevices, systemImage: "iphone.slash")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                VStack(spacing: 0) {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 320, maximum: 430), spacing: 16)],
+                    alignment: .leading,
+                    spacing: 14
+                ) {
                     ForEach(deviceStore.devices) { device in
                         deviceRow(device)
                     }
@@ -361,83 +228,85 @@ struct WorkspaceView: View {
     }
 
     private func deviceRow(_ device: TrustedDevice) -> some View {
-        HStack(spacing: 0) {
-            if device.platform == "ios" {
-                Image(systemName: "iphone.gen3")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 23, height: 44)
+        let presence = deviceStore.presenceState(for: device.deviceId)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: device.platform == "ios" ? "iphone.gen3" : "desktopcomputer")
+                    .font(.system(size: 19))
                     .foregroundStyle(.primary.opacity(0.85))
-                    .padding(.leading, 15)
-                    .offset(y: 5)
-            } else {
-                Image(systemName: "desktopcomputer")
-                    .font(.title3)
-                    .imageScale(.large)
-                    .foregroundStyle(.primary.opacity(0.85))
-                    .frame(width: 23, height: 44)
-                    .padding(.leading, 15)
-                    .offset(y: 5)
-            }
-
-            Spacer().frame(width: 30) // x=200对齐
-
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 4) {
-                    Text(device.displayName ?? device.deviceId)
-                        .font(.system(size: 18, weight: .semibold))
-                        .padding(.top, 9)
-                    if deviceStore.devices.filter({ $0.displayName == device.displayName }).count > 1 {
-                        Text("(\(String(device.deviceId.suffix(6))))")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 9)
-                    }
+                    .frame(width: 22)
+                Text(device.displayName ?? device.deviceId)
+                    .font(.system(size: 17, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(device.displayName ?? device.deviceId)
+                if deviceStore.devices.filter({ $0.displayName == device.displayName }).count > 1 {
+                    Text("(\(String(device.deviceId.suffix(6))))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
-                Text(deviceDetails(for: device))
-                    .font(.system(size: 14))
+                PresenceDotView(state: presence)
+                    .help(Self.presenceAccessibilityText(for: presence))
+                Spacer(minLength: 8)
+                Text(Self.presenceText(for: presence))
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
 
-            Spacer()
+            HStack(alignment: .center) {
+                Text(deviceDetails(for: device))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(deviceDetails(for: device))
+                Spacer(minLength: 12)
 
-            // Single official web pairing link (`/web/`); candidate `/web-v2/` is retired.
-            let isWebLoading = generatingWebLinkId == device.deviceId
-            let isWebCopied = copiedWebLinkId == device.deviceId
-            Button {
-                handleCopyLink(forDevice: device)
-            } label: {
-                HStack(spacing: 4) {
-                    if isWebLoading {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: isWebCopied ? "checkmark" : "doc.on.clipboard")
+                // Single official web pairing link (`/web/`); candidate `/web-v2/` is retired.
+                let isWebLoading = generatingWebLinkId == device.deviceId
+                let isWebCopied = copiedWebLinkId == device.deviceId
+                Button {
+                    handleCopyLink(forDevice: device)
+                } label: {
+                    Group {
+                        if isWebLoading {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: isWebCopied ? "checkmark" : "doc.on.clipboard")
+                        }
                     }
-                    Text(isWebCopied ? L10n.pairingLinkCopied : L10n.copyPairingLink)
+                    .frame(width: 26, height: 24)
                 }
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(generatingWebLinkId != nil)
-            .offset(y: 7)
-            .padding(.trailing, 12)
+                .buttonStyle(.borderless)
+                .disabled(generatingWebLinkId != nil)
+                .help(isWebCopied ? L10n.pairingLinkCopied : L10n.copyPairingLink)
+                .accessibilityLabel(L10n.copyPairingLink)
 
-            RevokeButton {
-                deviceToRemove = device
-                showRemoveConfirmation = true
+                Button {
+                    deviceToRemove = device
+                    showRemoveConfirmation = true
+                } label: {
+                    Image(systemName: "trash")
+                        .frame(width: 26, height: 24)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(Color(red: 0.92, green: 0.35, blue: 0.35))
+                .disabled(deviceStore.isRevoking)
+                .help(L10n.removeDevice)
+                .accessibilityLabel(L10n.removeDevice)
             }
-            .buttonStyle(.plain)
-            .offset(y: 7)
-            .padding(.trailing, 25)
-            .accessibilityLabel(L10n.devicesActions)
         }
-        .padding(.vertical, 16)
-        .padding(.bottom, 4)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.white.opacity(0.15))
-                .frame(height: 0.5)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.055))
+        }
+        .anchorPreference(
+            key: WorkspaceTopologyAnchorKey.self,
+            value: .bounds
+        ) {
+            ["device:\(device.deviceId)": $0]
         }
     }
 
@@ -461,89 +330,357 @@ struct WorkspaceView: View {
         }
     }
 
-    // MARK: - AI 工具 + 安全连接
+    // MARK: - 三层拓扑画布
 
-    private var toolsAndConnectionSection: some View {
-        VStack(alignment: .leading, spacing: 31) { // 缩减 3px 向上拉升
-            VStack(alignment: .leading, spacing: 12) {
-                workspaceSectionHeader(L10n.aiTools)
-                if agents.isEmpty {
-                    Text(L10n.noAiToolsDetected)
-                        .foregroundStyle(.secondary)
-                        .font(.subheadline)
-                } else {
-                    if let error = backendViewModel.versionRescanError {
-                        Text(error)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.orange)
+    private var topologyCanvas: some View {
+        GeometryReader { proxy in
+            Canvas { context, _ in
+                guard isServiceRunning else { return }
+                let service = anchorRect("service", proxy: proxy)
+                let relay = anchorRect("relay", proxy: proxy)
+                guard let service else { return }
+
+                for device in deviceStore.devices {
+                    guard case .connected(let transports) = deviceStore.presenceState(for: device.deviceId),
+                          let deviceRect = anchorRect("device:\(device.deviceId)", proxy: proxy) else {
+                        continue
                     }
-                    VStack(spacing: 0) {
-                        ForEach(agents) { agent in
-                            agentRow(for: agent)
+                    for transport in transports {
+                        if transport.kind == "relay" {
+                            guard let relay else { continue }
+                            strokeRoundedPolyline(
+                                in: &context,
+                                from: .bottomCenter(of: deviceRect),
+                                to: .topCenter(of: relay),
+                                color: .accentColor.opacity(0.58)
+                            )
+                            strokeRoundedPolyline(
+                                in: &context,
+                                from: .trailingCenter(of: relay),
+                                to: .trailingCenter(of: service),
+                                color: .accentColor.opacity(0.58)
+                            )
+                        } else {
+                            strokeRoundedPolyline(
+                                in: &context,
+                                from: .bottomCenter(of: deviceRect),
+                                to: .topCenter(of: service),
+                                color: .green.opacity(0.58)
+                            )
                         }
                     }
-                    .padding(.bottom, 12) // OpenCode 底部增加 12px 留白
-                    .onAppear { grokLeaderManager.refresh() }
-                    .onChange(of: backendViewModel.agents) { _, _ in
-                        grokLeaderManager.refresh()
-                    }
-                    .alert(
-                        L10n.grokLeaderToggleFailedTitle,
-                        isPresented: Binding(
-                            get: { grokLeaderFailureAlert != nil },
-                            set: { if !$0 { grokLeaderFailureAlert = nil } }
-                        )
-                    ) {
-                        Button("OK", role: .cancel) {}
-                    } message: {
-                        Text(String(
-                            format: L10n.grokLeaderToggleFailedBody,
-                            grokLeaderFailureAlert?.reason ?? "",
-                            grokLeaderManager.backupDirectoryPath
-                        ))
-                    }
                 }
+
+                for agent in agents {
+                    guard agent.isActive,
+                          agent.isObservationCurrent,
+                          let agentRect = anchorRect("agent:\(agent.id)", proxy: proxy) else {
+                        continue
+                    }
+                    strokeRoundedPolyline(
+                        in: &context,
+                        from: .bottomCenter(of: service),
+                        to: .topCenter(of: agentRect),
+                        color: agent.isAvailable ? .green.opacity(0.52) : .primary.opacity(0.24),
+                        dashed: !agent.isAvailable
+                    )
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .onPreferenceChange(WorkspaceTopologyAnchorKey.self) { anchors in
+            topologyAnchors = anchors
+        }
+    }
+
+    private func anchorRect(
+        _ key: String,
+        proxy: GeometryProxy
+    ) -> CGRect? {
+        guard let anchor = topologyAnchors[key] else { return nil }
+        return proxy[anchor]
+    }
+
+    private func strokeRoundedPolyline(
+        in context: inout GraphicsContext,
+        from start: CGPoint,
+        to end: CGPoint,
+        color: Color,
+        dashed: Bool = false
+    ) {
+        var path = Path()
+        let points = Self.topologyPolylinePoints(from: start, to: end)
+        path.move(to: points[0])
+        for point in points.dropFirst() {
+            path.addLine(to: point)
+        }
+        var style = StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+        if dashed {
+            style.dash = [5, 5]
+        }
+        context.stroke(path, with: .color(color), style: style)
+    }
+
+    static func topologyPolylinePoints(from start: CGPoint, to end: CGPoint) -> [CGPoint] {
+        let middleY = (start.y + end.y) / 2
+        return [
+            start,
+            CGPoint(x: start.x, y: middleY),
+            CGPoint(x: end.x, y: middleY),
+            end
+        ]
+    }
+
+    // MARK: - 中间服务层
+
+    private var serviceSection: some View {
+        HStack(alignment: .top, spacing: 22) {
+            serviceCard
+                .frame(maxWidth: .infinity)
+            relayCard
+                .frame(width: 285)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var serviceCard: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            HStack(spacing: 10) {
+                Image(systemName: "dot.radiowaves.left.and.right")
+                    .font(.system(size: 25, weight: .light))
+                    .foregroundStyle(serviceColor)
+                    .frame(width: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L10n.workspaceServiceTitle)
+                        .font(.system(size: 19, weight: .semibold))
+                    Text(serviceStatusText)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
             }
 
-            HStack(alignment: .top, spacing: 28) {
-                Image(systemName: relayIcon)
-                    .font(.system(size: 34, weight: .light))
-                    .foregroundStyle(relayColor)
-                    .frame(width: 34, height: 41)
-                    .offset(y: -3)
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(L10n.workspaceSecureConnection)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    Text(relaySummary)
-                        .font(.system(size: 15))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .multilineTextAlignment(.leading)
-                }
-                
+            HStack(spacing: 12) {
+                headlineActions
+            }
+        }
+        .padding(18)
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.065))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(serviceColor.opacity(0.28), lineWidth: 1)
+        }
+        .anchorPreference(
+            key: WorkspaceTopologyAnchorKey.self,
+            value: .bounds
+        ) {
+            ["service": $0]
+        }
+    }
+
+    private var relayCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 9) {
+                Circle()
+                    .fill(relayColor)
+                    .frame(width: 9, height: 9)
+                Text(L10n.workspaceRelayTitle)
+                    .font(.system(size: 15, weight: .semibold))
                 Spacer()
-                
-                if viewModel.relayConfigured != true {
-                    Button(L10n.connectionStatus) {
-                        onOpenConnectionStatus?()
+            }
+            Text(relaySummary)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if viewModel.relayConfigured != true {
+                Button(L10n.connectionStatus) {
+                    onOpenConnectionStatus?()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.045))
+        }
+        .anchorPreference(
+            key: WorkspaceTopologyAnchorKey.self,
+            value: .bounds
+        ) {
+            ["relay": $0]
+        }
+    }
+
+    private var serviceColor: Color {
+        switch viewModel.status {
+        case .ready, .readyNoAgents:
+            return .green
+        case .starting:
+            return .orange
+        case .crashed:
+            return .red
+        case .stopped, .idle, .sleeping:
+            return .secondary
+        }
+    }
+
+    private var isServiceRunning: Bool {
+        viewModel.status == .ready || viewModel.status == .readyNoAgents || viewModel.status == .starting
+    }
+
+    private var serviceStatusText: String {
+        switch viewModel.status {
+        case .ready:
+            return L10n.workspaceServiceRunning
+        case .readyNoAgents:
+            return L10n.workspaceServiceRunningNoAgents
+        case .starting:
+            return L10n.overviewStarting
+        case .stopped, .idle, .sleeping:
+            return L10n.workspaceServiceStopped
+        case .crashed:
+            return viewModel.lastError ?? L10n.overviewStartFailed
+        }
+    }
+
+    // MARK: - Agent 分组
+
+    private var agentSection: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            if let error = backendViewModel.inventoryRescanError {
+                Text(error)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+            }
+            if let error = backendViewModel.versionRescanError {
+                Text(error)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+            }
+
+            ForEach(WorkspaceAgentGroup.allCases) { group in
+                let groupAgents = agents.filter { Self.agentGroup(for: $0.installation?.state) == group }
+                if !groupAgents.isEmpty {
+                    VStack(alignment: .leading, spacing: 9) {
+                        HStack(spacing: 8) {
+                            Text(group.title)
+                                .font(.system(size: 16, weight: .semibold))
+                            if group == .installed {
+                                Button {
+                                    Task { await backendViewModel.rescanInventory() }
+                                } label: {
+                                    Image(systemName: "arrow.clockwise.circle")
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.secondary)
+                                .disabled(backendViewModel.isRescanningInventory)
+                                .help(L10n.workspaceRecheckTools)
+                                .accessibilityLabel(L10n.workspaceRecheckTools)
+                            }
+                            Spacer()
+                        }
+                        VStack(spacing: 8) {
+                            ForEach(groupAgents) { agent in
+                                agentRow(for: agent)
+                            }
+                        }
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .offset(y: 4)
                 }
             }
-            .padding(.leading, 6)
-            .padding(.trailing, 16)
-            .offset(y: -10)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, 10)
+        .onAppear { grokLeaderManager.refresh() }
+        .onChange(of: backendViewModel.agents) { _, _ in
+            grokLeaderManager.refresh()
+        }
+        .alert(
+            L10n.grokLeaderToggleFailedTitle,
+            isPresented: Binding(
+                get: { grokLeaderFailureAlert != nil },
+                set: { if !$0 { grokLeaderFailureAlert = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(String(
+                format: L10n.grokLeaderToggleFailedBody,
+                grokLeaderFailureAlert?.reason ?? "",
+                grokLeaderManager.backupDirectoryPath
+            ))
+        }
     }
 
     private func isCodexDesktop(_ agent: BackendAgentStatus) -> Bool {
         let kind = agent.kind.lowercased()
         return agent.id == "codex-remote" || kind == "codex-remote"
+    }
+
+    enum WorkspaceAgentGroup: String, CaseIterable, Identifiable {
+        case installed
+        case missing
+        case external
+        case pending
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .installed: return L10n.workspaceInstalledAgents
+            case .missing: return L10n.workspaceMissingAgents
+            case .external: return L10n.workspaceExternalAgents
+            case .pending: return L10n.workspacePendingAgents
+            }
+        }
+    }
+
+    static func agentGroup(for installationState: String?) -> WorkspaceAgentGroup {
+        switch installationState {
+        case "installed":
+            return .installed
+        case "missing":
+            return .missing
+        case "not_required":
+            return .external
+        default:
+            return .pending
+        }
+    }
+
+    static func presenceText(for state: DeviceStore.PresenceState) -> String {
+        switch state {
+        case .unknown:
+            return L10n.devicePresenceUnknown
+        case .disconnected:
+            return L10n.devicePresenceDisconnected
+        case .connected(let transports):
+            if transports.count > 1 {
+                return L10n.devicePresenceSwitching
+            }
+            if transports.first?.kind == "relay" {
+                return L10n.devicePresenceRelay
+            }
+            return L10n.devicePresenceDirect
+        }
+    }
+
+    static func presenceAccessibilityText(for state: DeviceStore.PresenceState) -> String {
+        switch state {
+        case .unknown:
+            return L10n.devicePresenceUnknownAccessibility
+        case .disconnected:
+            return L10n.devicePresenceDisconnectedAccessibility
+        case .connected(let transports):
+            let names = transports.map { transport in
+                transport.kind == "relay" ? L10n.devicePresenceRelay : L10n.devicePresenceDirect
+            }
+            return L10n.devicePresenceConnectedAccessibility + ": " + names.joined(separator: " / ")
+        }
     }
 
     private func isDeepSeekWeb(_ agent: BackendAgentStatus) -> Bool {
@@ -552,6 +689,12 @@ struct WorkspaceView: View {
 
     /// 行状态文本：dsh / OpenCode 行走各自的本地覆盖，其余走全局映射。
     private func rowStatusText(for agent: BackendAgentStatus) -> String {
+        if !agent.isActive {
+            return L10n.workspaceAgentNotConnected
+        }
+        if !isServiceRunning {
+            return L10n.workspaceServiceStopped
+        }
         if isDeepSeekWeb(agent) {
             return Self.deepSeekRowStatusText(agent.status)
         }
@@ -650,12 +793,10 @@ struct WorkspaceView: View {
     }
 
     private func agentRow(for agent: BackendAgentStatus) -> some View {
-        HStack(spacing: 0) {
+        HStack(alignment: .center, spacing: 16) {
             AgentBrandMark(kind: agent.kind)
-                .padding(.leading, 13)
-            Spacer().frame(width: 27) // 13 + 28 + 27 = 68px. 起点完全锁定在 68px (x≈200)！
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 8) {
                     Text(agent.displayName)
                         .font(.system(size: 17, weight: .semibold))
@@ -665,34 +806,28 @@ struct WorkspaceView: View {
                             .foregroundStyle(.secondary)
                     }
                     versionPill(for: agent)
-                    if let guidance = agent.installGuidance,
-                       agent.status == "not_detected" || agent.status == "not_configured" {
-                        if let recipe = guidance.recipe {
-                            Text(recipe.display)
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                                .help(recipe.display)
-                            Button {
-                                copyInstallRecipe(recipe, for: agent)
-                            } label: {
-                                Image(systemName: copiedInstallRecipeAgentID == agent.id ? "checkmark" : "doc.on.doc")
-                                    .font(.system(size: 10, weight: .semibold))
-                            }
-                            .buttonStyle(.plain)
+                    if agent.installation?.state == "missing" {
+                        Text(L10n.workspaceAgentMissing)
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(.secondary)
-                            .help(copiedInstallRecipeAgentID == agent.id ? L10n.versionCopied : L10n.versionCopyCommand)
-                        } else if let reason = guidance.reason, !reason.isEmpty {
-                            Text(reason)
-                                .font(.system(size: 10))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .help(reason)
-                        }
+                        installGuidanceControls(for: agent)
                     }
                 }
-                .frame(width: 403, alignment: .leading)
+
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(agentStatusColor(for: agent))
+                        .frame(width: 7, height: 7)
+                    Text(rowStatusText(for: agent))
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(agentStatusColor(for: agent).opacity(0.9))
+                    if !agent.isObservationCurrent {
+                        Text(L10n.workspaceObservationStale)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 if agent.kind.lowercased() == "codex-web", runtimeManager.codexDaemonConfigChanged {
                     Text(L10n.codexConfigChangedHint)
                         .font(.system(size: 11))
@@ -711,16 +846,7 @@ struct WorkspaceView: View {
                     openCodeSeatHint(for: agent)
                 }
             }
-
-            HStack(spacing: 12) {
-                Image(systemName: agent.isAvailable ? "checkmark.circle" : "exclamationmark.circle")
-                    .font(.system(size: 23, weight: .light))
-                    .frame(width: 23, height: 23)
-                Text(rowStatusText(for: agent))
-                    .font(.system(size: 16, weight: .semibold))
-            }
-            .foregroundStyle(agent.isAvailable ? Color.green : Color.orange)
-            .frame(width: 200, alignment: .leading)
+            .frame(minWidth: 320, alignment: .leading)
 
             Spacer()
 
@@ -753,8 +879,7 @@ struct WorkspaceView: View {
             }
 
             if agent.kind.lowercased() == "grokbuild" {
-                grokLeaderToggle(for: agent)
-                    .frame(width: 172, height: 32)
+                grokLeaderDisclosure(for: agent)
             }
 
             if isDeepSeekWeb(agent) {
@@ -774,16 +899,91 @@ struct WorkspaceView: View {
                 .disabled(agent.isRefreshing)
                 .frame(width: 56, height: 32)
             }
+
+            agentConnectionToggle(for: agent)
+                .frame(width: 74, height: 32)
         }
-        .frame(height: 52)
-        .padding(.trailing, 16)
-        .offset(y: -3) // 整体上移 3px
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.white.opacity(0.15))
-                .frame(height: 0.5)
-                .offset(y: -3) // 分割线也跟随上移 3px
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .frame(minHeight: 64)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.04))
         }
+        .anchorPreference(
+            key: WorkspaceTopologyAnchorKey.self,
+            value: .bounds
+        ) {
+            ["agent:\(agent.id)": $0]
+        }
+    }
+
+    private func agentStatusColor(for agent: BackendAgentStatus) -> Color {
+        if !agent.isActive {
+            return .secondary
+        }
+        return agent.isAvailable ? .green : .orange
+    }
+
+    @ViewBuilder
+    private func installGuidanceControls(for agent: BackendAgentStatus) -> some View {
+        if let guidance = agent.installGuidance {
+            if let recipe = guidance.recipe {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Text(recipe.display)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .help(recipe.display)
+                }
+                .frame(maxWidth: 420)
+
+                Button {
+                    copyInstallRecipe(recipe, for: agent)
+                } label: {
+                    Image(systemName: copiedInstallRecipeAgentID == agent.id ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help(copiedInstallRecipeAgentID == agent.id ? L10n.versionCopied : L10n.versionCopyCommand)
+                .accessibilityLabel(L10n.versionCopyCommand)
+            } else {
+                if let reason = guidance.reason, !reason.isEmpty {
+                    Text(reason)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .help(reason)
+                }
+                Button(L10n.workspaceOpenInstallGuide) {
+                    if let url = URL(string: guidance.documentationUrl) {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 11))
+                .help(guidance.documentationUrl)
+            }
+        }
+    }
+
+    private func agentConnectionToggle(for agent: BackendAgentStatus) -> some View {
+        let explicitSelection = backendViewModel.selectionRevision != nil
+        let isOn = explicitSelection
+            ? backendViewModel.requestedDrivers.contains(agent.id)
+            : backendViewModel.activeDrivers.contains(agent.id)
+        let canInstallOrRun = agent.installation?.state == "installed" || agent.installation?.state == "not_required"
+        return Toggle(L10n.workspaceAgentConnect, isOn: Binding(
+            get: { isOn },
+            set: { _ in }
+        ))
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .labelsHidden()
+            .disabled(!explicitSelection || !canInstallOrRun)
+            .help(explicitSelection ? L10n.workspaceAgentConnectHelp : L10n.workspaceAgentConnectDeferred)
+            .accessibilityLabel(String(format: L10n.workspaceAgentConnectFormat, agent.displayName))
     }
 
     @ViewBuilder
@@ -1133,6 +1333,25 @@ struct WorkspaceView: View {
         )
     }
 
+    private func grokLeaderDisclosure(for agent: BackendAgentStatus) -> some View {
+        Button {
+            isShowingGrokLeaderDetail = true
+        } label: {
+            Label(L10n.grokLeaderMode, systemImage: "chevron.right")
+                .font(.system(size: 12, weight: .medium))
+        }
+        .buttonStyle(.borderless)
+        .help(L10n.grokLeaderMode)
+        .popover(isPresented: $isShowingGrokLeaderDetail) {
+            VStack(alignment: .leading, spacing: 12) {
+                grokLeaderToggle(for: agent)
+                grokLeaderHint(for: agent)
+            }
+            .padding(16)
+            .frame(width: 360, alignment: .leading)
+        }
+    }
+
     /// 行内 Toggle（槽位与 codex-web 行内按钮对齐；F1/F2/F3 禁用）。
     private func grokLeaderToggle(for agent: BackendAgentStatus) -> some View {
         Toggle(L10n.grokLeaderMode, isOn: Binding(
@@ -1234,52 +1453,24 @@ struct WorkspaceView: View {
         return details.joined(separator: " · ")
     }
 
-    // MARK: - 派生状态
-
-    private func workspaceSectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.title3.weight(.semibold))
-    }
-
-    /// 健康结论外观（文字+状态点共同表达，不单靠颜色）。
-    private var conclusionAppearance: (icon: String, color: Color) {
-        switch viewModel.status {
-        case .ready: return ("checkmark.circle", .green)
-        case .readyNoAgents: return ("exclamationmark.circle", .orange)
-        case .starting: return ("hourglass", .orange)
-        case .stopped, .idle: return ("stop.circle", .secondary)
-        case .crashed: return ("xmark.circle.fill", .red)
-        case .sleeping: return ("moon.fill", .blue)
-        }
-    }
-
-    private var conclusionTitle: String {
-        switch viewModel.status {
-        case .ready: return L10n.workspaceCanConnect
-        case .readyNoAgents: return L10n.workspaceOneStepAway
-        case .starting: return L10n.overviewStarting
-        case .stopped, .idle: return L10n.workspacePausedTitle
-        case .crashed: return L10n.overviewStartFailed
-        case .sleeping: return L10n.overviewSleeping
-        }
-    }
-
-    private var conclusionSubtitle: String {
-        switch viewModel.status {
-        case .ready: return L10n.workspaceReadySubtitle
-        case .readyNoAgents: return L10n.workspaceNoToolsSubtitle
-        case .stopped, .idle: return L10n.workspacePausedSubtitle
-        case .crashed: return viewModel.lastError.flatMap { $0.isEmpty ? nil : $0 } ?? L10n.workspacePausedSubtitle
-        default: return L10n.workspaceReadySubtitle
-        }
-    }
-
     private var relaySummary: String {
+        if backendViewModel.isWorkspaceObservationCurrent,
+           let relay = backendViewModel.workspaceRelay {
+            if !relay.enabled {
+                return L10n.workspaceRelayDisabled
+            }
+            if !relay.configured {
+                return L10n.workspaceRelayNotConfigured
+            }
+            return relay.connected
+                ? L10n.workspaceRelayConnected
+                : L10n.workspaceRelayNotConnected
+        }
         switch viewModel.relayConfigured {
         case true:
-            return OfficialRelayConfiguration.isUsingCustomEndpoint
-                ? L10n.overviewCustomRelayConfigured
-                : L10n.workspaceSecureRelayOn
+            return isServiceRunning
+                ? L10n.workspaceRelayStatusUnknown
+                : L10n.workspaceRelayUnavailableWhileStopped
         case false: return L10n.workspaceRelayOff
         case nil: return L10n.overviewRelayUnavailable
         }
@@ -1294,6 +1485,13 @@ struct WorkspaceView: View {
     }
 
     private var relayColor: Color {
+        if backendViewModel.isWorkspaceObservationCurrent,
+           let relay = backendViewModel.workspaceRelay {
+            if !relay.enabled || !relay.configured {
+                return .secondary
+            }
+            return relay.connected ? .green : .orange
+        }
         switch viewModel.relayConfigured {
         case true: return .green
         case false: return .secondary
@@ -1301,6 +1499,64 @@ struct WorkspaceView: View {
         }
     }
 
+}
+
+private struct WorkspaceTopologyAnchorKey: PreferenceKey {
+    static var defaultValue: [String: Anchor<CGRect>] = [:]
+
+    static func reduce(
+        value: inout [String: Anchor<CGRect>],
+        nextValue: () -> [String: Anchor<CGRect>]
+    ) {
+        value.merge(nextValue()) { _, current in current }
+    }
+}
+
+private extension CGPoint {
+    static func bottomCenter(of rect: CGRect) -> CGPoint {
+        CGPoint(x: rect.midX, y: rect.maxY)
+    }
+
+    static func topCenter(of rect: CGRect) -> CGPoint {
+        CGPoint(x: rect.midX, y: rect.minY)
+    }
+
+    static func trailingCenter(of rect: CGRect) -> CGPoint {
+        CGPoint(x: rect.maxX, y: rect.midY)
+    }
+}
+
+private struct PresenceDotView: View {
+    let state: DeviceStore.PresenceState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isPulsing = false
+
+    private var isConnected: Bool {
+        if case .connected = state { return true }
+        return false
+    }
+
+    var body: some View {
+        ZStack {
+            if isConnected {
+                Circle()
+                    .stroke(Color.green.opacity(isPulsing ? 0.08 : 0.28), lineWidth: 3)
+                    .frame(width: 13, height: 13)
+                    .scaleEffect(isPulsing ? 1.32 : 0.92)
+            }
+            Circle()
+                .fill(isConnected ? Color.green : Color.secondary.opacity(0.65))
+                .frame(width: 8, height: 8)
+        }
+        .frame(width: 15, height: 15)
+        .accessibilityHidden(true)
+        .onAppear {
+            guard isConnected && !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) {
+                isPulsing = true
+            }
+        }
+    }
 }
 
 /// 运行时控制保持为次级操作：有明确轮廓与图标，但不与蓝色配对主操作竞争。
@@ -1389,18 +1645,8 @@ private struct AgentBrandMark: View {
     }
 }
 
-private extension BridgeStatus {
-    /// 是否处于可连接状态（用于判断首次使用引导是否显示）。
-    var isConnectable: Bool {
-        switch self {
-        case .ready, .readyNoAgents: return true
-        default: return false
-        }
-    }
-}
-
 /// 工作站主操作：静态蓝底白字，不做扫光/呼吸（持续动画长期占用 CPU）；悬停时轻微放大。
-/// 首次使用（无设备）与常规头部共用，减少视觉层级干扰。
+/// 放在「已授权设备」区，保持原有蓝色主按钮形态。
 private struct PairDeviceButton: View {
     let title: String
     let action: () -> Void
@@ -1439,36 +1685,6 @@ private struct PairDeviceButton: View {
                 isHovering = hovering
             }
         }
-        .accessibilityHint(L10n.pairNewDevice)
-    }
-}
-
-private struct RevokeButton: View {
-    let action: () -> Void
-    @State private var isHovering = false
-
-    var body: some View {
-        Button(action: action) {
-            Text(L10n.current == .zhHans ? "撤销授权" : "Revoke")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Color(red: 0.92, green: 0.35, blue: 0.35))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color(red: 0.92, green: 0.35, blue: 0.35).opacity(0.10))
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color(red: 0.92, green: 0.35, blue: 0.35).opacity(0.25), lineWidth: 0.7)
-                }
-        }
-        .buttonStyle(.plain)
-        .scaleEffect(isHovering ? 1.02 : 1)
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.16)) {
-                isHovering = hovering
-            }
-        }
+        .accessibilityHint(L10n.addNewDevice)
     }
 }
