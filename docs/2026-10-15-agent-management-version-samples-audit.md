@@ -2,7 +2,7 @@
 
 日期：2026-10-15（Asia/Taipei）。范围：主方案 §7 的版本解析内容形状；不是整个方案的独立评审，不宣称实现或升级成功。
 
-主方案：[设备—服务—Agent 拓扑与状态管理](2026-10-15-agent-management-topology-and-state-machines.md)。样本目录：[assets/2026-10-15-agent-management](assets/2026-10-15-agent-management/version-sample-index.json)。所有样本是本轮实际捕获；索引保存精确UTC时间、请求/命令、SHA-256、HTTP状态或退出码，UTC的10月14日16时对应台北10月15日00时。
+主方案：[设备—服务—Agent 拓扑与状态管理](2026-10-15-agent-management-topology-and-state-machines.md)。样本目录：[assets/2026-10-15-agent-management](assets/2026-10-15-agent-management/version-sample-index.json)。v1 样本为本轮实际捕获；索引保存精确UTC时间、请求/命令、SHA-256、HTTP状态或退出码，UTC的10月14日16时对应台北10月15日00时。**v3 批注（2026-10-15 02:36–02:38 UTC 补采，r1 评审 F1）**：同索引追加四项命令语义观察（`claude-install-help.txt`、`opencode-upgrade-help.stdout/stderr.txt`、`grok-update-help.txt`、`chatgpt-infoplist-observed.txt`），本报告下文"两类外部版本数据"的结论范围不变——这四项是命令／本地读取形状证据，不是新增 latest provider。
 
 ## 结论
 
@@ -30,7 +30,7 @@ Grok完整原始stdout：
 
 本轮证据捕获所在M工作树：`/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline`，`feat/ios-native-message-timeline`，源码基线 `f7dee495ccf722ce66e4cd470bf795ec5332893c`；第一次文档修改前干净，本报告写入时仅本任务新文档/证据未跟踪。完整dirty列表和双仓配对见主方案§2及source-manifest，本报告不形成iOS源码结论。
 
-U-Grok：`/Users/jacklee/Projects/grok-build`，main，`2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8`，干净；源码 `crates/codegen/xai-grok-update/src/auto_update.rs:167` 的 `UpdateStatus`、`:177` 的JSON序列化与 `xai-grok-pager/src/app/cli.rs:89` 的check参数可与样本对照。实测binary是 `grok 1.0.52 (0920c8169e27)`，该短hash在本机checkout不可解析；因此**shape证明来自真实stdout**，不能把新版上游其它功能视作安装版能力。`grok update --help`也实际确认了 `--check` 的“不安装”语义，未执行更新。
+U-Grok：`/Users/jacklee/Projects/grok-build`，main，`2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8`，干净；源码 `crates/codegen/xai-grok-update/src/auto_update.rs:167` 的 `UpdateStatus`、`:177` 的JSON序列化与 `xai-grok-pager/src/app/cli.rs:89` 的check参数可与样本对照。实测binary是 `grok 1.0.52 (0920c8169e27)`，该短hash在本机checkout不可解析；因此**shape证明来自真实stdout**，不能把新版上游其它功能视作安装版能力。`grok update --help` 确认 `--check` 的“不安装”语义（v3 归档：[grok-update-help.txt](assets/2026-10-15-agent-management/grok-update-help.txt)，raw 文本 “Check for updates without installing”），未执行更新；v1 轮此句曾无归档，是 r1 评审 F1 的一项。
 
 npm请求来自公共registry，无账号、无认证头；只读取公开发布元数据。没有捕获token、设备身份或用户会话。版本样本不能证明目标工具已安装、已登录、当前runtime在运行或更新兼容。
 

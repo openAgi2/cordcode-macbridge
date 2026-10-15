@@ -1,8 +1,19 @@
 # CordCode Link：设备—服务—Agent 拓扑与接入状态管理
 
 日期：2026-10-15（Asia/Taipei）
-版本：v2，补充 Magpie 源码复用；方案待独立评审；本次只交付方案与证据，不修改产品代码。
+版本：v3，按 r1 评审意见修订（意见全部处置见下方处置表）；方案待独立评审；本次只交付方案与证据，不修改产品代码。
 目标分支：`feat/ios-native-message-timeline`。
+
+### v3 修订范围（r1 处置表）
+
+评审报告：[review-r1](2026-10-15-agent-management-topology-and-state-machines-review-r1.md)。本轮改动仅覆盖 F1–F4 与必要一致性维护；R/OD/E/S 的 ID 与产品范围不变，无章节增删。
+
+| 意见 | 处置 | 核实证据与改动 | 遗留门 |
+| --- | --- | --- | --- |
+| F1（阻塞）四项命令语义观察无归档样本 | 采纳（补采归档） | 本轮补采四个 raw 输出并追加进 [version-sample-index.json](assets/2026-10-15-agent-management/version-sample-index.json)（索引现 9 条，SHA 逐一重算对账通过）：`claude-install-help.txt`、`opencode-upgrade-help.stdout/stderr.txt`、`grok-update-help.txt`、`chatgpt-infoplist-observed.txt`。补采实测：三项 help 输出与 v2 散文声明逐字一致；ChatGPT bundle 版本已漂移为 `26.1007.71326`/`20398`（v1 数值 `26.1007.30912`/`20156` 无归档且不可复核，App 在两次采集间被官方自动更新）——§2.2 已改以带归档的实测为准。附带形状事实：OpenCode `upgrade --help` 文本全部走 stderr、stdout 为空。改动位置：§2.2、§2.3 末段、§7.1、§7.3、§9.2 E4、§12、伴随审计补引。 | 无 |
+| F2（建议）RuntimeManager `:463` 行号漂移 | 采纳 | 本轮亲核 `applyConfigAndRestart` 在 `:454`（`:463` 附近是 `shutdownForExit`），quiesce/commit 主体在 `:718-768`。§2.3 行改为 `:412,431,454,677,718`。 | 无 |
+| F3（建议）设备连接行 `:381` 未写文件名 | 采纳 | 本轮亲核 `device_conn_registry.go` 全文件 132 行，死连接清理在 `relay_bridge_client.go:380-385`（`pruneDeadDevice`）。§2.3 补写文件名。 | 无 |
+| F4（建议）安装命令 catalog 来源未在 S0 冻结 | 采纳 | 本轮亲核 U-Grok（`2bdd1d6a…`）`README.md:46` 为官方安装脚本 `curl -fsSL https://x.ai/cli/install.sh \| bash`。§10 S0 冻结清单加命令 catalog 来源登记项；§7.3 Grok 命令锚到 README.md:46。 | 无 |
 
 ## 1. 目标与开发入口
 
@@ -56,7 +67,7 @@ v2 变化：将安装与版本查询统一归 Go `toolinventory`，取消拟新�
 
 ### 2.2 真实版本与上游边界
 
-[local-cli-versions.json](assets/2026-10-15-agent-management/local-cli-versions.json) 是本轮有 5s 上限的只读版本探针：Claude `2.1.296`、Grok `1.0.52 (0920c8169e27)`、dsh `0.2.0-rc.2`、OpenCode `1.19.0`。本轮读取 ChatGPT app 的 Info.plist：版本 `26.1007.30912`、build `20156`；它不是 npm Codex CLI 的版本。
+[local-cli-versions.json](assets/2026-10-15-agent-management/local-cli-versions.json) 是 v1 轮有 5s 上限的只读版本探针：Claude `2.1.296`、Grok `1.0.52 (0920c8169e27)`、dsh `0.2.0-rc.2`、OpenCode `1.19.0`（四个 CLI 版本在 v3 补采时逐一复测，均未漂移）。ChatGPT app 的 Info.plist 读取：v3 实测版本 `26.1007.71326`、build `20398`，读取方式、bundle 路径与签名身份（`com.openai.codex`，显示名 ChatGPT）归档于 [chatgpt-infoplist-observed.txt](assets/2026-10-15-agent-management/chatgpt-infoplist-observed.txt)；v2 正文曾写的 `26.1007.30912`/`20156` 出自 v1 轮未归档的观察、已不可复核，且该 App 在两次采集之间被官方自动更新——以带归档的实测为准，生产实现不得硬编码任何时点版本号。它不是 npm Codex CLI 的版本。
 
 上游 checkout 与这些发布二进制**不是同版本证明**。Grok 的 `0920c8169e27` 在本机 checkout 无可解析提交；OpenCode checkout 是新版 dev 树，不能据它为已安装 1.19.0 发明参数。本方案不修改上述产品内部状态机；上游源码用于确认行为边界，版本解析以本轮真实输出为准。若实施扩大到官方协议、升级执行或新 flags，先取得对应目标版本来源和真实样本，不能沿用本表作放行。
 
@@ -70,10 +81,10 @@ v2 变化：将安装与版本查询统一归 Go `toolinventory`，取消拟新�
 | 默认驱动 | M `Services/RuntimeManager.swift:158,206,1644` 的 `RuntimeConfig`、`processArguments`；`App/AppDependencies.swift:126` 未传用户选择 | 从单一选择 store 生成 `drivers`，显式空集也传 argv；不是从安装检测结果生成。 |
 | 驱动即有后台行为 | M `go-bridge/main.go:202,232,274` 的创建、注册与订阅；`agent/codex-remote/agent.go:76` 自动恢复 pairing；`agent/dsh-web/dshweb.go:126` 的后台解析 | 接入关闭必须阻止这些入口执行；不调用 `New` 来仅仅检测安装。 |
 | 零驱动当前失败 | M `go-bridge/main.go:286` 的空 BackendList 退出；`management_api.go:462` 已有 `ready_no_agents` | 区分主动空集与非空请求全部创建失败；前者启动，后者保留真实错误。 |
-| 安全重启 | M `Services/RuntimeManager.swift:412,431,463,677`：generation、`applyConfigAndRestart`、quiesce/commit | 复用现有 admission 与代际校验；补选择应用 outcome，不能新增旁路 `kill` 或自动强制重启。 |
+| 安全重启 | M `Services/RuntimeManager.swift:412,431,454,677,718`：generation、`applyConfigAndRestart`、quiesce/commit | 复用现有 admission 与代际校验；补选择应用 outcome，不能新增旁路 `kill` 或自动强制重启。 |
 | 管理面实际状态 | M `go-bridge/agent_descriptor.go:19,162,211`；`management_api.go:649,661,1265` | 保留 wire readiness，新增本机 workspace snapshot；安装／版本探测与活动 driver readiness 分开。 |
 | 设备授权与撤销 | M `ViewModels/DeviceStore.swift:17,99`；`management_api.go:901,917` | 保留 revoke→强制 reload→警告矩阵；只是更换呈现与文案。 |
-| 当前在线连接 | M `go-bridge/device_conn_registry.go:14,35,67`，direct 在 `server.go:626` 注册，Relay 在 `relay_bridge_client.go:551` 注册；`:381` 清掉死连接 | 扩展同一 registry 的只读 transport snapshot；不新建第二套判活注册表，不用 lastSeenAt 猜在线。 |
+| 当前在线连接 | M `go-bridge/device_conn_registry.go:14,35,67`，direct 在 `server.go:626` 注册，Relay 在 `relay_bridge_client.go:551` 注册；`relay_bridge_client.go:381` 起的 `pruneDeadDevice` 清掉死连接 | 扩展同一 registry 的只读 transport snapshot；不新建第二套判活注册表，不用 lastSeenAt 猜在线。 |
 | 配对链接 | M `WorkspaceView.swift:443` 的 `handleCopyLink`；`ViewModels/PairingViewModel.swift:129` 的 `getOrFetchWebPairingURL` | 保留创建／复用官方 `/web/` 配对 URL；这是邀请入口，**不是恢复这台设备旧 token**。 |
 | Grok Leader | M `Services/GrokLeaderModeManager.swift`、`WorkspaceView.grokLeaderToggle/grokLeaderHint` | “Leader 模式 ›”展开已有专用状态机；接入开关不写 Grok 配置。 |
 | 安装定位 | M `agent/dsh-web/binary.go:44` 的 record→PATH→nvm；`Services/OpenCodeManagedServer.swift:51` 的 `DefaultOpenCodeCLIResolver`；`OpenCodeInstaller.swift:85` 的安装记录；`agent/codex-remote/chatgpt_auth.go:20` 的 app 内嵌路径 | 扩展纯定位 seam；Codex 检测 app/内嵌 CLI，不拿 `command -v codex` 当 Desktop 安装条件。 |
@@ -83,7 +94,7 @@ v2 变化：将安装与版本查询统一归 Go `toolinventory`，取消拟新�
 
 上游核验：U-Codex `codex-rs/app-server-transport/src/transport/remote_control/desired_state.rs:12` 与 `app-server/src/request_processors/remote_control_processor.rs:63` 将愿望态和实际状态分开，官方 disable 会修改其持久配置；CordCode 接入关闭**不调用这个官方 disable**。U-Grok `crates/codegen/xai-grok-update/src/auto_update.rs:167,228`／`auto_update_tests.rs` 与 `xai-grok-pager/src/app/cli.rs:89` 定义只检查更新及 channel/policy；U-OpenCode `packages/cli/src/commands/handlers/upgrade.ts:18`／`test/upgrade.test.ts:19` 按安装方式升级、检查失败不安装；U-DSH `apps/cli/src/bin.ts:27`→`args.ts:146` 与 `tests/args.spec.ts:92` 定义版本入口。
 
-闭源 Claude 的本轮命令证据：`claude install --help` 输出 `install [options] [target]`，target 可为 stable/latest/具体版本。已安装 OpenCode 1.19.0 的 `upgrade --help` 证明 `[target]`、`--method`、`--major`；本方案不传 `--major`。CLI 安装／更新元数据实际来源见 §7 与伴随样本审计，不能以 SDK 类型代替这些证据。
+闭源 Claude 的命令证据已归档（v3 补采，raw＋SHA 见样本索引）：`claude install --help` 输出 `install [options] [target]`，target 可为 stable/latest/具体版本（[claude-install-help.txt](assets/2026-10-15-agent-management/claude-install-help.txt)）。已安装 OpenCode 1.19.0 的 `upgrade --help` 证明 `upgrade [target]`、`--method {curl,npm,pnpm,bun,brew,choco,scoop}`、`--major`；本方案不传 `--major`（[opencode-upgrade-help.stderr.txt](assets/2026-10-15-agent-management/opencode-upgrade-help.stderr.txt)——注意该 help 文本全部走 stderr、stdout 为空，未来任何消费方不得只读 stdout）。Grok `update --help` 的 `--check`「Check for updates without installing」不安装语义同样已归档（[grok-update-help.txt](assets/2026-10-15-agent-management/grok-update-help.txt)，与 U-Grok `cli.rs:89` 对齐）。CLI 安装／更新元数据实际来源见 §7 与伴随样本审计，不能以 SDK 类型代替这些证据。
 
 ### 2.4 产品覆盖底表
 
@@ -302,17 +313,17 @@ web复用 `RemoteWebViewModel.setBackends([], null)`；将 `connectedOnce`、boo
 
 ### 7.1 有证据的版本源
 
-v1 的外部更新源形状只有两类：npm latest 文档的顶层 `version:string`；Grok 已安装 CLI 的 update-check JSON。原始输出、时间、SHA 与请求见 [version-sample-index.json](assets/2026-10-15-agent-management/version-sample-index.json)；核验结论见 [v1 样本审计](2026-10-15-agent-management-version-samples-audit.md)。v2 另增加本地所属 npm package.json 的安装元数据读取，真实全文件样本、name/version 根字段与边界见 [复用调查 §7](2026-10-15-magpie-agent-management-source-reuse.md) 和 [本地样本索引](assets/2026-10-15-agent-management/magpie-reuse-package-sample-index.json)。这是第三类文件格式，并非新增 latest provider。不解析任何外部 transcript、会话事件或嵌套模型列表。
+v1 的外部更新源形状只有两类：npm latest 文档的顶层 `version:string`；Grok 已安装 CLI 的 update-check JSON。v3 另归档四项命令语义观察（`claude install --help`、`opencode upgrade --help`、`grok update --help`、ChatGPT Info.plist 读取）——它们是命令／本地读取形状证据，不是新增 latest provider。全部原始输出、时间、SHA 与请求见 [version-sample-index.json](assets/2026-10-15-agent-management/version-sample-index.json)（9 条，静态对账通过）；核验结论见 [v1 样本审计](2026-10-15-agent-management-version-samples-audit.md)（含 v3 补采批注）。v2 另增加本地所属 npm package.json 的安装元数据读取，真实全文件样本、name/version 根字段与边界见 [复用调查 §7](2026-10-15-magpie-agent-management-source-reuse.md) 和 [本地样本索引](assets/2026-10-15-agent-management/magpie-reuse-package-sample-index.json)。这是第三类文件格式，并非新增 latest provider。不解析任何外部 transcript、会话事件或嵌套模型列表。
 
 | 工具／安装方式 | 版本来源与更新入口 |
 | --- | --- |
 | Claude npm | 同一 npm package latest；`npm install -g @anthropic-ai/claude-code@<target>` 命令说明 |
 | Claude native／brew／来源无法证明 | 当前版本照实显示；不把 npm latest 直接当该渠道目标；打开官方更新说明，版本源标 unsupportedSource，不伪造“已最新” |
 | OpenCode npm/本 App prefix | npm `opencode-ai/latest`；保留实际安装 scope 的带目标版本命令；prefix 不能更新成另一个全局副本 |
-| OpenCode 其他官方方式 | 1.19.0 `upgrade [target]` 的 help 已捕获，但对应 channel latest 尚未取证；当前显示官方更新入口，新增自动 latest provider 必须先完成 E5，不抓 dev checkout 的 package.version 作发布版 |
+| OpenCode 其他官方方式 | 1.19.0 `upgrade [target]` 的 help 已捕获并归档（`opencode-upgrade-help.stderr.txt`，help 走 stderr）；对应 channel latest 尚未取证；当前显示官方更新入口，新增自动 latest provider 必须先完成 E5，不抓 dev checkout 的 package.version 作发布版 |
 | dsh npm/本 App prefix | npm `@deepseek-ai/dsh/latest`，同 scope 带目标版本命令；CLI/App/seat 版本有明确标签，不把 CLI 升级当正在运行的 seat 已升级 |
 | Grok | 已安装 binary 的 `update --check --json`；消费 currentVersion/latestVersion/updateAvailable/channel/installer/error，遵守官方 policy；不自己换 stable/alpha 或忽略 version cap |
-| Codex Desktop | 读取实际 app bundle 版本；显示“由 ChatGPT Desktop 更新”并打开官方应用／更新说明；没有已验证公开版本源，不比较 npm Codex CLI、不抓网页猜版本 |
+| Codex Desktop | 读取实际 app bundle 版本（v3 归档样本：`chatgpt-infoplist-observed.txt`，PlistBuddy 只读、bundle `/Applications/ChatGPT.app`、签名 id `com.openai.codex`）；显示“由 ChatGPT Desktop 更新”并打开官方应用／更新说明；没有已验证公开版本源，不比较 npm Codex CLI、不抓网页猜版本 |
 
 这是明确的 source 支持边界，不是遇到请求失败后改用其他来源的 fallback。source 不支持与网络失败分别显示；同一工具不在官方源失败后偷偷改查另一 registry 或镜像。
 
@@ -338,7 +349,7 @@ Go 单一 `VersionService` 将结果写到本代 observation；Swift 先展示�
 
 ### 7.3 安装交互
 
-未安装行复制官方安装命令／打开官方说明 → 用户执行安装与登录 → 重新检测定位成功 → 行进入已安装，但接入仍 disabled → 用户再开接入。只显示该产品实际支持的命令：Grok 官方安装脚本、Claude 官方 native/已支持 npm、dsh 官方 npm package、OpenCode 官方 `opencode-ai`；不能将示意图的 Claude 命令复制给所有产品。
+未安装行复制官方安装命令／打开官方说明 → 用户执行安装与登录 → 重新检测定位成功 → 行进入已安装，但接入仍 disabled → 用户再开接入。只显示该产品实际支持的命令：Grok 官方安装脚本（锚点 U-Grok `README.md:46`：`curl -fsSL https://x.ai/cli/install.sh | bash`，commit `2bdd1d6a…`）、Claude 官方 native（`claude-install-help.txt` 归档）/已支持 npm、dsh 官方 npm package、OpenCode 官方 `opencode-ai`；不能将示意图的 Claude 命令复制给所有产品。安装／更新命令 catalog 的每条来源锚点在 S0 显式冻结（见 §10）。
 
 既有 dsh/OpenCode 代装／启动 API 和 BackendManagementView 的已授权入口保留；本页不新增代装 CTA。若旧入口在飞，inventory/seat-action 如实显示 installing/starting，不能与本页复制动作混淆。安装成功仍须真实 binary/version 验证，旧安装器的成功标准不放松。
 
@@ -372,7 +383,7 @@ Go 单一 `VersionService` 将结果写到本代 observation；Swift 先展示�
 | E1 | 工作树唯一配对、路径/分支/完整HEAD/所有dirty路径；source-manifest + 本轮两次git核对。反例：main或另一任务族 | 本次 verified；每次实施/构建/安装必须 fresh，身份不符停全部相关动作 |
 | E2 | 5产品声明/装配/消费、空集当前失败、现有registry；§2源码锚点、文件SHA；反例：默认六驱动/历史注册被错当产品 | 源码 verified；S0须亲核漂移；不证明生产运行 |
 | E3 | 新本机 snapshot、零driver ACK JSON和并发规则 | 拟议内部契约，实施后 producer/codec/epoch/stale单测；阻塞S3/S4完成，不声称已有API |
-| E4 | v1 npm三package顶层version与Grok检查JSON；v2本地三package完整package.json根name/version；raw/index/SHA；真实HTTP404与内部字段错误负例，禁止改源 | 已采集；第三类只作安装元数据、不证明执行；边界见v1审计＋复用调查§7，不推广其他API |
+| E4 | v1 npm三package顶层version与Grok检查JSON；v2本地三package完整package.json根name/version；v3四项命令语义观察（claude install／opencode upgrade／grok update 三份 help＋ChatGPT Info.plist 读取）；raw/index/SHA；真实HTTP404与内部字段错误负例，禁止改源 | 已采集（索引9条，SHA对账通过）；package.json只作安装元数据、不证明执行；help/plist 样本证明命令与读取形状，不证明升级成功；边界见v1审计＋复用调查§7，不推广其他API |
 | E5 | 未支持发行源的新latest provider、自动更新、Grok不同输出generation | pending条件门：取得目标版本真实成功/错误输出、channel/方式、官方source/callsite和测试后再改方案评审；仅挡新增provider/自动执行，不卡本版准确指引 |
 | E6 | disabled零后台、空集初连/重连、撤销、direct与Relay观测 | 实施后完成门：定向单测＋部署后真实日志/进程＋owner矩阵。未取证不得宣称生产路径完成 |
 
@@ -382,7 +393,7 @@ Gate A＝E1/E2与本切片使用的外部证据满足；Gate B＝产品集合与
 
 | S | 行为结果、组件与复用 | 前置／依赖 | 最小验证与完成证据 | 失败处理 |
 | --- | --- | --- | --- | --- |
-| S0 来源/契约冻结 | 重新记录M/I+实际触碰G/上游；确认5项装配、空ACK两消费点、旧专用动作；冻结snapshot/rescan typed schema、SemVer固定依赖与官方契约 | 方案独立通过；E1/E2 fresh；不能碰I既有274项dirty文档 | 关键SHA/锚点、产品集合契约、MIT移植清单；无build | 来源漂移先更新方案；重叠改动停受影响文件，不stash/覆盖 |
+| S0 来源/契约冻结 | 重新记录M/I+实际触碰G/上游；确认5项装配、空ACK两消费点、旧专用动作；冻结snapshot/rescan typed schema、SemVer固定依赖与官方契约；**安装／更新命令 catalog 逐条登记官方来源锚点**（Grok=U-Grok `README.md:46` 安装脚本；Claude=`claude-install-help.txt` 归档；OpenCode/dsh=npm package 样本＋`opencode-upgrade-help.stderr.txt`；Codex Desktop=官方下载链接，无命令行） | 方案独立通过；E1/E2 fresh；不能碰I既有274项dirty文档 | 关键SHA/锚点、产品集合契约、MIT移植清单、命令catalog来源登记表；无build | 来源漂移先更新方案；命令无官方锚点的入口只给官方文档链接，不凭印象写命令文本；重叠改动停受影响文件，不stash/覆盖 |
 | S1 选择与纯安装观察 | 新SelectionStore/catalog；空选择迁移；Go toolinventory最小classifier/metadata/runner，OpenCode实际binary传递；借G定向用例 | S0；OD2/范围就绪 | 迁移/损坏/写失败/record优先/残留配置/真实package身份/Node keg与Agent formula/同prefix/npm缺失/版本timeout/唯一reap；关闭时无构造 | 读写/定位错误显式；未知scope不给假命令，不默认全开 |
 | S2 应用选择闭环 | RuntimeConfig drivers+revision；安全重启outcome；SwiftOpenCode门；后台启动审计 | S1；原admission机制 | 快速toggle、忙碌defer、lease过期、response-loss、旧PID拒绝、新集合确认；禁用无restore/SSE/scan | 保存意愿但失败未应用；旧活进程仍如实运行；无forcekill |
 | S3 零Agent跨仓 | Main允许显式空；成功ACK []；I初连/重连与App级noAgents/旧target停用；web connected/noAgents与strictavailable；canonical+mirror | S1/S2；不依赖MacUI完成 | Go序列化/空注册集测试；I有效空/missing/unknownkind/旧pump/重新启用；web空bootstrap/softreconnect/无RPC/不可用原因/已保存内容不删 | 非空全创建失败保留fatal；协议不合法保持错误 |
@@ -465,6 +476,15 @@ S3触碰I客户端后按匹配工作树定向build/unit；可用physical iPhone�
 
 ## 12. 本次交付与已知限制
 
-方案已完成 CordCode／上游调查、v1 外部版本样本核验与 v2 Magpie 源码复用调查；产品代码、跨仓协议修改、单元测试、构建、部署与人工验收均未执行。I的已有274项dirty文档、G的7项未跟踪文件保持原样。图中目标版本/设备在线组合仅示意，未加入生产逻辑。v2 处置登记与源文件 SHA 见 Magpie 复用报告／manifest；自检不等于独立评审通过。
+方案已完成 CordCode／上游调查、v1 外部版本样本核验、v2 Magpie 源码复用调查与 v3 按 r1 评审的四项命令语义样本补采归档；产品代码、跨仓协议修改、单元测试、构建、部署与人工验收均未执行。I的已有274项dirty文档、G的7项未跟踪文件保持原样。图中目标版本/设备在线组合仅示意，未加入生产逻辑。v2 处置登记与源文件 SHA 见 Magpie 复用报告／manifest；v3 修订范围与 r1 意见处置见开头处置表；自检不等于独立评审通过。
 
 开发就绪的边界是本文规定的5产品、显式接入、两类已采集版本源、官方更新指引及合法空连接。未知发行源自动检查／自动升级与未验证目标版本的新协议受E5阻断；它们不是本版完成条件。独立评审入口为本文，外部内容形状复核入口为伴随审计与raw样本索引。
+
+```
+plan_path: /Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/docs/2026-10-15-agent-management-topology-and-state-machines.md
+plan_version: v3
+plan_sha256: 0df8728c712e8ae8a4326c0ff5fd7ce5156b852a637fe3306b097e4504cc6a76（本行写入前的文件内容哈希；SHA 行本身造成自引用漂移，评审复算以实际文件 shasum -a 256 为准）
+scope: full
+open_gates: []
+brief_attached: true
+```

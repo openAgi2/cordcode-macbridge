@@ -58,5 +58,75 @@
     "capturedAt": "2026-10-14T16:47:17.957355+00:00",
     "sha256": "57aefd8046010e86f09187427e21bad3376b25a2f9a46ce20452ac7d5448298d",
     "purpose": "真实 registry HTTP 404 负例；不存在包，不是模拟服务器"
+  },
+  {
+    "file": "claude-install-help.txt",
+    "command": [
+      "claude",
+      "install",
+      "--help"
+    ],
+    "runtimeVersion": "2.1.296 (Claude Code)",
+    "exitCode": 0,
+    "stderrBytes": 0,
+    "capturedAt": "2026-10-15T02:36:41.238971+00:00",
+    "sha256": "4dc358a42314bf21801781a0fe1d856ba5196a7aa59d48de63fd8e6632dd9505",
+    "purpose": "闭源 Claude 唯一可行证据路径：native 安装子命令形状 install [options] [target]（target=stable/latest/具体版本）＋ --force",
+    "observedUsage": "install [options] [target]"
+  },
+  {
+    "file": "opencode-upgrade-help.stdout.txt",
+    "stderrFile": "opencode-upgrade-help.stderr.txt",
+    "stderrSha256": "0f0348cff4cd2a6d8154ee85c7414fd59fb71ecd10a351167192ec62312a963c",
+    "command": [
+      "/opt/homebrew/bin/opencode",
+      "upgrade",
+      "--help"
+    ],
+    "runtimeVersion": "1.19.0",
+    "exitCode": 0,
+    "stdoutBytes": 0,
+    "capturedAt": "2026-10-15T02:36:41.238971+00:00",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "purpose": "已安装 1.19.0 的 upgrade 形状：upgrade [target]、-m/--method {curl,npm,pnpm,bun,brew,choco,scoop}、--major；help 文本全部走 stderr（stdout 为空），消费方不得只读 stdout",
+    "observedUsage": "opencode upgrade [target]"
+  },
+  {
+    "file": "grok-update-help.txt",
+    "command": [
+      "grok",
+      "update",
+      "--help"
+    ],
+    "runtimeVersion": "grok 1.0.52 (0920c8169e27) [stable]",
+    "exitCode": 0,
+    "stderrBytes": 0,
+    "capturedAt": "2026-10-15T02:36:41.238971+00:00",
+    "sha256": "7bb1d51de2040e0db7adf34389e7f04d71ebbd278002e583fbcaca6e9084f38c",
+    "purpose": "grok update --check 官方语义『Check for updates without installing』＋ --json/--force-reinstall/--version/--alpha/--stable；与 U-Grok cli.rs Update 子命令对齐",
+    "observedCheckSemantics": "Check for updates without installing"
+  },
+  {
+    "file": "chatgpt-infoplist-observed.txt",
+    "command": [
+      "/usr/libexec/PlistBuddy",
+      "-c",
+      "Print :CFBundleIdentifier",
+      "-c",
+      "Print :CFBundleDisplayName",
+      "-c",
+      "Print :CFBundleShortVersionString",
+      "-c",
+      "Print :CFBundleVersion",
+      "/Applications/ChatGPT.app/Contents/Info.plist"
+    ],
+    "bundlePath": "/Applications/ChatGPT.app",
+    "readMethod": "PlistBuddy Print（只读，不启动 App）",
+    "identityCheck": "codesign -dv 确认 Identifier=com.openai.codex、显示名 ChatGPT、OpenAI 官方签名 app bundle；仓库内嵌 CLI 候选路径见 agent/codex-remote/chatgpt_auth.go:20-24",
+    "exitCode": 0,
+    "capturedAt": "2026-10-15T02:37:58.304110+00:00",
+    "sha256": "c9fe28cf55356d96248f08e9a4f84904414b62d6586d7ce502b113546bcd2b2e",
+    "purpose": "ChatGPT Desktop 本地 bundle 版本读取证据：26.1007.71326 / build 20398",
+    "note": "v1 方案正文引用的 26.1007.30912 / build 20156 未归档且已无法复核；本次补采实测为 26.1007.71326 / 20398，证明该 App 在 v1 采集与 v3 补采之间被官方自动更新。方案 §2.2 已修订为以本条目为准；生产实现不得硬编码任何时点版本号"
   }
 ]
