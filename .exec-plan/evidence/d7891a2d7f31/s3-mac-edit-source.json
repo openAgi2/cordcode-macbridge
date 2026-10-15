@@ -1,0 +1,10 @@
+{
+  "capturedAt": "2026-10-15T05:35:10.983894+00:00",
+  "repository": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+  "branch": "feat/ios-native-message-timeline",
+  "commit": "4c589ac8147573ab2766b5292efe92fc05643b8d",
+  "status": [],
+  "purpose": "S3 Mac producer first edit gate",
+  "scope": "MacBridge Go producer only; no iOS/web changes",
+  "expectedWireBehavior": "successful empty hello_ack contains backends: []"
+}

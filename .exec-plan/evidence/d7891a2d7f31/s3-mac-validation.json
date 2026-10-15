@@ -1,0 +1,13 @@
+{
+  "checkedAt": "2026-10-15T05:36:57.749383+00:00",
+  "scope": "Mac producer only; iOS/web intentionally untouched per owner",
+  "go": {
+    "command": "GOSUMDB=sum.golang.org go test ./go-bridge -run TestHandleHello\\\\|TestBridgeV1Schema\\\\|TestLocalCandidatesContract -count=1",
+    "result": "passed",
+    "assertions": [
+      "successful HandleHello with empty agents encodes backends:[]",
+      "protocol error ACK does not gain backends field",
+      "existing hello/schema/local-candidate contracts decode"
+    ]
+  }
+}

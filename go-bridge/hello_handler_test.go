@@ -136,6 +136,34 @@ func TestHandleHello_ContainsAgentDescriptors(t *testing.T) {
 	if ack.Backends == nil {
 		t.Error("Backends 不应为 nil（应为空列表）")
 	}
+
+	encoded, err := json.Marshal(ack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]interface{}
+	if err := json.Unmarshal(encoded, &wire); err != nil {
+		t.Fatal(err)
+	}
+	backends, ok := wire["backends"].([]interface{})
+	if !ok || len(backends) != 0 {
+		t.Fatalf("successful empty ACK must encode backends:[], got %#v", wire["backends"])
+	}
+
+	unsupported := *hello
+	unsupported.Protocol.Version = BridgeProtocolVersion + 1
+	errorACK := HandleHello(&unsupported, nil, "bridge-1", "My Bridge", "0.1.0", "ws://localhost:8777", "", nil, "exec", nil, nil)
+	encodedError, err := json.Marshal(errorACK)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wireError map[string]interface{}
+	if err := json.Unmarshal(encodedError, &wireError); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := wireError["backends"]; exists {
+		t.Fatalf("error ACK must not gain an empty backend list: %s", encodedError)
+	}
 }
 
 func TestHandleHelloCarriesCodexRemoteStructuredReadiness(t *testing.T) {

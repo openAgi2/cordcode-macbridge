@@ -1,6 +1,7 @@
 package gobridge
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -54,6 +55,40 @@ type HelloAckMessage struct {
 	// 仅当客户端声明 capability 且 store 接线/健康时下发；misconfigured 时只带
 	// schemaVersion+status，不带公钥。未声明 capability 的旧客户端收不到该字段。
 	WebPush *WebPushHelloProfile `json:"webPush,omitempty"`
+}
+
+// helloAckWithoutBackends preserves the original omission behavior for error/recovery
+// frames. A successful HandleHello frame always has a non-nil descriptor slice.
+type helloAckWithoutBackends struct {
+	Type            string                   `json:"type"`
+	Ok              bool                     `json:"ok"`
+	Bridge          *HelloBridgeInfo         `json:"bridge,omitempty"`
+	Capabilities    map[string]bool          `json:"capabilities,omitempty"`
+	BridgeStatus    string                   `json:"bridgeStatus,omitempty"`
+	RunningSessions []BridgeV1RunningSession `json:"runningSessions,omitempty"`
+	Error           *WireError               `json:"error,omitempty"`
+	BridgeEpoch     string                   `json:"bridgeEpoch,omitempty"`
+	Recovery        *BridgeRecoveryPlan      `json:"recovery,omitempty"`
+	GrantedScopes   []string                 `json:"grantedScopes,omitempty"`
+	WebPush         *WebPushHelloProfile     `json:"webPush,omitempty"`
+}
+
+type helloAckWithBackends struct {
+	helloAckWithoutBackends
+	Backends []AgentProviderDescriptor `json:"backends"`
+}
+
+func (m HelloAckMessage) MarshalJSON() ([]byte, error) {
+	base := helloAckWithoutBackends{
+		Type: m.Type, Ok: m.Ok, Bridge: m.Bridge, Capabilities: m.Capabilities,
+		BridgeStatus: m.BridgeStatus, RunningSessions: m.RunningSessions, Error: m.Error,
+		BridgeEpoch: m.BridgeEpoch, Recovery: m.Recovery, GrantedScopes: m.GrantedScopes,
+		WebPush: m.WebPush,
+	}
+	if m.Backends == nil {
+		return json.Marshal(base)
+	}
+	return json.Marshal(helloAckWithBackends{helloAckWithoutBackends: base, Backends: m.Backends})
 }
 
 type BridgeAffectedSession struct {
