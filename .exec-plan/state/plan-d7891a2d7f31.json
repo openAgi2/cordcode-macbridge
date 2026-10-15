@@ -1,0 +1,595 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+  "plan_file": "docs/2026-10-15-agent-management-topology-and-state-machines.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-d7891a2d7f31.json",
+    "legacy_path": ".claude/exec-plans/plan-d7891a2d7f31.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "none (codex)",
+    "invocation_policy": "natural-language start for one explicit approved plan",
+    "persistence_rule": "persist-on-every-status-transition"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-10-15-agent-management-topology-and-state-machines完成情况.md",
+    "completion_report_status": "missing",
+    "last_generated_at": null,
+    "based_on_queue_hash": null
+  },
+  "updated_at": "2026-10-15T03:13:29.727Z",
+  "approved_plan_sha256": "e49e2d5d00e6216bd70d0127c02949351be96474aef1c8b6cd0b14f91d74121a",
+  "scope_gates": {
+    "E5": "blocked extensions only: unverified latest sources and all automatic update execution",
+    "E3": "implementation completion evidence; not startup prerequisite",
+    "E6": "deployment/owner completion evidence; not startup prerequisite"
+  },
+  "todos": [
+    {
+      "id": "s0-impl",
+      "title": "冻结开工来源与内部契约 / impl",
+      "description": "Fresh M/I+G/U manifest; compare reviewed plan SHA, paired worktree drift and no overlapping source changes; snapshot/rescan schema, command source catalog, pinned strict SemVer dependency.",
+      "phase": "s0",
+      "kind": "impl",
+      "status": "in_progress",
+      "depends_on": [],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S0",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s0-tests",
+      "title": "冻结开工来源与内部契约 / tests",
+      "description": "Fresh M/I+G/U manifest; compare reviewed plan SHA, paired worktree drift and no overlapping source changes; snapshot/rescan schema, command source catalog, pinned strict SemVer dependency.",
+      "phase": "s0",
+      "kind": "tests",
+      "status": "pending",
+      "depends_on": [
+        "s0-impl"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S0",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s0-regression",
+      "title": "冻结开工来源与内部契约 / regression",
+      "description": "Fresh M/I+G/U manifest; compare reviewed plan SHA, paired worktree drift and no overlapping source changes; snapshot/rescan schema, command source catalog, pinned strict SemVer dependency. Require integration evidence appropriate to this slice; final UX matrix remains s7-regression; do not block coding on post-implementation evidence.",
+      "phase": "s0",
+      "kind": "regression",
+      "status": "pending",
+      "depends_on": [
+        "s0-tests"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S0",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s1-impl",
+      "title": "选择持久化与纯安装观察 / impl",
+      "description": "Swift AgentSelectionStore and product catalog; empty initial opt-in, atomic validated persistence; Go toolinventory origin/metadata/probe; exact dsh/ChatGPT/OpenCode owning resolver paths; Magpie attribution.",
+      "phase": "s1",
+      "kind": "impl",
+      "status": "pending",
+      "depends_on": [
+        "s0-regression"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s1-tests",
+      "title": "选择持久化与纯安装观察 / tests",
+      "description": "Swift AgentSelectionStore and product catalog; empty initial opt-in, atomic validated persistence; Go toolinventory origin/metadata/probe; exact dsh/ChatGPT/OpenCode owning resolver paths; Magpie attribution.",
+      "phase": "s1",
+      "kind": "tests",
+      "status": "pending",
+      "depends_on": [
+        "s1-impl"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s1-regression",
+      "title": "选择持久化与纯安装观察 / regression",
+      "description": "Swift AgentSelectionStore and product catalog; empty initial opt-in, atomic validated persistence; Go toolinventory origin/metadata/probe; exact dsh/ChatGPT/OpenCode owning resolver paths; Magpie attribution. Require integration evidence appropriate to this slice; final UX matrix remains s7-regression; do not block coding on post-implementation evidence.",
+      "phase": "s1",
+      "kind": "regression",
+      "status": "pending",
+      "depends_on": [
+        "s1-tests"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s2-impl",
+      "title": "安全应用接入选择 / impl",
+      "description": "RuntimeConfig drivers+revision; require Management V1 admission, desired/applied/error/deferred states, latest-generation-only restart; gate all disabled driver background and managed OpenCode entrypoints.",
+      "phase": "s2",
+      "kind": "impl",
+      "status": "pending",
+      "depends_on": [
+        "s1-tests"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s2-tests",
+      "title": "安全应用接入选择 / tests",
+      "description": "RuntimeConfig drivers+revision; require Management V1 admission, desired/applied/error/deferred states, latest-generation-only restart; gate all disabled driver background and managed OpenCode entrypoints.",
+      "phase": "s2",
+      "kind": "tests",
+      "status": "pending",
+      "depends_on": [
+        "s2-impl"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s2-regression",
+      "title": "安全应用接入选择 / regression",
+      "description": "RuntimeConfig drivers+revision; require Management V1 admission, desired/applied/error/deferred states, latest-generation-only restart; gate all disabled driver background and managed OpenCode entrypoints. Require integration evidence appropriate to this slice; final UX matrix remains s7-regression; do not block coding on post-implementation evidence.",
+      "phase": "s2",
+      "kind": "regression",
+      "status": "pending",
+      "depends_on": [
+        "s2-tests"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s3-impl",
+      "title": "跨仓合法零Agent连接 / impl",
+      "description": "Explicit empty Go drivers still serves pairing/management/direct/relay; ACK backends []; iOS initial/reconnect+advertisement+App/server selection; web empty/noavailable bootstrap, teardown and guarded methods; canonical protocol and mirror.",
+      "phase": "s3",
+      "kind": "impl",
+      "status": "pending",
+      "depends_on": [
+        "s2-tests"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s3-tests",
+      "title": "跨仓合法零Agent连接 / tests",
+      "description": "Explicit empty Go drivers still serves pairing/management/direct/relay; ACK backends []; iOS initial/reconnect+advertisement+App/server selection; web empty/noavailable bootstrap, teardown and guarded methods; canonical protocol and mirror.",
+      "phase": "s3",
+      "kind": "tests",
+      "status": "pending",
+      "depends_on": [
+        "s3-impl"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s3-regression",
+      "title": "跨仓合法零Agent连接 / regression",
+      "description": "Explicit empty Go drivers still serves pairing/management/direct/relay; ACK backends []; iOS initial/reconnect+advertisement+App/server selection; web empty/noavailable bootstrap, teardown and guarded methods; canonical protocol and mirror. Require integration evidence appropriate to this slice; final UX matrix remains s7-regression; do not block coding on post-implementation evidence.",
+      "phase": "s3",
+      "kind": "regression",
+      "status": "pending",
+      "depends_on": [
+        "s3-tests"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s4-impl",
+      "title": "设备与Relay观察快照 / impl",
+      "description": "Existing DeviceConnRegistry per-connection transport metadata and authenticated snapshot; Management workspace+async rescan; Swift identity/generation/stale snapshot store; no extra liveness owner.",
+      "phase": "s4",
+      "kind": "impl",
+      "status": "pending",
+      "depends_on": [
+        "s3-tests"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S4",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s4-tests",
+      "title": "设备与Relay观察快照 / tests",
+      "description": "Existing DeviceConnRegistry per-connection transport metadata and authenticated snapshot; Management workspace+async rescan; Swift identity/generation/stale snapshot store; no extra liveness owner.",
+      "phase": "s4",
+      "kind": "tests",
+      "status": "pending",
+      "depends_on": [
+        "s4-impl"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S4",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s4-regression",
+      "title": "设备与Relay观察快照 / regression",
+      "description": "Existing DeviceConnRegistry per-connection transport metadata and authenticated snapshot; Management workspace+async rescan; Swift identity/generation/stale snapshot store; no extra liveness owner. Require integration evidence appropriate to this slice; final UX matrix remains s7-regression; do not block coding on post-implementation evidence.",
+      "phase": "s4",
+      "kind": "regression",
+      "status": "pending",
+      "depends_on": [
+        "s4-tests"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S4",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s5-impl",
+      "title": "已取证版本与命令指引 / impl",
+      "description": "Go typed version service for captured npm/Grok provider shapes only; strict SemVer, origin/scope-preserving quoted recipes, bounded coalescing/fingerprint/errors; Swift popover/copy, no execution or unverified providers.",
+      "phase": "s5",
+      "kind": "impl",
+      "status": "pending",
+      "depends_on": [
+        "s4-tests"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s5-tests",
+      "title": "已取证版本与命令指引 / tests",
+      "description": "Go typed version service for captured npm/Grok provider shapes only; strict SemVer, origin/scope-preserving quoted recipes, bounded coalescing/fingerprint/errors; Swift popover/copy, no execution or unverified providers.",
+      "phase": "s5",
+      "kind": "tests",
+      "status": "pending",
+      "depends_on": [
+        "s5-impl"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s5-regression",
+      "title": "已取证版本与命令指引 / regression",
+      "description": "Go typed version service for captured npm/Grok provider shapes only; strict SemVer, origin/scope-preserving quoted recipes, bounded coalescing/fingerprint/errors; Swift popover/copy, no execution or unverified providers. Require integration evidence appropriate to this slice; final UX matrix remains s7-regression; do not block coding on post-implementation evidence.",
+      "phase": "s5",
+      "kind": "regression",
+      "status": "pending",
+      "depends_on": [
+        "s5-tests"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s6-impl",
+      "title": "三层工作站界面 / impl",
+      "description": "Full-width devices (two icon actions and breathing/gray dot), bridge and side Relay nodes with one lifecycle control area; installed/uninstalled rows inline name/version/pill/command; anchored Canvas, existing specialized actions, Leader disclosure, localization/AX.",
+      "phase": "s6",
+      "kind": "impl",
+      "status": "pending",
+      "depends_on": [
+        "s5-tests"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s6-tests",
+      "title": "三层工作站界面 / tests",
+      "description": "Full-width devices (two icon actions and breathing/gray dot), bridge and side Relay nodes with one lifecycle control area; installed/uninstalled rows inline name/version/pill/command; anchored Canvas, existing specialized actions, Leader disclosure, localization/AX.",
+      "phase": "s6",
+      "kind": "tests",
+      "status": "pending",
+      "depends_on": [
+        "s6-impl"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s6-regression",
+      "title": "三层工作站界面 / regression",
+      "description": "Full-width devices (two icon actions and breathing/gray dot), bridge and side Relay nodes with one lifecycle control area; installed/uninstalled rows inline name/version/pill/command; anchored Canvas, existing specialized actions, Leader disclosure, localization/AX. Require integration evidence appropriate to this slice; final UX matrix remains s7-regression; do not block coding on post-implementation evidence.",
+      "phase": "s6",
+      "kind": "regression",
+      "status": "pending",
+      "depends_on": [
+        "s6-tests"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s7-impl",
+      "title": "统一验证与正式交付 / impl",
+      "description": "Targeted Go/Swift/iOS/web tests and coherent incremental builds; client-first delivery then formal /Applications Release install with PID/epoch/unique-log proof; secret scan, live docs/change logs and owner U1-U10.",
+      "phase": "s7",
+      "kind": "impl",
+      "status": "pending",
+      "depends_on": [
+        "s6-tests"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S7",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s7-tests",
+      "title": "统一验证与正式交付 / tests",
+      "description": "Targeted Go/Swift/iOS/web tests and coherent incremental builds; client-first delivery then formal /Applications Release install with PID/epoch/unique-log proof; secret scan, live docs/change logs and owner U1-U10.",
+      "phase": "s7",
+      "kind": "tests",
+      "status": "pending",
+      "depends_on": [
+        "s7-impl"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S7",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s7-regression",
+      "title": "统一验证与正式交付 / regression",
+      "description": "Targeted Go/Swift/iOS/web tests and coherent incremental builds; client-first delivery then formal /Applications Release install with PID/epoch/unique-log proof; secret scan, live docs/change logs and owner U1-U10. Require integration evidence appropriate to this slice; final UX matrix remains s7-regression; do not block coding on post-implementation evidence.",
+      "phase": "s7",
+      "kind": "regression",
+      "status": "pending",
+      "depends_on": [
+        "s7-tests"
+      ],
+      "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S7",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    }
+  ]
+}
