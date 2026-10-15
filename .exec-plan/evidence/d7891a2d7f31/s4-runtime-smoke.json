@@ -1,0 +1,126 @@
+{
+  "captured_at": "2026-10-15T06:11:38.873881+00:00",
+  "scope": "final isolated real runtime smoke on ports 18777/18778; production /Applications app untouched",
+  "runtime_pid": 96363,
+  "checks": {
+    "schema_v1": true,
+    "runtime_pid_matches_process": true,
+    "selection_revision": true,
+    "requested_empty": true,
+    "active_empty": true,
+    "five_products": true,
+    "external_opencode_not_required": true,
+    "device_presence_empty": true,
+    "relay_not_connected": true,
+    "unauthorized_rejected": true,
+    "no_remote_address_leak": true,
+    "ready_no_agents": true
+  },
+  "snapshot_redacted": {
+    "schemaVersion": 1,
+    "runtimeIdentity": {
+      "bridgeEpoch": 10215995164556233876,
+      "pid": 96363
+    },
+    "selectionRevision": 3,
+    "requestedDrivers": [],
+    "activeDrivers": [],
+    "sampledAt": "2026-10-15T06:11:38.800172Z",
+    "agents": [
+      {
+        "id": "claude",
+        "installation": {
+          "state": "installed",
+          "artifactKind": "cli",
+          "installMethod": "npm"
+        },
+        "version": "2.1.296",
+        "versionSource": "npm_package_json",
+        "versionCheck": {
+          "state": "unchecked"
+        }
+      },
+      {
+        "id": "codex-remote",
+        "installation": {
+          "state": "installed",
+          "artifactKind": "app_bundle_cli"
+        },
+        "versionCheck": {
+          "state": "unchecked"
+        }
+      },
+      {
+        "id": "dsh-web",
+        "installation": {
+          "state": "installed",
+          "artifactKind": "cli",
+          "installMethod": "npm"
+        },
+        "version": "0.2.0-rc.2",
+        "versionSource": "npm_package_json",
+        "versionCheck": {
+          "state": "unchecked"
+        }
+      },
+      {
+        "id": "grokbuild",
+        "installation": {
+          "state": "installed",
+          "artifactKind": "cli"
+        },
+        "versionCheck": {
+          "state": "unchecked"
+        }
+      },
+      {
+        "id": "opencode-web",
+        "installation": {
+          "state": "not_required",
+          "artifactKind": "external_service"
+        },
+        "versionCheck": {
+          "state": "unchecked"
+        }
+      }
+    ],
+    "devicePresence": [],
+    "relay": {
+      "enabled": false,
+      "configured": false,
+      "connected": false
+    }
+  },
+  "status_redacted": {
+    "activity": {
+      "admissionState": "accepting",
+      "bridgeOwnedActiveTurns": 0,
+      "bridgeOwnedActiveTurnsByBackend": {},
+      "pendingInteractions": 0,
+      "pendingInteractionsByBackend": {}
+    },
+    "agentSelectionRevision": 3,
+    "bridgeId": "brg_uqU-4oqd2km3r1I0Nn_tRQ",
+    "displayName": "jackdeMacBook-Pro-3723.local",
+    "fileReadHealth": {
+      "restartRecommended": false,
+      "state": "healthy",
+      "stateEpoch": 1,
+      "stuckWorkers": 0
+    },
+    "managementSchemaVersion": 1,
+    "quiesce": {
+      "state": "none"
+    },
+    "registeredDrivers": [],
+    "requestedDrivers": [],
+    "runtimeIdentity": {
+      "bridgeEpoch": 10215995164556233876,
+      "pid": 96363
+    },
+    "status": "ready_no_agents",
+    "uptime": "85.254583ms",
+    "version": "0.1.0-dev"
+  },
+  "unauthorized_status": 401
+}

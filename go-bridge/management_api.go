@@ -60,6 +60,8 @@ type ManagementConfig struct {
 	Agents                 map[string]core.Agent
 	RequestedDrivers       []string
 	AgentSelectionRevision *uint64
+	OpenCodeInstalledCLI   string
+	OpenCodeSource         string
 	CodexBackendMode       string
 	DetectionCfg           *AgentDetectionConfig
 	TLSPin                 *BridgeV1TLSPin
@@ -353,6 +355,8 @@ func (s *ManagementServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleRuntimeDiagnostics(w)
 	case path == "/internal/topology/snapshot" && r.Method == http.MethodGet:
 		s.handleTopologySnapshot(w, r)
+	case path == "/internal/workspace/snapshot" && r.Method == http.MethodGet:
+		s.handleWorkspaceSnapshot(w, r)
 	case path == "/internal/webpush/status" && r.Method == http.MethodGet:
 		s.handleWebPushStatus(w, r)
 	case path == "/internal/webpush/reset" && r.Method == http.MethodPost:
@@ -459,6 +463,15 @@ func (s *ManagementServer) checkAuth(w http.ResponseWriter, r *http.Request) boo
 		return false
 	}
 	return true
+}
+
+// ── GET /internal/workspace/snapshot ────────────────────────────────────────
+func (s *ManagementServer) handleWorkspaceSnapshot(w http.ResponseWriter, _ *http.Request) {
+	identity := map[string]interface{}{"pid": int32(0), "bridgeEpoch": uint64(0)}
+	if s.cfg.RuntimeIdentity.PID > 0 {
+		identity = runtimeIdentityJSON(s.cfg.RuntimeIdentity)
+	}
+	writeMgmtJSON(w, http.StatusOK, buildWorkspaceSnapshot(s.cfg, identity, s.relayStatusConnected()))
 }
 
 // ── GET /internal/status ─────────────────────────────────────────────────────

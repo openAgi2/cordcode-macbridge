@@ -50,7 +50,8 @@ final class MacBridgeBehaviorTests: XCTestCase {
             dataDir: "/tmp/data",
             logDir: "/tmp/logs",
             drivers: [],
-            agentSelectionRevision: 7
+            agentSelectionRevision: 7,
+            opencodeInstalledCLI: "/exact/opencode"
         )
         let arguments = RuntimeManager.processArguments(for: selected)
         guard let drivers = arguments.firstIndex(of: "-drivers") else {
@@ -61,6 +62,10 @@ final class MacBridgeBehaviorTests: XCTestCase {
             return XCTFail("missing selection revision")
         }
         XCTAssertEqual(arguments[revision + 1], "7")
+        guard let installedCLI = arguments.firstIndex(of: "-opencode-installed-cli") else {
+            return XCTFail("missing exact OpenCode CLI path")
+        }
+        XCTAssertEqual(arguments[installedCLI + 1], "/exact/opencode")
 
         let legacy = RuntimeConfig(
             executablePath: "/tmp/runtime",
@@ -69,6 +74,9 @@ final class MacBridgeBehaviorTests: XCTestCase {
         )
         XCTAssertNil(legacy.agentSelectionRevision)
         XCTAssertFalse(RuntimeManager.processArguments(for: legacy).contains("-agent-selection-revision"))
+
+        let sourceIndex = RuntimeManager.processArguments(for: legacy).firstIndex(of: "-opencode-source")
+        XCTAssertEqual(RuntimeManager.processArguments(for: legacy)[sourceIndex! + 1], "disabled")
     }
 
     func testGoDurationFormatting() {

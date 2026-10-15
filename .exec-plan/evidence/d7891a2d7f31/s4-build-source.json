@@ -1,0 +1,47 @@
+{
+  "captured_at": "2026-10-15T06:11:06.490279+00:00",
+  "purpose": "S4 pre-build/test source gate in actual execution worktree",
+  "repository": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+  "branch": "feat/ios-native-message-timeline",
+  "commit": "2a67079e5771eb12a97a012982cb2d472f29eae2",
+  "uncommitted_status": [
+    " M MacBridge/CordCodeLink.xcodeproj/project.pbxproj",
+    " M MacBridge/MacBridge/App/AppDependencies.swift",
+    " M MacBridge/MacBridge/App/MacBridgeApp.swift",
+    " M MacBridge/MacBridge/Services/ManagementAPIClient.swift",
+    " M MacBridge/MacBridge/Services/RuntimeManager.swift",
+    " M MacBridge/MacBridge/ViewModels/DeviceStore.swift",
+    " M MacBridge/MacBridge/Views/ContentView.swift",
+    " M MacBridge/MacBridgeTests/DeviceStoreTests.swift",
+    " M MacBridge/MacBridgeTests/MacBridgeBehaviorTests.swift",
+    " M go-bridge/device_conn_registry.go",
+    " M go-bridge/device_conn_registry_test.go",
+    " M go-bridge/main.go",
+    " M go-bridge/management_api.go",
+    " M go-bridge/relay_conn.go",
+    " M go-bridge/relay_connection.go",
+    "?? .exec-plan/evidence/d7891a2d7f31/s4-accidental-gofmt-revert.json",
+    "?? .exec-plan/evidence/d7891a2d7f31/s4-build-source.json",
+    "?? .exec-plan/evidence/d7891a2d7f31/s4-edit-source.json",
+    "?? .exec-plan/evidence/d7891a2d7f31/s4-repair-edit-source.json",
+    "?? .exec-plan/evidence/d7891a2d7f31/s4-resume-source.json",
+    "?? .exec-plan/evidence/d7891a2d7f31/s4-runtime-smoke.json",
+    "?? MacBridge/MacBridge/Services/WorkspaceSnapshotStore.swift",
+    "?? MacBridge/MacBridgeTests/WorkspaceSnapshotStoreTests.swift",
+    "?? go-bridge/workspace_snapshot.go",
+    "?? go-bridge/workspace_snapshot_test.go"
+  ],
+  "expected_branch": "feat/ios-native-message-timeline",
+  "paired_ios": {
+    "repository": "/Users/jacklee/Projects/cordcode-ios-native-message-timeline",
+    "branch": "feat/ios-native-message-timeline",
+    "modification": "read-only, untouched"
+  },
+  "expected_capabilities": [
+    "authenticated GET /internal/workspace/snapshot",
+    "exact OpenCode inventory path",
+    "transport metadata without remote addresses",
+    "no automatic latest check or update"
+  ],
+  "note": "Regenerated after moving lifecycle subscription past stored-property initialization."
+}

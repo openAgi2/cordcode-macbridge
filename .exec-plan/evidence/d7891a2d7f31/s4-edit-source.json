@@ -1,0 +1,14 @@
+{
+  "capturedAt": "2026-10-15T05:38:44.314871+00:00",
+  "repository": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+  "branch": "feat/ios-native-message-timeline",
+  "commit": "2a67079e5771eb12a97a012982cb2d472f29eae2",
+  "status": [],
+  "purpose": "S4 first edit gate",
+  "scope": "MacBridge-only",
+  "expectedOwners": {
+    "devicePresence": "existing DeviceConnRegistry",
+    "relay": "existing RelayBridgeClient/Management providers",
+    "timeline": "no new writer"
+  }
+}

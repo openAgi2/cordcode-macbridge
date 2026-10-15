@@ -58,6 +58,14 @@ func (d *directConnAdapter) RemoteAddr() string {
 	return d.inner.remote
 }
 
+func (d *directConnAdapter) ConnectionTransportMetadata() DeviceConnectionMetadata {
+	analysis := classifyRemoteURL("ws://" + d.inner.remote)
+	if analysis.HostCategory == "invalid" || analysis.HostCategory == "" {
+		return DeviceConnectionMetadata{Kind: DeviceConnectionTransportDirect, DirectClass: "unknown"}
+	}
+	return DeviceConnectionMetadata{Kind: DeviceConnectionTransportDirect, DirectClass: analysis.HostCategory}
+}
+
 // IsRevoked 检查底层直连是否已被撤销。
 func (d *directConnAdapter) IsRevoked() bool {
 	return d.inner.revoked

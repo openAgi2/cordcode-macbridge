@@ -163,6 +163,62 @@ struct AgentInfo: Codable, Equatable {
     let requiresPollingForExternalTurns: Bool
 }
 
+struct WorkspaceSnapshot: Codable, Equatable {
+    struct RuntimeIdentity: Codable, Equatable {
+        let pid: Int32
+        let bridgeEpoch: UInt64
+    }
+
+    struct Installation: Codable, Equatable {
+        let state: String
+        let errorCode: String?
+        let reason: String?
+        let artifactKind: String?
+        let installMethod: String?
+    }
+
+    struct VersionCheck: Codable, Equatable {
+        let state: String
+        let code: String?
+        let reason: String?
+    }
+
+    struct Agent: Codable, Equatable {
+        let id: String
+        let installation: Installation
+        let version: String?
+        let versionSource: String?
+        let versionCheck: VersionCheck
+        let readiness: AgentInfo?
+    }
+
+    struct DeviceTransport: Codable, Equatable {
+        let kind: String
+        let directClass: String?
+    }
+
+    struct DevicePresence: Codable, Equatable {
+        let deviceId: String
+        let transports: [DeviceTransport]
+    }
+
+    struct Relay: Codable, Equatable {
+        let enabled: Bool
+        let configured: Bool
+        let connected: Bool
+    }
+
+    let schemaVersion: Int
+    let runtimeIdentity: RuntimeIdentity
+    let selectionRevision: UInt64?
+    let requestedDrivers: [String]
+    let activeDrivers: [String]
+    let sampledAt: String
+    let agents: [Agent]
+    let devicePresence: [DevicePresence]
+    let relay: Relay
+}
+
 /// POST /internal/agents/dsh-web/install · /start 的立即返回（kick 异步工作）。
 /// status ∈ started / already_installing / already_starting / already_running /
 /// node_missing / no_binary / not_needed。
@@ -233,7 +289,7 @@ struct PairingSessionStatus: Codable {
 // MARK: - Management API 客户端
 
 /// 管理 API 的 HTTP 客户端，所有请求带 Bearer token
-class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIProviding, TopologyAPIProviding {
+class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIProviding, TopologyAPIProviding, WorkspaceSnapshotAPIProviding {
     let baseURL: URL
     let token: String
     /// T07: 专用 ephemeral URLSession，短请求/资源超时，防慢响应阻塞监控循环。
@@ -344,6 +400,11 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
     func getAgents() async throws -> [AgentInfo] {
         let data = try await performRequest("/internal/agents")
         return try JSONDecoder().decode([AgentInfo].self, from: data)
+    }
+
+    func getWorkspaceSnapshot() async throws -> WorkspaceSnapshot {
+        let data = try await performRequest("/internal/workspace/snapshot")
+        return try JSONDecoder().decode(WorkspaceSnapshot.self, from: data)
     }
 
     func startCodexRemotePairing() async throws -> CodexRemotePairingStatus {

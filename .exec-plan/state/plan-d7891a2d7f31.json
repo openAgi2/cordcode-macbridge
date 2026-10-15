@@ -33,7 +33,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-10-15T05:37:35.155613+00:00",
+  "updated_at": "2026-10-15T06:15:09.989762+00:00",
   "approved_plan_sha256": "e49e2d5d00e6216bd70d0127c02949351be96474aef1c8b6cd0b14f91d74121a",
   "scope_gates": {
     "E5": "blocked extensions only: unverified latest sources and all automatic update execution",
@@ -347,33 +347,42 @@
     {
       "id": "s4-impl",
       "title": "设备与Relay观察快照 / impl",
-      "description": "Existing DeviceConnRegistry per-connection transport metadata and authenticated snapshot; Management workspace+async rescan; Swift identity/generation/stale snapshot store; no extra liveness owner.",
+      "description": "Existing DeviceConnRegistry per-connection transport metadata, authenticated read-only workspace snapshot, Swift identity/stale snapshot store, and DeviceStore presence join; no extra liveness owner.",
       "phase": "s4",
       "kind": "impl",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "s3-mac-regression"
       ],
       "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S4",
-      "notes": "",
+      "notes": "Queue description corrected to approved plan S4 scope; async rescan moved explicitly to S5.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Implemented transport metadata in the live connection registry, authenticated workspace snapshot API/model, read-only inventory projection, Swift polling/identity/stale store, and DeviceStore presence join",
+        "artifacts": [
+          "go-bridge/device_conn_registry.go",
+          "go-bridge/relay_conn.go",
+          "go-bridge/relay_connection.go",
+          "go-bridge/workspace_snapshot.go",
+          "go-bridge/management_api.go",
+          "MacBridge/MacBridge/Services/WorkspaceSnapshotStore.swift",
+          "MacBridge/MacBridge/Services/ManagementAPIClient.swift",
+          "MacBridge/MacBridge/ViewModels/DeviceStore.swift"
+        ],
+        "checked_at": "2026-10-15T06:15:09.986442+00:00"
       }
     },
     {
       "id": "s4-tests",
       "title": "设备与Relay观察快照 / tests",
-      "description": "Existing DeviceConnRegistry per-connection transport metadata and authenticated snapshot; Management workspace+async rescan; Swift identity/generation/stale snapshot store; no extra liveness owner.",
+      "description": "Existing DeviceConnRegistry per-connection transport metadata, authenticated read-only workspace snapshot, Swift identity/stale snapshot store, and DeviceStore presence join; no extra liveness owner.",
       "phase": "s4",
       "kind": "tests",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "s4-impl"
       ],
@@ -381,22 +390,24 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Targeted Go, toolinventory, Swift store/join/argv, and isolated runtime tests passed",
+        "artifacts": [
+          ".exec-plan/evidence/d7891a2d7f31/s4-validation.json"
+        ],
+        "checked_at": "2026-10-15T06:15:09.986442+00:00"
       }
     },
     {
       "id": "s4-regression",
       "title": "设备与Relay观察快照 / regression",
-      "description": "Existing DeviceConnRegistry per-connection transport metadata and authenticated snapshot; Management workspace+async rescan; Swift identity/generation/stale snapshot store; no extra liveness owner. Require integration evidence appropriate to this slice; final UX matrix remains s7-regression; do not block coding on post-implementation evidence.",
+      "description": "Existing DeviceConnRegistry per-connection transport metadata, authenticated read-only workspace snapshot, Swift identity/stale snapshot store, and DeviceStore presence join; no extra liveness owner.",
       "phase": "s4",
       "kind": "regression",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "s4-tests"
       ],
@@ -404,19 +415,22 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Component and isolated real-runtime regression passed: direct/relay registry behavior, stale/identity handling, unauthorized API rejection, empty drivers with five-product inventory, empty device presence, Relay false, and address non-leak",
+        "artifacts": [
+          ".exec-plan/evidence/d7891a2d7f31/s4-validation.json",
+          ".exec-plan/evidence/d7891a2d7f31/s4-runtime-smoke.json"
+        ],
+        "checked_at": "2026-10-15T06:15:09.986442+00:00"
       }
     },
     {
       "id": "s5-impl",
       "title": "已取证版本与命令指引 / impl",
-      "description": "Go typed version service for captured npm/Grok provider shapes only; strict SemVer, origin/scope-preserving quoted recipes, bounded coalescing/fingerprint/errors; Swift popover/copy, no execution or unverified providers.",
+      "description": "Go VersionService, workspace rescan task/API, typed coalescing/cache, scope/channel and command recipes; Swift version popover/copy feedback, no second version owner.",
       "phase": "s5",
       "kind": "impl",
       "status": "pending",

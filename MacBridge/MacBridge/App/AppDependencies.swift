@@ -14,6 +14,8 @@ class AppDependencies: ObservableObject {
     /// Desktop 同步拓扑监视轮询 owner（UI-3 消费 phase 渲染面板）。
     /// epoch 新鲜度对比 v1 runtime identity（快照 bridgeEpoch 同源：sha256 摘要）。
     let topologyStore: TopologyMonitorStatusStore
+    /// 设备/Agent 工作区快照轮询 owner；只消费 Management API，不写业务状态。
+    let workspaceSnapshotStore: WorkspaceSnapshotStore
 
     private let dataDir: String
     private var hasStartedBridge = false
@@ -111,6 +113,8 @@ class AppDependencies: ObservableObject {
             NSLog("[AppDependencies] OpenCode managed_local selected; endpoint will be resolved during runtime launch.")
         }
 
+        let opencodeInstalledCLI = DefaultOpenCodeCLIResolver(dataDir: dir)
+            .resolveOpenCodeCLI(searchPath: RuntimeConfig.defaultCLISearchPath()) ?? ""
         let configuredRelayEndpoint = OfficialRelayConfiguration.endpoint
         let savedRelayEndpoint = UserDefaults.standard.string(forKey: "relayEndpoint") ?? ""
         let hasCurrentRelayRoute = !configuredRelayEndpoint.isEmpty &&
@@ -134,6 +138,7 @@ class AppDependencies: ObservableObject {
             opencodePass: opencodePass,
             opencodeURL: opencodeURL,
             opencodeSource: opencodeSource,
+            opencodeInstalledCLI: opencodeInstalledCLI,
             logFilePath: logFilePath,
             remoteURL: UserDefaults.standard.string(forKey: "remoteBridgeURL") ?? "",
             includeTailscaleInPairing: UserDefaults.standard.object(forKey: "pairingIncludeTailscale") as? Bool ?? true,
@@ -154,6 +159,11 @@ class AppDependencies: ObservableObject {
         self.topologyStore = TopologyMonitorStatusStore(
             expectedEpochProvider: { [weak runtimeManager] in
                 runtimeManager?.runtimeIdentityEpoch
+            }
+        )
+        self.workspaceSnapshotStore = WorkspaceSnapshotStore(
+            expectedIdentity: { [weak runtimeManager] in
+                runtimeManager?.runtimeIdentitySnapshot
             }
         )
         self.statusViewModel = BridgeStatusViewModel()
@@ -183,6 +193,19 @@ class AppDependencies: ObservableObject {
                 self?.pairingViewModel.configure(apiClient: client)
                 // 拓扑监视共享同一 client；轮询由 store 自持（configure 即开始）。
                 self?.topologyStore.configure(apiClient: client)
+                self?.workspaceSnapshotStore.configure(apiClient: client)
+            }
+            .store(in: &cancellables)
+
+        runtimeManager.$status
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                switch status {
+                case .idle, .starting, .stopped, .crashed, .sleeping:
+                    self?.workspaceSnapshotStore.invalidateObservation()
+                case .ready, .readyNoAgents:
+                    break
+                }
             }
             .store(in: &cancellables)
 

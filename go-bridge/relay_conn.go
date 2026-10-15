@@ -577,6 +577,10 @@ func (rc *RelayDeviceConn) RemoteAddr() string {
 	return "relay:" + rc.deviceID
 }
 
+func (rc *RelayDeviceConn) ConnectionTransportMetadata() DeviceConnectionMetadata {
+	return DeviceConnectionMetadata{Kind: DeviceConnectionTransportRelay}
+}
+
 // Close 关闭 relay connection，擦除密钥材料。
 func (rc *RelayDeviceConn) Close() error {
 	rc.mu.Lock()

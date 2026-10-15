@@ -14,8 +14,18 @@ import Foundation
 /// 结束路径在一次同步块内提交。
 @MainActor
 final class DeviceStore: ObservableObject {
+    enum PresenceState: Equatable {
+        case unknown
+        case disconnected
+        case connected([WorkspaceSnapshot.DeviceTransport])
+    }
+
     /// 已授权设备列表。
     @Published private(set) var devices: [TrustedDevice] = []
+    /// Presence is a projection of the current workspace snapshot, keyed for an ID join.
+    /// It never changes authorization records and is cleared whenever observation is stale.
+    @Published private(set) var presenceByDeviceId: [String: [WorkspaceSnapshot.DeviceTransport]] = [:]
+    @Published private(set) var isPresenceCurrent = false
     /// 是否已完成至少一次成功加载（区分“尚未加载”与“加载结果为空”）。
     @Published private(set) var hasLoadedDevices = false
     /// 最近一次加载/撤销错误的人类可读描述；无错误时为 nil。
@@ -50,6 +60,31 @@ final class DeviceStore: ObservableObject {
     /// alert 可达」可单测。
     var isRevokeCleanupWarningPresented: Bool {
         revokeCleanupWarning != nil
+    }
+
+    func applyWorkspaceSnapshotPhase(
+        _ phase: WorkspaceSnapshotStore.Phase,
+        isObservationCurrent: Bool
+    ) {
+        guard isObservationCurrent,
+              case .available(let snapshot) = phase else {
+            presenceByDeviceId = [:]
+            isPresenceCurrent = false
+            return
+        }
+        presenceByDeviceId = Dictionary(
+            snapshot.devicePresence.map { ($0.deviceId, $0.transports) },
+            uniquingKeysWith: { current, next in current + next }
+        )
+        isPresenceCurrent = true
+    }
+
+    func presenceState(for deviceId: String) -> PresenceState {
+        guard isPresenceCurrent else { return .unknown }
+        guard let transports = presenceByDeviceId[deviceId], !transports.isEmpty else {
+            return .disconnected
+        }
+        return .connected(transports)
     }
 
     /// 拉取已授权设备列表。失败时设置 `devicesError` 并把 `hasLoadedDevices` 置 false。

@@ -61,6 +61,20 @@ final class DeviceStoreTests: XCTestCase {
         TrustedDevice(deviceId: id, displayName: nil, platform: "ios", createdAt: nil, lastSeenAt: nil)
     }
 
+    private func makeSnapshot(devicePresence: [WorkspaceSnapshot.DevicePresence]) -> WorkspaceSnapshot {
+        WorkspaceSnapshot(
+            schemaVersion: 1,
+            runtimeIdentity: .init(pid: 77, bridgeEpoch: 88),
+            selectionRevision: 1,
+            requestedDrivers: [],
+            activeDrivers: [],
+            sampledAt: "2026-10-15T00:00:00Z",
+            agents: [],
+            devicePresence: devicePresence,
+            relay: .init(enabled: true, configured: true, connected: false)
+        )
+    }
+
     private func waitUntil(_ condition: @autoclosure () -> Bool) async {
         for _ in 0..<500 {
             if condition() { return }
@@ -394,5 +408,39 @@ final class DeviceStoreTests: XCTestCase {
         stub.revokeOutcome = .confirmedClean
         await store.revokeDevice(d1)
         XCTAssertNil(store.revokeCleanupWarning, "新撤销完成且 clean 时不应残留旧 warning")
+    }
+
+    // MARK: - Workspace presence join
+
+    func testPresenceJoinOnlySpeaksForCurrentAuthorizedDevices() {
+        let store = DeviceStore()
+        let transports: [WorkspaceSnapshot.DeviceTransport] = [
+            .init(kind: "relay", directClass: nil)
+        ]
+        store.applyWorkspaceSnapshotPhase(
+            .available(makeSnapshot(devicePresence: [
+                .init(deviceId: "authorized", transports: transports),
+                .init(deviceId: "unknown-device", transports: transports),
+            ])),
+            isObservationCurrent: true
+        )
+
+        XCTAssertEqual(store.presenceState(for: "authorized"), .connected(transports))
+        XCTAssertEqual(store.presenceState(for: "not-connected"), .disconnected)
+    }
+
+    func testStaleObservationBecomesUnknownAndClearsPresence() {
+        let store = DeviceStore()
+        let phase = WorkspaceSnapshotStore.Phase.available(
+            makeSnapshot(devicePresence: [
+                .init(deviceId: "d1", transports: [.init(kind: "direct", directClass: "private")])
+            ])
+        )
+        store.applyWorkspaceSnapshotPhase(phase, isObservationCurrent: true)
+        store.applyWorkspaceSnapshotPhase(phase, isObservationCurrent: false)
+
+        XCTAssertFalse(store.isPresenceCurrent)
+        XCTAssertTrue(store.presenceByDeviceId.isEmpty)
+        XCTAssertEqual(store.presenceState(for: "d1"), .unknown)
     }
 }

@@ -101,6 +101,8 @@ func Main() {
 	ocwBaseURL := flag.String("opencode-web-url", envOr("OPENCODE_WEB_BASE_URL", ""), "OpenCode Web HTTP API URL (same resolved serve URL as -opencode-url during coexistence). Empty = not configured.")
 	ocwUser := flag.String("opencode-web-user", envOr("OPENCODE_WEB_SERVER_USERNAME", ""), "OpenCode Web auth username")
 	ocwPass := flag.String("opencode-web-pass", envOr("OPENCODE_WEB_SERVER_PASSWORD", ""), "OpenCode Web auth password")
+	opencodeInstalledCLI := flag.String("opencode-installed-cli", "", "Exact OpenCode CLI selected by the Mac app (read-only inventory)")
+	opencodeSource := flag.String("opencode-source", "", "OpenCode endpoint source (managed_local, external_http, legacy_64667, service_discovery_future, disabled)")
 
 	// 管理 API（Mac App product 模式使用，开发模式不启用）
 	managementHost := flag.String("management-host", "", "Management API host (product mode: 127.0.0.1)")
@@ -477,6 +479,8 @@ func Main() {
 			Agents:                 handlers.agents,
 			RequestedDrivers:       requestedDrivers,
 			AgentSelectionRevision: selectionRevision,
+			OpenCodeInstalledCLI:   *opencodeInstalledCLI,
+			OpenCodeSource:         *opencodeSource,
 			CodexBackendMode:       *codexBackend,
 			DetectionCfg: &AgentDetectionConfig{
 				OpenCodeURL:       *ocBaseURL,

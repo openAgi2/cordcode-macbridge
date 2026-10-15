@@ -174,6 +174,8 @@ struct RuntimeConfig {
     var opencodeURL: String
     /// Selected OpenCode server source. Drives Desktop config sync + diagnostics.
     var opencodeSource: OpenCodeServerSource
+    /// Exact CLI selected by the Swift resolver; passed to read-only Go inventory.
+    var opencodeInstalledCLI: String
     let logFilePath: String
     let cliSearchPath: [String]
     var remoteURL: String
@@ -215,6 +217,7 @@ struct RuntimeConfig {
         opencodePass: String = "",
         opencodeURL: String = "",
         opencodeSource: OpenCodeServerSource = .disabled,
+        opencodeInstalledCLI: String = "",
         logFilePath: String = "",
         cliSearchPath: [String] = Self.defaultCLISearchPath(),
         remoteURL: String = "",
@@ -241,6 +244,7 @@ struct RuntimeConfig {
         self.opencodePass = opencodePass
         self.opencodeURL = opencodeURL
         self.opencodeSource = opencodeSource
+        self.opencodeInstalledCLI = opencodeInstalledCLI
         self.logFilePath = NSString(string: logFilePath).expandingTildeInPath
         self.cliSearchPath = cliSearchPath.map { NSString(string: $0).expandingTildeInPath }
         self.remoteURL = remoteURL
@@ -255,7 +259,7 @@ struct RuntimeConfig {
         self.sessionListLimit = min(max(sessionListLimit, 1), 150)
     }
 
-    private static func defaultCLISearchPath() -> [String] {
+    static func defaultCLISearchPath() -> [String] {
         [
             "~/.bun/bin",
             "~/.local/bin",
@@ -351,6 +355,14 @@ class RuntimeManager: ObservableObject {
     /// 尚未从 /internal/status 解出 v1 时返回 nil（此时快照 epoch 校验跳过）。
     var runtimeIdentityEpoch: UInt64? {
         latestManagementStatus?.v1?.runtimeIdentity.bridgeEpoch
+    }
+
+    var runtimeIdentitySnapshot: WorkspaceSnapshot.RuntimeIdentity? {
+        latestManagementStatus?.v1.map {
+            WorkspaceSnapshot.RuntimeIdentity(
+                pid: $0.runtimeIdentity.pid, bridgeEpoch: $0.runtimeIdentity.bridgeEpoch
+            )
+        }
     }
 
     private var apiClient: ManagementAPIClient?
@@ -1760,6 +1772,10 @@ class RuntimeManager: ObservableObject {
         }
         if !config.relayServiceAddress.isEmpty {
             arguments += ["-relay-service-addr", config.relayServiceAddress]
+        }
+        arguments += ["-opencode-source", config.opencodeSource.rawValue]
+        if !config.opencodeInstalledCLI.isEmpty {
+            arguments += ["-opencode-installed-cli", config.opencodeInstalledCLI]
         }
         if let selectionRevision = config.agentSelectionRevision {
             arguments += ["-agent-selection-revision", String(selectionRevision)]

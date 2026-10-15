@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 /// 主窗口内容，承载各功能标签页
@@ -167,6 +168,14 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .openConnectionStatusRequest)) { _ in
             showConnectionStatus = true
+        }
+        .onReceive(
+            Publishers.CombineLatest(
+                dependencies.workspaceSnapshotStore.$phase,
+                dependencies.workspaceSnapshotStore.$isObservationCurrent
+            )
+        ) { phase, isCurrent in
+            deviceStore.applyWorkspaceSnapshotPhase(phase, isObservationCurrent: isCurrent)
         }
         .sheet(isPresented: $showConnectionStatus) {
             // P0 阶段承载现有 RemoteAccessView；P1-2 将其重做为单页连接状态 Sheet。

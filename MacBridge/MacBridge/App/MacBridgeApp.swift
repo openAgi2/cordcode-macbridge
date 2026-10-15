@@ -54,12 +54,14 @@ struct MacBridgeApp: App {
                     object: nil, queue: .main
                 ) { _ in
                     dependencies.topologyStore.setAppActive(false)
+                    dependencies.workspaceSnapshotStore.setAppActive(false)
                 }
                 NotificationCenter.default.addObserver(
                     forName: NSApplication.didBecomeActiveNotification,
                     object: nil, queue: .main
                 ) { _ in
                     dependencies.topologyStore.setAppActive(true)
+                    dependencies.workspaceSnapshotStore.setAppActive(true)
                 }
             }
         }
