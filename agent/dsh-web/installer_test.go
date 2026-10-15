@@ -113,7 +113,7 @@ func isolatedSeatResolver(t *testing.T) *Resolver {
 
 func TestInstallerGlobalArgvExact(t *testing.T) {
 	fakePrefix := t.TempDir()
-	_, argvLog := fakeNpm(t, "ok", fakePrefix)
+	npmPath, argvLog := fakeNpm(t, "ok", fakePrefix)
 
 	a := &Agent{resolver: isolatedSeatResolver(t)}
 	dataDir := a.resolver.dataDirOf()
@@ -158,6 +158,9 @@ func TestInstallerGlobalArgvExact(t *testing.T) {
 	if rec.BinPath != filepath.Join(fakePrefix, "bin", "dsh") {
 		t.Fatalf("record bin = %q", rec.BinPath)
 	}
+	if rec.NpmPath != npmPath {
+		t.Fatalf("record npm = %q, want %q", rec.NpmPath, npmPath)
+	}
 	if rec.Scope != InstallScopeUserGlobal || rec.DshVersion != "0.1.5-fake" {
 		t.Fatalf("record scope/version = %q/%q", rec.Scope, rec.DshVersion)
 	}
@@ -170,7 +173,7 @@ func TestInstallerGlobalArgvExact(t *testing.T) {
 
 func TestInstallerPrefixFallbackArgvAndNote(t *testing.T) {
 	fakePrefix := t.TempDir()
-	_, argvLog := fakeNpm(t, "fail", fakePrefix)
+	npmPath, argvLog := fakeNpm(t, "fail", fakePrefix)
 
 	a := &Agent{resolver: isolatedSeatResolver(t)}
 	dataDir := a.resolver.dataDirOf()
@@ -201,6 +204,9 @@ func TestInstallerPrefixFallbackArgvAndNote(t *testing.T) {
 	}
 	if rec.Scope != InstallScopeCordcodePrefix {
 		t.Fatalf("scope = %q, want cordcode-prefix", rec.Scope)
+	}
+	if rec.NpmPath != npmPath {
+		t.Fatalf("record npm = %q, want %q", rec.NpmPath, npmPath)
 	}
 	if rec.BinPath != filepath.Join(wantPrefix, "node_modules", ".bin", "dsh") {
 		t.Fatalf("fallback bin = %q", rec.BinPath)

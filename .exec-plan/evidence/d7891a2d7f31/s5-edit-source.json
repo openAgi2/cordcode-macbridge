@@ -1,0 +1,36 @@
+{
+  "captured_at": "2026-10-15T06:18:44.894492+00:00",
+  "purpose": "S5 pre-analysis/source-first edit gate",
+  "scope": "MacBridge-only implementation; iOS read-only and untouched; Magpie/upstreams read-only",
+  "mac": {
+    "repository": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "ca6061f1c2d9955ffff238e49afa7ae9d1219c43",
+    "uncommitted_status": [],
+    "expected_branch": "feat/ios-native-message-timeline"
+  },
+  "paired_ios_readonly": {
+    "repository": "/Users/jacklee/Projects/cordcode-ios-native-message-timeline",
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "5ba7d0ab153b165a41cc2952f8c516cd2a6cc8a8",
+    "uncommitted_status": [],
+    "expected_branch": "feat/ios-native-message-timeline"
+  },
+  "magpie_readonly": {
+    "repository": "/Users/jacklee/Projects/magpie",
+    "branch": "main",
+    "commit": "a36319d607d97e4754e025b82070a32d1d1a58ac",
+    "uncommitted_status": [
+      "?? .DS_Store",
+      "?? .github/.DS_Store",
+      "?? build/.DS_Store",
+      "?? docs/.DS_Store",
+      "?? internal/.DS_Store",
+      "?? plugins/.DS_Store",
+      "?? site/.DS_Store"
+    ],
+    "expected_branch": null
+  },
+  "plan_sha256": "e49e2d5d00e6216bd70d0127c02949351be96474aef1c8b6cd0b14f91d74121a",
+  "e5_boundary": "No unverified latest providers and no automatic update execution"
+}

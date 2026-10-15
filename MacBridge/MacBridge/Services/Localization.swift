@@ -319,6 +319,17 @@ enum L10n {
     static var detectionTimedOut: String { tr("detection_timed_out") }
     static var cannotReachService: String { tr("cannot_reach_service") }
     static var checkDocsGuidance: String { tr("check_docs_guidance") }
+    static var versionUpdateTo: String { tr("version_update_to") }
+    static var versionCheckFailed: String { tr("version_check_failed") }
+    static var versionRecheck: String { tr("version_recheck") }
+    static var versionCurrentLabel: String { tr("version_current_label") }
+    static var versionTargetLabel: String { tr("version_target_label") }
+    static var versionInstallMethod: String { tr("version_install_method") }
+    static var versionOfficialCommand: String { tr("version_official_command") }
+    static var versionCopyCommand: String { tr("version_copy_command") }
+    static var versionCopied: String { tr("version_copied") }
+    static var versionRestartNotice: String { tr("version_restart_notice") }
+    static var versionUnsupportedSource: String { tr("version_unsupported_source") }
 
     // MARK: - AI Tools status
 
@@ -797,6 +808,17 @@ enum L10n {
             "detection_timed_out": "Detection timed out. The service may not be responding.",
             "cannot_reach_service": "Cannot reach the service. Check your connection.",
             "check_docs_guidance": "Check the tool's documentation for setup instructions.",
+            "version_update_to": "Update to %@",
+            "version_check_failed": "Version check failed",
+            "version_recheck": "Recheck version",
+            "version_current_label": "Current version",
+            "version_target_label": "Target version",
+            "version_install_method": "Installation method",
+            "version_official_command": "Official command",
+            "version_copy_command": "Copy command",
+            "version_copied": "Copied",
+            "version_restart_notice": "A running tool may need to restart after updating. CordCode never runs this command for you.",
+            "version_unsupported_source": "This installation source has no verified latest-version provider.",
             "status_ready": "Ready",
             "status_not_found": "Not Found",
             "status_login_required": "Login Required",
@@ -1219,6 +1241,17 @@ enum L10n {
             "detection_timed_out": "检测超时。服务可能未响应。",
             "cannot_reach_service": "无法连接服务。请检查网络。",
             "check_docs_guidance": "请查看工具文档了解安装方法。",
+            "version_update_to": "更新到 %@",
+            "version_check_failed": "版本检查失败",
+            "version_recheck": "重新检测版本",
+            "version_current_label": "当前版本",
+            "version_target_label": "目标版本",
+            "version_install_method": "安装方式",
+            "version_official_command": "官方命令",
+            "version_copy_command": "复制命令",
+            "version_copied": "已复制",
+            "version_restart_notice": "正在运行的工具更新后可能需要重启。CordCode 不会替你执行这条命令。",
+            "version_unsupported_source": "此安装来源没有已验证的最新版本提供方。",
             "status_ready": "就绪",
             "status_not_found": "未找到",
             "status_login_required": "需要登录",

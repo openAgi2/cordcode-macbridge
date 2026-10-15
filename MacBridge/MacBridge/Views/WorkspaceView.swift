@@ -31,6 +31,9 @@ struct WorkspaceView: View {
     @State private var isRestartingCodexDaemon = false
     @State private var codexRestartMessage: String? = nil
     @State private var showCodexDesktopPairing = false
+    @State private var versionDetailAgentID: String?
+    @State private var copiedVersionRecipeAgentID: String?
+    @State private var copiedInstallRecipeAgentID: String?
     @StateObject private var grokLeaderManager = GrokLeaderModeManager()
     @State private var grokLeaderFailureAlert: GrokLeaderToggleFailure?
 
@@ -469,6 +472,11 @@ struct WorkspaceView: View {
                         .foregroundStyle(.secondary)
                         .font(.subheadline)
                 } else {
+                    if let error = backendViewModel.versionRescanError {
+                        Text(error)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.orange)
+                    }
                     VStack(spacing: 0) {
                         ForEach(agents) { agent in
                             agentRow(for: agent)
@@ -648,9 +656,43 @@ struct WorkspaceView: View {
             Spacer().frame(width: 27) // 13 + 28 + 27 = 68px. 起点完全锁定在 68px (x≈200)！
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(agent.displayName)
-                    .font(.system(size: 17, weight: .semibold))
-                    .frame(width: 403, alignment: .leading)
+                HStack(spacing: 8) {
+                    Text(agent.displayName)
+                        .font(.system(size: 17, weight: .semibold))
+                    if let version = agent.snapshotVersion, !version.isEmpty {
+                        Text(version)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    versionPill(for: agent)
+                    if let guidance = agent.installGuidance,
+                       agent.status == "not_detected" || agent.status == "not_configured" {
+                        if let recipe = guidance.recipe {
+                            Text(recipe.display)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .help(recipe.display)
+                            Button {
+                                copyInstallRecipe(recipe, for: agent)
+                            } label: {
+                                Image(systemName: copiedInstallRecipeAgentID == agent.id ? "checkmark" : "doc.on.doc")
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .help(copiedInstallRecipeAgentID == agent.id ? L10n.versionCopied : L10n.versionCopyCommand)
+                        } else if let reason = guidance.reason, !reason.isEmpty {
+                            Text(reason)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .help(reason)
+                        }
+                    }
+                }
+                .frame(width: 403, alignment: .leading)
                 if agent.kind.lowercased() == "codex-web", runtimeManager.codexDaemonConfigChanged {
                     Text(L10n.codexConfigChangedHint)
                         .font(.system(size: 11))
@@ -741,6 +783,163 @@ struct WorkspaceView: View {
                 .fill(Color.white.opacity(0.15))
                 .frame(height: 0.5)
                 .offset(y: -3) // 分割线也跟随上移 3px
+        }
+    }
+
+    @ViewBuilder
+    private func versionPill(for agent: BackendAgentStatus) -> some View {
+        if let check = agent.versionCheck {
+            switch check.state {
+            case "update_available":
+                if let target = check.targetVersion {
+                    Button {
+                        versionDetailAgentID = agent.id
+                    } label: {
+                        Label(String(format: L10n.versionUpdateTo, target), systemImage: "arrow.down.circle")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .popover(isPresented: versionPopoverBinding(agentID: agent.id)) {
+                        versionPopover(for: agent, check: check)
+                    }
+                }
+            case "failed":
+                Button(L10n.versionCheckFailed) {
+                    versionDetailAgentID = agent.id
+                }
+                .font(.system(size: 11, weight: .semibold))
+                .buttonStyle(.plain)
+                .foregroundStyle(.orange)
+                .popover(isPresented: versionPopoverBinding(agentID: agent.id)) {
+                    versionPopover(for: agent, check: check)
+                }
+            case "unsupported_source":
+                Button(L10n.versionUnsupportedSource) {
+                    versionDetailAgentID = agent.id
+                }
+                .font(.system(size: 11))
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help(L10n.versionUnsupportedSource)
+            default:
+                EmptyView()
+            }
+
+            Button {
+                Task { await backendViewModel.rescanVersions(agentIDs: [agent.id]) }
+            } label: {
+                Image(systemName: "arrow.clockwise.circle")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help(L10n.versionRecheck)
+            .disabled(backendViewModel.isRescanningVersions)
+        }
+    }
+
+    private func versionPopoverBinding(agentID: String) -> Binding<Bool> {
+        Binding(
+            get: { versionDetailAgentID == agentID },
+            set: { shown in
+                if shown {
+                    versionDetailAgentID = agentID
+                } else if versionDetailAgentID == agentID {
+                    versionDetailAgentID = nil
+                }
+            }
+        )
+    }
+
+    private func versionPopover(
+        for agent: BackendAgentStatus,
+        check: WorkspaceSnapshot.VersionCheck
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                LabeledContent(L10n.versionCurrentLabel, value: agent.snapshotVersion ?? check.installedVersion ?? "—")
+                LabeledContent(L10n.versionTargetLabel, value: check.targetVersion ?? "—")
+                LabeledContent(
+                    L10n.versionInstallMethod,
+                    value: installMethodText(agent: agent, check: check)
+                )
+            }
+            .font(.system(size: 12))
+
+            if let recipe = check.updateRecipe {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.versionOfficialCommand)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text(recipe.display)
+                        .font(.system(size: 11, design: .monospaced))
+                        .textSelection(.enabled)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                    Button {
+                        copyVersionRecipe(recipe, for: agent)
+                    } label: {
+                        Label(
+                            copiedVersionRecipeAgentID == agent.id ? L10n.versionCopied : L10n.versionCopyCommand,
+                            systemImage: copiedVersionRecipeAgentID == agent.id ? "checkmark" : "doc.on.doc"
+                        )
+                    }
+                    .controlSize(.small)
+                }
+            } else if let reason = check.reason, !reason.isEmpty {
+                Text(reason)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text(L10n.versionRestartNotice)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(width: 390, alignment: .leading)
+    }
+
+    private func installMethodText(
+        agent: BackendAgentStatus,
+        check: WorkspaceSnapshot.VersionCheck
+    ) -> String {
+        if let source = check.source, !source.isEmpty {
+            return source
+        }
+        return agent.kind
+    }
+
+    private func copyVersionRecipe(
+        _ recipe: WorkspaceSnapshot.CommandRecipe,
+        for agent: BackendAgentStatus
+    ) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(recipe.display, forType: .string)
+        copiedVersionRecipeAgentID = agent.id
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            if copiedVersionRecipeAgentID == agent.id {
+                copiedVersionRecipeAgentID = nil
+            }
+        }
+    }
+
+    private func copyInstallRecipe(
+        _ recipe: WorkspaceSnapshot.CommandRecipe,
+        for agent: BackendAgentStatus
+    ) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(recipe.display, forType: .string)
+        copiedInstallRecipeAgentID = agent.id
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            if copiedInstallRecipeAgentID == agent.id {
+                copiedInstallRecipeAgentID = nil
+            }
         }
     }
 

@@ -93,6 +93,7 @@ enum OpenCodeInstaller {
     /// InstallSuccess is a verified install outcome（--version exit 0 才算成功）.
     struct InstallSuccess: Equatable {
         let binPath: String
+        let npmPath: String
         /// user-global | cordcode-prefix
         let scope: String
         /// 界面备注（prefix 回退时说明「已装到 CordCode 目录」）。
@@ -106,6 +107,7 @@ enum OpenCodeInstaller {
     struct InstallRecord: Codable, Equatable {
         var version: Int = 1
         var binPath: String
+        var npmPath: String?
         var scope: String
         var opencodeVersion: String
         var installedAt: String
@@ -113,6 +115,7 @@ enum OpenCodeInstaller {
         enum CodingKeys: String, CodingKey {
             case version
             case binPath = "bin_path"
+            case npmPath = "npm_path"
             case scope
             case opencodeVersion = "opencode_version"
             case installedAt = "installed_at"
@@ -138,6 +141,7 @@ enum OpenCodeInstaller {
             case .success(let prefixed):
                 let success = InstallSuccess(
                     binPath: prefixed.binPath,
+                    npmPath: npmPath,
                     scope: "cordcode-prefix",
                     note: "已装到 CordCode 目录，终端里不一定有 opencode",
                     version: prefixed.version
@@ -170,7 +174,7 @@ enum OpenCodeInstaller {
         guard FileManager.default.isExecutableFile(atPath: bin) else {
             return .failure(InstallError(message: "npm 安装完成但未找到可执行 opencode（期望 \(bin)）"))
         }
-        return verifyBin(bin: bin, runner: runner)
+        return verifyBin(bin: bin, npmPath: npmPath, runner: runner)
     }
 
     /// npmInstallPrefix runs the fallback `npm install --prefix <dir>
@@ -191,12 +195,12 @@ enum OpenCodeInstaller {
         guard FileManager.default.isExecutableFile(atPath: bin) else {
             return .failure(InstallError(message: "npm 安装完成但未找到可执行 opencode（期望 \(bin)）"))
         }
-        return verifyBin(bin: bin, runner: runner)
+        return verifyBin(bin: bin, npmPath: npmPath, runner: runner)
     }
 
     /// verifyBin runs `opencode --version`——安装只在 exit 0 时算成功
     /// （方案 §4：--version 失败 = 安装失败，不启动）。
-    static func verifyBin(bin: String, runner: OpenCodeProcessRunning) -> Result<InstallSuccess, InstallError> {
+    static func verifyBin(bin: String, npmPath: String, runner: OpenCodeProcessRunning) -> Result<InstallSuccess, InstallError> {
         let run = runner.run(
             executable: bin,
             arguments: ["--version"],
@@ -211,6 +215,7 @@ enum OpenCodeInstaller {
         }
         return .success(InstallSuccess(
             binPath: bin,
+            npmPath: npmPath,
             scope: "user-global",
             note: "",
             version: run.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -272,6 +277,7 @@ enum OpenCodeInstaller {
     private static func record(for success: InstallSuccess) -> InstallRecord {
         InstallRecord(
             binPath: success.binPath,
+            npmPath: success.npmPath,
             scope: success.scope,
             opencodeVersion: success.version,
             installedAt: ISO8601DateFormatter().string(from: Date())

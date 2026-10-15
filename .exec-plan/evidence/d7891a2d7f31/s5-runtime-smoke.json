@@ -1,0 +1,77 @@
+{
+  "captured_at": "2026-10-15T07:39:38.926932+00:00",
+  "scope": "isolated real runtime read-only npm registry check on ports 18777/18778; production app untouched",
+  "runtime_pid": 10868,
+  "checks": {
+    "runtime_pid_matches": true,
+    "ready_no_agents": true,
+    "rescan_accepted": true,
+    "opencode_installed": true,
+    "npm_source": true,
+    "observation_terminal": true,
+    "freshness_present": true,
+    "recipe_only_when_update": true,
+    "no_update_executed": true
+  },
+  "observed_state": "update_available",
+  "observed_target": "1.19.0",
+  "observation_redacted": {
+    "installation": {
+      "state": "installed",
+      "artifactKind": "cli",
+      "installMethod": "npm"
+    },
+    "version": "1.18.0",
+    "versionSource": "npm_package_json",
+    "versionCheck": {
+      "state": "update_available",
+      "checkedAt": "2026-10-15T07:39:38.798661Z",
+      "freshUntil": "2026-10-15T13:39:38.798661Z",
+      "source": "npm_registry",
+      "channel": "latest",
+      "installedVersion": "1.18.0",
+      "targetVersion": "1.19.0"
+    },
+    "recipe_present": true,
+    "recipe_argument_shape": [
+      "install",
+      "-g",
+      "opencode-ai@1.19.0"
+    ],
+    "recipe_environment_exact_scope": {
+      "names": [
+        "PATH"
+      ],
+      "single_exact_bin_dir": true
+    }
+  },
+  "status_redacted": {
+    "activity": {
+      "admissionState": "accepting",
+      "bridgeOwnedActiveTurns": 0,
+      "bridgeOwnedActiveTurnsByBackend": {},
+      "pendingInteractions": 0,
+      "pendingInteractionsByBackend": {}
+    },
+    "agentSelectionRevision": 4,
+    "fileReadHealth": {
+      "restartRecommended": false,
+      "state": "healthy",
+      "stateEpoch": 1,
+      "stuckWorkers": 0
+    },
+    "managementSchemaVersion": 1,
+    "quiesce": {
+      "state": "none"
+    },
+    "registeredDrivers": [],
+    "requestedDrivers": [],
+    "runtimeIdentity": {
+      "bridgeEpoch": 17273505035608066947,
+      "pid": 10868
+    },
+    "status": "ready_no_agents",
+    "uptime": "691.670292ms",
+    "version": "0.1.0-dev"
+  }
+}

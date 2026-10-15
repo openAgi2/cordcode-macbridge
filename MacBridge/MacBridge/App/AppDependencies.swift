@@ -115,6 +115,13 @@ class AppDependencies: ObservableObject {
 
         let opencodeInstalledCLI = DefaultOpenCodeCLIResolver(dataDir: dir)
             .resolveOpenCodeCLI(searchPath: RuntimeConfig.defaultCLISearchPath()) ?? ""
+        let opencodeInstallRecord = OpenCodeInstaller.readInstallRecord(dataDir: dir)
+        let opencodeInstallNpmPath = opencodeInstallRecord?.binPath == opencodeInstalledCLI
+            ? opencodeInstallRecord?.npmPath ?? ""
+            : ""
+        let opencodeInstallScope = opencodeInstallRecord?.binPath == opencodeInstalledCLI
+            ? opencodeInstallRecord?.scope ?? ""
+            : ""
         let configuredRelayEndpoint = OfficialRelayConfiguration.endpoint
         let savedRelayEndpoint = UserDefaults.standard.string(forKey: "relayEndpoint") ?? ""
         let hasCurrentRelayRoute = !configuredRelayEndpoint.isEmpty &&
@@ -126,6 +133,7 @@ class AppDependencies: ObservableObject {
 
         let relayEnabled = UserDefaults.standard.object(forKey: "relayEnabled") as? Bool ?? true
         let preferLocalNetwork = UserDefaults.standard.object(forKey: "preferLocalNetwork") as? Bool ?? false
+        let codexDesktopVersion = Self.readCodexDesktopBundleVersion()
         let logFilePath = logDir + "/go-bridge.log"
         let config = RuntimeConfig(
             executablePath: executablePath,
@@ -134,11 +142,15 @@ class AppDependencies: ObservableObject {
             workDir: FileManager.default.homeDirectoryForCurrentUser.path,
             codexBackend: "app_server",
             codexAppServerURL: UserDefaults.standard.string(forKey: "codexAppServerURL") ?? "",
+            codexDesktopShortVersion: codexDesktopVersion?.short ?? "",
+            codexDesktopBuildVersion: codexDesktopVersion?.build ?? "",
             opencodeUser: opencodeUser,
             opencodePass: opencodePass,
             opencodeURL: opencodeURL,
             opencodeSource: opencodeSource,
             opencodeInstalledCLI: opencodeInstalledCLI,
+            opencodeInstallNpmPath: opencodeInstallNpmPath,
+            opencodeInstallScope: opencodeInstallScope,
             logFilePath: logFilePath,
             remoteURL: UserDefaults.standard.string(forKey: "remoteBridgeURL") ?? "",
             includeTailscaleInPairing: UserDefaults.standard.object(forKey: "pairingIncludeTailscale") as? Bool ?? true,
@@ -216,6 +228,18 @@ class AppDependencies: ObservableObject {
     }
 
     private var cancellables = Set<AnyCancellable>()
+
+    private static func readCodexDesktopBundleVersion() -> (short: String, build: String)? {
+        let path = "/Applications/ChatGPT.app/Contents/Info.plist"
+        guard let dictionary = NSDictionary(contentsOfFile: path) as? [String: Any],
+              dictionary["CFBundleIdentifier"] as? String == "com.openai.codex",
+              let short = dictionary["CFBundleShortVersionString"] as? String,
+              let build = dictionary["CFBundleVersion"] as? String,
+              !short.isEmpty, !build.isEmpty else {
+            return nil
+        }
+        return (short, build)
+    }
 
     /// 延迟启动 bridge，给 SwiftUI 足够的时间完成 UI 初始化
     func startBridge() {

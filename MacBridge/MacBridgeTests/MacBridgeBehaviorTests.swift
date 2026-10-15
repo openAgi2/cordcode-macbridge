@@ -77,6 +77,10 @@ final class MacBridgeBehaviorTests: XCTestCase {
 
         let sourceIndex = RuntimeManager.processArguments(for: legacy).firstIndex(of: "-opencode-source")
         XCTAssertEqual(RuntimeManager.processArguments(for: legacy)[sourceIndex! + 1], "disabled")
+        let shortIndex = RuntimeManager.processArguments(for: legacy).firstIndex(of: "-codex-desktop-short-version")
+        XCTAssertEqual(RuntimeManager.processArguments(for: legacy)[shortIndex! + 1], "")
+        let buildIndex = RuntimeManager.processArguments(for: legacy).firstIndex(of: "-codex-desktop-build-version")
+        XCTAssertEqual(RuntimeManager.processArguments(for: legacy)[buildIndex! + 1], "")
     }
 
     func testGoDurationFormatting() {

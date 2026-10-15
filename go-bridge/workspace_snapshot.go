@@ -21,18 +21,27 @@ type WorkspaceAgentInstallation struct {
 }
 
 type WorkspaceVersionCheck struct {
-	State  string `json:"state"`
-	Code   string `json:"code,omitempty"`
-	Reason string `json:"reason,omitempty"`
+	State        string                       `json:"state"`
+	CheckedAt    string                       `json:"checkedAt,omitempty"`
+	FreshUntil   string                       `json:"freshUntil,omitempty"`
+	Source       string                       `json:"source,omitempty"`
+	Channel      string                       `json:"channel,omitempty"`
+	Installed    string                       `json:"installedVersion,omitempty"`
+	Target       string                       `json:"targetVersion,omitempty"`
+	Code         string                       `json:"code,omitempty"`
+	Reason       string                       `json:"reason,omitempty"`
+	UpdateRecipe *toolinventory.CommandRecipe `json:"updateRecipe,omitempty"`
 }
 
 type WorkspaceAgentSnapshot struct {
-	ID            string                     `json:"id"`
-	Installation  WorkspaceAgentInstallation `json:"installation"`
-	Version       string                     `json:"version,omitempty"`
-	VersionSource string                     `json:"versionSource,omitempty"`
-	VersionCheck  WorkspaceVersionCheck      `json:"versionCheck"`
-	Readiness     *AgentProviderDescriptor   `json:"readiness,omitempty"`
+	ID            string                         `json:"id"`
+	Installation  WorkspaceAgentInstallation     `json:"installation"`
+	InstallGuide  *toolinventory.InstallGuidance `json:"installGuidance,omitempty"`
+	Version       string                         `json:"version,omitempty"`
+	VersionBuild  string                         `json:"versionBuild,omitempty"`
+	VersionSource string                         `json:"versionSource,omitempty"`
+	VersionCheck  WorkspaceVersionCheck          `json:"versionCheck"`
+	Readiness     *AgentProviderDescriptor       `json:"readiness,omitempty"`
 }
 
 type WorkspaceRelaySnapshot struct {
@@ -120,6 +129,16 @@ func workspaceAgentSnapshots(cfg ManagementConfig) []WorkspaceAgentSnapshot {
 			value := descriptor
 			snapshot.Readiness = &value
 		}
+		if installation.State == "missing" {
+			npmPath, _ := exec.LookPath("npm")
+			guidance := toolinventory.BuildInstallGuidance(product, npmPath)
+			snapshot.InstallGuide = &guidance
+		}
+		if product.ID == "codex-remote" && artifactPath != "" && cfg.CodexDesktopShortVersion != "" {
+			snapshot.Version = cfg.CodexDesktopShortVersion
+			snapshot.VersionBuild = cfg.CodexDesktopBuildVersion
+			snapshot.VersionSource = "chatgpt_desktop_plist"
+		}
 		if artifactPath != "" && installation.State == "installed" && product.NPMPackage != "" {
 			origin, err := toolinventory.ClassifyInstallOrigin(product, artifactPath, toolinventory.OriginDependencies{})
 			if err != nil {
@@ -147,9 +166,33 @@ func workspaceAgentSnapshots(cfg ManagementConfig) []WorkspaceAgentSnapshot {
 				}
 			}
 		}
+		if cfg.VersionService != nil {
+			if observation, ok := cfg.VersionService.Snapshot(product.ID); ok {
+				snapshot.VersionCheck = workspaceVersionCheck(observation)
+				if observation.InstalledVersion != "" {
+					snapshot.Version = observation.InstalledVersion
+				}
+			}
+		}
 		out = append(out, snapshot)
 	}
 	return out
+}
+
+func workspaceVersionCheck(observation toolinventory.VersionObservation) WorkspaceVersionCheck {
+	check := WorkspaceVersionCheck{
+		State: string(observation.State), Source: string(observation.Source),
+		Channel: observation.Channel, Installed: observation.InstalledVersion,
+		Target: observation.TargetVersion, Code: observation.ErrorCode, Reason: observation.Reason,
+		UpdateRecipe: observation.UpdateRecipe,
+	}
+	if !observation.CheckedAt.IsZero() {
+		check.CheckedAt = observation.CheckedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if !observation.FreshUntil.IsZero() {
+		check.FreshUntil = observation.FreshUntil.UTC().Format(time.RFC3339Nano)
+	}
+	return check
 }
 
 func workspaceArtifactPath(productID string, cfg ManagementConfig) string {

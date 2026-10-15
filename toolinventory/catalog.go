@@ -2,17 +2,18 @@ package toolinventory
 
 // Product is the Mac product lineup, deliberately independent from the Go plugin registry.
 type Product struct {
-	ID         string
-	Kind       string
-	NPMPackage string
+	ID               string
+	Kind             string
+	NPMPackage       string
+	DocumentationURL string
 }
 
 var products = []Product{
-	{ID: "claude", Kind: "claude_code", NPMPackage: "@anthropic-ai/claude-code"},
-	{ID: "codex-remote", Kind: "codex-remote"},
-	{ID: "dsh-web", Kind: "deepseek-web", NPMPackage: "@deepseek-ai/dsh"},
-	{ID: "grokbuild", Kind: "grokbuild"},
-	{ID: "opencode-web", Kind: "opencode-web", NPMPackage: "opencode-ai"},
+	{ID: "claude", Kind: "claude_code", NPMPackage: "@anthropic-ai/claude-code", DocumentationURL: "https://code.claude.com/docs/en/setup"},
+	{ID: "codex-remote", Kind: "codex-remote", DocumentationURL: "https://chatgpt.com/download"},
+	{ID: "dsh-web", Kind: "deepseek-web", NPMPackage: "@deepseek-ai/dsh", DocumentationURL: "https://github.com/deepseek-ai/deepseek-harness"},
+	{ID: "grokbuild", Kind: "grokbuild", DocumentationURL: "https://github.com/xai-org/grok-build"},
+	{ID: "opencode-web", Kind: "opencode-web", NPMPackage: "opencode-ai", DocumentationURL: "https://opencode.ai/docs/"},
 }
 
 // Products returns the supported product IDs in stable UI order.

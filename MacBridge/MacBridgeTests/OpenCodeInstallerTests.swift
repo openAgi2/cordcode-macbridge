@@ -81,6 +81,7 @@ final class OpenCodeInstallerTests: XCTestCase {
             return XCTFail("global install should succeed, got \(result)")
         }
         XCTAssertEqual(success.binPath, fakePrefix + "/bin/opencode")
+        XCTAssertEqual(success.npmPath, "/opt/homebrew/bin/npm")
         XCTAssertEqual(success.scope, "user-global")
         XCTAssertEqual(success.version, "1.18.34")
         XCTAssertEqual(success.note, "")
@@ -106,6 +107,7 @@ final class OpenCodeInstallerTests: XCTestCase {
         XCTAssertFalse(json.lowercased().contains("username"), "记录不得含凭据")
         let record = OpenCodeInstaller.readInstallRecord(dataDir: dataDir)
         XCTAssertEqual(record?.binPath, fakePrefix + "/bin/opencode")
+        XCTAssertEqual(record?.npmPath, "/opt/homebrew/bin/npm")
         XCTAssertEqual(record?.scope, "user-global")
         XCTAssertEqual(record?.opencodeVersion, "1.18.34")
     }
@@ -125,6 +127,7 @@ final class OpenCodeInstallerTests: XCTestCase {
             return XCTFail("prefix fallback should succeed, got \(result)")
         }
         XCTAssertEqual(success.binPath, fallbackBin)
+        XCTAssertEqual(success.npmPath, "/opt/homebrew/bin/npm")
         XCTAssertEqual(success.scope, "cordcode-prefix")
         XCTAssertTrue(success.note.contains("CordCode 目录"), "prefix 回退必须写明装到了 CordCode 目录")
 

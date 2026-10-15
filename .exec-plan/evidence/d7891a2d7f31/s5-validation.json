@@ -1,0 +1,63 @@
+{
+  "captured_at": "2026-10-15T07:51:13.985871+00:00",
+  "scope": "S5 verified version observation and copy-only command guidance",
+  "commands": [
+    {
+      "command": "GOTOOLCHAIN=local go test ./toolinventory -count=1",
+      "result": "passed",
+      "duration": "0.184s package time",
+      "note": "Includes repaired archived Grok JSON shape and wrong-type rejection."
+    },
+    {
+      "command": "GOTOOLCHAIN=local go test ./agent/dsh-web -run 'TestInstallerGlobalArgvExact|TestInstallerPrefixFallbackArgvAndNote|TestFindDSHBinary' -count=1",
+      "result": "passed",
+      "duration": "0.144s package time"
+    },
+    {
+      "command": "GOTOOLCHAIN=local go test ./go-bridge -run 'TestWorkspaceRescan|TestWorkspaceCheckTarget|TestWorkspaceSnapshot|TestDeviceConnRegistry' -count=1",
+      "result": "passed",
+      "duration": "0.037s package time"
+    },
+    {
+      "command": "GOTOOLCHAIN=local go test ./toolinventory -race -run 'TestVersionService|TestNPMLatest|TestGrok|TestShellQuote|TestBuildRecipes|TestBuildInstallGuidance|TestArtifactFingerprint' -count=1",
+      "result": "passed",
+      "duration": "1.106s package time"
+    },
+    {
+      "command": "GOTOOLCHAIN=local go vet ./toolinventory ./agent/dsh-web ./go-bridge",
+      "result": "passed"
+    },
+    {
+      "command": "GOTOOLCHAIN=local xcodebuild -project MacBridge/CordCodeLink.xcodeproj -scheme CordCodeLink -configuration Debug -destination 'platform=macOS' -only-testing:CordCodeLinkTests/OpenCodeInstallerTests -only-testing:CordCodeLinkTests/WorkspaceSnapshotStoreTests -only-testing:CordCodeLinkTests/MacBridgeBehaviorTests/testAgentSelectionArgumentsPreserveExplicitEmptyAndRevision test -quiet",
+      "result": "passed",
+      "duration": "11.724s wall",
+      "note": "xcodebuild emitted a benign empty supported-platforms destination notice; testing completed successfully."
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "gofmt -l <changed Go files>",
+      "result": "passed",
+      "note": "No changed S5 Go file required formatting."
+    }
+  ],
+  "failure_repair": {
+    "observed": "TestParseGrokUpdateCheckAcceptsArchivedShape and TestRunGrokUpdateCheckRejectsReportedErrorAndBadExit failed with invalid_grok_json wrong value type.",
+    "root_cause": "parseGrokUpdateCheck unmarshaled each required field value into the entire raw result struct.",
+    "fix": "Check exact required keys in a raw object map, then unmarshal the complete document once.",
+    "retest": "GOTOOLCHAIN=local go test ./toolinventory -count=1 passed after the fix."
+  },
+  "boundaries": [
+    "No automatic update execution.",
+    "No new latest-version source beyond captured npm registry and Grok update-check JSON.",
+    "No iOS code changes.",
+    "Production /Applications/CordCodeLink.app untouched."
+  ],
+  "integration": {
+    "runtime_smoke": ".exec-plan/evidence/d7891a2d7f31/s5-runtime-smoke.json",
+    "result": "passed",
+    "scope": "isolated real runtime; production app untouched"
+  }
+}

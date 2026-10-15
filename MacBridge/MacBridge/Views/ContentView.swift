@@ -176,6 +176,7 @@ struct ContentView: View {
             )
         ) { phase, isCurrent in
             deviceStore.applyWorkspaceSnapshotPhase(phase, isObservationCurrent: isCurrent)
+            backendVM.applyWorkspaceSnapshotPhase(phase, isObservationCurrent: isCurrent)
         }
         .sheet(isPresented: $showConnectionStatus) {
             // P0 阶段承载现有 RemoteAccessView；P1-2 将其重做为单页连接状态 Sheet。

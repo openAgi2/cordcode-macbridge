@@ -10,6 +10,33 @@ struct BackendAgentStatus: Identifiable, Equatable {
     let reason: String?
     let isRefreshing: Bool
     let requiresPollingForExternalTurns: Bool
+    let installGuidance: WorkspaceSnapshot.InstallGuidance?
+    let snapshotVersion: String?
+    let versionCheck: WorkspaceSnapshot.VersionCheck?
+
+    init(
+        id: String,
+        displayName: String,
+        kind: String,
+        status: String,
+        reason: String?,
+        isRefreshing: Bool,
+        requiresPollingForExternalTurns: Bool,
+        installGuidance: WorkspaceSnapshot.InstallGuidance? = nil,
+        snapshotVersion: String? = nil,
+        versionCheck: WorkspaceSnapshot.VersionCheck? = nil
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.kind = kind
+        self.status = status
+        self.reason = reason
+        self.isRefreshing = isRefreshing
+        self.requiresPollingForExternalTurns = requiresPollingForExternalTurns
+        self.installGuidance = installGuidance
+        self.snapshotVersion = snapshotVersion
+        self.versionCheck = versionCheck
+    }
 
     /// 用户友好的状态文案
     var displayStatus: String {
@@ -38,17 +65,72 @@ class BackendStatusViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var isShowingStaleResults = false
+    @Published var isRescanningVersions = false
+    @Published var versionRescanError: String?
     /// dsh-web 座位动作状态（2026-09-22 方案：安装/启动按钮与字幕的数据源）。
     @Published var dshWebSeatAction = DSHWebSeatActionState()
 
     private var apiClient: ManagementAPIClient?
     private var refreshTask: Task<Void, Never>?
     private var dshWebPollTask: Task<Void, Never>?
+    private var didStartInitialVersionRescan = false
 
     /// 配置 API 客户端
     func configure(apiClient: ManagementAPIClient) {
         self.apiClient = apiClient
         startAvailabilityPolling()
+    }
+
+    func applyWorkspaceSnapshotPhase(
+        _ phase: WorkspaceSnapshotStore.Phase,
+        isObservationCurrent: Bool
+    ) {
+        guard isObservationCurrent, case .available(let snapshot) = phase else {
+            return
+        }
+        let observations = Dictionary(
+            snapshot.agents.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        agents = agents.map { agent in
+            BackendAgentStatus(
+                id: agent.id,
+                displayName: agent.displayName,
+                kind: agent.kind,
+                status: agent.status,
+                reason: agent.reason,
+                isRefreshing: agent.isRefreshing,
+                requiresPollingForExternalTurns: agent.requiresPollingForExternalTurns,
+                installGuidance: observations[agent.id]?.installGuidance,
+                snapshotVersion: observations[agent.id]?.version,
+                versionCheck: observations[agent.id]?.versionCheck
+            )
+        }
+        startInitialVersionRescanIfNeeded(snapshot: snapshot)
+    }
+
+    private func startInitialVersionRescanIfNeeded(snapshot: WorkspaceSnapshot) {
+        guard !didStartInitialVersionRescan else { return }
+        let supportedIDs = snapshot.agents.filter { agent in
+            agent.versionCheck.state == "unchecked" &&
+                agent.installation.state == "installed" &&
+                (agent.installation.installMethod == "npm" || agent.id == "grokbuild")
+        }.map(\.id)
+        guard !supportedIDs.isEmpty else { return }
+        didStartInitialVersionRescan = true
+        Task { await rescanVersions(agentIDs: supportedIDs) }
+    }
+
+    func rescanVersions(agentIDs: [String] = []) async {
+        guard let client = apiClient, !isRescanningVersions else { return }
+        isRescanningVersions = true
+        versionRescanError = nil
+        do {
+            _ = try await client.rescanWorkspace(agentIDs: agentIDs, checkVersions: true)
+        } catch {
+            versionRescanError = error.localizedDescription
+        }
+        isRescanningVersions = false
     }
 
     /// Codex Desktop restore is async. Keep GET /internal/agents until that row becomes available.

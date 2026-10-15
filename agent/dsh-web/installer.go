@@ -168,7 +168,7 @@ func (a *Agent) runInstall(npm string) {
 		return
 	}
 
-	if err := writeInstallRecord(a.resolver.dataDirOf(), bin, scope, dshVersion); err != nil {
+	if err := writeInstallRecord(a.resolver.dataDirOf(), bin, scope, dshVersion, npm); err != nil {
 		slog.Warn("dsh-web: install record write failed", "error", err.Error())
 	}
 	a.resolver.SetManagedBinary(bin)
@@ -321,7 +321,7 @@ func verifyDSHVersion(bin string) (string, error) {
 
 // writeInstallRecord persists the install (0600, no credentials): bin path,
 // npm scope, version, time.
-func writeInstallRecord(dataDir, bin, scope, dshVersion string) error {
+func writeInstallRecord(dataDir, bin, scope, dshVersion, npmPath string) error {
 	if dataDir == "" {
 		return fmt.Errorf("no data dir")
 	}
@@ -332,6 +332,7 @@ func writeInstallRecord(dataDir, bin, scope, dshVersion string) error {
 		DshVersion:  dshVersion,
 		InstalledAt: time.Now().UTC().Format(time.RFC3339),
 	}
+	rec.NpmPath = npmPath
 	b, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
 		return err

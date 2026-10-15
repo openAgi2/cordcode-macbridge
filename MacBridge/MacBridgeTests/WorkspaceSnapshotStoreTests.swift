@@ -35,6 +35,50 @@ final class WorkspaceSnapshotStoreTests: XCTestCase {
         )
     }
 
+    private func makeSnapshotAgent() -> WorkspaceSnapshot.Agent {
+        WorkspaceSnapshot.Agent(
+            id: "opencode-web",
+            installation: .init(
+                state: "installed",
+                errorCode: nil,
+                reason: nil,
+                artifactKind: "cli",
+                installMethod: "npm"
+            ),
+            installGuidance: .init(
+                documentationUrl: "https://opencode.ai/docs/",
+                recipe: .init(
+                    executable: "/tools/bin/npm",
+                    args: ["install", "-g", "opencode-ai"],
+                    environment: [.init(name: "PATH", value: "/tools/bin")],
+                    display: "PATH='/tools/bin' '/tools/bin/npm' 'install' '-g' 'opencode-ai'"
+                ),
+                reason: nil
+            ),
+            version: "1.19.0",
+            versionBuild: nil,
+            versionSource: "npm_package_json",
+            versionCheck: .init(
+                state: "update_available",
+                checkedAt: "2026-10-15T00:00:00Z",
+                freshUntil: "2026-10-15T06:00:00Z",
+                source: "npm_registry",
+                channel: "latest",
+                installedVersion: "1.19.0",
+                targetVersion: "1.19.1",
+                code: nil,
+                reason: nil,
+                updateRecipe: .init(
+                    executable: "/tools/bin/npm",
+                    args: ["install", "-g", "opencode-ai@1.19.1"],
+                    environment: [.init(name: "PATH", value: "/tools/bin")],
+                    display: "PATH='/tools/bin' '/tools/bin/npm' 'install' '-g' 'opencode-ai@1.19.1'"
+                )
+            ),
+            readiness: nil
+        )
+    }
+
     private func waitUntil(
         _ condition: @autoclosure () -> Bool,
         timeout: TimeInterval = 2,
@@ -126,5 +170,41 @@ final class WorkspaceSnapshotStoreTests: XCTestCase {
         store.configure(apiClient: spy)
         await waitUntil(store.phase == .diagnostic(.unauthorized))
         store.stopPolling()
+    }
+
+    @MainActor
+    func testBackendViewModelMergesSnapshotVersionAndInstallGuidance() {
+        let viewModel = BackendStatusViewModel()
+        viewModel.agents = [
+            BackendAgentStatus(
+                id: "opencode-web",
+                displayName: "OpenCode Web",
+                kind: "opencode-web",
+                status: "not_detected",
+                reason: nil,
+                isRefreshing: false,
+                requiresPollingForExternalTurns: false
+            )
+        ]
+        let snapshot = WorkspaceSnapshot(
+            schemaVersion: 1,
+            runtimeIdentity: .init(pid: 77, bridgeEpoch: 88),
+            selectionRevision: 1,
+            requestedDrivers: [],
+            activeDrivers: [],
+            sampledAt: "2026-10-15T00:00:00Z",
+            agents: [makeSnapshotAgent()],
+            devicePresence: [],
+            relay: .init(enabled: true, configured: true, connected: false)
+        )
+
+        viewModel.applyWorkspaceSnapshotPhase(.available(snapshot), isObservationCurrent: true)
+
+        XCTAssertEqual(viewModel.agents.first?.snapshotVersion, "1.19.0")
+        XCTAssertEqual(viewModel.agents.first?.versionCheck?.targetVersion, "1.19.1")
+        XCTAssertEqual(viewModel.agents.first?.installGuidance?.recipe?.display, "PATH='/tools/bin' '/tools/bin/npm' 'install' '-g' 'opencode-ai'")
+
+        viewModel.applyWorkspaceSnapshotPhase(.available(snapshot), isObservationCurrent: false)
+        XCTAssertEqual(viewModel.agents.first?.versionCheck?.targetVersion, "1.19.1")
     }
 }

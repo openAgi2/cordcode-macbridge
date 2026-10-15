@@ -32,6 +32,7 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/core"
 	"github.com/openAgi2/cordcode-macbridge/go-bridge/admission"
 	"github.com/openAgi2/cordcode-macbridge/pinstore"
+	"github.com/openAgi2/cordcode-macbridge/toolinventory"
 )
 
 const defaultDrivers = "claude,codex,codex-web,grokbuild,dsh-web,opencode-web"
@@ -83,6 +84,8 @@ func Main() {
 	showVersion := flag.Bool("version", false, "Print runtime version and exit")
 	codexBackend := flag.String("codex-backend", envOr("GO_BRIDGE_CODEX_BACKEND", "exec"), "Codex backend mode: exec or app_server")
 	codexAppServerURL := flag.String("codex-app-server-url", envOr("GO_BRIDGE_CODEX_APP_SERVER_URL", ""), "Optional Codex app-server listen URL")
+	codexDesktopShortVersion := flag.String("codex-desktop-short-version", "", "ChatGPT Desktop CFBundleShortVersionString observed by the Mac app")
+	codexDesktopBuildVersion := flag.String("codex-desktop-build-version", "", "ChatGPT Desktop CFBundleVersion observed by the Mac app")
 	// codex-web：官方长驻 app-server 的 JSON-RPC 客户端 backend。显式 URL 只用于
 	// 隔离测试/非 Desktop 实验；产品空值 = 官方 daemon 复用→managed start，失败可见，
 	// 禁止回落到 Desktop 无法连接的第二个 loopback app-server。
@@ -102,6 +105,8 @@ func Main() {
 	ocwUser := flag.String("opencode-web-user", envOr("OPENCODE_WEB_SERVER_USERNAME", ""), "OpenCode Web auth username")
 	ocwPass := flag.String("opencode-web-pass", envOr("OPENCODE_WEB_SERVER_PASSWORD", ""), "OpenCode Web auth password")
 	opencodeInstalledCLI := flag.String("opencode-installed-cli", "", "Exact OpenCode CLI selected by the Mac app (read-only inventory)")
+	opencodeInstallNpmPath := flag.String("opencode-install-npm-path", "", "Exact npm binary recorded for the selected OpenCode install")
+	opencodeInstallScope := flag.String("opencode-install-scope", "", "Recorded OpenCode install scope (user-global or cordcode-prefix)")
 	opencodeSource := flag.String("opencode-source", "", "OpenCode endpoint source (managed_local, external_http, legacy_64667, service_discovery_future, disabled)")
 
 	// 管理 API（Mac App product 模式使用，开发模式不启用）
@@ -452,36 +457,43 @@ func Main() {
 
 	if *managementHost != "" && *managementToken != "" {
 		displayName := loadOrCreateDisplayName(dataDir)
+		versionService := toolinventory.NewVersionService(toolinventory.VersionDependencies{})
 
 		mgmtCfg := ManagementConfig{
-			Handlers:     handlers,
-			Token:        *managementToken,
-			DataDir:      dataDir,
-			PairingStore: func() PairingSessionStore { s := NewMemoryPairingStore(); globalPairingStore = s; return s }(),
+			WorkspaceContext: ctx,
+			Handlers:         handlers,
+			Token:            *managementToken,
+			DataDir:          dataDir,
+			PairingStore:     func() PairingSessionStore { s := NewMemoryPairingStore(); globalPairingStore = s; return s }(),
 			// 复用 dispatcher 之前已创建并冻结的同一 DeviceStore 实例（评审
 			// R5-B1：不再二次构造，授权过滤与管理面同源）。
-			DeviceStore:            trustedDevices,
-			BridgeID:               bridgeID,
-			DisplayName:            displayName,
-			LocalURL:               advertisedLocalURL,
-			LocalURLs:              advertisedLocalURLs,
-			TailscaleURL:           tailscaleURL,
-			RemoteURL:              *remoteURL,
-			IncludeTailscale:       *includeTailscale,
-			IncludeRemote:          *includeRemote,
-			RelayEndpoint:          *relayEndpoint,
-			RelayRouteID:           *relayRouteID,
-			RelayCredential:        *relayCredential,
-			RelayConfigured:        relayConfigured,
-			RelayEnabled:           *relayEnabled,
-			RelayIdentity:          relayIdentity,
-			PreferLocalNetwork:     *preferLocalNetwork,
-			Agents:                 handlers.agents,
-			RequestedDrivers:       requestedDrivers,
-			AgentSelectionRevision: selectionRevision,
-			OpenCodeInstalledCLI:   *opencodeInstalledCLI,
-			OpenCodeSource:         *opencodeSource,
-			CodexBackendMode:       *codexBackend,
+			DeviceStore:              trustedDevices,
+			BridgeID:                 bridgeID,
+			DisplayName:              displayName,
+			LocalURL:                 advertisedLocalURL,
+			LocalURLs:                advertisedLocalURLs,
+			TailscaleURL:             tailscaleURL,
+			RemoteURL:                *remoteURL,
+			IncludeTailscale:         *includeTailscale,
+			IncludeRemote:            *includeRemote,
+			RelayEndpoint:            *relayEndpoint,
+			RelayRouteID:             *relayRouteID,
+			RelayCredential:          *relayCredential,
+			RelayConfigured:          relayConfigured,
+			RelayEnabled:             *relayEnabled,
+			RelayIdentity:            relayIdentity,
+			PreferLocalNetwork:       *preferLocalNetwork,
+			Agents:                   handlers.agents,
+			RequestedDrivers:         requestedDrivers,
+			AgentSelectionRevision:   selectionRevision,
+			OpenCodeInstalledCLI:     *opencodeInstalledCLI,
+			OpenCodeSource:           *opencodeSource,
+			OpenCodeInstallNpmPath:   *opencodeInstallNpmPath,
+			OpenCodeInstallScope:     *opencodeInstallScope,
+			VersionService:           versionService,
+			CodexBackendMode:         *codexBackend,
+			CodexDesktopShortVersion: *codexDesktopShortVersion,
+			CodexDesktopBuildVersion: *codexDesktopBuildVersion,
 			DetectionCfg: &AgentDetectionConfig{
 				OpenCodeURL:       *ocBaseURL,
 				OpenCodeUser:      *ocUser,

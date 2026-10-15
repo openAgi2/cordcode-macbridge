@@ -179,14 +179,65 @@ struct WorkspaceSnapshot: Codable, Equatable {
 
     struct VersionCheck: Codable, Equatable {
         let state: String
+        let checkedAt: String?
+        let freshUntil: String?
+        let source: String?
+        let channel: String?
+        let installedVersion: String?
+        let targetVersion: String?
         let code: String?
+        let reason: String?
+        let updateRecipe: CommandRecipe?
+
+        init(
+            state: String,
+            checkedAt: String? = nil,
+            freshUntil: String? = nil,
+            source: String? = nil,
+            channel: String? = nil,
+            installedVersion: String? = nil,
+            targetVersion: String? = nil,
+            code: String? = nil,
+            reason: String? = nil,
+            updateRecipe: CommandRecipe? = nil
+        ) {
+            self.state = state
+            self.checkedAt = checkedAt
+            self.freshUntil = freshUntil
+            self.source = source
+            self.channel = channel
+            self.installedVersion = installedVersion
+            self.targetVersion = targetVersion
+            self.code = code
+            self.reason = reason
+            self.updateRecipe = updateRecipe
+        }
+    }
+
+    struct CommandRecipe: Codable, Equatable {
+        let executable: String
+        let args: [String]?
+        let environment: [CommandEnvironment]?
+        let display: String
+    }
+
+    struct CommandEnvironment: Codable, Equatable {
+        let name: String
+        let value: String
+    }
+
+    struct InstallGuidance: Codable, Equatable {
+        let documentationUrl: String
+        let recipe: CommandRecipe?
         let reason: String?
     }
 
     struct Agent: Codable, Equatable {
         let id: String
         let installation: Installation
+        let installGuidance: InstallGuidance?
         let version: String?
+        let versionBuild: String?
         let versionSource: String?
         let versionCheck: VersionCheck
         let readiness: AgentInfo?
@@ -217,6 +268,16 @@ struct WorkspaceSnapshot: Codable, Equatable {
     let agents: [Agent]
     let devicePresence: [DevicePresence]
     let relay: Relay
+}
+
+struct WorkspaceRescanKick: Codable, Equatable {
+    let operationId: String
+    let status: String
+}
+
+private struct WorkspaceRescanRequest: Encodable {
+    let agentIDs: [String]
+    let checkVersions: Bool
 }
 
 /// POST /internal/agents/dsh-web/install · /start 的立即返回（kick 异步工作）。
@@ -405,6 +466,19 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
     func getWorkspaceSnapshot() async throws -> WorkspaceSnapshot {
         let data = try await performRequest("/internal/workspace/snapshot")
         return try JSONDecoder().decode(WorkspaceSnapshot.self, from: data)
+    }
+
+    func rescanWorkspace(agentIDs: [String], checkVersions: Bool) async throws -> WorkspaceRescanKick {
+        let body = try JSONEncoder().encode(WorkspaceRescanRequest(
+            agentIDs: agentIDs,
+            checkVersions: checkVersions
+        ))
+        let data = try await performRequest(
+            "/internal/workspace/rescan",
+            method: "POST",
+            body: body
+        )
+        return try JSONDecoder().decode(WorkspaceRescanKick.self, from: data)
     }
 
     func startCodexRemotePairing() async throws -> CodexRemotePairingStatus {

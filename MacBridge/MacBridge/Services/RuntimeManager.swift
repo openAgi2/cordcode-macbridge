@@ -167,6 +167,8 @@ struct RuntimeConfig {
     let workDir: String
     let codexBackend: String
     let codexAppServerURL: String
+    let codexDesktopShortVersion: String
+    let codexDesktopBuildVersion: String
     var opencodeUser: String
     var opencodePass: String
     /// Resolved OpenCode endpoint URL (loopback, e.g. `http://127.0.0.1:<port>`).
@@ -176,6 +178,8 @@ struct RuntimeConfig {
     var opencodeSource: OpenCodeServerSource
     /// Exact CLI selected by the Swift resolver; passed to read-only Go inventory.
     var opencodeInstalledCLI: String
+    var opencodeInstallNpmPath: String
+    var opencodeInstallScope: String
     let logFilePath: String
     let cliSearchPath: [String]
     var remoteURL: String
@@ -213,11 +217,15 @@ struct RuntimeConfig {
         workDir: String = FileManager.default.homeDirectoryForCurrentUser.path,
         codexBackend: String = "app_server",
         codexAppServerURL: String = "",
+        codexDesktopShortVersion: String = "",
+        codexDesktopBuildVersion: String = "",
         opencodeUser: String = "",
         opencodePass: String = "",
         opencodeURL: String = "",
         opencodeSource: OpenCodeServerSource = .disabled,
         opencodeInstalledCLI: String = "",
+        opencodeInstallNpmPath: String = "",
+        opencodeInstallScope: String = "",
         logFilePath: String = "",
         cliSearchPath: [String] = Self.defaultCLISearchPath(),
         remoteURL: String = "",
@@ -240,11 +248,15 @@ struct RuntimeConfig {
         self.workDir = workDir
         self.codexBackend = codexBackend
         self.codexAppServerURL = codexAppServerURL
+        self.codexDesktopShortVersion = codexDesktopShortVersion
+        self.codexDesktopBuildVersion = codexDesktopBuildVersion
         self.opencodeUser = opencodeUser
         self.opencodePass = opencodePass
         self.opencodeURL = opencodeURL
         self.opencodeSource = opencodeSource
         self.opencodeInstalledCLI = opencodeInstalledCLI
+        self.opencodeInstallNpmPath = opencodeInstallNpmPath
+        self.opencodeInstallScope = opencodeInstallScope
         self.logFilePath = NSString(string: logFilePath).expandingTildeInPath
         self.cliSearchPath = cliSearchPath.map { NSString(string: $0).expandingTildeInPath }
         self.remoteURL = remoteURL
@@ -1749,6 +1761,8 @@ class RuntimeManager: ObservableObject {
             "-drivers", config.drivers.joined(separator: ","),
             "-work-dir", config.workDir,
             "-codex-backend", config.codexBackend,
+            "-codex-desktop-short-version", config.codexDesktopShortVersion,
+            "-codex-desktop-build-version", config.codexDesktopBuildVersion,
             "-management-host", "127.0.0.1",
             "-management-port", "0",
             "-data-dir", config.dataDir,
@@ -1777,6 +1791,8 @@ class RuntimeManager: ObservableObject {
         if !config.opencodeInstalledCLI.isEmpty {
             arguments += ["-opencode-installed-cli", config.opencodeInstalledCLI]
         }
+        arguments += ["-opencode-install-npm-path", config.opencodeInstallNpmPath]
+        arguments += ["-opencode-install-scope", config.opencodeInstallScope]
         if let selectionRevision = config.agentSelectionRevision {
             arguments += ["-agent-selection-revision", String(selectionRevision)]
         }

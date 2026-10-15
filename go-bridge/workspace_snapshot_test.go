@@ -137,3 +137,25 @@ func TestWorkspaceSnapshotExternalOpenCodeDoesNotRequireLocalCLI(t *testing.T) {
 		t.Fatalf("external OpenCode installation mismatch: %+v", opencode.Installation)
 	}
 }
+
+func TestWorkspaceSnapshotMissingAgentProvidesOfficialGuidance(t *testing.T) {
+	t.Setenv("PATH", "")
+	cfg := ManagementConfig{
+		Agents: map[string]core.Agent{}, DataDir: NewDataDir(t.TempDir()),
+	}
+	agents := workspaceAgentSnapshots(cfg)
+	var grok WorkspaceAgentSnapshot
+	for _, agent := range agents {
+		if agent.ID == "grokbuild" {
+			grok = agent
+		}
+	}
+	if grok.Installation.State != "missing" || grok.InstallGuide == nil {
+		t.Fatalf("missing Grok guidance absent: %+v", grok)
+	}
+	if grok.InstallGuide.Recipe == nil ||
+		!strings.Contains(grok.InstallGuide.Recipe.Display, "https://x.ai/cli/install.sh") ||
+		grok.InstallGuide.DocumentationURL == "" {
+		t.Fatalf("missing Grok guidance incomplete: %+v", grok.InstallGuide)
+	}
+}

@@ -31,9 +31,19 @@ const (
 	InstallScopeCordcodePrefix = "cordcode-prefix"
 )
 
+// InstallRecordSnapshot is the non-secret subset needed by workspace
+// inventory. It is read-only and never changes resolver state.
+type InstallRecordSnapshot struct {
+	BinPath string
+	NpmPath string
+	Scope   string
+	Version string
+}
+
 type installRecord struct {
 	Version     int    `json:"version"`
 	BinPath     string `json:"bin_path"`
+	NpmPath     string `json:"npm_path,omitempty"`
 	Scope       string `json:"scope"`       // user-global | cordcode-prefix
 	DshVersion  string `json:"dsh_version"` // `dsh --version` output, diagnostics only
 	InstalledAt string `json:"installed_at"`
@@ -73,6 +83,19 @@ func readInstallRecord(dataDir string) *installRecord {
 		return nil
 	}
 	return &rec
+}
+
+// ReadInstallRecordSnapshot exports the installer-owned scope record to the
+// Mac workspace inventory without exposing private installer mutation APIs.
+func ReadInstallRecordSnapshot(dataDir string) *InstallRecordSnapshot {
+	record := readInstallRecord(dataDir)
+	if record == nil {
+		return nil
+	}
+	return &InstallRecordSnapshot{
+		BinPath: record.BinPath, NpmPath: record.NpmPath,
+		Scope: record.Scope, Version: record.DshVersion,
+	}
 }
 
 func isExecutableFile(path string) bool {

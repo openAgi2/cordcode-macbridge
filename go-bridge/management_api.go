@@ -21,6 +21,7 @@ import (
 	dshweb "github.com/openAgi2/cordcode-macbridge/agent/dsh-web"
 	"github.com/openAgi2/cordcode-macbridge/core"
 	"github.com/openAgi2/cordcode-macbridge/go-bridge/admission"
+	"github.com/openAgi2/cordcode-macbridge/toolinventory"
 )
 
 // httpReadHeaderTimeout 是管理/主 HTTP server 的握手 header 读取超时（P2-1 slowloris 防护）。
@@ -30,9 +31,10 @@ var httpReadHeaderTimeout = 10 * time.Second
 // ── 管理 API 配置 ───────────────────────────────────────────────────────────
 // ManagementConfig 包含创建 ManagementServer 所需的全部依赖。
 type ManagementConfig struct {
-	Handlers *Handlers
-	Token    string
-	DataDir  *DataDir
+	WorkspaceContext context.Context
+	Handlers         *Handlers
+	Token            string
+	DataDir          *DataDir
 	// ClaudeHookHolder（Phase 3）：自 spawn 会话 --settings hooks 端点的延迟
 	// 解析 holder；Heartbeat 自检通过时翻转其 probeOK。可为 nil（单测）。
 	ClaudeHookHolder *claudeHookConfigHolder
@@ -56,15 +58,20 @@ type ManagementConfig struct {
 	// PreferLocalNetwork 是 control-plane 连接策略:是否在同一局域网时优先直连。默认 false。
 	// 由 main.go 从 -prefer-local-network flag 注入;随 RelayFirstResult / pairing_complete /
 	// hello_ack / /internal/remote/status 下发。SSV2:不进入 timeline/projection。
-	PreferLocalNetwork     bool
-	Agents                 map[string]core.Agent
-	RequestedDrivers       []string
-	AgentSelectionRevision *uint64
-	OpenCodeInstalledCLI   string
-	OpenCodeSource         string
-	CodexBackendMode       string
-	DetectionCfg           *AgentDetectionConfig
-	TLSPin                 *BridgeV1TLSPin
+	PreferLocalNetwork       bool
+	Agents                   map[string]core.Agent
+	RequestedDrivers         []string
+	AgentSelectionRevision   *uint64
+	OpenCodeInstalledCLI     string
+	OpenCodeSource           string
+	OpenCodeInstallNpmPath   string
+	OpenCodeInstallScope     string
+	VersionService           *toolinventory.VersionService
+	CodexBackendMode         string
+	CodexDesktopShortVersion string
+	CodexDesktopBuildVersion string
+	DetectionCfg             *AgentDetectionConfig
+	TLSPin                   *BridgeV1TLSPin
 	// RuntimeIdentity 非零时启用 additive Management v1；零值保留 observed v0 fixture/旧 runtime。
 	RuntimeIdentity admission.RuntimeIdentity
 	// TopologyProvider：/internal/topology/snapshot 的只读数据源。nil = monitor 未启用
@@ -114,6 +121,8 @@ type ManagementServer struct {
 	relayStatusMu       sync.RWMutex
 	relayStatusProvider RelayConnectionStatusProvider
 	admission           *admission.AdmissionMachine
+	rescanMu            sync.Mutex
+	workspaceRescans    map[string]*workspaceRescanOperation
 	// claudeHookHealth 如实记录 hooks 事件源的活性状态（S3，Phase 3 验收硬条件）。
 	claudeHookHealth claudeHookHealth
 }
@@ -131,6 +140,7 @@ func NewManagementServer(cfg ManagementConfig) *ManagementServer {
 		startedAt:           time.Now(),
 		now:                 time.Now,
 		relayStatusProvider: disconnectedRelayStatusProvider{},
+		workspaceRescans:    make(map[string]*workspaceRescanOperation),
 	}
 	if cfg.RuntimeIdentity.PID > 0 && cfg.RuntimeIdentity.BridgeEpoch > 0 {
 		s.admission = admission.NewAdmissionMachine(cfg.RuntimeIdentity, nil, budget.LeaseMax)
@@ -266,6 +276,11 @@ func (s *ManagementServer) Start(host string, port int) (actualPort int, err err
 
 // Shutdown 优雅关闭管理 API（P2-1：也便于测试清理，避免 goroutine 泄漏）。
 func (s *ManagementServer) Shutdown() {
+	s.rescanMu.Lock()
+	for _, operation := range s.workspaceRescans {
+		operation.cancel()
+	}
+	s.rescanMu.Unlock()
 	s.serverMu.Lock()
 	srv := s.httpServer
 	s.serverMu.Unlock()
@@ -357,6 +372,8 @@ func (s *ManagementServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleTopologySnapshot(w, r)
 	case path == "/internal/workspace/snapshot" && r.Method == http.MethodGet:
 		s.handleWorkspaceSnapshot(w, r)
+	case path == "/internal/workspace/rescan" && r.Method == http.MethodPost:
+		s.handleWorkspaceRescan(w, r)
 	case path == "/internal/webpush/status" && r.Method == http.MethodGet:
 		s.handleWebPushStatus(w, r)
 	case path == "/internal/webpush/reset" && r.Method == http.MethodPost:

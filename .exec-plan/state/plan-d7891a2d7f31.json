@@ -33,7 +33,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-10-15T06:15:09.989762+00:00",
+  "updated_at": "2026-10-15T07:51:36.107350+00:00",
   "approved_plan_sha256": "e49e2d5d00e6216bd70d0127c02949351be96474aef1c8b6cd0b14f91d74121a",
   "scope_gates": {
     "E5": "blocked extensions only: unverified latest sources and all automatic update execution",
@@ -433,7 +433,7 @@
       "description": "Go VersionService, workspace rescan task/API, typed coalescing/cache, scope/channel and command recipes; Swift version popover/copy feedback, no second version owner.",
       "phase": "s5",
       "kind": "impl",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "s4-tests"
       ],
@@ -441,13 +441,16 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Implemented VersionService for captured npm/Grok sources, strict version comparison, bounded cache/coalescing, fingerprint identity, official update/install recipes, workspace rescan API, exact npm-origin persistence, Codex bundle version plumbing, and Swift merge/present/copy paths.",
+        "artifacts": [
+          ".exec-plan/evidence/d7891a2d7f31/s5-edit-source.json",
+          ".exec-plan/evidence/d7891a2d7f31/s5-resume-source.json"
+        ],
+        "checked_at": "2026-10-15T07:51:14.015122+00:00"
       }
     },
     {
@@ -456,7 +459,7 @@
       "description": "Go typed version service for captured npm/Grok provider shapes only; strict SemVer, origin/scope-preserving quoted recipes, bounded coalescing/fingerprint/errors; Swift popover/copy, no execution or unverified providers.",
       "phase": "s5",
       "kind": "tests",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "s5-impl"
       ],
@@ -464,13 +467,15 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "All S5 targeted Go tests, race subset, vet, Swift targeted tests, gofmt check, and diff check passed after fixing Grok archived-shape parser.",
+        "artifacts": [
+          ".exec-plan/evidence/d7891a2d7f31/s5-validation.json"
+        ],
+        "checked_at": "2026-10-15T07:51:36.105076+00:00"
       }
     },
     {
@@ -479,7 +484,7 @@
       "description": "Go typed version service for captured npm/Grok provider shapes only; strict SemVer, origin/scope-preserving quoted recipes, bounded coalescing/fingerprint/errors; Swift popover/copy, no execution or unverified providers. Require integration evidence appropriate to this slice; final UX matrix remains s7-regression; do not block coding on post-implementation evidence.",
       "phase": "s5",
       "kind": "regression",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "s5-tests"
       ],
@@ -487,13 +492,16 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Component/integration regression passed through the isolated real runtime read-only npm check; snapshot exposed update_available and scope-preserving recipe while confirming no update command execution. Final production UX matrix remains assigned to S7 and is not claimed here.",
+        "artifacts": [
+          ".exec-plan/evidence/d7891a2d7f31/s5-runtime-smoke.json",
+          ".exec-plan/evidence/d7891a2d7f31/s5-validation.json"
+        ],
+        "checked_at": "2026-10-15T07:51:36.107340+00:00"
       }
     },
     {

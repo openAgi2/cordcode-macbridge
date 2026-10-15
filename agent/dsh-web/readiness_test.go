@@ -247,7 +247,7 @@ func TestReadinessInstallRecordBinSurvivesPathGap(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeInstallRecord(dataDir, bin, InstallScopeCordcodePrefix, "0.1.5-fake"); err != nil {
+	if err := writeInstallRecord(dataDir, bin, InstallScopeCordcodePrefix, "0.1.5-fake", ""); err != nil {
 		t.Fatal(err)
 	}
 
