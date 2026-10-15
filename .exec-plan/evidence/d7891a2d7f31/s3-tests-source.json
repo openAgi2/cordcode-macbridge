@@ -1,0 +1,52 @@
+{
+  "recorded_at": "2026-10-15T17:24:35Z",
+  "reason": "Pre-test/build source gate for S3 implementation; iOS edits are on owner-unblocked latest committed timeline branch.",
+  "macbridge": {
+    "path": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "8e8cee8f89d64d3ea4f73d705ede83c87c84ebb0",
+    "status": [
+      "M .exec-plan/state/plan-d7891a2d7f31.json",
+      "?? .exec-plan/evidence/d7891a2d7f31/s3-ios-edit-source.json"
+    ]
+  },
+  "ios": {
+    "path": "/Users/jacklee/Projects/cordcode-ios-native-message-timeline",
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "f7f3927de0cb0e4d450b7e99ce3dc85c0a86790e",
+    "status": [
+      "M OpenCodeiOS/OpenCodeiOS/App/ContentView.swift",
+      " M OpenCodeiOS/OpenCodeiOS/App/OpenCodeiOSApp.swift",
+      " M OpenCodeiOS/OpenCodeiOS/Resources/en.lproj/Localizable.strings",
+      " M OpenCodeiOS/OpenCodeiOS/Resources/zh-Hans.lproj/Localizable.strings",
+      " M OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift",
+      " M OpenCodeiOS/OpenCodeiOS/ViewModels/ConnectionHealthViewModel.swift",
+      " M OpenCodeiOS/OpenCodeiOS/ViewModels/ServerViewModel.swift",
+      " M OpenCodeiOS/OpenCodeiOS/Views/Chat/ConnectionHealthSheet.swift",
+      " M OpenCodeiOS/OpenCodeiOSTests/BridgeLANFirstFallbackTests.swift",
+      " M OpenCodeiOS/OpenCodeiOSTests/ConnectionHealthViewModelTests.swift",
+      " M OpenCodeiOS/OpenCodeiOSTests/ServerViewModelBridgeActivationTests.swift",
+      " M remote-web/src/adapter/RemoteWebViewModel.ts",
+      " M remote-web/src/app/AppController.ts",
+      " M remote-web/src/app/CatalogInvalidationCoordinator.ts",
+      " M remote-web/src/app/RemoteWebV2App.tsx",
+      " M remote-web/src/core/backend/__tests__/backend-selection.test.ts",
+      " M remote-web/src/core/backend/backend-selection.ts",
+      " M remote-web/src/design/shell.css",
+      "?? remote-web/src/app/__tests__/no-backend-connection.test.ts"
+    ]
+  },
+  "expected_branch": "feat/ios-native-message-timeline",
+  "validation_scope": [
+    "OpenCodeiOS targeted unit tests: BridgeLANFirstFallbackTests, ServerViewModelBridgeActivationTests, ConnectionHealthViewModelTests",
+    "remote-web Vitest: no-backend-connection.test.ts and backend-selection.test.ts",
+    "remote-web TypeScript typecheck"
+  ],
+  "prohibited_validation": [
+    "full repository suite",
+    "UI automation",
+    "snapshot tests",
+    "simulator automation",
+    "clean builds"
+  ]
+}

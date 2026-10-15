@@ -1,0 +1,19 @@
+{
+  "recorded_at": "2026-10-15T17:35:27.653504Z",
+  "implementation": {
+    "ios_repo": "/Users/jacklee/Projects/cordcode-ios-native-message-timeline",
+    "ios_branch": "feat/ios-native-message-timeline",
+    "ios_commit": "1d25a636b35b96c1d2b7bb7f7798f748fea05c79",
+    "mac_repo": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+    "mac_branch": "feat/ios-native-message-timeline",
+    "mac_commit": "8e8cee8f89d64d3ea4f73d705ede83c87c84ebb0"
+  },
+  "verification": {
+    "remote_web_tests": "PASS 7/7 (2 files)",
+    "ios_simulator_app_build": "PASS",
+    "ios_physical_device_debug_build": "PASS",
+    "ios_physical_device_install": "PASS org.openagi.cordcode",
+    "swift_targeted_tests": "BLOCKED before execution by unrelated FenceAppendP2bTests/CodeView compile errors from timeline checkpoint f7f3927d",
+    "remote_web_typecheck": "BLOCKED by unrelated existing Timeline.tsx, push tests, and missing generated crypto bindings"
+  }
+}
