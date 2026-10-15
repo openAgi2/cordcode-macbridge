@@ -1,0 +1,22 @@
+{
+  "recorded_at": "2026-10-15T17:45:41Z",
+  "reason": "Pre-formal-MacBridge-Release build/install source gate.",
+  "macbridge": {
+    "path": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "a7131f7bd3c5358fe15e5b5a23748db305769bdc",
+    "status": []
+  },
+  "ios": {
+    "path": "/Users/jacklee/Projects/cordcode-ios-native-message-timeline",
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "1d25a636b35b96c1d2b7bb7f7798f748fea05c79",
+    "status": [
+      "?? docs/2026-10-16-native-timeline-markdown-libs-perf-migration-plan-v4-review.md"
+    ]
+  },
+  "expected_branch": "feat/ios-native-message-timeline",
+  "product_expectation": "AppDependencies resolves explicit AgentSelection; new runtime carries selection revision and legal zero-agent startup.",
+  "build_command": "GOSUMDB=sum.golang.org ./scripts/build-unsigned-release.sh",
+  "install_path": "/Applications/CordCodeLink.app"
+}

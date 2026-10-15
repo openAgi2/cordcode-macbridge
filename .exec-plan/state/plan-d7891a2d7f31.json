@@ -301,9 +301,13 @@
           "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/.exec-plan/evidence/d7891a2d7f31/s3-ios-device-build.log",
           "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/.exec-plan/evidence/d7891a2d7f31/s3-ios-device-install.log",
           "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/.exec-plan/evidence/d7891a2d7f31/selection-rollout-swift-tests.log",
-          "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/.exec-plan/evidence/d7891a2d7f31/selection-rollout-verification.json"
+          "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/.exec-plan/evidence/d7891a2d7f31/selection-rollout-verification.json",
+          "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/.exec-plan/evidence/d7891a2d7f31/selection-rollout-release-build.log",
+          "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/.exec-plan/evidence/d7891a2d7f31/selection-rollout-install.log",
+          "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/.exec-plan/evidence/d7891a2d7f31/selection-rollout-runtime-verification.log",
+          "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/.exec-plan/evidence/d7891a2d7f31/selection-rollout-release-verification.json"
         ],
-        "checked_at": "2026-10-15T17:45:13.659220Z"
+        "checked_at": "2026-10-15T17:48:58.049361Z"
       }
     },
     {
@@ -340,7 +344,7 @@
         "s3-tests"
       ],
       "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S3",
-      "notes": "Blocked behind s3-tests. Physical device installation succeeded, but no cross-client noAgents runtime regression is claimed until targeted Swift tests and real Mac/client paths can run.",
+      "notes": "Blocked behind s3-tests. Physical device installation succeeded, but no cross-client noAgents runtime regression is claimed until targeted Swift tests and real Mac/client paths can run. Formal MacBridge Release was installed and runtime generation/identity verified after rollout; noAgents cross-client runtime regression remains unclaimed while s3-tests is blocked.",
       "verification": {
         "required": true,
         "status": "missing",
