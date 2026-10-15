@@ -1,0 +1,71 @@
+{
+  "recorded_at": "2026-10-15T10:14:03.610694+00:00",
+  "mac": {
+    "path": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "f45d115f5eb53655297201f441b8ad12c8f57417",
+    "uncommitted": [
+      "M go-bridge/management_api.go",
+      "?? .exec-plan/evidence/d7891a2d7f31/s7-build-source.json",
+      "?? .exec-plan/evidence/d7891a2d7f31/s7-edit-source.json"
+    ]
+  },
+  "ios_read_only": {
+    "path": "/Users/jacklee/Projects/cordcode-ios-native-message-timeline",
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "09984ae985ce068c13c5c604e22071a44ac2c012",
+    "uncommitted": [
+      "M OpenCodeiOS/CordCode.xcodeproj/project.pbxproj",
+      " M OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/NarrativeRevealPacer.swift",
+      " M OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/NativeTimelineViewController.swift",
+      " M OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/TimelineMarkdownCell.swift",
+      " M OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/TimelineStreamingMarkdownCell.swift",
+      "D  OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/WordFadeAppendEligibility.swift",
+      "D  OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/WordFadeDisplayTransaction.swift",
+      "D  OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/WordFadeFrozenFragments.swift",
+      "D  OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/WordFadeLedger.swift",
+      "D  OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/WordFadeMarkdownAdapter.swift",
+      "D  OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/WordFadeMarkdownDisplayMap.swift",
+      "D  OpenCodeiOS/OpenCodeiOS/App/NativeTimeline/WordFadeTextKitLayout.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/LitextWordFadeDrawTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/LitextWordFadeRasterTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/MarkdownRenderedOriginTests.swift",
+      "RM OpenCodeiOS/OpenCodeiOSTests/WordFadeApparatusV2.swift -> OpenCodeiOS/OpenCodeiOSTests/TimelineRenderApparatus.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/TimelineStreamingTextWordFadeTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadeApparatusV2Tests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadeCarrierHandoffTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadeCostDecompositionTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadeFrozenReference.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadeFrozenTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadeIncrementalTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadeLedgerTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadeLifecycleTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadePairedCostTests.swift",
+      "D  OpenCodeiOS/OpenCodeiOSTests/WordFadeS1WiringTests.swift",
+      "?? OpenCodeiOS/OpenCodeiOSTests/MarkdownLibraryVersion.swift",
+      "?? OpenCodeiOS/OpenCodeiOSTests/MarkdownRenderCorpus.swift",
+      "?? OpenCodeiOS/OpenCodeiOSTests/TimelineRenderApparatusTests.swift",
+      "?? OpenCodeiOS/OpenCodeiOSTests/UpstreamMigrationPerfTests.swift",
+      "?? OpenCodeiOS/OpenCodeiOSTests/UpstreamMigrationTapeTests.swift"
+    ],
+    "authorization": "owner forbids edits; dirty files belong to another active timeline task"
+  },
+  "gate": "S7 full delivery block",
+  "reason": "Client-first rollout gate remains failed: current iOS and remote-web consumers still reject legal empty backend arrays; owner explicitly prohibited iOS edits in this task.",
+  "ios_evidence": {
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "09984ae985ce068c13c5c604e22071a44ac2c012",
+    "new_commits_since_mac_s5_resume": [
+      "719ae845 docs only",
+      "09984ae9 docs only"
+    ],
+    "source_checks": [
+      "OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:948 rejects empty backends on initial connect",
+      "OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:1205 rejects empty backends on reconnect",
+      "remote-web has no connected/noAgents empty-backend branch"
+    ],
+    "dirty_state_note": "iOS worktree contains an unrelated active NativeTimeline implementation and must not be modified from this task."
+  },
+  "decision": "Do not enable default-all-off UI behavior or replace the production Mac app while existing clients would interpret an empty backend list as a protocol failure.",
+  "unblock_requirement": "Implement and review iOS/web empty-backend connected/noAgents behavior in their paired worktrees, then rerun S7 full delivery."
+}

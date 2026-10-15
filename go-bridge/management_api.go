@@ -507,14 +507,14 @@ func (s *ManagementServer) handleStatus(w http.ResponseWriter, _ *http.Request) 
 		"uptime":      s.now().Sub(s.startedAt).String(),
 		"version":     runtimeVersion,
 	}
-	registeredDrivers := make([]string, 0, len(s.cfg.Agents))
-	for id := range s.cfg.Agents {
-		registeredDrivers = append(registeredDrivers, id)
-	}
-	sort.Strings(registeredDrivers)
-	result["requestedDrivers"] = s.cfg.RequestedDrivers
-	result["registeredDrivers"] = registeredDrivers
 	if s.cfg.AgentSelectionRevision != nil {
+		registeredDrivers := make([]string, 0, len(s.cfg.Agents))
+		for id := range s.cfg.Agents {
+			registeredDrivers = append(registeredDrivers, id)
+		}
+		sort.Strings(registeredDrivers)
+		result["requestedDrivers"] = s.cfg.RequestedDrivers
+		result["registeredDrivers"] = registeredDrivers
 		result["agentSelectionRevision"] = *s.cfg.AgentSelectionRevision
 	}
 	if s.admission != nil {

@@ -1,0 +1,42 @@
+{
+  "captured_at": "2026-10-15T10:14:03.908818+00:00",
+  "scope": "MacBridge-side final targeted validation; full S7 remains blocked",
+  "commands": [
+    {
+      "command": "GOTOOLCHAIN=local go test ./toolinventory ./agent/dsh-web ./go-bridge ./go-bridge/admission -count=1",
+      "result": "partial_then_repaired",
+      "detail": "toolinventory, dsh-web, and admission passed. Full go-bridge exposed stale V0/V1 fixtures caused by selection fields leaking legacy status; contract fixed."
+    },
+    {
+      "command": "GOTOOLCHAIN=local go test ./go-bridge -run 'TestManagementV0Status|TestManagementV1ObservedFixturesRoundTrip|TestStatusReportsAgentSelectionAssemblyIdentity' -count=1",
+      "result": "passed",
+      "duration": "0.028s package time after repair"
+    },
+    {
+      "command": "GOTOOLCHAIN=local xcodebuild ... AgentSelectionStoreTests RuntimeManagerRestartTests WorkspaceSnapshotStoreTests WorkspaceTopologyTests WorkspaceViewTests AccessibilityPolishTests OpenCodeInstallerTests MacBridgeBehaviorTests/testAgentSelectionArgumentsPreserveExplicitEmptyAndRevision test -quiet",
+      "result": "passed",
+      "duration": "17.968s wall"
+    },
+    {
+      "command": "gitleaks git . --redact --no-banner --exit-code 1",
+      "result": "passed",
+      "detail": "1453 commits, ~708.8 MB, no leaks"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ],
+  "contract_repair": {
+    "root_cause": "Selection assembly identity fields were emitted for legacy Management V0 status even without an explicit selection revision, breaking the observed five-field V0 contract and all V1 golden fixtures.",
+    "fix": "Emit requestedDrivers/registeredDrivers/agentSelectionRevision only when agentSelectionRevision is present. Explicit selection still serializes empty arrays.",
+    "fixtures_changed": false
+  },
+  "not_run": [
+    "formal Release build and /Applications replacement",
+    "production runtime restart",
+    "iOS build/install/tests",
+    "remote-web build/tests/publication",
+    "owner U1-U10 matrix"
+  ]
+}

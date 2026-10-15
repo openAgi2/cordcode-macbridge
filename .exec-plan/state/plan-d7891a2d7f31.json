@@ -33,7 +33,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-10-15T10:05:31.945953+00:00",
+  "updated_at": "2026-10-15T10:14:03.933682+00:00",
   "approved_plan_sha256": "e49e2d5d00e6216bd70d0127c02949351be96474aef1c8b6cd0b14f91d74121a",
   "scope_gates": {
     "E5": "blocked extensions only: unverified latest sources and all automatic update execution",
@@ -587,12 +587,12 @@
       "description": "Targeted Go/Swift/iOS/web tests and coherent incremental builds; client-first delivery then formal /Applications Release install with PID/epoch/unique-log proof; secret scan, live docs/change logs and owner U1-U10.",
       "phase": "s7",
       "kind": "impl",
-      "status": "pending",
+      "status": "blocked",
       "depends_on": [
         "s6-tests"
       ],
       "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S7",
-      "notes": "Mac-only deliverable; no iOS build/install/web deployment. Client-first rollout prerequisite remains before enabling opt-in default for existing incompatible clients.",
+      "notes": "Blocked before full delivery: iOS/web consumers still reject empty backend arrays, and owner forbids iOS edits. Mac-side implementation and V0 contract repair are complete.",
       "verification": {
         "required": true,
         "status": "missing",
@@ -610,12 +610,12 @@
       "description": "Targeted Go/Swift/iOS/web tests and coherent incremental builds; client-first delivery then formal /Applications Release install with PID/epoch/unique-log proof; secret scan, live docs/change logs and owner U1-U10.",
       "phase": "s7",
       "kind": "tests",
-      "status": "pending",
+      "status": "blocked",
       "depends_on": [
         "s7-impl"
       ],
       "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S7",
-      "notes": "Mac-only deliverable; no iOS build/install/web deployment. Client-first rollout prerequisite remains before enabling opt-in default for existing incompatible clients.",
+      "notes": "Blocked for full cross-repo matrix; MacBridge targeted Go/Swift tests and secret scan passed.",
       "verification": {
         "required": true,
         "status": "missing",
@@ -633,12 +633,12 @@
       "description": "Targeted Go/Swift/iOS/web tests and coherent incremental builds; client-first delivery then formal /Applications Release install with PID/epoch/unique-log proof; secret scan, live docs/change logs and owner U1-U10. Require integration evidence appropriate to this slice; final UX matrix remains s7-regression; do not block coding on post-implementation evidence.",
       "phase": "s7",
       "kind": "regression",
-      "status": "pending",
+      "status": "blocked",
       "depends_on": [
         "s7-tests"
       ],
       "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S7",
-      "notes": "Mac-only deliverable; no iOS build/install/web deployment. Client-first rollout prerequisite remains before enabling opt-in default for existing incompatible clients.",
+      "notes": "Blocked for formal Release deployment, production runtime proof, iOS/web rollout, and owner U1-U10 matrix.",
       "verification": {
         "required": true,
         "status": "missing",
