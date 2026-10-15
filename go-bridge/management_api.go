@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -55,11 +56,13 @@ type ManagementConfig struct {
 	// PreferLocalNetwork 是 control-plane 连接策略:是否在同一局域网时优先直连。默认 false。
 	// 由 main.go 从 -prefer-local-network flag 注入;随 RelayFirstResult / pairing_complete /
 	// hello_ack / /internal/remote/status 下发。SSV2:不进入 timeline/projection。
-	PreferLocalNetwork bool
-	Agents             map[string]core.Agent
-	CodexBackendMode   string
-	DetectionCfg       *AgentDetectionConfig
-	TLSPin             *BridgeV1TLSPin
+	PreferLocalNetwork     bool
+	Agents                 map[string]core.Agent
+	RequestedDrivers       []string
+	AgentSelectionRevision *uint64
+	CodexBackendMode       string
+	DetectionCfg           *AgentDetectionConfig
+	TLSPin                 *BridgeV1TLSPin
 	// RuntimeIdentity 非零时启用 additive Management v1；零值保留 observed v0 fixture/旧 runtime。
 	RuntimeIdentity admission.RuntimeIdentity
 	// TopologyProvider：/internal/topology/snapshot 的只读数据源。nil = monitor 未启用
@@ -473,6 +476,16 @@ func (s *ManagementServer) handleStatus(w http.ResponseWriter, _ *http.Request) 
 		"displayName": displayName,
 		"uptime":      s.now().Sub(s.startedAt).String(),
 		"version":     runtimeVersion,
+	}
+	registeredDrivers := make([]string, 0, len(s.cfg.Agents))
+	for id := range s.cfg.Agents {
+		registeredDrivers = append(registeredDrivers, id)
+	}
+	sort.Strings(registeredDrivers)
+	result["requestedDrivers"] = s.cfg.RequestedDrivers
+	result["registeredDrivers"] = registeredDrivers
+	if s.cfg.AgentSelectionRevision != nil {
+		result["agentSelectionRevision"] = *s.cfg.AgentSelectionRevision
 	}
 	if s.admission != nil {
 		s.syncAdmissionInputs()

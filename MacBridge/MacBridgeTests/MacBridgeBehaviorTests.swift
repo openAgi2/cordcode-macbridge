@@ -44,6 +44,33 @@ final class MacBridgeBehaviorTests: XCTestCase {
         XCTAssertFalse(enabledArgs.contains("-prefer-local-network"), "不得使用分开的 flag 形式")
     }
 
+    func testAgentSelectionArgumentsPreserveExplicitEmptyAndRevision() {
+        let selected = RuntimeConfig(
+            executablePath: "/tmp/runtime",
+            dataDir: "/tmp/data",
+            logDir: "/tmp/logs",
+            drivers: [],
+            agentSelectionRevision: 7
+        )
+        let arguments = RuntimeManager.processArguments(for: selected)
+        guard let drivers = arguments.firstIndex(of: "-drivers") else {
+            return XCTFail("missing -drivers")
+        }
+        XCTAssertEqual(arguments[drivers + 1], "")
+        guard let revision = arguments.firstIndex(of: "-agent-selection-revision") else {
+            return XCTFail("missing selection revision")
+        }
+        XCTAssertEqual(arguments[revision + 1], "7")
+
+        let legacy = RuntimeConfig(
+            executablePath: "/tmp/runtime",
+            dataDir: "/tmp/data",
+            logDir: "/tmp/logs"
+        )
+        XCTAssertNil(legacy.agentSelectionRevision)
+        XCTAssertFalse(RuntimeManager.processArguments(for: legacy).contains("-agent-selection-revision"))
+    }
+
     func testGoDurationFormatting() {
         XCTAssertEqual(BridgeStatusViewModel.formatUptime("42.381s"), L10n.overviewUptimeUnderMinute)
         XCTAssertEqual(BridgeStatusViewModel.formatUptime("12m4.2s"), String(format: L10n.overviewUptimeMinutes, 12))

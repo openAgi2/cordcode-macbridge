@@ -1,0 +1,77 @@
+{
+  "checkedAt": "2026-10-15T05:30:48.068973+00:00",
+  "source": {
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "0c3a824b0df9cdd1a2c7bf0bee44786309a58085",
+    "status": [
+      "M MacBridge/MacBridge/Services/ManagementAPIClient.swift",
+      " M MacBridge/MacBridge/Services/ManagementV1Codec.swift",
+      " M MacBridge/MacBridge/Services/RuntimeManager.swift",
+      " M MacBridge/MacBridgeTests/MacBridgeBehaviorTests.swift",
+      " M MacBridge/MacBridgeTests/ManagementV1CodecTests.swift",
+      " M MacBridge/MacBridgeTests/OpenCodeSeatResolveTests.swift",
+      " M MacBridge/MacBridgeTests/RuntimeManagerRestartTests.swift",
+      " M go-bridge/main.go",
+      " M go-bridge/management_api.go",
+      "?? .exec-plan/evidence/d7891a2d7f31/s2-build-source.json",
+      "?? .exec-plan/evidence/d7891a2d7f31/s2-edit-source.json",
+      "?? go-bridge/main_selection_test.go",
+      "?? go-bridge/management_agent_selection_status_test.go"
+    ]
+  },
+  "go": [
+    {
+      "command": "GOSUMDB=sum.golang.org go test ./go-bridge -run TestStatusReportsAgentSelectionAssemblyIdentity\\|TestSplitDriverIDs\\|TestParseAgentSelectionRevision\\|TestExplicitEmptyDriverSelection -count=1",
+      "result": "passed"
+    },
+    {
+      "command": "GOSUMDB=sum.golang.org go build ./go-bridge",
+      "result": "passed"
+    }
+  ],
+  "swift": [
+    {
+      "command": "xcodebuild test ... -only-testing ManagementV1CodecTests/testAgentSelectionAssemblyFieldsAreOptionalAndStrictlyDecoded -only-testing MacBridgeBehaviorTests/testAgentSelectionArgumentsPreserveExplicitEmptyAndRevision -only-testing RuntimeManagerRestartTests/testStoppedAgentSelectionSavesWithoutLaunch -only-testing OpenCodeSeatResolveTests/testResolveStopsManagedServerWhenBackendDisabled",
+      "result": "passed",
+      "testsExecuted": 4,
+      "xcresult": "MacBridge/DerivedData/Logs/Test/Test-CordCodeLink-2026.10.15_13-27-17-+0800.xcresult"
+    },
+    {
+      "command": "xcodebuild test ... -only-testing RuntimeManagerRestartTests/testLiveAgentSelectionRequiresManagementIdentity",
+      "result": "passed",
+      "testsExecuted": 1,
+      "xcresult": "MacBridge/DerivedData/Logs/Test/Test-CordCodeLink-2026.10.15_13-29-15-+0800.xcresult"
+    }
+  ],
+  "integration": [
+    {
+      "command": "temporary isolated cordcode-bridge-runtime with -drivers \"\" -agent-selection-revision 3; GET /internal/status; inspect stderr",
+      "result": "passed",
+      "observed": {
+        "status": "ready_no_agents",
+        "runtimeIdentityPid": "runtime pid",
+        "agentSelectionRevision": 3,
+        "requestedDrivers": [],
+        "registeredDrivers": [],
+        "perAgentWatchers": "skipped"
+      }
+    }
+  ],
+  "attempts": [
+    {
+      "result": "failed",
+      "reason": "verification script incorrectly expected a nested status.v1 object; actual Management v1 fields are flattened",
+      "resolution": "corrected script to read runtimeIdentity and optional selection fields; no product change"
+    },
+    {
+      "result": "failed",
+      "reason": "first live admission unit test raced asynchronous Process.launch",
+      "resolution": "wait 100ms after launch count before applying selection; test passed"
+    }
+  ],
+  "boundaries": [
+    "Production App still starts legacy five-driver config until iOS empty-backend compatibility is delivered",
+    "No iOS/web files touched",
+    "No automatic update execution or unverified latest source"
+  ]
+}\n

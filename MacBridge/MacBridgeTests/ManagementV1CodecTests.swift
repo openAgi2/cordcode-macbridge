@@ -107,6 +107,21 @@ final class ManagementV1CodecTests: XCTestCase {
         XCTAssertEqual(decoded.codexScopedPendingInteractions, decoded.pendingInteractions)
     }
 
+    func testAgentSelectionAssemblyFieldsAreOptionalAndStrictlyDecoded() throws {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: fixture("v1-status-accepting.json")) as? [String: Any])
+        object["agentSelectionRevision"] = 9
+        object["requestedDrivers"] = []
+        object["registeredDrivers"] = []
+
+        let status = try ManagementStatusCodec.decode(JSONSerialization.data(withJSONObject: object))
+        XCTAssertEqual(status.agentSelectionRevision, 9)
+        XCTAssertEqual(status.requestedDrivers, [])
+        XCTAssertEqual(status.registeredDrivers, [])
+
+        object["requestedDrivers"] = [7]
+        XCTAssertThrowsError(try ManagementStatusCodec.decode(JSONSerialization.data(withJSONObject: object)))
+    }
+
     func testRequestEncodingUsesExactV1Keys() throws {
         let identity = ManagementRuntimeIdentity(pid: 12345, bridgeEpoch: 1)
         let request = ManagementQuiesceRequest(

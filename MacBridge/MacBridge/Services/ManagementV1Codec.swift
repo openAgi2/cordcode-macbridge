@@ -193,6 +193,11 @@ private struct ManagementJSONObject {
         return value
     }
 
+    func optionalUInt64(_ key: String) throws -> UInt64? {
+        guard values[key] != nil else { return nil }
+        return try uint64(key)
+    }
+
     /// 可选的 `{"<backendID>": <uint32>}` 映射；键缺失返回 nil，值非法则抛错。
     func optionalUint32Map(_ key: String) throws -> [String: UInt32]? {
         guard let entry = values[key] else { return nil }
@@ -205,6 +210,18 @@ private struct ManagementJSONObject {
                 throw ManagementCodecError.invalidInteger("\(key).\(backend)")
             }
             out[backend] = UInt32(parsed)
+        }
+        return out
+    }
+
+    func optionalStringArray(_ key: String) throws -> [String]? {
+        guard let entry = values[key] else { return nil }
+        guard case let .array(items) = entry else { throw ManagementCodecError.invalidType(key) }
+        var out = [String]()
+        out.reserveCapacity(items.count)
+        for item in items {
+            guard case let .string(value) = item else { throw ManagementCodecError.invalidType(key) }
+            out.append(value)
         }
         return out
     }
@@ -273,10 +290,13 @@ enum ManagementStatusCodec {
                 uptime: try root.string("uptime"), version: try root.string("version"), v1: nil
             )
         }
-        let expected: Set<String> = [
+        var expected: Set<String> = [
             "managementSchemaVersion", "status", "bridgeId", "displayName", "uptime", "version",
             "runtimeIdentity", "fileReadHealth", "activity", "quiesce",
         ]
+        for key in ["agentSelectionRevision", "requestedDrivers", "registeredDrivers"] where rootMap[key] != nil {
+            expected.insert(key)
+        }
         guard rootKeys == expected else { throw ManagementCodecError.unexpectedKeys }
         let root = try ManagementJSONObject(rootValue, exactKeys: expected)
         let version = try root.uint64("managementSchemaVersion")
@@ -320,7 +340,10 @@ enum ManagementStatusCodec {
             status: try root.string("status"), bridgeId: try root.string("bridgeId"),
             displayName: try root.string("displayName"), iosPort: nil,
             uptime: try root.string("uptime"), version: try root.string("version"),
-            v1: ManagementV1Status(runtimeIdentity: identity, fileReadHealth: health, activity: activity, quiesce: quiesce)
+            v1: ManagementV1Status(runtimeIdentity: identity, fileReadHealth: health, activity: activity, quiesce: quiesce),
+            agentSelectionRevision: try root.optionalUInt64("agentSelectionRevision"),
+            requestedDrivers: try root.optionalStringArray("requestedDrivers"),
+            registeredDrivers: try root.optionalStringArray("registeredDrivers")
         )
     }
 

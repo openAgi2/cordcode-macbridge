@@ -1,0 +1,22 @@
+{
+  "capturedAt": "2026-10-15T05:18:05.333404+00:00",
+  "repository": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+  "branch": "feat/ios-native-message-timeline",
+  "commit": "0c3a824b0df9cdd1a2c7bf0bee44786309a58085",
+  "status": [
+    "M MacBridge/MacBridge/Services/RuntimeManager.swift",
+    " M MacBridge/MacBridgeTests/MacBridgeBehaviorTests.swift",
+    " M MacBridge/MacBridgeTests/RuntimeManagerRestartTests.swift",
+    " M go-bridge/main.go",
+    "?? .exec-plan/evidence/d7891a2d7f31/s2-edit-source.json",
+    "?? go-bridge/main_selection_test.go"
+  ],
+  "purpose": "S2 targeted Go/Swift test build gate",
+  "scope": "MacBridge-only",
+  "expectedCapabilities": [
+    "explicit empty drivers",
+    "agent selection revision argv",
+    "safe selection restart admission",
+    "zero-agent no per-agent background watchers"
+  ]
+}\n

@@ -1,0 +1,16 @@
+{
+  "capturedAt": "2026-10-15T05:12:55.765388+00:00",
+  "repository": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+  "branch": "feat/ios-native-message-timeline",
+  "commit": "0c3a824b0df9cdd1a2c7bf0bee44786309a58085",
+  "status": [],
+  "purpose": "S2 first product-code edit gate",
+  "scope": "MacBridge-only; no iOS/web changes",
+  "expectedProductIDs": [
+    "claude",
+    "codex-remote",
+    "grokbuild",
+    "dsh-web",
+    "opencode-web"
+  ]
+}\n

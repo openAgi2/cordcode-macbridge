@@ -61,6 +61,53 @@ final class RuntimeManagerRestartTests: XCTestCase {
         XCTAssertEqual(manager.launchCount, 1, "applyConfigAndRestart 应只触发单次 launch")
     }
 
+    /// 服务未运行时，选择只保存为待启动配置，不得自动启动旧默认或新空集。
+    @MainActor
+    func testStoppedAgentSelectionSavesWithoutLaunch() async {
+        let manager = makeManager()
+
+        await manager.applyAgentSelection(AgentSelection(schemaVersion: 1, revision: 2, enabledIDs: ["claude"]))
+        await manager.applyAgentSelection(AgentSelection(schemaVersion: 1, revision: 3, enabledIDs: []))
+
+        XCTAssertEqual(manager.config.drivers, [])
+        XCTAssertEqual(manager.config.agentSelectionRevision, 3)
+        XCTAssertEqual(manager.agentSelectionApplication?.phase, .pendingStart)
+        XCTAssertEqual(manager.agentSelectionApplication?.desiredRevision, 3)
+        XCTAssertEqual(manager.launchCount, 0)
+    }
+
+    /// 活进程但 Management V1 不可用时，选择应用必须失败，不得借 pre-ready 配置替换分支直接停进程。
+    @MainActor
+    func testLiveAgentSelectionRequiresManagementIdentity() async {
+        let logFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("agent-selection-live-\(UUID().uuidString).log").path
+        let manager = RuntimeManager(config: RuntimeConfig(
+            executablePath: "/usr/bin/yes",
+            port: 0,
+            dataDir: "/tmp/cccode-agent-selection-\(UUID().uuidString)",
+            logDir: "/tmp",
+            logFilePath: logFile
+        ))
+        manager.start()
+        for _ in 0..<100 where manager.launchCount == 0 {
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(manager.launchCount, 1)
+        // launchCount is incremented immediately before the asynchronous Process.launch.
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        await manager.applyAgentSelection(AgentSelection(schemaVersion: 1, revision: 1, enabledIDs: []))
+        for _ in 0..<100 where manager.agentSelectionApplication?.phase != .failed {
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        XCTAssertEqual(manager.agentSelectionApplication?.phase, .failed)
+        XCTAssertNotNil(manager.agentSelectionApplication?.errorMessage)
+        manager.stop()
+    }
+
     /// generation 回退：第一个 restart 的延迟 Task 醒来时若 generation 已变，不得 launch。
     /// 通过连续 restart 验证只有最后一次 generation 生效（已被 testRapidRestartsConvergeToSingleLaunch 覆盖）；
     /// 这里额外验证两次间隔较远的 restart 各自 launch（generation 不被错误吞掉）。

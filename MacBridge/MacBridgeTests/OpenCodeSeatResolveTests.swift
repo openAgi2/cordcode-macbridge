@@ -113,6 +113,24 @@ final class OpenCodeSeatResolveTests: XCTestCase {
         XCTAssertEqual(manager.config.opencodeUser, "ext-user")
     }
 
+    /// opencode-web 接入关闭时，即使 source 仍是 managed_local，也不得启动/保留托管子进程。
+    @MainActor
+    func testResolveStopsManagedServerWhenBackendDisabled() {
+        let manager = makeManager(source: .managedLocal)
+        manager.config.drivers = ["claude"]
+        manager.openCodeManagedServer = OpenCodeManagedServer(
+            dataDir: manager.config.dataDir,
+            logDir: "/tmp",
+            cliSearchPath: manager.config.cliSearchPath,
+            cliResolver: NilCLIResolver()
+        )
+
+        manager.resolveManagedOpenCodeIfNeeded()
+
+        XCTAssertNil(manager.openCodeManagedServer)
+        XCTAssertEqual(manager.config.opencodeURL, "")
+    }
+
     /// persistedEndpoint 单元行为：状态文件在 → endpoint；无 → nil。
     func testPersistedEndpointReadsStateFile() {
         let dataDir = "/tmp/cccode-ocw-persisted-\(UUID().uuidString)"

@@ -70,6 +70,9 @@ struct ManagementStatus: Sendable {
     let uptime: String?
     let version: String?
     let v1: ManagementV1Status?
+    let agentSelectionRevision: UInt64?
+    let requestedDrivers: [String]?
+    let registeredDrivers: [String]?
 
     init(
         status: String,
@@ -78,7 +81,10 @@ struct ManagementStatus: Sendable {
         iosPort: Int?,
         uptime: String?,
         version: String?,
-        v1: ManagementV1Status? = nil
+        v1: ManagementV1Status? = nil,
+        agentSelectionRevision: UInt64? = nil,
+        requestedDrivers: [String]? = nil,
+        registeredDrivers: [String]? = nil
     ) {
         self.status = status
         self.bridgeId = bridgeId
@@ -87,6 +93,9 @@ struct ManagementStatus: Sendable {
         self.uptime = uptime
         self.version = version
         self.v1 = v1
+        self.agentSelectionRevision = agentSelectionRevision
+        self.requestedDrivers = requestedDrivers
+        self.registeredDrivers = registeredDrivers
     }
 }
 

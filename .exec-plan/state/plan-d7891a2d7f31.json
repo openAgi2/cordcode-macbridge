@@ -33,7 +33,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-10-15T05:11:53.627478+00:00",
+  "updated_at": "2026-10-15T05:30:48.339528+00:00",
   "approved_plan_sha256": "e49e2d5d00e6216bd70d0127c02949351be96474aef1c8b6cd0b14f91d74121a",
   "scope_gates": {
     "E5": "blocked extensions only: unverified latest sources and all automatic update execution",
@@ -203,7 +203,7 @@
       "description": "RuntimeConfig drivers+revision; require Management V1 admission, desired/applied/error/deferred states, latest-generation-only restart; gate all disabled driver background and managed OpenCode entrypoints.",
       "phase": "s2",
       "kind": "impl",
-      "status": "in_progress",
+      "status": "done",
       "depends_on": [
         "s1-tests"
       ],
@@ -211,13 +211,17 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Implemented explicit selection argv/revision, legal zero-agent runtime, safe Mac application states, management assembly identity, and disabled backend watcher/managed-server gates",
+        "artifacts": [
+          "go-bridge/main.go",
+          "go-bridge/management_api.go",
+          "MacBridge/MacBridge/Services/RuntimeManager.swift"
+        ],
+        "checked_at": "2026-10-15T05:30:48.184011+00:00"
       }
     },
     {
@@ -226,7 +230,7 @@
       "description": "RuntimeConfig drivers+revision; require Management V1 admission, desired/applied/error/deferred states, latest-generation-only restart; gate all disabled driver background and managed OpenCode entrypoints.",
       "phase": "s2",
       "kind": "tests",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "s2-impl"
       ],
@@ -234,13 +238,15 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Targeted Go, Swift codec/application/OpenCode gate, and live admission tests passed",
+        "artifacts": [
+          ".exec-plan/evidence/d7891a2d7f31/s2-validation.json"
+        ],
+        "checked_at": "2026-10-15T05:30:48.249328+00:00"
       }
     },
     {
@@ -249,7 +255,7 @@
       "description": "RuntimeConfig drivers+revision; require Management V1 admission, desired/applied/error/deferred states, latest-generation-only restart; gate all disabled driver background and managed OpenCode entrypoints. Require integration evidence appropriate to this slice; final UX matrix remains s7-regression; do not block coding on post-implementation evidence.",
       "phase": "s2",
       "kind": "regression",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "s2-tests"
       ],
@@ -257,13 +263,15 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Isolated real runtime reached ready_no_agents with revision/requested/registered identity and skipped per-agent watchers",
+        "artifacts": [
+          ".exec-plan/evidence/d7891a2d7f31/s2-validation.json"
+        ],
+        "checked_at": "2026-10-15T05:30:48.313083+00:00"
       }
     },
     {
@@ -272,7 +280,7 @@
       "description": "Explicit empty Go drivers still serves pairing/management/direct/relay; ACK backends []; iOS initial/reconnect+advertisement+App/server selection; web empty/noavailable bootstrap, teardown and guarded methods; canonical protocol and mirror.",
       "phase": "s3",
       "kind": "impl",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         "s2-tests"
       ],

@@ -43,7 +43,7 @@ struct RuntimeSupervisorObservation: Codable, Equatable, Sendable {
 }
 
 private enum RuntimeRestartTrigger: Sendable {
-    case manual, configuration, automatic
+    case manual, configuration, agentSelection, automatic
 }
 
 private enum RuntimeRecoveryError: LocalizedError {
@@ -160,7 +160,10 @@ struct RuntimeConfig {
     let port: Int
     let dataDir: String
     let logDir: String
-    let drivers: [String]
+    var drivers: [String]
+    /// Non-nil only after an explicit AgentSelection has been applied. Nil preserves
+    /// the legacy product startup path until every deployed client accepts `backends: []`.
+    var agentSelectionRevision: UInt64?
     let workDir: String
     let codexBackend: String
     let codexAppServerURL: String
@@ -204,6 +207,7 @@ struct RuntimeConfig {
         // seat（configureCodexDesktopSharedRuntime）以本列表为门，随之自动 skip，
         // codex-remote 走独立 Remote Control 链路不受影响。回滚 = 加回 "codex-web"。
         drivers: [String] = ["claude", "codex-remote", "grokbuild", "dsh-web", "opencode-web"],
+        agentSelectionRevision: UInt64? = nil,
         workDir: String = FileManager.default.homeDirectoryForCurrentUser.path,
         codexBackend: String = "app_server",
         codexAppServerURL: String = "",
@@ -229,6 +233,7 @@ struct RuntimeConfig {
         self.dataDir = NSString(string: dataDir).expandingTildeInPath
         self.logDir = NSString(string: logDir).expandingTildeInPath
         self.drivers = drivers
+        self.agentSelectionRevision = agentSelectionRevision
         self.workDir = workDir
         self.codexBackend = codexBackend
         self.codexAppServerURL = codexAppServerURL
@@ -294,6 +299,21 @@ struct OpenCodeSeatActionState: Equatable {
     var lastInstallNote: String?
 }
 
+struct AgentSelectionApplicationState: Equatable {
+    enum Phase: Equatable {
+        case pendingStart
+        case applying
+        case inSync
+        case deferred
+        case failed
+    }
+
+    var desiredRevision: UInt64
+    var appliedRevision: UInt64?
+    var phase: Phase
+    var errorMessage: String?
+}
+
 /// 管理 go-bridge 子进程生命周期。
 ///
 /// MacBridge 拥有 go-bridge 进程：启动、监控、崩了重启、退出时终止。
@@ -320,6 +340,7 @@ class RuntimeManager: ObservableObject {
     // managed server state 快照；行直接读本属性（先例：codex-web 行读
     // codexDaemonConfigChanged）。
     @Published private(set) var openCodeSeatAction = OpenCodeSeatActionState()
+    @Published private(set) var agentSelectionApplication: AgentSelectionApplicationState?
 
     var supervisorObservation: RuntimeSupervisorObservation {
         RuntimeSupervisorObservation(supervisorState: supervisorState)
@@ -435,6 +456,19 @@ class RuntimeManager: ObservableObject {
             } catch {
                 guard gen == self.launchGeneration else { return }
                 self.lastError = error.localizedDescription
+                if trigger == .agentSelection {
+                    let phase: AgentSelectionApplicationState.Phase
+                    if case RuntimeRecoveryError.quiesceTimedOut = error {
+                        phase = .deferred
+                    } else {
+                        phase = .failed
+                    }
+                    self.agentSelectionApplication = AgentSelectionApplicationState(
+                        desiredRevision: self.config.agentSelectionRevision ?? 0,
+                        phase: phase,
+                        errorMessage: error.localizedDescription
+                    )
+                }
                 self.setStatus(.crashed, "Bridge 安全重启失败")
                 self.supervisorState = .restartFailed
                 return
@@ -452,8 +486,38 @@ class RuntimeManager: ObservableObject {
     /// 回调）应改用此方法合并所有字段变更，再只 restart 一次——避免连续双 restart 导致端口
     /// 反复接管与 ready frame 抖动。
     func applyConfigAndRestart(_ apply: (inout RuntimeConfig) -> Void) {
+        applyConfigAndRestart(trigger: .configuration, apply)
+    }
+
+    private func applyConfigAndRestart(
+        trigger: RuntimeRestartTrigger,
+        _ apply: (inout RuntimeConfig) -> Void
+    ) {
         apply(&config)
-        scheduleRestart(trigger: .configuration)
+        scheduleRestart(trigger: trigger)
+    }
+
+    /// Apply the durable user selection. A stopped service only saves the pending config;
+    /// a live service must go through Management V1 admission and the safe restart path.
+    /// The production app does not call this until the empty-backend client rollout is complete.
+    func applyAgentSelection(_ selection: AgentSelection) async {
+        let process = await processController.snapshot()
+        if !process.isRunning {
+            config.drivers = selection.enabledIDs
+            config.agentSelectionRevision = selection.revision
+            agentSelectionApplication = AgentSelectionApplicationState(
+                desiredRevision: selection.revision, phase: .pendingStart
+            )
+            resolveManagedOpenCodeIfNeeded()
+            return
+        }
+        agentSelectionApplication = AgentSelectionApplicationState(
+            desiredRevision: selection.revision, phase: .applying
+        )
+        applyConfigAndRestart(trigger: .agentSelection) { config in
+            config.drivers = selection.enabledIDs
+            config.agentSelectionRevision = selection.revision
+        }
     }
 
     /// 更新 OpenCode 认证凭据（下次启动时生效）
@@ -491,6 +555,13 @@ class RuntimeManager: ObservableObject {
         try? FileManager.default.removeItem(atPath: config.dataDir + "/runtime.json")
         resolveManagedOpenCodeIfNeeded()
         configureOpenCodeDesktopServerIfNeeded()
+        if let revision = config.agentSelectionRevision {
+            if agentSelectionApplication?.desiredRevision != revision || agentSelectionApplication?.phase == .pendingStart {
+                agentSelectionApplication = AgentSelectionApplicationState(
+                    desiredRevision: revision, phase: .applying
+                )
+            }
+        }
         launchCount += 1
         // T06: 每次 launch 重置 epoch 锁定，新进程的 runtime.json 首次读到时重新锁定。
         currentBridgeEpoch = nil
@@ -679,6 +750,9 @@ class RuntimeManager: ObservableObject {
         generation: Int
     ) async throws -> Duration {
         guard let client = apiClient else {
+            if trigger == .agentSelection {
+                throw RuntimeRecoveryError.managementUnavailable
+            }
             let process = await processController.snapshot()
             // Startup configuration can arrive before runtime.json exposes the management API
             // (notably Relay credentials loaded from Keychain). The runtime is not ready and
@@ -697,6 +771,7 @@ class RuntimeManager: ObservableObject {
         }
         guard generation == launchGeneration, !Task.isCancelled else { throw CancellationError() }
         guard let initialV1 = status.v1 else {
+            if trigger == .agentSelection { throw RuntimeRecoveryError.managementUnavailable }
             if trigger == .automatic { throw RuntimeRecoveryError.legacyAutomaticRecoveryDisabled }
             try await client.shutdown()
             return .seconds(2)
@@ -904,6 +979,7 @@ class RuntimeManager: ObservableObject {
             }
             latestManagementStatus = resp
             applyManagementStatus(resp.status)
+            confirmAgentSelectionApplication(resp)
             if let activity = resp.v1?.activity {
                 // per-backend scoped：claude 等 backend 的活跃 turn 不再禁用 codex
                 // 重启按钮（owner 2026-08-28）；旧 runtime 无 breakdown 时退回全局计数。
@@ -938,6 +1014,20 @@ class RuntimeManager: ObservableObject {
     }
 
     // MARK: - 状态辅助
+
+    private func confirmAgentSelectionApplication(_ status: ManagementStatus) {
+        guard var application = agentSelectionApplication,
+              let desiredRevision = config.agentSelectionRevision,
+              application.desiredRevision == desiredRevision else { return }
+        guard status.status == "ready" || status.status == "ready_no_agents",
+              status.agentSelectionRevision == desiredRevision,
+              status.requestedDrivers == config.drivers,
+              Set(status.registeredDrivers ?? []) == Set(config.drivers) else { return }
+        application.appliedRevision = desiredRevision
+        application.phase = .inSync
+        application.errorMessage = nil
+        agentSelectionApplication = application
+    }
 
     private func resetRuntimeState() {
         managementURL = nil
@@ -1040,7 +1130,7 @@ class RuntimeManager: ObservableObject {
 
     // internal for @testable（2026-10-06 方案 §8：持久 URL 回退测试直调）。
     func resolveManagedOpenCodeIfNeeded() {
-        guard config.opencodeSource == .managedLocal else {
+        guard config.drivers.contains("opencode-web"), config.opencodeSource == .managedLocal else {
             openCodeManagedServer?.stop()
             openCodeManagedServer = nil
             refreshOpenCodeSeatActionInputs()
@@ -1670,6 +1760,9 @@ class RuntimeManager: ObservableObject {
         }
         if !config.relayServiceAddress.isEmpty {
             arguments += ["-relay-service-addr", config.relayServiceAddress]
+        }
+        if let selectionRevision = config.agentSelectionRevision {
+            arguments += ["-agent-selection-revision", String(selectionRevision)]
         }
         arguments += ["-pairing-include-tailscale=\(config.includeTailscaleInPairing ? "true" : "false")"]
         arguments += ["-pairing-include-remote=\(config.includeRemoteInPairing ? "true" : "false")"]

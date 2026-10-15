@@ -14,6 +14,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -44,12 +46,39 @@ const defaultDrivers = "claude,codex,codex-web,grokbuild,dsh-web,opencode-web"
 // 堆高水位推到 GB 级，实测 footprint 2.5G/峰值 3.8G 而活堆仅 ~20MB。
 const defaultBridgeMemoryLimitBytes int64 = 512 << 20
 
+func splitDriverIDs(value string) []string {
+	parts := strings.Split(value, ",")
+	ids := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if id := strings.TrimSpace(part); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func parseAgentSelectionRevision(value string) (*uint64, error) {
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := strconv.ParseUint(value, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid agent selection revision %q", value)
+	}
+	return &parsed, nil
+}
+
+func isExplicitEmptyDriverSelection(requested []string, driversProvided bool) bool {
+	return driversProvided && len(requested) == 0
+}
+
 func Main() {
 	port := flag.Int("port", 8777, "WebSocket listen port")
 	// 老 opencode backend 移除（owner 2026-08-19：与 opencode-web 双订阅同一 serve 互扰）；
 	// 2026-09-29 起源码移入 deprecated/opencode 且不再注册——回滚 = git revert，
 	// drivers 加回 "opencode" 已无效（驱动未注册，解析失败仅记日志跳过）。
 	drivers := flag.String("drivers", defaultDrivers, "Comma-separated agent list")
+	agentSelectionRevision := flag.String("agent-selection-revision", "", "Explicit agent selection revision (decimal UInt64)")
 	workDir := flag.String("work-dir", "", "Working directory for agents (default: cwd)")
 	showVersion := flag.Bool("version", false, "Print runtime version and exit")
 	codexBackend := flag.String("codex-backend", envOr("GO_BRIDGE_CODEX_BACKEND", "exec"), "Codex backend mode: exec or app_server")
@@ -103,6 +132,18 @@ func Main() {
 	relayServiceAddr := flag.String("relay-service-addr", "", "Local-only in-process relay test listener (for example 127.0.0.1:8780)")
 
 	flag.Parse()
+	driversProvided := false
+	flag.Visit(func(item *flag.Flag) {
+		if item.Name == "drivers" {
+			driversProvided = true
+		}
+	})
+	requestedDrivers := splitDriverIDs(*drivers)
+	selectionRevision, err := parseAgentSelectionRevision(*agentSelectionRevision)
+	if err != nil {
+		WriteErrorFrame(RuntimeErrorConfigInvalid, err.Error())
+		return
+	}
 	if *showVersion {
 		fmt.Println(runtimeVersionString())
 		return
@@ -199,11 +240,7 @@ func Main() {
 	// provider 返回 ok=false，spawn 不带 --settings（纯轮询=现状，S3 fail-closed）。
 	claudeHooks := &claudeHookConfigHolder{}
 
-	for _, id := range strings.Split(*drivers, ",") {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
+	for _, id := range requestedDrivers {
 		agentName := agentAliases[id]
 		if agentName == "" {
 			agentName = id
@@ -285,16 +322,41 @@ func Main() {
 			slog.Info("go-bridge: opencode HTTP proxy registered", "url", *ocBaseURL)
 		}
 	}
-	if len(handlers.BackendList()) == 0 {
+	if len(handlers.BackendList()) == 0 && !isExplicitEmptyDriverSelection(requestedDrivers, driversProvided) {
 		slog.Error("go-bridge: no agents available, exiting")
 		WriteErrorFrame(RuntimeErrorNoAgents, "no agents available")
 		os.Exit(1)
 	}
 
+	if selectionRevision != nil || driversProvided {
+		registeredDrivers := make([]string, 0, len(handlers.Agents()))
+		for id := range handlers.Agents() {
+			registeredDrivers = append(registeredDrivers, id)
+		}
+		sort.Strings(registeredDrivers)
+		revision := uint64(0)
+		if selectionRevision != nil {
+			revision = *selectionRevision
+		}
+		slog.Info("go-bridge: agent_selection_applied",
+			"revision", revision,
+			"revisionProvided", selectionRevision != nil,
+			"requestedDrivers", requestedDrivers,
+			"registeredDrivers", registeredDrivers,
+			"pid", os.Getpid(),
+			"bridgeEpoch", bridgeEpoch,
+		)
+	}
+
 	handlers.Start(ctx) // T09: 显式启动 observation lease loop（构造函数不再自动起 goroutine）
 	handlers.StartCleanupLoop(60 * time.Second)
-	handlers.StartSessionDiscoveryWatcher(ctx) // 可选：新外部 session → "sessions_changed" push
-	handlers.StartCodexRelayWatcher(ctx)       // 安全网：订阅中的 codex session 始终有 relay 在跑
+	// Zero-agent mode keeps transport and pairing alive without any per-agent scanner.
+	if len(handlers.BackendList()) > 0 {
+		handlers.StartSessionDiscoveryWatcher(ctx) // 可选：新外部 session → "sessions_changed" push
+		handlers.StartCodexRelayWatcher(ctx)       // 安全网：订阅中的 codex session 始终有 relay 在跑
+	} else {
+		slog.Info("go-bridge: per-agent watchers skipped for explicit empty selection")
+	}
 	var dataDir *DataDir
 	if *dataDirPath != "" {
 		dataDir = NewDataDir(*dataDirPath)
@@ -332,7 +394,9 @@ func Main() {
 		})
 		webPushDispatcher.Start()
 		defer webPushDispatcher.Stop()
-		handlers.StartClaudeWebPushWatcher(ctx)
+		if _, claudeEnabled := handlers.Agents()["claude"]; claudeEnabled {
+			handlers.StartClaudeWebPushWatcher(ctx)
+		}
 	}
 	advertisedLocalURL := BuildBridgeLocalURL(ResolveAdvertisedHost(), *port)
 	// advertisedLocalURLs:全部 LAN 直连候选(主候选 advertisedLocalURL 在前),用于 relay-first completion
@@ -367,52 +431,53 @@ func Main() {
 	// topology monitor（owner gate 后默认 on；CODEX_TOPOLOGY_MONITOR=0 可显式关闭；
 	// codex-web 后端提供 transport identity provider）。
 	var topologyProvider TopologyProvider
-	if *topologyMonitor {
+	codexWebAgent, codexWebPresent := handlers.Agents()["codex-web"]
+	if *topologyMonitor && codexWebPresent {
 		provCfg := TopologyMonitorConfig{Collector: NewTopologyCollector(),
 			BridgeEpoch: func() uint64 { return managementBridgeEpoch(bridgeEpoch) }}
-		if ag, ok := handlers.Agents()["codex-web"]; ok {
-			if idProv, idOK := ag.(core.CodexWebTransportIdentityProvider); idOK {
-				provCfg.Identity = idProv
-			} else {
-				slog.Warn("go-bridge: codex-web agent does not implement transport identity provider; topology bridge dimension stays unresolved")
-			}
+		if idProv, idOK := codexWebAgent.(core.CodexWebTransportIdentityProvider); idOK {
+			provCfg.Identity = idProv
 		} else {
-			slog.Warn("go-bridge: codex-web agent not present; topology bridge dimension stays unresolved")
+			slog.Warn("go-bridge: codex-web agent does not implement transport identity provider; topology bridge dimension stays unresolved")
 		}
 		svc := NewTopologyMonitorService(provCfg)
 		svc.Start(ctx)
 		topologyProvider = svc
 		slog.Info("go-bridge: topology monitor enabled")
+	} else if *topologyMonitor {
+		slog.Info("go-bridge: legacy codex-web topology monitor skipped because backend is not selected")
 	}
 
 	if *managementHost != "" && *managementToken != "" {
 		displayName := loadOrCreateDisplayName(dataDir)
 
 		mgmtCfg := ManagementConfig{
-			Handlers:           handlers,
-			Token:              *managementToken,
-			DataDir:            dataDir,
-			PairingStore:       func() PairingSessionStore { s := NewMemoryPairingStore(); globalPairingStore = s; return s }(),
+			Handlers:     handlers,
+			Token:        *managementToken,
+			DataDir:      dataDir,
+			PairingStore: func() PairingSessionStore { s := NewMemoryPairingStore(); globalPairingStore = s; return s }(),
 			// 复用 dispatcher 之前已创建并冻结的同一 DeviceStore 实例（评审
 			// R5-B1：不再二次构造，授权过滤与管理面同源）。
-			DeviceStore:        trustedDevices,
-			BridgeID:           bridgeID,
-			DisplayName:        displayName,
-			LocalURL:           advertisedLocalURL,
-			LocalURLs:          advertisedLocalURLs,
-			TailscaleURL:       tailscaleURL,
-			RemoteURL:          *remoteURL,
-			IncludeTailscale:   *includeTailscale,
-			IncludeRemote:      *includeRemote,
-			RelayEndpoint:      *relayEndpoint,
-			RelayRouteID:       *relayRouteID,
-			RelayCredential:    *relayCredential,
-			RelayConfigured:    relayConfigured,
-			RelayEnabled:       *relayEnabled,
-			RelayIdentity:      relayIdentity,
-			PreferLocalNetwork: *preferLocalNetwork,
-			Agents:             handlers.agents,
-			CodexBackendMode:   *codexBackend,
+			DeviceStore:            trustedDevices,
+			BridgeID:               bridgeID,
+			DisplayName:            displayName,
+			LocalURL:               advertisedLocalURL,
+			LocalURLs:              advertisedLocalURLs,
+			TailscaleURL:           tailscaleURL,
+			RemoteURL:              *remoteURL,
+			IncludeTailscale:       *includeTailscale,
+			IncludeRemote:          *includeRemote,
+			RelayEndpoint:          *relayEndpoint,
+			RelayRouteID:           *relayRouteID,
+			RelayCredential:        *relayCredential,
+			RelayConfigured:        relayConfigured,
+			RelayEnabled:           *relayEnabled,
+			RelayIdentity:          relayIdentity,
+			PreferLocalNetwork:     *preferLocalNetwork,
+			Agents:                 handlers.agents,
+			RequestedDrivers:       requestedDrivers,
+			AgentSelectionRevision: selectionRevision,
+			CodexBackendMode:       *codexBackend,
 			DetectionCfg: &AgentDetectionConfig{
 				OpenCodeURL:       *ocBaseURL,
 				OpenCodeUser:      *ocUser,
@@ -441,13 +506,20 @@ func Main() {
 
 		// Phase 3 心跳自检（S3 验收硬条件）：端点真实可达（路由+路径 token 鉴权+
 		// 解析）后 hooks 才对自 spawn 会话生效；失败=纯轮询=现状，不伪装事件驱动。
-		claudeHooks.set(managementURL, *managementToken)
+		_, claudeEnabled := handlers.Agents()["claude"]
+		if claudeEnabled {
+			claudeHooks.set(managementURL, *managementToken)
+		}
 		probeBody := strings.NewReader(`{"hook_event_name":"Heartbeat"}`)
-		probeResp, probeErr := http.Post(managementURL+claudeHookEndpointPath+*managementToken, "application/json", probeBody)
-		if probeErr == nil {
+		var probeResp *http.Response
+		var probeErr error
+		if claudeEnabled {
+			probeResp, probeErr = http.Post(managementURL+claudeHookEndpointPath+*managementToken, "application/json", probeBody)
+		}
+		if probeErr == nil && probeResp != nil {
 			_ = probeResp.Body.Close()
 		}
-		if probeErr != nil || probeResp == nil || probeResp.StatusCode != http.StatusOK {
+		if claudeEnabled && (probeErr != nil || probeResp == nil || probeResp.StatusCode != http.StatusOK) {
 			slog.Warn("go-bridge: claude hooks endpoint self-probe failed; staying on polling-only", "error", probeErr)
 		}
 	}
@@ -896,7 +968,7 @@ func remoteIdentityURLs(tailscaleURL, remoteURL string, includeTailscale, includ
 // newTrustedDeviceStoreChecked 返回设备 store 及其加载健康状态（评审
 // R5-B1）：devices.json 加载失败时退回空内存 store（direct auth 全部失效）
 // 并标记 degraded——web push 授权过滤据此把「记录缺失」按暂时状态处理
-//（拒绝投递但不删订阅，devices.json 恢复重启后订阅仍可用）。
+// （拒绝投递但不删订阅，devices.json 恢复重启后订阅仍可用）。
 func newTrustedDeviceStoreChecked(dataDir *DataDir) (TrustedDeviceStore, bool) {
 	if dataDir == nil {
 		return NewMemoryDeviceStore(), false
