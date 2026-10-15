@@ -286,22 +286,24 @@
         "s2-tests"
       ],
       "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S3",
-      "notes": "Owner lifted the temporary iOS edit ban after all timeline work was committed; resume full iOS/web consumer implementation on fresh source identities.",
+      "notes": "Owner lifted the temporary iOS edit ban after all timeline work was committed; resume full iOS/web consumer implementation on fresh source identities. Production rollout wiring completed at MacBridge commit 58207ee9606cd41b800ad659a878d4814a6e0fda.",
       "verification": {
         "required": true,
         "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "iOS and embedded remote-web now classify explicit empty backend advertisements as authenticated noAgents, stop backend work while preserving saved targets/session state, distinguish all-unavailable descriptors, and reject missing backends. iOS commit 1d25a636b35b96c1d2b7bb7f7798f748fea05c79.",
+        "summary": "iOS and embedded remote-web now classify explicit empty backend advertisements as authenticated noAgents, stop backend work while preserving saved targets/session state, distinguish all-unavailable descriptors, and reject missing backends. iOS commit 1d25a636b35b96c1d2b7bb7f7798f748fea05c79. Production startup now resolves AgentSelectionStore fail-closed and workstation toggles apply durable selections through safe restart.",
         "artifacts": [
           "/Users/jacklee/Projects/cordcode-ios-native-message-timeline",
           "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/.exec-plan/evidence/d7891a2d7f31/s3-remote-web-tests.log",
           "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/.exec-plan/evidence/d7891a2d7f31/s3-swift-app-build.log",
           "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/.exec-plan/evidence/d7891a2d7f31/s3-ios-device-build.log",
-          "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/.exec-plan/evidence/d7891a2d7f31/s3-ios-device-install.log"
+          "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/.exec-plan/evidence/d7891a2d7f31/s3-ios-device-install.log",
+          "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/.exec-plan/evidence/d7891a2d7f31/selection-rollout-swift-tests.log",
+          "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/.exec-plan/evidence/d7891a2d7f31/selection-rollout-verification.json"
         ],
-        "checked_at": "2026-10-15T17:35:27.653504Z"
+        "checked_at": "2026-10-15T17:45:13.659220Z"
       }
     },
     {

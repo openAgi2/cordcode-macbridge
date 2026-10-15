@@ -1,0 +1,31 @@
+{
+  "recorded_at": "2026-10-15T17:41:35Z",
+  "reason": "Pre-test/build source gate for production agent-selection rollout edits.",
+  "macbridge": {
+    "path": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "7924fc49ba6963cf33b4a6c6af6cf316db3407aa",
+    "status": [
+      "M MacBridge/MacBridge/App/AppDependencies.swift",
+      " M MacBridge/MacBridge/Services/Localization.swift",
+      " M MacBridge/MacBridge/Services/RuntimeManager.swift",
+      " M MacBridge/MacBridge/Views/ContentView.swift",
+      " M MacBridge/MacBridge/Views/WorkspaceView.swift",
+      " M MacBridge/MacBridgeTests/AppDependenciesTests.swift",
+      "?? .exec-plan/evidence/d7891a2d7f31/selection-rollout-edit-source.json"
+    ]
+  },
+  "ios": {
+    "path": "/Users/jacklee/Projects/cordcode-ios-native-message-timeline",
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "1d25a636b35b96c1d2b7bb7f7798f748fea05c79",
+    "status": [
+      "untracked docs owned by timeline agent"
+    ]
+  },
+  "tests": [
+    "CordCodeLinkTests/AppDependenciesTests",
+    "CordCodeLinkTests/RuntimeManagerRestartTests"
+  ],
+  "build": "MacBridge CordCodeLink Debug macOS"
+}

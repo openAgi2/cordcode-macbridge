@@ -1,0 +1,26 @@
+{
+  "recorded_at": "2026-10-15T17:38:06Z",
+  "reason": "Pre-edit source gate for production AgentSelectionStore rollout after iOS zero-agent support commit.",
+  "macbridge": {
+    "path": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "7924fc49ba6963cf33b4a6c6af6cf316db3407aa",
+    "status": []
+  },
+  "ios": {
+    "path": "/Users/jacklee/Projects/cordcode-ios-native-message-timeline",
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "1d25a636b35b96c1d2b7bb7f7798f748fea05c79",
+    "status": [
+      "?? docs/2026-10-16-native-timeline-markdown-libs-perf-migration-plan-v4-review.md"
+    ]
+  },
+  "expected_branch": "feat/ios-native-message-timeline",
+  "scope": [
+    "MacBridge AppDependencies production startup wiring",
+    "Workspace agent connection toggle",
+    "localization",
+    "targeted tests"
+  ],
+  "behavior": "Valid selection initializes RuntimeConfig drivers/revision; invalid selection blocks startup fail-closed; UI writes durable selection then applies safe restart."
+}

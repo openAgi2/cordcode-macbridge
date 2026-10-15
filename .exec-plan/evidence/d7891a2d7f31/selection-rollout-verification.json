@@ -1,0 +1,15 @@
+{
+  "recorded_at": "2026-10-15T17:45:13.659220Z",
+  "implementation_commit": "58207ee9606cd41b800ad659a878d4814a6e0fda",
+  "branch": "feat/ios-native-message-timeline",
+  "behavior": [
+    "valid AgentSelection initializes RuntimeConfig drivers and agentSelectionRevision",
+    "corrupt selection blocks runtime startup instead of implicit all-on/empty success",
+    "workstation toggle writes durable selection then RuntimeManager.applyAgentSelection"
+  ],
+  "verification": {
+    "targeted_tests": "CordCodeLinkTests/AppDependenciesTests + RuntimeManagerRestartTests: 12/12 PASS",
+    "initial_toolchain_failure": "GOSUMDB=off blocked verified Go 1.26.6 toolchain download; resolved by official GOSUMDB=sum.golang.org, no repository/toolchain downgrade",
+    "formal_release": "deferred to S7"
+  }
+}
