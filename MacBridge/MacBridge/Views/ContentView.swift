@@ -209,6 +209,7 @@ struct ContentView: View {
         WorkspaceView(
             viewModel: viewModel,
             backendViewModel: backendVM,
+            agentSelectionStore: dependencies.agentSelectionStore,
             deviceStore: deviceStore,
             pairingViewModel: pairingViewModel,
             runtimeManager: dependencies.runtimeManager,
@@ -227,6 +228,9 @@ struct ContentView: View {
             onPairDevice: {
                 pairingViewModel.startPairing()
                 showPairing = true
+            },
+            onSetAgentEnabled: { enabled, agentID in
+                try await dependencies.setAgentEnabled(enabled, agentID: agentID)
             }
         )
     }

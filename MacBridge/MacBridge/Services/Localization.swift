@@ -114,6 +114,7 @@ enum L10n {
     static var workspaceAgentConnectHelp: String { tr("workspace_agent_connect_help") }
     static var workspaceAgentConnectDeferred: String { tr("workspace_agent_connect_deferred") }
     static var workspaceAgentConnectFormat: String { tr("workspace_agent_connect_format") }
+    static var workspaceAgentConnectFailed: String { tr("workspace_agent_connect_failed") }
     static var workspaceObservationStale: String { tr("workspace_observation_stale") }
     static var workspaceRelayDisabled: String { tr("workspace_relay_disabled") }
     static var workspaceRelayNotConfigured: String { tr("workspace_relay_not_configured") }
@@ -620,8 +621,9 @@ enum L10n {
             "workspace_agent_not_connected": "Not connected",
             "workspace_agent_connect": "Connect",
             "workspace_agent_connect_help": "Changing this switch safely restarts MacBridge and briefly reconnects devices.",
-            "workspace_agent_connect_deferred": "Agent switching becomes available after every installed client supports an empty agent list.",
+            "workspace_agent_connect_deferred": "Install the agent, then use this switch to connect it through MacBridge.",
             "workspace_agent_connect_format": "Connect %@",
+            "workspace_agent_connect_failed": "Couldn't change agent connection",
             "workspace_observation_stale": "Status may have changed",
             "workspace_relay_disabled": "Relay is off.",
             "workspace_relay_not_configured": "Relay is not configured.",
@@ -1088,8 +1090,9 @@ enum L10n {
             "workspace_agent_not_connected": "未接入",
             "workspace_agent_connect": "接入",
             "workspace_agent_connect_help": "修改接入开关会安全重启 MacBridge，设备会短暂重连。",
-            "workspace_agent_connect_deferred": "所有已安装客户端支持空 Agent 列表后，接入开关才会开放。",
+            "workspace_agent_connect_deferred": "安装 Agent 后，可用此开关接入 MacBridge。",
             "workspace_agent_connect_format": "接入%@",
+            "workspace_agent_connect_failed": "无法修改 Agent 接入",
             "workspace_observation_stale": "状态可能已变化",
             "workspace_relay_disabled": "Relay 已关闭。",
             "workspace_relay_not_configured": "Relay 未配置。",

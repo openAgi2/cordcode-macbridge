@@ -7,6 +7,7 @@ import Foundation
 @MainActor
 class AppDependencies: ObservableObject {
     let runtimeManager: RuntimeManager
+    let agentSelectionStore: AgentSelectionStore
     let statusViewModel: BridgeStatusViewModel
     let pairingViewModel: PairingViewModel
     let settingsViewModel: SettingsViewModel
@@ -16,9 +17,21 @@ class AppDependencies: ObservableObject {
     let topologyStore: TopologyMonitorStatusStore
     /// 设备/Agent 工作区快照轮询 owner；只消费 Management API，不写业务状态。
     let workspaceSnapshotStore: WorkspaceSnapshotStore
+    @Published private(set) var agentSelectionStartupError: String?
 
     private let dataDir: String
     private var hasStartedBridge = false
+
+    enum AgentSelectionStartup: Equatable {
+        case apply(AgentSelection)
+        case blocked(String)
+
+        @MainActor
+        static func resolve(_ store: AgentSelectionStore) -> AgentSelectionStartup {
+            if let selection = store.selection { return .apply(selection) }
+            return .blocked(store.errorMessage ?? "接入选择不可用")
+        }
+    }
 
     init() {
         // 从 Bundle 获取 runtime binary 路径，回退到 /usr/local/bin
@@ -29,6 +42,14 @@ class AppDependencies: ObservableObject {
             + "/CordCode Link"
         self.dataDir = dir
         let logDir = dir + "/logs"
+        let agentSelectionStore = AgentSelectionStore(dataDir: dir)
+        let agentSelectionStartup = AgentSelectionStartup.resolve(agentSelectionStore)
+        let initialAgentSelection: AgentSelection?
+        if case .apply(let selection) = agentSelectionStartup {
+            initialAgentSelection = selection
+        } else {
+            initialAgentSelection = nil
+        }
 
         // OpenCode 凭据：环境变量 → credentials.json 降级
         var opencodeUser = ""
@@ -139,6 +160,8 @@ class AppDependencies: ObservableObject {
             executablePath: executablePath,
             dataDir: dir,
             logDir: logDir,
+            drivers: initialAgentSelection?.enabledIDs ?? [],
+            agentSelectionRevision: initialAgentSelection?.revision,
             workDir: FileManager.default.homeDirectoryForCurrentUser.path,
             codexBackend: "app_server",
             codexAppServerURL: UserDefaults.standard.string(forKey: "codexAppServerURL") ?? "",
@@ -167,6 +190,11 @@ class AppDependencies: ObservableObject {
         )
 
         self.runtimeManager = RuntimeManager(config: config)
+        self.agentSelectionStore = agentSelectionStore
+        if case .blocked(let reason) = agentSelectionStartup {
+            self.agentSelectionStartupError = reason
+            NSLog("[AppDependencies] Agent selection unavailable; runtime startup blocked: \(reason)")
+        }
         // epoch 新鲜度：store 轮询时对比当前 runtime identity epoch（同源校验，代际变化作废旧快照）。
         self.topologyStore = TopologyMonitorStatusStore(
             expectedEpochProvider: { [weak runtimeManager] in
@@ -246,6 +274,15 @@ class AppDependencies: ObservableObject {
         guard !hasStartedBridge else { return }
         hasStartedBridge = true
 
+        guard agentSelectionStore.selection != nil else {
+            agentSelectionStartupError = agentSelectionStartupError
+                ?? agentSelectionStore.errorMessage
+                ?? "接入选择不可用，已阻止 runtime 启动。"
+            NSLog("[AppDependencies] Refusing runtime startup without a valid explicit agent selection.")
+            return
+        }
+        agentSelectionStartupError = nil
+
         // 监听远程 URL 变更，更新 RuntimeConfig 并重启
         NotificationCenter.default.publisher(for: .remoteURLDidChange)
             .receive(on: DispatchQueue.main)
@@ -301,6 +338,11 @@ class AppDependencies: ObservableObject {
                 }
             }
         }
+    }
+
+    func setAgentEnabled(_ enabled: Bool, agentID: String) async throws {
+        let selection = try agentSelectionStore.setEnabled(enabled, for: agentID)
+        await runtimeManager.applyAgentSelection(selection)
     }
 
     /// 远程 URL 变更回调：从 UserDefaults 读取最新 remoteURL，更新配置并重启

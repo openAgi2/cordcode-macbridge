@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+### 2026-10-16 — 工作站 Agent 接入开关正式生效
+
+- MacBridge 启动现在以 `agent-selection.json` 的显式选择作为唯一 Agent 集合：新装默认全关，已保存选择按 revision 恢复，不再隐式启动全部 Agent；文件损坏时阻止 runtime 启动并显示错误，不回落到默认全集或伪造空选择。
+- 工作站“接入”开关从只读占位变为真实写路径：先持久化用户意愿，再通过安全重启应用新 Agent 集合；保存或应用失败会弹出具体错误，设备会短暂重连。
+
 ### 2026-10-13 — Claude 后台任务执行态与主会话状态对齐
 
 - Claude Code 2.1.296 的 `~/.claude/sessions/*.json` 官方 `status=busy` 现在优先于主 transcript 的“最后 assistant 已结束”推断；后台 agent 只推进 sidechain 时，MacBridge 不再把外部 worker 误判为 live-but-idle，也不会打开同 session 的第二个 Claude 进程。同一 session 的多个官方 stub 按 busy 优先聚合，不再每秒交替发布 running/idle；已打开 session 的 SSV2 projection 会同步这个官方执行态（不创建假 turn、不覆盖真实 active turn），已有观察连接也不会在长后台任务 5 分钟后被 idle TTL 误收口。iPhone 时间线、session 列表徽标与后台任务图标由此使用一致的执行真相。

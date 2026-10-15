@@ -6,6 +6,7 @@ import SwiftUI
 struct WorkspaceView: View {
     @ObservedObject var viewModel: BridgeStatusViewModel
     @ObservedObject var backendViewModel: BackendStatusViewModel
+    @ObservedObject var agentSelectionStore: AgentSelectionStore
     @ObservedObject var deviceStore: DeviceStore
     @ObservedObject var pairingViewModel: PairingViewModel
     @ObservedObject var runtimeManager: RuntimeManager
@@ -14,6 +15,7 @@ struct WorkspaceView: View {
     let onRestartBridge: () -> Void
     var onOpenConnectionStatus: (() -> Void)?
     let onPairDevice: () -> Void
+    let onSetAgentEnabled: (Bool, String) async throws -> Void
 
     @State private var showStopConfirmation = false
     @State private var isRestarting = false
@@ -31,6 +33,7 @@ struct WorkspaceView: View {
     @State private var isShowingGrokLeaderDetail = false
     @StateObject private var grokLeaderManager = GrokLeaderModeManager()
     @State private var grokLeaderFailureAlert: GrokLeaderToggleFailure?
+    @State private var agentSelectionFailureMessage: String?
 
     private let topologyCoordinateSpace = "workspace-topology"
 
@@ -127,6 +130,17 @@ struct WorkspaceView: View {
             Button(L10n.ok, role: .cancel) { codexRestartMessage = nil }
         } message: {
             Text(codexRestartMessage ?? "")
+        }
+        .alert(
+            L10n.workspaceAgentConnectFailed,
+            isPresented: Binding(
+                get: { agentSelectionFailureMessage != nil },
+                set: { if !$0 { agentSelectionFailureMessage = nil } }
+            )
+        ) {
+            Button(L10n.ok, role: .cancel) { agentSelectionFailureMessage = nil }
+        } message: {
+            Text(agentSelectionFailureMessage ?? "")
         }
     }
 
@@ -553,6 +567,11 @@ struct WorkspaceView: View {
 
     private var agentSection: some View {
         VStack(alignment: .leading, spacing: 18) {
+            if let error = agentSelectionStore.errorMessage {
+                Text(error)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
+            }
             if let error = backendViewModel.inventoryRescanError {
                 Text(error)
                     .font(.system(size: 11))
@@ -969,14 +988,14 @@ struct WorkspaceView: View {
     }
 
     private func agentConnectionToggle(for agent: BackendAgentStatus) -> some View {
-        let explicitSelection = backendViewModel.selectionRevision != nil
-        let isOn = explicitSelection
-            ? backendViewModel.requestedDrivers.contains(agent.id)
-            : backendViewModel.activeDrivers.contains(agent.id)
+        let explicitSelection = agentSelectionStore.selection != nil
+        let isOn = agentSelectionStore.isEnabled(agent.id)
         let canInstallOrRun = agent.installation?.state == "installed" || agent.installation?.state == "not_required"
         return Toggle(L10n.workspaceAgentConnect, isOn: Binding(
             get: { isOn },
-            set: { _ in }
+            set: { enabled in
+                setAgentConnection(enabled, agent: agent)
+            }
         ))
             .toggleStyle(.switch)
             .controlSize(.small)
@@ -984,6 +1003,16 @@ struct WorkspaceView: View {
             .disabled(!explicitSelection || !canInstallOrRun)
             .help(explicitSelection ? L10n.workspaceAgentConnectHelp : L10n.workspaceAgentConnectDeferred)
             .accessibilityLabel(String(format: L10n.workspaceAgentConnectFormat, agent.displayName))
+    }
+
+    private func setAgentConnection(_ enabled: Bool, agent: BackendAgentStatus) {
+        Task {
+            do {
+                try await onSetAgentEnabled(enabled, agent.id)
+            } catch {
+                agentSelectionFailureMessage = error.localizedDescription
+            }
+        }
     }
 
     @ViewBuilder

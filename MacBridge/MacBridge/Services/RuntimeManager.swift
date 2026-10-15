@@ -162,7 +162,8 @@ struct RuntimeConfig {
     let logDir: String
     var drivers: [String]
     /// Non-nil only after an explicit AgentSelection has been applied. Nil preserves
-    /// the legacy product startup path until every deployed client accepts `backends: []`.
+    /// the pre-selection startup shape for tests and older construction sites; the
+    /// production app resolves this from AgentSelectionStore before launch.
     var agentSelectionRevision: UInt64?
     let workDir: String
     let codexBackend: String
@@ -523,7 +524,7 @@ class RuntimeManager: ObservableObject {
 
     /// Apply the durable user selection. A stopped service only saves the pending config;
     /// a live service must go through Management V1 admission and the safe restart path.
-    /// The production app does not call this until the empty-backend client rollout is complete.
+    /// The production workstation toggle calls this only after the durable write succeeds.
     func applyAgentSelection(_ selection: AgentSelection) async {
         let process = await processController.snapshot()
         if !process.isRunning {
