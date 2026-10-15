@@ -1,0 +1,21 @@
+{
+  "capturedAt": "2026-10-15T05:31:01.581037+00:00",
+  "repository": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+  "branch": "feat/ios-native-message-timeline",
+  "commit": "d566119bb7c77f5b5a2b3adb686c3d5e8e64783c",
+  "status": [],
+  "purpose": "S2 formal Release build source gate",
+  "actualBuildWorkdir": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+  "expectedProductIDs": [
+    "claude",
+    "codex-remote",
+    "grokbuild",
+    "dsh-web",
+    "opencode-web"
+  ],
+  "expectedCapabilities": [
+    "legacy five-driver product startup preserved",
+    "explicit zero-agent runtime capability",
+    "agent selection revision"
+  ]
+}\n

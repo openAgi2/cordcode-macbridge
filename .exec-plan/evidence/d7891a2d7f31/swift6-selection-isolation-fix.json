@@ -1,0 +1,10 @@
+{
+  "checkedAt": "2026-10-15T05:32:47.964470+00:00",
+  "change": "Marked AgentSelectionStore filesystem helpers nonisolated; they touch no MainActor state",
+  "reason": "Release build exposed Swift 6 global-actor conversion warning in injected persistence seam",
+  "verification": {
+    "command": "xcodebuild test ... AgentSelectionStoreTests/testInitialSelectionIsExplicitEmptyAndDurable + testFailedWriteKeepsPreviousSelectionAndFile",
+    "result": "passed",
+    "testsExecuted": 2
+  }
+}

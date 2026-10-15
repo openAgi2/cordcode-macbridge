@@ -91,7 +91,7 @@ final class AgentSelectionStore: ObservableObject {
         }
     }
 
-    private static func read(_ url: URL) throws -> AgentSelection {
+    nonisolated private static func read(_ url: URL) throws -> AgentSelection {
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         guard (attributes[.size] as? NSNumber)?.intValue ?? Int.max <= 16 * 1024 else {
             throw AgentSelectionError.invalidFile
@@ -99,7 +99,7 @@ final class AgentSelectionStore: ObservableObject {
         return try JSONDecoder().decode(AgentSelection.self, from: Data(contentsOf: url)).validated()
     }
 
-    private static func persist(_ value: AgentSelection, to url: URL) throws {
+    nonisolated private static func persist(_ value: AgentSelection, to url: URL) throws {
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         // Also normalize an existing app-data directory; newly created directories inherit the value above.
@@ -127,7 +127,7 @@ final class AgentSelectionStore: ObservableObject {
         guard try read(url) == value else { throw AgentSelectionError.invalidFile }
     }
 
-    private static func posixError() -> AgentSelectionError {
+    nonisolated private static func posixError() -> AgentSelectionError {
         .persistence(String(cString: strerror(errno)))
     }
 }
