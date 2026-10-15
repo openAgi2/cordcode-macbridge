@@ -267,9 +267,10 @@
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "Isolated real runtime reached ready_no_agents with revision/requested/registered identity and skipped per-agent watchers",
+        "summary": "Isolated real runtime reached ready_no_agents with revision/requested/registered identity and skipped per-agent watchers; formal /Applications Release deployment and runtime identity verified.",
         "artifacts": [
-          ".exec-plan/evidence/d7891a2d7f31/s2-validation.json"
+          ".exec-plan/evidence/d7891a2d7f31/s2-validation.json",
+          ".exec-plan/evidence/d7891a2d7f31/s2-release-deployment.json"
         ],
         "checked_at": "2026-10-15T05:30:48.313083+00:00"
       }

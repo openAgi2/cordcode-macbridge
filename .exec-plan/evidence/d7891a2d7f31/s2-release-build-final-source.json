@@ -1,0 +1,10 @@
+{
+  "capturedAt": "2026-10-15T05:32:59.719016+00:00",
+  "repository": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+  "branch": "feat/ios-native-message-timeline",
+  "commit": "c9af5ee1f7f4fc9203486d0a84927af1786588ea",
+  "status": [],
+  "purpose": "Formal Release build after Swift isolation fix",
+  "actualBuildWorkdir": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+  "expectedRuntimeCommitPrefix": "c9af5ee1f7f4"
+}\n

@@ -1,0 +1,41 @@
+{
+  "checkedAt": "2026-10-15T05:34:55.129153+00:00",
+  "build": {
+    "commit": "c9af5ee1f7f4fc9203486d0a84927af1786588ea",
+    "runtimeVersion": "cordcode-bridge-runtime 0.1.0 (commit: c9af5ee1f7f4, built: 2026-10-15T05:32:59Z)",
+    "zipSHA256": "fd803d2ec58de0e54218204c34857cbfa26a013c078baba6b05e3868e1576abf"
+  },
+  "install": {
+    "appPath": "/Applications/CordCodeLink.app",
+    "oldAppPreservedAt": "/tmp/CordCodeLink-pre-agent-management-20261015133410.app",
+    "installTime": "2026-10-15T05:34:10Z"
+  },
+  "runtime": {
+    "appPid": 90663,
+    "appProcessStartedAt": "2026-10-15 13:34:10 +08:00",
+    "runtimePid": 90707,
+    "runtimeProcessStartedAt": "2026-10-15 13:34:14 +08:00",
+    "listener": "*:8777 by /Applications/CordCodeLink.app embedded runtime PID 90707",
+    "managementStatus": "ready",
+    "agentSelectionRevision": null,
+    "requestedDrivers": [
+      "claude",
+      "codex-remote",
+      "grokbuild",
+      "dsh-web",
+      "opencode-web"
+    ],
+    "registeredDrivers": [
+      "claude",
+      "codex-remote",
+      "dsh-web",
+      "grokbuild",
+      "opencode-web"
+    ],
+    "uniqueFeatureLog": "agent_selection_applied pid=90707"
+  },
+  "boundary": [
+    "Production default intentionally remains five drivers until iOS accepts empty backend list",
+    "No iOS/web changes or deployment"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "capturedAt": "2026-10-15T05:34:09.093825+00:00",
+  "repository": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+  "branch": "feat/ios-native-message-timeline",
+  "commit": "c9af5ee1f7f4fc9203486d0a84927af1786588ea",
+  "status": [
+    "?? .exec-plan/evidence/d7891a2d7f31/s2-release-build-final-source.json"
+  ],
+  "purpose": "Formal /Applications install gate",
+  "actualInstallSourceApp": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/build/unsigned-release/Build/Products/Release/CordCodeLink.app",
+  "appTreeIdentitySHA256": "6bcb1eafb8378d0d819c088ecb24a6037d5cf5fcde8ef90f4a49341377d6cedc",
+  "runtimePath": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/build/unsigned-release/Build/Products/Release/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime",
+  "runtimeVersionOutput": "cordcode-bridge-runtime 0.1.0 (commit: c9af5ee1f7f4, built: 2026-10-15T05:32:59Z)",
+  "zip": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip",
+  "zipSHA256": "fd803d2ec58de0e54218204c34857cbfa26a013c078baba6b05e3868e1576abf",
+  "expectedRuntimeCommitPrefix": "c9af5ee1f7f4"
+}
