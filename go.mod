@@ -6,6 +6,7 @@ toolchain go1.26.6
 
 require (
 	github.com/BurntSushi/toml v1.6.0
+	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/cloudflare/circl v1.6.3
 	github.com/creack/pty v1.1.24

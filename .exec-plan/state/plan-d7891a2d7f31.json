@@ -33,12 +33,13 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-10-15T03:13:29.727Z",
+  "updated_at": "2026-10-15T05:11:53.627478+00:00",
   "approved_plan_sha256": "e49e2d5d00e6216bd70d0127c02949351be96474aef1c8b6cd0b14f91d74121a",
   "scope_gates": {
     "E5": "blocked extensions only: unverified latest sources and all automatic update execution",
     "E3": "implementation completion evidence; not startup prerequisite",
-    "E6": "deployment/owner completion evidence; not startup prerequisite"
+    "E6": "deployment/owner completion evidence; not startup prerequisite",
+    "iosConsumer": "out of current scope per owner; legacy iOS rejects empty backends; do not claim cross-repository completion or bypass client-first rollout gate"
   },
   "todos": [
     {
@@ -47,19 +48,22 @@
       "description": "Fresh M/I+G/U manifest; compare reviewed plan SHA, paired worktree drift and no overlapping source changes; snapshot/rescan schema, command source catalog, pinned strict SemVer dependency.",
       "phase": "s0",
       "kind": "impl",
-      "status": "in_progress",
+      "status": "done",
       "depends_on": [],
       "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S0",
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Fresh source identities and approved scope/schema/catalog frozen",
+        "artifacts": [
+          "docs/2026-10-15-agent-management-s0-baseline.md",
+          ".exec-plan/evidence/d7891a2d7f31/s0-source-manifest.json"
+        ],
+        "checked_at": "2026-10-15T03:14:52.120387+00:00"
       }
     },
     {
@@ -68,7 +72,7 @@
       "description": "Fresh M/I+G/U manifest; compare reviewed plan SHA, paired worktree drift and no overlapping source changes; snapshot/rescan schema, command source catalog, pinned strict SemVer dependency.",
       "phase": "s0",
       "kind": "tests",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "s0-impl"
       ],
@@ -76,13 +80,15 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Static S0 validation passed, no build/test required for documentation",
+        "artifacts": [
+          ".exec-plan/evidence/d7891a2d7f31/s0-validation.json"
+        ],
+        "checked_at": "2026-10-15T03:14:52.350040+00:00"
       }
     },
     {
@@ -91,7 +97,7 @@
       "description": "Fresh M/I+G/U manifest; compare reviewed plan SHA, paired worktree drift and no overlapping source changes; snapshot/rescan schema, command source catalog, pinned strict SemVer dependency. Require integration evidence appropriate to this slice; final UX matrix remains s7-regression; do not block coding on post-implementation evidence.",
       "phase": "s0",
       "kind": "regression",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "s0-tests"
       ],
@@ -99,13 +105,15 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Reviewed plan hash unchanged and paired iOS anchors unchanged; E5 remains blocked",
+        "artifacts": [
+          ".exec-plan/evidence/d7891a2d7f31/s0-validation.json"
+        ],
+        "checked_at": "2026-10-15T03:14:52.503253+00:00"
       }
     },
     {
@@ -114,7 +122,7 @@
       "description": "Swift AgentSelectionStore and product catalog; empty initial opt-in, atomic validated persistence; Go toolinventory origin/metadata/probe; exact dsh/ChatGPT/OpenCode owning resolver paths; Magpie attribution.",
       "phase": "s1",
       "kind": "impl",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "s0-regression"
       ],
@@ -122,13 +130,21 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Implemented explicit durable selection store/product catalog and pure Go inventory origin/metadata/version seams with read-only dsh/Codex locators",
+        "artifacts": [
+          "MacBridge/MacBridge/Services/AgentSelectionStore.swift",
+          "MacBridge/MacBridge/Services/ProductAgentCatalog.swift",
+          "toolinventory/origin.go",
+          "toolinventory/metadata.go",
+          "toolinventory/version.go",
+          "agent/dsh-web/binary.go",
+          "agent/codex-remote/chatgpt_auth.go"
+        ],
+        "checked_at": "2026-10-15T05:11:53.506106+00:00"
       }
     },
     {
@@ -137,7 +153,7 @@
       "description": "Swift AgentSelectionStore and product catalog; empty initial opt-in, atomic validated persistence; Go toolinventory origin/metadata/probe; exact dsh/ChatGPT/OpenCode owning resolver paths; Magpie attribution.",
       "phase": "s1",
       "kind": "tests",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "s1-impl"
       ],
@@ -145,13 +161,15 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Go and Swift owning component tests passed; no UI/full-suite test run",
+        "artifacts": [
+          ".exec-plan/evidence/d7891a2d7f31/s1-validation.json"
+        ],
+        "checked_at": "2026-10-15T05:11:53.556596+00:00"
       }
     },
     {
@@ -160,7 +178,7 @@
       "description": "Swift AgentSelectionStore and product catalog; empty initial opt-in, atomic validated persistence; Go toolinventory origin/metadata/probe; exact dsh/ChatGPT/OpenCode owning resolver paths; Magpie attribution. Require integration evidence appropriate to this slice; final UX matrix remains s7-regression; do not block coding on post-implementation evidence.",
       "phase": "s1",
       "kind": "regression",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "s1-tests"
       ],
@@ -168,13 +186,15 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Component-level regression only: pure S1 has no runtime/UI surface yet; S2+/client-first gates own integration evidence",
+        "artifacts": [
+          ".exec-plan/evidence/d7891a2d7f31/s1-validation.json"
+        ],
+        "checked_at": "2026-10-15T05:11:53.602701+00:00"
       }
     },
     {
@@ -183,7 +203,7 @@
       "description": "RuntimeConfig drivers+revision; require Management V1 admission, desired/applied/error/deferred states, latest-generation-only restart; gate all disabled driver background and managed OpenCode entrypoints.",
       "phase": "s2",
       "kind": "impl",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         "s1-tests"
       ],
@@ -257,7 +277,7 @@
         "s2-tests"
       ],
       "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S3",
-      "notes": "",
+      "notes": "Current scope only Mac producer, explicit empty runtime and ACK serialization. iOS/web consumer work deferred by owner; keep full cross-client verification incomplete.",
       "verification": {
         "required": true,
         "status": "missing",
@@ -280,7 +300,7 @@
         "s3-impl"
       ],
       "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S3",
-      "notes": "",
+      "notes": "Current scope only Mac producer, explicit empty runtime and ACK serialization. iOS/web consumer work deferred by owner; keep full cross-client verification incomplete.",
       "verification": {
         "required": true,
         "status": "missing",
@@ -303,7 +323,7 @@
         "s3-tests"
       ],
       "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S3",
-      "notes": "",
+      "notes": "Current scope only Mac producer, explicit empty runtime and ACK serialization. iOS/web consumer work deferred by owner; keep full cross-client verification incomplete.",
       "verification": {
         "required": true,
         "status": "missing",
@@ -533,7 +553,7 @@
         "s6-tests"
       ],
       "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S7",
-      "notes": "",
+      "notes": "Mac-only deliverable; no iOS build/install/web deployment. Client-first rollout prerequisite remains before enabling opt-in default for existing incompatible clients.",
       "verification": {
         "required": true,
         "status": "missing",
@@ -556,7 +576,7 @@
         "s7-impl"
       ],
       "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S7",
-      "notes": "",
+      "notes": "Mac-only deliverable; no iOS build/install/web deployment. Client-first rollout prerequisite remains before enabling opt-in default for existing incompatible clients.",
       "verification": {
         "required": true,
         "status": "missing",
@@ -579,7 +599,7 @@
         "s7-tests"
       ],
       "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S7",
-      "notes": "",
+      "notes": "Mac-only deliverable; no iOS build/install/web deployment. Client-first rollout prerequisite remains before enabling opt-in default for existing incompatible clients.",
       "verification": {
         "required": true,
         "status": "missing",
@@ -591,5 +611,6 @@
         "checked_at": null
       }
     }
-  ]
+  ],
+  "active_scope": "MacBridge-only per owner steering; no cordcode-ios code/docs/remote-web edits or deployments"
 }

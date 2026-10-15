@@ -1,0 +1,25 @@
+{
+  "checkedAt": "2026-10-15T03:14:52.063727+00:00",
+  "result": "PASS",
+  "scope": "S0 static contract/source checks only; no product tests/build/deploy",
+  "planSHA256": "e49e2d5d00e6216bd70d0127c02949351be96474aef1c8b6cd0b14f91d74121a",
+  "iosCommit": "f9546ffe7904edbd448ec4f7a31d8e1dce1ade2b",
+  "iosAnchorFilesUnchanged": [
+    "OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift",
+    "OpenCodeiOS/OpenCodeiOS/App/OpenCodeiOSApp.swift",
+    "OpenCodeiOS/OpenCodeiOS/ViewModels/ServerViewModel.swift",
+    "remote-web/src/app/AppController.ts",
+    "remote-web/src/core/backend/backend-selection.ts",
+    "remote-web/src/adapter/RemoteWebViewModel.ts"
+  ],
+  "iosPreexistingDirtyCount": 274,
+  "checks": [
+    "paired source identities",
+    "reviewed plan bytes",
+    "no overlapping iOS dirty sources",
+    "v1 to implementation iOS anchor drift",
+    "Magpie source hashes",
+    "native command/metadata sample references read",
+    "pinned strict SemVer official module source read"
+  ]
+}

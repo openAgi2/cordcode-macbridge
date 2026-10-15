@@ -1,0 +1,28 @@
+{
+  "capturedAt": "2026-10-15T05:07:09.328612+00:00",
+  "repository": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+  "branch": "feat/ios-native-message-timeline",
+  "commit": "690571d30f0d39c2259a4638b965183f3d436ced",
+  "status": [
+    "M .exec-plan/state/plan-d7891a2d7f31.json",
+    " M MacBridge/CordCodeLink.xcodeproj/project.pbxproj",
+    " M go.mod",
+    " M go.sum",
+    "?? .exec-plan/evidence/d7891a2d7f31/s0-validation.json",
+    "?? .exec-plan/evidence/d7891a2d7f31/update-queue.py",
+    "?? MacBridge/MacBridge/Services/AgentSelectionStore.swift",
+    "?? MacBridge/MacBridge/Services/ProductAgentCatalog.swift",
+    "?? MacBridge/MacBridgeTests/AgentSelectionStoreTests.swift",
+    "?? MacBridge/MacBridgeTests/ProductAgentCatalogTests.swift",
+    "?? toolinventory/"
+  ],
+  "expectedProductIDs": [
+    "claude",
+    "codex-remote",
+    "grokbuild",
+    "dsh-web",
+    "opencode-web"
+  ],
+  "purpose": "S1 targeted Swift unit test build gate",
+  "actualBuildWorkdir": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline"
+}

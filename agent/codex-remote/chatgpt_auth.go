@@ -44,6 +44,12 @@ func defaultChatGPTCodexPath() string {
 	})
 }
 
+// ResolveChatGPTCodexInstallPath is read-only workspace inventory. It does not run
+// app-server or the Remote Control auth probe.
+func ResolveChatGPTCodexInstallPath() string {
+	return defaultChatGPTCodexPath()
+}
+
 // chatGPTCodexBin resolves the probe binary loadChatGPTAuth execs. It is a
 // package-level var so tests can point the auth probe at a stub binary
 // (zombie-reaping regression, incidents/2026-10-12-bridge-zombie-process-

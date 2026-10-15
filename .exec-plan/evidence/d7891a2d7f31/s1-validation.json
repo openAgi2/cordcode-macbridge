@@ -1,0 +1,63 @@
+{
+  "checkedAt": "2026-10-15T05:11:53.422717+00:00",
+  "source": {
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "690571d30f0d39c2259a4638b965183f3d436ced",
+    "status": [
+      "M .exec-plan/state/plan-d7891a2d7f31.json",
+      " M MacBridge/CordCodeLink.xcodeproj/project.pbxproj",
+      " M agent/codex-remote/chatgpt_auth.go",
+      " M agent/dsh-web/binary.go",
+      " M go.mod",
+      " M go.sum",
+      "?? .exec-plan/evidence/d7891a2d7f31/s0-validation.json",
+      "?? .exec-plan/evidence/d7891a2d7f31/s1-swift-build-source.json",
+      "?? .exec-plan/evidence/d7891a2d7f31/update-queue.py",
+      "?? MacBridge/MacBridge/Services/AgentSelectionStore.swift",
+      "?? MacBridge/MacBridge/Services/ProductAgentCatalog.swift",
+      "?? MacBridge/MacBridgeTests/AgentSelectionStoreTests.swift",
+      "?? MacBridge/MacBridgeTests/ProductAgentCatalogTests.swift",
+      "?? THIRD_PARTY_NOTICES.md",
+      "?? toolinventory/"
+    ],
+    "buildWorkdir": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline"
+  },
+  "go": {
+    "command": "GOSUMDB=sum.golang.org go test ./toolinventory -count=1",
+    "result": "passed",
+    "tests": "origin exact prefix, no ambient npm fallback, metadata identity/malformed, strict SemVer, bounded version runner/process-group timeout, product contract"
+  },
+  "touchedPackageTests": {
+    "command": "GOSUMDB=sum.golang.org go test ./toolinventory ./agent/dsh-web ./agent/codex-remote -count=1",
+    "result": "passed",
+    "wallSeconds": 24.061,
+    "scope": "new/changed Go packages only"
+  },
+  "swift": {
+    "command": "GOSUMDB=sum.golang.org xcodebuild test -project MacBridge/CordCodeLink.xcodeproj -scheme CordCodeLink -configuration Debug -destination platform=macOS -derivedDataPath MacBridge/DerivedData -only-testing:CordCodeLinkTests/AgentSelectionStoreTests -only-testing:CordCodeLinkTests/ProductAgentCatalogTests",
+    "result": "passed",
+    "testsExecuted": 8,
+    "failures": 0,
+    "xcresult": "MacBridge/DerivedData/Logs/Test/Test-CordCodeLink-2026.10.15_13-08-46-+0800.xcresult",
+    "wallSecondsAbout": 3.7
+  },
+  "attempts": [
+    {
+      "result": "failed-before-code-test",
+      "reason": "inherited GOSUMDB=off blocked Go toolchain verification in Xcode prebuild",
+      "resolution": "retry same command with process-local GOSUMDB=sum.golang.org"
+    },
+    {
+      "result": "failed",
+      "reason": "write-failure test used filesystem permissions that did not deny the test host",
+      "resolution": "inject persistence failure at store seam; production writer remains default atomic implementation"
+    }
+  ],
+  "boundaries": [
+    "No agent constructors or background probes started",
+    "No iOS/web edits or deployments",
+    "No automatic update execution",
+    "No unverified latest provider",
+    "Selection not yet wired into production runtime because current iOS rejects empty backends; client-first rollout gate remains"
+  ]
+}\n

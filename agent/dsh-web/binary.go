@@ -143,3 +143,9 @@ func parseNodeVersion(s string) (major, minor, patch int, ok bool) {
 	}
 	return nums[0], nums[1], nums[2], true
 }
+
+// FindDSHBinary is the read-only installation locator used by workspace inventory.
+// It must not construct the backend or start the official web seat.
+func FindDSHBinary(dataDir string) string {
+	return findDSHBinary(dataDir)
+}
