@@ -1,0 +1,58 @@
+{
+  "scope": "S3 targeted Swift test gate after timeline compile-block repair",
+  "ios_commit_before_fix": "6cdc0323d24c4e6bb800115cdbf4ded458a548ef",
+  "ios_fix_commit": "09d347ff7bd7db220a43d08a49c5bd724413ec1e",
+  "mac_commit": "42c5a430b21c5886e66620806c9775815fc9a12f",
+  "change_scope": "one iOS test fixture; no NativeTimeline/product files",
+  "independent_initial_rerun": {
+    "build": "PASS",
+    "result": "FAIL",
+    "tests": {
+      "executed": 131,
+      "passed": 120,
+      "skipped": 10,
+      "failed": 1
+    },
+    "failure": "BridgeLANFirstFallbackTests.testBackendAdvertisement_missingArrayRemainsProtocolError expected no_backends, actual relay.credentials_unavailable",
+    "log": "s3-timeline-unblock-tests.log"
+  },
+  "single_class_rerun": {
+    "result": "PASS",
+    "executed": 35,
+    "failed": 0,
+    "log": "s3-review-fix-single-tests.log"
+  },
+  "four_class_rerun": {
+    "result": "PASS",
+    "executed": 131,
+    "passed": 121,
+    "skipped": 10,
+    "failed": 0,
+    "classes": {
+      "FenceAppendP2bTests": {
+        "executed": 64,
+        "skipped": 10,
+        "failed": 0
+      },
+      "BridgeLANFirstFallbackTests": {
+        "executed": 35,
+        "skipped": 0,
+        "failed": 0
+      },
+      "ServerViewModelBridgeActivationTests": {
+        "executed": 7,
+        "skipped": 0,
+        "failed": 0
+      },
+      "ConnectionHealthViewModelTests": {
+        "executed": 25,
+        "skipped": 0,
+        "failed": 0
+      }
+    },
+    "log": "s3-review-fix-four-tests.log"
+  },
+  "attestation": "re-verified independently by Codex using build-for-testing then test-without-building; no UI/snapshot tests",
+  "source_manifest": "s3-review-fix-final-source.json",
+  "checked_at": "2026-10-16T02:04:49.378161+00:00"
+}

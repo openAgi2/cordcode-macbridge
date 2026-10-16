@@ -1,0 +1,28 @@
+{
+  "recorded_at": "2026-10-16T01:52:30Z",
+  "reason": "Verify timeline agent report that CCCodeTests compile blocker is fixed and classify the remaining S3 test failure.",
+  "macbridge": {
+    "path": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "42c5a430b21c5886e66620806c9775815fc9a12f",
+    "status": []
+  },
+  "ios": {
+    "path": "/Users/jacklee/Projects/cordcode-ios-native-message-timeline",
+    "branch": "feat/ios-native-message-timeline",
+    "commit": "6cdc0323d24c4e6bb800115cdbf4ded458a548ef",
+    "status": [
+      "?? docs/2026-10-16-native-timeline-markdown-libs-perf-migration-plan-v4-review.md"
+    ]
+  },
+  "expected_ios_commit": "6cdc0323d24c4e6bb800115cdbf4ded458a548ef",
+  "verification_scope": [
+    "git show/report audit",
+    "targeted CCCodeTests re-run",
+    "diagnose BridgeLANFirstFallbackTests no_backends failure"
+  ],
+  "prohibited_edits": [
+    "NativeTimeline/**",
+    "timeline tests/assets during verification"
+  ]
+}
