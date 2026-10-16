@@ -122,6 +122,7 @@ open /Applications/CordCodeLink.app
 | --- | --- |
 | `runtime.json` | runtime PID、Bridge 端口、Management URL、bridge epoch |
 | `management-token` | Mac app 调 Management API 的本机 token，权限应为 `0600` |
+| `agent-selection.json` | 用户显式开启的 Agent 集合与 revision；新装默认空集合 |
 | `credentials.json` | OpenCode 本地认证配置 |
 | `opencode-managed-server.json` | CordCode 托管 OpenCode server 的 URL、端口、PID 与随机凭据，权限应为 `0600` |
 | `devices.json` | 已授权设备 |
@@ -160,6 +161,11 @@ curl -fsS -H "Authorization: Bearer $TOKEN" "$MGMT_URL/internal/agents"
 
 Bridge ready 与 backend available 是两个维度。Claude 未安装、OpenCode 未启动或 Codex
 未登录时，应在 `/internal/agents` 暴露真实状态，不能把整个 runtime 判成崩溃。
+
+Mac App 的 `-drivers` 来自 `agent-selection.json`。显式空数组是合法选择：runtime
+状态为 `ready_no_agents`，`requestedDrivers`/`registeredDrivers` 均为空，pairing、
+direct、Relay 和 workspace snapshot 继续工作；这不是 `runtime_error.no_agents`。只有
+非空请求中全部 driver 构造失败才应按后者排障。
 
 ## Codex app-server 的启动归属
 
@@ -222,8 +228,10 @@ Mac app 启动的子进程 PATH 不一定和交互式 shell 完全相同。若 s
 `/internal/agents` 找不到，检查 `RuntimeManager` 构造的环境和完整 runtime 日志，不要新建
 第二个 LaunchAgent 绕过 supervisor。
 
-只有所有 driver 创建都失败时 runtime 才会报 `runtime_error.no_agents` 并退出；单个
-backend 未安装或未登录应保持 Bridge ready，同时在 agent descriptor 中返回真实原因。
+先看 `runtime.json` 与 `/internal/status`：`ready_no_agents` 表示用户显式全关，属于合法
+状态，不要“修复”为默认全开。只有非空请求的所有 driver 创建都失败时 runtime 才会报
+`runtime_error.no_agents` 并退出；单个 backend 未安装或未登录应保持 Bridge ready，
+同时在 agent descriptor 中返回真实原因。
 
 ### OpenCode 401 / not_configured / server_unauthenticated
 

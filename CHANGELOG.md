@@ -12,6 +12,9 @@
 
 - MacBridge 启动现在以 `agent-selection.json` 的显式选择作为唯一 Agent 集合：新装默认全关，已保存选择按 revision 恢复，不再隐式启动全部 Agent；文件损坏时阻止 runtime 启动并显示错误，不回落到默认全集或伪造空选择。
 - 工作站“接入”开关从只读占位变为真实写路径：先持久化用户意愿，再通过安全重启应用新 Agent 集合；保存或应用失败会弹出具体错误，设备会短暂重连。
+- 工作站改为“已授权设备 → MacBridge/Relay → Agent”三层拓扑：设备在线来自 direct/Relay 实时连接而非 lastSeen 猜测，服务节点保留启动/停止控制，Agent 行同时呈现安装、版本、开启与专用操作状态。
+- Agent 状态与安装状态解耦：五个产品始终可观察，未开启不误报未安装；CLI 存在但版本探测失败会保留真实错误，可信 npm/Grok 来源显示版本更新 pill 和可复制官方命令/指引，不自动检查未取证来源、不自动执行更新。
+- 合法零 Agent 连接闭环：全部关闭时 runtime 进入 `ready_no_agents`，成功握手仍携带 `backends: []`；已配对 iPhone/Web 保持连接并显示无 Agent，不能发送，授权、保存的 server/session 状态不被删除。重新开启后同一设备自动重建 backend client。
 
 ### 2026-10-13 — Claude 后台任务执行态与主会话状态对齐
 

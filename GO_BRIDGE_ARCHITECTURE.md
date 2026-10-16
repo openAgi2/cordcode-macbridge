@@ -37,16 +37,24 @@ cordcode-bridge-runtime
 只是 app-server JSON-RPC 客户端库（无 `RegisterAgent`），不是 backend；
 `agent/providerseedtest/` 是测试辅助包。
 
-**默认 drivers 是双真值（2026-09-04 校正）：**
+**driver 集合（2026-10-16 校正）：**
 
-- **产品 lineup**（`MacBridge/MacBridge/Services/RuntimeManager.swift` 默认传给
-  runtime 的 `-drivers`）：`claude,codex-remote,grokbuild,dsh-web,opencode-web`。
-- **go-bridge fallback**（`go-bridge/main.go` `defaultDrivers`，无 Swift 传参时）：
-  `claude,codex,codex-web,grokbuild,dsh-web,opencode-web`。
+- **Mac 产品路径**：`AgentSelectionStore` 读取
+  `~/Library/Application Support/CordCode Link/agent-selection.json`，把显式选择作为
+  runtime `-drivers` 的唯一来源。新安装/无历史偏好时选择为空，runtime 合法进入
+  `ready_no_agents`；成功 `hello_ack` 输出真实空数组 `backends: []`，客户端保持已连接
+  但不可发送 Agent 请求。文件缺失时初始化为空选择；文件损坏、schema 不符或未知 ID 会
+  阻止启动并显示错误，不会隐式回退到全开。
+- **产品 catalog**（可被用户显式开启的五个产品）：
+  `claude,codex-remote,grokbuild,dsh-web,opencode-web`。安装/版本观察仍会列出这五项；
+  “未开启”不等于“未安装”。
+- **go-bridge standalone fallback**（无 Swift 传参时的开发/测试形态）：保留
+  `defaultDrivers`，不作为 Mac App 的启动真值。排查产品问题必须以 runtime 参数和
+  Management API 的 requested/registered drivers 为准。
 
-两者差异：产品 lineup 不含旧 `codex`（exec/app_server）、`codex-web`（已退役，
-见下）与 `opencode`、`deepseek`；runtime fallback 仍含旧 `codex` 与 `codex-web`
-但不含 `codex-remote`。以产品实际传入为准排查。
+显式空选择与“请求了 Agent 但全部创建失败”是两种状态：前者 Management API 返回
+`ready_no_agents`，请求/注册集合均为空且 pairing/direct/Relay 照常可用；后者仍按
+`runtime_error.no_agents` 失败，不能伪造 ready 状态。
 
 `codex-web` 已于 2026-09-04 按 owner 指令从产品 lineup 退役（Mac/iOS 不再出现、
 runtime 不再挂载）；`agent/codex-web` 源码保留、仍可显式挂载，回滚 = 把

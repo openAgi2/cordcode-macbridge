@@ -1,0 +1,24 @@
+{
+  "gate": "before S7 source analysis/build",
+  "recorded_at": "2026-10-16T15:14:21Z",
+  "repos": [
+    {
+      "repo_path": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+      "branch": "feat/ios-native-message-timeline",
+      "commit": "2b3e1da15f942fc42051b84d5cf9aabc7edf57df",
+      "uncommitted_status": "clean",
+      "task_expected_branch": "feat/ios-native-message-timeline",
+      "expected_scope": "S7 final delivery/source audit"
+    },
+    {
+      "repo_path": "/Users/jacklee/Projects/cordcode-ios-native-message-timeline",
+      "branch": "feat/ios-native-message-timeline",
+      "commit": "02a46521678950fd1df47ac951505f3dccba0d4e",
+      "uncommitted_status": [
+        "?? docs/2026-10-16-native-timeline-code-table-block-fade-plan.md"
+      ],
+      "task_expected_branch": "feat/ios-native-message-timeline",
+      "expected_scope": "S7 final delivery/source audit"
+    }
+  ]
+}

@@ -33,7 +33,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-10-16T15:13:26.626828+00:00",
+  "updated_at": "2026-10-16T15:14:21.908884+00:00",
   "approved_plan_sha256": "e49e2d5d00e6216bd70d0127c02949351be96474aef1c8b6cd0b14f91d74121a",
   "scope_gates": {
     "E5": "blocked extensions only: unverified latest sources and all automatic update execution",
@@ -606,12 +606,12 @@
       "description": "Targeted Go/Swift/iOS/web tests and coherent incremental builds; client-first delivery then formal /Applications Release install with PID/epoch/unique-log proof; secret scan, live docs/change logs and owner U1-U10.",
       "phase": "s7",
       "kind": "impl",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         "s6-tests"
       ],
       "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S7",
-      "notes": "Unblocked after s3-regression. Consolidate already-collected builds/tests/deployment identity, update live docs/changelog as needed, and prepare final delivery evidence.",
+      "notes": "S3 regression complete. Auditing source deltas, existing evidence, live docs/changelogs, and final Mac/iOS deployment gaps.",
       "verification": {
         "required": true,
         "status": "missing",
