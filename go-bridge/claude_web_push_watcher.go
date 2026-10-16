@@ -96,6 +96,9 @@ func (w *claudeWebPushWatcher) sweep() {
 	}
 	seen := make(map[claudeSessionKey]struct{}, len(snapshot.Sorted))
 	for _, entry := range snapshot.Sorted {
+		if entry.Programmatic {
+			continue
+		}
 		seen[entry.Key] = struct{}{}
 		cut, err := projectionJSONLStartCut(entry.FilePath)
 		if err != nil {

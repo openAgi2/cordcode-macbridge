@@ -4259,6 +4259,9 @@ type claudeSessionScanResult struct {
 	ModelID            string
 	ProviderID         string
 	ReasoningEffort    string
+	Entrypoint         string
+	SessionKind        string
+	Programmatic       bool
 	// ArchivedAt is read from the session sidecar (claudeBridgeSessionSidecar).
 	// The catalog surfaces it as archivedAtMillis so clients can hide archived
 	// sessions (web session-grouping filters on archivedAtMillis). Without it,
@@ -4289,6 +4292,12 @@ func scanClaudeSessionMetadata(path string, fallbackTime time.Time) claudeSessio
 	var title string
 	var customTitle string
 	var assistantTitle string
+	var entrypoint string
+	var entrypointFound bool
+	var sawParentLine bool
+	var firstParentSessionKind string
+	var fallbackSessionKind string
+	var fallbackSessionKindFound bool
 	var firstUserAt time.Time
 	var modelID string
 	var createdAt time.Time
@@ -4318,6 +4327,32 @@ func scanClaudeSessionMetadata(path string, fallbackTime time.Time) claudeSessio
 				if updatedAt.IsZero() || parsed.After(updatedAt) {
 					updatedAt = parsed
 				}
+			}
+		}
+		// Official SDK visibility first checks a head entrypoint value. An empty
+		// string is a hit and must suppress the tail fallback.
+		if !entrypointFound {
+			var value string
+			if rawValue, ok := raw["entrypoint"]; ok && json.Unmarshal(rawValue, &value) == nil {
+				entrypoint = value
+				entrypointFound = true
+			}
+		}
+		// Official sessionKind handling is line-shaped: inspect only the first head
+		// line containing parentUuid; if no such line exists, search the whole head.
+		if strings.Contains(line, `"parentUuid":`) && !sawParentLine {
+			sawParentLine = true
+			var value string
+			if rawValue, ok := raw["sessionKind"]; ok {
+				_ = json.Unmarshal(rawValue, &value)
+			}
+			firstParentSessionKind = value
+		}
+		if !fallbackSessionKindFound {
+			var value string
+			if rawValue, ok := raw["sessionKind"]; ok && json.Unmarshal(rawValue, &value) == nil {
+				fallbackSessionKind = value
+				fallbackSessionKindFound = true
 			}
 		}
 		var msgType string
@@ -4380,6 +4415,14 @@ func scanClaudeSessionMetadata(path string, fallbackTime time.Time) claudeSessio
 	if title == "" {
 		title = assistantTitle
 	}
+	if !entrypointFound {
+		entrypoint = claudeTailEntrypoint(path)
+	}
+	sessionKind := fallbackSessionKind
+	if sawParentLine {
+		sessionKind = firstParentSessionKind
+	}
+	programmatic := isClaudeProgrammaticSession(entrypoint, sessionKind)
 	if createdAt.IsZero() {
 		createdAt = fallbackTime
 	}
@@ -4413,6 +4456,9 @@ func scanClaudeSessionMetadata(path string, fallbackTime time.Time) claudeSessio
 		ModelID:            modelID,
 		ProviderID:         providerID,
 		ReasoningEffort:    normalizeClaudeRuntimeEffort(sidecar.ReasoningEffort),
+		Entrypoint:         entrypoint,
+		SessionKind:        sessionKind,
+		Programmatic:       programmatic,
 		ArchivedAt:         archivedAt,
 	}
 }

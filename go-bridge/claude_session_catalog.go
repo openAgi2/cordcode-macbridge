@@ -74,11 +74,14 @@ type claudeSessionIndexEntry struct {
 	ModelID            string
 	ProviderID         string
 	ReasoningEffort    string
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	MessageCount       int
-	ArchivedAt         time.Time
-	Fingerprint        claudeSessionFingerprint
+	// Programmatic marks SDK/daemon sessions that official IDE session pickers hide.
+	// They remain in ByKey for cache identity but are excluded from Sorted.
+	Programmatic bool
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	MessageCount int
+	ArchivedAt   time.Time
+	Fingerprint  claudeSessionFingerprint
 }
 
 type claudeSessionSnapshot struct {
@@ -121,6 +124,9 @@ func resetClaudeLineageLogForTest() {
 type claudeSessionCatalog struct {
 	projectsDir        string
 	desktopStateLoader func() claudeDesktopSessionState
+	// includeProgrammatic is test/oracle-only; zero value matches the official IDE
+	// picker by hiding programmatic sessions.
+	includeProgrammatic bool
 
 	mu       sync.Mutex
 	snapshot *claudeSessionSnapshot
@@ -375,6 +381,7 @@ func (c *claudeSessionCatalog) buildSnapshot(
 			ModelID:            scan.ModelID,
 			ProviderID:         scan.ProviderID,
 			ReasoningEffort:    scan.ReasoningEffort,
+			Programmatic:       scan.Programmatic,
 			CreatedAt:          scan.CreatedAt,
 			UpdatedAt:          scan.UpdatedAt,
 			ArchivedAt:         scan.ArchivedAt,
@@ -411,6 +418,23 @@ func (c *claudeSessionCatalog) buildSnapshot(
 		}
 		return sortedEntries[i].Key.SessionID < sortedEntries[j].Key.SessionID
 	})
+
+	// Apply official IDE visibility before lineage folding. Programmatic entries stay
+	// in ByKey (cache/identity), but cannot become a lineage primary and delete a
+	// human-created branch from the visible set.
+	if !c.includeProgrammatic {
+		visibleEntries := make([]claudeSessionIndexEntry, 0, len(sortedEntries))
+		for _, entry := range sortedEntries {
+			if !entry.Programmatic {
+				visibleEntries = append(visibleEntries, entry)
+			}
+		}
+		hiddenCount := len(sortedEntries) - len(visibleEntries)
+		if shouldLogClaudeLineage("programmatic", strconv.Itoa(hiddenCount), time.Now()) {
+			slog.Info("claude catalog programmatic hidden", "count", hiddenCount)
+		}
+		sortedEntries = visibleEntries
+	}
 
 	// Claude Code fork 检测：同一 projectKey 下，custom-title 和首条用户消息 timestamp
 	// 都相同的会话被视为 fork 对（/resume 或中断后续接会产生）。只保留最新的一条，

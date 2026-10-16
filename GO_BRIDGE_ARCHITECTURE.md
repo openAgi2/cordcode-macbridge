@@ -175,6 +175,22 @@ idle session 清理。
 turn 完成时，在线订阅设备收到事件；未在线设备的通知写入 per-device pending store，iOS
 回前台通过 `check_pending_notifications` 消费。
 
+### Claude programmatic session 与 API error 通知边界
+
+Claude compatibility catalog 对齐官方 TypeScript SDK
+`listSessions({ includeProgrammatic: false })` 的 IDE session picker 语义：top-level
+transcript 的 `entrypoint` 属于 `sdk-cli` / `sdk-ts` / `sdk-py`，或 head 内官方
+`sessionKind` 分类为 `daemon` / `daemon-worker` 时，默认不进入 `Sorted`、session
+列表和 Web Push watcher；entrypoint 提取使用 512KiB head ∪ 64KiB tail 双窗口，
+但 sessionKind 只读 head。被隐藏的 transcript 保留在 `ByKey` 作为缓存/明确 ID
+detail 身份，不删除、不改写。
+
+Claude transcript 的 `isApiErrorMessage=true` synthetic assistant 行不是正常完成回复。
+mapper 将其转换为 `turn_error`（保留 API status / requestId /诊断文本），不产生
+assistant 正文或 `turn_completed`；live source 与 legacy relay 均按 error terminal
+广播 idle。completion Web Push 只由 `turn_completed` 触发，因此 synthetic API error
+不会生成“任务已完成”通知。
+
 ## backend 进程模型
 
 ### Claude Code

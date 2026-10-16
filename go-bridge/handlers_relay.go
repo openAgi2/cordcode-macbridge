@@ -721,7 +721,7 @@ func (h *Handlers) ensureRelaysForSubscribedCodexSessions() {
 //   - lookup error / generation 或 source 不匹配 → failed（fail closed）。
 //
 // cachedPID>0 但进程已死时，先做一次替代复查：见 B 活 → 同一状态转移直接 rebind B
-//（§4.3.2「已绑 A 连续死亡 miss 后复查到 B 时不得先清零回 late-bind」）；无替代者
+// （§4.3.2「已绑 A 连续死亡 miss 后复查到 B 时不得先清零回 late-bind」）；无替代者
 // 才回 dead。
 func (h *Handlers) handleClaudeCoverageCommand(
 	sessionID, backendID string,
@@ -1566,6 +1566,10 @@ func (h *Handlers) deliverClaudeLegacyRow(
 			h.broadcastIdleState(sessionID, backendID)
 			*runningObserved = false
 			slog.Info("go-bridge: claudeSessionFileRelay turn completed, keeping watch while process live", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID, "turnId", *currentTurnID)
+		case "turn_error":
+			h.sendSessionEvent(sessionID, backendID, ev.Event, ev.Data)
+			h.broadcastIdleState(sessionID, backendID)
+			*runningObserved = false
 		case "system_message":
 			h.sendSessionEvent(sessionID, backendID, "system_message", ev.Data)
 		default:
@@ -1612,20 +1616,21 @@ func (h *Handlers) deliverClaudeLiveControlPlane(
 	runningObserved *bool,
 	cachedPID int,
 ) {
-	hasUserMessage, hasTurnCompleted := false, false
+	hasUserMessage := false
+	terminalEvent := ""
 	for _, ev := range batch.Events {
 		switch ev.Event {
 		case "user_message":
 			hasUserMessage = true
-		case "turn_completed":
-			hasTurnCompleted = true
+		case "turn_completed", "turn_error":
+			terminalEvent = ev.Event
 		}
 	}
 	switch {
-	case hasTurnCompleted:
+	case terminalEvent != "":
 		h.broadcastIdleState(sessionID, backendID)
 		*runningObserved = false
-		slog.Info("go-bridge: claudeSessionFileRelay turn completed, keeping watch while process live", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID, "turnId", batch.Record.GraphResolvedTurn)
+		slog.Info("go-bridge: claudeSessionFileRelay turn settled, keeping watch while process live", "event", terminalEvent, "sessionID", sessionID, "backendID", backendID, "pid", cachedPID, "turnId", batch.Record.GraphResolvedTurn)
 	case hasUserMessage:
 		h.sessions.markRunning(sessionID)
 		h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
@@ -1644,6 +1649,10 @@ type claudeTranscriptRelayEntry struct {
 	IsMeta                    bool                        `json:"isMeta"`
 	IsCompactSummary          bool                        `json:"isCompactSummary"`
 	IsVisibleInTranscriptOnly bool                        `json:"isVisibleInTranscriptOnly"`
+	IsAPIErrorMessage         bool                        `json:"isApiErrorMessage"`
+	APIErrorStatus            int                         `json:"apiErrorStatus"`
+	Error                     string                      `json:"error"`
+	RequestID                 string                      `json:"requestId"`
 	CompactMetadata           *claudeRelayCompactMetadata `json:"compactMetadata"`
 	// Claude Desktop persists the complete AskUserQuestion resolution on the user row in
 	// toolUseResult, alongside message.content.tool_result. The relay needs presence and
@@ -2349,6 +2358,28 @@ func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *
 	turnID := *currentTurnID
 	if turnID == "" {
 		turnID = identity // assistant before any user prompt (rare) — self-keyed
+	}
+	if e.IsAPIErrorMessage {
+		message := strings.TrimSpace(claudeConcatTextBlocks(blocks))
+		if message == "" {
+			message = strings.TrimSpace(e.Error)
+		}
+		data := map[string]interface{}{
+			"turnId":  turnID,
+			"message": message,
+			"reason":  "claude_api_error",
+		}
+		if e.APIErrorStatus > 0 {
+			data["apiErrorStatus"] = e.APIErrorStatus
+		}
+		if e.RequestID != "" {
+			data["requestId"] = e.RequestID
+		}
+		return []projectionHydrateEvent{{
+			Event:    "turn_error",
+			Data:     data,
+			TurnDone: true,
+		}}
 	}
 	for _, b := range blocks {
 		switch b.Type {

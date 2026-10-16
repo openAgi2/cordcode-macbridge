@@ -105,6 +105,55 @@ func TestClaudeWebPushWatcherDoesNotBackfillWhenEnrollmentStarts(t *testing.T) {
 	}
 }
 
+func TestClaudeWebPushWatcherSkipsProgrammaticSession(t *testing.T) {
+	enableKindGateForTest(t, WebPushKindCompletion)
+	projectsDir := t.TempDir()
+	workspace := catalogFixtureWorkspace(t, projectsDir, "push-programmatic")
+	projectDir := filepath.Join(projectsDir, "-tmp-push-programmatic")
+	if err := os.Mkdir(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := "sdk-py-reviewer"
+	transcript := filepath.Join(projectDir, sessionID+".jsonl")
+	baseline := `{"uuid":"u-old","type":"user","entrypoint":"sdk-py","timestamp":"2026-09-12T00:00:00Z","cwd":"` + workspace + `","message":{"role":"user","content":[{"type":"text","text":"review"}]}}` + "\n" +
+		`{"uuid":"a-old","parentUuid":"u-old","entrypoint":"sdk-py","type":"assistant","timestamp":"2026-09-12T00:00:01Z","cwd":"` + workspace + `","message":{"role":"assistant","content":[{"type":"text","text":"old review"}],"stop_reason":"end_turn"}}` + "\n"
+	if err := os.WriteFile(transcript, []byte(baseline), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewHandlers()
+	h.claudeSessions = newClaudeSessionCatalog(projectsDir)
+	store := newTestWebPushStore(t)
+	if _, err := store.Register("dev_programmatic", testSubscriptionRecord("https://push.example.com/programmatic")); err != nil {
+		t.Fatal(err)
+	}
+	pipeline := NewWebPushCandidatePipeline(store)
+	h.SetWebPushStore(store)
+	h.SetWebPushPipeline(pipeline)
+	watcher := &claudeWebPushWatcher{h: h, states: make(map[claudeSessionKey]*claudeWebPushWatchState), startedAt: time.Now().UTC().Add(-time.Minute)}
+
+	liveAt := time.Now().UTC().Format(time.RFC3339Nano)
+	live := `{"uuid":"u-live","parentUuid":"a-old","entrypoint":"sdk-py","type":"user","timestamp":"` + liveAt + `","cwd":"` + workspace + `","message":{"role":"user","content":[{"type":"text","text":"new review"}]}}` + "\n" +
+		`{"uuid":"a-live","parentUuid":"u-live","entrypoint":"sdk-py","type":"assistant","timestamp":"` + liveAt + `","cwd":"` + workspace + `","message":{"role":"assistant","content":[{"type":"text","text":"Failed to authenticate. API Error: 401 Invalid bearer token"}],"stop_reason":"end_turn"}}` + "\n"
+	appendTranscriptFixture(t, transcript, live)
+
+	watcher.sweep()
+	watcher.sweep()
+	if got := pipeline.Drain(); len(got) != 0 {
+		t.Fatalf("programmatic session produced %d candidates: %+v", len(got), got)
+	}
+	key := claudeSessionKey{ProjectKey: "-tmp-push-programmatic", SessionID: sessionID}
+	if !h.claudeSessions.snapshot.ByKey[key].Programmatic {
+		t.Fatalf("session missing from ByKey or not programmatic: %#v", h.claudeSessions.snapshot.ByKey[key])
+	}
+	if len(h.claudeSessions.snapshot.Sorted) != 0 {
+		t.Fatalf("programmatic session leaked into visible Sorted: %#v", h.claudeSessions.snapshot.Sorted)
+	}
+	if _, ok := watcher.states[key]; ok {
+		t.Fatal("programmatic session acquired watcher state")
+	}
+}
+
 func TestClaudeWebPushWatcherDoesNotBackfillFirstVisibleHistoricalSession(t *testing.T) {
 	enableKindGateForTest(t, WebPushKindCompletion)
 	projectsDir := t.TempDir()

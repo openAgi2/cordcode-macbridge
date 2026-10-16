@@ -1,0 +1,579 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+  "plan_file": "docs/2026-10-16-claude-programmatic-sessions-and-api-error-notifications-plan.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-bade133f63ef.json",
+    "legacy_path": ".claude/exec-plans/plan-bade133f63ef.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "host-tracker-optional-mirror",
+    "invocation_policy": "slash-or-natural-language-equivalent",
+    "persistence_rule": "persist-on-every-status-transition"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-10-16-claude-programmatic-sessions-and-api-error-notifications-plan完成情况.md",
+    "completion_report_status": "current",
+    "last_generated_at": "2026-10-16T14:46:23.404542Z",
+    "based_on_queue_hash": "5bcc8f6760b9"
+  },
+  "updated_at": "2026-10-16T14:46:23.404542Z",
+  "todos": [
+    {
+      "id": "s1-classifier-impl",
+      "title": "Implement official Claude programmatic classifier",
+      "description": "Parse top-level entrypoint from 512KiB head with 64KiB tail fallback, parse sessionKind exactly per SDK YD semantics, add isClaudeProgrammaticSession. Files: go-bridge/handlers.go and focused helpers as appropriate.",
+      "status": "done",
+      "phase": "s1",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "v4 plan S/s1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Added official SDK programmatic classifier, 512KiB head plus 64KiB tail entrypoint extraction, sessionKind semantics, catalog metadata/filter plumbing, and ByKey cache retention. Compile-only no-match go test passed.",
+        "artifacts": [
+          "go-bridge/claude_programmatic_sessions.go",
+          "go-bridge/claude_session_catalog.go",
+          "go-bridge/handlers.go",
+          "cmd:GOTOOLCHAIN=local go test ./go-bridge -count=1 -run TestNoSuchTest"
+        ],
+        "checked_at": "2026-10-16T14:43:54.023203Z",
+        "upstream_anchor": "@anthropic-ai/claude-agent-sdk@0.3.301 package/sdk.mjs:1 (minified symbols YD/nl/jt near byte offsets 379747/380202/380424); package/sdk.d.ts:1149-1158"
+      }
+    },
+    {
+      "id": "s1-classifier-tests",
+      "title": "Test Claude programmatic classifier",
+      "description": "Cover sdk-cli/sdk-ts/sdk-py, daemon/daemon-worker, unknown/empty, all sessionKind branches, entrypoint head/tail windows, empty-string no fallback, tail truncated first line, and sessionKind never reading tail.",
+      "status": "done",
+      "phase": "s1",
+      "kind": "tests",
+      "depends_on": [
+        "s1-classifier-impl"
+      ],
+      "source": "v4 plan S/s1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "All 7 classifier/metadata tests and 4 sessionKind subtests passed under the focused command (0.025s).",
+        "artifacts": [
+          "go-bridge/claude_programmatic_sessions_test.go",
+          "cmd:GOTOOLCHAIN=local go test ./go-bridge -count=1 -run Test(Is|Scan)Claude.*(Programmatic|Entrypoint)",
+          "/tmp/cordcode-s1-tests.log"
+        ],
+        "checked_at": "2026-10-16T14:43:54.023203Z",
+        "upstream_anchor": "@anthropic-ai/claude-agent-sdk@0.3.301 package/sdk.mjs:1 (YD programmatic set + head/tail extraction); package/sdk.d.ts:1149-1158"
+      }
+    },
+    {
+      "id": "s1-classifier-regression",
+      "title": "Regression gate for classifier",
+      "description": "Pure classifier logic has no separate UX/e2e surface; covered by s1-classifier-tests and the E-8 oracle task.",
+      "status": "done",
+      "phase": "s1",
+      "kind": "regression",
+      "depends_on": [
+        "s1-classifier-tests"
+      ],
+      "source": "v4 plan S/s1",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": "No separate runtime surface: focused automated tests and s6/s7 verification cover this logic; iOS is explicitly out of modification scope.",
+        "summary": "N/A: pure classifier logic has no separate runtime surface; covered by focused tests and later S6 oracle/S7 runtime checks.",
+        "artifacts": [
+          ".exec-plan/state/plan-bade133f63ef.json"
+        ],
+        "checked_at": "2026-10-16T14:14:06.394524Z"
+      }
+    },
+    {
+      "id": "s2-catalog-impl",
+      "title": "Hide programmatic Claude sessions from default catalog",
+      "description": "Extend scan/index metadata with Programmatic; filter programmatic entries from Sorted before fork/compact lineage while retaining them in ByKey; preserve archived wire behavior.",
+      "status": "done",
+      "phase": "s2",
+      "kind": "impl",
+      "depends_on": [
+        "s1-classifier-regression"
+      ],
+      "source": "v4 plan S/s2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Programmatic metadata is carried into index entries; Sorted filters programmatic entries before fork/compact lineage while ByKey retains cache identity and archived wire behavior is unchanged.",
+        "artifacts": [
+          "go-bridge/claude_session_catalog.go",
+          "go-bridge/handlers.go"
+        ],
+        "checked_at": "2026-10-16T14:43:54.023203Z",
+        "upstream_anchor": "@anthropic-ai/claude-agent-sdk@0.3.301 package/sdk.d.ts:1149-1158 (includeProgrammatic:false); package/sdk.mjs:1 (L0 filtering path)"
+      }
+    },
+    {
+      "id": "s2-catalog-tests",
+      "title": "Test catalog visibility and cache semantics",
+      "description": "Cover interactive/SDK/daemon visibility, archivedAtMillis contract, programmatic-before-lineage behavior, programmatic retained in ByKey, and large-file head-miss/tail-hit cache behavior.",
+      "status": "done",
+      "phase": "s2",
+      "kind": "tests",
+      "depends_on": [
+        "s2-catalog-impl"
+      ],
+      "source": "v4 plan S/s2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Four focused catalog tests passed: official visibility/cache identity, archived wire contract, programmatic-before-lineage, and large tail-only cache hit (0.063s).",
+        "artifacts": [
+          "go-bridge/claude_session_catalog_programmatic_test.go",
+          "cmd:GOTOOLCHAIN=local go test ./go-bridge -count=1 -run TestClaudeSessionCatalog.*(Programmatic|ArchivedWire)",
+          "/tmp/cordcode-s2-tests.log"
+        ],
+        "checked_at": "2026-10-16T14:43:54.023203Z",
+        "upstream_anchor": "@anthropic-ai/claude-agent-sdk@0.3.301 package/sdk.d.ts:1149-1158; package/sdk.mjs:1 (includeProgrammatic filter)"
+      }
+    },
+    {
+      "id": "s2-catalog-regression",
+      "title": "Regression gate for catalog filtering",
+      "description": "Catalog behavior is covered by focused tests plus S6 official oracle; no separate device/UI regression while iOS must remain untouched.",
+      "status": "done",
+      "phase": "s2",
+      "kind": "regression",
+      "depends_on": [
+        "s2-catalog-tests"
+      ],
+      "source": "v4 plan S/s2",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": "No separate runtime surface: focused automated tests and s6/s7 verification cover this logic; iOS is explicitly out of modification scope.",
+        "summary": "N/A: no separate runtime surface; focused catalog tests and S6/S7 cover behavior.",
+        "artifacts": [
+          ".exec-plan/state/plan-bade133f63ef.json"
+        ],
+        "checked_at": "2026-10-16T14:16:09.342289Z"
+      }
+    },
+    {
+      "id": "s3-webpush-impl",
+      "title": "Prevent Web Push monitoring of programmatic sessions",
+      "description": "Ensure watcher consumes the default-visible Sorted set and clears stale state when a programmatic session disappears from visibility; add no payload/protocol change.",
+      "status": "done",
+      "phase": "s3",
+      "kind": "impl",
+      "depends_on": [
+        "s2-catalog-regression"
+      ],
+      "source": "v4 plan S/s3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Watcher now explicitly skips Programmatic entries and the catalog removes them from Sorted before watcher iteration; stale state cleanup remains driven by the seen set.",
+        "artifacts": [
+          "go-bridge/claude_web_push_watcher.go"
+        ],
+        "checked_at": "2026-10-16T14:43:54.023203Z",
+        "upstream_anchor": "@anthropic-ai/claude-agent-sdk@0.3.301 package/sdk.d.ts:1149-1158 (default visibility for IDE picker); package/sdk.mjs:1 (L0 filter)"
+      }
+    },
+    {
+      "id": "s3-webpush-tests",
+      "title": "Test Web Push exclusion",
+      "description": "Fixture a sdk-py transcript with synthetic 401/turn completion and assert zero WebPushCandidate; retain normal interactive completion test behavior.",
+      "status": "done",
+      "phase": "s3",
+      "kind": "tests",
+      "depends_on": [
+        "s3-webpush-impl"
+      ],
+      "source": "v4 plan S/s3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Focused test passed: sdk-py transcript with live synthetic 401 produced zero candidates, stayed absent from Sorted/watcher state, and remained programmatic in ByKey (0.047s).",
+        "artifacts": [
+          "go-bridge/claude_web_push_watcher_test.go",
+          "cmd:GOTOOLCHAIN=local go test ./go-bridge -count=1 -run TestClaudeWebPushWatcherSkipsProgrammaticSession",
+          "/tmp/cordcode-s3-tests.log"
+        ],
+        "checked_at": "2026-10-16T14:43:54.023203Z",
+        "upstream_anchor": "@anthropic-ai/claude-agent-sdk@0.3.301 package/sdk.d.ts:1149-1158; package/sdk.mjs:1 (L0 filter)"
+      }
+    },
+    {
+      "id": "s3-webpush-regression",
+      "title": "Regression gate for Web Push exclusion",
+      "description": "No live push/device test is authorized; fixture-level behavior is covered by s3-webpush-tests and runtime log/list checks happen in s7.",
+      "status": "done",
+      "phase": "s3",
+      "kind": "regression",
+      "depends_on": [
+        "s3-webpush-tests"
+      ],
+      "source": "v4 plan S/s3",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": "No separate runtime surface: focused automated tests and s6/s7 verification cover this logic; iOS is explicitly out of modification scope.",
+        "summary": "N/A: no live push/device test authorized; fixture test and S7 runtime checks cover risk.",
+        "artifacts": [
+          ".exec-plan/state/plan-bade133f63ef.json"
+        ],
+        "checked_at": "2026-10-16T14:17:13.127247Z"
+      }
+    },
+    {
+      "id": "s4-api-error-impl",
+      "title": "Map Claude synthetic API errors to turn_error",
+      "description": "Parse isApiErrorMessage/apiErrorStatus/error/requestId and emit terminal turn_error without text_delta or turn_completed.",
+      "status": "done",
+      "phase": "s4",
+      "kind": "impl",
+      "depends_on": [
+        "s1-classifier-regression"
+      ],
+      "source": "v4 plan S/s4",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Synthetic API error transcript rows now return a terminal turn_error carrying message/reason/status/requestId and no text_delta or turn_completed.",
+        "artifacts": [
+          "go-bridge/handlers_relay.go"
+        ],
+        "checked_at": "2026-10-16T14:18:28.555933Z"
+      }
+    },
+    {
+      "id": "s4-api-error-tests",
+      "title": "Test synthetic API error mapping",
+      "description": "Cover text from assistant, fallback to top-level error, status/requestId preservation, no assistant text, and no completion.",
+      "status": "done",
+      "phase": "s4",
+      "kind": "tests",
+      "depends_on": [
+        "s4-api-error-impl"
+      ],
+      "source": "v4 plan S/s4",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Three focused mapper tests passed: normal 401 fields, top-level error fallback, and self-keyed pre-user failure (0.012s).",
+        "artifacts": [
+          "go-bridge/claude_api_error_test.go",
+          "cmd:GOTOOLCHAIN=local go test ./go-bridge -count=1 -run TestClaudeAPIError",
+          "/tmp/cordcode-s4-tests.log"
+        ],
+        "checked_at": "2026-10-16T14:18:28.555933Z"
+      }
+    },
+    {
+      "id": "s4-api-error-regression",
+      "title": "Regression gate for synthetic API error mapping",
+      "description": "Projection semantics are covered by focused mapper/reducer tests; runtime verification is consolidated in s7.",
+      "status": "done",
+      "phase": "s4",
+      "kind": "regression",
+      "depends_on": [
+        "s4-api-error-tests"
+      ],
+      "source": "v4 plan S/s4",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": "No separate runtime surface: focused automated tests and s6/s7 verification cover this logic; iOS is explicitly out of modification scope.",
+        "summary": "N/A: projection semantics covered by mapper/reducer tests and S5/S7; no live Claude failure generated.",
+        "artifacts": [
+          ".exec-plan/state/plan-bade133f63ef.json"
+        ],
+        "checked_at": "2026-10-16T14:18:28.555933Z"
+      }
+    },
+    {
+      "id": "s5-live-relay-impl",
+      "title": "Settle Claude live relay on turn_error",
+      "description": "Update live control-plane and legacy relay handling so turn_error broadcasts idle and clears running without waiting for text.",
+      "status": "done",
+      "phase": "s5",
+      "kind": "impl",
+      "depends_on": [
+        "s4-api-error-regression"
+      ],
+      "source": "v4 plan S/s5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Live source control plane and legacy relay now treat turn_error as terminal, broadcast idle, clear running, and never hold synthetic API errors as completion text.",
+        "artifacts": [
+          "go-bridge/handlers_relay.go"
+        ],
+        "checked_at": "2026-10-16T14:25:09.490144Z"
+      }
+    },
+    {
+      "id": "s5-live-relay-tests",
+      "title": "Test live relay error terminal handling",
+      "description": "Cover live batch and legacy/file relay paths: turn_error is forwarded, idle is broadcast, and held completion logic does not await synthetic error text.",
+      "status": "done",
+      "phase": "s5",
+      "kind": "tests",
+      "depends_on": [
+        "s5-live-relay-impl"
+      ],
+      "source": "v4 plan S/s5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Focused API error and relay tests passed for mapper, live control-plane running flag, legacy failed outcome/idle, and no held completion (0.013s).",
+        "artifacts": [
+          "go-bridge/claude_api_error_test.go",
+          "cmd:GOTOOLCHAIN=local go test ./go-bridge -count=1 -run TestClaude(LiveControlPlaneSettlesOnTurnError|LegacyRelayTurnErrorSettlesIdle|APIError)",
+          "/tmp/cordcode-s5-tests.log"
+        ],
+        "checked_at": "2026-10-16T14:25:09.490144Z"
+      }
+    },
+    {
+      "id": "s5-live-relay-regression",
+      "title": "Regression gate for live relay error handling",
+      "description": "No live external Claude failure is generated; behavior is covered by relay tests and runtime deployment checks.",
+      "status": "done",
+      "phase": "s5",
+      "kind": "regression",
+      "depends_on": [
+        "s5-live-relay-tests"
+      ],
+      "source": "v4 plan S/s5",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": "No separate runtime surface: focused automated tests and s6/s7 verification cover this logic; iOS is explicitly out of modification scope.",
+        "summary": "N/A: no live external Claude failure generated; relay tests and S7 runtime deployment cover the behavior.",
+        "artifacts": [
+          ".exec-plan/state/plan-bade133f63ef.json"
+        ],
+        "checked_at": "2026-10-16T14:25:09.490144Z"
+      }
+    },
+    {
+      "id": "s6-oracle-verification",
+      "title": "Verify Go hidden set against official TypeScript SDK",
+      "description": "Run official SDK includeProgrammatic true/false with includeWorktrees:false and full pagination; expose/test Go hidden set with filter off/on; assert exact ID equality and expected 22 hidden IDs.",
+      "status": "done",
+      "phase": "s6",
+      "kind": "tests",
+      "depends_on": [
+        "s2-catalog-regression"
+      ],
+      "source": "v4 plan S/s6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Official TS SDK 0.3.301 and Go catalog oracle comparison passed with includeWorktrees:false and full pagination: exact hidden ID equality; 22 hidden in both; main 7afc session visible.",
+        "artifacts": [
+          "build/claude-programmatic-ts-oracle.json",
+          "build/claude-programmatic-go-oracle.json",
+          "build/claude-programmatic-oracle-comparison.json",
+          "build/claude-programmatic-go-oracle.log",
+          "go-bridge/claude_session_catalog_programmatic_test.go"
+        ],
+        "checked_at": "2026-10-16T14:43:54.023203Z",
+        "upstream_anchor": "@anthropic-ai/claude-agent-sdk@0.3.301 package/sdk.d.ts:1149-1158; package/sdk.mjs:1 (L0/YD)"
+      }
+    },
+    {
+      "id": "s6-oracle-regression",
+      "title": "Regression gate for official oracle comparison",
+      "description": "This is the automated cross-implementation regression for visibility semantics; it subsumes a separate e2e surface for catalog filtering.",
+      "status": "done",
+      "phase": "s6",
+      "kind": "regression",
+      "depends_on": [
+        "s6-oracle-verification"
+      ],
+      "source": "v4 plan S/s6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Automated cross-implementation comparison passed: Go hidden set equals TS SDK true-minus-false hidden set, with zero missing/extra IDs.",
+        "artifacts": [
+          "build/claude-programmatic-oracle-comparison.json"
+        ],
+        "checked_at": "2026-10-16T14:43:54.023203Z",
+        "upstream_anchor": "@anthropic-ai/claude-agent-sdk@0.3.301 package/sdk.d.ts:1149-1158; package/sdk.mjs:1 (L0/YD)"
+      }
+    },
+    {
+      "id": "s7-doc-release-impl",
+      "title": "Sync architecture documentation and build release runtime",
+      "description": "Update GO_BRIDGE_ARCHITECTURE.md, add the commit-specific programmatic-hidden INFO log, run git diff --check, targeted tests, and unsigned Release build.",
+      "status": "done",
+      "phase": "s7",
+      "kind": "impl",
+      "depends_on": [
+        "s3-webpush-regression",
+        "s5-live-relay-regression",
+        "s6-oracle-regression"
+      ],
+      "source": "v4 plan S/s7",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Documentation synced and final Release runtime built successfully. Embedded runtime identifies commit f10c138a9561 and build time 2026-10-16T14:33:20Z; commit-specific programmatic hidden-count INFO log is present in source.",
+        "artifacts": [
+          "GO_BRIDGE_ARCHITECTURE.md",
+          "go-bridge/claude_session_catalog.go",
+          "build/claude-programmatic-release-build.log",
+          "build/unsigned-release/Build/Products/Release/CordCodeLink.app",
+          "dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip"
+        ],
+        "checked_at": "2026-10-16T14:36:34.527327Z"
+      }
+    },
+    {
+      "id": "s7-doc-release-tests",
+      "title": "Run final targeted Go test suite",
+      "description": "Execute both v4 plan test command groups after the final coherent edit, plus any specifically added tests, and record logs and durations.",
+      "status": "done",
+      "phase": "s7",
+      "kind": "tests",
+      "depends_on": [
+        "s7-doc-release-impl"
+      ],
+      "source": "v4 plan S/s7",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Final focused verification passed after coherent edits: catalog/Web Push group in 5s, API-error/mapper group in 2s, and focused classifier/relay tests in under 1s; git diff --check passed.",
+        "artifacts": [
+          "cmd:git diff --check",
+          "cmd:GOTOOLCHAIN=local go test ./go-bridge -count=1 -run TestClaude.*Programmatic|TestClaudeSessionCatalog|TestClaudeWebPushWatcher",
+          "cmd:GOTOOLCHAIN=local go test ./go-bridge -count=1 -run TestClaude.*APIError|TestClaudeEntryToProjectionEvents|TestClaudeSessionFileRelay",
+          "build/claude-programmatic-tests-group1.log",
+          "build/claude-programmatic-tests-group2.log",
+          "build/claude-programmatic-tests-focused.log"
+        ],
+        "checked_at": "2026-10-16T14:36:56.568333Z"
+      }
+    },
+    {
+      "id": "s7-runtime-regression",
+      "title": "Deploy and verify production runtime",
+      "description": "Install Release over /Applications, restart both CordCodeLink and embedded runtime, verify PID generation/lstart after build, 8777 listener, unique hidden-count log, and session-list hidden behavior without UI automation.",
+      "status": "done",
+      "phase": "s7",
+      "kind": "regression",
+      "depends_on": [
+        "s7-doc-release-tests"
+      ],
+      "source": "v4 plan S/s7",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Production install verified without UI automation: only /Applications app processes run; PID 66458 lstart 2026-10-16 22:38:02 +08 is later than build 14:33:20Z and owns 8777; commit-specific hidden-count log appears. Runtime global catalog hides 38 programmatic sessions; fresh project oracle hides the approved 22-ID set, leaves zero baseline IDs visible, and keeps main 7afc3bd7-c69b-4582-85cf-556fa4f54d69 visible. security-guidance remains absent from enabled plugins.",
+        "artifacts": [
+          "build/claude-programmatic-preinstall-source-manifest.txt",
+          "build/claude-programmatic-runtime-regression.txt",
+          "build/claude-programmatic-runtime-day-go-oracle.json",
+          "build/claude-programmatic-runtime-day-go-oracle.log",
+          "build/claude-programmatic-plugin-state.txt"
+        ],
+        "checked_at": "2026-10-16T14:41:56.257790Z"
+      }
+    }
+  ]
+}
