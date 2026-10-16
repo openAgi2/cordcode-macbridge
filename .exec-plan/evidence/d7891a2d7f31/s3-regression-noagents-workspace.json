@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "runtimeIdentity": {
+    "bridgeEpoch": 16884560054832488904,
+    "pid": 72671
+  },
+  "selectionRevision": 8,
+  "requestedDrivers": [],
+  "activeDrivers": [],
+  "sampledAt": "2026-10-16T15:11:04.46087Z",
+  "agents": [
+    {
+      "id": "claude",
+      "installation": {
+        "state": "installed",
+        "artifactKind": "cli",
+        "installMethod": "npm"
+      },
+      "version": "2.1.300",
+      "versionSource": "npm_package_json",
+      "versionCheck": {
+        "state": "update_available",
+        "checkedAt": "2026-10-16T15:06:32.483773Z",
+        "freshUntil": "2026-10-16T21:06:32.483773Z",
+        "source": "npm_registry",
+        "channel": "latest",
+        "installedVersion": "2.1.300",
+        "targetVersion": "2.1.301",
+        "updateRecipe": {
+          "executable": "/opt/homebrew/bin/npm",
+          "args": [
+            "install",
+            "-g",
+            "@anthropic-ai/claude-code@2.1.301"
+          ],
+          "environment": [
+            {
+              "name": "PATH",
+              "value": "/opt/homebrew/bin"
+            }
+          ],
+          "display": "PATH='/opt/homebrew/bin' '/opt/homebrew/bin/npm' 'install' '-g' '@anthropic-ai/claude-code@2.1.301'"
+        }
+      }
+    },
+    {
+      "id": "codex-remote",
+      "installation": {
+        "state": "installed",
+        "artifactKind": "app_bundle_cli"
+      },
+      "version": "26.1007.71326",
+      "versionBuild": "20398",
+      "versionSource": "chatgpt_desktop_plist",
+      "versionCheck": {
+        "state": "unchecked"
+      }
+    },
+    {
+      "id": "dsh-web",
+      "installation": {
+        "state": "installed",
+        "artifactKind": "cli",
+        "installMethod": "npm"
+      },
+      "version": "0.2.0-rc.2",
+      "versionSource": "npm_package_json",
+      "versionCheck": {
+        "state": "current",
+        "checkedAt": "2026-10-16T15:06:32.798959Z",
+        "freshUntil": "2026-10-16T21:06:32.798959Z",
+        "source": "npm_registry",
+        "channel": "latest",
+        "installedVersion": "0.2.0-rc.2",
+        "targetVersion": "0.2.0-rc.2"
+      }
+    },
+    {
+      "id": "grokbuild",
+      "installation": {
+        "state": "installed",
+        "artifactKind": "cli"
+      },
+      "version": "1.0.60",
+      "versionCheck": {
+        "state": "current",
+        "checkedAt": "2026-10-16T15:06:33.93726Z",
+        "freshUntil": "2026-10-16T21:06:33.93726Z",
+        "source": "grok_update_check",
+        "channel": "stable",
+        "installedVersion": "1.0.60",
+        "targetVersion": "1.0.60"
+      }
+    },
+    {
+      "id": "opencode-web",
+      "installation": {
+        "state": "installed",
+        "artifactKind": "cli",
+        "installMethod": "npm"
+      },
+      "version": "1.19.0",
+      "versionSource": "npm_package_json",
+      "versionCheck": {
+        "state": "update_available",
+        "checkedAt": "2026-10-16T15:06:34.11745Z",
+        "freshUntil": "2026-10-16T21:06:34.11745Z",
+        "source": "npm_registry",
+        "channel": "latest",
+        "installedVersion": "1.19.0",
+        "targetVersion": "1.19.3",
+        "updateRecipe": {
+          "executable": "/opt/homebrew/bin/npm",
+          "args": [
+            "install",
+            "-g",
+            "opencode-ai@1.19.3"
+          ],
+          "environment": [
+            {
+              "name": "PATH",
+              "value": "/opt/homebrew/bin"
+            }
+          ],
+          "display": "PATH='/opt/homebrew/bin' '/opt/homebrew/bin/npm' 'install' '-g' 'opencode-ai@1.19.3'"
+        }
+      }
+    }
+  ],
+  "devicePresence": [
+    {
+      "deviceId": "dev_c5ad42a3051f461e970b0ea0332c0646",
+      "transports": [
+        {
+          "kind": "direct",
+          "directClass": "private"
+        }
+      ]
+    }
+  ],
+  "relay": {
+    "enabled": true,
+    "configured": true,
+    "connected": true
+  }
+}

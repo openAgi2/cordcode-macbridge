@@ -1,0 +1,38 @@
+time=2026-10-16T23:12:15.563+08:00 level=INFO msg="go-bridge: agent_selection_applied" revision=9 revisionProvided=true requestedDrivers="[claude codex-remote dsh-web grokbuild opencode-web]" registeredDrivers="[claude codex-remote dsh-web grokbuild opencode-web]" pid=73643 bridgeEpoch=d7518315-2f7c-45d0-82fb-757fa468fa69
+time=2026-10-16T23:12:15.891+08:00 level=INFO msg="go-bridge: client connected" remote=192.168.1.2:60716
+time=2026-10-16T23:12:16.367+08:00 level=INFO msg="go-bridge: [K4Patch] syncV2_mark" remote=192.168.1.2:60716 device=dev_c5ad42a3051f461e970b0ea0332c0646 enabled=true syncV2Size=1
+time=2026-10-16T23:12:16.368+08:00 level=INFO msg="go-bridge: hello_ack sent" ok=true device=dev_c5ad42a3051f461e970b0ea0332c0646 catalog_cursor_epoch_v2=true
+time=2026-10-16T23:12:16.451+08:00 level=INFO msg="go-bridge: RPC request" method=get_delivery_prekey_status backendId="" requestId=req_4
+time=2026-10-16T23:12:16.541+08:00 level=INFO msg="go-bridge: RPC request" method=list_sessions backendId=claude requestId=req_6
+time=2026-10-16T23:12:16.541+08:00 level=INFO msg="go-bridge: RPC request" method=list_sessions backendId=claude requestId=req_5
+time=2026-10-16T23:12:16.649+08:00 level=INFO msg="go-bridge: RPC request" method=upload_delivery_prekeys backendId="" requestId=req_7
+time=2026-10-16T23:12:16.649+08:00 level=INFO msg="prekey-store: batch uploaded" deviceID=dev_c5ad42a3 batchID=batch_56523A accepted=32 totalAvailable=32
+time=2026-10-16T23:12:16.669+08:00 level=INFO msg="go-bridge: RPC request" method=set_observation_scope backendId=claude requestId=req_10
+time=2026-10-16T23:12:16.669+08:00 level=INFO msg="go-bridge: RPC request" method=set_observation_scope backendId=claude requestId=req_8
+time=2026-10-16T23:12:16.669+08:00 level=INFO msg="go-bridge: set_observation_scope applied" deviceID=dev_c5ad42a3 backendID=claude mode=full_stream sessions=0 sessionIDs=[] requestedSessions=0 requestedIDs=[] includeRunning=true leaseSeconds=90 hasSessionSubscriber=false attachOk=true
+time=2026-10-16T23:12:16.669+08:00 level=INFO msg="go-bridge: set_observation_scope applied" deviceID=dev_c5ad42a3 backendID=claude mode=full_stream sessions=0 sessionIDs=[] requestedSessions=0 requestedIDs=[] includeRunning=true leaseSeconds=90 hasSessionSubscriber=false attachOk=true
+time=2026-10-16T23:12:16.671+08:00 level=INFO msg="go-bridge: RPC request" method=list_permission_modes backendId=claude requestId=req_11
+time=2026-10-16T23:12:16.686+08:00 level=INFO msg="go-bridge: RPC request" method=get_workspace_diff backendId=claude requestId=req_17
+time=2026-10-16T23:12:16.686+08:00 level=INFO msg="go-bridge: RPC request" method=set_observation_scope backendId=claude requestId=req_13
+time=2026-10-16T23:12:16.686+08:00 level=INFO msg="go-bridge: RPC request" method=list_agents backendId=claude requestId=req_15
+time=2026-10-16T23:12:16.686+08:00 level=INFO msg="go-bridge: RPC request" method=list_models backendId=claude requestId=req_16
+time=2026-10-16T23:12:16.686+08:00 level=INFO msg="go-bridge: set_observation_scope applied" deviceID=dev_c5ad42a3 backendID=claude mode=full_stream sessions=0 sessionIDs=[] requestedSessions=0 requestedIDs=[] includeRunning=true leaseSeconds=90 hasSessionSubscriber=false attachOk=true
+time=2026-10-16T23:12:16.686+08:00 level=INFO msg="go-bridge: RPC request" method=get_workspace_diff backendId=claude requestId=req_12
+time=2026-10-16T23:12:16.686+08:00 level=INFO msg="go-bridge: RPC request" method=list_projects backendId=claude requestId=req_14
+time=2026-10-16T23:12:16.715+08:00 level=INFO msg="go-bridge: RPC request" method=list_models backendId=claude requestId=req_19
+time=2026-10-16T23:12:16.715+08:00 level=INFO msg="go-bridge: RPC request" method=list_models backendId=claude requestId=req_18
+time=2026-10-16T23:12:16.870+08:00 level=INFO msg="go-bridge: RPC request" method=list_agents backendId=claude requestId=req_21
+time=2026-10-16T23:12:16.870+08:00 level=INFO msg="go-bridge: RPC request" method=get_git_context backendId=claude requestId=req_20
+time=2026-10-16T23:12:17.097+08:00 level=INFO msg="go-bridge: RPC request" method=list_sessions backendId=claude requestId=req_22
+time=2026-10-16T23:12:17.871+08:00 level=INFO msg="go-bridge: RPC request" method=list_sessions backendId=claude requestId=req_23
+time=2026-10-16T23:12:17.876+08:00 level=INFO msg="go-bridge: RPC request" method=list_projects backendId=claude requestId=req_24
+time=2026-10-16T23:12:17.881+08:00 level=INFO msg="go-bridge: RPC request" method=list_sessions backendId=claude requestId=req_25
+time=2026-10-16T23:12:17.961+08:00 level=INFO msg="go-bridge: RPC request" method=list_sessions backendId=claude requestId=req_26
+time=2026-10-16T23:12:18.012+08:00 level=INFO msg="go-bridge: RPC request" method=list_pinned_sessions backendId=claude requestId=req_27
+time=2026-10-16T23:12:28.066+08:00 level=INFO msg="go-bridge: RPC request" method=list_sessions backendId=claude requestId=req_28
+time=2026-10-16T23:12:28.275+08:00 level=INFO msg="go-bridge: RPC request" method=list_projects backendId=claude requestId=req_29
+time=2026-10-16T23:12:28.348+08:00 level=INFO msg="go-bridge: RPC request" method=list_pinned_sessions backendId=claude requestId=req_30
+time=2026-10-16T23:12:36.791+08:00 level=INFO msg="go-bridge: RPC request" method=set_observation_scope backendId=claude requestId=req_32
+time=2026-10-16T23:12:36.791+08:00 level=INFO msg="go-bridge: RPC request" method=set_observation_scope backendId=claude requestId=req_31
+time=2026-10-16T23:12:36.792+08:00 level=INFO msg="go-bridge: set_observation_scope applied" deviceID=dev_c5ad42a3 backendID=claude mode=full_stream sessions=0 sessionIDs=[] requestedSessions=0 requestedIDs=[] includeRunning=true leaseSeconds=90 hasSessionSubscriber=false attachOk=true
+time=2026-10-16T23:12:36.792+08:00 level=INFO msg="go-bridge: set_observation_scope applied" deviceID=dev_c5ad42a3 backendID=claude mode=full_stream sessions=0 sessionIDs=[] requestedSessions=0 requestedIDs=[] includeRunning=true leaseSeconds=90 hasSessionSubscriber=false attachOk=true

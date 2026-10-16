@@ -1,0 +1,320 @@
+{
+  "schemaVersion": 1,
+  "runtimeIdentity": {
+    "bridgeEpoch": 12951529817817354637,
+    "pid": 66458
+  },
+  "selectionRevision": 7,
+  "requestedDrivers": [
+    "claude",
+    "codex-remote",
+    "dsh-web",
+    "grokbuild",
+    "opencode-web"
+  ],
+  "activeDrivers": [
+    "claude",
+    "codex-remote",
+    "dsh-web",
+    "grokbuild",
+    "opencode-web"
+  ],
+  "sampledAt": "2026-10-16T15:04:48.955831Z",
+  "agents": [
+    {
+      "id": "claude",
+      "installation": {
+        "state": "installed",
+        "artifactKind": "cli",
+        "installMethod": "npm"
+      },
+      "version": "2.1.300",
+      "versionSource": "npm_package_json",
+      "versionCheck": {
+        "state": "update_available",
+        "checkedAt": "2026-10-16T14:38:05.082424Z",
+        "freshUntil": "2026-10-16T20:38:05.082424Z",
+        "source": "npm_registry",
+        "channel": "latest",
+        "installedVersion": "2.1.300",
+        "targetVersion": "2.1.301",
+        "updateRecipe": {
+          "executable": "/opt/homebrew/bin/npm",
+          "args": [
+            "install",
+            "-g",
+            "@anthropic-ai/claude-code@2.1.301"
+          ],
+          "environment": [
+            {
+              "name": "PATH",
+              "value": "/opt/homebrew/bin"
+            }
+          ],
+          "display": "PATH='/opt/homebrew/bin' '/opt/homebrew/bin/npm' 'install' '-g' '@anthropic-ai/claude-code@2.1.301'"
+        }
+      },
+      "readiness": {
+        "id": "claude",
+        "kind": "claude_code",
+        "displayName": "Claude Code",
+        "status": "available",
+        "capabilities": [
+          "session_state",
+          "model_switch",
+          "provider_switch",
+          "session_history",
+          "workspace_diff",
+          "memory_read",
+          "diagnostics",
+          "usage_reporting",
+          "permission_mode",
+          "session_mutation",
+          "session_rename",
+          "session_archive",
+          "session_delete",
+          "session_pin",
+          "session_catalog_recent",
+          "session_preview_v1",
+          "permission_resolve",
+          "todos",
+          "structured_user_input_v1",
+          "content_chunking",
+          "question_reply",
+          "external_turn_streaming",
+          "supports_checkpoint",
+          "image",
+          "file",
+          "supports_workspace_browse",
+          "supports_pull_requests",
+          "supports_commit_message",
+          "background_tasks",
+          "background_task_details"
+        ],
+        "liveEvents": "session_process",
+        "requiresPollingForExternalTurns": true
+      }
+    },
+    {
+      "id": "codex-remote",
+      "installation": {
+        "state": "installed",
+        "artifactKind": "app_bundle_cli"
+      },
+      "version": "26.1007.71326",
+      "versionBuild": "20398",
+      "versionSource": "chatgpt_desktop_plist",
+      "versionCheck": {
+        "state": "unchecked"
+      },
+      "readiness": {
+        "id": "codex-remote",
+        "kind": "codex-remote",
+        "displayName": "Codex Desktop",
+        "status": "available",
+        "reason": "codex-remote controller protocol 3 (environment stream bound)",
+        "capabilities": [
+          "session_state",
+          "model_switch",
+          "session_history",
+          "workspace_diff",
+          "session_goal",
+          "context_compaction",
+          "session_collaboration_mode",
+          "session_mutation",
+          "session_rename",
+          "session_archive",
+          "session_delete",
+          "session_pin",
+          "session_catalog_recent",
+          "session_preview_v1",
+          "permission_resolve",
+          "turn_detail_lazy_v1",
+          "turn_detail_chunks_v1",
+          "supports_workspace_browse",
+          "background_tasks",
+          "background_task_details"
+        ],
+        "liveEvents": "broadcast",
+        "requiresPollingForExternalTurns": false
+      }
+    },
+    {
+      "id": "dsh-web",
+      "installation": {
+        "state": "installed",
+        "artifactKind": "cli",
+        "installMethod": "npm"
+      },
+      "version": "0.2.0-rc.2",
+      "versionSource": "npm_package_json",
+      "versionCheck": {
+        "state": "current",
+        "checkedAt": "2026-10-16T14:38:05.587325Z",
+        "freshUntil": "2026-10-16T20:38:05.587325Z",
+        "source": "npm_registry",
+        "channel": "latest",
+        "installedVersion": "0.2.0-rc.2",
+        "targetVersion": "0.2.0-rc.2"
+      },
+      "readiness": {
+        "id": "dsh-web",
+        "kind": "deepseek-web",
+        "displayName": "DeepSeek Harness",
+        "status": "available",
+        "reason": "external dsh web instance at http://127.0.0.1:3080",
+        "statusMessage": "dsh 0.2.0-rc.2 (cli /opt/homebrew/bin/dsh)",
+        "capabilities": [
+          "session_state",
+          "model_switch",
+          "provider_switch",
+          "session_history",
+          "workspace_diff",
+          "diagnostics",
+          "permission_mode",
+          "session_commands",
+          "session_goal",
+          "session_queue_management",
+          "attachment_read",
+          "session_media_read",
+          "session_media_dimensions",
+          "session_mutation",
+          "session_rename",
+          "session_archive",
+          "session_unarchive",
+          "session_pin",
+          "session_catalog_recent",
+          "session_preview_v1",
+          "permission_resolve",
+          "structured_user_input_v1",
+          "external_turn_streaming",
+          "question_reply",
+          "image",
+          "file",
+          "supports_workspace_browse",
+          "background_tasks",
+          "background_task_details",
+          "background_task_cancel"
+        ],
+        "liveEvents": "broadcast",
+        "requiresPollingForExternalTurns": false
+      }
+    },
+    {
+      "id": "grokbuild",
+      "installation": {
+        "state": "installed",
+        "artifactKind": "cli"
+      },
+      "version": "1.0.60",
+      "versionCheck": {
+        "state": "current",
+        "checkedAt": "2026-10-16T14:38:07.31957Z",
+        "freshUntil": "2026-10-16T20:38:07.31957Z",
+        "source": "grok_update_check",
+        "channel": "stable",
+        "installedVersion": "1.0.60",
+        "targetVersion": "1.0.60"
+      },
+      "readiness": {
+        "id": "grokbuild",
+        "kind": "grokbuild",
+        "displayName": "Grok Build",
+        "status": "available",
+        "capabilities": [
+          "session_state",
+          "model_switch",
+          "provider_switch",
+          "session_history",
+          "workspace_diff",
+          "diagnostics",
+          "permission_mode",
+          "session_commands",
+          "session_goal",
+          "session_rename",
+          "session_delete",
+          "session_catalog_recent",
+          "session_preview_v1",
+          "permission_resolve",
+          "structured_user_input_v1",
+          "supports_checkpoint",
+          "file",
+          "supports_workspace_browse",
+          "background_tasks",
+          "background_task_details"
+        ],
+        "liveEvents": "session_process",
+        "requiresPollingForExternalTurns": true
+      }
+    },
+    {
+      "id": "opencode-web",
+      "installation": {
+        "state": "installed",
+        "artifactKind": "cli",
+        "installMethod": "npm"
+      },
+      "version": "1.19.0",
+      "versionSource": "npm_package_json",
+      "versionCheck": {
+        "state": "update_available",
+        "checkedAt": "2026-10-16T14:38:07.71486Z",
+        "freshUntil": "2026-10-16T20:38:07.71486Z",
+        "source": "npm_registry",
+        "channel": "latest",
+        "installedVersion": "1.19.0",
+        "targetVersion": "1.19.3",
+        "updateRecipe": {
+          "executable": "/opt/homebrew/bin/npm",
+          "args": [
+            "install",
+            "-g",
+            "opencode-ai@1.19.3"
+          ],
+          "environment": [
+            {
+              "name": "PATH",
+              "value": "/opt/homebrew/bin"
+            }
+          ],
+          "display": "PATH='/opt/homebrew/bin' '/opt/homebrew/bin/npm' 'install' '-g' 'opencode-ai@1.19.3'"
+        }
+      },
+      "readiness": {
+        "id": "opencode-web",
+        "kind": "opencode-web",
+        "displayName": "OpenCode Web",
+        "status": "available",
+        "reason": "generation=1.18 url=http://127.0.0.1:4096",
+        "capabilities": [
+          "session_state",
+          "model_switch",
+          "session_history",
+          "workspace_diff",
+          "diagnostics",
+          "session_mutation",
+          "session_rename",
+          "session_archive",
+          "session_delete",
+          "session_catalog_recent",
+          "session_preview_v1",
+          "permission_resolve",
+          "todos",
+          "structured_user_input_v1",
+          "external_turn_streaming",
+          "image",
+          "file",
+          "supports_workspace_browse"
+        ],
+        "liveEvents": "broadcast",
+        "requiresPollingForExternalTurns": false
+      }
+    }
+  ],
+  "devicePresence": [],
+  "relay": {
+    "enabled": true,
+    "configured": true,
+    "connected": true
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "runtime": {
+    "pid": 72671,
+    "bridgeEpoch": "fce7f7bb-8b36-4e58-ad03-54b992d3b7b9",
+    "managementUrl": "http://127.0.0.1:57911",
+    "drivers": []
+  },
+  "status": {
+    "activity": {
+      "admissionState": "accepting",
+      "bridgeOwnedActiveTurns": 0,
+      "bridgeOwnedActiveTurnsByBackend": {},
+      "pendingInteractions": 0,
+      "pendingInteractionsByBackend": {}
+    },
+    "agentSelectionRevision": 8,
+    "bridgeId": "brg_qyFyiSOtsTDmPyVLsMhyvQ",
+    "displayName": "jackdeMacBook-Pro-3723.local",
+    "fileReadHealth": {
+      "restartRecommended": false,
+      "state": "healthy",
+      "stateEpoch": 1,
+      "stuckWorkers": 0
+    },
+    "managementSchemaVersion": 1,
+    "quiesce": {
+      "state": "none"
+    },
+    "registeredDrivers": [],
+    "requestedDrivers": [],
+    "runtimeIdentity": {
+      "bridgeEpoch": 16884560054832488904,
+      "pid": 72671
+    },
+    "status": "ready_no_agents",
+    "uptime": "4m34.137562042s",
+    "version": "0.1.0"
+  },
+  "agentsCount": null,
+  "workspace": {
+    "selectionRevision": 8,
+    "requestedDrivers": [],
+    "activeDrivers": [],
+    "devicePresence": [
+      {
+        "deviceId": "dev_c5ad42a3051f461e970b0ea0332c0646",
+        "transports": [
+          {
+            "kind": "direct",
+            "directClass": "private"
+          }
+        ]
+      }
+    ],
+    "relay": {
+      "enabled": true,
+      "configured": true,
+      "connected": true
+    },
+    "sampledAt": "2026-10-16T15:11:04.46087Z"
+  },
+  "wireEvidence": {
+    "directHelloAck": true,
+    "relayHelloAck": true,
+    "directAndRelayPresence": false
+  },
+  "scope": "production /Applications CordCodeLink with explicit empty selection revision 8; official CordCode iOS client reconnected"
+}

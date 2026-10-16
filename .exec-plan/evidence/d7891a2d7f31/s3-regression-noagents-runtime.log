@@ -1,0 +1,20 @@
+time=2026-10-16T23:06:30.275+08:00 level=INFO msg="go-bridge: agent_selection_applied" revision=8 revisionProvided=true requestedDrivers=[] registeredDrivers=[] pid=72671 bridgeEpoch=fce7f7bb-8b36-4e58-ad03-54b992d3b7b9
+time=2026-10-16T23:07:42.311+08:00 level=INFO msg="go-bridge: client connected" remote=192.168.1.2:60711
+time=2026-10-16T23:07:42.404+08:00 level=INFO msg="go-bridge: [K4Patch] syncV2_mark" remote=192.168.1.2:60711 device=dev_c5ad42a3051f461e970b0ea0332c0646 enabled=true syncV2Size=1
+time=2026-10-16T23:07:42.406+08:00 level=INFO msg="go-bridge: hello_ack sent" ok=true device=dev_c5ad42a3051f461e970b0ea0332c0646 catalog_cursor_epoch_v2=true
+time=2026-10-16T23:07:42.830+08:00 level=INFO msg="prekey-store: batch uploaded" deviceID=dev_c5ad42a3 batchID=batch_FAB86D accepted=32 totalAvailable=32
+time=2026-10-16T23:07:43.534+08:00 level=INFO msg="event-publisher: connection unregistered" remote=192.168.1.2:60711 generation=1
+time=2026-10-16T23:07:43.566+08:00 level=INFO msg="go-bridge: client connected" remote=192.168.1.2:60712
+time=2026-10-16T23:07:43.577+08:00 level=INFO msg="go-bridge: [K4Patch] syncV2_mark" remote=192.168.1.2:60712 device=dev_c5ad42a3051f461e970b0ea0332c0646 enabled=true syncV2Size=1
+time=2026-10-16T23:07:43.577+08:00 level=INFO msg="go-bridge: hello_ack sent" ok=true device=dev_c5ad42a3051f461e970b0ea0332c0646 catalog_cursor_epoch_v2=true
+time=2026-10-16T23:07:43.619+08:00 level=INFO msg="event-publisher: connection unregistered" remote=192.168.1.2:60712 generation=2
+time=2026-10-16T23:07:48.208+08:00 level=INFO msg="relay-bridge-client: received client hello" deviceID=dev_c5ad42a3 bridgeID=brg_qyFyiSOtsTDmPyVLsMhyvQ generation=55
+time=2026-10-16T23:07:48.210+08:00 level=INFO msg="relay-bridge-client: device authenticated and registered" deviceID=dev_c5ad42a3 generation=55 replaced=false
+time=2026-10-16T23:07:52.655+08:00 level=INFO msg="go-bridge: [K4Patch] syncV2_mark" remote=relay:dev_c5ad42a3051f461e970b0ea0332c0646 device=dev_c5ad42a3051f461e970b0ea0332c0646 enabled=true syncV2Size=1
+time=2026-10-16T23:07:52.655+08:00 level=INFO msg="relay-bridge-client: hello_ack sent via relay" ok=true device=dev_c5ad42a3051f461e970b0ea0332c0646 catalog_cursor_epoch_v2=true
+time=2026-10-16T23:07:53.175+08:00 level=INFO msg="go-bridge: client connected" remote=192.168.1.2:60713
+time=2026-10-16T23:07:53.215+08:00 level=INFO msg="go-bridge: [K4Patch] syncV2_mark" remote=192.168.1.2:60713 device=dev_c5ad42a3051f461e970b0ea0332c0646 enabled=true syncV2Size=2
+time=2026-10-16T23:07:53.215+08:00 level=INFO msg="go-bridge: hello_ack sent" ok=true device=dev_c5ad42a3051f461e970b0ea0332c0646 catalog_cursor_epoch_v2=true
+time=2026-10-16T23:09:59.110+08:00 level=INFO msg="event-publisher: connection unregistered" remote=relay:dev_c5ad42a3051f461e970b0ea0332c0646 generation=3
+time=2026-10-16T23:09:59.111+08:00 level=INFO msg="relay-conn: closing device connection" device=dev_c5ad42a3 generation=55
+time=2026-10-16T23:09:59.111+08:00 level=WARN msg="relay-bridge-client: pruned inactive device connection" deviceID=dev_c5ad42a3 idle=2m6.454741s deadAfter=2m0s hint="device→Mac silence; iOS must pong Mac type:ping to refresh lastActivity"

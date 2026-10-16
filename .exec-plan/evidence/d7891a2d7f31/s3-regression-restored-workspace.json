@@ -1,0 +1,275 @@
+{
+  "schemaVersion": 1,
+  "runtimeIdentity": {
+    "bridgeEpoch": 4253990946113913562,
+    "pid": 73643
+  },
+  "selectionRevision": 9,
+  "requestedDrivers": [
+    "claude",
+    "codex-remote",
+    "dsh-web",
+    "grokbuild",
+    "opencode-web"
+  ],
+  "activeDrivers": [
+    "claude",
+    "codex-remote",
+    "dsh-web",
+    "grokbuild",
+    "opencode-web"
+  ],
+  "sampledAt": "2026-10-16T15:12:38.435715Z",
+  "agents": [
+    {
+      "id": "claude",
+      "installation": {
+        "state": "installed",
+        "artifactKind": "cli",
+        "installMethod": "npm"
+      },
+      "version": "2.1.300",
+      "versionSource": "npm_package_json",
+      "versionCheck": {
+        "state": "unchecked"
+      },
+      "readiness": {
+        "id": "claude",
+        "kind": "claude_code",
+        "displayName": "Claude Code",
+        "status": "available",
+        "capabilities": [
+          "session_state",
+          "model_switch",
+          "provider_switch",
+          "session_history",
+          "workspace_diff",
+          "memory_read",
+          "diagnostics",
+          "usage_reporting",
+          "permission_mode",
+          "session_mutation",
+          "session_rename",
+          "session_archive",
+          "session_delete",
+          "session_pin",
+          "session_catalog_recent",
+          "session_preview_v1",
+          "permission_resolve",
+          "todos",
+          "structured_user_input_v1",
+          "content_chunking",
+          "question_reply",
+          "external_turn_streaming",
+          "supports_checkpoint",
+          "image",
+          "file",
+          "supports_workspace_browse",
+          "supports_pull_requests",
+          "supports_commit_message",
+          "background_tasks",
+          "background_task_details"
+        ],
+        "liveEvents": "session_process",
+        "requiresPollingForExternalTurns": true
+      }
+    },
+    {
+      "id": "codex-remote",
+      "installation": {
+        "state": "installed",
+        "artifactKind": "app_bundle_cli"
+      },
+      "version": "26.1007.71326",
+      "versionBuild": "20398",
+      "versionSource": "chatgpt_desktop_plist",
+      "versionCheck": {
+        "state": "unchecked"
+      },
+      "readiness": {
+        "id": "codex-remote",
+        "kind": "codex-remote",
+        "displayName": "Codex Desktop",
+        "status": "available",
+        "reason": "codex-remote controller protocol 3 (environment stream bound)",
+        "capabilities": [
+          "session_state",
+          "model_switch",
+          "session_history",
+          "workspace_diff",
+          "session_goal",
+          "context_compaction",
+          "session_collaboration_mode",
+          "session_mutation",
+          "session_rename",
+          "session_archive",
+          "session_delete",
+          "session_pin",
+          "session_catalog_recent",
+          "session_preview_v1",
+          "permission_resolve",
+          "turn_detail_lazy_v1",
+          "turn_detail_chunks_v1",
+          "supports_workspace_browse",
+          "background_tasks",
+          "background_task_details"
+        ],
+        "liveEvents": "broadcast",
+        "requiresPollingForExternalTurns": false
+      }
+    },
+    {
+      "id": "dsh-web",
+      "installation": {
+        "state": "installed",
+        "artifactKind": "cli",
+        "installMethod": "npm"
+      },
+      "version": "0.2.0-rc.2",
+      "versionSource": "npm_package_json",
+      "versionCheck": {
+        "state": "unchecked"
+      },
+      "readiness": {
+        "id": "dsh-web",
+        "kind": "deepseek-web",
+        "displayName": "DeepSeek Harness",
+        "status": "available",
+        "reason": "external dsh web instance at http://127.0.0.1:3080",
+        "statusMessage": "dsh 0.2.0-rc.2 (cli /opt/homebrew/bin/dsh)",
+        "capabilities": [
+          "session_state",
+          "model_switch",
+          "provider_switch",
+          "session_history",
+          "workspace_diff",
+          "diagnostics",
+          "permission_mode",
+          "session_commands",
+          "session_goal",
+          "session_queue_management",
+          "attachment_read",
+          "session_media_read",
+          "session_media_dimensions",
+          "session_mutation",
+          "session_rename",
+          "session_archive",
+          "session_unarchive",
+          "session_pin",
+          "session_catalog_recent",
+          "session_preview_v1",
+          "permission_resolve",
+          "structured_user_input_v1",
+          "external_turn_streaming",
+          "question_reply",
+          "image",
+          "file",
+          "supports_workspace_browse",
+          "background_tasks",
+          "background_task_details",
+          "background_task_cancel"
+        ],
+        "liveEvents": "broadcast",
+        "requiresPollingForExternalTurns": false
+      }
+    },
+    {
+      "id": "grokbuild",
+      "installation": {
+        "state": "installed",
+        "artifactKind": "cli"
+      },
+      "versionCheck": {
+        "state": "unchecked"
+      },
+      "readiness": {
+        "id": "grokbuild",
+        "kind": "grokbuild",
+        "displayName": "Grok Build",
+        "status": "available",
+        "capabilities": [
+          "session_state",
+          "model_switch",
+          "provider_switch",
+          "session_history",
+          "workspace_diff",
+          "diagnostics",
+          "permission_mode",
+          "session_commands",
+          "session_goal",
+          "session_rename",
+          "session_delete",
+          "session_catalog_recent",
+          "session_preview_v1",
+          "permission_resolve",
+          "structured_user_input_v1",
+          "supports_checkpoint",
+          "file",
+          "supports_workspace_browse",
+          "background_tasks",
+          "background_task_details"
+        ],
+        "liveEvents": "session_process",
+        "requiresPollingForExternalTurns": true
+      }
+    },
+    {
+      "id": "opencode-web",
+      "installation": {
+        "state": "installed",
+        "artifactKind": "cli",
+        "installMethod": "npm"
+      },
+      "version": "1.19.0",
+      "versionSource": "npm_package_json",
+      "versionCheck": {
+        "state": "unchecked"
+      },
+      "readiness": {
+        "id": "opencode-web",
+        "kind": "opencode-web",
+        "displayName": "OpenCode Web",
+        "status": "available",
+        "reason": "generation=1.18 url=http://127.0.0.1:4096",
+        "capabilities": [
+          "session_state",
+          "model_switch",
+          "session_history",
+          "workspace_diff",
+          "diagnostics",
+          "session_mutation",
+          "session_rename",
+          "session_archive",
+          "session_delete",
+          "session_catalog_recent",
+          "session_preview_v1",
+          "permission_resolve",
+          "todos",
+          "structured_user_input_v1",
+          "external_turn_streaming",
+          "image",
+          "file",
+          "supports_workspace_browse"
+        ],
+        "liveEvents": "broadcast",
+        "requiresPollingForExternalTurns": false
+      }
+    }
+  ],
+  "devicePresence": [
+    {
+      "deviceId": "dev_c5ad42a3051f461e970b0ea0332c0646",
+      "transports": [
+        {
+          "kind": "direct",
+          "directClass": "private"
+        }
+      ]
+    }
+  ],
+  "relay": {
+    "enabled": true,
+    "configured": true,
+    "connected": false
+  }
+}

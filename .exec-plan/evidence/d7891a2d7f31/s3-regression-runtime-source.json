@@ -1,0 +1,24 @@
+{
+  "gate": "before S3 regression source analysis and runtime observation",
+  "recorded_at": "2026-10-16T15:03:27Z",
+  "repos": [
+    {
+      "repo_path": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+      "branch": "feat/ios-native-message-timeline",
+      "commit": "593e7f74c77b1e8f622a3eebc7cfe8675430fe4c",
+      "uncommitted_status": "clean",
+      "task_expected_branch": "feat/ios-native-message-timeline",
+      "task_expected_commit": null,
+      "expected_product_scope": "S3 noAgents cross-client regression"
+    },
+    {
+      "repo_path": "/Users/jacklee/Projects/cordcode-ios-native-message-timeline",
+      "branch": "feat/ios-native-message-timeline",
+      "commit": "02a46521678950fd1df47ac951505f3dccba0d4e",
+      "uncommitted_status": "clean",
+      "task_expected_branch": "feat/ios-native-message-timeline",
+      "task_expected_commit": null,
+      "expected_product_scope": "S3 noAgents cross-client regression"
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "scope": "S3 real cross-client noAgents regression",
+  "source": {
+    "mac": {
+      "path": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+      "branch": "feat/ios-native-message-timeline",
+      "commit": "593e7f74c77b1e8f622a3eebc7cfe8675430fe4c"
+    },
+    "ios": {
+      "path": "/Users/jacklee/Projects/cordcode-ios-native-message-timeline",
+      "branch": "feat/ios-native-message-timeline",
+      "commit": "02a46521678950fd1df47ac951505f3dccba0d4e"
+    },
+    "production_runtime_commit": "f10c138a9561",
+    "production_runtime_commit_is_mac_ancestor": true
+  },
+  "no_agents": {
+    "selection_revision": 8,
+    "runtime_pid": 72671,
+    "bridge_epoch": "fce7f7bb-8b36-4e58-ad03-54b992d3b7b9",
+    "management_status": "ready_no_agents",
+    "requested_drivers": [],
+    "registered_drivers": [],
+    "official_ios_device": "iPhone physical, process CordCode pid 11955",
+    "device_id": "dev_c5ad42a3051f461e970b0ea0332c0646",
+    "direct_hello_ack": "2026-10-16T23:07:42/43+08:00",
+    "relay_hello_ack": "2026-10-16T23:07:52+08:00",
+    "relay_authenticated_registered": "2026-10-16T23:07:48+08:00",
+    "final_noagents_workspace_device_presence": [
+      {
+        "kind": "direct",
+        "directClass": "private"
+      }
+    ],
+    "interpretation": "Production runtime accepted the already-paired official CordCode client over direct and Relay while serving zero agents; the Relay path was observed independently and the final direct snapshot remained live."
+  },
+  "restore": {
+    "selection_revision": 9,
+    "enabled_ids": [
+      "claude",
+      "codex-remote",
+      "dsh-web",
+      "grokbuild",
+      "opencode-web"
+    ],
+    "runtime_pid": 73643,
+    "bridge_epoch": "d7518315-2f7c-45d0-82fb-757fa468fa69",
+    "management_status": "ready",
+    "same_device_direct_hello_ack": "2026-10-16T23:12:16+08:00",
+    "post_restore_backend_activity": [
+      "list_sessions claude",
+      "set_observation_scope claude",
+      "list_models claude",
+      "list_projects claude",
+      "list_pinned_sessions claude"
+    ],
+    "interpretation": "Authorization and saved client/session-facing work were not deleted by zero-agent mode; the same device reconnected and resumed backend requests after all five products were restored."
+  },
+  "artifacts": [
+    "s3-regression-runtime-source.json",
+    "s3-regression-noagents-summary.json",
+    "s3-regression-noagents-status.json",
+    "s3-regression-noagents-agents.json",
+    "s3-regression-noagents-workspace.json",
+    "s3-regression-noagents-runtime.log",
+    "s3-regression-restored-status.json",
+    "s3-regression-restored-agents.json",
+    "s3-regression-restored-workspace.json",
+    "s3-regression-restored-runtime.log"
+  ],
+  "limitations": "No UI automation or screenshot was used. iOS noAgents presentation and persistence invariants are covered by targeted CCCodeTests/remote-web tests; this regression adds the real Mac/official-client/direct/Relay runtime path.",
+  "checked_at": "2026-10-16T15:13:26.626828+00:00"
+}

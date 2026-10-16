@@ -1,0 +1,43 @@
+{
+  "activity": {
+    "admissionState": "accepting",
+    "bridgeOwnedActiveTurns": 0,
+    "bridgeOwnedActiveTurnsByBackend": {},
+    "pendingInteractions": 0,
+    "pendingInteractionsByBackend": {}
+  },
+  "agentSelectionRevision": 9,
+  "bridgeId": "brg_qyFyiSOtsTDmPyVLsMhyvQ",
+  "displayName": "jackdeMacBook-Pro-3723.local",
+  "fileReadHealth": {
+    "restartRecommended": false,
+    "state": "healthy",
+    "stateEpoch": 1,
+    "stuckWorkers": 0
+  },
+  "managementSchemaVersion": 1,
+  "quiesce": {
+    "state": "none"
+  },
+  "registeredDrivers": [
+    "claude",
+    "codex-remote",
+    "dsh-web",
+    "grokbuild",
+    "opencode-web"
+  ],
+  "requestedDrivers": [
+    "claude",
+    "codex-remote",
+    "dsh-web",
+    "grokbuild",
+    "opencode-web"
+  ],
+  "runtimeIdentity": {
+    "bridgeEpoch": 4253990946113913562,
+    "pid": 73643
+  },
+  "status": "ready",
+  "uptime": "22.826603583s",
+  "version": "0.1.0"
+}
