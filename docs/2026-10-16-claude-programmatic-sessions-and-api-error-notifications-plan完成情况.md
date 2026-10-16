@@ -7,9 +7,9 @@
 - Legacy State File: none
 - Completion Report Verdict: `proved-complete`
 - Queue Summary: 20/20 todos done, 20/20 proven; 10 re-verified, 10 self-attested (including justified N/A regression gates)
-- Related Commits: implementation is the reviewed working tree on top of `f10c138a9561f22c1282ef25c464859c28681c01`; no implementation commit was created in this delivery
-- Generated At: `2026-10-16T14:45:07Z`
-- Queue Hash: `5bcc8f6760b9`
+- Related Commits: `135ba20ada5479719eebc48065d83791dd370e20` (`fix(claude): hide programmatic sessions and settle API errors`); pre-implementation source parent was `f10c138a9561f22c1282ef25c464859c28681c01`
+- Generated At: `2026-10-16T14:59:38Z`
+- Queue Hash: `fbba30764c7f`
 
 Source identity at install:
 
@@ -21,7 +21,7 @@ Source identity at install:
 | Upstream package | `@anthropic-ai/claude-agent-sdk@0.3.301`, npm tarball retained under `build/upstream-claude-agent-sdk-0.3.301/` |
 
 ## 1. Overall Verdict (总体结论)
-The v4 plan is implemented and deployed. Programmatic Claude sessions are now excluded from the default visible catalog and Web Push watcher using the official `includeProgrammatic:false` category, while transcripts and `ByKey` cache identity remain intact. Synthetic Claude API errors now become terminal `turn_error` events, and both live control planes settle to idle instead of presenting the failure as a completed turn.
+The v4 plan is implemented, committed, deployed, and owner-accepted. Programmatic Claude sessions are now excluded from the default visible catalog and Web Push watcher using the official `includeProgrammatic:false` category, while transcripts and `ByKey` cache identity remain intact. Synthetic Claude API errors now become terminal `turn_error` events, and both live control planes settle to idle instead of presenting the failure as a completed turn. The owner subsequently confirmed that the CordCode App Claude Code session list is normal and the problem sessions are absent.
 
 All required queue items are proven complete. Focused tests, official SDK oracle comparison, whitespace check, and Release build were re-run or independently executed from artifacts; production process/listener/generation/log checks were performed against the installed app. No iOS source was modified, and no UI/snapshot/simulator automation was run.
 
@@ -108,6 +108,7 @@ Runtime evidence:
 - Unique new log `claude catalog programmatic hidden` appears with `count=38`.
 - Count interpretation: 38 is the runtime's **global visible-workspace catalog** count. The approved E-8 project scope is 22; fresh post-deploy project data still yields 35 total / 13 visible / 22 hidden and zero baseline hidden IDs visible. The global count is therefore expected rather than an oracle mismatch.
 - `security-guidance` remains absent from current Claude enabled plugins; its bearer-token defect is not claimed as fixed.
+- Owner acceptance, 2026-10-16: the CordCode App Claude Code session list is normal and the prior problem sessions are absent.
 
 ### 4.3 Audit downgrade summary
 - Downgraded todos: none after exit audit.
@@ -118,7 +119,7 @@ Runtime evidence:
 - Go deliberately uses top-level line JSON parsing for structured fields while the SDK implementation uses raw substring probing. The known constructed divergence is a nested `entrypoint` or `sessionKind` key; no real sample in this corpus depended on it.
 - If an `entrypoint` only exists between 512KiB from head and 64KiB from tail, both implementations leave the session visible. This fail-open boundary is intentional and documented.
 - The plugin's own authentication failure is not fixed; `security-guidance` remains disabled.
-- No iOS visual automation was run by design. Runtime log/listener plus exact post-deploy catalog data verify the Mac behavior; iPhone rendering continues to consume the unchanged protocol.
+- No iOS visual automation was run by design. Runtime log/listener plus exact post-deploy catalog data verify the Mac behavior; the owner has now manually accepted the resulting CordCode App session list.
 
 ## 6. Audit Focus (建议审核重点)
 1. Verify `Sorted` filtering occurs before fork/compact lineage and that `ByKey` still retains hidden identity.

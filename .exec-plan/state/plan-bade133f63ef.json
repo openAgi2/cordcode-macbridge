@@ -31,10 +31,10 @@
   "reports": {
     "completion_report_path": "docs/2026-10-16-claude-programmatic-sessions-and-api-error-notifications-plan完成情况.md",
     "completion_report_status": "current",
-    "last_generated_at": "2026-10-16T14:46:23.404542Z",
-    "based_on_queue_hash": "5bcc8f6760b9"
+    "last_generated_at": "2026-10-16T14:59:38.531275Z",
+    "based_on_queue_hash": "fbba30764c7f"
   },
-  "updated_at": "2026-10-16T14:46:23.404542Z",
+  "updated_at": "2026-10-16T14:59:38.531275Z",
   "todos": [
     {
       "id": "s1-classifier-impl",
@@ -564,16 +564,27 @@
         "method": "mixed",
         "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Production install verified without UI automation: only /Applications app processes run; PID 66458 lstart 2026-10-16 22:38:02 +08 is later than build 14:33:20Z and owns 8777; commit-specific hidden-count log appears. Runtime global catalog hides 38 programmatic sessions; fresh project oracle hides the approved 22-ID set, leaves zero baseline IDs visible, and keeps main 7afc3bd7-c69b-4582-85cf-556fa4f54d69 visible. security-guidance remains absent from enabled plugins.",
+        "summary": "Production install verified without UI automation: only /Applications app processes run; PID 66458 lstart 2026-10-16 22:38:02 +08 is later than build 14:33:20Z and owns 8777; commit-specific hidden-count log appears. Runtime global catalog hides 38 programmatic sessions; fresh project oracle hides the approved 22-ID set, leaves zero baseline IDs visible, and keeps main 7afc3bd7-c69b-4582-85cf-556fa4f54d69 visible. security-guidance remains absent from enabled plugins. Owner subsequently confirmed in CordCode App that the Claude Code session list is normal and the prior problem sessions are absent.",
         "artifacts": [
           "build/claude-programmatic-preinstall-source-manifest.txt",
           "build/claude-programmatic-runtime-regression.txt",
           "build/claude-programmatic-runtime-day-go-oracle.json",
           "build/claude-programmatic-runtime-day-go-oracle.log",
-          "build/claude-programmatic-plugin-state.txt"
+          "build/claude-programmatic-plugin-state.txt",
+          "docs/2026-10-16-claude-programmatic-sessions-and-api-error-notifications-plan完成情况.md"
         ],
-        "checked_at": "2026-10-16T14:41:56.257790Z"
+        "checked_at": "2026-10-16T14:59:38.491143Z"
       }
     }
-  ]
+  ],
+  "closure": {
+    "status": "done",
+    "closed_at": "2026-10-16T14:59:38.491143Z",
+    "implementation_commit": "135ba20ada5479719eebc48065d83791dd370e20",
+    "owner_validation": {
+      "status": "passed",
+      "checked_at": "2026-10-16T14:59:38.491143Z",
+      "summary": "CordCode App Claude Code session list is normal; prior problem sessions are absent."
+    }
+  }
 }

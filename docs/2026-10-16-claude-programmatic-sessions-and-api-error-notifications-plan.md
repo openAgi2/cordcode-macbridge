@@ -1,6 +1,8 @@
 # Claude programmatic session 过滤与 API error 通知修复方案
 
-> 状态：v4 方案，仅设计，未实施。owner 入口要求“暂时不写代码、写修复方案”；本文不构成实施授权。本文将此前偏复杂的 plugin 专用 prompt 匹配方案，收敛为官方 TypeScript SDK 已公开的 `listSessions({ includeProgrammatic: false })` 语义，并单独修复 Claude synthetic API error 的终态归类。
+> 状态：**done / owner-accepted**。v4 方案已实施、测试、Release 部署并提交为 `135ba20ada5479719eebc48065d83791dd370e20`；owner 于 2026-10-16 手动确认 CordCode App 的 Claude Code session 列表恢复正常，问题 session 已消失。
+>
+> 本方案将此前偏复杂的 plugin 专用 prompt 匹配方案，收敛为官方 TypeScript SDK 已公开的 `listSessions({ includeProgrammatic: false })` 语义，并单独修复 Claude synthetic API error 的终态归类。
 >
 > **v4 改动范围（第 3 轮评审 F-12 采纳，逐条核实后处置）**：D-1 为 `entrypoint` 增加文件尾 64KB 回退（对齐官方 `nl(head) ?? jt(tail)` 双窗口；`sessionKind` 仍只用 head，与官方一致）——本机 22 条 programmatic 中 3 条大文件 reviewer（`0296f9ef`/`1eba385c`/`a9a158a0`，1.25–1.9MB，均为无 401 的成功安审 reviewer）head 512KB 内零 `"entrypoint"` 子串、仅 tail 可达，v3 的 head-only 规则会漏隐藏 3/22 并使 E-8 基线 22 必假；删除 v3「两条路径实测收敛」的虚假断言并重写差异清单（F-12）；§2.5 补字节偏移 census（16 条 head 可达 + 3 条 tail-only，可达性分界是首条 user 行字节数而非行号）；S-1 fixture 补 entrypoint 双窗口用例；§7 补大文件隐藏行；§8 风险表「大文件」行改为 tail 回退兜底。修订时已以本机 39 文件模拟 v4 双窗口规则：22 programmatic / 17 visible，与官方 SDK 0.3.301 实测（hidden=22、prog:false=17）逐项一致。
 
