@@ -33,7 +33,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-10-16T15:14:21.908884+00:00",
+  "updated_at": "2026-10-16T15:27:34.874221+00:00",
   "approved_plan_sha256": "e49e2d5d00e6216bd70d0127c02949351be96474aef1c8b6cd0b14f91d74121a",
   "scope_gates": {
     "E5": "blocked extensions only: unverified latest sources and all automatic update execution",
@@ -606,21 +606,25 @@
       "description": "Targeted Go/Swift/iOS/web tests and coherent incremental builds; client-first delivery then formal /Applications Release install with PID/epoch/unique-log proof; secret scan, live docs/change logs and owner U1-U10.",
       "phase": "s7",
       "kind": "impl",
-      "status": "in_progress",
+      "status": "done",
       "depends_on": [
         "s6-tests"
       ],
       "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S7",
-      "notes": "S3 regression complete. Auditing source deltas, existing evidence, live docs/changelogs, and final Mac/iOS deployment gaps.",
+      "notes": "Live docs/changelog updated; targeted Go/Swift tests passed; current Mac Release built and formally installed; production runtime identity verified.",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "implementation",
-        "attestation": "self-attested",
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Docs, targeted validation, Release build, /Applications install, runtime generation/SHA/status, and secret scan completed.",
+        "artifacts": [
+          ".exec-plan/evidence/d7891a2d7f31/s7-validation.json",
+          ".exec-plan/evidence/d7891a2d7f31/s7-release-build.log",
+          ".exec-plan/evidence/d7891a2d7f31/s7-install-source.json"
+        ],
+        "checked_at": "2026-10-16T15:27:34.874221+00:00"
       }
     },
     {
@@ -629,21 +633,26 @@
       "description": "Targeted Go/Swift/iOS/web tests and coherent incremental builds; client-first delivery then formal /Applications Release install with PID/epoch/unique-log proof; secret scan, live docs/change logs and owner U1-U10.",
       "phase": "s7",
       "kind": "tests",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "s7-impl"
       ],
       "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S7",
-      "notes": "Ready only after s7-impl consolidation; do not repeat full suites without behavior risk.",
+      "notes": "Final targeted Mac tests plus prior S3 iOS/web tests are archived; no full-suite or UI/snapshot run.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Go targeted subset passed; Swift 51/51 passed; prior iOS S3 classes passed 131 tests with 10 skips and 0 failures; remote-web tests passed 7/7.",
+        "artifacts": [
+          ".exec-plan/evidence/d7891a2d7f31/s7-targeted-go-tests.log",
+          ".exec-plan/evidence/d7891a2d7f31/s7-targeted-swift-tests.log",
+          ".exec-plan/evidence/d7891a2d7f31/s3-review-fix-tests.json",
+          ".exec-plan/evidence/d7891a2d7f31/s3-remote-web-tests.log"
+        ],
+        "checked_at": "2026-10-16T15:27:34.874221+00:00"
       }
     },
     {
@@ -652,21 +661,25 @@
       "description": "Targeted Go/Swift/iOS/web tests and coherent incremental builds; client-first delivery then formal /Applications Release install with PID/epoch/unique-log proof; secret scan, live docs/change logs and owner U1-U10. Require integration evidence appropriate to this slice; final UX matrix remains s7-regression; do not block coding on post-implementation evidence.",
       "phase": "s7",
       "kind": "regression",
-      "status": "pending",
+      "status": "blocked",
       "depends_on": [
         "s7-tests"
       ],
       "source": "docs/2026-10-15-agent-management-topology-and-state-machines.md §10 S7",
-      "notes": "Agent-side runtime evidence is largely collected; final owner U1-U10 manual matrix remains required.",
+      "notes": "Agent-side real Mac/iPhone regression, current Release deployment, current iOS Debug install, and production reconnection are complete. Remaining blocker is owner-only manual acceptance matrix U1-U10; UI automation/snapshot testing is not authorized.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Agent-side production regression complete; owner U1-U10 manual matrix remains.",
+        "artifacts": [
+          ".exec-plan/evidence/d7891a2d7f31/s7-validation.json",
+          ".exec-plan/evidence/d7891a2d7f31/s7-release-runtime-status.json",
+          ".exec-plan/evidence/d7891a2d7f31/s7-ios-device-install.log"
+        ],
+        "checked_at": "2026-10-16T15:27:34.874221+00:00"
       }
     },
     {

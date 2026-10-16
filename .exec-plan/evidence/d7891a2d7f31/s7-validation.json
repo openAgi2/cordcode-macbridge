@@ -1,42 +1,79 @@
 {
-  "captured_at": "2026-10-15T10:14:03.908818+00:00",
-  "scope": "MacBridge-side final targeted validation; full S7 remains blocked",
-  "commands": [
-    {
-      "command": "GOTOOLCHAIN=local go test ./toolinventory ./agent/dsh-web ./go-bridge ./go-bridge/admission -count=1",
-      "result": "partial_then_repaired",
-      "detail": "toolinventory, dsh-web, and admission passed. Full go-bridge exposed stale V0/V1 fixtures caused by selection fields leaking legacy status; contract fixed."
+  "scope": "S7 agent-side final validation and deployment",
+  "source": {
+    "mac": {
+      "path": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+      "branch": "feat/ios-native-message-timeline",
+      "commit": "a959eacdf34f1b1d0c6ae62338a5b88a8ef53ee5"
     },
-    {
-      "command": "GOTOOLCHAIN=local go test ./go-bridge -run 'TestManagementV0Status|TestManagementV1ObservedFixturesRoundTrip|TestStatusReportsAgentSelectionAssemblyIdentity' -count=1",
-      "result": "passed",
-      "duration": "0.028s package time after repair"
-    },
-    {
-      "command": "GOTOOLCHAIN=local xcodebuild ... AgentSelectionStoreTests RuntimeManagerRestartTests WorkspaceSnapshotStoreTests WorkspaceTopologyTests WorkspaceViewTests AccessibilityPolishTests OpenCodeInstallerTests MacBridgeBehaviorTests/testAgentSelectionArgumentsPreserveExplicitEmptyAndRevision test -quiet",
-      "result": "passed",
-      "duration": "17.968s wall"
-    },
-    {
-      "command": "gitleaks git . --redact --no-banner --exit-code 1",
-      "result": "passed",
-      "detail": "1453 commits, ~708.8 MB, no leaks"
-    },
-    {
-      "command": "git diff --check",
-      "result": "passed"
+    "ios": {
+      "path": "/Users/jacklee/Projects/cordcode-ios-native-message-timeline",
+      "branch": "feat/ios-native-message-timeline",
+      "commit": "7920070eb46c30b4b625e53b8f7994695f83f289"
     }
-  ],
-  "contract_repair": {
-    "root_cause": "Selection assembly identity fields were emitted for legacy Management V0 status even without an explicit selection revision, breaking the observed five-field V0 contract and all V1 golden fixtures.",
-    "fix": "Emit requestedDrivers/registeredDrivers/agentSelectionRevision only when agentSelectionRevision is present. Explicit selection still serializes empty arrays.",
-    "fixtures_changed": false
   },
-  "not_run": [
-    "formal Release build and /Applications replacement",
-    "production runtime restart",
-    "iOS build/install/tests",
-    "remote-web build/tests/publication",
-    "owner U1-U10 matrix"
-  ]
+  "tests": {
+    "go_targeted": "PASS; recent Claude fix + workspace/agent-selection/zero-agent status subset",
+    "swift_targeted": "PASS; 51 tests, 0 failures across AgentSelectionStore, DeviceStore, RuntimeManagerRestart, WorkspaceSnapshotStore, WorkspaceView",
+    "swift_initial_attempt": "FAIL before test execution because host GOSUMDB=off blocked Go toolchain verification; retried same DerivedData with GOSUMDB=sum.golang.org and passed",
+    "prior_s3": "iOS four-class 131 tests: 121 pass/10 skip/0 fail; remote-web no-backend tests 7/7 pass",
+    "no_ui_or_snapshot_tests": true
+  },
+  "mac_release": {
+    "build": "PASS",
+    "commit": "a959eacdf34f",
+    "built_at": "2026-10-16T15:20:01Z",
+    "runtime_version": "cordcode-bridge-runtime 0.1.0",
+    "artifact": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip",
+    "artifact_sha256": "a57ffc611fa68ba38084aa6e0ecf66bfc64e502b2d594fb6465ce455533b515d",
+    "runtime_sha256": "935a1a34f55c87b20e1919fcb5ce9007ab73c6eb833b853cb9d6444501e1c415",
+    "formal_install": "PASS",
+    "installed_runtime_sha256": "935a1a34f55c87b20e1919fcb5ce9007ab73c6eb833b853cb9d6444501e1c415",
+    "runtime_sha_match": true,
+    "old_pid": 73614,
+    "old_runtime_pid": 73643,
+    "new_pid": 76018,
+    "new_runtime_pid": 76071,
+    "bridge_epoch": "19e37832-fb01-425e-bdf8-b959fa55368f",
+    "port_listener": "/Applications/CordCodeLink.app embedded runtime PID 76071",
+    "non_formal_process_residue": false
+  },
+  "production_runtime": {
+    "status": "ready",
+    "agent_selection_revision": 9,
+    "requested_and_registered": [
+      "claude",
+      "codex-remote",
+      "dsh-web",
+      "grokbuild",
+      "opencode-web"
+    ],
+    "relay": {
+      "enabled": true,
+      "configured": true,
+      "connected": true
+    },
+    "device": "dev_c5ad42a3051f461e970b0ea0332c0646 direct/private after final Mac + iOS installs",
+    "post_install_client_activity": [
+      "hello_ack",
+      "list_sessions claude",
+      "list_models claude",
+      "list_projects claude",
+      "list_pinned_sessions claude"
+    ]
+  },
+  "ios_device": {
+    "device_udid": "00008140-001E69503453001C",
+    "build": "PASS Debug iphoneos",
+    "install": "PASS org.openagi.cordcode",
+    "installation_url": "file:///private/var/containers/Bundle/Application/C6E30558-1F0D-45AF-8773-5A905A1AAF8C/CordCode.app/",
+    "running_pid": 12783,
+    "mac_reconnect": "direct client connected and hello_ack sent at 2026-10-16T23:25:28/29 and 23:25:35+08:00"
+  },
+  "secret_scan": {
+    "git": "PASS; 1464 commits, no leaks",
+    "directory": "PASS; no leaks"
+  },
+  "remaining": "Only owner manual acceptance matrix U1-U10 remains for s7-regression; no UI automation performed.",
+  "checked_at": "2026-10-16T15:27:34.874221+00:00"
 }

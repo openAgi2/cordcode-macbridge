@@ -1,0 +1,35 @@
+{
+  "gate": "before formal /Applications install",
+  "recorded_at": "2026-10-16T15:21:02Z",
+  "repos": [
+    {
+      "repo_path": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+      "branch": "feat/ios-native-message-timeline",
+      "commit": "a959eacdf34f1b1d0c6ae62338a5b88a8ef53ee5",
+      "uncommitted_status": [
+        "?? .exec-plan/evidence/d7891a2d7f31/s7-release-build-source.json"
+      ],
+      "task_expected_branch": "feat/ios-native-message-timeline"
+    },
+    {
+      "repo_path": "/Users/jacklee/Projects/cordcode-ios-native-message-timeline",
+      "branch": "feat/ios-native-message-timeline",
+      "commit": "7920070eb46c30b4b625e53b8f7994695f83f289",
+      "uncommitted_status": "clean",
+      "task_expected_branch": "feat/ios-native-message-timeline"
+    }
+  ],
+  "build_app": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline/build/unsigned-release/Build/Products/Release/CordCodeLink.app",
+  "runtime_sha256": "935a1a34f55c87b20e1919fcb5ce9007ab73c6eb833b853cb9d6444501e1c415",
+  "old_processes": [
+    {
+      "pid": 73614,
+      "ps": "PID  PPID STARTED                      COMMAND\n73614     1 Fri Oct 16 23:12:10 2026     /Applications/CordCodeLink.app/Contents/MacOS/CordCodeLink"
+    },
+    {
+      "pid": 73643,
+      "ps": "PID  PPID STARTED                      COMMAND\n73643 73614 Fri Oct 16 23:12:15 2026     /Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime -port 8777 -drivers claude,codex-remote,dsh-web,grokbuild,opencode-web -work-dir /Users/jacklee -codex-backend app_server -codex-desktop-short-version 26.1007.71326 -codex-desktop-build-version 20398 -management-host 127.0.0.1 -management-port 0 -data-dir /Users/jacklee/Library/Application Support/CordCode Link -log-dir /Users/jacklee/Library/Application Support/CordCode Link/logs -session-list-limit 150 -opencode-url http://127.0.0.1:4096 -opencode-web-url http://127.0.0.1:4096 -opencode-source managed_local -opencode-installed-cli /opt/homebrew/bin/opencode -opencode-install-npm-path  -opencode-install-scope  -agent-selection-revision 9 -pairing-include-tailscale=true -pairing-include-remote=true -relay-enabled=true -prefer-local-network=true"
+    }
+  ],
+  "runtime_version": "cordcode-bridge-runtime 0.1.0 (commit: a959eacdf34f, built: 2026-10-16T15:20:01Z)"
+}

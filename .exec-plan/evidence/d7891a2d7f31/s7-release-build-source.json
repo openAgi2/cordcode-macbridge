@@ -1,0 +1,29 @@
+{
+  "gate": "before Mac formal Release build/install",
+  "recorded_at": "2026-10-16T15:20:01Z",
+  "repos": [
+    {
+      "repo_path": "/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline",
+      "branch": "feat/ios-native-message-timeline",
+      "commit": "a959eacdf34f1b1d0c6ae62338a5b88a8ef53ee5",
+      "uncommitted_status": "clean",
+      "task_expected_branch": "feat/ios-native-message-timeline",
+      "expected_build_scope": "Mac formal Release only; iOS source read-only identity"
+    },
+    {
+      "repo_path": "/Users/jacklee/Projects/cordcode-ios-native-message-timeline",
+      "branch": "feat/ios-native-message-timeline",
+      "commit": "7920070eb46c30b4b625e53b8f7994695f83f289",
+      "uncommitted_status": "clean",
+      "task_expected_branch": "feat/ios-native-message-timeline",
+      "expected_build_scope": "Mac formal Release only; iOS source read-only identity"
+    }
+  ],
+  "expected_product_features": [
+    "explicit agent selection",
+    "ready_no_agents",
+    "five product catalog",
+    "workspace snapshot",
+    "version guidance"
+  ]
+}
