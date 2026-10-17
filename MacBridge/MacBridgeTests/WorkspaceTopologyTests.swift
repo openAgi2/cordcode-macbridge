@@ -24,6 +24,24 @@ final class WorkspaceTopologyTests: XCTestCase {
             WorkspaceView.presenceText(for: .connected([
                 .init(kind: "direct", directClass: "private")
             ])),
+            L10n.devicePresenceLAN
+        )
+        XCTAssertEqual(
+            WorkspaceView.presenceText(for: .connected([
+                .init(kind: "direct", directClass: "loopback")
+            ])),
+            L10n.devicePresenceLAN
+        )
+        XCTAssertEqual(
+            WorkspaceView.presenceText(for: .connected([
+                .init(kind: "direct", directClass: "tailscale")
+            ])),
+            L10n.devicePresenceTailscale
+        )
+        XCTAssertEqual(
+            WorkspaceView.presenceText(for: .connected([
+                .init(kind: "direct", directClass: "unknown")
+            ])),
             L10n.devicePresenceDirect
         )
         XCTAssertEqual(
@@ -59,6 +77,48 @@ final class WorkspaceTopologyTests: XCTestCase {
                 previous.x == current.x || previous.y == current.y,
                 "segment \(index) is not orthogonal"
             )
+        }
+    }
+
+
+    func testAgentTopologyKeepsTrunkAndStubsClearOfCardAndLogo() {
+        let gutter = WorkspaceView.agentGutterWidth
+        let inset = WorkspaceView.agentTrunkInset
+        let gap = WorkspaceView.agentStubGap
+        let dot = WorkspaceView.agentEndpointDotRadius
+        let service = CGRect(x: 0, y: 80, width: 640, height: 120)
+        let cardMinX = service.minX + gutter
+        let nodes = [
+            WorkspaceView.AgentTopologyNode(midY: 260, minX: cardMinX, available: true),
+            WorkspaceView.AgentTopologyNode(midY: 340, minX: cardMinX, available: false)
+        ]
+        let layout = WorkspaceView.agentTopologyPaths(service: service, nodes: nodes)
+        let trunkX = cardMinX - inset
+        let stubEndX = cardMinX - gap
+        XCTAssertEqual(layout.trunk, [
+            CGPoint(x: trunkX, y: 200),
+            CGPoint(x: trunkX, y: 340)
+        ])
+        XCTAssertEqual(layout.stubs, [
+            WorkspaceView.AgentTopologyStub(
+                from: CGPoint(x: trunkX, y: 260),
+                to: CGPoint(x: stubEndX, y: 260),
+                available: true
+            ),
+            WorkspaceView.AgentTopologyStub(
+                from: CGPoint(x: trunkX, y: 340),
+                to: CGPoint(x: stubEndX, y: 340),
+                available: false
+            )
+        ])
+        XCTAssertGreaterThanOrEqual(gutter, inset)
+        XCTAssertGreaterThan(gap, dot)
+        XCTAssertGreaterThanOrEqual(stubEndX - trunkX, 16)
+        XCTAssertLessThan(trunkX, cardMinX)
+        for stub in layout.stubs {
+            XCTAssertLessThan(stub.to.x + dot, cardMinX, "endpoint dot must stay left of the card")
+            // Agent row padding is 14pt; 28pt brand mark starts there.
+            XCTAssertLessThan(stub.to.x + dot, cardMinX + 14, "endpoint must stay left of the logo")
         }
     }
 

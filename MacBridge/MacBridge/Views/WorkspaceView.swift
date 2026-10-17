@@ -29,7 +29,6 @@ struct WorkspaceView: View {
     @State private var versionDetailAgentID: String?
     @State private var copiedVersionRecipeAgentID: String?
     @State private var copiedInstallRecipeAgentID: String?
-    @State private var topologyAnchors: [String: Anchor<CGRect>] = [:]
     @State private var isShowingGrokLeaderDetail = false
     @StateObject private var grokLeaderManager = GrokLeaderModeManager()
     @State private var grokLeaderFailureAlert: GrokLeaderToggleFailure?
@@ -66,16 +65,17 @@ struct WorkspaceView: View {
 
     var body: some View {
         PageContainer(maxContentWidth: .greatestFiniteMagnitude) {
-            ZStack {
-                topologyCanvas
-                VStack(alignment: .leading, spacing: 24) {
-                    devicesSection
-                        .padding(.top, 18)
-                    serviceSection
-                    agentSection
-                }
+            VStack(alignment: .leading, spacing: 32) {
+                devicesSection
+                    .padding(.top, 18)
+                serviceSection
+                agentSection
+                    .padding(.leading, Self.agentGutterWidth)
             }
             .coordinateSpace(name: topologyCoordinateSpace)
+            .overlayPreferenceValue(WorkspaceTopologyAnchorKey.self) { anchors in
+                topologyLayer(anchors: anchors)
+            }
         }
         .confirmationDialog(
             L10n.overviewStopConfirmTitle,
@@ -346,73 +346,132 @@ struct WorkspaceView: View {
 
     // MARK: - 三层拓扑画布
 
-    private var topologyCanvas: some View {
+    /// 画布必须用 overlayPreferenceValue 解析锚点。兄弟 GeometryReader
+    /// 收不到子视图 preference，线上就会整层消失。
+    private func topologyLayer(anchors: [String: Anchor<CGRect>]) -> some View {
         GeometryReader { proxy in
             Canvas { context, _ in
-                guard isServiceRunning else { return }
-                let service = anchorRect("service", proxy: proxy)
-                let relay = anchorRect("relay", proxy: proxy)
-                guard let service else { return }
+                drawTopology(in: &context, proxy: proxy, anchors: anchors)
+            }
+        }
+        .allowsHitTesting(false)
+        .id(topologySignature)
+    }
 
-                for device in deviceStore.devices {
-                    guard case .connected(let transports) = deviceStore.presenceState(for: device.deviceId),
-                          let deviceRect = anchorRect("device:\(device.deviceId)", proxy: proxy) else {
-                        continue
-                    }
-                    for transport in transports {
-                        if transport.kind == "relay" {
-                            guard let relay else { continue }
-                            strokeRoundedPolyline(
-                                in: &context,
-                                from: .bottomCenter(of: deviceRect),
-                                to: .topCenter(of: relay),
-                                color: .accentColor.opacity(0.58)
-                            )
-                            strokeRoundedPolyline(
-                                in: &context,
-                                from: .trailingCenter(of: relay),
-                                to: .trailingCenter(of: service),
-                                color: .accentColor.opacity(0.58)
-                            )
-                        } else {
-                            strokeRoundedPolyline(
-                                in: &context,
-                                from: .bottomCenter(of: deviceRect),
-                                to: .topCenter(of: service),
-                                color: .green.opacity(0.58)
-                            )
-                        }
-                    }
-                }
+    private var topologySignature: String {
+        let devices = deviceStore.devices.map { device in
+            "\(device.deviceId):\(String(describing: deviceStore.presenceState(for: device.deviceId)))"
+        }.joined(separator: ",")
+        let agentPart = agents.map { agent in
+            "\(agent.id):\(agent.isActive):\(agent.isAvailable):\(agent.isObservationCurrent)"
+        }.joined(separator: ",")
+        let relay = backendViewModel.workspaceRelay
+        let relayPart = relay.map { "\($0.enabled)-\($0.configured)-\($0.connected)" } ?? "nil"
+        return "\(viewModel.status)-\(devices)-\(agentPart)-\(relayPart)"
+    }
 
-                for agent in agents {
-                    guard agent.isActive,
-                          agent.isObservationCurrent,
-                          let agentRect = anchorRect("agent:\(agent.id)", proxy: proxy) else {
-                        continue
-                    }
+    private func drawTopology(
+        in context: inout GraphicsContext,
+        proxy: GeometryProxy,
+        anchors: [String: Anchor<CGRect>]
+    ) {
+        guard isServiceRunning else { return }
+
+        func rect(_ key: String) -> CGRect? {
+            guard let anchor = anchors[key] else { return nil }
+            return proxy[anchor]
+        }
+
+        guard let service = rect("service") else { return }
+        let relay = rect("relay")
+        var drewRelayToService = false
+
+        for device in deviceStore.devices {
+            guard case .connected(let transports) = deviceStore.presenceState(for: device.deviceId),
+                  let deviceRect = rect("device:\(device.deviceId)") else {
+                continue
+            }
+            for transport in transports {
+                if transport.kind == "relay" {
+                    guard let relay else { continue }
                     strokeRoundedPolyline(
                         in: &context,
-                        from: .bottomCenter(of: service),
-                        to: .topCenter(of: agentRect),
-                        color: agent.isAvailable ? .green.opacity(0.52) : .primary.opacity(0.24),
-                        dashed: !agent.isAvailable
+                        from: .bottomCenter(of: deviceRect),
+                        to: .topCenter(of: relay),
+                        color: Color.accentColor.opacity(0.9)
+                    )
+                    if !drewRelayToService {
+                        strokeRoundedPolyline(
+                            in: &context,
+                            from: .leadingCenter(of: relay),
+                            to: .trailingCenter(of: service),
+                            color: Color.accentColor.opacity(0.9)
+                        )
+                        drewRelayToService = true
+                    }
+                } else {
+                    strokeRoundedPolyline(
+                        in: &context,
+                        from: .bottomCenter(of: deviceRect),
+                        to: .topCenter(of: service),
+                        color: Self.directPathColor(for: transport).opacity(0.9)
                     )
                 }
             }
         }
-        .allowsHitTesting(false)
-        .onPreferenceChange(WorkspaceTopologyAnchorKey.self) { anchors in
-            topologyAnchors = anchors
+
+        if let relay, !drewRelayToService, shouldDrawRelayInfrastructureLink {
+            let connected = backendViewModel.workspaceRelay?.connected == true
+            let color = Color.accentColor.opacity(connected ? 0.9 : 0.4)
+            let start = CGPoint.trailingCenter(of: service)
+            let end = CGPoint.leadingCenter(of: relay)
+            strokeRoundedPolyline(
+                in: &context,
+                from: start,
+                to: end,
+                color: color,
+                dashed: !connected
+            )
+            fillDot(in: &context, at: start, color: color)
+            fillDot(in: &context, at: end, color: color)
+        }
+
+        let agentNodes: [AgentTopologyNode] = agents.compactMap { agent in
+            guard agent.isActive, agent.isObservationCurrent, let agentRect = rect("agent:\(agent.id)") else {
+                return nil
+            }
+            return AgentTopologyNode(
+                midY: agentRect.midY,
+                minX: agentRect.minX,
+                available: agent.isAvailable
+            )
+        }
+        let layout = Self.agentTopologyPaths(service: service, nodes: agentNodes)
+        if layout.trunk.count >= 2 {
+            strokePoints(
+                in: &context,
+                points: layout.trunk,
+                color: Color.green.opacity(0.82)
+            )
+        }
+        for stub in layout.stubs {
+            strokePoints(
+                in: &context,
+                points: [stub.from, stub.to],
+                color: stub.available ? Color.green.opacity(0.9) : Color.orange.opacity(0.85),
+                dashed: !stub.available
+            )
+            fillDot(
+                in: &context,
+                at: stub.to,
+                color: stub.available ? Color.green : Color.orange
+            )
         }
     }
 
-    private func anchorRect(
-        _ key: String,
-        proxy: GeometryProxy
-    ) -> CGRect? {
-        guard let anchor = topologyAnchors[key] else { return nil }
-        return proxy[anchor]
+    private var shouldDrawRelayInfrastructureLink: Bool {
+        guard let relay = backendViewModel.workspaceRelay else { return false }
+        return relay.enabled && relay.configured
     }
 
     private func strokeRoundedPolyline(
@@ -422,17 +481,41 @@ struct WorkspaceView: View {
         color: Color,
         dashed: Bool = false
     ) {
+        strokePoints(
+            in: &context,
+            points: Self.topologyPolylinePoints(from: start, to: end),
+            color: color,
+            dashed: dashed
+        )
+    }
+
+    private func strokePoints(
+        in context: inout GraphicsContext,
+        points: [CGPoint],
+        color: Color,
+        dashed: Bool = false
+    ) {
+        guard let first = points.first else { return }
         var path = Path()
-        let points = Self.topologyPolylinePoints(from: start, to: end)
-        path.move(to: points[0])
+        path.move(to: first)
         for point in points.dropFirst() {
             path.addLine(to: point)
         }
-        var style = StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+        var style = StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
         if dashed {
             style.dash = [5, 5]
         }
         context.stroke(path, with: .color(color), style: style)
+    }
+
+    private func fillDot(
+        in context: inout GraphicsContext,
+        at point: CGPoint,
+        color: Color
+    ) {
+        let radius = Self.agentEndpointDotRadius
+        let rect = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
+        context.fill(Path(ellipseIn: rect), with: .color(color))
     }
 
     static func topologyPolylinePoints(from start: CGPoint, to end: CGPoint) -> [CGPoint] {
@@ -445,10 +528,65 @@ struct WorkspaceView: View {
         ]
     }
 
+    struct AgentTopologyNode: Equatable {
+        let midY: CGFloat
+        let minX: CGFloat
+        let available: Bool
+    }
+
+    struct AgentTopologyStub: Equatable {
+        let from: CGPoint
+        let to: CGPoint
+        let available: Bool
+    }
+
+    /// Agent 列表左侧留给主干的槽宽。卡片内还有 14pt 水平 padding 才到 28pt logo，
+    /// 槽必须明显宽于「线宽 + 端点圆 + 支线」，否则主干会贴进品牌标。
+    static let agentGutterWidth: CGFloat = 56
+    static let agentTrunkInset: CGFloat = 28
+    static let agentStubGap: CGFloat = 12
+    static let agentEndpointDotRadius: CGFloat = 3.5
+
+    static func agentTopologyPaths(
+        service: CGRect,
+        nodes: [AgentTopologyNode]
+    ) -> (trunk: [CGPoint], stubs: [AgentTopologyStub]) {
+        guard !nodes.isEmpty else { return ([], []) }
+        let sorted = nodes.sorted { $0.midY < $1.midY }
+        let cardMinX = sorted.map(\.minX).min() ?? (service.minX + agentGutterWidth)
+        let trunkX = cardMinX - agentTrunkInset
+        let bottomY = sorted.map(\.midY).max() ?? service.maxY
+        let trunk = [
+            CGPoint(x: trunkX, y: service.maxY),
+            CGPoint(x: trunkX, y: bottomY)
+        ]
+        let stubs = sorted.map { node in
+            let endX = node.minX - agentStubGap
+            return AgentTopologyStub(
+                from: CGPoint(x: trunkX, y: node.midY),
+                to: CGPoint(x: endX, y: node.midY),
+                available: node.available
+            )
+        }
+        return (trunk, stubs)
+    }
+
+    static func directPathColor(for transport: WorkspaceSnapshot.DeviceTransport) -> Color {
+        switch transport.directClass {
+        case "private", "loopback":
+            return .green
+        case "tailscale":
+            return Color(red: 0.35, green: 0.72, blue: 0.92)
+        default:
+            return Color(red: 0.45, green: 0.82, blue: 0.58)
+        }
+    }
+
+
     // MARK: - 中间服务层
 
     private var serviceSection: some View {
-        HStack(alignment: .top, spacing: 22) {
+        HStack(alignment: .top, spacing: 28) {
             serviceCard
                 .frame(maxWidth: .infinity)
             relayCard
@@ -458,25 +596,20 @@ struct WorkspaceView: View {
     }
 
     private var serviceCard: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            HStack(spacing: 10) {
-                Image(systemName: "dot.radiowaves.left.and.right")
-                    .font(.system(size: 25, weight: .light))
-                    .foregroundStyle(serviceColor)
-                    .frame(width: 30)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L10n.workspaceServiceTitle)
-                        .font(.system(size: 19, weight: .semibold))
-                    Text(serviceStatusText)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .font(.system(size: 25, weight: .light))
+                .foregroundStyle(serviceColor)
+                .frame(width: 30)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L10n.workspaceServiceTitle)
+                    .font(.system(size: 19, weight: .semibold))
+                Text(serviceStatusText)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
             }
-
-            HStack(spacing: 12) {
-                headlineActions
-            }
+            Spacer(minLength: 12)
+            headlineActions
         }
         .padding(18)
         .background {
@@ -592,13 +725,19 @@ struct WorkspaceView: View {
                                 .font(.system(size: 16, weight: .semibold))
                             if group == .installed {
                                 Button {
-                                    Task { await backendViewModel.rescanInventory() }
+                                    Task {
+                                        await backendViewModel.rescanInventory()
+                                        await backendViewModel.rescanVersions()
+                                    }
                                 } label: {
                                     Image(systemName: "arrow.clockwise.circle")
                                 }
                                 .buttonStyle(.plain)
                                 .foregroundStyle(.secondary)
-                                .disabled(backendViewModel.isRescanningInventory)
+                                .disabled(
+                                    backendViewModel.isRescanningInventory
+                                        || backendViewModel.isRescanningVersions
+                                )
                                 .help(L10n.workspaceRecheckTools)
                                 .accessibilityLabel(L10n.workspaceRecheckTools)
                             }
@@ -681,9 +820,23 @@ struct WorkspaceView: View {
             if transports.count > 1 {
                 return L10n.devicePresenceSwitching
             }
-            if transports.first?.kind == "relay" {
-                return L10n.devicePresenceRelay
+            guard let transport = transports.first else {
+                return L10n.devicePresenceDisconnected
             }
+            return presenceText(forTransport: transport)
+        }
+    }
+
+    static func presenceText(forTransport transport: WorkspaceSnapshot.DeviceTransport) -> String {
+        if transport.kind == "relay" {
+            return L10n.devicePresenceRelay
+        }
+        switch transport.directClass {
+        case "private", "loopback":
+            return L10n.devicePresenceLAN
+        case "tailscale":
+            return L10n.devicePresenceTailscale
+        default:
             return L10n.devicePresenceDirect
         }
     }
@@ -695,9 +848,7 @@ struct WorkspaceView: View {
         case .disconnected:
             return L10n.devicePresenceDisconnectedAccessibility
         case .connected(let transports):
-            let names = transports.map { transport in
-                transport.kind == "relay" ? L10n.devicePresenceRelay : L10n.devicePresenceDirect
-            }
+            let names = transports.map { presenceText(forTransport: $0) }
             return L10n.devicePresenceConnectedAccessibility + ": " + names.joined(separator: " / ")
         }
     }
@@ -856,7 +1007,7 @@ struct WorkspaceView: View {
                         .help(L10n.codexConfigChangedHintFull)
                 }
                 if agent.kind.lowercased() == "grokbuild" {
-                    grokLeaderHint(for: agent)
+                    grokLeaderHint(for: agent, compact: true)
                 }
                 if isDeepSeekWeb(agent) {
                     deepSeekSeatHint(for: agent)
@@ -1055,16 +1206,6 @@ struct WorkspaceView: View {
                 EmptyView()
             }
 
-            Button {
-                Task { await backendViewModel.rescanVersions(agentIDs: [agent.id]) }
-            } label: {
-                Image(systemName: "arrow.clockwise.circle")
-                    .font(.system(size: 11, weight: .semibold))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help(L10n.versionRecheck)
-            .disabled(backendViewModel.isRescanningVersions)
         }
     }
 
@@ -1413,9 +1554,9 @@ struct WorkspaceView: View {
         }
     }
 
-    /// 名字下方副文案（§3.4 表；#2 橙色，其余次级色；hover 提供全文）。
+    /// Leader 展开面板展示完整观察态；工作站主行只保留待重启/失败，避免 socket 诊断占第三行。
     @ViewBuilder
-    private func grokLeaderHint(for agent: BackendAgentStatus) -> some View {
+    private func grokLeaderHint(for agent: BackendAgentStatus, compact: Bool = false) -> some View {
         // F3：grok 不可用时开关已由槽位禁用 + .help 提示；副文案只承载配置/socket 维度。
         switch grokLeaderRowState {
         case .coreOff:
@@ -1423,13 +1564,29 @@ struct WorkspaceView: View {
         case .coreOnPendingRestart:
             hintText(L10n.grokLeaderPendingRestart, full: L10n.grokLeaderPendingRestartFull, color: .orange)
         case .coreOnSocketDetected:
-            hintText(L10n.grokLeaderSocketDetected, full: L10n.grokLeaderSocketDetected, color: .secondary)
+            if compact {
+                EmptyView()
+            } else {
+                hintText(L10n.grokLeaderSocketDetected, full: L10n.grokLeaderSocketDetected, color: .secondary)
+            }
         case .observeSocketTrace:
-            hintText(L10n.grokLeaderSocketTrace, full: L10n.grokLeaderSocketTrace, color: .secondary)
+            if compact {
+                EmptyView()
+            } else {
+                hintText(L10n.grokLeaderSocketTrace, full: L10n.grokLeaderSocketTrace, color: .secondary)
+            }
         case .observeExplicitOff:
-            hintText(L10n.grokLeaderExplicitOff, full: L10n.grokLeaderExplicitOff, color: .secondary)
+            if compact {
+                EmptyView()
+            } else {
+                hintText(L10n.grokLeaderExplicitOff, full: L10n.grokLeaderExplicitOff, color: .secondary)
+            }
         case .observeCustomSocket(let path):
-            hintText(String(format: L10n.grokLeaderCustomSocket, path), full: path, color: .secondary)
+            if compact {
+                EmptyView()
+            } else {
+                hintText(String(format: L10n.grokLeaderCustomSocket, path), full: path, color: .secondary)
+            }
         case .failedRead(let reason):
             hintText(String(format: L10n.grokLeaderReadFailed, reason), full: reason, color: .orange)
         case .failedUnsafeForm:
@@ -1552,6 +1709,10 @@ private extension CGPoint {
 
     static func trailingCenter(of rect: CGRect) -> CGPoint {
         CGPoint(x: rect.maxX, y: rect.midY)
+    }
+
+    static func leadingCenter(of rect: CGRect) -> CGPoint {
+        CGPoint(x: rect.minX, y: rect.midY)
     }
 }
 

@@ -336,6 +336,8 @@ enum L10n {
     static var devicePresenceUnknown: String { tr("device_presence_unknown") }
     static var devicePresenceDisconnected: String { tr("device_presence_disconnected") }
     static var devicePresenceDirect: String { tr("device_presence_direct") }
+    static var devicePresenceLAN: String { tr("device_presence_lan") }
+    static var devicePresenceTailscale: String { tr("device_presence_tailscale") }
     static var devicePresenceRelay: String { tr("device_presence_relay") }
     static var devicePresenceSwitching: String { tr("device_presence_switching") }
     static var devicePresenceConnectedAccessibility: String { tr("device_presence_connected_accessibility") }
@@ -864,6 +866,8 @@ enum L10n {
             "device_presence_unknown": "Unknown",
             "device_presence_disconnected": "Not connected",
             "device_presence_direct": "Direct",
+            "device_presence_lan": "LAN",
+            "device_presence_tailscale": "Tailscale",
             "device_presence_relay": "Relay",
             "device_presence_switching": "Switching paths",
             "device_presence_connected_accessibility": "Connected",
@@ -1333,6 +1337,8 @@ enum L10n {
             "device_presence_unknown": "状态未知",
             "device_presence_disconnected": "未连接",
             "device_presence_direct": "直连",
+            "device_presence_lan": "局域网直连",
+            "device_presence_tailscale": "Tailscale",
             "device_presence_relay": "Relay",
             "device_presence_switching": "切换路径中",
             "device_presence_connected_accessibility": "已连接",

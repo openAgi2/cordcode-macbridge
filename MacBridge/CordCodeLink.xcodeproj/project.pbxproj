@@ -38,6 +38,7 @@
 		742820E9402FE38F72C8864D /* OpenCodeSeatResolveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC1ED7A9AA4245B568A2F2E4 /* OpenCodeSeatResolveTests.swift */; };
 		786AA7E7D49157B38619003B /* RuntimeManagerRestartTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC22FD66FBF5F720584F8421 /* RuntimeManagerRestartTests.swift */; };
 		7BE491FC9C32F55DFDD8366F /* WorkspaceViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E116F8D2EB44EF494A149825 /* WorkspaceViewTests.swift */; };
+		1E6C4A82D9B047219F58C3A0 /* WorkspaceTopologyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A91E04B25D4F8A9C13E6B8 /* WorkspaceTopologyTests.swift */; };
 		7F1302ED24887EA2D603700C /* MacBridgeBehaviorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC64B170A23E565E7D8F8251 /* MacBridgeBehaviorTests.swift */; };
 		823404E84CB481A19EA410EB /* NotificationCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F2FC3E11BEA5EE407C00BC1 /* NotificationCoordinatorTests.swift */; };
 		873B6481F86EECA0D44F3698 /* ConnectionStatusSheetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E18C638B10992A839E98CC26 /* ConnectionStatusSheetTests.swift */; };
@@ -163,6 +164,7 @@
 		DC2125905A5A283AE86C6A43 /* ManagementAPIClientTimeoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementAPIClientTimeoutTests.swift; sourceTree = "<group>"; };
 		E003468DFD71B379E19E4C7F /* PairingWorkspaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingWorkspaceTests.swift; sourceTree = "<group>"; };
 		E116F8D2EB44EF494A149825 /* WorkspaceViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceViewTests.swift; sourceTree = "<group>"; };
+		C7A91E04B25D4F8A9C13E6B8 /* WorkspaceTopologyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceTopologyTests.swift; sourceTree = "<group>"; };
 		E18C638B10992A839E98CC26 /* ConnectionStatusSheetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStatusSheetTests.swift; sourceTree = "<group>"; };
 		E41A7CB83294BBA77096BAA5 /* OpenCodeInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeInstaller.swift; sourceTree = "<group>"; };
 		E77BE11CA9FD973E2C417411 /* OpenCodeSeatActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeSeatActionTests.swift; sourceTree = "<group>"; };
@@ -284,6 +286,7 @@
 				9895BBFDD35A0A701986612D /* TopologyMonitorStatusStoreTests.swift */,
 				F75F0357623C9DE9A3951300 /* WebPushMaintenanceViewModelTests.swift */,
 				630D12F8D698D2902F7D9CDF /* WorkspaceSnapshotStoreTests.swift */,
+				C7A91E04B25D4F8A9C13E6B8 /* WorkspaceTopologyTests.swift */,
 				E116F8D2EB44EF494A149825 /* WorkspaceViewTests.swift */,
 			);
 			path = MacBridgeTests;
@@ -501,6 +504,7 @@
 				41432C4B5D2E651AF4363D6E /* TopologyMonitorStatusStoreTests.swift in Sources */,
 				41F39EDDEC981563BE3BFDB0 /* WebPushMaintenanceViewModelTests.swift in Sources */,
 				DB8666642F0D26985F10F852 /* WorkspaceSnapshotStoreTests.swift in Sources */,
+				1E6C4A82D9B047219F58C3A0 /* WorkspaceTopologyTests.swift in Sources */,
 				7BE491FC9C32F55DFDD8366F /* WorkspaceViewTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
