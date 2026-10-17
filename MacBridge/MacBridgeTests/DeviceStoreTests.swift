@@ -431,16 +431,20 @@ final class DeviceStoreTests: XCTestCase {
 
     func testStaleObservationBecomesUnknownAndClearsPresence() {
         let store = DeviceStore()
+        let transports: [WorkspaceSnapshot.DeviceTransport] = [
+            .init(kind: "direct", directClass: "private")
+        ]
         let phase = WorkspaceSnapshotStore.Phase.available(
             makeSnapshot(devicePresence: [
-                .init(deviceId: "d1", transports: [.init(kind: "direct", directClass: "private")])
+                .init(deviceId: "d1", transports: transports)
             ])
         )
         store.applyWorkspaceSnapshotPhase(phase, isObservationCurrent: true)
         store.applyWorkspaceSnapshotPhase(phase, isObservationCurrent: false)
 
         XCTAssertFalse(store.isPresenceCurrent)
-        XCTAssertTrue(store.presenceByDeviceId.isEmpty)
         XCTAssertEqual(store.presenceState(for: "d1"), .unknown)
+        XCTAssertEqual(store.lastObservedTransports(for: "d1"), transports)
+        XCTAssertEqual(store.presenceByDeviceId["d1"], transports)
     }
 }

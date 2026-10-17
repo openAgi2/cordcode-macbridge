@@ -23,7 +23,9 @@ final class DeviceStore: ObservableObject {
     /// 已授权设备列表。
     @Published private(set) var devices: [TrustedDevice] = []
     /// Presence is a projection of the current workspace snapshot, keyed for an ID join.
-    /// It never changes authorization records and is cleared whenever observation is stale.
+    /// It never changes authorization records. Cards still report `.unknown` while
+    /// observation is stale so the breathing green cannot linger; last transports
+    /// stay so Magpie-style resting wires can keep their path.
     @Published private(set) var presenceByDeviceId: [String: [WorkspaceSnapshot.DeviceTransport]] = [:]
     @Published private(set) var isPresenceCurrent = false
     /// 是否已完成至少一次成功加载（区分“尚未加载”与“加载结果为空”）。
@@ -68,7 +70,8 @@ final class DeviceStore: ObservableObject {
     ) {
         guard isObservationCurrent,
               case .available(let snapshot) = phase else {
-            presenceByDeviceId = [:]
+            // Magpie rebuild: nodes stay while they stay. Dropping last
+            // transports would empty every device wire for the restart window.
             isPresenceCurrent = false
             return
         }
@@ -85,6 +88,12 @@ final class DeviceStore: ObservableObject {
             return .disconnected
         }
         return .connected(transports)
+    }
+
+    /// Last observed transports, including while the card must say unknown.
+    /// Topology uses this for Magpie `.rest` wires; the breathing dot does not.
+    func lastObservedTransports(for deviceId: String) -> [WorkspaceSnapshot.DeviceTransport] {
+        presenceByDeviceId[deviceId] ?? []
     }
 
     /// 拉取已授权设备列表。失败时设置 `devicesError` 并把 `hasLoadedDevices` 置 false。

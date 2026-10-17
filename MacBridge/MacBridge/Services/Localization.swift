@@ -122,6 +122,13 @@ enum L10n {
     static var workspaceRelayNotConnected: String { tr("workspace_relay_not_connected") }
     static var workspaceRelayStatusUnknown: String { tr("workspace_relay_status_unknown") }
     static var workspaceRelayUnavailableWhileStopped: String { tr("workspace_relay_unavailable_while_stopped") }
+    static var workspaceRelayInlineConnected: String { tr("workspace_relay_inline_connected") }
+    static var workspaceRelayInlineNotConnected: String { tr("workspace_relay_inline_not_connected") }
+    static var workspaceRelayInlineDisabled: String { tr("workspace_relay_inline_disabled") }
+    static var workspaceRelayInlineNotConfigured: String { tr("workspace_relay_inline_not_configured") }
+    static var workspaceRelayInlineUnknown: String { tr("workspace_relay_inline_unknown") }
+    static var workspaceRelayInlineUnavailable: String { tr("workspace_relay_inline_unavailable") }
+    static var workspaceRelayInlineUnavailableStopped: String { tr("workspace_relay_inline_unavailable_stopped") }
     static var codexRestartSharedService: String { tr("codex_restart_shared_service") }
     static var codexConfigChangedHint: String { tr("codex_config_changed_hint") }
     static var codexConfigChangedHintFull: String { tr("codex_config_changed_hint_full") }
@@ -633,6 +640,13 @@ enum L10n {
             "workspace_relay_not_connected": "Relay is not connected.",
             "workspace_relay_status_unknown": "Relay status is unknown.",
             "workspace_relay_unavailable_while_stopped": "The local service is stopped, so Relay cannot be observed.",
+            "workspace_relay_inline_connected": "Connected",
+            "workspace_relay_inline_not_connected": "Not connected",
+            "workspace_relay_inline_disabled": "Off",
+            "workspace_relay_inline_not_configured": "Not configured",
+            "workspace_relay_inline_unknown": "Status unknown",
+            "workspace_relay_inline_unavailable": "Status unavailable",
+            "workspace_relay_inline_unavailable_stopped": "Service stopped",
             "workspace_no_tools_title": "One step away",
             "workspace_no_tools_subtitle": "CordCode Link is running, but no AI tools are available yet.",
             "topology_title": "Desktop Sync",
@@ -1104,6 +1118,13 @@ enum L10n {
             "workspace_relay_not_connected": "Relay 未连接。",
             "workspace_relay_status_unknown": "Relay 状态未知。",
             "workspace_relay_unavailable_while_stopped": "本机服务已停止，无法观测 Relay。",
+            "workspace_relay_inline_connected": "已连接",
+            "workspace_relay_inline_not_connected": "未连接",
+            "workspace_relay_inline_disabled": "已关闭",
+            "workspace_relay_inline_not_configured": "未配置",
+            "workspace_relay_inline_unknown": "状态未知",
+            "workspace_relay_inline_unavailable": "状态暂不可用",
+            "workspace_relay_inline_unavailable_stopped": "服务已停止",
             "workspace_no_tools_title": "还差一步才能开始",
             "workspace_no_tools_subtitle": "CordCode Link 正在运行，但还没有可用的 AI 工具。",
             "topology_title": "Desktop 同步",

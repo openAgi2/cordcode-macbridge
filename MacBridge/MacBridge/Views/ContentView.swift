@@ -262,7 +262,7 @@ struct ContentView: View {
     private func reloadManagementAPIData() async {
         guard configureBackendClientIfAvailable() else { return }
         async let devices: Void = deviceStore.loadDevices()
-        async let agents: Void = backendVM.loadAgents()
+        async let agents: Void = backendVM.loadAgents(showLoading: false)
         async let overview: Void = viewModel.refreshOverviewData()
         _ = await (devices, agents, overview)
     }

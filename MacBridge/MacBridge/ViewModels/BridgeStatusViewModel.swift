@@ -68,7 +68,8 @@ class BridgeStatusViewModel: ObservableObject {
             overviewRetryTask?.cancel()
             overviewRetryTask = nil
         case .failure(let error):
-            relayConfigured = nil
+            // Magpie rest: a selection restart must not blank a known Relay
+            // fact. Keep the last configured value until a real sample arrives.
             errors.append(String(format: L10n.overviewRelayStatusFailed, error.localizedDescription))
             if !isRetry {
                 scheduleOverviewRetry()

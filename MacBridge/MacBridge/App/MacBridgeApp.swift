@@ -48,7 +48,7 @@ struct MacBridgeApp: App {
                 // M1: request notification authorization here (not in applicationDidFinishLaunching,
                 // where notificationCoordinator is still nil for SwiftUI apps — see note above).
                 appDelegate.notificationCoordinator?.requestAuthorization()
-                // 拓扑监视随应用前后台暂停/恢复（UI-2：保留 phase，激活即恢复采样）。
+                // 拓扑监视和工作区快照随应用前后台暂停/恢复（保留 phase 与 occupancy，激活即恢复采样）。
                 NotificationCenter.default.addObserver(
                     forName: NSApplication.didResignActiveNotification,
                     object: nil, queue: .main

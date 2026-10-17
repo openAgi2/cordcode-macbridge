@@ -129,21 +129,51 @@ final class WorkspaceSnapshotStoreTests: XCTestCase {
         store.stopPolling()
     }
 
-    func testStoppingPollingAndBackgroundingExpireOnlineTruth() async {
-        let spy = SnapshotAPISpy(results: [.success(makeSnapshot()), .success(makeSnapshot())])
+    func testBackgroundingPreservesOnlineTruthAndStopPollingExpiresIt() async {
+        let snapshot = makeSnapshot()
+        let spy = SnapshotAPISpy(results: [.success(snapshot), .success(snapshot)])
         let store = WorkspaceSnapshotStore(
             cadence: 0.01, staleAfterFailures: 3, expectedIdentity: { .init(pid: 77, bridgeEpoch: 88) }
         )
         store.configure(apiClient: spy)
         await waitUntil(store.isObservationCurrent)
+        XCTAssertEqual(store.phase, .available(snapshot))
 
         store.setAppActive(false)
-        XCTAssertFalse(store.isObservationCurrent)
+        XCTAssertTrue(store.isObservationCurrent, "window deactivation must not expire last occupancy")
+        XCTAssertEqual(store.phase, .available(snapshot), "pause sampling must keep the last available snapshot")
 
         store.setAppActive(true)
-        await waitUntil(store.isObservationCurrent)
+        XCTAssertTrue(store.isObservationCurrent)
+        XCTAssertEqual(store.phase, .available(snapshot))
+
         store.stopPolling()
         XCTAssertFalse(store.isObservationCurrent)
+        XCTAssertEqual(store.phase, .diagnostic(.stale))
+    }
+
+    func testBackgroundingPausesPollingWithoutClearingPhase() async {
+        let snapshot = makeSnapshot()
+        let spy = SnapshotAPISpy(results: Array(repeating: .success(snapshot), count: 40))
+        let store = WorkspaceSnapshotStore(
+            cadence: 0.05, staleAfterFailures: 3, expectedIdentity: { .init(pid: 77, bridgeEpoch: 88) }
+        )
+        store.configure(apiClient: spy)
+        await waitUntil(store.isObservationCurrent)
+        store.setAppActive(false)
+        try? await Task.sleep(nanoseconds: 80_000_000)
+        let callsWhileBackground = spy.callCount
+        try? await Task.sleep(nanoseconds: 250_000_000)
+        XCTAssertEqual(spy.callCount, callsWhileBackground, "后台必须停止轮询")
+        XCTAssertTrue(store.isObservationCurrent)
+        XCTAssertEqual(store.phase, .available(snapshot))
+        store.setAppActive(true)
+        await waitUntil(
+            spy.callCount > callsWhileBackground,
+            message: "前台必须恢复轮询"
+        )
+        XCTAssertTrue(store.isObservationCurrent)
+        store.stopPolling()
     }
 
     func testNetworkFailuresExpireLastAvailableSnapshot() async {

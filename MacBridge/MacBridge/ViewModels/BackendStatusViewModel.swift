@@ -54,6 +54,42 @@ struct BackendAgentStatus: Identifiable, Equatable {
 
     /// 状态是否为可用
     var isAvailable: Bool { status == "available" }
+
+    func with(isRefreshing: Bool) -> BackendAgentStatus {
+        BackendAgentStatus(
+            id: id,
+            displayName: displayName,
+            kind: kind,
+            status: status,
+            reason: reason,
+            isRefreshing: isRefreshing,
+            requiresPollingForExternalTurns: requiresPollingForExternalTurns,
+            installGuidance: installGuidance,
+            snapshotVersion: snapshotVersion,
+            versionCheck: versionCheck,
+            installation: installation,
+            isActive: isActive,
+            isObservationCurrent: isObservationCurrent
+        )
+    }
+
+    func merging(live: AgentInfo, isRefreshing: Bool) -> BackendAgentStatus {
+        BackendAgentStatus(
+            id: id,
+            displayName: displayName,
+            kind: kind,
+            status: live.status,
+            reason: live.reason,
+            isRefreshing: isRefreshing,
+            requiresPollingForExternalTurns: live.requiresPollingForExternalTurns,
+            installGuidance: installGuidance,
+            snapshotVersion: snapshotVersion,
+            versionCheck: versionCheck,
+            installation: installation,
+            isActive: true,
+            isObservationCurrent: isObservationCurrent
+        )
+    }
 }
 
 enum CodexDesktopPairingError: LocalizedError {
@@ -70,7 +106,9 @@ enum CodexDesktopPairingError: LocalizedError {
 /// 后端管理页 ViewModel
 @MainActor
 class BackendStatusViewModel: ObservableObject {
-    @Published var agents: [BackendAgentStatus] = []
+    /// Magpie occupancy: seats exist before any live list or snapshot arrives.
+    /// GET /internal/agents never owns membership.
+    @Published var agents: [BackendAgentStatus] = catalogOccupancy()
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var isShowingStaleResults = false
@@ -92,6 +130,28 @@ class BackendStatusViewModel: ObservableObject {
     private var didStartInitialVersionRescan = false
     private var lastWorkspaceSnapshot: WorkspaceSnapshot?
 
+    static func catalogOccupancy(existing: [BackendAgentStatus] = []) -> [BackendAgentStatus] {
+        let existingByID = Dictionary(existing.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return ProductAgentCatalog.products.map { product in
+            let existing = existingByID[product.id]
+            return BackendAgentStatus(
+                id: product.id,
+                displayName: existing?.displayName ?? product.name,
+                kind: product.kind,
+                status: existing?.status ?? "inactive",
+                reason: existing?.reason,
+                isRefreshing: existing?.isRefreshing ?? false,
+                requiresPollingForExternalTurns: existing?.requiresPollingForExternalTurns ?? false,
+                installGuidance: existing?.installGuidance,
+                snapshotVersion: existing?.snapshotVersion,
+                versionCheck: existing?.versionCheck,
+                installation: existing?.installation,
+                isActive: existing?.isActive ?? false,
+                isObservationCurrent: existing?.isObservationCurrent ?? false
+            )
+        }
+    }
+
     /// 配置 API 客户端
     func configure(apiClient: ManagementAPIClient) {
         self.apiClient = apiClient
@@ -104,9 +164,9 @@ class BackendStatusViewModel: ObservableObject {
     ) {
         isWorkspaceObservationCurrent = isObservationCurrent
         guard isObservationCurrent, case .available(let snapshot) = phase else {
-            activeDrivers = []
-            requestedDrivers = []
-            workspaceRelay = nil
+            // Magpie rebuild keeps catalog/wires while they stay. A selection
+            // restart must not nil the last relay or collapse rows. Device
+            // presence is still unknown until the next current snapshot.
             agents = agents.map { agent in
                 BackendAgentStatus(
                     id: agent.id,
@@ -137,45 +197,65 @@ class BackendStatusViewModel: ObservableObject {
 
     private func rebuildProductAgents(from snapshot: WorkspaceSnapshot?) {
         guard let snapshot else { return }
-        let activeAgents = Dictionary(
+        applyCatalogRows(
+            liveAgents: snapshot.agents.compactMap(\.readiness),
+            observations: Dictionary(
+                snapshot.agents.map { ($0.id, $0) },
+                uniquingKeysWith: { first, _ in first }
+            ),
+            observationCurrent: true
+        )
+    }
+
+    /// Magpie rebuild: "agents stay where they are while they stay."
+    /// GET /internal/agents only names live backends. Occupancy is the product
+    /// catalog; live status is paint, not membership.
+    func applyLiveAgentList(_ liveAgents: [AgentInfo]) {
+        applyCatalogRows(
+            liveAgents: liveAgents,
+            observations: Dictionary(
+                (lastWorkspaceSnapshot?.agents ?? []).map { ($0.id, $0) },
+                uniquingKeysWith: { first, _ in first }
+            ),
+            observationCurrent: isWorkspaceObservationCurrent
+        )
+    }
+
+    private func applyCatalogRows(
+        liveAgents: [AgentInfo],
+        observations: [String: WorkspaceSnapshot.Agent],
+        observationCurrent: Bool
+    ) {
+        let existingByID = Dictionary(
             agents.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        let observations = Dictionary(
-            snapshot.agents.map { ($0.id, $0) },
-            uniquingKeysWith: { first, _ in first }
+        let liveByID = Dictionary(
+            liveAgents.map { ($0.id, $0) },
+            uniquingKeysWith: { _, last in last }
         )
-
         agents = ProductAgentCatalog.products.map { product in
+            let existing = existingByID[product.id]
             let observation = observations[product.id]
-            let active = activeAgents[product.id] ??
-                agents.first { $0.kind.lowercased() == product.kind.lowercased() }
-            let readiness = observation?.readiness
-            let activeStatus = active ?? readiness.map {
-                BackendAgentStatus(
-                    id: product.id,
-                    displayName: product.name,
-                    kind: product.kind,
-                    status: $0.status,
-                    reason: $0.reason,
-                    isRefreshing: false,
-                    requiresPollingForExternalTurns: $0.requiresPollingForExternalTurns
-                )
+            let live = liveByID[product.id] ?? liveAgents.first {
+                $0.kind.lowercased() == product.kind.lowercased()
             }
             return BackendAgentStatus(
                 id: product.id,
-                displayName: activeStatus?.displayName ?? product.name,
+                displayName: existing?.displayName ?? live?.displayName ?? product.name,
                 kind: product.kind,
-                status: activeStatus?.status ?? "inactive",
-                reason: activeStatus?.reason ?? readiness?.reason,
-                isRefreshing: activeStatus?.isRefreshing ?? false,
-                requiresPollingForExternalTurns: activeStatus?.requiresPollingForExternalTurns ?? readiness?.requiresPollingForExternalTurns ?? false,
-                installGuidance: observation?.installGuidance,
-                snapshotVersion: observation?.version,
-                versionCheck: observation?.versionCheck,
-                installation: observation?.installation,
-                isActive: activeStatus != nil || readiness != nil,
-                isObservationCurrent: true
+                status: live?.status ?? existing?.status ?? "inactive",
+                reason: live?.reason ?? existing?.reason,
+                isRefreshing: existing?.isRefreshing ?? false,
+                requiresPollingForExternalTurns: live?.requiresPollingForExternalTurns
+                    ?? existing?.requiresPollingForExternalTurns
+                    ?? false,
+                installGuidance: observation?.installGuidance ?? existing?.installGuidance,
+                snapshotVersion: observation?.version ?? existing?.snapshotVersion,
+                versionCheck: observation?.versionCheck ?? existing?.versionCheck,
+                installation: observation?.installation ?? existing?.installation,
+                isActive: live != nil,
+                isObservationCurrent: observationCurrent
             )
         }
     }
@@ -235,23 +315,15 @@ class BackendStatusViewModel: ObservableObject {
     /// 从 management API 加载后端列表
     func loadAgents(showLoading: Bool = true) async {
         guard let client = apiClient else { return }
-        if showLoading {
+        // Occupied catalog is chrome. A selection restart must not flash a
+        // loading replacement over seats that are already on screen.
+        if showLoading, agents.allSatisfy({ $0.installation == nil && !$0.isActive }) {
             isLoading = true
         }
         errorMessage = nil
         do {
             let agentList = try await client.getAgents()
-            agents = agentList.map { agent in
-                BackendAgentStatus(
-                    id: agent.id,
-                    displayName: agent.displayName,
-                    kind: agent.kind,
-                    status: agent.status,
-                    reason: agent.reason,
-                    isRefreshing: false,
-                    requiresPollingForExternalTurns: agent.requiresPollingForExternalTurns
-                )
-            }
+            applyLiveAgentList(agentList)
             isShowingStaleResults = false
         } catch {
             if agents.isEmpty {
@@ -274,17 +346,7 @@ class BackendStatusViewModel: ObservableObject {
         errorMessage = nil
         do {
             let agentList = try await client.refreshAgents()
-            agents = agentList.map { agent in
-                BackendAgentStatus(
-                    id: agent.id,
-                    displayName: agent.displayName,
-                    kind: agent.kind,
-                    status: agent.status,
-                    reason: agent.reason,
-                    isRefreshing: false,
-                    requiresPollingForExternalTurns: agent.requiresPollingForExternalTurns
-                )
-            }
+            applyLiveAgentList(agentList)
             isShowingStaleResults = false
         } catch {
             if agents.isEmpty {
@@ -303,7 +365,7 @@ class BackendStatusViewModel: ObservableObject {
         guard let client = apiClient else { return }
         agents = agents.map { agent in
             if agent.id == id {
-                return BackendAgentStatus(id: agent.id, displayName: agent.displayName, kind: agent.kind, status: agent.status, reason: agent.reason, isRefreshing: true, requiresPollingForExternalTurns: agent.requiresPollingForExternalTurns)
+                return agent.with(isRefreshing: true)
             }
             return agent
         }
@@ -311,7 +373,7 @@ class BackendStatusViewModel: ObservableObject {
             let result = try await client.testAgent(id)
             agents = agents.map { agent in
                 if agent.id == id {
-                    return BackendAgentStatus(id: result.id, displayName: result.displayName, kind: result.kind, status: result.status, reason: result.reason, isRefreshing: false, requiresPollingForExternalTurns: result.requiresPollingForExternalTurns)
+                    return agent.merging(live: result, isRefreshing: false)
                 }
                 return agent
             }
@@ -323,7 +385,7 @@ class BackendStatusViewModel: ObservableObject {
             isShowingStaleResults = !agents.isEmpty
             agents = agents.map { agent in
                 if agent.id == id {
-                    return BackendAgentStatus(id: agent.id, displayName: agent.displayName, kind: agent.kind, status: agent.status, reason: agent.reason, isRefreshing: false, requiresPollingForExternalTurns: agent.requiresPollingForExternalTurns)
+                    return agent.with(isRefreshing: false)
                 }
                 return agent
             }

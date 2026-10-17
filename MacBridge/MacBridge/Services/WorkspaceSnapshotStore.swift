@@ -25,8 +25,9 @@ final class WorkspaceSnapshotStore: ObservableObject {
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var lastUpdatedAt: Date?
     @Published private(set) var lastDiagnosticDetail: String?
-    /// False as soon as one observation fetch fails. A retained `.available` phase may
-    /// still hold non-presence context, but it must never be rendered as current online state.
+    /// False after a failed observation, identity mismatch, unauthorized response, or
+    /// `stopPolling()`. Window deactivation is not a failure: last `.available` stays
+    /// current while sampling is paused, matching TopologyMonitor.
     @Published private(set) var isObservationCurrent = false
 
     private let cadence: TimeInterval
@@ -67,11 +68,11 @@ final class WorkspaceSnapshotStore: ObservableObject {
         invalidateObservation()
     }
 
+    /// Pause/resume sampling with the window. Resigning active only stops polls;
+    /// last occupancy, phase, and `isObservationCurrent` stay. Runtime keeps running
+    /// behind other apps, so Cmd-Tab must not flash 状态未知 / clocks / dashed wires.
     func setAppActive(_ active: Bool) {
         isAppActive = active
-        if !active {
-            invalidateObservation()
-        }
     }
 
     func invalidateObservation() {

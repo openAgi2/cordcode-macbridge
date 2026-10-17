@@ -33,6 +33,7 @@ struct WorkspaceView: View {
     @StateObject private var grokLeaderManager = GrokLeaderModeManager()
     @State private var grokLeaderFailureAlert: GrokLeaderToggleFailure?
     @State private var agentSelectionFailureMessage: String?
+    @State private var topologyGeometry = TopologyGeometryStore()
 
     private let topologyCoordinateSpace = "workspace-topology"
 
@@ -47,20 +48,9 @@ struct WorkspaceView: View {
     }
 
     private var agents: [BackendAgentStatus] {
-        if !backendViewModel.agents.isEmpty {
-            return backendViewModel.agents
-        }
-        return viewModel.agents.map {
-            BackendAgentStatus(
-                id: $0.id,
-                displayName: $0.displayName,
-                kind: $0.kind,
-                status: $0.status,
-                reason: $0.reason,
-                isRefreshing: false,
-                requiresPollingForExternalTurns: $0.requiresPollingForExternalTurns
-            )
-        }
+        // Live GET /internal/agents is paint, not occupancy. Never collapse
+        // to the runtime's enabled-only list or rows vanish on toggle.
+        Self.displayedAgents(catalog: backendViewModel.agents)
     }
 
     var body: some View {
@@ -75,6 +65,7 @@ struct WorkspaceView: View {
             .coordinateSpace(name: topologyCoordinateSpace)
             .overlayPreferenceValue(WorkspaceTopologyAnchorKey.self) { anchors in
                 topologyLayer(anchors: anchors)
+                    .transaction { $0.animation = nil }
             }
         }
         .confirmationDialog(
@@ -152,36 +143,49 @@ struct WorkspaceView: View {
         }
     }
 
+    private var isApplyingRuntime: Bool {
+        viewModel.status == .starting || isRestarting
+    }
+
+    @ViewBuilder
+    private var serviceRuntimeControls: some View {
+        HStack(spacing: 13) {
+            RuntimeControlButton(
+                title: viewModel.status == .starting
+                    ? L10n.overviewStarting
+                    : (isRestarting ? L10n.overviewRestarting : L10n.restart),
+                systemImage: "arrow.clockwise",
+                width: 113,
+                isDisabled: isApplyingRuntime
+            ) {
+                isRestarting = true
+                onRestartBridge()
+            }
+            RuntimeControlButton(
+                title: L10n.stop,
+                systemImage: "stop",
+                width: 118,
+                isDisabled: viewModel.status == .starting
+            ) {
+                showStopConfirmation = true
+            }
+        }
+    }
+
     @ViewBuilder
     private var headlineActions: some View {
         switch viewModel.status {
-        case .ready:
-            HStack(spacing: 13) {
-                RuntimeControlButton(
-                    title: isRestarting ? L10n.overviewRestarting : L10n.restart,
-                    systemImage: "arrow.clockwise",
-                    width: 113,
-                    isDisabled: isRestarting
-                ) {
-                    isRestarting = true
-                    onRestartBridge()
-                }
-                RuntimeControlButton(
-                    title: L10n.stop,
-                    systemImage: "stop",
-                    width: 118
-                ) {
-                    showStopConfirmation = true
-                }
-            }
+        case .ready, .starting:
+            // Magpie `steady` / `.rt-cap { min-height }`: emptying a part and
+            // filling it again jumps the page. Keep Restart/Stop chrome while
+            // a selection restart is applying.
+            serviceRuntimeControls
         case .readyNoAgents:
             Button(L10n.workspaceRecheck) {
                 Task { await backendViewModel.refreshAgents() }
             }
             .disabled(backendViewModel.isLoading)
             .controlSize(.regular)
-        case .starting:
-            Button(L10n.overviewStarting) {}.disabled(true).controlSize(.regular)
         case .idle, .stopped, .sleeping:
             Button(L10n.workspaceStart, action: onStartBridge)
                 .buttonStyle(.borderedProminent)
@@ -346,16 +350,18 @@ struct WorkspaceView: View {
 
     // MARK: - 三层拓扑画布
 
-    /// 画布必须用 overlayPreferenceValue 解析锚点。兄弟 GeometryReader
-    /// 收不到子视图 preference，线上就会整层消失。
+    /// Magpie `rt-wires` is a persistent overlay SVG. `path()` appends once;
+    /// `layout()` only writes each path's `d`. Canvas is immediate-mode, so
+    /// returning with no rects would blank the stage. Keep last live rects
+    /// and never remount this overlay.
     private func topologyLayer(anchors: [String: Anchor<CGRect>]) -> some View {
         GeometryReader { proxy in
             Canvas { context, _ in
+                let _ = topologySignature
                 drawTopology(in: &context, proxy: proxy, anchors: anchors)
             }
         }
         .allowsHitTesting(false)
-        .id(topologySignature)
     }
 
     private var topologySignature: String {
@@ -363,11 +369,11 @@ struct WorkspaceView: View {
             "\(device.deviceId):\(String(describing: deviceStore.presenceState(for: device.deviceId)))"
         }.joined(separator: ",")
         let agentPart = agents.map { agent in
-            "\(agent.id):\(agent.isActive):\(agent.isAvailable):\(agent.isObservationCurrent)"
+            "\(agent.id):\(agentSelectionStore.isEnabled(agent.id)):\(agent.isAvailable)"
         }.joined(separator: ",")
         let relay = backendViewModel.workspaceRelay
         let relayPart = relay.map { "\($0.enabled)-\($0.configured)-\($0.connected)" } ?? "nil"
-        return "\(viewModel.status)-\(devices)-\(agentPart)-\(relayPart)"
+        return "\(viewModel.status)-\(backendViewModel.isWorkspaceObservationCurrent)-\(deviceStore.isPresenceCurrent)-\(devices)-\(agentPart)-\(relayPart)"
     }
 
     private func drawTopology(
@@ -375,37 +381,64 @@ struct WorkspaceView: View {
         proxy: GeometryProxy,
         anchors: [String: Anchor<CGRect>]
     ) {
-        guard isServiceRunning else { return }
-
-        func rect(_ key: String) -> CGRect? {
-            guard let anchor = anchors[key] else { return nil }
-            return proxy[anchor]
+        guard isServiceRunning else {
+            topologyGeometry.rects.removeAll()
+            return
         }
 
+        var liveKeys: Set<String> = ["service", "relay"]
+        for device in deviceStore.devices {
+            liveKeys.insert("device:\(device.deviceId)")
+        }
+        for agent in agents {
+            liveKeys.insert("agent:\(agent.id)")
+        }
+
+        var current: [String: CGRect] = [:]
+        for (key, anchor) in anchors where liveKeys.contains(key) {
+            current[key] = proxy[anchor]
+        }
+        topologyGeometry.rects = Self.persistTopologyRects(
+            current: current,
+            previous: topologyGeometry.rects,
+            liveKeys: liveKeys
+        )
+
+        func rect(_ key: String) -> CGRect? {
+            topologyGeometry.rects[key]
+        }
+
+        // Magpie layout() returns early when the stage has no width and leaves
+        // existing path `d` in place. Canvas would otherwise blank this frame.
         guard let service = rect("service") else { return }
         let relay = rect("relay")
         var drewRelayToService = false
 
         for device in deviceStore.devices {
-            guard case .connected(let transports) = deviceStore.presenceState(for: device.deviceId),
-                  let deviceRect = rect("device:\(device.deviceId)") else {
+            guard let link = Self.deviceTopologyLink(
+                presence: deviceStore.presenceState(for: device.deviceId),
+                lastObserved: deviceStore.lastObservedTransports(for: device.deviceId)
+            ), let deviceRect = rect("device:\(device.deviceId)") else {
                 continue
             }
-            for transport in transports {
+            let opacity = link.rest ? 0.4 : 0.9
+            for transport in link.transports {
                 if transport.kind == "relay" {
                     guard let relay else { continue }
                     strokeRoundedPolyline(
                         in: &context,
                         from: .bottomCenter(of: deviceRect),
                         to: .topCenter(of: relay),
-                        color: Color.accentColor.opacity(0.9)
+                        color: Color.accentColor.opacity(opacity),
+                        dashed: link.rest
                     )
                     if !drewRelayToService {
                         strokeRoundedPolyline(
                             in: &context,
                             from: .leadingCenter(of: relay),
                             to: .trailingCenter(of: service),
-                            color: Color.accentColor.opacity(0.9)
+                            color: Color.accentColor.opacity(opacity),
+                            dashed: link.rest
                         )
                         drewRelayToService = true
                     }
@@ -414,7 +447,8 @@ struct WorkspaceView: View {
                         in: &context,
                         from: .bottomCenter(of: deviceRect),
                         to: .topCenter(of: service),
-                        color: Self.directPathColor(for: transport).opacity(0.9)
+                        color: Self.directPathColor(for: transport).opacity(opacity),
+                        dashed: link.rest
                     )
                 }
             }
@@ -422,7 +456,11 @@ struct WorkspaceView: View {
 
         if let relay, !drewRelayToService, shouldDrawRelayInfrastructureLink {
             let connected = backendViewModel.workspaceRelay?.connected == true
-            let color = Color.accentColor.opacity(connected ? 0.9 : 0.4)
+            let style = Self.relayInfrastructureStyle(
+                observationCurrent: backendViewModel.isWorkspaceObservationCurrent,
+                connected: connected
+            )
+            let color = Color.accentColor.opacity(style.opacity)
             let start = CGPoint.trailingCenter(of: service)
             let end = CGPoint.leadingCenter(of: relay)
             strokeRoundedPolyline(
@@ -430,14 +468,15 @@ struct WorkspaceView: View {
                 from: start,
                 to: end,
                 color: color,
-                dashed: !connected
+                dashed: style.dashed
             )
             fillDot(in: &context, at: start, color: color)
             fillDot(in: &context, at: end, color: color)
         }
 
         let agentNodes: [AgentTopologyNode] = agents.compactMap { agent in
-            guard agent.isActive, agent.isObservationCurrent, let agentRect = rect("agent:\(agent.id)") else {
+            guard Self.shouldDrawAgentTopologyLink(isEnabled: agentSelectionStore.isEnabled(agent.id)),
+                  let agentRect = rect("agent:\(agent.id)") else {
                 return nil
             }
             return AgentTopologyNode(
@@ -447,31 +486,206 @@ struct WorkspaceView: View {
             )
         }
         let layout = Self.agentTopologyPaths(service: service, nodes: agentNodes)
+        let observationCurrent = backendViewModel.isWorkspaceObservationCurrent
+        let trunkStyle = Self.agentTopologyStyle(
+            observationCurrent: observationCurrent,
+            available: true
+        )
         if layout.trunk.count >= 2 {
             strokePoints(
                 in: &context,
                 points: layout.trunk,
-                color: Color.green.opacity(0.82)
+                color: Color.green.opacity(trunkStyle.opacity),
+                dashed: trunkStyle.dashed
             )
         }
         for stub in layout.stubs {
+            let style = Self.agentTopologyStyle(
+                observationCurrent: observationCurrent,
+                available: stub.available
+            )
+            let color = stub.available ? Color.green : Color.orange
             strokePoints(
                 in: &context,
                 points: [stub.from, stub.to],
-                color: stub.available ? Color.green.opacity(0.9) : Color.orange.opacity(0.85),
-                dashed: !stub.available
+                color: color.opacity(style.opacity),
+                dashed: style.dashed
             )
-            fillDot(
-                in: &context,
-                at: stub.to,
-                color: stub.available ? Color.green : Color.orange
-            )
+            fillDot(in: &context, at: stub.to, color: color.opacity(style.opacity))
         }
     }
 
     private var shouldDrawRelayInfrastructureLink: Bool {
         guard let relay = backendViewModel.workspaceRelay else { return false }
-        return relay.enabled && relay.configured
+        return Self.shouldDrawRelayInfrastructureLink(
+            enabled: relay.enabled,
+            configured: relay.configured
+        )
+    }
+
+    /// Magpie `rebuild`: "agents stay where they are while they stay."
+    /// A selection restart must not drop every stub; only a disabled agent leaves.
+    static func displayedAgents(catalog: [BackendAgentStatus]) -> [BackendAgentStatus] {
+        if catalog.map(\.id) == ProductAgentCatalog.ids {
+            return catalog
+        }
+        return BackendStatusViewModel.catalogOccupancy(existing: catalog)
+    }
+
+    static func shouldShowAgentRecheck(isActive: Bool, isAvailable: Bool) -> Bool {
+        isActive && !isAvailable
+    }
+
+    static func shouldDrawAgentTopologyLink(isEnabled: Bool) -> Bool {
+        isEnabled
+    }
+
+    static func shouldDrawRelayInfrastructureLink(enabled: Bool, configured: Bool) -> Bool {
+        enabled && configured
+    }
+
+    enum RelayCardTone: Equatable {
+        case connected
+        case attention
+        case inactive
+
+        var color: Color {
+            switch self {
+            case .connected: return .green
+            case .attention: return .orange
+            case .inactive: return .secondary
+            }
+        }
+    }
+
+    struct RelayCardPresentation: Equatable {
+        let statusText: String
+        let tone: RelayCardTone
+        let showsConnectionStatusButton: Bool
+        let isRest: Bool
+    }
+
+    /// Last known Relay occupancy stays through a selection restart. Overview
+    /// `relayConfigured == nil` is a missing sample, not "Relay broke".
+    static func relayCardPresentation(
+        observationCurrent: Bool,
+        workspaceRelay: WorkspaceSnapshot.Relay?,
+        overviewRelayConfigured: Bool?,
+        serviceRunning: Bool
+    ) -> RelayCardPresentation {
+        if let relay = workspaceRelay {
+            let rest = !observationCurrent
+            if !relay.enabled {
+                return RelayCardPresentation(
+                    statusText: L10n.workspaceRelayInlineDisabled,
+                    tone: .inactive,
+                    showsConnectionStatusButton: false,
+                    isRest: rest
+                )
+            }
+            if !relay.configured {
+                return RelayCardPresentation(
+                    statusText: L10n.workspaceRelayInlineNotConfigured,
+                    tone: .attention,
+                    showsConnectionStatusButton: true,
+                    isRest: rest
+                )
+            }
+            if relay.connected {
+                return RelayCardPresentation(
+                    statusText: L10n.workspaceRelayInlineConnected,
+                    tone: .connected,
+                    showsConnectionStatusButton: false,
+                    isRest: rest
+                )
+            }
+            return RelayCardPresentation(
+                statusText: L10n.workspaceRelayInlineNotConnected,
+                tone: .attention,
+                showsConnectionStatusButton: false,
+                isRest: rest
+            )
+        }
+        switch overviewRelayConfigured {
+        case true:
+            return RelayCardPresentation(
+                statusText: serviceRunning
+                    ? L10n.workspaceRelayInlineUnknown
+                    : L10n.workspaceRelayInlineUnavailableStopped,
+                tone: serviceRunning ? .attention : .inactive,
+                showsConnectionStatusButton: false,
+                isRest: true
+            )
+        case false:
+            return RelayCardPresentation(
+                statusText: L10n.workspaceRelayInlineDisabled,
+                tone: .inactive,
+                showsConnectionStatusButton: false,
+                isRest: false
+            )
+        case nil:
+            return RelayCardPresentation(
+                statusText: L10n.workspaceRelayInlineUnavailable,
+                tone: .attention,
+                showsConnectionStatusButton: false,
+                isRest: true
+            )
+        }
+    }
+
+    /// Magpie `.rt-wires path.rest { stroke-dasharray: 2 6; opacity: .45 }`:
+    /// resting/stale stays drawn, faded, never emptied.
+    static func relayInfrastructureStyle(
+        observationCurrent: Bool,
+        connected: Bool
+    ) -> (dashed: Bool, opacity: Double) {
+        if observationCurrent && connected {
+            return (false, 0.9)
+        }
+        return (true, 0.4)
+    }
+
+    static func agentTopologyStyle(
+        observationCurrent: Bool,
+        available: Bool
+    ) -> (dashed: Bool, opacity: Double) {
+        if !observationCurrent {
+            return (true, 0.4)
+        }
+        return available ? (false, 0.9) : (true, 0.85)
+    }
+
+    /// Magpie `rebuild`: keep last rects for nodes that still exist. Canvas has
+    /// no persistent path `d`, so a missing preference this frame must not drop
+    /// the wire.
+    static func persistTopologyRects(
+        current: [String: CGRect],
+        previous: [String: CGRect],
+        liveKeys: Set<String>
+    ) -> [String: CGRect] {
+        var next = previous.filter { liveKeys.contains($0.key) }
+        for (key, rect) in current where liveKeys.contains(key) {
+            if rect.width > 0, rect.height > 0 {
+                next[key] = rect
+            }
+        }
+        return next
+    }
+
+    /// Card presence stays `.unknown` while stale (no breathing green). Topology
+    /// still uses last transports as Magpie rest wires.
+    static func deviceTopologyLink(
+        presence: DeviceStore.PresenceState,
+        lastObserved: [WorkspaceSnapshot.DeviceTransport]
+    ) -> (transports: [WorkspaceSnapshot.DeviceTransport], rest: Bool)? {
+        switch presence {
+        case .connected(let transports):
+            return transports.isEmpty ? nil : (transports, false)
+        case .unknown:
+            return lastObserved.isEmpty ? nil : (lastObserved, true)
+        case .disconnected:
+            return nil
+        }
     }
 
     private func strokeRoundedPolyline(
@@ -612,6 +826,7 @@ struct WorkspaceView: View {
             headlineActions
         }
         .padding(18)
+        .frame(minHeight: 76)
         .background {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color.white.opacity(0.065))
@@ -629,39 +844,55 @@ struct WorkspaceView: View {
     }
 
     private var relayCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 9) {
-                Circle()
-                    .fill(relayColor)
-                    .frame(width: 9, height: 9)
-                Text(L10n.workspaceRelayTitle)
-                    .font(.system(size: 15, weight: .semibold))
-                Spacer()
-            }
-            Text(relaySummary)
+        let presentation = relayCardPresentation
+        return HStack(alignment: .center, spacing: 8) {
+            Circle()
+                .fill(presentation.tone.color.opacity(presentation.isRest ? 0.55 : 1))
+                .frame(width: 9, height: 9)
+            Text(L10n.workspaceRelayTitle)
+                .font(.system(size: 15, weight: .semibold))
+            Text(presentation.statusText)
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if viewModel.relayConfigured != true {
+                .lineLimit(1)
+            if presentation.isRest {
+                Image(systemName: "clock")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .help(L10n.workspaceObservationStale)
+                    .accessibilityLabel(L10n.workspaceObservationStale)
+            }
+            Spacer(minLength: 8)
+            if presentation.showsConnectionStatusButton {
                 Button(L10n.connectionStatus) {
                     onOpenConnectionStatus?()
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.small)
+                .controlSize(.mini)
             }
-            Spacer(minLength: 0)
         }
         .padding(16)
+        .frame(minHeight: 76)
         .background {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color.white.opacity(0.045))
         }
+        .animation(nil, value: presentation)
         .anchorPreference(
             key: WorkspaceTopologyAnchorKey.self,
             value: .bounds
         ) {
             ["relay": $0]
         }
+    }
+
+    private var relayCardPresentation: RelayCardPresentation {
+        Self.relayCardPresentation(
+            observationCurrent: backendViewModel.isWorkspaceObservationCurrent,
+            workspaceRelay: backendViewModel.workspaceRelay,
+            overviewRelayConfigured: viewModel.relayConfigured,
+            serviceRunning: isServiceRunning
+        )
     }
 
     private var serviceColor: Color {
@@ -744,7 +975,7 @@ struct WorkspaceView: View {
                             Spacer()
                         }
                         VStack(spacing: 8) {
-                            ForEach(groupAgents) { agent in
+                            ForEach(groupAgents, id: \.id) { agent in
                                 agentRow(for: agent)
                             }
                         }
@@ -753,6 +984,11 @@ struct WorkspaceView: View {
             }
         }
         .padding(.bottom, 10)
+        .animation(nil, value: backendViewModel.agents)
+        .animation(nil, value: backendViewModel.agents.map(\.id))
+        .animation(nil, value: backendViewModel.isWorkspaceObservationCurrent)
+        .animation(nil, value: viewModel.status)
+        .transaction { $0.animation = nil }
         .onAppear { grokLeaderManager.refresh() }
         .onChange(of: backendViewModel.agents) { _, _ in
             grokLeaderManager.refresh()
@@ -991,10 +1227,13 @@ struct WorkspaceView: View {
                     Text(rowStatusText(for: agent))
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(agentStatusColor(for: agent).opacity(0.9))
+                        .lineLimit(1)
                     if !agent.isObservationCurrent {
-                        Text(L10n.workspaceObservationStale)
+                        Image(systemName: "clock")
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
+                            .help(L10n.workspaceObservationStale)
+                            .accessibilityLabel(L10n.workspaceObservationStale)
                     }
                 }
 
@@ -1060,7 +1299,7 @@ struct WorkspaceView: View {
                 openCodeSeatControls(for: agent)
             }
 
-            if !agent.isAvailable {
+            if Self.shouldShowAgentRecheck(isActive: agent.isActive, isAvailable: agent.isAvailable) {
                 Button(L10n.workspaceRecheck) {
                     Task { await backendViewModel.testAgent(id: agent.id) }
                 }
@@ -1148,8 +1387,7 @@ struct WorkspaceView: View {
                 setAgentConnection(enabled, agent: agent)
             }
         ))
-            .toggleStyle(.switch)
-            .controlSize(.small)
+            .toggleStyle(WorkspaceSwitchToggleStyle())
             .labelsHidden()
             .disabled(!explicitSelection || !canInstallOrRun)
             .help(explicitSelection ? L10n.workspaceAgentConnectHelp : L10n.workspaceAgentConnectDeferred)
@@ -1528,8 +1766,7 @@ struct WorkspaceView: View {
             get: { grokLeaderManager.status.isON },
             set: { setGrokLeaderMode($0) }
         ))
-        .toggleStyle(.switch)
-        .controlSize(.small)
+        .toggleStyle(WorkspaceSwitchToggleStyle())
         .disabled(grokLeaderRowState.disablesToggle || !agent.isAvailable)
         .help(grokLeaderToggleHelp(for: agent))
     }
@@ -1639,52 +1876,12 @@ struct WorkspaceView: View {
         return details.joined(separator: " · ")
     }
 
-    private var relaySummary: String {
-        if backendViewModel.isWorkspaceObservationCurrent,
-           let relay = backendViewModel.workspaceRelay {
-            if !relay.enabled {
-                return L10n.workspaceRelayDisabled
-            }
-            if !relay.configured {
-                return L10n.workspaceRelayNotConfigured
-            }
-            return relay.connected
-                ? L10n.workspaceRelayConnected
-                : L10n.workspaceRelayNotConnected
-        }
-        switch viewModel.relayConfigured {
-        case true:
-            return isServiceRunning
-                ? L10n.workspaceRelayStatusUnknown
-                : L10n.workspaceRelayUnavailableWhileStopped
-        case false: return L10n.workspaceRelayOff
-        case nil: return L10n.overviewRelayUnavailable
-        }
-    }
+}
 
-    private var relayIcon: String {
-        switch viewModel.relayConfigured {
-        case true: return "checkmark.shield"
-        case false: return "lock.slash"
-        case nil: return "questionmark.circle"
-        }
-    }
-
-    private var relayColor: Color {
-        if backendViewModel.isWorkspaceObservationCurrent,
-           let relay = backendViewModel.workspaceRelay {
-            if !relay.enabled || !relay.configured {
-                return .secondary
-            }
-            return relay.connected ? .green : .orange
-        }
-        switch viewModel.relayConfigured {
-        case true: return .green
-        case false: return .secondary
-        case nil: return .orange
-        }
-    }
-
+/// Magpie `const path = () => { wires.appendChild(p); return p }`: the SVG
+/// overlay owns path nodes. Canvas cannot, so last live rects stand in for `d`.
+private final class TopologyGeometryStore {
+    var rects: [String: CGRect] = [:]
 }
 
 private struct WorkspaceTopologyAnchorKey: PreferenceKey {
@@ -1832,6 +2029,40 @@ private struct AgentBrandMark: View {
         }
         .frame(width: 28, height: 28, alignment: .center)
         .accessibilityHidden(true)
+    }
+}
+
+/// Agent 开关不用 AppKit `.switch`。原生开关跟窗口 key 状态走，MacBridge 在后面时
+/// 开启态会被涂成灰色；这里用和「添加新设备」相同的 accent 填色，失焦仍保持蓝色。
+private struct WorkspaceSwitchToggleStyle: ToggleStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 8) {
+            configuration.label
+            capsule(isOn: configuration.isOn)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard isEnabled else { return }
+            configuration.isOn.toggle()
+        }
+        .opacity(isEnabled ? 1 : 0.45)
+        .animation(.easeInOut(duration: 0.15), value: configuration.isOn)
+    }
+
+    private func capsule(isOn: Bool) -> some View {
+        Capsule()
+            .fill(isOn ? Color.accentColor : Color.white.opacity(0.22))
+            .frame(width: 32, height: 18)
+            .overlay(alignment: isOn ? .trailing : .leading) {
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 14, height: 14)
+                    .shadow(color: .black.opacity(0.28), radius: 1, y: 0.5)
+                    .padding(2)
+            }
+            .accessibilityHidden(true)
     }
 }
 
