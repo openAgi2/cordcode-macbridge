@@ -1,3 +1,29 @@
+## 2026-10-18：10-04 LAN 广播刷新误写 timeline-parity 工作树——未提交残留挂两周（已授权清理）
+
+2026-10-04 长跑 Codex 会话（cwd=iOS native-message-timeline）实现「DHCP 换 IP 后运行期刷新
+LAN 广播地址并推送 bridge_current_urls」时，第一批 Mac 侧编辑**误写入 cordcode-macbridge-codex-
+timeline-parity 工作树**（14:19–14:23 落盘：6 modified + untracked `advertised_url_refresh.go`，
+当天 status 里还有 `advertised_url_refresh_test.go`、后消失）。P0 来源门当场检测到 clean→dirty
+并报失败，但同一 shell 未启用 fail-fast，后续 iOS 编辑继续执行。会话随后在正确配对工作树
+`macbridge-native-message-timeline` 重做（15:58–15:59 落盘）并正常交付：MacBridge `024b9831`
+（feat+test，16:07）+ `984da943`（canonical protocol，16:08）、iOS `38292666`/`75c205a3`
+（16:14），16:16:42 部署重启；该分支族后来并入两仓 main（containment 已验，5 个提交全 ✓）。
+**纠错只重做了正身，没有清理错写现场**——agent 16:23 的复盘已明确记录误写，残留仍被留下；
+parity 分支此后零提交（HEAD `e198a6da` 即与 main 的 merge-base，落后 68 commits），残留变成
+纯孤儿。2026-10-18 owner 授权处置：`git worktree remove --force` + `branch -d` 删除 parity
+工作树与分支。删除前复核：残留 7 文件 4 个与 main 逐字节一致、3 个（device_conn_registry/
+main/management_api）== `024b9831` 提交快照（main 10-15 又演进过这三处），**0% 独有内容**，
+全部可从 git 历史恢复；不删的实际危害是**阻塞 parity 将来 merge main**（git 拒绝覆盖本地
+未提交改动），不是无害垃圾。教训：①多命令编辑 shell 必须 fail-fast——来源门已报错仍继续
+执行，是这次残留的直接原因；②误写工作树的纠错闭环必须包含「清理错写现场」，复盘里记录了
+事故 ≠ 完成处置；③脏 worktree 是 merge 的前置阻塞，长期挂着的孤儿脏状态终有一天挡路；
+④P0 来源门再次证明有效（当场抓到 clean→dirty），缺口在编辑命令对目标 worktree 路径的前置
+校验与失败即停，不在检测本身。取证：Codex rollout `01a101b0-d8c1-7d21-bde0-1dc97dd291ef`
+（10-03T20:15 及 10-04T16:16:30 续接两段）、go-bridge.log.3 起点 16:16:42、parity 文件
+mtime 14:19–14:23、native 工作树 mtime 15:58–15:59。
+
+---
+
 ## 2026-10-12：codex-remote 探针 Kill 不 Wait，僵尸进程打满整机 fork 配额（事故复盘）
 
 `loadChatGPTAuth` 每次调用 spawn 一个 ChatGPT 内嵌 codex `app-server --stdio` 探针，读完登录态只
