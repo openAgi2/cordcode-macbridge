@@ -74,7 +74,15 @@ const (
 	// 新 PartOp `upsert_workflow` + live event 名 `workflow_run`（syncV2 raw
 	// deny-list 封条，projection 为 SoT）。全部非破坏性新增，schemaRevision 维持
 	// 2026-09-05。
-	BridgeProtocolSchemaRevision = "2026-09-05"
+	//
+	// 2026-10-18: direct 传输逐帧压缩——additive capability `direct_gzip_v1`
+	//（hello 声明 + echo；仅 DIRECT 连接的 Mac→client 方向；WebSocket opcode 自描述：
+	// text=原始 JSON（现状不变）/ binary=gzip(JSON envelope) 整帧压缩，仅发送给已协商
+	// 连接；阈值 = 序列化后 ≥32KiB 且压缩更小，sender policy）。client→Mac 维持现状
+	// binary 不在变更边界。协议章节 docs/protocol/bridge-v1.md §Direct Frame Compression
+	//（FROZEN）；冻结样本 samples/direct-gzip-v1/（两仓字节一致副本）。非破坏性新增，
+	// 不触碰 relay_gzip_v1 语义；schemaRevision 2026-09-05 → 2026-10-18。
+	BridgeProtocolSchemaRevision = "2026-10-18"
 )
 
 type BridgeV1Protocol struct {

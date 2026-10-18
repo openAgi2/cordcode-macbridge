@@ -1,6 +1,7 @@
 package gobridge
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -31,6 +32,15 @@ const (
 // 不能短于真实可写完时间。详见 go-bridge.log: too many write errors + socket_send_ms。
 var bridgeWriteTimeout = 60 * time.Second
 
+// directGzipThreshold mirrors relay_gzip_v1 sender policy（§Direct Frame Compression：
+// 阈值与「压缩更小才发送」是 sender policy，不是额外 wire 要求）。
+const directGzipThreshold = 32 * 1024
+
+// directGzipProductionEnabled 是 direct_gzip_v1 的发布门（镜像 PERF-S4D 纪律）。
+// Rollback = 置 false（echo 撤回 → 未协商连接永远收不到 binary 帧，逐字节回到
+// 不压缩现状；无数据迁移）。
+const directGzipProductionEnabled = true
+
 // Conn wraps a WebSocket connection with thread-safe writes.
 type Conn struct {
 	mu                     sync.Mutex
@@ -42,6 +52,9 @@ type Conn struct {
 	authedDevice           *TrustedDeviceRecord
 	revoked                bool
 	consecutiveWriteErrors int
+	// directGzip：该连接已协商 direct_gzip_v1（hello echo 成功后置位；SendJSONReport
+	// 持 c.mu 读它，序列化后 ≥32KiB 且 gzip 更小时以 binary 帧整帧压缩发送）。
+	directGzip bool
 }
 
 type ActiveConnRegistry struct {
@@ -109,19 +122,48 @@ func (c *Conn) SendJSON(v interface{}) {
 	_ = c.SendJSONReport(v)
 }
 
+// SetDirectGzipEnabled 标记该连接已协商 direct_gzip_v1（仅在 direct hello 协商成功
+// 后调用；c.mu 保护，与 SendJSONReport 的读并发安全）。
+func (c *Conn) SetDirectGzipEnabled(enabled bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.directGzip = enabled
+}
+
 // SendJSONReport is the error-returning write used by K4 projection probes so
 // write_post can distinguish closed-conn / WriteJSON failure from real wire success.
 // Plain SendJSON swallows both (historical contract for broadcaster callers).
+//
+// direct_gzip_v1（§Direct Frame Compression）：已协商连接的大帧按 binary 帧整帧
+// gzip（≥32KiB 且压缩更小才启用；sender policy）。序列化统一走
+// json.NewEncoder(...).Encode——与既有 WriteJSON 输出逐字节一致（含尾随换行），
+// 未压缩帧以 text 帧发送，压缩对旧 peer 不可见。
 func (c *Conn) SendJSONReport(v interface{}) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
 		return fmt.Errorf("connection closed")
 	}
-	// 写 deadline 必须在持 c.mu 的情况下紧贴 WriteJSON 调用（gorilla 不允许同 conn 并发写），
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(v); err != nil {
+		return err
+	}
+	raw := buf.Bytes()
+	messageType := websocket.TextMessage
+	payload := raw
+	if c.directGzip && len(raw) >= directGzipThreshold {
+		if compressed, err := gzipPayload(raw); err == nil && len(compressed) < len(raw) {
+			messageType = websocket.BinaryMessage
+			payload = compressed
+		} else if err != nil {
+			// 压缩失败按真实失败上抛，不静默降级为明文重发（避免大帧行为漂移不可观测）。
+			return err
+		}
+	}
+	// 写 deadline 必须在持 c.mu 的情况下紧贴写调用（gorilla 不允许同 conn 并发写），
 	// 避免另一个写者在 deadline 与实际写之间插入。详见根治 spec 坑 1。
 	_ = c.conn.SetWriteDeadline(time.Now().Add(bridgeWriteTimeout))
-	if err := c.conn.WriteJSON(v); err != nil {
+	if err := c.conn.WriteMessage(messageType, payload); err != nil {
 		c.consecutiveWriteErrors++
 		slog.Debug("go-bridge: write error", "error", err, "consecutive", c.consecutiveWriteErrors)
 		if c.consecutiveWriteErrors >= 5 {
@@ -357,6 +399,29 @@ func (s *Server) negotiateTurnDetailLazyV1(ack *HelloAckMessage, hello *HelloMes
 		s.eventPublisher.SetConnTurnDetailV1(conn, true)
 	}
 	return true
+}
+
+// helloSupportsDirectGzipV1 returns true when the client advertised
+// direct_gzip_v1 in hello.
+func helloSupportsDirectGzipV1(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "direct_gzip_v1" {
+			return true
+		}
+	}
+	return false
+}
+
+// negotiateDirectGzipV1 applies the frozen hello rules for direct_gzip_v1 on the
+// DIRECT hello path ONLY（§Direct Frame Compression）。Relay 连接不经此协商——Relay
+// 压缩保持 relay_gzip_v1（envelope contentEncoding），语义互不触碰。Echo 即开启该
+// 连接的整帧 gzip 发送（≥32KiB 且更小才压缩；未声明客户端永远收不到 binary 帧）。
+func (s *Server) negotiateDirectGzipV1(ack *HelloAckMessage, hello *HelloMessage, conn *Conn) {
+	if !helloSupportsDirectGzipV1(hello) || !directGzipProductionEnabled || !ack.Ok {
+		return
+	}
+	ack.Capabilities["direct_gzip_v1"] = true
+	conn.SetDirectGzipEnabled(true)
 }
 
 // helloSupportsProjectionWindowV1 returns true when the client advertised
@@ -803,6 +868,9 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 		ack.Capabilities["session_state_events_v1"] = true
 		s.eventPublisher.SetConnSessionStateEvents(connection, true)
 	}
+	// direct_gzip_v1（§Direct Frame Compression，S-8）：仅 direct 路径协商——echo 后
+	// 该连接的大响应以 binary 帧整帧 gzip 发送；未协商连接 wire 逐字节不变。
+	s.negotiateDirectGzipV1(ack, &hello, conn)
 	// projection_window_v1 (frozen §Projection Window): prerequisite validation may fail
 	// hello; echo + per-conn mark only when the rollout flag is enabled.
 	if !s.negotiateProjectionWindowV1(ack, &hello, connection) {

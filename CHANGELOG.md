@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+### 2026-10-18 — 直连传输逐帧压缩 `direct_gzip_v1`（S-8）
+
+- 新增直连（LAN `ws://` / Tailscale `wss://`）Mac→client 大响应的 gzip 逐帧压缩：客户端在 hello 声明 `direct_gzip_v1` 且 Bridge echo 后，序列化后 ≥32KiB 且压缩更小的响应帧以 WebSocket binary 帧整帧压缩发送（gzip(JSON envelope)），小帧与不可压帧维持 text 帧不变。此前事故样本约 34MB 的全量投影在直连路径无任何压缩（Relay 已有 `relay_gzip_v1` 但直连不适用）；按本地估算 level-1 压缩后约 11.2MB，长会话首开网络传输体积显著下降。
+- 协议冻结：`docs/protocol/bridge-v1.md` 新增 §Direct Frame Compression（FROZEN SPEC），冻结样本 `samples/direct-gzip-v1/`（gzip 字节 + 解压后 JSON，两仓字节一致副本）；`schemaRevision` 2026-09-05 → 2026-10-18。客户端→Mac 方向维持现状不在变更边界；未协商连接永远收不到 binary 帧（wire 逐字节不变），回滚 = 停止 echo 该 capability。
+
 ### 2026-10-16 — 工作站 Agent 接入开关正式生效
 
 - MacBridge 启动现在以 `agent-selection.json` 的显式选择作为唯一 Agent 集合：新装默认全关，已保存选择按 revision 恢复，不再隐式启动全部 Agent；文件损坏时阻止 runtime 启动并显示错误，不回落到默认全集或伪造空选择。

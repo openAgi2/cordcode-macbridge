@@ -2970,3 +2970,82 @@ credentials, directories, message bodies, or endpoints.
   `user_input_requested` (sample-gated) → Agent 正在等待回复/点击打开 CordCode 回答;
   `turn_error` (sample-gated) → 任务异常中断/点击打开 CordCode 查看详情. Kinds without
   archived real samples stay disabled and MUST NOT be enabled via analogous fixtures.
+
+## Direct Frame Compression (`direct_gzip_v1`) — FROZEN SPEC
+
+`direct_gzip_v1` is an optional `cordcode-bridge` v1 capability for compressing large
+MacBridge-to-client frames on DIRECT bridge WebSocket connections (LAN `ws://8777` and
+Tailscale `wss://8778`). It mirrors the `relay_gzip_v1` discipline
+(`relay-frame-compression.md`) as an application-layer, per-frame transform. It does not
+change client-to-Mac traffic, and it does not apply to Relay connections — Relay
+compression remains `relay_gzip_v1`, unchanged.
+
+### Negotiation
+
+The client advertises the capability in the authenticated `hello`:
+
+```json
+{"type":"hello","protocol":{"name":"cordcode-bridge","version":1},"capabilities":["direct_gzip_v1"]}
+```
+
+MacBridge compresses outbound frames only when ALL of these hold:
+
+- the active connection is a DIRECT bridge WebSocket (not a Relay frame connection);
+- the client declared `direct_gzip_v1`;
+- the Bridge accepted the `hello`.
+
+The successful `hello_ack.capabilities` map contains `"direct_gzip_v1": true`. Clients
+that omit the capability never receive compressed frames; for them the wire is
+byte-identical to before this capability existed. Rollback = stop echoing the
+capability (no data migration).
+
+### Frame self-description: WebSocket opcode
+
+The direct `WireMessage` envelope has no `contentEncoding` field, and the direct send
+path writes UTF-8 JSON text frames — a compressed frame is no longer readable JSON, so
+an in-band marker is self-contradictory (reading it would require decompressing or
+parsing first). The frame type is therefore described by the native WebSocket opcode:
+
+- `text` frame (opcode `0x1`): the original UTF-8 Bridge JSON envelope (unchanged);
+- `binary` frame (opcode `0x2`): `gzip(JSON envelope)` — the ENTIRE envelope compressed
+  as one gzip stream, written only to connections that negotiated this capability.
+
+This constraint applies to the **Mac→client direction only**. Client→Mac traffic keeps
+its existing shape (CordCode iOS already sends binary JSON frames) and MUST NOT be
+changed to text as part of this capability. Rejected alternatives: `permessage-deflate`
+(two-way, context-carrying, transport-global behavior — worse controllability and
+testability than a per-frame application layer); an in-band `contentEncoding` envelope
+field (self-referential — the field lives inside the compressed bytes); gzip magic
+sniffing (heuristic, violates the no-guessing discipline for future non-gzip binary
+frames).
+
+### Sender policy (Mac→client)
+
+Evaluated per frame after serialization: compress only when the serialized payload is
+≥ 32 KiB AND the gzip output is strictly smaller than the original. Small or
+incompressible frames remain text frames. Threshold and size check are sender policy,
+not wire requirements (mirroring `relay_gzip_v1`).
+
+Mixed traffic on one connection is normal: text and binary frames interleave, each
+self-describing by opcode.
+
+### Receiver requirements
+
+A client that negotiated the capability MUST dispatch on the WebSocket opcode:
+
+- `text` → the existing JSON parse path (unchanged);
+- `binary` → gunzip → the SAME parse path.
+
+Decompression failure is a real transport failure and MUST NOT be reinterpreted as
+uncompressed JSON or silently dropped. A client that did NOT negotiate can rely on
+never receiving a binary frame from the Bridge.
+
+### Freeze notes
+
+- The frozen assertion "un-negotiated connections carry zero binary frames" is scoped
+  to the **Mac→client** direction (client→Mac binary frames are pre-existing behavior
+  and out of scope).
+- Frozen fixture: `samples/direct-gzip-v1/` — gzip bytes plus the decoded JSON
+  envelope, SHA-256 recorded in its README; the iOS repository keeps a byte-identical
+  copy, and both sides' spec tests consume their in-repo copy.
+- This capability changes no JSON envelope fields and no `relay_gzip_v1` semantics.

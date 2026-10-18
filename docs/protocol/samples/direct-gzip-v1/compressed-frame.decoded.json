@@ -1,0 +1,1 @@
+{"type":"result","requestId":"req_direct_gzip_fixture","data":{"projection":{"sessionId":"synthetic-direct-gzip-spec","syncRev":7,"execution":{"phase":"running","activeTurnId":"turn-1"},"turns":[{"turnId":"turn-1","status":"running"},{"turnId":"turn-0","status":"completed"}]}}}
