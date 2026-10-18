@@ -1353,9 +1353,16 @@ export type BridgeProjectionResume =
       requestedRev?: number;
     };
 
-/** get_session_projection result: full projection (no sinceRev / server chose snapshot) OR delta patches. */
+/**
+ * get_session_projection result: full projection (no sinceRev / server chose snapshot)
+ * OR delta patches. Anchor-newer seed tokens (S-7): the FULL variant carries an optional
+ * `turnTokens` map ({turnId → Bridge digest token}) when the connection negotiated
+ * `projection_window_anchor_newer_v1` — clients pair each cached row with its token
+ * (same-frame authoritative delivery; token lifecycle invariant #1). Absent = no tokens
+ * (delta variants and non-negotiated connections never carry it).
+ */
 export type BridgeGetSessionProjectionResult =
-  | { projection: BridgeSessionProjection; resume?: BridgeProjectionResume }
+  | { projection: BridgeSessionProjection; resume?: BridgeProjectionResume; turnTokens?: Record<string, string> }
   | { patches: BridgeProjectionPatch[]; headRev: number; resume?: BridgeProjectionResume };
 
 // ---------------------------------------------------------------------------
@@ -1410,6 +1417,65 @@ export interface BridgeGetSessionProjectionWindowResult {
   /** Kernel admission cut; subsequent projection_patch frames chain from it (R4). */
   syncRev: number;
   resume?: { kind: "at_head" };
+}
+
+// ---------------------------------------------------------------------------
+// Anchor-Newer Incremental Reconciliation (projection_window_anchor_newer_v1)
+// — FROZEN SPEC, additive new RPC. Does NOT touch the frozen v1 window types above.
+// Canonical rules: docs/protocol/bridge-v1.md §Anchor-Newer Incremental Reconciliation.
+// ---------------------------------------------------------------------------
+
+/** 全基底对账 digest：token = Bridge 下发的不透明摘要；`null` = 失效（必须回传该 turn 当前终态）。 */
+export type BridgeAnchorNewerDigests = Record<string, string | null>;
+
+/** get_session_projection_anchor_newer params（首包与续页共用；correctionCursor 为续页身份标记）。 */
+export interface BridgeGetSessionProjectionAnchorNewerParams {
+  sessionId: string;
+  backendId: string;
+  /** 裸 turnId 水位线（R1：不得持久化 wire cursor；首包与续页同值）。 */
+  anchorTurnId: string;
+  /** 完整复查集 = 原始 baseDigests 全部项 ∪ 已发项 token；不随页收缩，每续页携带全量（≤256 项）。 */
+  baseDigests: BridgeAnchorNewerDigests;
+  /** turns 上限；协议默认 100 turns / 4MiB。 */
+  limit?: number;
+  /**
+   * 续页身份显式标记 = 上一响应 correctionsPending.cursor。
+   * 无标记 = 全新对账事务首包（响应携带 anchorRefresh）；有标记 = 续页（不携带）。
+   */
+  correctionCursor?: string;
+}
+
+/** anchor-newer 页会话级标量（语义镜像 BridgeSessionProjection 的 scalar 字段；execution 必选）。 */
+export interface BridgeAnchorNewerScalarState {
+  execution: BridgeExecutionView;
+  /** 可选标量；缺省 = 该 backend 无此投影。 */
+  planMode?: BridgePlanModeView;
+  sessionMode?: { status: string; mode?: string; canSet: boolean; reason?: string };
+  collaborationMode?: BridgeCollaborationModeState;
+  goal?: BridgeGoalView;
+  codexGoal?: BridgeCodexGoalSnapshot;
+}
+
+/** get_session_projection_anchor_newer result：对账增量页（预算/打包规则见协议章节）。 */
+export interface BridgeGetSessionProjectionAnchorNewerResult {
+  /** 严格位于 anchor 之后的 turns（grow 语义边界排他；R7 严格链序不跳过）。 */
+  turns: BridgeTurnProjection[];
+  /**
+   * anchor turn 当前完整终态；仅首包携带（续页不重复）。不计页 limit/字节预算；
+   * never-split（超大锚可超 4MiB，单独计量；anchor==tail 且零新增时 turns 为空但本字段仍携带终态）。
+   */
+  anchorRefresh?: BridgeTurnProjection;
+  /** 复查集中 token 不一致或为 null 的当前完整 upsert（覆盖离线修改；整 turn 粒度按 turnId 升序分页）。 */
+  changedTurns: BridgeTurnProjection[];
+  /** 复查项已不在 kernel 当前投影的 tombstone（任何复查项被移除均经本字段返回；不重发内容）。 */
+  removedTurnIds: string[];
+  scalarState: BridgeAnchorNewerScalarState;
+  /** 剩余修正未拉完时携带；续页请求回传 cursor。部分修正未完成不得判已对账。 */
+  correctionsPending?: { cursor: string; remaining: number };
+  /** 本页交付 turn（turns/anchorRefresh/changedTurns 全集）的 {turnId → token}——与内容同帧的权威配对。 */
+  turnTokens?: Record<string, string>;
+  /** 本页切片时 committed head；每续页独立取值，客户端采用事务以最后一页为准。 */
+  syncRev: number;
 }
 
 // ── Web Push (web_push_v1) — additive; see bridge-v1.md "Web Push" section ──────

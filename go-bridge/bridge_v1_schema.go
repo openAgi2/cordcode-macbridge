@@ -82,6 +82,17 @@ const (
 	// binary 不在变更边界。协议章节 docs/protocol/bridge-v1.md §Direct Frame Compression
 	//（FROZEN）；冻结样本 samples/direct-gzip-v1/（两仓字节一致副本）。非破坏性新增，
 	// 不触碰 relay_gzip_v1 语义；schemaRevision 2026-09-05 → 2026-10-18。
+	//
+	// 2026-10-18（同日二次）: anchor-newer 对账增量——additive capability
+	// `projection_window_anchor_newer_v1`（hello 声明+echo，session_sync_v2 前置）+ 新 RPC
+	// `get_session_projection_anchor_newer`（裸 anchorTurnId 水位线 + baseDigests 全基底
+	// 对账 + correctionCursor 续页身份标记；响应 turns 严格后继/anchorRefresh 仅首包/
+	// changedTurns/removedTurnIds/scalarState/correctionsPending；预算与确定性打包、token
+	// 生命周期、两级 typed oversized、epoch 客户端侧判定均冻结）+ hello 可选数值字段
+	// `projectionMaxBytes` 协商（默认 50MiB、提升档上限 256MiB）。新类型
+	// BridgeGetSessionProjectionAnchorNewerParams/Result + BridgeAnchorNewerScalarState；
+	// 独立冻结样本 anchor-newer-response-spec.json（两仓字节一致）；不触碰 frozen v1
+	// window 字段集。非破坏性新增，schemaRevision 维持 2026-10-18（同日 additive 合并）。
 	BridgeProtocolSchemaRevision = "2026-10-18"
 )
 

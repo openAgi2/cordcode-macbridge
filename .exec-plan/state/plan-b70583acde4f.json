@@ -38,7 +38,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-10-18T13:45:59Z",
+  "updated_at": "2026-10-18T13:55:38Z",
   "todos": [
     {
       "id": "s0-runtime-evidence",
@@ -269,7 +269,7 @@
       "id": "s7-refreeze-batch",
       "title": "S-7 anchor-newer re-freeze 批次（协议 pack 主交付）",
       "description": "§3.8 冻结批次（docs/protocol/ Mac 权威 + iOS mirror 字节一致同步）：① bridge-v1.md 新增 anchor-newer 小节，冻结：capability projection_window_anchor_newer_v1；请求形状（direction=newer + anchorTurnId 裸 turnId 无 cursor + limit 默认 100 turns/4MiB + baseDigests 全基底对账 {turnId→digest|null} ≤256 项 + 续页身份显式标记=回传上一响应修正 cursor——无标记=首包携带 anchorRefresh/有标记=续页不携带【F-61】+ 完整复查集=原始 baseDigests 全部项 ∪ 已发项 token 每续页携带全量不收缩【F-59 全集口径】）；响应形状（turns 严格后继 + anchorRefresh 独立字段仅首包 never-split 不计页预算 + changedTurns=复查集中 digest 不一致或 token null 的当前完整 upsert【F-60 口径】+ removedTurnIds tombstone + scalarState + correctionsPending/修正 cursor）；token 生命周期绑定不变量（Mac 生成不透明 token 随每 turn 下发；patch 全 ops 后终态才可绑 token；未附新 token 的局部修改该行 token 置 null；null=请求回传当前终态）；预算与打包（总硬顶 48MiB / mandatory 2MiB / anchorRefresh 与单 changedTurn never-split ≤46MiB 超即 typed oversized / 对账预算 8MiB 每页 anchorRefresh 不计入 / 确定性打包顺序 mandatory→首包 anchorRefresh→turns→changedTurns 按 turnId 升序 + 相位边界 F-58 装不下即切页不回填、changedTurns 不得越过未交付 turns / 对账续页=内容页不携带 anchorRefresh 可含 turns 剩余片 / 对账事务内水位线=已交付链末端）；超限恢复两级 typed（reconciliation.oversized → FallbackFull → full.oversized 显式终态失败）+ projection_max_bytes hello 协商（默认 50MiB，提升档本批冻结定——数值归 OD-7）；epoch 中止分支 iOS 侧判定（hello_ack epoch 比对；Mac 侧不比对、续页请求不携带 epoch【F-55】）；typed stale=anchor 离开保留区复用 cursor_stale 族（Mac 侧判定）；② bridge-v1.types.ts 新类型；③ 冻结样本独立文件 docs/protocol/samples/projection-window-v1/anchor-newer-response-spec.json（两仓字节一致；不动既有 window-response-spec.json）；④ Mac spec 断言新增读取点（projection_window_spec_test.go）；⑤ iOS spec 断言（ProjectionWindowSpecTests.swift）；⑥ schemaRevision bump。不触碰 frozen v1 BridgeGetSessionProjectionWindowResult 字段集。",
-      "status": "pending",
+      "status": "done",
       "phase": "s7",
       "kind": "impl",
       "depends_on": [
@@ -281,20 +281,27 @@
       "notes": "开工前置：E-3 已闭合（s0）+ 第一阶段承重项已证明。W1 的 v1 响应批次保持 contingency 不在本批实施。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "S-7 冻结批次交付：① bridge-v1.md §Anchor-Newer Incremental Reconciliation（FROZEN：capability 协商（ssv2 前置）、首包/续页两形态请求（correctionCursor 续页标记 F-61、baseDigests 全集不收缩 F-59、null 失效语义）、响应七字段（turns 严格后继/anchorRefresh 仅首包/changedTurns 复查集口径 F-60/removedTurnIds/scalarState/correctionsPending/turnTokens）、token 生命周期不变量、预算与确定性打包（48/2/46/8MiB+相位边界 F-58+水位线=已交付链末端）、两级 typed oversized、projectionMaxBytes 协商（默认 50MiB/提升档 256MiB，hello 数值字段+ack 授予值）、epoch 客户端侧判定 F-55、cursor_stale Mac 侧）；② types.ts 3 新接口+full result turnTokens（token 同帧配对——迭代后定稿为响应级 map，规避 TouchTurnProjection）；③ 独立冻结样本 anchor-newer-response-spec.json（sha256 191cc871…，两仓字节一致）+ README 登记；④ Mac spec 测试 3 例 PASS（fixture 形状含 turnTokens 覆盖断言/类型冻结集/v1 边界守卫）+ iOS mirror 测试就绪（运行按调度约束后置批量）；⑤ schemaRevision 同日二次条目（维持 2026-10-18）。冻结清单显式定案项全覆盖：F-55/F-59/F-60/F-61/projection_max_bytes wire 形态",
+        "artifacts": [
+          "mac:docs/protocol/bridge-v1.md (§Anchor-Newer, 3220 行)",
+          "mac:docs/protocol/schema/bridge-v1.types.ts (3 新接口 + full result turnTokens)",
+          "mac:docs/protocol/samples/projection-window-v1/anchor-newer-response-spec.json (sha256 191cc8710262b807d560faa15ae11ee8b4961190068cb3865e1885c0d59c7b71)",
+          "mac:go-bridge/anchor_newer_spec_test.go (3/3 PASS)",
+          "mac:go-bridge/bridge_v1_schema.go (同日二次条目)",
+          "ios:mirror 4 文件字节一致核对 ✓"
+        ],
+        "checked_at": "2026-10-18T13:55:38Z"
       }
     },
     {
       "id": "s7-anchor-newer-impl",
       "title": "S-7 anchor-newer 双端实施",
       "description": "Mac（go-bridge）：① projection_window.go newer 分支增加 anchorTurnId 直接锚定形态（现只能从 epoch 绑定 opaque cursor 进 :278-296；locate(anchorTurnId) :297-301 裸 turnId 锚定先例）；切片复用 growWindowRange(sizes, limit, boundary+1, false)（严格后继）；② anchorRefresh 独立字段（anchor 当前完整终态，不计 limit/字节预算，never-split；anchor==tail 且零新增时 turns 空但 anchorRefresh 仍携带终态）；③ baseDigests 对账引擎（Mac 无 per-device 状态——不变量 6；复查集全量比对 → changedTurns/removedTurnIds；token null 必须回传当前终态）；④ 确定性打包算法 + 相位边界 + 续页内容页 + 事务内水位线=已交付链末端（超大 anchor 不阻塞 turns 前进）；⑤ typed 错误族（anchor 离开保留区 cursor_stale → iOS FallbackFull；reconciliation.oversized / full.oversized；未协商 protocol.capability_required fail-closed）；⑥ projection_max_bytes 协商 + full 序列化超限判定（两级 typed 链）；⑦ negotiateProjectionWindowV1 内扩展 echo（direct server.go:808 + relay main.go:693 双路径自动覆盖；projection_window_anchor_newer_v1）；⑧ fence scalar 分支（协商 projection_window_scalar_v1 的连接跳过 resolved.Execution=nil 清空——OD-6 定案条件 2，防御性分支，per-turn 清空规则不变）；⑨ held 注册：增量页全部 turns（含锚点）+ changedTurns 经 CompleteProjectionSnapshotWithHeldTurns 注册（漏注册 = permanently strand detail）；⑩ window projection_rpc trace（与 full 同构 requestId/backend/sessionID/outcome——F-25：无它则 §7.3 重试指标不可计数）；⑪ 每 turn digest token 随页下发。iOS：anchor-newer 请求/响应类型 mirror + eligibility 第三维度（anchor echo；缺失回退全量冷路径 FallbackFull）+ opcode 协商消费。完整打开状态机归 s4。完成后追加 CHANGELOG.md [Unreleased]。",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "s7",
       "kind": "impl",
       "depends_on": [
@@ -612,5 +619,15 @@
         "checked_at": null
       }
     }
-  ]
+  ],
+  "scheduling_constraints": {
+    "note": "owner 2026-10-18 指示：另一 agent 在做 timeline 优化、可能真机测试 CordCode iOS app",
+    "rules": [
+      "本任务所有 CordCode iOS 真机构建/安装/测试推到最后（S-6 收口阶段或 owner 明确窗口），避免撞车",
+      "iOS 模拟器测试如需运行：使用与并行任务不同的模拟器设备（如 iPhone 18 Pro Max），或错峰批量化执行",
+      "iOS 仓文件层工作（源码/mirror/spec 测试代码编写）不受影响照常进行；仅设备层操作后置",
+      "Mac 侧（worktree、runtime、Release 部署）与并行任务不冲突照常推进"
+    ],
+    "recorded_at": "2026-10-18T13:47:35Z"
+  }
 }

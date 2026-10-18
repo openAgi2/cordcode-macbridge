@@ -3049,3 +3049,172 @@ never receiving a binary frame from the Bridge.
   envelope, SHA-256 recorded in its README; the iOS repository keeps a byte-identical
   copy, and both sides' spec tests consume their in-repo copy.
 - This capability changes no JSON envelope fields and no `relay_gzip_v1` semantics.
+
+## Anchor-Newer Incremental Reconciliation (`projection_window_anchor_newer_v1`) — FROZEN SPEC
+
+Restore-then-increment 的服务端半边：客户端重开时以本地基底缓存的水位线（裸
+`tailTurnId`）拉取「严格后继增量 + 锚点终态刷新 + 全基底对账修正」。Bridge 对客户端
+进度**完全无状态**（同一 session 的多设备各水位线各请求，天然不串扰；任何一端重启都
+不需要另一端配合）——全部判定输入随请求携带。anchor 定位复用 §Projection Window 的
+裸 turnId 锚定语义（locate 先例 R8），切片复用同族 grow 语义（严格后继、never-split）。
+
+### Negotiation
+
+Capability `projection_window_anchor_newer_v1`：客户端在 hello `capabilities` 声明；
+声明必须同时声明 `session_sync_v2`（对账增量是 projection-surface 特性——缺前置时
+hello 失败 `protocol.invalid_capabilities`，与 `projection_window_v1` 同族纪律）。
+Bridge echo 条件 = 服务端实现落地 + `hello` 被接受。未 echo 时客户端 fail-closed 回退
+全量冷路径（`get_session_projection` + `direct_gzip_v1`；**不回 `window_0`**——其无
+默认 scalar 补齐）。Rollback = 停止 echo（无数据迁移）。
+
+### Request — `get_session_projection_anchor_newer`
+
+首包（全新对账事务；**无续页标记**）：
+
+```json
+{
+  "sessionId": "…",
+  "backendId": "claude",
+  "anchorTurnId": "<裸 turnId = 客户端水位线>",
+  "limit": 100,
+  "baseDigests": { "<turnId>": "<token>", "<turnId2>": null }
+}
+```
+
+续页（`correctionsPending` 未拉完时；**回传上一响应的 correction cursor = 续页身份
+显式标记**）：
+
+```json
+{
+  "sessionId": "…",
+  "backendId": "claude",
+  "anchorTurnId": "<同首包，不变>",
+  "baseDigests": { "<完整复查集>" },
+  "correctionCursor": "<上一响应 correctionsPending.cursor>"
+}
+```
+
+冻结字段语义：
+
+- `anchorTurnId`（必填，首包与续页同值）：裸 turnId 水位线。**不得持久化 wire
+  cursor**（R1 冻结条款）；请求时由 turnId 现场构造锚定。
+- `baseDigests`（必填）：`{turnId → token | null}` 映射，**完整复查集 = 原始
+  baseDigests 全部项 ∪ 已发项 token**（含首包 anchorRefresh turn 与本事务已交付
+  turns）——**复查集不随页收缩，每续页携带全量**（受缓存上限约束 ≤256 项）。token
+  为 Bridge 生成的不透明摘要，随历史下发（full 种子 / anchor-newer 页逐 turn 附带，
+  见 token 生命周期）；`null` = 该行 token 失效（本地 live patch 局部修改后未获新
+  token），语义 =「请返回该 turn 当前终态」。
+- `correctionCursor`（可选；仅续页存在）：**无标记 = 首包（响应携带 anchorRefresh）；
+  有标记 = 续页（响应不携带 anchorRefresh）**。Bridge 以该标记区分两种请求形态，
+  不保存任何 per-device 状态——同一 cursor 重放结果幂等（upsert 覆盖）。
+- `limit`（可选）：turns 上限，协议默认 100 turns / 4MiB。
+
+### Response — 对账增量页（`get_session_projection_anchor_newer` result）
+
+```json
+{
+  "turns": [ /* 严格位于 anchor 之后的 turns（链序，不跳过）*/ ],
+  "anchorRefresh": { /* anchor turn 当前完整终态；仅首包 */ },
+  "changedTurns": [ /* 复查集中 token 不一致或为 null 的当前完整 upsert */ ],
+  "removedTurnIds": [ /* 复查项已不在 kernel 当前投影的 tombstone */ },
+  "scalarState": { "execution": { "phase": "…", "activeTurnId": "…" } },
+  "correctionsPending": { "cursor": "…", "remaining": 3 },
+  "syncRev": 531
+}
+```
+
+- `turns`：**严格后继**（复用 grow 语义：边界排他、R7 严格链序不跳过未加载 turn）。
+- `anchorRefresh`：anchor turn 的**当前完整终态**，独立字段——**不计入页 limit 与
+  字节预算**，never-split（超大锚可超 4MiB，单独计量）。anchor == tail 且零新增时
+  `turns` 为空但 `anchorRefresh` 仍携带终态（缓存保存时仍在流式中的末 turn 离线完成
+  的最常见场景）。**仅首包携带；续页不重复**（anchor 开销只付一次）。
+- `changedTurns`：**复查集中**（全集口径）与当前内容 digest 不一致、或 token 为
+  `null`（失效必须回传）的 turns 的**当前完整 upsert**——覆盖离线期间对缓存范围内
+  旧 turn 的修改（live patch 只覆盖订阅后事件；对账是唯一修正载体）。受对账预算约
+  束、按整 turn 粒度分页（见预算）。
+- `removedTurnIds`：复查集中已不在 kernel 当前投影的 turnId（compaction/截断的
+  tombstone；**复查集中任何项被移除——无论已发/未发/早页确认——都经本字段返回，
+  不重发内容**），客户端从基底移除。
+- `scalarState`：会话级标量（`execution` 必选：phase/activeTurnId 覆盖 running /
+  requires_action；`planMode`/`sessionMode`/`collaborationMode`/`goal` 可选，nil = 该
+  backend 无此投影——语义镜像 `SessionProjection` additive scalar 字段）。
+- `correctionsPending`：剩余修正未拉完时携带（cursor + remaining 估计）；**部分修正
+  未完成不得清 syncing / 判已对账**。续页请求回传该 cursor。
+- `syncRev`：本页切片时的 committed head。**每续页独立取当前 head；客户端采用事务
+  以最后一页 head 为准**（单调覆盖，不要求与首包一致）。
+- 同 turnId 出现于 anchorRefresh/turns/changedTurns 多处 → 合并为一条（后到覆盖）。
+
+### token 生命周期绑定不变量
+
+每一缓存行的 `(内容, token)` 必须来自同一权威交付：
+
+1. **full 种子 / anchor-newer 页**：turn 内容与 token 同帧到达（每 turn 附带其
+   token），客户端原样配对存储。
+2. **live patch**：token 只能绑定该 patch 全部 ops 应用后的最终 turn 状态（upsert
+   基底 → stateOps/partOps 就地修改 → 以最终结果计算 token）；**未附带新 token 的
+   局部修改 → 该行 token 立即置 `null`**（对账请求中 null = 必须回传当前终态）。
+   绝不允许「新内容配旧 token」或「终态配中间态 token」。
+3. **写盘**：逐行保存 `(内容, token, tokenValid)`；缺失 token 的行一律按 null 处理。
+
+### 预算与确定性打包（同一输入只允许一个合法页序列）
+
+- 响应总硬顶 **48MiB**（全字段序列化合计；< transport 50MiB 解压上限留 header 余量）。
+- **mandatory 预留 2MiB**（envelope + scalar/metadata + removedTurnIds + 分页元数据；
+  任何页先扣除，保证 mandatory 字段永远可发）。
+- **anchorRefresh 与单个 changedTurn 均 never-split，独占额度 ≤46MiB**：超 46MiB →
+  typed `reconciliation.oversized` → 客户端 FallbackFull。
+- **对账预算（turns + changedTurns + scalar/metadata）≤ 8MiB / 每页**；anchorRefresh
+  不计入对账预算（另按独占额度与总硬顶计量）。首包对账空间被大 anchor 挤压时可少于
+  8MiB 甚至为 0（剩余全部 correctionsPending）。
+- **确定性打包顺序**：扣除 mandatory → 首包 anchorRefresh（唯一一次）→ turns（严格
+  后继，受 limit/4MiB）→ changedTurns（按 turnId 升序）。**相位边界**：turn phase 内
+  某 turn 装不下当前页剩余对账空间时本页 turn phase 即终止（该 turn 溢出至后续页；
+  never-split 独占或续页普通片），**当前页剩余空间不回填**——changedTurns 不得越过
+  未交付的 turns 提前装页；turns 全部交付完毕后 changedTurns 才按序进入（可与末个
+  turns 同页；同页内 turns 先于 changedTurns）。
+- **续页 = 内容页**：不携带 anchorRefresh，**可携带 turns 剩余片**（turn phase）与
+  changedTurns 剩余片（correction phase）；removedTurnIds/scalar/head/correction
+  cursor 随页携带。**对账事务内 turns 总页数计入「超 2 页退全量」判定**（首包即能
+  判定时首包 typed FallbackFull 提示；事务中途 live 新增致超限时中止事务 →
+  FallbackFull）。
+- **对账事务内水位线 = 已交付 turn 链的末端**（首包只交付 anchorRefresh 时 =
+  anchor 自身；续页交付 turns 后 = 其最后一个 turn）——46MiB anchor + 任意后继
+  turn 由续页交付后水位线前移，不阻塞前进。
+
+### 超限恢复语义（两级 typed 链）
+
+1. anchorRefresh 或单个 changedTurn 超 46MiB 独占额度 → typed
+   `reconciliation.oversized` → 客户端 FallbackFull（全量冷路径）。
+2. FallbackFull 后 full 序列化超当前协商 `projectionMaxBytes` → typed
+   `full.oversized` 显式终态失败（客户端明确错误态，不假成功、不部分渲染）。
+   **contingency `window_0` 不是恢复路径**（同受传输上限）。
+
+### `projectionMaxBytes` 协商（hello 可选数值字段）
+
+- hello 可选字段 `projectionMaxBytes: number`（客户端请求上限）；`hello_ack` 回显
+  `projectionMaxBytes: number`（**授予值** = min(客户端请求, 服务端档位上限)；未请求
+  或未回显 = 默认 50MiB）。direct 逻辑消息上限与 relay 解压上限同值生效。
+- 冻结档位：默认 **50MiB**（52428800），提升档上限 **256MiB**（268435456）。服务端
+  永不授予高于档位上限的值。内存峰值随上限走（解压 + 解析），由客户端单次解析管线
+  承接。
+
+### typed 错误族与 epoch 语义
+
+- `cursor_stale`：anchor 不在 kernel 保留区（水位线失效，如 compaction）→ 客户端
+  fail-closed FallbackFull，不假成功。**判定主体 = Bridge 侧**（判定输入
+  anchorTurnId 随请求携带）。
+- **epoch 中止 = 客户端侧判定**（bridgeEpoch 是 runtime 启动身份，epoch 变化必伴随
+  连接断开——客户端重连后经 hello_ack 取得当前 epoch，与对账事务开始时记录值不一致
+  → 主动整组放弃、FallbackFull）。**续页请求不携带 epoch 身份；Bridge 侧不比对
+  epoch**。客户端判定遗漏时由「复查集自包含幂等 + 采用事务取最后一页 head」收敛兜底
+  （不产生部分采用错误状态）。
+- 未协商连接调用本 RPC → typed `protocol.capability_required`（fail-closed）。
+
+### 与既有冻结面的关系
+
+- 不触碰 frozen v1 `BridgeGetSessionProjectionWindowParams` /
+  `BridgeGetSessionProjectionWindowResult` 字段集与 `window-response-spec.json`。
+- 冻结样本：`samples/projection-window-v1/anchor-newer-response-spec.json`（独立文件，
+  两仓字节一致副本；spec 测试新增独立读取点）。
+- `session_sync_v2` 是前置（hello 声明纪律）；`direct_gzip_v1` 与本能力正交组合
+  （大对账页同样经 opcode 分流压缩传输）。
