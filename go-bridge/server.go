@@ -36,6 +36,19 @@ var bridgeWriteTimeout = 60 * time.Second
 // 阈值与「压缩更小才发送」是 sender policy，不是额外 wire 要求）。
 const directGzipThreshold = 32 * 1024
 
+// projectionMaxBytes 协商档位（frozen §Anchor-Newer）：默认 50MiB（现状维持）；
+// 提升档上限 256MiB（服务端永不授予更高值）；防呆下限 1MiB。
+const (
+	projectionMaxBytesDefault  = 50 << 20
+	projectionMaxBytesTierCap  = 256 << 20
+	projectionMaxBytesFloor    = 1 << 20
+)
+
+// anchorNewerProductionEnabled 是 projection_window_anchor_newer_v1 的发布门
+// （S-7）。Rollback = 置 false（echo 撤回 → 未协商连接收 typed
+// protocol.capability_required，客户端 fail-closed 回全量冷路径；无数据迁移）。
+const anchorNewerProductionEnabled = true
+
 // directGzipProductionEnabled 是 direct_gzip_v1 的发布门（镜像 PERF-S4D 纪律）。
 // Rollback = 置 false（echo 撤回 → 未协商连接永远收不到 binary 帧，逐字节回到
 // 不压缩现状；无数据迁移）。
@@ -440,7 +453,36 @@ func helloSupportsProjectionWindowV1(hello *HelloMessage) bool {
 // capability REQUIRES session_sync_v2 (windows are a projection-surface feature), and a
 // declaration without it is protocol.invalid_capabilities.
 func (s *Server) negotiateProjectionWindowV1(ack *HelloAckMessage, hello *HelloMessage, conn Connection) bool {
+	// S-7（§Anchor-Newer 超限恢复语义 / F-53）：projectionMaxBytes 数值协商。
+	// 授予值 = min(客户端请求, 提升档上限 256MiB)；缺省（未请求/未回显）= 50MiB。
+	// 该协商在 direct 与 relay 两条 hello 路径均经本函数（F-26 纪律同源）。
+	if req := hello.ProjectionMaxBytes; req != nil && *req > 0 && ack.Ok {
+		granted := *req
+		if granted > projectionMaxBytesTierCap {
+			granted = projectionMaxBytesTierCap
+		}
+		if granted < projectionMaxBytesFloor {
+			granted = projectionMaxBytesFloor
+		}
+		ack.ProjectionMaxBytes = &granted
+		s.eventPublisher.SetConnProjectionMaxBytes(conn, granted)
+	}
+	// S-7（§3.8）：anchor-newer 前置校验先于 window 早退——anchor 不要求
+	// projection_window_v1，anchor-only hello 也要走到 echo；缺 ssv2 前置 = hello
+	// 失败（同族纪律）。F-26：在 negotiateProjectionWindowV1 内扩展 → relay 路径
+	// 自动覆盖。
+	if helloSupportsAnchorNewerV1(hello) && !helloSupportsSessionSyncV2(hello) {
+		retryable := false
+		ack.Ok = false
+		ack.Error = &WireError{
+			Code:      "protocol.invalid_capabilities",
+			Message:   "projection_window_anchor_newer_v1 requires session_sync_v2",
+			Retryable: &retryable,
+		}
+		return false
+	}
 	if !helloSupportsProjectionWindowV1(hello) {
+		s.echoAnchorNewerAndScalar(ack, hello, conn)
 		return true
 	}
 	if !helloSupportsSessionSyncV2(hello) {
@@ -457,7 +499,41 @@ func (s *Server) negotiateProjectionWindowV1(ack *HelloAckMessage, hello *HelloM
 		ack.Capabilities["projection_window_v1"] = true
 		s.eventPublisher.SetConnProjectionWindowV1(conn, true)
 	}
+	s.echoAnchorNewerAndScalar(ack, hello, conn)
 	return true
+}
+
+// echoAnchorNewerAndScalar 处理 S-7 的两个 echo（anchor-newer 与 fence scalar）。
+// OD-6 W1 条件 2（fence scalar 分支的协商面）：scalar echo 条件 = 客户端声明
+// projection_window_v1 + projection_window_scalar_v1 + ack.Ok（镜像 §3.7 W1）。
+// Marked 连接的 decide=true fence 帧保留 Execution（per-turn 清空规则不变）。
+func (s *Server) echoAnchorNewerAndScalar(ack *HelloAckMessage, hello *HelloMessage, conn Connection) {
+	if helloSupportsAnchorNewerV1(hello) && anchorNewerProductionEnabled && ack.Ok {
+		ack.Capabilities["projection_window_anchor_newer_v1"] = true
+		s.eventPublisher.SetConnAnchorNewerV1(conn, true)
+	}
+	if helloSupportsProjectionWindowScalarV1(hello) && helloSupportsProjectionWindowV1(hello) && ack.Ok {
+		ack.Capabilities["projection_window_scalar_v1"] = true
+		s.eventPublisher.SetConnProjectionWindowScalarV1(conn, true)
+	}
+}
+
+func helloSupportsAnchorNewerV1(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "projection_window_anchor_newer_v1" {
+			return true
+		}
+	}
+	return false
+}
+
+func helloSupportsProjectionWindowScalarV1(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "projection_window_scalar_v1" {
+			return true
+		}
+	}
+	return false
 }
 
 // helloSupportsSessionSyncV2 returns true when the client advertised the

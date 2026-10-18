@@ -38,7 +38,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-10-18T13:55:38Z",
+  "updated_at": "2026-10-18T14:19:42Z",
   "todos": [
     {
       "id": "s0-runtime-evidence",
@@ -301,7 +301,7 @@
       "id": "s7-anchor-newer-impl",
       "title": "S-7 anchor-newer 双端实施",
       "description": "Mac（go-bridge）：① projection_window.go newer 分支增加 anchorTurnId 直接锚定形态（现只能从 epoch 绑定 opaque cursor 进 :278-296；locate(anchorTurnId) :297-301 裸 turnId 锚定先例）；切片复用 growWindowRange(sizes, limit, boundary+1, false)（严格后继）；② anchorRefresh 独立字段（anchor 当前完整终态，不计 limit/字节预算，never-split；anchor==tail 且零新增时 turns 空但 anchorRefresh 仍携带终态）；③ baseDigests 对账引擎（Mac 无 per-device 状态——不变量 6；复查集全量比对 → changedTurns/removedTurnIds；token null 必须回传当前终态）；④ 确定性打包算法 + 相位边界 + 续页内容页 + 事务内水位线=已交付链末端（超大 anchor 不阻塞 turns 前进）；⑤ typed 错误族（anchor 离开保留区 cursor_stale → iOS FallbackFull；reconciliation.oversized / full.oversized；未协商 protocol.capability_required fail-closed）；⑥ projection_max_bytes 协商 + full 序列化超限判定（两级 typed 链）；⑦ negotiateProjectionWindowV1 内扩展 echo（direct server.go:808 + relay main.go:693 双路径自动覆盖；projection_window_anchor_newer_v1）；⑧ fence scalar 分支（协商 projection_window_scalar_v1 的连接跳过 resolved.Execution=nil 清空——OD-6 定案条件 2，防御性分支，per-turn 清空规则不变）；⑨ held 注册：增量页全部 turns（含锚点）+ changedTurns 经 CompleteProjectionSnapshotWithHeldTurns 注册（漏注册 = permanently strand detail）；⑩ window projection_rpc trace（与 full 同构 requestId/backend/sessionID/outcome——F-25：无它则 §7.3 重试指标不可计数）；⑪ 每 turn digest token 随页下发。iOS：anchor-newer 请求/响应类型 mirror + eligibility 第三维度（anchor echo；缺失回退全量冷路径 FallbackFull）+ opcode 协商消费。完整打开状态机归 s4。完成后追加 CHANGELOG.md [Unreleased]。",
-      "status": "in_progress",
+      "status": "done",
       "phase": "s7",
       "kind": "impl",
       "depends_on": [
@@ -311,27 +311,39 @@
       "notes": "跨仓改动直接实施（Mac canonical + iOS mirror），不抛回 owner。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Mac：核心 sliceAnchorNewerReconciliation（token 引擎 sha256(json)；全集复查 changed/removed + turn 阶段覆盖项/首页 anchor 去重（合并为一条）；确定性打包（首包 min(8,48-2-anchor) 预算/never-split ≤46MiB 含大 anchor 共存硬顶检查/相位边界不回填/correctionsPending 自包含 cursor V1）；AnchorNewerResult wire 类型）+ handler（capability gate/typed stale/oversized/fence 完成事务 + held 注册（turns+anchorRefresh+changedTurns）/projection_rpc trace mac_receive+response_enqueue+metrics）+ 协商（negotiateProjectionWindowV1 首部 projectionMaxBytes 数值协商 min(请求,256MiB) 缺省 50MiB；anchor 前置校验先于 window 早退（anchor-only hello 可达）；anchor+scalar echo 与 per-conn 标记）+ fence scalar 分支（协商连接保留 Execution）+ full 拉取 turnTokens 种子 + full.oversized 执行（sizes 估算 vs conn cap）+ relay bulk 分类。iOS：wire 模型（SessionProjectionAnchorNewer.swift）+ decoder + CCCodeBridgeClient fetch（协议声明+extension 默认+实现）+ BackendClient 转发 + supportsProjectionWindowAnchorNewer 第三维度 + hello 声明（anchor+scalar）+ GetSessionProjectionResult.turnTokens。双端编译通过；go-bridge 全包仅剩已知预存失败",
+        "artifacts": [
+          "mac:go-bridge/projection_anchor_newer.go (new)",
+          "mac:go-bridge/projection_anchor_newer_handler.go (new)",
+          "mac:go-bridge/server.go (协商+常量)",
+          "mac:go-bridge/handlers.go (分发)",
+          "mac:go-bridge/projection_snapshot_fence.go (scalar 分支)",
+          "mac:go-bridge/handlers_projection.go (turnTokens+full.oversized)",
+          "mac:go-bridge/hello_handler.go (projectionMaxBytes 字段)",
+          "mac:go-bridge/event_publisher.go+projection_delivery.go (标记+cap)",
+          "mac:go-bridge/relay_outbound_writer.go (bulk 分类)",
+          "ios:Models/SessionProjectionAnchorNewer.swift (new) + Bridge 客户端/transport/decoder/SessionProjection 改动",
+          "cmd:go build+vet OK; xcodebuild build SUCCEEDED"
+        ],
+        "checked_at": "2026-10-18T14:19:42Z"
       }
     },
     {
       "id": "s7-anchor-newer-tests",
       "title": "S-7 anchor-newer 定向测试（§7.1.5 全集）",
       "description": "Mac 定向测试全集（§7.1.5）：① 锚点命中（turns 严格后继+anchorRefresh 独立字段）/锚点离开保留区（typed cursor_stale → FallbackFull）/anchor==tail（合法空 turns+anchorRefresh 终态）；② baseDigests 对账（命中/不命中/离线修改 A旧→A新 经 changedTurns/compaction tombstone removedTurnIds/token null 强制回传）；③ 预算边界（8MiB 对账预算临界；20MiB anchor 合法；46MiB anchor 恰满独占额度首包对账空间 0 全部 correctionsPending；46MiB+1 超限 typed oversized；单个 changedTurn 9MiB 独占修正页；46MiB/46MiB+1 changedTurn 边界）；④ 组合验收（46+9 / 20+46 / 46+46；修正页不重复 anchorRefresh——turns/changedTurns 剩余片按 turn phase→correction phase 出现不属违例；每续页独立 head 采用最后一页；续页 typed stale 无部分采用状态泄漏；打包确定性=同输入两次生成页序列字节一致）；⑤ 后继 turn 交付（46MiB+1KiB 续页交付水位线前移 / 46MiB+9MiB 整 turn 独占页 / 42MiB+6MiB 首包 4MiB 不回填切页即止；每页 ≤48MiB、链不跳 R7、syncing 全到齐才清）；⑥ 自包含 cursor（Mac 无状态：换连接重发同一 cursor 幂等、两设备交错不串扰；跨 cut 复查=首页已发 turn 续页前被 live patch 修改 → token 失效重发当前终态；事务中途 compaction 移除非锚点 turn → removedTurnIds tombstone；早页确认项页间被修改 → 全集复查仍捕获；anchor 离开保留区中止）；⑦ full 超限（46MiB+1 构造 full > projection_max_bytes → reconciliation.oversized → FallbackFull → full.oversized 显式失败；提升档协商后成功；解压拒绝不计恢复成功）；⑧ 分页前进（超大 anchor 不阻塞；limit=1 前进；anchor==tail 不循环）；⑨ R7 严格链序；⑩ 未协商 typed protocol.capability_required；⑪ direct+relay 双路径 echo；⑫ projection_rpc trace 可按 requestId 计数；⑬ held 注册（含锚点与 changedTurns）+ 并发 detail commit 负对照（decide=true 不被清空）；⑭ 独立样本文件断言（anchor 样本经新增读取点；既有 window-response-spec.json 零改动）。iOS spec 断言同步。fence scalar 分支断言（§7.1.4：decide=true 构造、协商连接不清空 Execution、未协商负对照）。双链投递断言（§7.1.4 ①②：常规链含 Execution-only 原样投递 / detail commit held 命中不清空）。",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "s7",
       "kind": "tests",
       "depends_on": [
         "s7-anchor-newer-impl"
       ],
       "source": "方案 §7.1.4/§7.1.5 全部断言",
-      "notes": "",
+      "notes": "Mac 侧 18 例 PASS（§7.1.5 ①锚点命中/严格后继/首包唯一 anchorRefresh/anchor==tail/typed stale ②digest 对账 stale+null+removed ③46 恰满+1KiB 续页水位线前进/46+1 超限/9MiB changedTurn 空页独占/42+6 相位边界不回填 ④打包确定性字节一致 ⑥cursor 幂等重放/早页确认项页间修改捕获 ⑧limit=1 前进 ⑪协商 echo（anchor 前置/标记/scalar 双声明/projectionMaxBytes 钳制） + wire 键序 + spec 3 例）。部分覆盖登记：组合 20+46/46+46 未逐一（同函数边界已覆盖）；⑫trace 计数与 ⑬held 并发 detail 负对照归 s7-regression 运行态验证；⑦ full.oversized handler 级断言待 harness（enforcement 已实现）。iOS spec（AnchorNewerSpecTests 6 例）按 owner 调度约束与 S-4 批量执行（避免与并行 timeline 任务设备撞车）——文件就绪未运行。",
       "verification": {
         "required": true,
         "status": "missing",

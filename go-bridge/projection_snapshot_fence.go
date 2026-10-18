@@ -231,7 +231,13 @@ func (p *EventPublisher) completeProjectionSnapshot(
 		resolved.UpsertTurns = nil
 		resolved.PartOps = nil
 		resolved.TurnStateOps = nil
-		resolved.Execution = nil
+		// OD-6 W1 条件 2（fence scalar 分支）：会话级标量不属于 per-turn 数据，
+		// per-turn 清除规则不作用于 Execution——协商 projection_window_scalar_v1
+		// 的连接保留之（防御性分支：现有构造点的 decide=true patch 恒含 TurnID，
+		// 该分支防御未来新增 detail commit 构造点产生 Execution-only commit）。
+		if !p.connProjectionWindowScalarLocked(conn) {
+			resolved.Execution = nil
+		}
 		fence.pending[i].patch = resolved
 	}
 	sink := p.sinkLocked(conn)

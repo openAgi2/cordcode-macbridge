@@ -8,6 +8,12 @@
 
 ## [Unreleased]
 
+### 2026-10-18 — anchor-newer 对账增量 RPC 与 projectionMaxBytes 协商（S-7）
+
+- 新增 `get_session_projection_anchor_newer`（capability `projection_window_anchor_newer_v1`，session_sync_v2 前置）：客户端以裸 turnId 水位线请求「严格后继 turns + 锚点终态刷新（仅首包、never-split）+ 全基底对账修正」；`baseDigests` 全集复查（token 不一致/失效→changedTurns、移除→removedTurnIds），逐 turn token 与内容同帧下发（full 全量响应对协商连接也附带 `turnTokens` 种子）。预算按冻结规则执行：总硬顶 48MiB、mandatory 2MiB、never-split 独占 46MiB、每页对账预算 8MiB、确定性打包（相位边界不回填）、`correctionsPending` 自包含续页游标（Mac 零客户端状态，重放幂等）。
+- typed 错误链：anchor 离开保留区 `cursor_stale`；超 46MiB `reconciliation.oversized`；full 序列化超协商上限 `full.oversized` 显式失败。hello 新增数值协商 `projectionMaxBytes`（授予 = min(请求, 256MiB)，缺省 50MiB）。
+- fence scalar 分支（OD-6 W1 条件 2）：协商 `projection_window_scalar_v1` 的连接，decide=true fence 帧不再清空 Execution（per-turn 清空规则不变）。anchor 页（含 changedTurns）在同一完成事务注册 held turns；RPC 走与 full 同构的 projection_rpc trace。
+
 ### 2026-10-18 — 直连传输逐帧压缩 `direct_gzip_v1`（S-8）
 
 - 新增直连（LAN `ws://` / Tailscale `wss://`）Mac→client 大响应的 gzip 逐帧压缩：客户端在 hello 声明 `direct_gzip_v1` 且 Bridge echo 后，序列化后 ≥32KiB 且压缩更小的响应帧以 WebSocket binary 帧整帧压缩发送（gzip(JSON envelope)），小帧与不可压帧维持 text 帧不变。此前事故样本约 34MB 的全量投影在直连路径无任何压缩（Relay 已有 `relay_gzip_v1` 但直连不适用）；按本地估算 level-1 压缩后约 11.2MB，长会话首开网络传输体积显著下降。

@@ -252,10 +252,43 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 			fullReason = "journal_gap"
 		}
 	}
+	// S-7（§Anchor-Newer 超限恢复语义 / F-53）：full 序列化超协商上限 → typed
+	// full.oversized 显式终态失败（两级 typed 链第二级；不假成功、不部分渲染）。
+	// 估算 = turns 序列化合计 + 1MiB scalar/envelope 余量（防重编 34MB 级 payload）。
+	capBytes := h.eventPublisher.ProjectionMaxBytes(conn)
+	if sizes, sizeErr := turnEncodedSizes(proj.Turns); sizeErr == nil {
+		total := int64(1 << 20)
+		for _, size := range sizes {
+			total += int64(size)
+		}
+		if total > capBytes {
+			retryableFalse := false
+			wireErr := &WireError{
+				Code:      "full.oversized",
+				Message:   fmt.Sprintf("full projection serialization exceeds the negotiated projectionMaxBytes (%d bytes)", capBytes),
+				Retryable: &retryableFalse,
+			}
+			logProjectionRPCTrace("response_enqueue", msg, params.SessionID, params.SinceRev, proj.SyncRev, "full.oversized", &admission)
+			if err := h.eventPublisher.CompleteProjectionSnapshotError(conn, admission, msg.RequestID, wireErr); err != nil {
+				slog.Warn("go-bridge: full.oversized fence release failed", "requestId", msg.RequestID, "error", err)
+			}
+			return
+		}
+	}
 	logProjectionRPCTrace("response_enqueue", msg, params.SessionID, params.SinceRev, proj.SyncRev, "snapshot", &admission)
 	response := map[string]interface{}{
 		"projection": proj,
 		"resume":     projectionResumeFull(fullReason, params.SinceRev),
+	}
+	// S-7 token 生命周期 #1（full 种子同帧配对）：已协商 anchor-newer 的连接在全量
+	// 响应附带 {turnId → token}，客户端缓存逐行配对存储；未协商连接零开销（旧 peer
+	// wire 逐字节不变——map 缺省即不序列化）。
+	if h.eventPublisher.ConnAnchorNewerV1(conn) {
+		if tokens, tokenErr := BuildAnchorNewerTurnTokens(proj.Turns); tokenErr == nil {
+			response["turnTokens"] = tokens
+		} else {
+			slog.Warn("go-bridge: anchor-newer seed tokens unavailable", "requestId", msg.RequestID, "error", tokenErr)
+		}
 	}
 	logProjectionResponseMetrics(
 		msg, params.SessionID, params.SinceRev, proj.SyncRev, "snapshot", response,

@@ -1,0 +1,182 @@
+package gobridge
+
+// get_session_projection_anchor_newer RPC handler (S-7, 方案 v30 §3.8).
+//
+// 与 handleGetSessionProjectionWindow 同族：读同一 committed Kernel head、走同一
+// snapshot fence（Begin→slice→Complete 保持对账响应与 post-cut projection_patch 在
+// 同一连接 sink 上有序）；held-turn 注册在同一完成事务内（含 anchorRefresh 与
+// changedTurns——漏注册会永久 strand 并发 detail commit，P0-2）。Pull-only。
+// 未协商连接得到 frozen 兼容答案：protocol.capability_required。
+
+import (
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"time"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
+)
+
+func (h *Handlers) handleGetSessionProjectionAnchorNewer(conn Connection, msg WireMessage, agent core.Agent) {
+	// F-25：与 full 同构的 projection_rpc trace（requestId/backend/sessionID/outcome），
+	// §7.3 重试指标在 window 生效后可按本 trace 计数。
+	requestStartedAt := time.Now()
+	var params AnchorNewerParams
+	if msg.Params != nil {
+		if err := json.Unmarshal(msg.Params, &params); err != nil {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: err.Error()})
+			return
+		}
+	}
+	isContinuation := params.CorrectionCursor != ""
+	outcomeKind := "anchor_first_page"
+	if isContinuation {
+		outcomeKind = "anchor_continuation"
+	}
+	logProjectionRPCTrace("mac_receive", msg, params.SessionID, 0, -1, outcomeKind, nil)
+	if params.BackendID == "" {
+		params.BackendID = msg.BackendID
+	}
+	params.SessionID = h.resolveSessionIDForActiveSession(params.SessionID)
+
+	retryableFalse := false
+	retryableTrue := true
+
+	// Frozen gate：仅已协商 projection_window_anchor_newer_v1 的连接可调用。
+	if !h.eventPublisher.ConnAnchorNewerV1(conn) {
+		conn.SendResult(msg.RequestID, nil, &WireError{
+			Code:      "protocol.capability_required",
+			Message:   "get_session_projection_anchor_newer requires the projection_window_anchor_newer_v1 capability",
+			Retryable: &retryableFalse,
+		})
+		return
+	}
+	if params.AnchorTurnID == "" {
+		conn.SendResult(msg.RequestID, nil, &WireError{
+			Code:    "invalid_params",
+			Message: "anchorTurnId is required (bare turn-id watermark)",
+		})
+		return
+	}
+	if len(params.BaseDigests) > anchorNewerMaxDigestEntries {
+		conn.SendResult(msg.RequestID, nil, &WireError{
+			Code:      "invalid_params",
+			Message:   "baseDigests exceeds the 256-entry review-set cap",
+			Retryable: &retryableFalse,
+		})
+		return
+	}
+	if params.Limit > maxWindowTurns {
+		conn.SendResult(msg.RequestID, nil, &WireError{
+			Code:      "projection_window.limit_exceeded",
+			Message:   "limit exceeds maxWindowTurns (256)",
+			Retryable: &retryableFalse,
+		})
+		return
+	}
+
+	bridgeEpoch := h.eventPublisher.BridgeEpoch()
+
+	// 与 window/full 拉取相同的 session-open 副作用：订阅连接、挂 live producer relay。
+	h.subscribeConnToSession(conn, msg, params.SessionID, "")
+	if msg.BackendID != "claude" && msg.BackendID != "claudecode" {
+		h.startProjectionLiveRelay(params.SessionID, conn, msg.BackendID, agent, "")
+	}
+
+	forceColdInspection := params.SessionID != "" &&
+		(msg.BackendID == "opencode" || msg.BackendID == "opencode-web" ||
+			msg.BackendID == "grokbuild" ||
+			msg.BackendID == "claude" || msg.BackendID == "claudecode" ||
+			msg.BackendID == "deepseek" || msg.BackendID == "dsh-web" ||
+			msg.BackendID == "codex-web")
+	var beforeHydrate []func(ProjectionSourceDescriptor)
+	if msg.BackendID == "claude" || msg.BackendID == "claudecode" {
+		beforeHydrate = append(beforeHydrate, func(source ProjectionSourceDescriptor) {
+			h.startClaudeSessionFileRelayAt(params.SessionID, conn, msg.BackendID, &source.Cursor)
+		})
+	}
+	if err := h.ensureProjectionHydrated(
+		msg.BackendID,
+		params.SessionID,
+		"",
+		forceColdInspection,
+		beforeHydrate...,
+	); err != nil {
+		code := "projection.hydrate_failed"
+		retryable := false
+		switch {
+		case errors.Is(err, errProjectionHydrating):
+			code = "projection.hydrating"
+			retryable = true
+		case errors.Is(err, errProjectionBackendNotMigrated):
+			code = "projection.not_migrated"
+		case errors.Is(err, errProjectionSessionNotFound):
+			code = "projection.not_found"
+		}
+		conn.SendResult(msg.RequestID, nil, &WireError{
+			Code:      code,
+			Message:   err.Error(),
+			Retryable: &retryable,
+		})
+		return
+	}
+	if msg.BackendID == "claude" || msg.BackendID == "claudecode" {
+		h.startProjectionLiveRelay(params.SessionID, conn, msg.BackendID, agent, "")
+	}
+
+	h.eventPublisher.SetConnProjectionDeliveryMode(conn, msg.BackendID, params.SessionID, ProjectionDeliveryWindow)
+
+	// 同一 snapshot fence 准入（对账页与 post-cut patch 有序）。
+	proj, admission, snapshotErr := h.eventPublisher.BeginProjectionSnapshot(
+		conn,
+		msg.BackendID,
+		params.SessionID,
+	)
+	if snapshotErr != nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{
+			Code:    "projection.not_ready",
+			Message: snapshotErr.Error(),
+		})
+		return
+	}
+
+	result, sliceErr := sliceAnchorNewerReconciliation(proj, params)
+	if sliceErr != nil {
+		// fence 以 typed error 释放（R9 同族：显式 typed 失败，不留悬挂 fence）。
+		wireErr := &WireError{Code: "rpc.error", Message: sliceErr.Error(), Retryable: &retryableFalse}
+		switch {
+		case errors.Is(sliceErr, errAnchorNewerStale):
+			// anchor 离开保留区：水位线失效，客户端 fail-closed FallbackFull。
+			wireErr = &WireError{Code: "cursor_stale", Message: sliceErr.Error(), Retryable: &retryableTrue}
+		case errors.Is(sliceErr, errAnchorNewerOversized):
+			// never-split 独占额度超限：两级 typed 链第一级。
+			wireErr = &WireError{Code: "reconciliation.oversized", Message: sliceErr.Error(), Retryable: &retryableFalse}
+		case errors.Is(sliceErr, errAnchorNewerCursor):
+			wireErr = &WireError{Code: "cursor_stale", Message: sliceErr.Error(), Retryable: &retryableTrue}
+		}
+		if err := h.eventPublisher.CompleteProjectionSnapshotError(conn, admission, msg.RequestID, wireErr); err != nil {
+			slog.Warn("go-bridge: anchor-newer fence release failed", "requestId", msg.RequestID, "error", err)
+		}
+		return
+	}
+
+	// held-turn 注册在同一完成事务内（F-34/v23 扩展）：本页全部交付 turns——turns、
+	// anchorRefresh、changedTurns——注册进该连接的 held 集合，使后续针对这些 turn 的
+	// decide=true detail commit 不被 fence 清空。完成失败随完成事务回滚。
+	held := make([]string, 0, len(result.Turns)+len(result.ChangedTurns)+1)
+	for _, turn := range result.Turns {
+		held = append(held, turn.TurnID)
+	}
+	for _, turn := range result.ChangedTurns {
+		held = append(held, turn.TurnID)
+	}
+	if result.AnchorRefresh != nil {
+		held = append(held, result.AnchorRefresh.TurnID)
+	}
+	if err := h.eventPublisher.CompleteProjectionSnapshotWithHeldTurns(conn, admission, msg.RequestID, result, held); err != nil {
+		slog.Warn("go-bridge: anchor-newer response enqueue failed", "requestId", msg.RequestID, "error", err)
+	}
+	logProjectionRPCTrace("response_enqueue", msg, params.SessionID, 0, result.SyncRev, outcomeKind, &admission)
+	logProjectionResponseMetrics(msg, params.SessionID, 0, result.SyncRev, outcomeKind, result, h.eventPublisher.ActiveRecoveryID(conn), requestStartedAt, &proj)
+	_ = bridgeEpoch // epoch 判定在客户端侧（F-55）：续页不带 epoch、Mac 不比对。
+}
