@@ -38,7 +38,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-10-18T14:19:42Z",
+  "updated_at": "2026-10-18T14:21:53Z",
   "todos": [
     {
       "id": "s0-runtime-evidence",
@@ -366,7 +366,7 @@
         "s7-anchor-newer-tests"
       ],
       "source": "方案 §5 E-4/E-10；§9 第二阶段",
-      "notes": "",
+      "notes": "Mac 部署部分已完成（2026-10-18 22:21）：Release 构建 commit 455d49e47231（= S-7 实现提交）覆盖安装，运行态核验全过（PID 43301 lstart 22:21:25 > 构建 22:20、8777 监听者=新 PID、新 epoch 8cb0e6a6…、binary strings 含 455d49e47231、无违规残留、日志活跃）。剩余：E-4 真实 wire、E-10 anchor scalar 真机、hello echo 实测（direct+relay）——依赖新 iOS 包安装（按 owner 调度约束与 S-4/S-6 同批）；⑫trace 计数与 ⑬held 负对照运行态断言同批。",
       "verification": {
         "required": true,
         "status": "missing",
