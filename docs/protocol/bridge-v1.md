@@ -2168,11 +2168,14 @@ A CLIENT opt-in capability, mirrored as a backend-scoped server promise, followi
 `session_sync_v2` declaration pattern:
 
 - The client declares `capabilities: ["projection_window_v1"]` in `hello`. MacBridge echoes
-  `capabilities["projection_window_v1"] = true` in `hello_ack` only when BOTH (a) the
-  server-side rollout flag is enabled and (b) the selected backend descriptor's projection
-  kernel supports window admission. Per-backend support is additionally reported on the
-  backend descriptor's `capabilities` list; clients MUST gate window RPCs on the descriptor
-  list, not the global echo.
+  `capabilities["projection_window_v1"] = true` in `hello_ack` when the server-side rollout
+  flag is enabled (hello echo is the single gate). **[F-18 收口，2026-10-19 更正记录]**
+  本节原为双门语义（echo 条件 (b)「backend descriptor's projection kernel supports
+  window admission」+ 客户端「MUST gate window RPCs on the descriptor list, not the
+  global echo」）——descriptor 侧第二门自 F-13 登记以来从未实现（两端均为 hello echo
+  单门），随 `projection_window_v2` 冻结（§Projection Window v2 Summary）正式更正为
+  单门语义，与实现一致；per-backend 差异仍可经 backend descriptor capabilities 列表
+  观测（informational，非门控）。
 - **Prerequisite**: `session_sync_v2` MUST also be declared. A connection declaring
   `projection_window_v1` without `session_sync_v2` is a protocol violation: `hello` fails
   with `code = "protocol.invalid_capabilities"` (`retryable = false`). Windows are a
@@ -2374,7 +2377,9 @@ replaces the synthetic fixture under the same README discipline as
 ### Capability: `turn_detail_lazy_v1` (on-demand turn detail; frozen 2026-08-30, lazy-history §3.2.0)
 
 `turn_detail_lazy_v1` adds a backend-scoped lazy-detail surface for backends whose history is
-paginated upstream (v1: ONLY `codex-remote`, kind `codex-remote`). The first screen ships turn
+paginated upstream (v1: ONLY `codex-remote`, kind `codex-remote`; **v2 producer 扩展 =
+`claude`（kind `claude`），2026-10-19 随 `projection_window_v2` 冻结——per-session 资源门
+与 codex-remote 的 historyMode 维度不同，见 unified-bridge-protocol.md §11.7 修订**). The first screen ships turn
 summaries; per-turn detail (reasoning summaries, tool calls and outputs) is fetched on demand,
 committed to the projection Kernel, and delivered through the EXISTING
 `projection_snapshot`/`projection_patch` pipes — there is no second content channel.
@@ -3098,6 +3103,14 @@ Bridge echo 条件 = 服务端实现落地 + `hello` 被接受。未 echo 时客
 
 - `anchorTurnId`（必填，首包与续页同值）：裸 turnId 水位线。**不得持久化 wire
   cursor**（R1 冻结条款）；请求时由 turnId 现场构造锚定。
+- `itemsView`（**additive 可选，2026-10-19 随 `projection_window_v2` 冻结**）：取值
+  `"summary"`；仅当客户端 v2 echo 且基底为 summary 种子时携带（首包与续页同值）。
+  携带时 `turns` / `anchorRefresh` / `changedTurns` 行以 §Projection Window v2 Summary
+  的 `BridgeTurnSummaryDescriptor` 形态返回（响应回显 `itemsView: "summary"`），不携带
+  完整明细——防「下次更新退回全量」。token 基准不变 = 底层完整 committed 内容；summary
+  规则演进不引发假 mismatch。legacy full 种子基底不携带（两类基底形态不混用）；未实现
+  v2 的 Mac 按 additive 惯例忽略。always-visible 例外态行（liveState / permission 族 /
+  user_input pending）仍完整内嵌，不因 `itemsView:"summary"` 收窄。
 - `baseDigests`（必填）：`{turnId → token | null}` 映射，**完整复查集 = 原始
   baseDigests 全部项 ∪ 已发项 token**（含首包 anchorRefresh turn 与本事务已交付
   turns）——**复查集不随页收缩，每续页携带全量**（受缓存上限约束 ≤256 项）。token
@@ -3218,3 +3231,98 @@ Bridge echo 条件 = 服务端实现落地 + `hello` 被接受。未 echo 时客
   两仓字节一致副本；spec 测试新增独立读取点）。
 - `session_sync_v2` 是前置（hello 声明纪律）；`direct_gzip_v1` 与本能力正交组合
   （大对账页同样经 opcode 分流压缩传输）。
+
+## Projection Window v2 Summary (`projection_window_v2`) — FROZEN SPEC
+
+冻结依据：`docs/2026-10-19-s3-v2-summary-freeze-spec.md`（v3，评审通过 2026-10-19；
+owner 裁决路线 A + 显示方式 ③ 正文优先）。additive 新 RPC；不触碰 frozen v1 window
+类型与字段集。schema 见 `schema/bridge-v1.types.ts`（`BridgeGetSessionProjectionWindowV2*`）。
+
+### Capability: `projection_window_v2`
+
+- 客户端 `hello` 声明 `projection_window_v2`；MacBridge echo 条件 = 上文
+  `projection_window_v1` 修订后单门条件集（客户端声明 `projection_window_v1` +
+  `session_sync_v2` 前置 + 服务端 rollout flag）+ v2 producer 落地（`claude`）。
+- `itemsView` 是**请求内字段**而非独立 capability；echo `projection_window_v2` 即承诺
+  `summary` / `full` 两种取值。协商沿用 `negotiateProjectionWindowV1` 内扩展纪律
+  （direct + relay 双路径自动覆盖）。
+- 未协商 v2 的客户端：行为不变（full 首开，现状路径）。回退 = Mac 不 echo → iOS
+  自动回 full 首开，无数据迁移。
+
+### RPC: `get_session_projection_window_v2`
+
+请求字段继承 v1（`sessionId` / `directory?` / `backendId` / `direction` / `cursor?` /
+`limit?` / `anchorTurnId?`；组合规则不变——`cursor` 仅 older/newer 续拉、`anchorTurnId`
+仅 locate 必填，两者均为裸 turnId 锚定语义），新增必填 `itemsView: "summary" | "full"`。
+
+响应（`itemsView` 为判别字段）：
+
+- `itemsView: "summary"`：`window`（完整继承 v1 `BridgeProjectionWindow` 字段集）+
+  `turns: BridgeTurnSummaryDescriptor[]` + `scalarState`（必选，W1 语义镜像——v2 从
+  形状上消除 F-11）+ `syncRev` + `resume?` + `summaryBudget`（必选，可观测账本：
+  `payloadBytes` / `foldedTurnIds` / `exceptions`）。
+- `itemsView: "full"`：v1 行为 + `scalarState` 必选。
+
+### TurnSummaryDescriptor（冻结定义 1+2）
+
+- `turnId` / `status` / `startedAt?` / `completedAt?` / `durationMs?`。
+- `userBrief` / `agentBrief`（`{ text, truncated }`）：正文 brief；≤128 chars 完整，
+  超长截断至 128 + `truncated: true`；`agentBrief` 取末段（结论优先），
+  `agentBriefHead` 取开头 64 chars（③ 正文优先双端锚定）。
+- `folded` / `foldReason`（`long_body | tool_process | both | budget`）：③ 折叠形态
+  依据；`budget` = 预算降级整 turn 折叠（仅 turnId + folded + foldReason，无 brief；
+  渲染形态同 `long_body`，独立枚举供观测断言）。
+- `toolProcessCount?` / `toolProcessBytes?`：工具过程占位摘要。
+- `liveState?`：**always-visible 例外通道**——正在执行的轮次、权限确认卡（permission
+  族 part）、待回答问题（`user_input` 族 pending part，wire 字段名 `status ==
+  "pending"`）的完整 turn **原样**内嵌（frozen `BridgeTurnProjection`，never-split）。
+  **不新增 wire 字段**：iOS 按既有 part 类型识别。例外不受预算约束。
+- `turnGeneration?`：与 turn_detail 家族身份绑定（absent => 0）。
+
+**预算语义（定案）**：≤1MiB 是 brief 与工具占位合计的**软**预算；超限 → 老 turns 按
+`foldReason: "budget"` 降级（不截断已交付 brief）；`liveState` 例外与 `scalarState`
+不计入预算。**禁止以截断权限卡/待答问题凑预算**——例外永远完整。
+
+### 明细按需加载（冻结定义 6）与 Claude 资格门（四层）
+
+- 展开折叠 turn / 工具过程 → 既有 `session_turn_items`（v1）/ `turn_detail_chunk`
+  （v2 overlay）；chunks 家族语义（replay/seq/generation）原样复用，不新建第二套明细
+  协议。Claude producer 的资格门四层定案见 `unified-bridge-protocol.md` §11.7 修订：
+  连接级 = `turn_detail_lazy_v1` echo（不变）；backend 门 = `{codex-remote, claude}`；
+  per-session 门（Claude 无 historyMode 维度）= 「turn 在 committed projection 且
+  status=completed」；descriptor 门 = Claude descriptor 声明 `turn_detail_chunks_v1`。
+- 明细一旦经 chunks 交付并入本地投影，后续 live patch / anchorRefresh 以增量 partOps
+  更新，不回退为完整明细重发（定义 4 一致性约束）。
+
+### live patch / 缓存 / 对账一致性（冻结定义 4）
+
+- summary 视图下 folded turn 的 patch 只更新折叠元数据（工具字节数等），不展开内容；
+  已展开（本地有明细）的 turn 按常规完整 patch。
+- 首开 summary 成功 → 基底缓存播种 summary 形态（缓存 schema v3：rows 带 brief +
+  folded 元数据）；legacy full 种子基底（缓存 schema ≤v2）继续以 full 形态对账（请求
+  省略 `itemsView`），两类基底形态不混用。
+- 重开对账 wire 机制 = 上文 anchor-newer 章节的 `itemsView` additive 字段。已下载明细
+  行的合并规则（token 比对 → 保留/标记 stale 下次展开重拉）与 token 簿记不变量见
+  冻结规范 §5；token 基准 = 底层完整 committed 内容。
+
+### Errors（冻结定义 5）
+
+错误集 = frozen v1 window 全集 + 新增 `summary.oversized`（重试=false）：
+
+| code | retryable | direction 适用 |
+| --- | --- | --- |
+| `cursor_stale` | true | older/newer（cursor 解码失败 / epoch 失效） |
+| `projection_window.cursor_scope_mismatch` | false | cursor 跨 `(backendId, bridgeEpoch, sessionId)` scope |
+| `projection_window.limit_exceeded` | false | `limit > maxWindowTurns(256)` |
+| `projection_window.locate_out_of_window` | false | locate：`anchorTurnId` 未知或超出保留区（诚实回 full） |
+| `invalid_params` | false | 全 direction |
+| `protocol.capability_required` | false | 全 direction（连接未协商 v2） |
+| `projection.hydrating` | true | 全 direction |
+| `summary.oversized`（新增） | false | `itemsView:"summary"`：单 turn 例外通道自身超 `projectionMaxBytes` → fail-closed |
+
+### 非目标（冻结边界）
+
+older 方向网络加载（OD-8 维持 (a) 关闭；`older` 仅作游标形状预留）；非 Claude backend
+producer；离线查看未下载明细（owner 接受）。样本：
+`samples/projection-window-v2/window-summary-spec.json` +
+`samples/projection-window-v2/anchor-newer-summary-response-spec.json`（两仓字节一致）。

@@ -1,0 +1,132 @@
+{
+  "provenance": "synthetic-spec-fixture",
+  "note": "S-3 v2 重开对账 summary 形态冻结样本（anchor-newer itemsView additive，2026-10-19）。请求携带 itemsView=summary（首包与续页同值）→ 响应回显且 turns/anchorRefresh/changedTurns 行为 BridgeTurnSummaryDescriptor 形态；token 基准不变（底层完整 committed 内容）；always-visible 例外态行仍完整内嵌。legacy full 种子基底请求省略 itemsView（形态不混用）。",
+  "rpc": "get_session_projection_anchor_newer",
+  "requests": {
+    "firstPage": {
+      "sessionId": "s-spec-v2",
+      "backendId": "claude",
+      "anchorTurnId": "turn-104",
+      "baseDigests": {
+        "turn-100": "tok-100",
+        "turn-101": "tok-101",
+        "turn-102": null
+      },
+      "itemsView": "summary"
+    },
+    "continuation": {
+      "sessionId": "s-spec-v2",
+      "backendId": "claude",
+      "anchorTurnId": "turn-104",
+      "baseDigests": {
+        "turn-100": "tok-100",
+        "turn-101": "tok-101",
+        "turn-102": "tok-102-new",
+        "turn-103": "tok-103",
+        "turn-106": "tok-106"
+      },
+      "correctionCursor": "cur-correction-1",
+      "itemsView": "summary"
+    }
+  },
+  "responses": {
+    "firstPage": {
+      "turns": [
+        {
+          "turnId": "turn-106",
+          "status": "completed",
+          "userBrief": {
+            "text": "再跑一次",
+            "truncated": false
+          },
+          "agentBrief": {
+            "text": "回归通过，覆盖率 92%。",
+            "truncated": false
+          },
+          "folded": true,
+          "foldReason": "tool_process",
+          "toolProcessCount": 2,
+          "toolProcessBytes": 20480,
+          "turnGeneration": 0
+        }
+      ],
+      "anchorRefresh": {
+        "turnId": "turn-104",
+        "status": "completed",
+        "userBrief": {
+          "text": "把配置文件改一下再部署",
+          "truncated": false
+        },
+        "agentBrief": {
+          "text": "已按确认写入并部署完成。",
+          "truncated": false
+        },
+        "folded": true,
+        "foldReason": "tool_process",
+        "toolProcessCount": 1,
+        "toolProcessBytes": 512,
+        "turnGeneration": 1
+      },
+      "changedTurns": [
+        {
+          "turnId": "turn-102",
+          "status": "completed",
+          "userBrief": {
+            "text": "收到（离线修改补正）",
+            "truncated": false
+          },
+          "agentBrief": {
+            "text": "内容已修正。",
+            "truncated": false
+          },
+          "folded": false,
+          "turnGeneration": 0
+        }
+      ],
+      "removedTurnIds": [],
+      "scalarState": {
+        "execution": {
+          "phase": "idle",
+          "activeTurnId": null
+        }
+      },
+      "correctionsPending": {
+        "cursor": "cur-correction-1",
+        "remaining": 1
+      },
+      "turnTokens": {
+        "turn-104": "tok-104-new",
+        "turn-106": "tok-106",
+        "turn-102": "tok-102-new"
+      },
+      "syncRev": 5631,
+      "itemsView": "summary"
+    },
+    "continuation": {
+      "turns": [],
+      "changedTurns": [
+        {
+          "turnId": "turn-103",
+          "status": "completed",
+          "folded": true,
+          "foldReason": "budget",
+          "turnGeneration": 0
+        }
+      ],
+      "removedTurnIds": [
+        "turn-gone-compacted"
+      ],
+      "scalarState": {
+        "execution": {
+          "phase": "idle",
+          "activeTurnId": null
+        }
+      },
+      "turnTokens": {
+        "turn-103": "tok-103-new"
+      },
+      "syncRev": 5631,
+      "itemsView": "summary"
+    }
+  }
+}

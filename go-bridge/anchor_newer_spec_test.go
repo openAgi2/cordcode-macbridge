@@ -26,14 +26,17 @@ const anchorNewerRPC = "get_session_projection_anchor_newer"
 // Schema drift fails the schema-parse test below; fixture drift fails the fixture test.
 var frozenAnchorNewerFields = map[string][]string{
 	"BridgeGetSessionProjectionAnchorNewerParams": {
+		// itemsView = S-3 v2 additive（2026-10-19，spec v3 §5；summary 种子基底对账）。
 		"sessionId", "backendId", "anchorTurnId", "baseDigests", "limit", "correctionCursor",
+		"itemsView",
 	},
 	"BridgeAnchorNewerScalarState": {
 		"execution", "planMode", "sessionMode", "collaborationMode", "goal", "codexGoal",
 	},
 	"BridgeGetSessionProjectionAnchorNewerResult": {
+		// itemsView = S-3 v2 additive（2026-10-19；请求携带时回显、行为 summary 形态）。
 		"turns", "anchorRefresh", "changedTurns", "removedTurnIds",
-		"scalarState", "correctionsPending", "turnTokens", "syncRev",
+		"scalarState", "correctionsPending", "turnTokens", "syncRev", "itemsView",
 	},
 }
 

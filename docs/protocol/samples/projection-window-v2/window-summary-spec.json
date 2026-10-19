@@ -1,0 +1,295 @@
+{
+  "provenance": "synthetic-spec-fixture",
+  "note": "S-3 projection_window_v2 summary 首开冻结样本（spec v3，2026-10-19 评审通过）。③ 正文优先语义 wire 化：普通 brief 直接显示、超长折叠（long_body/both）、工具过程折叠（tool_process）、预算降级（budget）；always-visible 例外通道经 liveState 原样内嵌（permission 族 part 与 user_input pending part 各一实例，无新 wire 字段）。schema = bridge-v1.types.ts BridgeGetSessionProjectionWindowV2SummaryResult。",
+  "rpc": "get_session_projection_window_v2",
+  "request": {
+    "sessionId": "s-spec-v2",
+    "backendId": "claude",
+    "direction": "window_0",
+    "itemsView": "summary"
+  },
+  "response": {
+    "window": {
+      "windowId": "w-spec-v2-1",
+      "generation": 7,
+      "coverage": "window",
+      "headTurnId": "turn-100",
+      "tailTurnId": "turn-104",
+      "hasOlder": true,
+      "hasNewer": false,
+      "nextOlderCursor": "cur-older-spec"
+    },
+    "turns": [
+      {
+        "turnId": "turn-100",
+        "status": "completed",
+        "startedAt": 1791700000000,
+        "completedAt": 1791700005000,
+        "durationMs": 5000,
+        "userBrief": {
+          "text": "帮我看一下这个函数为什么超时",
+          "truncated": false
+        },
+        "agentBrief": {
+          "text": "根因是排序在循环内执行，复杂度 O(n²)；移出循环后实测 3ms。",
+          "truncated": false
+        },
+        "agentBriefHead": "我先看了调用路径，",
+        "folded": true,
+        "foldReason": "tool_process",
+        "toolProcessCount": 3,
+        "toolProcessBytes": 47104,
+        "turnGeneration": 0
+      },
+      {
+        "turnId": "turn-101",
+        "status": "completed",
+        "startedAt": 1791700100000,
+        "completedAt": 1791700110000,
+        "durationMs": 10000,
+        "userBrief": {
+          "text": "好，按这个方案改",
+          "truncated": false
+        },
+        "agentBrief": {
+          "text": "已完成修改并跑了回归，全部通过。改动共 3 处：……",
+          "truncated": true
+        },
+        "agentBriefHead": "我来改这三处：",
+        "folded": true,
+        "foldReason": "both",
+        "toolProcessCount": 5,
+        "toolProcessBytes": 131072,
+        "turnGeneration": 0
+      },
+      {
+        "turnId": "turn-102",
+        "status": "completed",
+        "startedAt": 1791700200000,
+        "completedAt": 1791700202000,
+        "durationMs": 2000,
+        "userBrief": {
+          "text": "收到",
+          "truncated": false
+        },
+        "agentBrief": {
+          "text": "不客气。",
+          "truncated": false
+        },
+        "folded": false,
+        "turnGeneration": 0
+      },
+      {
+        "turnId": "turn-103",
+        "status": "completed",
+        "startedAt": 1791700300000,
+        "completedAt": 1791700301000,
+        "durationMs": 1000,
+        "folded": true,
+        "foldReason": "budget",
+        "turnGeneration": 0
+      },
+      {
+        "turnId": "turn-104",
+        "status": "completed",
+        "startedAt": 1791700400000,
+        "completedAt": 1791700401000,
+        "durationMs": 1000,
+        "userBrief": {
+          "text": "把配置文件改一下再部署",
+          "truncated": false
+        },
+        "agentBrief": {
+          "text": "需要你确认：写入 /etc/app.conf 属于受保护路径。",
+          "truncated": false
+        },
+        "folded": true,
+        "foldReason": "tool_process",
+        "toolProcessCount": 1,
+        "toolProcessBytes": 512,
+        "liveState": {
+          "turnId": "turn-104",
+          "status": "completed",
+          "startedAt": 1791700400000,
+          "completedAt": 1791700401000,
+          "user": {
+            "id": "m-u-104",
+            "role": "user",
+            "parts": [
+              {
+                "type": "text",
+                "text": "把配置文件改一下再部署"
+              }
+            ]
+          },
+          "assistant": {
+            "id": "m-a-104",
+            "role": "assistant",
+            "parts": [
+              {
+                "type": "text",
+                "text": "需要你确认：写入 /etc/app.conf 属于受保护路径。"
+              },
+              {
+                "type": "permission_request",
+                "requiresPermissionConfirmation": true,
+                "permissionKind": "edit_file",
+                "patterns": [
+                  "/etc/app.conf"
+                ],
+                "permissionActions": [
+                  "approve",
+                  "reject",
+                  "approveAlways"
+                ]
+              }
+            ]
+          }
+        },
+        "turnGeneration": 0
+      }
+    ],
+    "scalarState": {
+      "execution": {
+        "phase": "requires_action",
+        "activeTurnId": "turn-105"
+      }
+    },
+    "syncRev": 5620,
+    "itemsView": "summary",
+    "summaryBudget": {
+      "payloadBytes": 1823,
+      "foldedTurnIds": [
+        "turn-100",
+        "turn-101",
+        "turn-103",
+        "turn-104"
+      ],
+      "exceptions": [
+        "turn-104",
+        "turn-105"
+      ]
+    }
+  },
+  "liveStateRunningExample": {
+    "note": "正在执行的轮次例外通道实例（scalarState.activeTurnId 指向；完整 turn 原样内嵌 liveState，never-split，不计预算）",
+    "turn": {
+      "turnId": "turn-105",
+      "status": "running",
+      "startedAt": 1791700500000,
+      "user": {
+        "id": "m-u-105",
+        "role": "user",
+        "parts": [
+          {
+            "type": "text",
+            "text": "继续"
+          }
+        ]
+      },
+      "assistant": {
+        "id": "m-a-105",
+        "role": "assistant",
+        "parts": [
+          {
+            "type": "text",
+            "text": "正在执行…"
+          },
+          {
+            "type": "user_input",
+            "interactionId": "ui_spec_1",
+            "status": "pending",
+            "canRespond": true,
+            "canReject": true,
+            "questions": [
+              {
+                "id": "q1",
+                "text": "部署到生产还是预发？"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "errorShapes": [
+    {
+      "code": "cursor_stale",
+      "retryable": true,
+      "directions": [
+        "older",
+        "newer"
+      ]
+    },
+    {
+      "code": "projection_window.cursor_scope_mismatch",
+      "retryable": false,
+      "directions": [
+        "older",
+        "newer"
+      ]
+    },
+    {
+      "code": "projection_window.limit_exceeded",
+      "retryable": false,
+      "directions": [
+        "window_0",
+        "older",
+        "newer",
+        "latest",
+        "locate"
+      ]
+    },
+    {
+      "code": "projection_window.locate_out_of_window",
+      "retryable": false,
+      "directions": [
+        "locate"
+      ]
+    },
+    {
+      "code": "invalid_params",
+      "retryable": false,
+      "directions": [
+        "window_0",
+        "older",
+        "newer",
+        "latest",
+        "locate"
+      ]
+    },
+    {
+      "code": "protocol.capability_required",
+      "retryable": false,
+      "directions": [
+        "window_0",
+        "older",
+        "newer",
+        "latest",
+        "locate"
+      ]
+    },
+    {
+      "code": "projection.hydrating",
+      "retryable": true,
+      "directions": [
+        "window_0",
+        "older",
+        "newer",
+        "latest",
+        "locate"
+      ]
+    },
+    {
+      "code": "summary.oversized",
+      "retryable": false,
+      "directions": [
+        "window_0",
+        "older",
+        "newer",
+        "latest",
+        "locate"
+      ]
+    }
+  ]
+}

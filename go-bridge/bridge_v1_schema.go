@@ -93,7 +93,20 @@ const (
 	// BridgeGetSessionProjectionAnchorNewerParams/Result + BridgeAnchorNewerScalarState；
 	// 独立冻结样本 anchor-newer-response-spec.json（两仓字节一致）；不触碰 frozen v1
 	// window 字段集。非破坏性新增，schemaRevision 维持 2026-10-18（同日 additive 合并）。
-	BridgeProtocolSchemaRevision = "2026-10-18"
+	//
+	// 2026-10-19: S-3 v2 summary 首开——additive capability `projection_window_v2`
+	//（新 RPC `get_session_projection_window_v2`：itemsView=summary|full 请求内字段、
+	// BridgeTurnSummaryDescriptor 摘要行、scalarState 必选、summaryBudget 账本、
+	// ≤1MiB 软预算 + always-visible 例外通道 liveState 原样内嵌、错误集 = v1 全集 +
+	// summary.oversized）+ `get_session_projection_anchor_newer` 请求/响应 additive
+	// 字段 `itemsView:"summary"`（summary 种子基底重开对账 summary 形态行；token 基准
+	// 不变）+ §11.7/§11.8 session_turn_items 适用 backend 扩展（v2 producer = claude，
+	// 四层资格门定案）+ F-18 window 能力双门更正为 hello echo 单门（bridge-v1.md 更正
+	// 记录）。新类型 BridgeGetSessionProjectionWindowV2Params/Result（summary/full 判别
+	// 联合）+ BridgeTurnSummaryDescriptor/Brief + BridgeProjectionSummaryBudget；冻结样本
+	// projection-window-v2/{window-summary-spec,anchor-newer-summary-response-spec}.json
+	//（两仓字节一致）；不触碰 frozen v1 window / anchor-newer 字段集。
+	BridgeProtocolSchemaRevision = "2026-10-19"
 )
 
 type BridgeV1Protocol struct {
