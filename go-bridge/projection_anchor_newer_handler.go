@@ -149,6 +149,25 @@ func (h *Handlers) handleGetSessionProjectionAnchorNewer(conn Connection, msg Wi
 
 	result, sliceErr := sliceAnchorNewerReconciliation(proj, params)
 	if sliceErr != nil {
+		// 2026-10-19 验收发现（观测增强）：cursor_stale 曾以一次 55ms 窗口的 fence/快照
+		// 不一致出现（快照 turns 落后于 cutRev——anchor 是刚并入 head 的新 turn 时被判
+		// stale；同 ms 的全量请求已能看到新 turns）。stale 路径此前服务端零日志，只能靠
+		// 客户端推断；登记 follow-up：BeginProjectionSnapshot 与 cutRev 的一致性。
+		if errors.Is(sliceErr, errAnchorNewerStale) || errors.Is(sliceErr, errAnchorNewerCursor) {
+			sidPrefix := params.SessionID
+			if len(sidPrefix) > 8 {
+				sidPrefix = sidPrefix[:8]
+			}
+			slog.Warn("go-bridge: anchor-newer stale slice",
+				"requestId", msg.RequestID,
+				"sessionPrefix", sidPrefix,
+				"anchorTurnId", params.AnchorTurnID,
+				"kernelTurns", len(proj.Turns),
+				"kernelHeadRev", proj.SyncRev,
+				"baseDigests", len(params.BaseDigests),
+				"sliceErr", sliceErr.Error(),
+			)
+		}
 		// fence 以 typed error 释放（R9 同族：显式 typed 失败，不留悬挂 fence）。
 		wireErr := &WireError{Code: "rpc.error", Message: sliceErr.Error(), Retryable: &retryableFalse}
 		switch {
