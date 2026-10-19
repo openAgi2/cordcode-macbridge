@@ -1,3 +1,36 @@
+## 2026-10-19：长 session 真机打开风暴 = WiFi rx 劣化 × 全量 22.8MB 冷拉 × 30s RPC 超时 × 无退避重试（S-4 实测复盘）
+
+owner 真机（iPhone16, PID 35979/36024）打开 7f389d08（48 turns / 22.8MB / syncRev 5505）持续
+「加载投影失败」，多轮重连循环。取证路径（可复用配方）：`devicectl device copy from
+--domain-type appDataContainer` 拉 `Documents/fg-trace.log(.1)`（8MB 滚动，含 [WS-RAW]/[ProjPull]/
+[Apply] 全链，时间戳 UTC=本地-8h）；配合 Mac `projection_rpc` 三段日志（mac_receive/hydrate_ready/
+response_enqueue）对齐。**NSLog 经 pymobiledevice3 syslog 捕不到（projLog 全灭），SensitiveLog
+（os.Logger + privacy:.public）能捕**——真机排障别依赖 NSLog 通道。
+
+对账数字（产物门）：18:01 成功周期 = 入队后 **18s** 传输（15s 硬帽先报错 late=1 但 <30s RPC 超时，
+结果仍采纳渲染）；18:30 失败周期 = 入队后 **40s** 传输 → 30s RPC 超时删表项 → 大帧迟到被静默丢弃
+（[WS-RAW] 22.8MB 有、[WS-RX] 无、无消费者）→ 立即重试**再拉一次全量**；18:46 周期 = 2-3MB gzip 帧
+彻底没到（pong 也断，30s 双路老化 → 看门狗拆连接）。wifid LQA 实锤：**rx-rate 0-3/5、rx-lat 5/5
+（最差）、tx-rate 5/5 持续非对称劣化**（18:28 起全程；信号强度 5/5 但 chq=2 → 同信道干扰，重试风暴
+自身占用空口形成正反馈）。关键排除：**解码/应用/渲染不是瓶颈**——两次成功周期（10:01:44、10:31:17）
+大帧到达 → 同秒 [ProjRPC] ok + [ProjPull] FULL ok + Render ready（S-5/S-8 管线按设计工作）；Mac 侧
+S-2 物化命中 600ms 内 enqueue。18:31:17 曾成功渲染 74 条消息（owner 9 秒后切走）。
+
+缺陷定位（按层）：
+1. **设计缺口（S-3 未实施）**：冷开 = 全量 22.8MB（gzip ~2-3MB），任何 <1Mbps 的链路都活不过 30s。
+   S-4 暖开路径（anchor KB 级）从未被触达——冷开不成功 → 缓存永远不播种（patch 触发路径的 pull 成功
+   不写缓存；app 被 kill 也不触发 didEnterBackground flush）。
+2. **重试风暴（H1）**：patch no-state → pull 15s 硬帽失败 → 无退避立即全量重试，自 DDoS 空口。
+3. **迟到帧静默丢弃（H2）**：30s 超时删表项后，在途大帧照常传完再丢，重试又叠加第二路传输。
+4. **看门狗与大传输互斥（H3）**：传输 40s > deadAfter 30s（lastInbound 只在完整帧后更新）→ 传输
+   中途被拆，全部作废，重连后从头再来。
+5. **open 路径停滞（H4，18:46 案例）**：[ProjOpen] pull BEFORE 完全缺席，唯一 pull 来自 patch 事件
+   （[Apply] no-state → pull）；open 任务在 startEventStream 与 loadMessagesTask 之间停滞，S-3 重构
+   打开路径时必须排查。
+教训：**「修复无效」先分层——本例 Mac 服务/解码/渲染全绿，死因在传输层时长与超时族的乘积**；
+对账要跨「Mac 入队时刻 ↔ 手机 WS-RAW 时刻」对齐才看得见 18s/40s 的在途时长；软故障（劣化而非断链）
+比硬故障更会伪装成代码 bug。
+
 ## 2026-10-12：codex-remote 探针 Kill 不 Wait，僵尸进程打满整机 fork 配额（事故复盘）
 
 `loadChatGPTAuth` 每次调用 spawn 一个 ChatGPT 内嵌 codex `app-server --stdio` 探针，读完登录态只
