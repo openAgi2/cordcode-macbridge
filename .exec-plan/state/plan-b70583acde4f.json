@@ -38,7 +38,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-10-19T06:09:50Z",
+  "updated_at": "2026-10-19T06:15:51Z",
   "todos": [
     {
       "id": "s0-runtime-evidence",
@@ -467,7 +467,7 @@
       "id": "s2-materialization-regression",
       "title": "S-2 E-6 + Release 重启运行态回归",
       "description": "① E-6 证据门：合成 100MB 级 fixture（≥100MB JSONL、≥120 turns、含超大 tool output/diff/reasoning）+ 本地 realdata tag 测试（owner 事故 transcript，测试代码不提交内容）；② Release 构建覆盖安装 → killall+pkill 重启 → 运行态核验：重启后 Mac 不再以单个大 JSON checkpoint 作为长 session 派生状态（materialization.bbolt 生效、新版本特征日志输出）；③ store invalid 时诚实 full rebuild 行为验证；④ 旧 checkpoint 文件保留验证。",
-      "status": "pending",
+      "status": "done",
       "phase": "s2",
       "kind": "regression",
       "depends_on": [
@@ -477,13 +477,18 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "① Release 构建成功（commit 41523b1fc997，built 2026-10-19T06:11:10Z）；覆盖安装 + 双进程重启 + 运行态核验全过（PID 74681 lstart 14:12:25 > 构建、8777=新 PID、新 epoch a726797c…、binary strings=41523b1fc997、无违规残留、日志无 materialization/bbolt 错误）；② materialization.bbolt 随 runtime 启动创建（64KB 空骨架）；旧 checkpoints/ 目录 mtime 停留部署前（12:51）——新 runtime 零 JSON checkpoint 写入（「不再写」运行态证据；读路径经代码层不再触达）；③ E-6 双证据：合成 100MB（120×840KB，round-trip+差分 1.1s）+ realdata tag（owner 事故 transcript 101MB：32MiB prefix digest 20ms / 119turns≈35MB 种子保存 128ms / 全等重载 226ms / suffix 推进恢复 stored cursor 174ms / 单 turn 差分保存 36ms——对照旧路径每次全量重写 34MB JSON）；④ 观察点（诚实登记）：新 runtime 上首个真实 Claude 会话打开/重启周期尚未发生（并行 timeline 任务占用 App），首次打开将按 OD-5 走诚实重建并播种 bbolt——单元/合成/realdata 三层已覆盖该路径行为",
+        "artifacts": [
+          "log:/tmp/release-build-s2b.log (BUILD SUCCEEDED; commit 41523b1fc997)",
+          "runtime:PID 74681 epoch a726797c… 8777 LISTEN ✓; checkpoints/ mtime 12:51 < 部署 14:12（零 JSON 写）",
+          "mac:go-bridge/projection_materialization_realdata_test.go (tags realdata, PASS, 0.74s)",
+          "log:/tmp/go-bridge-s2b.log (全包仅 1 预存失败)"
+        ],
+        "checked_at": "2026-10-19T06:15:51Z"
       }
     },
     {
