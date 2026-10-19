@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -518,6 +519,23 @@ func (s *Server) echoAnchorNewerAndScalar(ack *HelloAckMessage, hello *HelloMess
 	}
 }
 
+// sortedCapabilityKeys 返回 ack echo 的 capability 键（排序、逗号连接）——
+// hello 协商可观测性（§7.3：window/gzip/anchor 生效与否可从日志判定，E-3 类
+// 取证不再依赖设备侧日志）。
+func sortedCapabilityKeys(caps map[string]bool) string {
+	if len(caps) == 0 {
+		return "-"
+	}
+	keys := make([]string, 0, len(caps))
+	for key, on := range caps {
+		if on {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ",")
+}
+
 func helloSupportsAnchorNewerV1(hello *HelloMessage) bool {
 	for _, capability := range hello.Capabilities {
 		if capability == "projection_window_anchor_newer_v1" {
@@ -982,7 +1000,7 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 		s.emitRecoveryFrames(connection, ack.Recovery, replay)
 	}
 
-	slog.Info("go-bridge: hello_ack sent", "ok", ack.Ok, "device", hello.Client.DeviceID, "catalog_cursor_epoch_v2", catalogV2)
+	slog.Info("go-bridge: hello_ack sent", "ok", ack.Ok, "device", hello.Client.DeviceID, "catalog_cursor_epoch_v2", catalogV2, "echoedCapabilities", sortedCapabilityKeys(ack.Capabilities))
 }
 
 func helloSupportsRecovery(hello *HelloMessage) bool {
