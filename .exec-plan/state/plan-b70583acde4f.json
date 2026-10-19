@@ -38,7 +38,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-10-19T19:45:00+08:00",
+ "updated_at": "2026-10-19T21:10:00+08:00",
  "todos": [
   {
    "id": "s0-runtime-evidence",
@@ -579,8 +579,8 @@
   },
   {
    "id": "s3-open-hardening",
-   "title": "S-3 扩展：打开路径加固 H1-H4（owner 2026-10-19 批准并入）",
-   "description": "2026-10-19 真机打开风暴复盘四项：H1 恢复拉取连败退避（5/10/20/60s 封顶，pull() 漏斗权威成功清零，仅事件驱动路径）；H2 projection 家族 RPC 超时 75s + 孤儿 result 观测（orphan result dropped/[WS-RX] ORPHAN）；H3 看门狗大传输宽限 90s（effectiveWatchdogDeadAfter 单调放大，不变量=宽限≥家族超时+ping 周期）；H4 v2 会话 resume 失败不掐断投影打开 + pre-resolve/pre-resume 面包屑。iOS commit 75bd5e90。",
+   "title": "S-3/S-4 打开路径加固 + Codex 分析修复（owner 2026-10-19 批准 A 路线）",
+   "description": "2026-10-19 真机打开风暴复盘四项：H1 恢复拉取连败退避（5/10/20/60s 封顶，pull() 漏斗权威成功清零，仅事件驱动路径）；H2 projection 家族 RPC 超时 75s + 孤儿 result 观测（orphan result dropped/[WS-RX] ORPHAN）；H3 看门狗大传输宽限 90s（effectiveWatchdogDeadAfter 单调放大，不变量=宽限≥家族超时+ping 周期）；H4 v2 会话 resume 失败不掐断投影打开 + pre-resolve/pre-resume 面包屑。iOS commit 75bd5e90。 Codex 独立分析（docs/2026-10-19-ios-long-session-reopen-cache-root-cause-analysis.md）后追加：P0 生产客户端 anchor 协议遵循（动态转换曾永远失败=暖路径整条阻断）+ 真实类型回归测试 + 日志分流；P1 对账事务代际/epoch 隔离、有界计数器（turns≤2/hydrating≤3/安全阀≤8）、瞬态重试一轮、复查集容量 256、full 后淘汰账本清零、巨型尾轮诚实跳过、同步/截断提示接 UI。iOS commit f74b96fe。",
    "status": "done",
    "phase": "s3",
    "kind": "impl",
@@ -592,11 +592,11 @@
     "status": "passed",
     "method": "automated",
     "attestation": "self-attested",
-    "summary": "真机（iPhone16 00008140）定向 6/6 绿：ProjectionOpenHardeningTests 5 项（退避序列/冷却门/成功清零/宽限单调/宽限覆盖不变量）+ BridgeModelsTests 超时表（projection 家族 75s）；ProjectionBaseCacheTests 回归 6/6 绿。Debug app 已安装真机（19:42 hello_ack 确认连接）。",
+    "summary": "真机 19/19 绿（含生产类型转换、瞬态分类、复查集容量、账本清零、巨型尾轮 5 项新测试）；App 已安装（21:0x hello_ack 确认）。内存 LRU 经 owner 裁决留待后续，不阻塞。",
     "artifacts": [
      "CCCodeTests/ProjectionOpenHardeningTests.swift"
     ],
-    "checked_at": "2026-10-19T19:45:00+08:00"
+    "checked_at": "2026-10-19T21:10:00+08:00"
    }
   },
   {
