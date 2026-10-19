@@ -250,6 +250,32 @@ func (p *EventPublisher) ConnProjectionWindowV1(conn Connection) bool {
 	return p.projectionWindowV1[conn]
 }
 
+// SetConnProjectionWindowV2 records the authenticated hello negotiation for
+// projection_window_v2 (S-3 v2 summary). Only marked connections may call
+// get_session_projection_window_v2; everyone else answers protocol.capability_required.
+// UnregisterConnection clears the mark (same lifecycle as V1).
+func (p *EventPublisher) SetConnProjectionWindowV2(conn Connection, enabled bool) {
+	if p == nil || conn == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if enabled {
+		p.projectionWindowV2[conn] = true
+	} else {
+		delete(p.projectionWindowV2, conn)
+	}
+}
+
+func (p *EventPublisher) ConnProjectionWindowV2(conn Connection) bool {
+	if p == nil || conn == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.projectionWindowV2[conn]
+}
+
 // SetConnAnchorNewerV1 records the authenticated hello negotiation for
 // projection_window_anchor_newer_v1 (S-7). Only marked connections may call
 // get_session_projection_anchor_newer; everyone else answers

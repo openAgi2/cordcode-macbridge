@@ -1859,6 +1859,8 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleGetSessionProjection(conn, msg, agent)
 	case "get_session_projection_window":
 		h.handleGetSessionProjectionWindow(conn, msg, agent)
+	case "get_session_projection_window_v2":
+		h.handleGetSessionProjectionWindowV2(conn, msg, agent)
 	case "get_session_projection_anchor_newer":
 		h.handleGetSessionProjectionAnchorNewer(conn, msg, agent)
 	case "session_turn_items":

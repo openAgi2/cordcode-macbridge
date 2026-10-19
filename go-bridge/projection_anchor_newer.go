@@ -46,6 +46,9 @@ type AnchorNewerParams struct {
 	BaseDigests      map[string]*string  `json:"baseDigests"`
 	Limit            int                 `json:"limit,omitempty"`
 	CorrectionCursor string              `json:"correctionCursor,omitempty"`
+	// S-3 v2 additive（冻结 2026-10-19）：summary 种子基底对账时携带（首包与续页
+	// 同值）→ 行为 TurnSummaryDescriptor 形态（响应经 SummaryRows 回显）。
+	ItemsView string `json:"itemsView,omitempty"`
 }
 
 // AnchorNewerCorrectionsPending 是剩余修正的续拉标记（cursor = 续页请求回传的修正游标）。
@@ -65,6 +68,20 @@ type AnchorNewerResult struct {
 	CorrectionsPending *AnchorNewerCorrectionsPending `json:"correctionsPending,omitempty"`
 	TurnTokens         map[string]string             `json:"turnTokens,omitempty"`
 	SyncRev            int                           `json:"syncRev"`
+	// S-3 v2 additive：请求携带 itemsView=summary 时回显；此时 Turns/AnchorRefresh/
+	// ChangedTurns 序列化为 TurnSummaryDescriptor 形态（由 handler 在发送前经
+	// anchorNewerSummaryEnvelope 转换——本结构内是 full 形态真值，token 计算与
+	// 复查集判定不变）。
+	ItemsView   string                 `json:"itemsView,omitempty"`
+	SummaryRows *AnchorNewerSummaryRows `json:"summaryRows,omitempty"`
+}
+
+// AnchorNewerSummaryRows：itemsView=summary 时的行形态转换结果（turns/anchorRefresh/
+// changedTurns 三者与 AnchorNewerResult 同名 full 字段一一对应；null 语义相同）。
+type AnchorNewerSummaryRows struct {
+	Turns         []TurnSummaryDescriptor  `json:"turns"`
+	AnchorRefresh *TurnSummaryDescriptor   `json:"anchorRefresh,omitempty"`
+	ChangedTurns  []TurnSummaryDescriptor  `json:"changedTurns"`
 }
 
 // AnchorNewerScalarState 镜像 SessionProjection 的 scalar 字段（execution 必选；

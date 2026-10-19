@@ -50,6 +50,11 @@ const (
 // protocol.capability_required，客户端 fail-closed 回全量冷路径；无数据迁移）。
 const anchorNewerProductionEnabled = true
 
+// projectionWindowV2ProductionEnabled 是 projection_window_v2 的发布门（S-3 v2，
+// 冻结 2026-10-19）。Rollback = 置 false（echo 撤回 → 客户端 fail-closed 回
+// full 首开现状路径；无数据迁移——冻结规范 §9 回退条款）。
+const projectionWindowV2ProductionEnabled = true
+
 // directGzipProductionEnabled 是 direct_gzip_v1 的发布门（镜像 PERF-S4D 纪律）。
 // Rollback = 置 false（echo 撤回 → 未协商连接永远收不到 binary 帧，逐字节回到
 // 不压缩现状；无数据迁移）。
@@ -472,6 +477,16 @@ func (s *Server) negotiateProjectionWindowV1(ack *HelloAckMessage, hello *HelloM
 	// projection_window_v1，anchor-only hello 也要走到 echo；缺 ssv2 前置 = hello
 	// 失败（同族纪律）。F-26：在 negotiateProjectionWindowV1 内扩展 → relay 路径
 	// 自动覆盖。
+	if helloSupportsProjectionWindowV2(hello) && !helloSupportsSessionSyncV2(hello) {
+		retryable := false
+		ack.Ok = false
+		ack.Error = &WireError{
+			Code:      "protocol.invalid_capabilities",
+			Message:   "projection_window_v2 requires session_sync_v2",
+			Retryable: &retryable,
+		}
+		return false
+	}
 	if helloSupportsAnchorNewerV1(hello) && !helloSupportsSessionSyncV2(hello) {
 		retryable := false
 		ack.Ok = false
@@ -513,6 +528,13 @@ func (s *Server) echoAnchorNewerAndScalar(ack *HelloAckMessage, hello *HelloMess
 		ack.Capabilities["projection_window_anchor_newer_v1"] = true
 		s.eventPublisher.SetConnAnchorNewerV1(conn, true)
 	}
+	// S-3 v2（冻结 2026-10-19）：echo 条件 = 客户端声明 + ack.Ok（v2 首开属
+	// session_sync_v2 前置族——沿用同一前置校验，见下方 v2 声明前置检查）。
+	// producer = claude（rollout flag 复用 projectionWindowEnabled）。
+	if helloSupportsProjectionWindowV2(hello) && projectionWindowV2ProductionEnabled && ack.Ok {
+		ack.Capabilities["projection_window_v2"] = true
+		s.eventPublisher.SetConnProjectionWindowV2(conn, true)
+	}
 	if helloSupportsProjectionWindowScalarV1(hello) && helloSupportsProjectionWindowV1(hello) && ack.Ok {
 		ack.Capabilities["projection_window_scalar_v1"] = true
 		s.eventPublisher.SetConnProjectionWindowScalarV1(conn, true)
@@ -534,6 +556,15 @@ func sortedCapabilityKeys(caps map[string]bool) string {
 	}
 	sort.Strings(keys)
 	return strings.Join(keys, ",")
+}
+
+func helloSupportsProjectionWindowV2(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "projection_window_v2" {
+			return true
+		}
+	}
+	return false
 }
 
 func helloSupportsAnchorNewerV1(hello *HelloMessage) bool {

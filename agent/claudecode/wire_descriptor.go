@@ -30,6 +30,11 @@ func (a *Agent) WireDescriptor() *core.WireDescriptor {
 			"content_chunking",
 			"question_reply",
 			"external_turn_streaming",
+			// S-3 v2（2026-10-19 冻结）：turn_detail 明细加载入口声明（§11.8
+			// 终案权威声明；不加 deprecated 的 turn_detail_lazy_v1）。iOS
+			// supportsTurnDetailLazy 已同时接受 chunks 声明 → descriptor 变更
+			// 即解锁 Claude 会话入口。
+			"turn_detail_chunks_v1",
 		},
 	}
 }

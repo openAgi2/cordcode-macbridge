@@ -147,6 +147,14 @@ func (h *Handlers) handleGetSessionProjectionAnchorNewer(conn Connection, msg Wi
 		return
 	}
 
+	// S-3 v2：itemsView 只接受 summary（additive 单值）；非法值 = invalid_params。
+	if params.ItemsView != "" && params.ItemsView != "summary" {
+		conn.SendResult(msg.RequestID, nil, &WireError{
+			Code:    "invalid_params",
+			Message: "itemsView supports \"summary\" only",
+		})
+		return
+	}
 	result, sliceErr := sliceAnchorNewerReconciliation(proj, params)
 	if sliceErr != nil {
 		// 2026-10-19 验收发现（观测增强）：cursor_stale 曾以一次 55ms 窗口的 fence/快照
@@ -189,6 +197,41 @@ func (h *Handlers) handleGetSessionProjectionAnchorNewer(conn Connection, msg Wi
 	// held-turn 注册在同一完成事务内（F-34/v23 扩展）：本页全部交付 turns——turns、
 	// anchorRefresh、changedTurns——注册进该连接的 held 集合，使后续针对这些 turn 的
 	// decide=true detail commit 不被 fence 清空。完成失败随完成事务回滚。
+	// S-3 v2：请求 itemsView=summary → 行转 summary 形态（token/复查判定已按 full
+	// 真值完成；例外通道照常完整内嵌——token 基准不变）。
+	if params.ItemsView == "summary" {
+		maxExceptionBytes := int(h.eventPublisher.ProjectionMaxBytes(conn))
+		summaryTurns, sumErr := summarizeAnchorRows(result.Turns, maxExceptionBytes)
+		if sumErr == nil {
+			var summaryChanged []TurnSummaryDescriptor
+			summaryChanged, sumErr = summarizeAnchorRows(result.ChangedTurns, maxExceptionBytes)
+			if sumErr == nil && result.AnchorRefresh != nil {
+				refreshRows, refreshErr := summarizeAnchorRows([]TurnProjection{*result.AnchorRefresh}, maxExceptionBytes)
+				if refreshErr == nil && len(refreshRows) == 1 {
+					result.SummaryRows = &AnchorNewerSummaryRows{
+						Turns:         summaryTurns,
+						AnchorRefresh: &refreshRows[0],
+						ChangedTurns:  summaryChanged,
+					}
+					result.ItemsView = "summary"
+				}
+				sumErr = refreshErr
+			} else if sumErr == nil {
+				result.SummaryRows = &AnchorNewerSummaryRows{Turns: summaryTurns, ChangedTurns: summaryChanged}
+				result.ItemsView = "summary"
+			}
+		}
+		if sumErr != nil {
+			wireErr := &WireError{Code: "rpc.error", Message: sumErr.Error(), Retryable: &retryableFalse}
+			if errors.Is(sumErr, errSummaryOversized) {
+				wireErr = &WireError{Code: "summary.oversized", Message: sumErr.Error(), Retryable: &retryableFalse}
+			}
+			if err := h.eventPublisher.CompleteProjectionSnapshotError(conn, admission, msg.RequestID, wireErr); err != nil {
+				slog.Warn("go-bridge: anchor summary fence release failed", "requestId", msg.RequestID, "error", err)
+			}
+			return
+		}
+	}
 	held := make([]string, 0, len(result.Turns)+len(result.ChangedTurns)+1)
 	for _, turn := range result.Turns {
 		held = append(held, turn.TurnID)
