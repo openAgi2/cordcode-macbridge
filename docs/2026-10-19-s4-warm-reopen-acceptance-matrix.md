@@ -54,3 +54,28 @@
 1. 内存 LRU（同进程快速切换直读内存）——owner 裁决留待后续，先验证磁盘恢复路径。
 2. 巨型尾轮会话暖路径不可达（预算 4MiB frozen；放宽需方案变更过评审）。
 3. 跨重连混代时序、纯 correction 续页多页分布等边界未做真机时序实验（源码控制流已锁定）。
+
+
+## 验收结果（2026-10-19 20:42-20:49 owner 单轮，App f74b96fe）
+
+owner 结论：基本符合预期 ✅（长会话重开即时显示；Mac 新消息后切回即时显示旧+新消息）。
+
+### 四字段交付记录（实测）
+
+| 字段 | 实测值 | 证据 |
+|---|---|---|
+| 缓存首屏时间 | **磁盘 loadMs=23-33ms（iPhone 实测，6 次 hit）**；内容与 hit 同秒上屏 | fg-trace4 `open S4 hit rows=8/10 loadMs=23-33` |
+| anchor 对账完成时间 | Mac 侧 receive→enqueue **0-179ms**（6 次样本；多数 <120ms） | go-bridge.log req_82/95/125/149/191/209 |
+| 实际响应大小 | anchor 页当轮实测 **KB 级**（6-21KB 帧域；本会话末轮小）——注意这是本样本值，anchorRefresh 携带完整末轮时可以更大 | fg-trace4 WS-RAW 12:46:43-44 |
+| 是否出现全量请求 | **干净重开窗口（20:42-20:45，5 次切回）7f389d08 零全量**（全部 anchor）；窗口内仅有的全量属其它会话冷开（7afc3bd7 / 433c20a8） | Mac log `mac_receive` 分 session 计数 |
+
+### 新发现缺口（不阻塞本轮验收，登记下轮）
+
+**恢复期并发全量竞态**（20:46:46 窗口，Mac 新消息后首次切回）：anchor req_16
+mac_receive 后 Mac 侧 response_enqueue 未落（handler 在新消息 hydrate 后的路径待查），
+533ms 后客户端并发发出全量 req_17（疑为恢复窗口内 projection_patch 触发的
+scheduleRecoveryPull 未被恢复门拦截——MISMATCH 分支 vs holdPatchDuringRecoveryIfNeeded
+覆盖面）；该全量 43ms 入队快速补齐内容（UX 正确），但 wire 层出现 anchor+full 并发、
+open 侧另有一路 pullFull 15s 硬帽 timedOut（late apply 收口）。修复方向：恢复门扩大到
+MISMATCH 触发的 recovery pull（restore→对账窗口内禁并发全量）+ Mac anchor handler 对
+刚 hydrate 会话的响应缺口取证。

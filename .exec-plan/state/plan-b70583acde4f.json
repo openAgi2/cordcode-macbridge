@@ -38,7 +38,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-10-19T21:10:00+08:00",
+ "updated_at": "2026-10-19T21:40:00+08:00",
  "todos": [
   {
    "id": "s0-runtime-evidence",
@@ -558,7 +558,7 @@
    "id": "s4-ios-base-cache-regression",
    "title": "S-4 E-7/E-11 证据门收口",
    "description": "① E-7：基底缓存不污染权威 writer（restore 必须经唯一 writer 注入——定向测试+代码审查记录）；② E-11 全部反例实测：对账验收（比较内容终态非仅 turn ID 集合：restore+anchor-newer 与全新全量打开重叠范围内容一致）；离线修改反例（[A旧,B旧,C] 离线 A→A新 anchor 保留零后续事件 → changedTurns 返回 A新 syncing 对账后才清，同/跨 epoch 均覆盖）；compaction 反例（removedTurnIds+anchor typed stale）；token 反例 (a) 对账页后 partOps→写盘→重开 null→Mac 回传终态 (b) 内容/token 不匹配 Mac 恢复旧版本→失效规则强制 null；changedTurns 膨胀反例（64×1MiB 零新增 → correctionsPending 分页，部分修正不清 syncing）；对账续页跨 cut 复查（首页已发 turn 续页前被修改→重发覆盖，采用最后一页 head）；大 anchor 后继交付（46MiB+1KiB 续页交付水位线前移）；full 超限（reconciliation.oversized→FallbackFull→full.oversized 显式失败不冒充成功）；跨 epoch 身份一致性；水位线 typed 失效回退/滑动淘汰/双设备互不串扰；③ iOS 定向 build 完成；④ 重开 ≤1s 权威完成目标的本地可测口径记录（磁盘恢复+增量往返）。真机场景 9-15 归 S-6 owner。",
-   "status": "in_progress",
+   "status": "done",
    "phase": "s4",
    "kind": "regression",
    "depends_on": [
@@ -568,13 +568,13 @@
    "notes": "真机 App（00073f23）已装机并启动、hello echo 全套确认；E-7 代码级（唯一 writer 注入——openWithBaseCache 全程经 replica/commitIfObserved，无旁路）+测试级完成。剩余 E-11 活体（owner 在手机上打开→重开同一 Claude 会话，验证 anchor RPC 首现 + 重开 ≤1s + 增量对账）待 owner 交互窗口。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "passed",
     "method": "mixed",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
+    "summary": "owner 真机验收通过（2026-10-19 20:42-49 单轮）：长会话重开即时（缓存 loadMs 23-33ms×6）；干净窗口 5 次切回零全量（全部 anchor，Mac 侧 0-179ms）；Mac 新消息后切回旧+新消息即时显示。E-11 证据达成（anchor RPC 首次真机出现 + 亚秒重开）。已知缺口登记：恢复期并发全量竞态（验收矩阵附录）。",
     "artifacts": [],
-    "checked_at": null
+    "checked_at": "2026-10-19T21:40:00+08:00"
    }
   },
   {
