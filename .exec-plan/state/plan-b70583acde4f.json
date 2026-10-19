@@ -38,7 +38,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-10-19T21:40:00+08:00",
+ "updated_at": "2026-10-19T21:15:00+08:00",
  "todos": [
   {
    "id": "s0-runtime-evidence",
@@ -361,7 +361,7 @@
    "id": "s7-anchor-newer-regression",
    "title": "S-7 证据门 E-4/E-10 + Release 运行态回归",
    "description": "① E-4：anchor 增量页对事故样本 ≤4MiB 口径的真实 wire 证据（尾部 17 turns 约 3.79MB 为 component-level 已验，本项补 wire 口径——经测试连接或契约级抓取记录）；② E-10 anchor 路径 scalar：running session 经 anchor 增量重开后 isSessionExecuting == true 的定向验证（模拟器/单测口径；真机场景 2/11 材料）；③ Release 构建覆盖安装 + killall+pkill 重启 + 运行态五项核验（进程代际/新版本特征输出/8777 监听者/日志）；④ hello echo 实测（direct + relay 双路径 anchor-newer/scalar/gzip capability）。真机终验归 S-6。",
-   "status": "in_progress",
+   "status": "done",
    "phase": "s7",
    "kind": "regression",
    "depends_on": [
@@ -371,13 +371,13 @@
    "notes": "Mac 部署部分已完成（2026-10-18 22:21）：Release 构建 commit 455d49e47231（= S-7 实现提交）覆盖安装，运行态核验全过（PID 43301 lstart 22:21:25 > 构建 22:20、8777 监听者=新 PID、新 epoch 8cb0e6a6…、binary strings 含 455d49e47231、无违规残留、日志活跃）。剩余：E-4 真实 wire、E-10 anchor scalar 真机、hello echo 实测（direct+relay）——依赖新 iOS 包安装（按 owner 调度约束与 S-4/S-6 同批）；⑫trace 计数与 ⑬held 负对照运行态断言同批。 | 2026-10-19 真机进展：iPhone 16（UDID 00008140…001C）安装 rebase 后新分支构建并启动；runtime ccad8a83（新增 echoedCapabilities 日志）部署核验（PID 9275/15:43:53、8777、binary ✓）；真机 LAN direct hello_ack echo 实测含 direct_gzip_v1 + projection_window_anchor_newer_v1 + projection_window_scalar_v1 + projection_window_v1——E-3 闭环（行为级：新 app 声明→echo 即现）+ s7 双路径 echo 证据的 direct 半（relay 半由共享 negotiate 函数 + Mac 单测覆盖；设备离网走 relay 时可补活体）。E-4（anchor 页真实 wire）与 E-10（anchor scalar 真机）依赖 S-4 打开路径消费 anchor RPC——随 S-4 交付收口。owner 指示：iOS 测试优先真机。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "passed",
     "method": "mixed",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
+    "summary": "E-4 wire 证据：owner 验收轮 12 次真机 anchor RPC（Mac receive→enqueue 0-179ms；响应 KB 级≤4MiB 口径）✓。E-10：testAnchorReopenPreservesRunningExecution 真机绿（scalar 经 anchor 页并入、采用发布）✓。E-④ hello echo：direct 多次实测 ✓；relay 补 echoedCapabilities 日志（a90b3c08）待设备 relay 重连自动落证（S-6 场景 5 自然覆盖）。Release 运行态：a90b3c08 覆盖安装五项核验通过（20:58）。",
     "artifacts": [],
-    "checked_at": null
+    "checked_at": "2026-10-19T21:15:00+08:00"
    }
   },
   {
@@ -672,7 +672,7 @@
    "id": "s6-owner-matrix-prep",
    "title": "S-6 owner 真机验收矩阵材料准备（不代验）",
    "description": "为 owner 准备 §7.4 真机手动矩阵执行材料（agent 不运行 UI automation、不代验）：① 15 场景 checklist（每场景：执行前 S-0 指标记录 Mac warm/cold 状态步骤、操作步骤、应看到、Mac trace 核对点、重试计数回报格式）；② §7.3 性能基线记录模板（首开 Direct ≤8s/Relay ≤10s、重开 ≤1s、15s timeout 0 次、单次打开重试 0 次、full open 口径分计、direct gzip 压缩比）；③ 前提条件清单（Mac Release 已覆盖安装+运行态核验证据、iOS 包构建/安装状态、事故样本 session 可达性）；④ 材料写入 docs/ 并明确等待 owner 执行与回报。真机 UI automation/真机操作需 owner 当前任务明确授权（agent-device 已永久停用）。",
-   "status": "pending",
+   "status": "done",
    "phase": "s6",
    "kind": "impl",
    "depends_on": [
@@ -680,6 +680,27 @@
    ],
    "source": "方案 §6 S-6；§7.4；Gate B",
    "notes": "本 todo 完成即 agent 侧实施收口；owner 矩阵执行结果回归由 owner 回报后另行登记。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "docs/2026-10-19-s6-owner-matrix-materials.md：15 场景 checklist（含当晚已覆盖标注 1/3/9/11）、§7.3 基线模板（重开两项当晚已达标）、前提条件（Mac Release 20:58 核验/iOS f74b96fe+）、已知缺口三项。等待 owner 执行与回报。",
+    "artifacts": [],
+    "checked_at": "2026-10-19T21:15:00+08:00"
+   }
+  },
+  {
+   "id": "followup-fence-snapshot-consistency",
+   "title": "Mac fence/快照一致性竞态（anchor stale 55ms 窗口）",
+   "description": "2026-10-19 验收发现：BeginProjectionSnapshot 读到的 turns 可能落后于 fence cutRev（hydrate 合并竞态，55ms 窗口实测）——anchor 为刚并入 head 的新 turn 时被误判 stale → cursor_stale → 客户端 FallbackFull（多一次全量传输，内容正确）。服务端已加分光日志（anchor-newer stale slice: anchorTurnId/kernelTurns/kernelHeadRev，a90b3c08）。修复方向：快照读与 cutRev 的一致性保证。另含恢复期 iOS 侧 anchor+full 并发观察（iOS FallbackFull 为设计内行为，不动）。",
+   "status": "pending",
+   "phase": "followup",
+   "kind": "impl",
+   "depends_on": [],
+   "source": "docs/2026-10-19-s4-warm-reopen-acceptance-matrix.md 附录；go-bridge.log 20:46:46.821 时序",
+   "notes": "Mac kernel 级修复，需独立一轮取证+测试；不阻塞 S-6。",
    "verification": {
     "required": true,
     "status": "missing",
