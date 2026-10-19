@@ -31,6 +31,19 @@ S-2 物化命中 600ms 内 enqueue。18:31:17 曾成功渲染 74 条消息（own
 对账要跨「Mac 入队时刻 ↔ 手机 WS-RAW 时刻」对齐才看得见 18s/40s 的在途时长；软故障（劣化而非断链）
 比硬故障更会伪装成代码 bug。
 
+### 2026-10-19 补记（Codex 独立分析 + S-4 完成交付）
+
+上条的「暖路径未触达」根因闭环：**生产客户端 CCCodeBridgeBackendClient 缺
+SessionProjectionAnchorNewerFetching 协议遵循声明**——成员早已实现但 Swift 无形状隐式
+遵循，`fetcher as?` 动态转换永远失败，且日志把「协议转换失败」误写成 anchor-echo-off。
+教训：**协议多态入口必须有真实生产类型的 metatype 转换回归测试**（fake 声明了遵循即
+绕过生产接线，19 项测试全绿也测不到）。另两处措辞纠错（Codex 基准）：22.9MB 编码/写盘
+是 ~76ms/~45ms 量级（Mac 组件实测；先前「写盘要几秒」错误），第二次打开的等待主体是
+全量传输（Mac 入队→手机完整帧 ~27s）；旧预算漏算主因是 tool 结构（7.7MB）与递归
+subagent（13.1MB）而非 reasoning（reasoning 走 text 本来被计入）。完整分析：
+docs/2026-10-19-ios-long-session-reopen-cache-root-cause-analysis.md；修复与验收矩阵：
+docs/2026-10-19-s4-warm-reopen-acceptance-matrix.md（iOS f74b96fe，19/19 真机绿）。
+
 ## 2026-10-12：codex-remote 探针 Kill 不 Wait，僵尸进程打满整机 fork 配额（事故复盘）
 
 `loadChatGPTAuth` 每次调用 spawn 一个 ChatGPT 内嵌 codex `app-server --stdio` 探针，读完登录态只
