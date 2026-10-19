@@ -335,24 +335,47 @@ func loadClaudeContinuationHistoryAtSegments(
 	ctx context.Context,
 	segments []core.TranscriptSourceSegment,
 ) ([]core.RichHistoryEntry, int64, error) {
+	return loadClaudeContinuationHistoryAtSegmentsFrom(ctx, segments, nil)
+}
+
+// loadClaudeContinuationHistoryAtSegmentsFrom is the S-2 suffix read: per segment
+// parse [fromOffsets[i], segments[i].Cursor) instead of the full prefix. fromOffsets
+// nil/short = 0（全前缀，既有行为）。Continuation dedup-replace 语义在 suffix 子集上
+// 原样保留——基线（已恢复的投影）承接重叠头，reducer upsert 幂等。
+func loadClaudeContinuationHistoryAtSegmentsFrom(
+	ctx context.Context,
+	segments []core.TranscriptSourceSegment,
+	fromOffsets []int64,
+) ([]core.RichHistoryEntry, int64, error) {
 	merged := make([]core.RichHistoryEntry, 0)
 	positions := make(map[string]int)
 	var totalBytes int64
-	for _, segment := range segments {
+	for index, segment := range segments {
 		if err := ctx.Err(); err != nil {
 			return nil, totalBytes, err
 		}
 		if segment.Cursor < 0 {
 			return nil, totalBytes, io.ErrUnexpectedEOF
 		}
+		var from int64
+		if index < len(fromOffsets) {
+			from = fromOffsets[index]
+		}
+		if from < 0 || from > segment.Cursor {
+			return nil, totalBytes, io.ErrUnexpectedEOF
+		}
 		file, err := os.Open(segment.Path)
 		if err != nil {
 			return nil, totalBytes, err
 		}
-		entries, parseErr := LoadClaudeRichHistoryFromReader(
-			io.LimitReader(file, segment.Cursor),
-			segment.Path,
-		)
+		reader := io.LimitReader(file, segment.Cursor)
+		if from > 0 {
+			if _, err := file.Seek(from, io.SeekStart); err != nil {
+				_ = file.Close()
+				return nil, totalBytes, err
+			}
+		}
+		entries, parseErr := LoadClaudeRichHistoryFromReader(reader, segment.Path)
 		closeErr := file.Close()
 		if parseErr != nil {
 			return nil, totalBytes, parseErr
@@ -360,7 +383,7 @@ func loadClaudeContinuationHistoryAtSegments(
 		if closeErr != nil {
 			return nil, totalBytes, closeErr
 		}
-		totalBytes += segment.Cursor
+		totalBytes += segment.Cursor - from
 		for _, entry := range entries {
 			key := claudeHistoryDedupKey(entry)
 			if index, exists := positions[key]; exists {

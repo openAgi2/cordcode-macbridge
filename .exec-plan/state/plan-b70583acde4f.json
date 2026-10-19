@@ -38,7 +38,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-10-18T14:21:53Z",
+  "updated_at": "2026-10-19T06:09:50Z",
   "todos": [
     {
       "id": "s0-runtime-evidence",
@@ -382,30 +382,32 @@
       "id": "s2-storage-freeze",
       "title": "S-2 存储格式冻结 + 测试计划（Gate A 前置）",
       "description": "bbolt bucket/key 布局按 §3.2.2 schema 冻结（materialization.bbolt：<backend_id>/<session_id>/ 下 head / segments/<ordinal> / turns/<8B 大端 ordinal+turn_id> / items/<turn_id+8B ordinal+item_id>；head 含 schema_version/bridge_epoch(仅 provenance 不作有效性判据)/sync_rev/source_generation/updated_at/scalar_state_json）；不变量测试清单成文（append suffix only / restart / composite membership / prefix digest mismatch / truncation cursor 回退 / live patch race / schema version / window 冷检组合 IO 上界 / 重启恢复全链读量）；OD-9 未决 → 只按默认档 (a) 实施（source-ledger prefix digest 校验整读 + suffix 折叠；growth-trust 档不实现、不加开关）。产出格式冻结记录文档。",
-      "status": "pending",
+      "status": "done",
       "phase": "s2",
       "kind": "impl",
       "depends_on": [
         "s7-anchor-newer-regression"
       ],
       "source": "方案 §6 S-2 前置；§5 Gate A S-2 行；§4 OD-9",
-      "notes": "",
+      "notes": " | owner 2026-10-19 明确授权 S-2 提前开工（s7-anchor-newer-regression 剩余项为设备门控后置项——E-4 wire/E-10 真机/echo 实测依赖新 iOS 包安装，且另一 agent 正在真机跑 timeline 测试，iOS 端全部冻结）；本切片纯 Mac 无冲突。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "格式冻结文档交付：bucket 布局（backend>session>head/segments/turns/items）、head/SegmentRow 行形状、来源四态分类（(iii) 全等零读/(ii) prefix digest 默认/(iv) 失效重建；membership 按 identity 序与 JSON store 同纪律——row 内 Path 降级为 provenance）、kernel 接线（SetDataDir 发布门装配/producer state 接口化/F-14 冷检等价门 stat-only）、Phase A 显式不做清单（live flush 行级更新/items 拆行/查询下推归 Phase B；live 窗口正确性由 suffix 折叠 + reducer 幂等保证）、12 项不变量测试清单、OD-9 默认档 (a) 无跳过校验通道",
+        "artifacts": [
+          "docs/2026-10-19-s2-materialization-format-freeze.md"
+        ],
+        "checked_at": "2026-10-19T06:09:50Z"
       }
     },
     {
       "id": "s2-materialization-impl",
       "title": "S-2 Mac materialization store 实施",
       "description": "引入 go.etcd.io/bbolt（纯 Go 无 CGO，project.yml 构建链不变；CI govulncheck 已覆盖根模块）；ProjectionMaterializationStore：单写者 bbolt Update 事务 head 与 rows 同 commit；增量折叠（当前 cursor ≥ committed 只折 [committed, current) suffix；changed turns/items upsert；同事务推进 head/segment cursor/sync_rev）；失效诚实重建七类（schema 不兼容/backend/session/membership 变化/truncation 或 cursor 回退/prefix digest 不匹配/generation 显式变化/内部一致性失败——重建原子发布新 head，不是 fallback）；kernel 仍是唯一真相 writer（cold hydrate commit 后写 changed turns；live patch flush 后同 writer 按 upsertTurns/partOps/turnStateOps 更新 rows）；window handler 增「kernel Ready 且 source 未变则跳过冷检」等价门（对齐 full 路径 sinceRev 语义，F-14 组合路径收口）；source ledger 生产链（claudeSessionFileRelay 启动 Observe）行为保持并纳入测试口径（F-47）；Phase A 先落 turns/* turn_blob_json；旧 checkpoint 保留不删除不迁移（OD-5）。完成后追加 CHANGELOG.md [Unreleased]。",
-      "status": "pending",
+      "status": "done",
       "phase": "s2",
       "kind": "impl",
       "depends_on": [
@@ -415,20 +417,29 @@
       "notes": "bbolt 大 value 写放大风险按 §8（异步批量提交/Phase B item 拆行缓解）。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "bbolt 物化存储落地：ProjectionMaterializationStore（Save 行级差分单 Update 事务：未变 turn 零写；LoadValidated 四态分类 + 接受 cursor 推进返回 stored cursors；producer seed 独立于 checkpoint 保存顺序——骨架行语义，修复冷开 seed 先到丢失回归）；go.etcd.io/bbolt v1.4.3（纯 Go）；SetDataDir 按 materializationProductionEnabled 装配（rollback=关常量回 JSON store）；kernel admission 增 StartCursors（composite checkpoint-hit 基线=stored 段和）；core 可选接口 CompositeRichHistoryOffsetProvider + claudecode offset 续读（SectionReader，dedup-replace 保留，provider 缺席回退全前缀）；F-14 冷检等价门（kernel Ready + stat size==committed cursor 跳过冷检，window/anchor 两处接线）；producer state 存取接口化（projectionProducerStateStore）",
+        "artifacts": [
+          "mac:go-bridge/projection_materialization.go (new)",
+          "mac:go-bridge/projection_kernel.go (admission/accessor/接口化)",
+          "mac:go-bridge/handlers.go (装配)",
+          "mac:go-bridge/handlers_projection.go (produce offset 续读+gate helper)",
+          "mac:go-bridge/projection_window_handler.go + projection_anchor_newer_handler.go (冷检门)",
+          "mac:core/interfaces.go (可选接口)",
+          "mac:agent/claudecode/continuation.go+claudecode.go (offset 续读)",
+          "mac:go.mod/go.sum (bbolt v1.4.3)"
+        ],
+        "checked_at": "2026-10-19T06:09:50Z"
       }
     },
     {
       "id": "s2-materialization-tests",
       "title": "S-2 materialization 定向测试（§7.1.2 全集）",
       "description": "① append suffix only（重投影仅 suffix——R-5 精确口径）；② runtime restart；③ composite Claude continuation membership；④ prefix digest mismatch 诚实重建；⑤ truncation/cursor 回退；⑥ live patch 与 window fence 并发；⑦ store schema version；⑧ window 冷检组合路径 IO 上界（stat+尾部 4KiB 反扫不整读——仅指冷检路径；完整生产链含 source ledger Observe prefix 整读按 §3.2.3 (ii) 如实计）；⑨ 重启恢复全链读量（保存 store→停止 runtime→相同 source append→重启→relay 启动，真实 owning 调用链全部文件读取，trace 开/关均可解释；断言重投影仅 suffix、IO 与 (ii) 声明一致；prefix 原地等长改写反例 digest 校验捕获；OD-9 未启用不出现跳过 prefix 校验读量）；⑩ metrics（source cursor delta / materialized rows·bytes / page encoded bytes / kernel head syncRev / response queue time）。",
-      "status": "pending",
+      "status": "done",
       "phase": "s2",
       "kind": "tests",
       "depends_on": [
@@ -438,13 +449,18 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "冻结清单 §6 覆盖：round-trip(全等零读)+行级差分（改/删/加行重载一致）；suffix 推进接受（stored cursors）；truncation/membership/等长原地改写 digest 捕获/身份不符失效重建（OD-9 负对照：改写路径必经 digest）；失败 Save 事务回滚保持上一致点；8 并发 Save 串行；producer+claude source state round-trip（含 seed 独立存取）；禁用语义；旧 checkpoint 文件零触碰（OD-5）；F-14 门（未推进跳过/推进照旧）；E-6 组件级 120turns×840KB≈100MB 合成 round-trip+差分（1.1s）；agent 侧 offset 续读尾部等价+非法 offset 边界。全包回归：仅剩 1 处预存失败（TestClaudeSourceShapeFixtures，基线即红）。realdata tag（owner 事故 transcript）归 regression 阶段",
+        "artifacts": [
+          "mac:go-bridge/projection_materialization_test.go (10 例 PASS)",
+          "mac:agent/claudecode/continuation_offset_test.go (PASS)",
+          "log:/tmp/go-bridge-s2b.log (全包仅 1 预存失败)",
+          "log:agent/claudecode + core 全绿"
+        ],
+        "checked_at": "2026-10-19T06:09:50Z"
       }
     },
     {

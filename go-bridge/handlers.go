@@ -797,7 +797,13 @@ func (h *Handlers) SetDataDir(dir string) {
 	defer h.mu.Unlock()
 	h.dataDir = dir
 	if h.projectionKernel != nil {
-		h.projectionKernel.SetCheckpointStore(NewProjectionCheckpointStore(dir))
+		if materializationProductionEnabled {
+			// S-2（§3.2）：bbolt 物化存储为持久层——重启恢复走四态来源分类 + suffix
+			// 折叠；旧 checkpoints/*.json 保留不读不删（OD-5；rollback = 关发布门）。
+			h.projectionKernel.SetCheckpointStore(NewProjectionMaterializationStore(dir))
+		} else {
+			h.projectionKernel.SetCheckpointStore(NewProjectionCheckpointStore(dir))
+		}
 	}
 }
 

@@ -1839,6 +1839,20 @@ func (a *Agent) GetRichSessionHistoryAtSegments(
 	return entries, err
 }
 
+// GetRichSessionHistoryAtSegmentsFrom implements core.CompositeRichHistoryOffsetProvider
+// (S-2 suffix read): parse [fromOffsets[i], segments[i].Cursor) per segment.
+func (a *Agent) GetRichSessionHistoryAtSegmentsFrom(
+	ctx context.Context,
+	_ string,
+	segments []core.TranscriptSourceSegment,
+	fromOffsets []int64,
+) ([]core.RichHistoryEntry, error) {
+	started := time.Now()
+	entries, fileBytes, err := loadClaudeContinuationHistoryAtSegmentsFrom(ctx, segments, fromOffsets)
+	core.SessionLoadMetricsFromContext(ctx).AddHistoryParse(time.Since(started), fileBytes)
+	return entries, err
+}
+
 // FetchTodos implements core.TodoProvider. It reads the session transcript to find
 // the most recent TodoWrite tool_use block and returns the full todo list.
 // Claude Code's TodoWrite always sends the complete list, so the last block is authoritative.

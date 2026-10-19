@@ -83,7 +83,14 @@ func (h *Handlers) handleGetSessionProjectionAnchorNewer(conn Connection, msg Wi
 		h.startProjectionLiveRelay(params.SessionID, conn, msg.BackendID, agent, "")
 	}
 
-	forceColdInspection := params.SessionID != "" &&
+	// S-2/F-14：kernel Ready 且 committed 源未推进（stat-only）则跳过冷检——
+	// 对齐 full 路径 sinceRev=0 门语义，window_0 不再每请求强制冷源检查。
+	coldGate := true
+	if h.projectionKernel.Status(msg.BackendID, params.SessionID).Phase == ProjectionHydrateReady &&
+		projectionSourceUnchangedSinceCommit(h.projectionKernel, msg.BackendID, params.SessionID) {
+		coldGate = false
+	}
+	forceColdInspection := coldGate && params.SessionID != "" &&
 		(msg.BackendID == "opencode" || msg.BackendID == "opencode-web" ||
 			msg.BackendID == "grokbuild" ||
 			msg.BackendID == "claude" || msg.BackendID == "claudecode" ||

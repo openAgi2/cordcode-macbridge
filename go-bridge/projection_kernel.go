@@ -172,6 +172,13 @@ type projectionCheckpointPersistence interface {
 	Save(ProjectionCheckpoint) error
 }
 
+// projectionProducerStateStore 是 codex-remote 懒历史 producer seed 的存取面
+// （§11.7/R11d）。JSON store 用侧文件实现；materialization store 并入 head 行。
+type projectionProducerStateStore interface {
+	LoadCodexProducerState(backendID, sessionID string) (*CodexProducerState, error)
+	SaveCodexProducerState(backendID, sessionID string, state CodexProducerState) error
+}
+
 type ProjectionCheckpointStore struct {
 	baseDir      string
 	beforeRename func(tempPath, checkpointPath string) error
@@ -713,6 +720,10 @@ type ProjectionHydrateAdmission struct {
 	StartCut      int64
 	CheckpointHit bool
 	Done          <-chan struct{}
+	// StartCursors（S-2）：composite checkpoint-hit 携带 per-segment committed
+	// cursor（stored 值）——produce 走 offset 续读折叠 suffix；nil = 无段级基线
+	//（全前缀遍历，既有行为）。
+	StartCursors []int64
 }
 
 type ProjectionHydrateCommit struct {
@@ -1122,6 +1133,7 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 
 	checkpointHit := false
 	startCursor := int64(0)
+	var segmentStartCursors []int64
 	if wasReadyCatchUp {
 		startCursor = catchUpFrom
 		checkpointHit = true // base already in memory; only gap remains
@@ -1151,7 +1163,14 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 				tx.reducer.Restore(backendID, sessionID, restored)
 			}
 			if len(source.Segments) > 0 {
-				startCursor = source.Cursor
+				// S-2：composite 接受 cursor 推进——基线 = stored cursors（其和为
+				// startCursor，与单源 checkpoint.Source.Cursor 同构）；produce 以
+				// StartCursors 做 per-segment offset 续读，折叠 [stored_i, current_i)。
+				segmentStartCursors = make([]int64, 0, len(checkpoint.Sources))
+				for _, stored := range checkpoint.Sources {
+					segmentStartCursors = append(segmentStartCursors, stored.Cursor)
+					startCursor += stored.Cursor
+				}
 			} else {
 				startCursor = checkpoint.Source.Cursor
 			}
@@ -1178,6 +1197,7 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 		StartCut:      tx.startCut,
 		CheckpointHit: checkpointHit,
 		Done:          done,
+		StartCursors:  segmentStartCursors,
 	}
 	k.mu.Unlock()
 	return admission, nil
@@ -1730,6 +1750,32 @@ func (k *ProjectionKernel) HydrateSource(backendID, sessionID string) (Projectio
 	return session.hydrate.source, true
 }
 
+// CommittedSourceSegments（S-2/F-14）返回 committed 源的段级 descriptor 副本
+//（无 hydrate 事务的 Ready 会话同样返回 committedSource）。冷检等价门用它做
+// stat-only 未推进判定。
+func (k *ProjectionKernel) CommittedSourceSegments(backendID, sessionID string) ([]ProjectionSourceSegment, bool) {
+	if k == nil {
+		return nil, false
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	session := k.sessionLocked(backendID, sessionID)
+	if session.hydrate != nil {
+		return append([]ProjectionSourceSegment(nil), session.hydrate.source.Segments...), true
+	}
+	if len(session.committedSource.Segments) > 0 {
+		return append([]ProjectionSourceSegment(nil), session.committedSource.Segments...), true
+	}
+	if session.committedSource.Path != "" {
+		return []ProjectionSourceSegment{{
+			Identity: session.committedSource.Identity,
+			Path:     session.committedSource.Path,
+			Cursor:   session.committedSource.Cursor,
+		}}, true
+	}
+	return nil, false
+}
+
 func (k *ProjectionKernel) CommittedSourceCursor(backendID, sessionID string) (int64, bool) {
 	if k == nil {
 		return 0, false
@@ -1840,11 +1886,11 @@ func (k *ProjectionKernel) LoadCodexProducerState(backendID, sessionID string) (
 	k.mu.Lock()
 	store := k.store
 	k.mu.Unlock()
-	concrete, ok := store.(*ProjectionCheckpointStore)
+	producer, ok := store.(projectionProducerStateStore)
 	if !ok {
 		return nil, nil
 	}
-	return concrete.LoadCodexProducerState(backendID, sessionID)
+	return producer.LoadCodexProducerState(backendID, sessionID)
 }
 
 // SaveCodexProducerState persists through the installed store (no-op without one).
@@ -1855,11 +1901,11 @@ func (k *ProjectionKernel) SaveCodexProducerState(backendID, sessionID string, s
 	k.mu.Lock()
 	store := k.store
 	k.mu.Unlock()
-	concrete, ok := store.(*ProjectionCheckpointStore)
+	producer, ok := store.(projectionProducerStateStore)
 	if !ok {
 		return nil
 	}
-	return concrete.SaveCodexProducerState(backendID, sessionID, state)
+	return producer.SaveCodexProducerState(backendID, sessionID, state)
 }
 
 // PrependHistoricalTurns commits a structural historical prepend (R11a) on a

@@ -8,6 +8,13 @@
 
 ## [Unreleased]
 
+### 2026-10-19 — 投影物化存储（bbolt）与增量重启恢复（S-2）
+
+- 投影持久层从「每会话单个大 JSON checkpoint（长会话约 34MB，保存/读取/克隆全树）」换为 bbolt 行级物化存储 `session-projection/materialization.bbolt`：head/segments/turns 同事务原子提交，保存按行差分（未变 turn 零写），重启恢复不再序列化整棵 JSON。旧 checkpoints/*.json 保留不读不删；回滚 = 关发布门常量即回到旧路径。
+- 重启/重开支持增量折叠：接受「committed cursor ≤ 当前文件长度」的推进（恢复基线携带 stored cursors），仅折叠 append 的 suffix——单源走既有字节区间遍历；Claude composite 续链段新增 per-segment offset 续读（core 可选接口 `CompositeRichHistoryOffsetProvider`，provider 不支持时回退全前缀，行为不劣于现状）。截断/原地改写/段成员变化仍诚实失效重建（prefix digest 校验，OD-9 默认档：无跳过校验通道）。
+- window/anchor 请求的强制冷源检查增加等价门（F-14）：kernel Ready 且 committed 源 stat 未推进（size==cursor）时跳过冷检，对齐 full 路径 sinceRev 门语义。
+- 新依赖 go.etcd.io/bbolt（纯 Go 无 CGO）；codex-remote 懒历史 producer seed 并入 head 行（存取面接口化）。
+
 ### 2026-10-18 — anchor-newer 对账增量 RPC 与 projectionMaxBytes 协商（S-7）
 
 - 新增 `get_session_projection_anchor_newer`（capability `projection_window_anchor_newer_v1`，session_sync_v2 前置）：客户端以裸 turnId 水位线请求「严格后继 turns + 锚点终态刷新（仅首包、never-split）+ 全基底对账修正」；`baseDigests` 全集复查（token 不一致/失效→changedTurns、移除→removedTurnIds），逐 turn token 与内容同帧下发（full 全量响应对协商连接也附带 `turnTokens` 种子）。预算按冻结规则执行：总硬顶 48MiB、mandatory 2MiB、never-split 独占 46MiB、每页对账预算 8MiB、确定性打包（相位边界不回填）、`correctionsPending` 自包含续页游标（Mac 零客户端状态，重放幂等）。

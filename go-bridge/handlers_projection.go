@@ -1080,6 +1080,7 @@ func (h *Handlers) runProjectionHydrateTransaction(
 		source,
 		admission.StartCursor,
 		admission.StartCut,
+		admission.StartCursors,
 		base,
 		func(event projectionHydrateEvent) bool {
 			h.projectionKernel.ApplyHydrateEvent(
@@ -1263,6 +1264,7 @@ func (h *Handlers) produceProjectionHydrateSource(
 	backendID, sessionID string,
 	source ProjectionSourceDescriptor,
 	startOffset, endOffset int64,
+	segmentStartCursors []int64,
 	base SessionProjection,
 	emit func(projectionHydrateEvent) bool,
 ) error {
@@ -1304,13 +1306,49 @@ func (h *Handlers) produceProjectionHydrateSource(
 			Cursor:   segment.Cursor,
 		})
 	}
-	entries, err := provider.GetRichSessionHistoryAtSegments(ctx, sessionID, segments)
+	var entries []core.RichHistoryEntry
+	var err error
+	if len(segmentStartCursors) == len(segments) {
+		// S-2 suffix 折叠：per-segment committed cursor 起，只解析 [stored_i, current_i)。
+		// provider 不支持 offset 时回退全前缀遍历（行为不劣于 S-2 前）。
+		if offsetProvider, ok := provider.(core.CompositeRichHistoryOffsetProvider); ok {
+			entries, err = offsetProvider.GetRichSessionHistoryAtSegmentsFrom(ctx, sessionID, segments, segmentStartCursors)
+		} else {
+			entries, err = provider.GetRichSessionHistoryAtSegments(ctx, sessionID, segments)
+		}
+	} else {
+		entries, err = provider.GetRichSessionHistoryAtSegments(ctx, sessionID, segments)
+	}
 	if err != nil {
 		return err
 	}
 	// Claude segment replay has no activity probe; the commit gate keeps
 	// waiting rather than settling turns it cannot prove dead.
 	return streamRichHistoryProjectionEntries(ctx, entries, false, emit)
+}
+
+// projectionSourceUnchangedSinceCommit（S-2/F-14 冷检等价门）：committed 源每段
+// stat(path).Size() == committed cursor → append-only 语义下未推进，跳过冷源检查
+//（对齐 full 路径的 sinceRev 门）。size < cursor（截断）或任何 stat 失败都返回
+// false——冷检照旧，由四态分类的失效重建兜底。stat-only，不读文件内容。
+func projectionSourceUnchangedSinceCommit(kernel *ProjectionKernel, backendID, sessionID string) bool {
+	if kernel == nil {
+		return false
+	}
+	segments, ok := kernel.CommittedSourceSegments(backendID, sessionID)
+	if !ok || len(segments) == 0 {
+		return false
+	}
+	for _, segment := range segments {
+		if segment.Path == "" {
+			return false // pathless 家族无冷检门语义
+		}
+		info, err := os.Stat(segment.Path)
+		if err != nil || info.Size() != segment.Cursor {
+			return false
+		}
+	}
+	return true
 }
 
 func projectionSessionLogPrefix(sessionID string) string {
