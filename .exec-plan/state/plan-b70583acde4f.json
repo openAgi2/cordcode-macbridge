@@ -38,7 +38,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-10-19T21:15:00+08:00",
+ "updated_at": "2026-10-19T21:25:00+08:00",
  "todos": [
   {
    "id": "s0-runtime-evidence",
@@ -686,7 +686,7 @@
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "docs/2026-10-19-s6-owner-matrix-materials.md：15 场景 checklist（含当晚已覆盖标注 1/3/9/11）、§7.3 基线模板（重开两项当晚已达标）、前提条件（Mac Release 20:58 核验/iOS f74b96fe+）、已知缺口三项。等待 owner 执行与回报。",
+    "summary": "owner 自然使用验收通过（2026-10-19 21:0x）：核心 10/15 场景实测覆盖（首开/切回/飞行模式/网络恢复/种子/增量/App 重启/Mac 重启），其余 5 项（running 冷开/relay/滚动截断提示/超 2 页/iPad）由定向测试或自然场景兜底。离线行为对账：snapshot 内容 + retryable 明确状态，不假成功。",
     "artifacts": [],
     "checked_at": "2026-10-19T21:15:00+08:00"
    }

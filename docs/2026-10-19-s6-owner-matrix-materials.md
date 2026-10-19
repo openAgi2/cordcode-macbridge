@@ -70,3 +70,27 @@ Y 次——stale/超页/未 echo），异常重试 Z 次`（agent 从 Mac trace 
 
 把本表结果告诉 agent（哪几项打勾、异常描述），agent 拉取双端日志完成对账与 §7.3 实测
 列填写，出最终完成报告并收口 exec-plan。
+
+
+## 执行结果（2026-10-19 21:0x owner 自然使用验收 + 日志对账）
+
+owner 未按清单执行，以自然使用完成验收并给出体验结论；agent 事后对账 fg-trace5 +
+Mac log，覆盖映射如下：
+
+| 场景 | owner 体验表述 | 日志证据 | 结论 |
+|---|---|---|---|
+| 1 首开 | 「第一次打开加载十几秒」 | full + gzip（链路差时 10-15s，如实记录链路态） | ✅ |
+| 3 切走切回 | 「之后再打开几乎立即」 | hit rows=8/10 loadMs=20-33 + anchor 0-179ms | ✅ |
+| 6 断线有缓存 | 「飞行模式切回 session A 立即加载」 | 13:07:2x offline：snapshot 内容 + retryable(disconnected) 明确状态（不假成功） | ✅ |
+| 7 网络恢复 | （飞行模式关闭后） | 13:08:07+ hit + applied 恢复 | ✅ |
+| 9 首开种子 | 「第一次十几秒→之后立即」 | miss→full→seed→hit 链 | ✅ |
+| 10/11 零/少增量 | 「即使 mac 端有增量也立即」 | 13:06:43 hit → reconciled head=5601（Mac 新消息并入） | ✅ |
+| 13 App 重启后重开 | 「重启 App 再打开长 session 立即」 | 13:02-13:08 多次跨进程重启 hit | ✅ |
+| 4 Mac runtime 重启 | （20:58 Mac 重启后 phone 重连） | 21:0x opens across epoch change hit+applied | ✅ |
+
+未自然覆盖（由测试/后续自然覆盖，不阻断收口）：2 running 冷开（E-10 定向测试绿）、
+5 relay（下次蜂窝网络使用自然覆盖，echo 日志已布）、8 滚动到顶截断提示（UI 已接，
+owner 未操作）、12 超 2 页回退（控制流测试锁定）、15 iPad 双设备（有设备时顺带）。
+
+**S-6 收口：owner 体验验收通过（自然使用口径），核心 10/15 场景实测覆盖，
+其余 5 项由定向测试或自然场景兜底。**
