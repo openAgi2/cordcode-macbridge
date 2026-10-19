@@ -38,7 +38,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-10-19T21:25:00+08:00",
+ "updated_at": "2026-10-19T21:45:00+08:00",
  "todos": [
   {
    "id": "s0-runtime-evidence",
@@ -603,14 +603,14 @@
    "id": "s3-window-v2-impl",
    "title": "S-3 projection_window_v2 summary page 实施",
    "description": "§3.3 Phase B：additive capability projection_window_v2；请求（sessionId/backendId/direction=window_0|older|newer|latest|locate/cursor?/limit?/itemsView=summary|full/anchorTurnId?）；响应 turn descriptor（ID/状态/时间/duration/first user summary/final agent summary）+ coverage cursor + syncRev/resume + itemsView=summary 不携带完整工具输出/diff/长过程明细（≤1MiB 首屏）；明细按需经 turn_detail_lazy/chunks 家族或 v2 item page（倾向复用 turn_detail 家族 item 绑定与 chunk 语义，不平行新建第二套明细协议）；冻结前定义六项（summary card 最小可渲染字段/active turn·permission·question 例外 always-visible/item ID 与 turn generation 绑定/live patch 对 summary 与 detail 更新语义/cursor stale·scope mismatch·limit 错误/与 turn_detail_lazy_v1·chunks_v1 关系）；capability 双门偏离收口（F-18：协议冻结时二选一——(a) Mac 把 projection_window_v1（及 scalar）写入 backend descriptor 并按文档条件 echo + iOS 同步 descriptor 门控，或 (b) 修订 bridge-v1.md:2173-2175 为单门语义；由冻结评审定案方向）；Claude 先实现，其它 backend 只留协议推广空间。完成后追加 CHANGELOG.md [Unreleased]。",
-   "status": "pending",
+   "status": "in_progress",
    "phase": "s3",
    "kind": "impl",
    "depends_on": [
     "s4-ios-base-cache-regression"
    ],
    "source": "方案 §6 S-3；§3.3 Phase B；§2.2 F-13/F-18",
-   "notes": "v2 协议冻结前需 summary UI 语义确认（Gate B）——若涉产品取舍回报 owner，不自行定案。 2026-10-19 扩展：打开路径加固已先行落地（s3-open-hardening）；v2 summary 语义仍待 Gate B。",
+   "notes": "owner 2026-10-19 裁决（Codex 三路线分析后）：选 A＋③——正文优先（普通问答直接显示；超长正文折叠；工具过程收进可点开区域；正在执行轮次/权限卡/待答问题完整显示 always-visible）。冻结规范 docs/2026-10-19-s3-v2-summary-freeze-spec.md → 评审循环 → 实施。",
    "verification": {
     "required": true,
     "status": "missing",
