@@ -1,5 +1,13 @@
 # 交接：Claude 长 session 投影打开优化（方案 v30 实施中段）
 
+> **2026-10-19 更新**：S-2 已全部完成（freeze/impl/tests/regression 4 项，14/23 done）。
+> bbolt 物化存储已部署正式 runtime（41523b1f，14:12 起）；realdata 证据：事故
+> transcript 101MB 上种子保存 128ms / 单 turn 差分 **36ms**（旧路径每次全量重写
+> 34MB JSON）。剩余队列全部为 iOS 门控（s7-tests iOS spec 运行 / s7-regression
+> 真机 / S-4 / S-3 / S-6）——owner 指示 timeline 测试期间不动 iOS App 端，暂停等
+> 放行。提交链新增：41523b1f（S-2 实现）→ edab8660（realdata+收口）。
+
+
 日期：2026-10-18 22:30
 分支：Mac `feat/claude-long-session-projection-loading` @ 455d49e4；iOS 同名分支 @ 89f0a369
 方案：`docs/2026-10-17-claude-long-session-projection-loading-architecture-plan.md` v30（R25 APPROVED；正文 SHA-256 `88dede7e…` 已机械校验）
