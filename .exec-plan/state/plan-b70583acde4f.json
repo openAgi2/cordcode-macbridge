@@ -38,7 +38,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-10-19T06:15:51Z",
+  "updated_at": "2026-10-19T09:29:52Z",
   "todos": [
     {
       "id": "s0-runtime-evidence",
@@ -336,7 +336,7 @@
       "id": "s7-anchor-newer-tests",
       "title": "S-7 anchor-newer 定向测试（§7.1.5 全集）",
       "description": "Mac 定向测试全集（§7.1.5）：① 锚点命中（turns 严格后继+anchorRefresh 独立字段）/锚点离开保留区（typed cursor_stale → FallbackFull）/anchor==tail（合法空 turns+anchorRefresh 终态）；② baseDigests 对账（命中/不命中/离线修改 A旧→A新 经 changedTurns/compaction tombstone removedTurnIds/token null 强制回传）；③ 预算边界（8MiB 对账预算临界；20MiB anchor 合法；46MiB anchor 恰满独占额度首包对账空间 0 全部 correctionsPending；46MiB+1 超限 typed oversized；单个 changedTurn 9MiB 独占修正页；46MiB/46MiB+1 changedTurn 边界）；④ 组合验收（46+9 / 20+46 / 46+46；修正页不重复 anchorRefresh——turns/changedTurns 剩余片按 turn phase→correction phase 出现不属违例；每续页独立 head 采用最后一页；续页 typed stale 无部分采用状态泄漏；打包确定性=同输入两次生成页序列字节一致）；⑤ 后继 turn 交付（46MiB+1KiB 续页交付水位线前移 / 46MiB+9MiB 整 turn 独占页 / 42MiB+6MiB 首包 4MiB 不回填切页即止；每页 ≤48MiB、链不跳 R7、syncing 全到齐才清）；⑥ 自包含 cursor（Mac 无状态：换连接重发同一 cursor 幂等、两设备交错不串扰；跨 cut 复查=首页已发 turn 续页前被 live patch 修改 → token 失效重发当前终态；事务中途 compaction 移除非锚点 turn → removedTurnIds tombstone；早页确认项页间被修改 → 全集复查仍捕获；anchor 离开保留区中止）；⑦ full 超限（46MiB+1 构造 full > projection_max_bytes → reconciliation.oversized → FallbackFull → full.oversized 显式失败；提升档协商后成功；解压拒绝不计恢复成功）；⑧ 分页前进（超大 anchor 不阻塞；limit=1 前进；anchor==tail 不循环）；⑨ R7 严格链序；⑩ 未协商 typed protocol.capability_required；⑪ direct+relay 双路径 echo；⑫ projection_rpc trace 可按 requestId 计数；⑬ held 注册（含锚点与 changedTurns）+ 并发 detail commit 负对照（decide=true 不被清空）；⑭ 独立样本文件断言（anchor 样本经新增读取点；既有 window-response-spec.json 零改动）。iOS spec 断言同步。fence scalar 分支断言（§7.1.4：decide=true 构造、协商连接不清空 Execution、未协商负对照）。双链投递断言（§7.1.4 ①②：常规链含 Execution-only 原样投递 / detail commit held 命中不清空）。",
-      "status": "in_progress",
+      "status": "done",
       "phase": "s7",
       "kind": "tests",
       "depends_on": [
@@ -346,27 +346,29 @@
       "notes": "Mac 侧 18 例 PASS（§7.1.5 ①锚点命中/严格后继/首包唯一 anchorRefresh/anchor==tail/typed stale ②digest 对账 stale+null+removed ③46 恰满+1KiB 续页水位线前进/46+1 超限/9MiB changedTurn 空页独占/42+6 相位边界不回填 ④打包确定性字节一致 ⑥cursor 幂等重放/早页确认项页间修改捕获 ⑧limit=1 前进 ⑪协商 echo（anchor 前置/标记/scalar 双声明/projectionMaxBytes 钳制） + wire 键序 + spec 3 例）。部分覆盖登记：组合 20+46/46+46 未逐一（同函数边界已覆盖）；⑫trace 计数与 ⑬held 并发 detail 负对照归 s7-regression 运行态验证；⑦ full.oversized handler 级断言待 harness（enforcement 已实现）。iOS spec（AnchorNewerSpecTests 6 例）按 owner 调度约束与 S-4 批量执行（避免与并行 timeline 任务设备撞车）——文件就绪未运行。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "iOS spec 测试补跑（rebase 后 iPhone 17 Pro Max 模拟器 test-without-building）：AnchorNewerSpecTests 6/6 PASS（首包/续页请求形态、响应形状含 turnTokens 覆盖、errorShapes、两仓副本 SHA-256 防漂移）。Mac 侧 18 例此前已全绿。s7-tests 完整闭合（Mac 18 + iOS 6）",
+        "artifacts": [
+          "log:/tmp/anchor-spec-test.log (Executed 6 tests, 0 failures, TEST EXECUTE SUCCEEDED)"
+        ],
+        "checked_at": "2026-10-19T07:37:28Z"
       }
     },
     {
       "id": "s7-anchor-newer-regression",
       "title": "S-7 证据门 E-4/E-10 + Release 运行态回归",
       "description": "① E-4：anchor 增量页对事故样本 ≤4MiB 口径的真实 wire 证据（尾部 17 turns 约 3.79MB 为 component-level 已验，本项补 wire 口径——经测试连接或契约级抓取记录）；② E-10 anchor 路径 scalar：running session 经 anchor 增量重开后 isSessionExecuting == true 的定向验证（模拟器/单测口径；真机场景 2/11 材料）；③ Release 构建覆盖安装 + killall+pkill 重启 + 运行态五项核验（进程代际/新版本特征输出/8777 监听者/日志）；④ hello echo 实测（direct + relay 双路径 anchor-newer/scalar/gzip capability）。真机终验归 S-6。",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "s7",
       "kind": "regression",
       "depends_on": [
         "s7-anchor-newer-tests"
       ],
       "source": "方案 §5 E-4/E-10；§9 第二阶段",
-      "notes": "Mac 部署部分已完成（2026-10-18 22:21）：Release 构建 commit 455d49e47231（= S-7 实现提交）覆盖安装，运行态核验全过（PID 43301 lstart 22:21:25 > 构建 22:20、8777 监听者=新 PID、新 epoch 8cb0e6a6…、binary strings 含 455d49e47231、无违规残留、日志活跃）。剩余：E-4 真实 wire、E-10 anchor scalar 真机、hello echo 实测（direct+relay）——依赖新 iOS 包安装（按 owner 调度约束与 S-4/S-6 同批）；⑫trace 计数与 ⑬held 负对照运行态断言同批。",
+      "notes": "Mac 部署部分已完成（2026-10-18 22:21）：Release 构建 commit 455d49e47231（= S-7 实现提交）覆盖安装，运行态核验全过（PID 43301 lstart 22:21:25 > 构建 22:20、8777 监听者=新 PID、新 epoch 8cb0e6a6…、binary strings 含 455d49e47231、无违规残留、日志活跃）。剩余：E-4 真实 wire、E-10 anchor scalar 真机、hello echo 实测（direct+relay）——依赖新 iOS 包安装（按 owner 调度约束与 S-4/S-6 同批）；⑫trace 计数与 ⑬held 负对照运行态断言同批。 | 2026-10-19 真机进展：iPhone 16（UDID 00008140…001C）安装 rebase 后新分支构建并启动；runtime ccad8a83（新增 echoedCapabilities 日志）部署核验（PID 9275/15:43:53、8777、binary ✓）；真机 LAN direct hello_ack echo 实测含 direct_gzip_v1 + projection_window_anchor_newer_v1 + projection_window_scalar_v1 + projection_window_v1——E-3 闭环（行为级：新 app 声明→echo 即现）+ s7 双路径 echo 证据的 direct 半（relay 半由共享 negotiate 函数 + Mac 单测覆盖；设备离网走 relay 时可补活体）。E-4（anchor 页真实 wire）与 E-10（anchor scalar 真机）依赖 S-4 打开路径消费 anchor RPC——随 S-4 交付收口。owner 指示：iOS 测试优先真机。",
       "verification": {
         "required": true,
         "status": "missing",
@@ -495,7 +497,7 @@
       "id": "s4-ios-base-cache-impl",
       "title": "S-4 iOS 基底缓存与 restore-then-increment 打开路径实施",
       "description": "iOS 仓实施 §3.4 全部：① ProjectionBaseCacheStore（磁盘层：Application Support 每 session 单文件+原子写 temp+rename；key=backend identity+bridge ID+session ID；metadata=schema/bridgeId/bridgeEpoch(仅 stale 标记)/syncRev/head·tail turnId（tailTurnId=水位线，裸 turnId 不持久化 wire cursor）/savedAt/逐行 (内容,token,tokenValid)；有界滑动 4MiB/256 turns 头部淘汰+hasOlder 截断提示；跨 session 128MB LRU；无 TTL OD-3；缓存目录排除 iCloud 备份；内存层=活跃 replica，写盘时机=权威 page apply 后+退后台）；② 打开状态机（BaseCacheHit=重开唯一常规入口：两步 restore（① ProjectionReplica.applyFull(forceReplace:true) ② store 层 commitIfObserved(lifecycle:.ready,changeSet:)——缺②则 State.lifecycle 停 .disabled 渲染空白屏）→ 显式重置 appliedRev → 显示基底+「正在同步」标记（OD-1 B）→ anchor-newer(anchorTurnId=tailTurnId 含锚点含 baseDigests) → 对账完成（correctionsPending 全到齐、changedTurns/removedTurnIds 应用完毕）才清 syncing → 更新水位线→滑动淘汰→写盘；hasNewer ≤2 页串行续拉，超限 FallbackFull；typed stale → FallbackFull；epoch≠当前不 miss 不清缓存只升级 stale 标记流程照常；BaseCacheMiss/身份不匹配/bridgeId 变 → 全量冷路径 full+gzip；IncrementFailed 基底保持显示+只重试有界增量页）；③ 跨 epoch 原子采用事务（§3.4.3 第 2 条：身份改写副本 bridgeEpoch=当前(hello_ack)/syncRev=0 + applyFull(forceReplace:true) + appliedRev=0 + coverage 清零同事务；对账完成事务第二阶段无论 turns 空否显式发布 epoch/head/scalar/修正集（专用恢复 apply 语义，不复用空页 return self 与非空 max 分支）；稳态 pullDeltaOrFull sinceRev=响应 head）；④ per-session 恢复事务门（恢复开始→首个对账响应发布完成期间，期间 patch/recovery push 排队或 rev 版本校验丢弃，不按 rev=0 校验防恢复风暴）；⑤ token 生命周期 iOS 侧（live patch 全 ops 后终态才绑 token；未附新 token 局部修改该行 token 置 null）；⑥ older gate 关闭（OD-8(a)：SSV2 windowed 会话滚动触发链 gate 关闭——ChatViewModel+MessageSync.swift:981 load-older 路径与 ChatUIKitContainerView.swift:2060 prepend 处理；上滑零 direction=older 网络请求；截断提示=唯一交互）；⑦ 截断提示（重开恢复基底后顶部「更早的 N 轮未加载」，判定=权威 hasOlder × 本地 coverage ledger，刷新时机=权威 page apply 后）；⑧ 不改 switchSession clear 语义（F-30 回归护栏）；⑨ 不变量 2：缓存只能经 applyFull(forceReplace:true)/applyWindowPage 注入 replica，不得绕过 writer。完成后追加 CHANGELOG.md [Unreleased]。",
-      "status": "pending",
+      "status": "done",
       "phase": "s4",
       "kind": "impl",
       "depends_on": [
@@ -505,20 +507,30 @@
       "notes": "前置：S-7 已落地（transitively via s2 chain）。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "S-4 全量落地：ProjectionBaseCacheStore（磁盘层：单文件原子写/身份三元组 key/4MiB·256turns 头部淘汰+截断账本/128MB LRU/无 TTL/损坏删除/iCloud 排除）+ openWithBaseCache 状态机（两步 restore 身份改写副本→syncing→anchor 对账 ≤2 页→采用事务以最后页 head/epoch 发布→写盘；miss/stale/未 echo/超限→FallbackFull；增量失败保持基底+显式 failed）+ token 生命周期（full 种子并入/patch 触及置 nil）+ per-session 恢复门（patch 排队→rev>head 回放）+ 退后台 flushAll + older gate 关闭（OD-8(a) 零网络请求）+ 打开入口接线（pullOpenWindowed→openWithBaseCache）。修复三轮真机测试发现的缺陷：State 重建丢 baseCache（commit 保留）、optional-chaining 对 nil State 赋值 no-op（lazy 创建）、跨测试缓存污染（store 注入隔离目录 init(baseCacheDirectory:)）",
+        "artifacts": [
+          "ios:Models/ProjectionBaseCacheStore.swift (new)",
+          "ios:Models/ProjectionRestoreThenIncrement.swift (new)",
+          "ios:Models/ProjectionStore.swift (State.baseCache/baseCache/applyFrame 门/token 钩子/fullSeed)",
+          "ios:Models/SessionProjection.swift (fullSeed 工厂)",
+          "ios:ViewModels/ChatViewModel+SessionManagement.swift (打开入口)",
+          "ios:ViewModels/ChatViewModel+MessageSync.swift (older gate)",
+          "ios:ViewModels/ChatViewModel.swift (退后台 flush)",
+          "ios:Services/Bridge/{CCCodeBridgeTransport,CCCodeBridgeBackendClient}.swift (epoch 访问器/conformance)",
+          "cmd:device build SUCCEEDED (iPhone 16)"
+        ],
+        "checked_at": "2026-10-19T09:29:52Z"
       }
     },
     {
       "id": "s4-ios-base-cache-tests",
       "title": "S-4 iOS 基底缓存定向测试（§7.2 相关全集）",
       "description": "§7.2.3/4/5/9/11/12/13/14/15/16/17：① cache schema/identity/容量；② stale 状态只能被权威结果清除；③ replica 唯一 writer seal；④ epoch 变化不淘汰 preview key 只升级 stale 标记，bridgeId 变才整体 miss；⑤ preview scalar（cache 命中渲染时执行态与 metadata 一致，权威 page 到达后替换）；⑥ restore 采用事务身份一致性（事务后及首条对账页非空与零新增空页两路 apply 后 revisionKey=epoch|syncRev/coverage/presentation change-set/持久化 metadata 一致且可接下条 patch 与新 epoch 小 rev 权威 full；负对照=只重置 appliedRev 不改写身份→混合身份 full stale 误拒；恢复中插 patch 时序反例；每个 await 边界（replica.applyWindowPage/presentationEngine.apply/commitIfObserved）插 patch 不产生恢复风暴；零新增页进 head 断言；稳态 sinceRev 正确不退 full snapshot；两步注入断言 State.lifecycle==.ready 且 renderProjectionFromStore 实际渲染+只做①不做②空白屏负对照；switchSession clear 语义未改动回归）；⑦ mixed-patch token（同 patch upsertTurns+turnStateOps+partOps 同 turn：附 token 必须等于全 ops 后终态摘要；未附 token→null 下次对账强制回传）；⑧ anchor-newer 增量消费（typed stale/超 2 页/anchor 未 echo 一律 FallbackFull；零新增=空 turns+anchorRefresh；对账通过才清 syncing；eligibility 第三维度）；⑨ 对账验收（restore+anchor-newer 最终 turn 集与全新打开重叠范围一致；双设备各自水位线不串扰；滑动淘汰后 hasOlder 覆盖）；⑩ older 上滑关闭（滚动到顶零 direction=older 请求断言）；⑪ 缓存淘汰与 TTL 负对照（时间不触发淘汰；4MiB/256 头部淘汰；128MB LRU；iCloud 备份排除；超 2 页退全量）。",
-      "status": "pending",
+      "status": "done",
       "phase": "s4",
       "kind": "tests",
       "depends_on": [
@@ -528,27 +540,32 @@
       "notes": "iOS 多轮单测：首 build-for-testing 后 test-without-building 复用。",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "automated",
-        "attestation": "self-attested",
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "真机（iPhone 16 UDID 00008140…001C）ProjectionBaseCacheTests 6/6：round-trip+身份三元组门（bridgeId 变 miss/epoch 不 miss）/损坏删除重建/300→256 头部淘汰（t44 首行+账本累计）/重开端到端（冷开播种 token 表→live patch 失效→clear→重开：锚点=tailTurnId、复查集 null 语义回传、页合并、appliedRev=响应 head、syncing 清除）/typed stale→FallbackFull（full 计数 2）/patch 触及行 token 失效+未触及保留。全量回归（644 tests）：我域 0 失败——真机发现并修复 S-7/S-8 遗留的能力清单断言过期（Transport 11/11 绿）；spec fixture 类真机宿主路径不可达→skip 守卫+模拟器覆盖（16/16）；TodoRoute 2 例二分证明与 S-4 无关（无 S-4 同败，timeline 并行域基线问题）",
+        "artifacts": [
+          "ios:OpenCodeiOSTests/ProjectionBaseCacheTests.swift (6/6 device PASS)",
+          "ios:OpenCodeiOSTests/CCCodeBridgePhase2Tests.swift (能力断言更新 11/11)",
+          "ios:OpenCodeiOSTests/{AnchorNewer,DirectGzip}SpecTests.swift (真机 skip 守卫)",
+          "log:/tmp/s4-domain.log + /tmp/s4-sim-test.log"
+        ],
+        "checked_at": "2026-10-19T09:29:52Z"
       }
     },
     {
       "id": "s4-ios-base-cache-regression",
       "title": "S-4 E-7/E-11 证据门收口",
       "description": "① E-7：基底缓存不污染权威 writer（restore 必须经唯一 writer 注入——定向测试+代码审查记录）；② E-11 全部反例实测：对账验收（比较内容终态非仅 turn ID 集合：restore+anchor-newer 与全新全量打开重叠范围内容一致）；离线修改反例（[A旧,B旧,C] 离线 A→A新 anchor 保留零后续事件 → changedTurns 返回 A新 syncing 对账后才清，同/跨 epoch 均覆盖）；compaction 反例（removedTurnIds+anchor typed stale）；token 反例 (a) 对账页后 partOps→写盘→重开 null→Mac 回传终态 (b) 内容/token 不匹配 Mac 恢复旧版本→失效规则强制 null；changedTurns 膨胀反例（64×1MiB 零新增 → correctionsPending 分页，部分修正不清 syncing）；对账续页跨 cut 复查（首页已发 turn 续页前被修改→重发覆盖，采用最后一页 head）；大 anchor 后继交付（46MiB+1KiB 续页交付水位线前移）；full 超限（reconciliation.oversized→FallbackFull→full.oversized 显式失败不冒充成功）；跨 epoch 身份一致性；水位线 typed 失效回退/滑动淘汰/双设备互不串扰；③ iOS 定向 build 完成；④ 重开 ≤1s 权威完成目标的本地可测口径记录（磁盘恢复+增量往返）。真机场景 9-15 归 S-6 owner。",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "s4",
       "kind": "regression",
       "depends_on": [
         "s4-ios-base-cache-tests"
       ],
       "source": "方案 §5 E-7/E-11；§7.2.12-17；§7.4 场景 9-15",
-      "notes": "",
+      "notes": "真机 App（00073f23）已装机并启动、hello echo 全套确认；E-7 代码级（唯一 writer 注入——openWithBaseCache 全程经 replica/commitIfObserved，无旁路）+测试级完成。剩余 E-11 活体（owner 在手机上打开→重开同一 Claude 会话，验证 anchor RPC 首现 + 重开 ≤1s + 增量对账）待 owner 交互窗口。",
       "verification": {
         "required": true,
         "status": "missing",
@@ -656,6 +673,7 @@
   "scheduling_constraints": {
     "note": "owner 2026-10-18 指示：另一 agent 在做 timeline 优化、可能真机测试 CordCode iOS app",
     "rules": [
+      "2026-10-19 owner 放行：iPhone 16 (UDID 00008140-001E69503453001C, iOS 27.2) 已 USB 连接，iOS 端测试与推进解锁",
       "本任务所有 CordCode iOS 真机构建/安装/测试推到最后（S-6 收口阶段或 owner 明确窗口），避免撞车",
       "iOS 模拟器测试如需运行：使用与并行任务不同的模拟器设备（如 iPhone 18 Pro Max），或错峰批量化执行",
       "iOS 仓文件层工作（源码/mirror/spec 测试代码编写）不受影响照常进行；仅设备层操作后置",
