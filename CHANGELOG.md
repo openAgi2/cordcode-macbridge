@@ -8,6 +8,13 @@
 
 ## [Unreleased]
 
+### 2026-10-19 — anchor 对账观测增强（S-7 证据门收口配套）
+
+- anchor stale/cursor 判定服务端此前零日志——补 anchorTurnId/kernelTurns/kernelHeadRev
+  分光（验收发现的 fence/快照不一致竞态由此可诊断，竞态本身登记 follow-up）。
+- relay hello_ack 补 echoedCapabilities 字段（与 direct 同口径，relay 双路径 echo
+  实测依据）。
+
 ### 2026-10-19 — 投影物化存储（bbolt）与增量重启恢复（S-2）
 
 - 投影持久层从「每会话单个大 JSON checkpoint（长会话约 34MB，保存/读取/克隆全树）」换为 bbolt 行级物化存储 `session-projection/materialization.bbolt`：head/segments/turns 同事务原子提交，保存按行差分（未变 turn 零写），重启恢复不再序列化整棵 JSON。旧 checkpoints/*.json 保留不读不删；回滚 = 关发布门常量即回到旧路径。
