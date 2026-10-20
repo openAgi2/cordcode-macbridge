@@ -266,24 +266,21 @@ func (r *claudeRelayCoverageRegistry) invalidateLease(sessionID string) {
 
 // ── 冷事务侧（设计 v6 §4.3.2/§4.3.3）──────────────────────────────────────────
 
-// claudeTrailingUnansweredAskTurnIDs 扫描 hydrate 快照，找出「非终态 turn 上仍
-// pending 的 user_input part」所属 turn（尾部未答 Ask）。冷折叠内早于尾部的 turn
-// 都会带 stop_reason 终态，非终态 turn 只可能是尾部在飞/未答的 turn。
-func claudeTrailingUnansweredAskTurnIDs(snap SessionProjection) []string {
+// claudeTrailingCoverageNeededTurnIDs 扫描 hydrate 快照，找出**需要 coverage 裁决**
+// 的尾部非终态 turn（2026-10-20 扩语义，原 claudeTrailingUnansweredAskTurnIDs 只认
+// 未答 Ask——真机事故：尾部悬挂 tool_use（进程被 kill、tool_result 永不落盘）不匹配
+// Ask 形态 → coverage 不触发 → commit gate（WaitHydrateCommitReady）死等 15s 预算
+// ×N 轮，owner 白等 5 分钟）。冷折叠内早于尾部的 turn 都带 stop_reason 终态；非终态
+// turn 只可能是尾部在飞/未答/悬挂的 turn——dead 进程下全部只能靠合成 turn_aborted
+// 终态化（与既有 coverClaudeTrailingUnansweredAsk 的 dead 分支同一机制），live 进程
+// 由 sourceIsLive/coverage liveBound 语义放行。
+func claudeTrailingCoverageNeededTurnIDs(snap SessionProjection) []string {
 	var ids []string
 	for _, turn := range snap.Turns {
 		if turn.Status == "completed" || turn.Status == "aborted" || turn.Status == "error" {
 			continue
 		}
-		if turn.Assistant == nil {
-			continue
-		}
-		for _, part := range turn.Assistant.Parts {
-			if part.Type == "user_input" && part.UserInputStatus == "pending" {
-				ids = append(ids, turn.TurnID)
-				break
-			}
-		}
+		ids = append(ids, turn.TurnID)
 	}
 	return ids
 }
@@ -304,7 +301,7 @@ func (h *Handlers) coverClaudeTrailingUnansweredAsk(
 	if !ok {
 		return false, nil
 	}
-	pendingTurnIDs := claudeTrailingUnansweredAskTurnIDs(snap)
+	pendingTurnIDs := claudeTrailingCoverageNeededTurnIDs(snap)
 	if len(pendingTurnIDs) == 0 {
 		return false, nil
 	}
