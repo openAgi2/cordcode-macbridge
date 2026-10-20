@@ -63,6 +63,29 @@ WaitHydrateCommitReady 死等 15s×8。修复 = claudeTrailingCoverageNeededTurn
 形态匹配清单要覆盖「进程死亡的所有残留形态」，不只业务上认识到的那些**。
 档案：docs/2026-10-20-s3-v2-owner-acceptance.md（含实测数字）。
 
+### 2026-10-20 补记二（预览扩容 → 摘要首开整体退役，owner 同日裁决）
+
+S-3 v2 摘要首开当日走完「验收通过 → owner 反馈首屏太简 → 预览扩容方案
+（128→1024/head 64→256，独立评审两轮，F-01 修 UTF-8 预算低估）→ owner 裁决
+**别搞摘要了，太复杂**」全链，最终**退役**：iOS 冷开回归全量直拉，重开仍走 S-4
+缓存秒开；owner 真机验收「首开直接完整、重开秒开」通过。要点与教训：
+
+1. **「十几秒后才见工具/思考」不是摘要路径的自动补全**：fg-trace 证实是
+   foreground recovery transaction（ChatViewModel:1809/1915）发起的 get_session_projection
+   全量（36.4MB 传输 ~10s）；摘要就绪即 ready，无定时 full 预取。归因前先对齐
+   触发入口，别把恢复事务当成首开策略的一部分。
+2. **复杂度预算是产品决策**：摘要体系（判别联合 wire、双形态缓存种子、
+   claudePreviewRevision 本地失效门、前缀去重、UTF-8 预算、anchor summary 对账）
+   换来的只是「首开快几秒」，owner 一句「太复杂」整体退役。后续任何 session
+   加载优化先按「全量直拉 + 缓存暖开」这个已验收形态做基线，重建摘要类路径
+   必须有 owner 明确要求。
+3. **退役形态**：Mac 生产代码/协议/能力声明保留休眠（iOS 不请求即不触发），
+   iOS 摘要种子（任何 backend）打开即弃用重建（截短内容不得恢复）；pullWindowV2Summary
+   已删（净 -300 行）。两端 docs/protocol 的 v2 冻结章节与样本仍有效——是休眠
+   协议的契约，不是活跃行为描述；后续清理属独立任务。
+4. 评审反例沉淀：预算计量必须按实际字节（RuneCount×3 对四字节码点低估
+   343KB/1.4MB 量级）——任何「字符数×常数」估算都要过一遍四字节反例。
+
 ## 2026-10-12：codex-remote 探针 Kill 不 Wait，僵尸进程打满整机 fork 配额（事故复盘）
 
 `loadChatGPTAuth` 每次调用 spawn 一个 ChatGPT 内嵌 codex `app-server --stdio` 探针，读完登录态只
