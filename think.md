@@ -44,6 +44,25 @@ subagent（13.1MB）而非 reasoning（reasoning 走 text 本来被计入）。�
 docs/2026-10-19-ios-long-session-reopen-cache-root-cause-analysis.md；修复与验收矩阵：
 docs/2026-10-19-s4-warm-reopen-acceptance-matrix.md（iOS f74b96fe，19/19 真机绿）。
 
+### 2026-10-20 补记（S-3 v2 空白屏事故 + 尾部悬挂 turn 卡死）
+
+**空白屏事故**：v2 摘要首开 Mac 侧把摘要行放 wire `turns` 字段（与冻结 schema 一致），
+iOS 模型却自创 `summaryRows` 字段 + turns 按 full turn 解码——摘要字段全被丢弃，
+17 turn 应用成功、lifecycle ready、mapped=0，11 项测试全绿没拦住（spec 测的是 Mac 侧
+样本字典、消费测的 fake 直接构造结果对象——**没有任何测试穿过「真实 wire JSON →
+生产 decoder」**）。教训：① 冻结判别联合的消费端必须从冻结字段解码，自创字段 =
+违反冻结消费契约；② 契约测试必须用冻结样本 JSON 喂生产 decoder（新增
+ProjectionWindowV2WireContractTests 闭合）；③ 「applied + ready」不证明有可读内容。
+另经 Codex 独立评审抓出三项连带缺口（摘要缓存未实现/displayTurn 丢 generation/
+权限例外用错 part 形态——正式权限是 type=tool+requiresPermissionConfirmation 标记，
+raw permission_request 不是 SoT），一轮全修。
+**尾部悬挂 turn 卡死**（owner 白等 5 分钟）：eed413da 尾部悬挂 tool_use（进程被
+kill、tool_result 永不落盘）不属于「未答 Ask」→ coverage 裁决不触发 →
+WaitHydrateCommitReady 死等 15s×8。修复 = claudeTrailingCoverageNeededTurnIDs
+扩至一切尾部非终态 turn（dead → 合成 turn_aborted）。教训：**收口/超时类机制的
+形态匹配清单要覆盖「进程死亡的所有残留形态」，不只业务上认识到的那些**。
+档案：docs/2026-10-20-s3-v2-owner-acceptance.md（含实测数字）。
+
 ## 2026-10-12：codex-remote 探针 Kill 不 Wait，僵尸进程打满整机 fork 配额（事故复盘）
 
 `loadChatGPTAuth` 每次调用 spawn 一个 ChatGPT 内嵌 codex `app-server --stdio` 探针，读完登录态只
