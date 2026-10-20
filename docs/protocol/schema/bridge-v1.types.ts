@@ -1539,11 +1539,11 @@ export interface BridgeTurnSummaryDescriptor {
   startedAt?: number;
   completedAt?: number;
   durationMs?: number;
-  /** 用户提问正文；128 chars 上限规则。 */
+  /** 用户提问正文；1024 chars 上限规则（2026-10-20 预览扩容：128 → 1024）。 */
   userBrief?: BridgeTurnSummaryBrief;
-  /** 回答正文末段（结论优先）；128 chars 上限规则。 */
+  /** 回答正文末段（结论优先）；1024 chars 上限规则（2026-10-20 预览扩容）。 */
   agentBrief?: BridgeTurnSummaryBrief;
-  /** 回答正文开头 64 chars（正文优先双端锚定：开头+结尾，中段折叠）。 */
+  /** 回答正文开头 256 chars（正文优先双端锚定：开头+结尾，中段折叠；2026-10-20：64 → 256）。 */
   agentBriefHead?: string;
   /** true = 该 turn 有未随页交付的完整内容。 */
   folded: boolean;

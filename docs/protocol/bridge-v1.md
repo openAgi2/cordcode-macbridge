@@ -3273,9 +3273,11 @@ owner 裁决路线 A + 显示方式 ③ 正文优先）。additive 新 RPC；不
 ### TurnSummaryDescriptor（冻结定义 1+2）
 
 - `turnId` / `status` / `startedAt?` / `completedAt?` / `durationMs?`。
-- `userBrief` / `agentBrief`（`{ text, truncated }`）：正文 brief；≤128 chars 完整，
-  超长截断至 128 + `truncated: true`；`agentBrief` 取末段（结论优先），
-  `agentBriefHead` 取开头 64 chars（③ 正文优先双端锚定）。
+- `userBrief` / `agentBrief`（`{ text, truncated }`）：正文 brief；≤1024 chars 完整，
+  超长截断至 1024 + `truncated: true`；`agentBrief` 取末段（结论优先），
+  `agentBriefHead` 取开头 256 chars（③ 正文优先双端锚定）。
+  （2026-10-20 预览扩容勘误：原冻结值 128/64 扩至 1024/256——owner 真机反馈首屏
+  正文过简；私有策略阈值变更，wire 字段集与判别形态不变，冻结样本仍字节有效。）
 - `folded` / `foldReason`（`long_body | tool_process | both | budget`）：③ 折叠形态
   依据；`budget` = 预算降级整 turn 折叠（仅 turnId + folded + foldReason，无 brief；
   渲染形态同 `long_body`，独立枚举供观测断言）。
@@ -3289,6 +3291,9 @@ owner 裁决路线 A + 显示方式 ③ 正文优先）。additive 新 RPC；不
 **预算语义（定案）**：≤1MiB 是 brief 与工具占位合计的**软**预算；超限 → 老 turns 按
 `foldReason: "budget"` 降级（不截断已交付 brief）；`liveState` 例外与 `scalarState`
 不计入预算。**禁止以截断权限卡/待答问题凑预算**——例外永远完整。
+（2026-10-20 预览扩容勘误：预算计量改为 brief 三段的**实际 UTF-8 字节**合计——原
+`RuneCount×3` 近似对四字节码点低估，151 turns × 2304 码点全四字节时账本 1,043,712B
+而正文 1,391,616B，不触发降级；见评审 F-01。）
 
 ### 明细按需加载（冻结定义 6）与 Claude 资格门（四层）
 

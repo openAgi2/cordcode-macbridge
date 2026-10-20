@@ -44,8 +44,8 @@ func TestSummarizeTurnBodyPriorityShapes(t *testing.T) {
 		t.Fatalf("agentBriefHead = %q", row.AgentBriefHead)
 	}
 
-	// 超长正文 → long_body 折叠 + 截断。
-	long := v2TestTurn("t2", "completed", strings.Repeat("问", 200), strings.Repeat("答", 200))
+	// 超长正文 → long_body 折叠 + 截断（2026-10-20 预览扩容后阈值 1024，用 1200）。
+	long := v2TestTurn("t2", "completed", strings.Repeat("问", 1200), strings.Repeat("答", 1200))
 	row = summarizeTurn(long)
 	if !row.Folded || row.FoldReason != "long_body" {
 		t.Fatalf("超长正文应 long_body: %+v", row)
@@ -68,7 +68,7 @@ func TestSummarizeTurnBodyPriorityShapes(t *testing.T) {
 	}
 
 	// 两者 → both。
-	both := v2TestTurn("t4", "completed", strings.Repeat("问", 300), strings.Repeat("答", 300), v2ToolPart("tool_use"))
+	both := v2TestTurn("t4", "completed", strings.Repeat("问", 1300), strings.Repeat("答", 1300), v2ToolPart("tool_use"))
 	row = summarizeTurn(both)
 	if row.FoldReason != "both" {
 		t.Fatalf("both: %+v", row)
@@ -115,8 +115,8 @@ func TestSummarizeAlwaysVisibleExceptions(t *testing.T) {
 }
 
 func TestSummaryBudgetDegradesOldestNotExceptions(t *testing.T) {
-	// 触发预算：900 turns × ~244 chars×3B ≈ 660KB < 1MiB 仍不够——直接放大 brief
-	//（summaryViewPayloadBudget = 1MiB；用 2000 turns × 300 chars×3B ≈ 1.8MiB）。
+	// 触发预算：2000 turns × 300 chars（3B/字）× 三段 ≈ 5.4MiB 实际 UTF-8 字节
+	// > 1MiB（预算按实际字节计量，2026-10-20 F-01 修订）。
 	turns := make([]TurnProjection, 0, 2000)
 	for i := 0; i < 2000; i++ {
 		turns = append(turns, v2TestTurn(
@@ -163,6 +163,68 @@ func TestSummaryBudgetDegradesOldestNotExceptions(t *testing.T) {
 	}
 	if budgeted < degraded {
 		t.Fatal("FoldedTurnIds 账本必须覆盖全部折叠行")
+	}
+}
+
+// TestSummaryBudgetCountsActualUTF8Bytes（2026-10-20 预览扩容评审 F-01 反例）：
+// 151 个普通 completed turn，正文全四字节码点（emoji）。每轮 user 1024 + agent 1024
+// + head 256 码点 = 2304 码点 × 4B = 9216B；151 轮合计 1,391,616B > 1MiB。旧算法
+// RuneCount×3 只计 1,043,712B 不触发降级——必须按实际 UTF-8 字节计量并从最老轮
+// 整轮降级，未降级行 brief 原样保留。
+func TestSummaryBudgetCountsActualUTF8Bytes(t *testing.T) {
+	const turnsCount = 151
+	const perTurnBytes = (summaryBriefMaxChars + summaryBriefMaxChars + summaryBriefHeadChars) * 4 // 9216
+	body := strings.Repeat("\U0001F600", summaryBriefMaxChars+64) // 略超上限 → truncated
+	turns := make([]TurnProjection, 0, turnsCount)
+	for i := 0; i < turnsCount; i++ {
+		turns = append(turns, v2TestTurn(
+			"t-f01-"+string(rune('a'+i%26))+string(rune('0'+i/26%10))+string(rune('A'+i%26)),
+			"completed", body, body,
+		))
+	}
+	rows, budget, err := summarizeWindowTurns(turns, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 实际字节计量必须触发降级（旧 ×3 近似在此反例下不触发）。
+	degraded := 0
+	firstIntact := -1
+	for i, row := range rows {
+		if row.FoldReason == "budget" {
+			degraded++
+			if row.UserBrief != nil || row.AgentBrief != nil {
+				t.Fatalf("budget 降级行 %d 不得残留 brief", i)
+			}
+		} else if firstIntact < 0 {
+			firstIntact = i
+		}
+	}
+	if degraded == 0 {
+		t.Fatal("四字节码点反例：实际 UTF-8 字节 1,391,616B > 1MiB 必须触发降级（×3 近似低估修复回归）")
+	}
+	// 降级必须从最老开始且连续。
+	for i := 0; i < degraded; i++ {
+		if rows[i].FoldReason != "budget" {
+			t.Fatalf("降级必须从最老轮开始：rows[%d] 未降级而 rows[%d] 已降级", i, degraded)
+		}
+	}
+	if firstIntact != degraded {
+		t.Fatalf("降级段应连续：firstIntact=%d degraded=%d", firstIntact, degraded)
+	}
+	// 未降级行 brief 原样（不截断已交付 brief）：1024 码点 × 4B。
+	intact := rows[firstIntact]
+	if len([]rune(intact.UserBrief.Text)) != summaryBriefMaxChars || !intact.UserBrief.Truncated {
+		t.Fatalf("未降级行 brief 应保留完整 1024 码点截断形态")
+	}
+	if len(intact.UserBrief.Text) != summaryBriefMaxChars*4 {
+		t.Fatalf("四字节码点 1024 个应计 4096B 实际字节，got %dB", len(intact.UserBrief.Text))
+	}
+	// 账本 ≤ 1MiB 且等于未降级行实际字节合计。
+	if budget.PayloadBytes > summaryViewPayloadBudget {
+		t.Fatalf("payloadBytes %d > 1MiB", budget.PayloadBytes)
+	}
+	if budget.PayloadBytes != (turnsCount-degraded)*perTurnBytes {
+		t.Fatalf("payloadBytes %d != %d×%d（按实际 UTF-8 字节）", budget.PayloadBytes, turnsCount-degraded, perTurnBytes)
 	}
 }
 

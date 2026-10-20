@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"unicode/utf8"
 )
 
 // S-3 v2 summary producer（冻结规范 docs/2026-10-19-s3-v2-summary-freeze-spec.md v3；
@@ -17,9 +16,11 @@ const (
 	// summaryViewPayloadBudget = ≤1MiB 软预算（brief + 工具占位合计；liveState 例外与
 	// scalarState 不计入；超限老 turns 降级为 budget 折叠，不截断已交付 brief）。
 	summaryViewPayloadBudget = 1 << 20
-	// brief 上限（chars）：user/agent brief 128；agentBriefHead 64。
-	summaryBriefMaxChars   = 128
-	summaryBriefHeadChars = 64
+	// brief 上限（Unicode 码点）。2026-10-20 预览扩容（owner 真机反馈首屏过简）：
+	// user/agent brief 128 → 1024；agentBriefHead 64 → 256。仍为私有策略阈值——
+	// wire 字段集不变，工具/思考过程仍按需展开（session_turn_items / chunks）。
+	summaryBriefMaxChars   = 1024
+	summaryBriefHeadChars = 256
 )
 
 var errSummaryOversized = errors.New("summary liveState exception exceeds projectionMaxBytes")
@@ -226,15 +227,18 @@ func summarizeTurn(turn TurnProjection) TurnSummaryDescriptor {
 }
 
 // descriptorPayloadBytes：摘要净载荷（brief + 工具占位；不含 liveState 例外——never-split）。
+// 2026-10-20 预览扩容评审 F-01：按实际 UTF-8 字节计量（原 RuneCount×3 对四字节码点
+// 低估——151 turns × 2304 码点全四字节时账本 1,043,712B 而正文 1,391,616B，不触发
+// 降级）。预算对象不扩展为 JSON 信封，只计三段正文字节。
 func descriptorPayloadBytes(d TurnSummaryDescriptor) int {
 	n := 0
 	if d.UserBrief != nil {
-		n += utf8.RuneCountInString(d.UserBrief.Text) * 3 // UTF-8 上界近似
+		n += len(d.UserBrief.Text)
 	}
 	if d.AgentBrief != nil {
-		n += utf8.RuneCountInString(d.AgentBrief.Text) * 3
+		n += len(d.AgentBrief.Text)
 	}
-	n += utf8.RuneCountInString(d.AgentBriefHead) * 3
+	n += len(d.AgentBriefHead)
 	return n
 }
 

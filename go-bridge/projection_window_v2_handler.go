@@ -190,15 +190,17 @@ func (h *Handlers) handleGetSessionProjectionWindowV2(conn Connection, msg WireM
 		AnchorTurnID: params.AnchorTurnID,
 	}
 	// itemsView=summary：窗口按摘要等价尺寸切（修复 2026-10-20 owner 真机发现：
-	// 大 turn 会话被 full 4MiB 门截成尾部 11 行——大量内容「丢失」）。每 turn
-	// 摘要保守上界：brief 三段 128 chars ×3B + 工具占位 + 身份/时间 ≈ 1.5KB；
-	// 100 turns ≈ 150KB << 4MiB 预算 → 窗口实际由 turn 上限（≤100/limit）决定，
-	// 与冻结 §3「≤1MiB 摘要软预算」一致。full 形态不变（走 v1 预算）。
+	// 大 turn 会话被 full 4MiB 门截成尾部 11 行——大量内容「丢失」）。2026-10-20
+	// 预览扩容：每 turn 摘要保守上界 = brief 三段 1024+1024+256 码点 × 4B（四字节
+	// 码点最坏情形）≈ 9.2KB + 身份/时间 ≈ 10KiB；默认 100 turns ≈ 1MB、上限 256
+	// turns ≈ 2.5MB，均 << 4MiB full 预算 → 窗口仍由 turn 上限决定，与冻结 §3
+	// 「≤1MiB 摘要软预算」一致（软预算由 summarizeWindowTurns 按实际 UTF-8 字节
+	// 执行，超限老 turns 降级）。full 形态不变（走 v1 预算）。
 	var summarySizes []int
 	if params.ItemsView == "summary" {
 		summarySizes = make([]int, len(proj.Turns))
 		for i := range summarySizes {
-			summarySizes[i] = 1536
+			summarySizes[i] = 10 * 1024
 		}
 	}
 	v1Response, sliceErr := sliceProjectionWindowWithBudget(msg.BackendID, params.SessionID, bridgeEpoch, proj, v1Params, hasOlderUpstream, summarySizes)
@@ -268,6 +270,9 @@ func (h *Handlers) handleGetSessionProjectionWindowV2(conn Connection, msg WireM
 		"payloadBytes", budget.PayloadBytes,
 		"folded", len(budget.FoldedTurnIds),
 		"exceptions", len(budget.Exceptions),
+		// 2026-10-20 预览扩容运行态特征：本提交起 briefMax=1024/headMax=256。
+		"briefMaxChars", summaryBriefMaxChars,
+		"headMaxChars", summaryBriefHeadChars,
 	)
 }
 
