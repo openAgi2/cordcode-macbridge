@@ -38,7 +38,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-10-20T19:30:00+08:00",
+ "updated_at": "2026-10-20T20:45:00+08:00",
  "todos": [
   {
    "id": "s0-runtime-evidence",
@@ -714,6 +714,27 @@
      "go-bridge/kernel_snapshot_race_test.go"
     ],
     "checked_at": "2026-10-20T19:30:00+08:00"
+   }
+  },
+  {
+   "id": "v2-scope-fence",
+   "title": "v2 范围收口（Codex 评审 F-01/F-02/F-05）",
+   "description": "Codex 评审 docs/2026-10-20-long-session-backend-applicability-and-v2-scope-review.md 落地：双端 summary 范围门（claude-only）、非 Claude 越界种子弃用重建、v2 补进超时/看门狗家族、echo 对齐冻结条件（v1 声明+rollout）、协议勘误记录、mirror 同步（bridge-v1.md/types.ts rebase 后落后一并补齐）。",
+   "status": "done",
+   "phase": "followup",
+   "kind": "impl",
+   "depends_on": [],
+   "source": "owner 2026-10-20 批准一轮全修",
+   "notes": "推广门（F-03/F-04）维持登记：非 Claude 暖开=机制可达未验收；v2 推广需独立冻结。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "真机 30/30（含三新测：非Claude回退/坏种子弃用/Claude不回归）+模拟器10/10+Mac scope/echo 协商测试绿；双端部署（Mac 9914cc57 Release 20:38 核验 / iOS 18ca7f6b）+hello v2 echo 复核。owner 交互验收待日常使用覆盖。",
+    "artifacts": [],
+    "checked_at": "2026-10-20T20:45:00+08:00"
    }
   }
  ],
