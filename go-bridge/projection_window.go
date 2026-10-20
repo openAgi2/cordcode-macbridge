@@ -229,14 +229,36 @@ func sliceProjectionWindowWithUpstream(
 	params GetSessionProjectionWindowParams,
 	hasOlderUpstream bool,
 ) (ProjectionWindowResponse, error) {
+	return sliceProjectionWindowWithBudget(backendID, sessionID, bridgeEpoch, proj, params, hasOlderUpstream, nil)
+}
+
+// sliceProjectionWindowWithBudget：sizesOverride 非 nil 时窗口预算按该等价尺寸度量
+// 而非 full 编码尺寸（S-3 v2 修复 2026-10-20：summary 形态的行是 KB 级摘要——大 turn
+// 会话（如 48 turns≈22MB）按 full 4MiB 门只装得下尾部 11 个，摘要窗口被错误截断，
+// owner 看到大量会话内容「丢失」；冻结 §3 的 ≤1MiB 是摘要净载荷软预算，不是窗口
+// turn 集合的 full 字节预算）。返回的 Turns 仍是 full 真值行——调用方（v2 handler）
+// 在响应组装时转换为 summary 行。
+func sliceProjectionWindowWithBudget(
+	backendID, sessionID, bridgeEpoch string,
+	proj SessionProjection,
+	params GetSessionProjectionWindowParams,
+	hasOlderUpstream bool,
+	sizesOverride []int,
+) (ProjectionWindowResponse, error) {
 	turns := proj.Turns
 	limit := params.Limit
 	if limit <= 0 {
 		limit = defaultWindowTurns
 	}
-	sizes, err := turnEncodedSizes(turns)
-	if err != nil {
-		return ProjectionWindowResponse{}, err
+	var sizes []int
+	if sizesOverride != nil && len(sizesOverride) == len(turns) {
+		sizes = sizesOverride
+	} else {
+		var err error
+		sizes, err = turnEncodedSizes(turns)
+		if err != nil {
+			return ProjectionWindowResponse{}, err
+		}
 	}
 
 	var slice projectionWindowSlice
