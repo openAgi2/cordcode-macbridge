@@ -38,7 +38,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-10-20T19:05:00+08:00",
+ "updated_at": "2026-10-20T19:30:00+08:00",
  "todos": [
   {
    "id": "s0-runtime-evidence",
@@ -695,9 +695,9 @@
   },
   {
    "id": "followup-fence-snapshot-consistency",
-   "title": "Mac fence/快照一致性竞态（anchor stale 55ms 窗口）",
+   "title": "Mac fence/快照一致性竞态（已排除：设计内回退）",
    "description": "2026-10-19 验收发现：BeginProjectionSnapshot 读到的 turns 可能落后于 fence cutRev（hydrate 合并竞态，55ms 窗口实测）——anchor 为刚并入 head 的新 turn 时被误判 stale → cursor_stale → 客户端 FallbackFull（多一次全量传输，内容正确）。服务端已加分光日志（anchor-newer stale slice: anchorTurnId/kernelTurns/kernelHeadRev，a90b3c08）。修复方向：快照读与 cutRev 的一致性保证。另含恢复期 iOS 侧 anchor+full 并发观察（iOS FallbackFull 为设计内行为，不动）。",
-   "status": "pending",
+   "status": "done",
    "phase": "followup",
    "kind": "impl",
    "depends_on": [],
@@ -705,13 +705,15 @@
    "notes": "Mac kernel 级修复，需独立一轮取证+测试；不阻塞 S-6。",
    "verification": {
     "required": true,
-    "status": "missing",
-    "method": "implementation",
+    "status": "passed",
+    "method": "automated",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "定向复现排除：TestKernelSnapshotConsistentAcrossConcurrentCommit×5 全一致（rev 单调/turns 不缩水/60 武装 turn commit 后全在）；kernel.Snapshot 空回退分支不可达（无 ClearSession/Delete 路径，Phase=Ready 必经 Restore）；事故会话无 compact/fork。定案：cursor_stale→FallbackFull 为设计内合法回退（内容无损），anchor 离开保留区的一次性原因不再成立为缺陷；观测日志（anchor-newer stale slice：anchorTurnId/kernelTurns/kernelHeadRev）保留，真实复发时有数据。",
+    "artifacts": [
+     "go-bridge/kernel_snapshot_race_test.go"
+    ],
+    "checked_at": "2026-10-20T19:30:00+08:00"
    }
   }
  ],
