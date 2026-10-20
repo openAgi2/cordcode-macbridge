@@ -3,7 +3,7 @@
  "project_root": "/Users/jacklee/Projects/cordcode-macbridge-claude-long-session-projection-loading",
  "plan_file": "docs/2026-10-17-claude-long-session-projection-loading-architecture-plan.md",
  "plan_version": "v30 (R25 APPROVED, commit 6a76d92e, 正文 SHA-256 88dede7eeae620260550bf567c0a364493d936cff9064b579f41cbc455a4a388 已机械校验通过)",
- "paired_ios_worktree": "/Users/jacklee/Projects/cordcode-ios-claude-long-session-projection-loading (feat/claude-long-session-projection-loading @ b77faf3c，唯一配套 iOS worktree；其 .exec-plan/state/plan-b4b554001ea8.json 属并行任务不得触碰)",
+ "paired_ios_worktree": "/Users/jacklee/Projects/cordcode-ios-claude-long-session-projection-loading (feat/claude-long-session-projection-loading @ f65e7178，唯一配套 iOS worktree；其 .exec-plan/state/plan-b4b554001ea8.json 属并行任务不得触碰)",
  "state_store": {
   "canonical_path": ".exec-plan/state/plan-b70583acde4f.json",
   "legacy_path": ".claude/exec-plans/plan-b70583acde4f.json",
@@ -33,12 +33,12 @@
   "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
  },
  "reports": {
-  "completion_report_path": "docs/2026-10-18-2026-10-17-claude-long-session-projection-loading-architecture-plan完成情况.md",
-  "completion_report_status": "missing",
-  "last_generated_at": null,
-  "based_on_queue_hash": null
+  "completion_report_path": "docs/2026-10-20-2026-10-17-claude-long-session-projection-loading-architecture-plan完成情况.md",
+  "completion_report_status": "present",
+  "last_generated_at": "2026-10-20T23:45:00+08:00",
+  "based_on_queue_hash": "all-done-29-owner-accepted"
  },
- "updated_at": "2026-10-20T20:45:00+08:00",
+ "updated_at": "2026-10-20T23:45:00+08:00",
  "todos": [
   {
    "id": "s0-runtime-evidence",
@@ -735,6 +735,82 @@
     "summary": "真机 30/30（含三新测：非Claude回退/坏种子弃用/Claude不回归）+模拟器10/10+Mac scope/echo 协商测试绿；双端部署（Mac 9914cc57 Release 20:38 核验 / iOS 18ca7f6b）+hello v2 echo 复核。owner 交互验收待日常使用覆盖。",
     "artifacts": [],
     "checked_at": "2026-10-20T20:45:00+08:00"
+   }
+  },
+  {
+   "id": "claude-sort-tail-activity",
+   "title": "大会话列表排序改尾部反扫真实活动——「仅打开」不再顶到最前（owner 2026-10-20 验收）",
+   "description": "Claude 会话排序原以 mtime（含仅打开造成的 metadata 写入）前移；改为尾部 64KB 反扫最后带 timestamp 的对话行作为 updatedAt。Mac 单仓（9eac1a59），iOS 零改动。",
+   "status": "done",
+   "phase": "followup",
+   "kind": "impl",
+   "depends_on": [],
+   "source": "owner 2026-10-20 反馈（排序、清缓存、其他 backend 暖开均符合预期✅）",
+   "notes": "owner 同轮反馈的其余两项（清缓存按钮、backend 暖开）已在 S-4/8a813c47 覆盖。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "定向测试 2/2 绿（TestTailActivityIgnoresMetadataOnlyMtime / TestTailActivityFallbackWhenNoTimestampedLines）+ Release 覆盖安装运行态核验；owner 真机验收通过",
+    "artifacts": [
+     "commit:9eac1a59",
+     "changelog:7eba7e33"
+    ],
+    "checked_at": "2026-10-20T23:45:00+08:00"
+   }
+  },
+  {
+   "id": "s3-v2-preview-expansion",
+   "title": "S-3 v2 首屏预览扩容 128→1024 / head 64→256（R2 APPROVED 后实施；同日被退役裁决覆盖，现休眠）",
+   "description": "owner 2026-10-20 反馈首屏摘要过简；归因（截图+fg-trace/Mac 日志对账）：summary ~1s 就绪，「十几秒后完整」实为 foreground recovery 全量 36.4MB，非摘要补全。阈值扩容 + UTF-8 预算改实际字节（R1 F-01 四字节反例：RuneCount×3 低估）+ iOS 前缀去重 + claudePreviewRevision 缓存失效门 + 协议 mirror 同步。",
+   "status": "done",
+   "phase": "s3",
+   "kind": "impl",
+   "depends_on": [],
+   "source": "owner 2026-10-20 反馈；docs/2026-10-20-claude-summary-preview-expansion-plan.md v2（R2 APPROVED，SHA 7f3fe0ec…）",
+   "notes": "owner 实测后转为整体退役裁决：本项交付随退役进入休眠（iOS 不请求 v2 即不触发），Mac 阈值代码保留。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Mac 5e4d0a97 / iOS c2017bbe / mirror a42675c6 部署后 owner 实测；定向测试绿（含 TestSummaryBudgetCountsActualUTF8Bytes 四字节反例）；随后被 s3-v2-retirement 覆盖",
+    "artifacts": [
+     "commit:5e4d0a97",
+     "ios-commit:c2017bbe",
+     "mirror-commit:a42675c6"
+    ],
+    "checked_at": "2026-10-20T23:45:00+08:00"
+   }
+  },
+  {
+   "id": "s3-v2-retirement",
+   "title": "S-3 v2 摘要首开整体退役（owner 2026-10-20「别搞摘要了，太复杂」裁决）——冷开一律全量直拉",
+   "description": "删除 iOS pullWindowV2Summary（净删约 300 行），冷 miss 不再发 get_session_projection_window_v2；任何 backend 的摘要形态种子打开即弃用重建（reason=summary-mode-retired）；push snapshot 应用路径显式清 summaryRows；Mac v2 生产代码/协议/能力声明保留休眠。产品终态=冷开全量直拉+S-4 缓存暖开秒开（记忆 claude-session-loading-accepted-shape）。",
+   "status": "done",
+   "phase": "s3",
+   "kind": "impl",
+   "depends_on": [
+    "s3-v2-preview-expansion"
+   ],
+   "source": "owner 2026-10-20 裁决「我现在在想，别搞那些摘要了，即使几十M，那就老老实实的加载吧，现在这个摘要方案太复杂」",
+   "notes": "重建摘要/分页首开类路径须 owner 明确要求；Mac 休眠代码与协议 v2 冻结章节清理属独立任务。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "iOS f4b9caef 真机定向测试 21/21（冷 miss 一律全量 / 摘要种子弃用重建 / push 清 summaryRows）；真机构建身份 f796e89c；owner 终态验收「首次打开直接加载完整内容了，重开也秒开✅」",
+    "artifacts": [
+     "ios-commit:f4b9caef",
+     "test:ProjectionWindowV2ConsumptionTests",
+     "changelog:f65e7178"
+    ],
+    "checked_at": "2026-10-20T23:45:00+08:00"
    }
   }
  ],
