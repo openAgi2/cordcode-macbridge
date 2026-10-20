@@ -148,6 +148,17 @@ func (h *Handlers) handleGetSessionProjectionAnchorNewer(conn Connection, msg Wi
 	}
 
 	// S-3 v2：itemsView 只接受 summary（additive 单值）；非法值 = invalid_params。
+	// F-01 修复（2026-10-20 Codex 评审 §5.2 末）：summary 对账入口同样受 producer
+	// 范围门（claude-only）——普通 full 形态 anchor 不受限（评审明确不得一并禁掉）。
+	if params.ItemsView == "summary" && msg.BackendID != "claude" && msg.BackendID != "claudecode" {
+		conn.SendResult(msg.RequestID, nil, &WireError{
+			Code: "invalid_params",
+			Message: "anchor-newer summary form (itemsView=summary) is claude-only in this delivery; backend " +
+				msg.BackendID + " is not in the delivered producer set",
+			Retryable: &retryableFalse,
+		})
+		return
+	}
 	if params.ItemsView != "" && params.ItemsView != "summary" {
 		conn.SendResult(msg.RequestID, nil, &WireError{
 			Code:    "invalid_params",

@@ -3243,6 +3243,13 @@ owner 裁决路线 A + 显示方式 ③ 正文优先）。additive 新 RPC；不
 - 客户端 `hello` 声明 `projection_window_v2`；MacBridge echo 条件 = 上文
   `projection_window_v1` 修订后单门条件集（客户端声明 `projection_window_v1` +
   `session_sync_v2` 前置 + 服务端 rollout flag）+ v2 producer 落地（`claude`）。
+- **【2026-10-20 勘误记录（scope review F-01/F-05）】** echo 是**连接级**布尔（同一
+  连接可服务多 backend），表达「本连接可讲该 RPC」，不表达 per-backend 生产范围。
+  本交付的 producer 集合 = `claude` / `claudecode`；**其他 backend 的
+  `get_session_projection_window_v2` 与 anchor-newer `itemsView:"summary"` 由
+  服务端拒绝（typed `invalid_params`，retryable=false，frozen 错误集既有码）**，
+  客户端也应按 backend 资格分流。普通 full 形态 anchor 对全部 backend 不受影响。
+  未来扩展 producer 集合 = 独立协议冻结（真实样本 + 契约测试），不得改本布尔语义。
 - `itemsView` 是**请求内字段**而非独立 capability；echo `projection_window_v2` 即承诺
   `summary` / `full` 两种取值。协商沿用 `negotiateProjectionWindowV1` 内扩展纪律
   （direct + relay 双路径自动覆盖）。

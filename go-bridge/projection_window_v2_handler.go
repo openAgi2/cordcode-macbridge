@@ -39,6 +39,20 @@ func (h *Handlers) handleGetSessionProjectionWindowV2(conn Connection, msg WireM
 		})
 		return
 	}
+	// F-01 修复（2026-10-20 Codex 评审 §5.1）：producer 范围门（冻结 §1：producer
+	// 落地 = Claude；§8 推广走独立冻结）。echo 是连接级布尔，不表达 per-backend
+	// 生产范围——服务端拒绝在订阅/hydrate/fence 等副作用之前（评审 §8.3）。
+	// 错误码 = 冻结错误集既有 invalid_params（明确 backend message；不把「能力
+	// 已 echo 但该 backend 未交付」误报为 capability_required，评审 §5.1）。
+	if msg.BackendID != "claude" && msg.BackendID != "claudecode" {
+		conn.SendResult(msg.RequestID, nil, &WireError{
+			Code: "invalid_params",
+			Message: "projection_window_v2 summary producer is claude-only in this delivery; backend " +
+				msg.BackendID + " is not in the delivered producer set",
+			Retryable: &retryableFalse,
+		})
+		return
+	}
 	switch params.ItemsView {
 	case "summary", "full":
 	default:

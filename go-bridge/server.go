@@ -528,10 +528,16 @@ func (s *Server) echoAnchorNewerAndScalar(ack *HelloAckMessage, hello *HelloMess
 		ack.Capabilities["projection_window_anchor_newer_v1"] = true
 		s.eventPublisher.SetConnAnchorNewerV1(conn, true)
 	}
-	// S-3 v2（冻结 2026-10-19）：echo 条件 = 客户端声明 + ack.Ok（v2 首开属
-	// session_sync_v2 前置族——沿用同一前置校验，见下方 v2 声明前置检查）。
-	// producer = claude（rollout flag 复用 projectionWindowEnabled）。
-	if helloSupportsProjectionWindowV2(hello) && projectionWindowV2ProductionEnabled && ack.Ok {
+	// S-3 v2（冻结 2026-10-19）：echo 条件 = 修订后 v1 单门条件集（v1 声明 +
+	// 服务端 rollout flag；ssv2 前置已在 negotiateProjectionWindowV1 入口校验）
+	// + v2 生产门。F-05 修复（2026-10-20 Codex 评审 §7）：此前漏 v1 声明与运行
+	// 时 rollout 检查——「关 v1 rollout 停 v2」不成立。producer 范围门在 handler
+	// 层（claude-only，F-01）；echo 保持连接级布尔语义（评审 §3.3）。
+	if helloSupportsProjectionWindowV2(hello) &&
+		helloSupportsProjectionWindowV1(hello) &&
+		projectionWindowV2ProductionEnabled &&
+		s.projectionWindowEnabled &&
+		ack.Ok {
 		ack.Capabilities["projection_window_v2"] = true
 		s.eventPublisher.SetConnProjectionWindowV2(conn, true)
 	}
