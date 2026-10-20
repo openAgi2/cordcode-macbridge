@@ -131,16 +131,19 @@
                 "text": "需要你确认：写入 /etc/app.conf 属于受保护路径。"
               },
               {
-                "type": "permission_request",
+                "type": "tool",
+                "itemId": "tool-call-1",
+                "toolStatus": "pending",
                 "requiresPermissionConfirmation": true,
+                "toolName": "edit_file",
                 "permissionKind": "edit_file",
-                "patterns": [
+                "permissionPatterns": [
                   "/etc/app.conf"
                 ],
                 "permissionActions": [
                   "approve",
-                  "reject",
-                  "approveAlways"
+                  "approveAlways",
+                  "reject"
                 ]
               }
             ]

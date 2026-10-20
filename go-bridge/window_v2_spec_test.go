@@ -22,7 +22,7 @@ import (
 const (
 	windowV2RPC         = "get_session_projection_window_v2"
 	windowV2FixtureDir  = "projection-window-v2"
-	windowV2FixtureSHA  = "dfacf199902fb307fd659db80149a6e9d39c7e9ecb048f840af719f0470e085d"
+	windowV2FixtureSHA  = "5c39e17ae5952e732dbdfcef87c5e0ab655e4877513b901d3640b649c1aa9950"
 	anchorSummarySHA256 = "8959e1a641c40b74d7a23a63d23b39ac57c1f4ea14f1791d7f48182710f39182"
 )
 
@@ -142,12 +142,13 @@ func TestWindowV2SummaryTurnShapes(t *testing.T) {
 	}
 	hasPermissionPart := false
 	for _, part := range liveTurn.Assistant.Parts {
-		if string(part["type"]) == `"permission_request"` {
+		// F-3 更正（2026-10-20）：官方形态 = type:"tool" + requiresPermissionConfirmation:true。
+		if string(part["type"]) == `"tool"` && string(part["requiresPermissionConfirmation"]) == "true" {
 			hasPermissionPart = true
 		}
 	}
 	if !hasPermissionPart {
-		t.Fatal("liveState 例外实例必须含 permission_request part（无新 wire 字段识别）")
+		t.Fatal("liveState 例外实例必须含官方权限 part（type=tool + requiresPermissionConfirmation）")
 	}
 	var running map[string]json.RawMessage
 	if err := json.Unmarshal(doc["liveStateRunningExample"], &struct{}{}); err == nil {

@@ -91,6 +91,16 @@ func TestSummarizeAlwaysVisibleExceptions(t *testing.T) {
 		t.Fatal("permission_request part 必须走例外通道")
 	}
 
+	// F-3 官方权限标记形态（type=tool + RequiresPermissionConfirmation）→ 例外
+	// （正式投影的权限卡载体；completed 轮次同样完整可见）。
+	official := v2TestTurn("t-official", "completed", "q", "需要批准")
+	official.Assistant.Parts = append(official.Assistant.Parts, ProjectionPart{
+		Type: "tool", ToolStatus: "pending", RequiresPermissionConfirmation: true, ToolName: "edit_file",
+	})
+	if summarizeTurn(official).LiveState == nil {
+		t.Fatal("官方权限标记（type=tool + requiresPermissionConfirmation）必须走例外通道")
+	}
+
 	// user_input pending（wire 字段名 status）→ 例外；answered 不例外。
 	pending := v2TestTurn("t-ui", "completed", "q", "请回答")
 	pending.Assistant.Parts = append(pending.Assistant.Parts, ProjectionPart{Type: "user_input", UserInputStatus: "pending"})

@@ -198,27 +198,37 @@ func (h *Handlers) handleGetSessionProjectionAnchorNewer(conn Connection, msg Wi
 	// anchorRefresh、changedTurns——注册进该连接的 held 集合，使后续针对这些 turn 的
 	// decide=true detail commit 不被 fence 清空。完成失败随完成事务回滚。
 	// S-3 v2：请求 itemsView=summary → 行转 summary 形态（token/复查判定已按 full
-	// 真值完成；例外通道照常完整内嵌——token 基准不变）。
+	// 真值完成；例外通道照常完整内嵌——token 基准不变）。摘要行放 turns/anchorRefresh/
+	// changedTurns 标准 wire 字段（frozen 样本形态），发送 anchorNewerSummaryWire。
+	var summaryWire *anchorNewerSummaryWire
 	if params.ItemsView == "summary" {
 		maxExceptionBytes := int(h.eventPublisher.ProjectionMaxBytes(conn))
 		summaryTurns, sumErr := summarizeAnchorRows(result.Turns, maxExceptionBytes)
 		if sumErr == nil {
 			var summaryChanged []TurnSummaryDescriptor
 			summaryChanged, sumErr = summarizeAnchorRows(result.ChangedTurns, maxExceptionBytes)
-			if sumErr == nil && result.AnchorRefresh != nil {
-				refreshRows, refreshErr := summarizeAnchorRows([]TurnProjection{*result.AnchorRefresh}, maxExceptionBytes)
-				if refreshErr == nil && len(refreshRows) == 1 {
-					result.SummaryRows = &AnchorNewerSummaryRows{
-						Turns:         summaryTurns,
-						AnchorRefresh: &refreshRows[0],
-						ChangedTurns:  summaryChanged,
-					}
-					result.ItemsView = "summary"
+			if sumErr == nil {
+				wire := &anchorNewerSummaryWire{
+					Turns:              summaryTurns,
+					ChangedTurns:       summaryChanged,
+					RemovedTurnIDs:     result.RemovedTurnIDs,
+					ScalarState:        result.ScalarState,
+					CorrectionsPending: result.CorrectionsPending,
+					TurnTokens:         result.TurnTokens,
+					SyncRev:            result.SyncRev,
+					ItemsView:          "summary",
 				}
-				sumErr = refreshErr
-			} else if sumErr == nil {
-				result.SummaryRows = &AnchorNewerSummaryRows{Turns: summaryTurns, ChangedTurns: summaryChanged}
-				result.ItemsView = "summary"
+				if result.AnchorRefresh != nil {
+					refreshRows, refreshErr := summarizeAnchorRows([]TurnProjection{*result.AnchorRefresh}, maxExceptionBytes)
+					if refreshErr == nil && len(refreshRows) == 1 {
+						anchorCopy := refreshRows[0]
+						wire.AnchorRefresh = &anchorCopy
+					}
+					sumErr = refreshErr
+				}
+				if sumErr == nil {
+					summaryWire = wire
+				}
 			}
 		}
 		if sumErr != nil {
@@ -242,7 +252,11 @@ func (h *Handlers) handleGetSessionProjectionAnchorNewer(conn Connection, msg Wi
 	if result.AnchorRefresh != nil {
 		held = append(held, result.AnchorRefresh.TurnID)
 	}
-	if err := h.eventPublisher.CompleteProjectionSnapshotWithHeldTurns(conn, admission, msg.RequestID, result, held); err != nil {
+	sendPayload := interface{}(result)
+	if summaryWire != nil {
+		sendPayload = summaryWire
+	}
+	if err := h.eventPublisher.CompleteProjectionSnapshotWithHeldTurns(conn, admission, msg.RequestID, sendPayload, held); err != nil {
 		slog.Warn("go-bridge: anchor-newer response enqueue failed", "requestId", msg.RequestID, "error", err)
 	}
 	logProjectionRPCTrace("response_enqueue", msg, params.SessionID, 0, result.SyncRev, outcomeKind, &admission)

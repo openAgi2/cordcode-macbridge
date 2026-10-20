@@ -115,6 +115,13 @@ func summaryTurnRequiresAlwaysVisible(turn TurnProjection) bool {
 			continue
 		}
 		for _, part := range message.Parts {
+			// F-3（Codex 分析，2026-10-20）：正式权限由 RequiresPermissionConfirmation
+			// 标记承载（projection_types.go:57——dsh-web approval → type=tool + 标记；
+			// SSV2 客户端按该标记渲染权限卡，raw permission_request 不是 SoT）。
+			// completed 轮次内的标记同样完整可见（状态条件只保护非 completed）。
+			if part.RequiresPermissionConfirmation {
+				return true
+			}
 			switch part.Type {
 			case "permission_request":
 				return true

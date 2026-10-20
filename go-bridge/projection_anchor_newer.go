@@ -68,20 +68,25 @@ type AnchorNewerResult struct {
 	CorrectionsPending *AnchorNewerCorrectionsPending `json:"correctionsPending,omitempty"`
 	TurnTokens         map[string]string             `json:"turnTokens,omitempty"`
 	SyncRev            int                           `json:"syncRev"`
-	// S-3 v2 additive：请求携带 itemsView=summary 时回显；此时 Turns/AnchorRefresh/
-	// ChangedTurns 序列化为 TurnSummaryDescriptor 形态（由 handler 在发送前经
-	// anchorNewerSummaryEnvelope 转换——本结构内是 full 形态真值，token 计算与
-	// 复查集判定不变）。
-	ItemsView   string                 `json:"itemsView,omitempty"`
-	SummaryRows *AnchorNewerSummaryRows `json:"summaryRows,omitempty"`
+	// S-3 v2 additive：请求携带 itemsView=summary 时回显；此时 handler 发送
+	// anchorNewerSummaryWire（摘要行放 turns/anchorRefresh/changedTurns 标准 wire
+	// 字段——与冻结样本 anchor-newer-summary-response-spec.json 一致；本结构仍是
+	// full 形态真值，token 计算与复查集判定不变，不出 wire）。
+	ItemsView string `json:"itemsView,omitempty"`
 }
 
-// AnchorNewerSummaryRows：itemsView=summary 时的行形态转换结果（turns/anchorRefresh/
-// changedTurns 三者与 AnchorNewerResult 同名 full 字段一一对应；null 语义相同）。
-type AnchorNewerSummaryRows struct {
-	Turns         []TurnSummaryDescriptor  `json:"turns"`
-	AnchorRefresh *TurnSummaryDescriptor   `json:"anchorRefresh,omitempty"`
-	ChangedTurns  []TurnSummaryDescriptor  `json:"changedTurns"`
+// anchorNewerSummaryWire：itemsView=summary 的响应 wire 形态（frozen：行字段同名
+// 摘要化）。held 注册与 token 表在 handler 侧基于 full 真值完成，本结构只承轧行。
+type anchorNewerSummaryWire struct {
+	Turns              []TurnSummaryDescriptor         `json:"turns"`
+	AnchorRefresh      *TurnSummaryDescriptor          `json:"anchorRefresh,omitempty"`
+	ChangedTurns       []TurnSummaryDescriptor         `json:"changedTurns"`
+	RemovedTurnIDs     []string                        `json:"removedTurnIds"`
+	ScalarState        AnchorNewerScalarState          `json:"scalarState"`
+	CorrectionsPending *AnchorNewerCorrectionsPending  `json:"correctionsPending,omitempty"`
+	TurnTokens         map[string]string               `json:"turnTokens,omitempty"`
+	SyncRev            int                             `json:"syncRev"`
+	ItemsView          string                          `json:"itemsView"`
 }
 
 // AnchorNewerScalarState 镜像 SessionProjection 的 scalar 字段（execution 必选；
