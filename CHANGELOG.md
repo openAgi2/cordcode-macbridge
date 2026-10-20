@@ -8,6 +8,14 @@
 
 ## [Unreleased]
 
+### 2026-10-20 — Claude 会话排序：仅真实消息活动才前移
+
+- 修复大会话（>512KB）在「仅打开」后被顶到项目分组最前的问题：open-spawn 启动的
+  Claude CLI 会写无 timestamp 的元数据行（last-prompt/cost-state）刷新 transcript
+  mtime，而大文件 updatedAt 原先直接用 mtime。现改为尾部 64KB 反扫取最后带
+  timestamp 的对话行作为活动时间，打开动作本身不再改变排序；真实消息（用户/助手
+  turn）仍正常前移。
+
 ### 2026-10-20 — v2 摘要范围收口（仅 Claude）+ 越界缓存清理 + 协商条件对齐
 
 - 「先摘要后全文」此前会误用于 Codex/Grok/DeepSeek/OpenCode 会话（内容截短、
