@@ -4315,7 +4315,11 @@ func scanClaudeSessionMetadata(path string, fallbackTime time.Time) claudeSessio
 	var reader io.Reader = f
 	if info, statErr := f.Stat(); statErr == nil && info.Size() > claudeSessionSummaryReadLimit {
 		reader = io.LimitReader(f, claudeSessionSummaryReadLimit)
-		updatedAt = fallbackTime
+		// 2026-10-20 owner 定案「仅真实消息活动才排序前移」：大文件 updatedAt 不再
+		// 直接用 mtime——open-spawn 启动的 CLI 会写无 timestamp 的元数据行刷新
+		// mtime，「仅打开」不该构成活动。尾部反扫取最后对话行 timestamp（窗口内
+		// 无对话行时保守退回 mtime）。
+		updatedAt = claudeSessionLastActivityFromTail(path, fallbackTime)
 	}
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
