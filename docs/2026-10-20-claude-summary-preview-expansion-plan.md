@@ -1,7 +1,8 @@
-# Claude 首屏正文预览扩容补充方案 v1
+# Claude 首屏正文预览扩容补充方案 v2
 
-日期：2026-10-20。状态：待独立评审；通过前不改业务代码。
-本轮范围：已交付 S-3 v2 的正文预览调参 + 直接相关的缓存形态保真与一次升级；不新增 RPC/数据通道。
+日期：2026-10-20。状态：待独立复核；通过前不改业务代码。
+本轮范围：只修订方案文档，采纳R1的F-01/F-02；新增实际UTF-8预算计量和内容patch缓存往返断言，无不采纳意见。业务源码未变。原v1哈希及评审来源见同目录review-r1报告。
+功能范围：已交付 S-3 v2 的正文预览调参 + 直接相关的缓存形态保真与一次升级；不新增 RPC/数据通道。
 
 ## 1. 需求与完整交互
 
@@ -47,7 +48,7 @@ owner 原话：「Claude code 模式下，刚打开十几秒都是那种简略�
 
 ## 3. 拟议设计与边界
 
-S-1（R-1/R-4）：summaryBriefMaxChars=1024，summaryBriefHeadChars=256；仍取用户首text及助手最后text part的前N码点。用集中常量10KiB给summary窗口做等价尺寸，100/256轮均不被4MiB full预算提前裁切；实际摘要预算仍由summarizeWindowTurns执行，always-visible例外不计入且原样。不变更冻结样本字段集、major/schemaRevision（wire字段与含义不变，扩大的是策略阈值）；canonical bridge-v1.md/schema注释和I mirror同批更新，冻结v3原文保留并追加本补充方案的替代说明，不无声覆写历史。
+S-1（R-1/R-4）：summaryBriefMaxChars=1024，summaryBriefHeadChars=256；仍取用户首text及助手最后text part的前N码点。用集中常量10KiB给summary窗口做等价尺寸，100/256轮均不被4MiB full预算提前裁切；实际摘要预算仍由summarizeWindowTurns执行；descriptorPayloadBytes把RuneCount*3改为len(string)实际UTF-8字节相加（只计userBrief.text/agentBrief.text/agentBriefHead，预算对象不扩展为JSON信封）。always-visible例外不计入且原样。F-01反例151×2304×4=1,391,616B会触发最老轮整轮降级，剩余不超过1MiB，未降级行正文原样。不变更冻结样本字段集、major/schemaRevision（wire字段与含义不变，扩大的是策略阈值）；canonical bridge-v1.md/schema注释和I mirror同批更新，冻结v3原文保留并追加本补充方案的替代说明，不无声覆写历史。
 
 S-2（R-2/R-3）：iOS displayTurn若head==brief或brief.hasPrefix(head)则只显示brief；非前缀的首末段保持head+省略号+brief。commitIfObserved把summaryRows与window/baseCache一起保留；已明确处理full的路径仍清summaryRows，不保留到full形态。
 
@@ -62,8 +63,8 @@ OD：无待owner裁决；1024/256是根据样本选择的本轮工程默认，�
 |E|状态/来源|实施后断言与负例|缺项停止点|
 |---|---|---|---|
 |E-1|verified：上述双仓身份/官方SDK边界/原始日志|修改与build前再核验来源；不把CLI2.1.261证据说成2.1.300|来源变动即停编辑/安装|
-|E-2|pending，内部producer定向测试|600字不截、1025字截到1024；Unicode码点边界；head256；工具/running/权限例外；超预算老轮降级；48/100/256轮不被full预算裁摘要|S-1完成门|
-|E-3|pending，I组件测试|前缀不重复、独立首末段保留；cold summary→state-only patch→flush/load→clear→warm anchor→flush/load保持summary；显式full后清summary；full请求计数为0|S-2完成门|
+|E-2|pending，内部producer定向测试|600字不截、1025字截到1024；Unicode码点边界；head256；工具/running/权限例外；151轮四字节码点反例按实际UTF-8计量、最老轮先降级、余下正文与账本≤1MiB；48/100/256轮不被full预算裁摘要|S-1完成门|
+|E-3|pending，I组件测试|前缀不重复、独立首末段保留；cold summary→state-only patch→flush/load→clear→warm anchor→flush/load保持summary；另测合法upsertTurns或partOps内容patch后flush→restore→anchor：正文/状态/generation不回退，触及token失效，未触及行summary保留，最终形态匹配权威交付；显式full后清summary；summary暖开full请求计数为0|S-2完成门|
 |E-4|pending，本地缓存测试|Claude旧revision缺失（summary及误标full）miss；revision1命中；非Claude原schema3无revision仍命中；不删除旧文件/其他key；其他后端scope负例|S-3完成门|
 |E-5|pending，生产summarize对归档真实投影的组件测量|报告输入/输出turn计数、完整正文数、摘要实际JSON与gzip字节；区别归档与21:35生产实例；不泄露正文|调参完成门|
 |E-6|pending，D3定向验证+部署|定向Go组；iOS Consumption/BaseCache+wire contract相关用例（repo fixture仅模拟器必要时）；稳定DerivedData/定向only-testing/5分钟watchdog；无UI自动化|安装前必须通过|
