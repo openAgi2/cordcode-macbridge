@@ -38,7 +38,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-10-19T22:45:00+08:00",
+ "updated_at": "2026-10-20T19:05:00+08:00",
  "todos": [
   {
    "id": "s0-runtime-evidence",
@@ -603,7 +603,7 @@
    "id": "s3-window-v2-impl",
    "title": "S-3 projection_window_v2 summary page 实施",
    "description": "§3.3 Phase B：additive capability projection_window_v2；请求（sessionId/backendId/direction=window_0|older|newer|latest|locate/cursor?/limit?/itemsView=summary|full/anchorTurnId?）；响应 turn descriptor（ID/状态/时间/duration/first user summary/final agent summary）+ coverage cursor + syncRev/resume + itemsView=summary 不携带完整工具输出/diff/长过程明细（≤1MiB 首屏）；明细按需经 turn_detail_lazy/chunks 家族或 v2 item page（倾向复用 turn_detail 家族 item 绑定与 chunk 语义，不平行新建第二套明细协议）；冻结前定义六项（summary card 最小可渲染字段/active turn·permission·question 例外 always-visible/item ID 与 turn generation 绑定/live patch 对 summary 与 detail 更新语义/cursor stale·scope mismatch·limit 错误/与 turn_detail_lazy_v1·chunks_v1 关系）；capability 双门偏离收口（F-18：协议冻结时二选一——(a) Mac 把 projection_window_v1（及 scalar）写入 backend descriptor 并按文档条件 echo + iOS 同步 descriptor 门控，或 (b) 修订 bridge-v1.md:2173-2175 为单门语义；由冻结评审定案方向）；Claude 先实现，其它 backend 只留协议推广空间。完成后追加 CHANGELOG.md [Unreleased]。",
-   "status": "in_progress",
+   "status": "done",
    "phase": "s3",
    "kind": "impl",
    "depends_on": [
@@ -613,20 +613,22 @@
    "notes": "冻结规范 v3 评审通过（2026-10-19，3 轮 + 元审核；报告 docs/2026-10-19-s3-v2-summary-freeze-spec-review-r1/r2/r3(-meta).md）。开发阶段开始：交付物 1-6 顺序实施 → producer/消费端 → iPhone11（00008030）真机验收。F-R3-1（wire 字段名 status）/F-R3-2（例外态样本双实例）随实施纳入。",
    "verification": {
     "required": true,
-    "status": "missing",
-    "method": "implementation",
+    "status": "passed",
+    "method": "mixed",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "owner 真机验收通过（2026-10-20）：v2 首开 <1s/载荷 4.7-22KB（vs 全量 987KB）、缓存重开 0-3s、例外通道真机可用、原卡死会话秒开。含空白屏事故全修（判别解码/摘要缓存 v3/权限例外/契约测试）+ 卡死修复（尾部悬挂 turn coverage 扩语义）。报告 docs/2026-10-20-s3-v2-owner-acceptance.md。",
+    "artifacts": [
+     "docs/2026-10-20-s3-v2-owner-acceptance.md"
+    ],
+    "checked_at": "2026-10-20T19:05:00+08:00"
    }
   },
   {
    "id": "s3-window-v2-tests",
    "title": "S-3 v2 summary page 定向测试",
    "description": "§6 S-3 最小验证：schema mirror（两仓一致）；cursor（stale/scope mismatch/limit 错误 typed）；active turn/permission/question 例外字段 always-visible；item detail 按需加载（与 turn_detail 家族绑定）；v2 未协商时走 v1（不造第二 writer）；live patch 对 summary/detail 更新语义。",
-   "status": "pending",
+   "status": "done",
    "phase": "s3",
    "kind": "tests",
    "depends_on": [
@@ -636,20 +638,20 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "passed",
     "method": "automated",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
+    "summary": "Mac 64+ 族回归、iPhone11 真机 28/28、模拟器契约+spec 10/10（真实 wire JSON→生产 decoder→mapping 全链，Codex 点名缺口闭合）、卡死回归 TestTrailingCoverage×2。",
     "artifacts": [],
-    "checked_at": null
+    "checked_at": "2026-10-20T19:05:00+08:00"
    }
   },
   {
    "id": "s3-window-v2-regression",
    "title": "S-3 v2 summary 回归 + 双端构建",
    "description": "① 首屏 turn summary ≤1MiB 实测（含超大 turn 场景：6.35MB turn 在 summary 视图不主导首屏）；② v2 capability 不协商 → v1 路径回归；③ Mac Release 构建 + iOS 定向 build；④ protocol pack（docs/protocol/）与 iOS mirror 一致性核验。",
-   "status": "pending",
+   "status": "done",
    "phase": "s3",
    "kind": "regression",
    "depends_on": [
@@ -659,13 +661,13 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "passed",
     "method": "mixed",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
+    "summary": "双端构建+部署（Mac d78100ee Release 五项核验 18:45；iPhone11 ba56042f）；protocol pack 两仓一致（样本纠错记录）；首开 summary 真机 ≤1s/载荷 ≤22KB；未协商回退 full 路径回归（fail-closed 测试锁定）。",
     "artifacts": [],
-    "checked_at": null
+    "checked_at": "2026-10-20T19:05:00+08:00"
    }
   },
   {
