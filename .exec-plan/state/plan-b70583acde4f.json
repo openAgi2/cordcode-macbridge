@@ -38,7 +38,7 @@
   "last_generated_at": "2026-10-20T23:45:00+08:00",
   "based_on_queue_hash": "all-done-29-owner-accepted"
  },
- "updated_at": "2026-10-21T17:40:00+08:00",
+ "updated_at": "2026-10-21T19:00:00+08:00",
  "todos": [
   {
    "id": "s0-runtime-evidence",
@@ -880,6 +880,33 @@
     "summary": "部署身份门五项全过（实测值见 description）；构建前/安装前双门点 porcelain 均 0 行、HEAD 未漂移；运行态核验时间 17:22:35-17:23:07",
     "artifacts": [],
     "checked_at": "2026-10-21T17:40:00+08:00"
+   }
+  },
+  {
+   "id": "v21-live-relay-fix",
+   "title": "O2 修复方案 v2.1 实施：RC-A 空白行白名单 source-only + RC-B error RawMessage 解码（含 R3 部署身份门收口）",
+   "description": "R3 工作单全链：①R3-1 部署身份门闭合（16:30 脏工作区构建勘误；干净 HEAD 97958344 重建重装 PID 27003）；②v2.1 实施（c308ad25）：三分类 classifyClaudeSourceRowContent（白名单 source-only 决定在事务内；同源空白判断；未知块失败关闭；拒收错误带行形态诊断；每代 relay 首次白名单限流 INFO）+ Error→json.RawMessage/claudeRelayErrorText（语法错误仍 poison）；③fixture 四件由 §3.2/S1-S6 派生（manifest 注明记录 SHA 去 LF 约定/字节范围含 LF/CLI 版本）；④T7 普查 516 文件 admitted 200,932 行违例 0；⑤部署 c308ad25017b（PID 35789）+ iPhone16 6c56144e；⑥owner 验收四项完成。",
+   "status": "done",
+   "phase": "review-followup",
+   "kind": "impl",
+   "depends_on": [
+    "review-r3-identity-closeout"
+   ],
+   "source": "R3 工作单第 3-5 步（方案 v2.1 复审 R2 APPROVED）",
+   "notes": "生产取证：验收窗零 rejected/gap/subevents（对照修复前 146/281）、41/41 可投影块进事务、7 次 hydrate 全 settled（RC-1 生产级）。白名单 INFO 与 RC-B 429 生产样本待自然触发（证据等级分标注见完成报告 §5）。Phase 2 登记待 owner 排期。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "红绿（4 红 3 守护→8/8 绿）+ 回归族全绿 + vet + T7 普查违例 0 + 双轮部署身份门（porcelain 0/HEAD 一致/两处 SHA 一致/进程代际）+ owner 真机验收 + 运行态对账（完成报告 §5）",
+    "artifacts": [
+     "docs/2026-10-21-claude-live-relay-zero-event-and-api-error-poison-fix-plan完成情况.md",
+     "commit:c308ad25",
+     "runtime:c308ad25017b-PID35789"
+    ],
+    "checked_at": "2026-10-21T19:00:00+08:00"
    }
   }
  ],
