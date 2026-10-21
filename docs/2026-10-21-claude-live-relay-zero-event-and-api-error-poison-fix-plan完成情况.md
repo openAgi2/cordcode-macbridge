@@ -59,11 +59,21 @@ owner 验收（方案 §9 四项）完成。被旁观回合：ce5ca3c8（30 新 
 - ~~7 次 hydrate 全部 settled=true~~ **勘误**：7 条 `checkpoint_stage` 全部 `settled=false`——`settled` 定义为 `Execution.Phase != "running"`，运行中会话本来就是 false，非故障；v1 把值写反。
 - **RC-1 单列（R4-4 更正：n=1）**：该会话 relay 仅于 18:31:48.522 启动一次；只有**首次打开**处于竞态窗内——18:31:48.521 收到请求 → relay 启动 → 18:31:49.141 coverage liveBound → 18:31:49.146 hydrate 提交（执行态 running）——修复前此场景会撞 `no registered relay loop`。其余 6 次打开时 relay 已在运行，不构成竞态样本。结论成立但样本量 n=1。
 
+### 5.1 owner 补充验收轮（2026-10-21 19:40–19:50，R4 修订轮之后）
+
+按 R4 要求用**会产生空白思考行的会话**（Claude Desktop Opus，会话 9f066cce）跑多工具任务，owner 测试两次：第一次全程旁观流式输出，第二次退出两次再进均正常。
+
+- **触发输入真实出现**：该会话 19:40 后新增 63 条 assistant 行，其中**空白 thinking 行 17 条**（transcript 侧实测）——修复前形态下这 17 条将各触发一次拒收并级联断档（对照 b66193d7 修复前 73 分钟 146/281）。
+- **Mac 生产日志**：白名单限流 INFO 出现（9f066cce，`rowClass=proven_no_display`）；`Claude source batch rejected`/`no projection subevents`/`source batch gap` 全窗 **0**；`hydrate failed`/`coverage_failed` **0**；4 次重开 hydrate（对应两次退出再进）全部成功（冷开诚实重建，无「无法加载会话投影」）。
+- **iPhone 端呈现（截图 /Users/jacklee/Downloads/Scrollie_20261021_194602.jpg，glm-vision 分析）**：完整投影——5 个折叠工具卡（含命令/工具计数）、4 段中间说明、中文总结、report.md 代码块（语言标签+行号+复制按钮）、20 条原始数据全部呈现；**完成态**收尾（无执行中/失败标识）；**无任何错误提示**；内容叙事链完整且数字自洽（平均 57.45 = 1149/20，最高 100/最低 18 均可在数据行中找到）。截图细节噪音（会话标题为旧主题残留）与本修复无关。
+- **对账（产物门）**：transcript 侧 tool_use=32 / tool_result=32 / 非空 text=14 / 空白 thinking=17；投影侧逐 part 计数仍未提取（Management API 无端点），但本轮触发输入真实出现且零拒收 + iPhone 呈现全部件——RC-A 在生产路径（Mac 侧 + iPhone 呈现）双端闭环。
+- **RC-1 附带样本**：两次退出再进（4 次 hydrate）无失败，与 §5 的 n=1 样本互为补充。
+
 **证据等级（分开标注，不混写）**：
 
 | 项 | 等级 | 依据 |
 | --- | --- | --- |
-| RC-A 拒收消除（白名单放行） | **生产路径（Mac 侧，复核 R4 观察）** | b66193d7（Opus）18:48–19:09：56 空白 thinking 行、白名单放行 INFO 出现、全窗 0 拒收；同会话修复前 146/281。iPhone 端实时显示未观测（该时段无客户端在看）。开发者验收窗（glm-5.3）无触发输入，不构成证据 |
+| RC-A 拒收消除（白名单放行） | **生产路径（Mac 侧，复核 R4 观察）** | b66193d7（Opus）18:48–19:09：56 空白 thinking 行、白名单放行 INFO 出现、全窗 0 拒收；同会话修复前 146/281。iPhone 端实时呈现已在 19:46 owner 验收轮观测（见 §5.1）|
 | RC-A 白名单 source-only（含限流 INFO） | **组件级**（生产未触发） | T1/T4 + 普查 3,595 存量空白行分类正确、违例 0；本窗口 40 新行 0 空白形态（当前 CLI/网关组合不产生空白 thinking 行），限流 INFO 未自然出现 |
 | RC-B 对象 error 不再冻结 | **组件级** | T5（fixture 转绿）+ 普查 516 文件；生产 429 未自然出现，待自然样本佐证 |
 | RC-1 运行中会话冷开 | **生产路径** | 验收②执行中重开 7 次 hydrate 全 settled |
