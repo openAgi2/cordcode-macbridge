@@ -368,13 +368,12 @@ func loadClaudeContinuationHistoryAtSegmentsFrom(
 		if err != nil {
 			return nil, totalBytes, err
 		}
-		reader := io.LimitReader(file, segment.Cursor)
-		if from > 0 {
-			if _, err := file.Seek(from, io.SeekStart); err != nil {
-				_ = file.Close()
-				return nil, totalBytes, err
-			}
-		}
+		// N1（评审 R1 复核，2026-10-21）：语义 = 读 [from, cursor)。原实现先
+		// LimitReader(file, cursor) 后 Seek(from)，LimitReader 的 N 从 seek 后位置
+		// 起算，实际读到 [from, from+cursor) ——cursor 之后的行被多读（S-2 折叠
+		// 损坏的放大面之一；组合源严格门后生产不可达，但 API 语义仍错）。改为
+		// SectionReader 精确表达 [from, cursor)。
+		reader := io.NewSectionReader(file, from, segment.Cursor-from)
 		entries, parseErr := LoadClaudeRichHistoryFromReader(reader, segment.Path)
 		closeErr := file.Close()
 		if parseErr != nil {

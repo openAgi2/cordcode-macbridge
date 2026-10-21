@@ -103,6 +103,11 @@ func TestMaterializationV1HeadInvalidatedBySchemaBump(t *testing.T) {
 
 	// 手工把 head 行降级为 v1（模拟 2026-10-21 bump 前写入的存量存档——其中
 	// 可能已包含折叠损坏的投影，schema bump 必须让它们全部失效走诚实重建）。
+	// N2（复核）：写**字面量 1** 而非常量表达式——若有人把 materializationSchemaVersion
+	// 改回 1，本测试必须失败（钉住 bump 不回退）。
+	if materializationSchemaVersion < 2 {
+		t.Fatalf("materializationSchemaVersion=%d, must stay >=2 (2026-10-21 v1 损坏存档失效 bump)", materializationSchemaVersion)
+	}
 	if err := store.db.Update(func(tx *bolt.Tx) error {
 		sessionBkt, err := materializationSessionBucket(tx, "claude", "sess", false)
 		if err != nil || sessionBkt == nil {
@@ -116,7 +121,7 @@ func TestMaterializationV1HeadInvalidatedBySchemaBump(t *testing.T) {
 		if err := json.Unmarshal(raw, &head); err != nil {
 			return err
 		}
-		head["schemaVersion"] = materializationSchemaVersion - 1
+		head["schemaVersion"] = 1
 		downgraded, err := json.Marshal(head)
 		if err != nil {
 			return err

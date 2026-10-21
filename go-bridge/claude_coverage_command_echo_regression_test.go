@@ -82,7 +82,11 @@ func TestTrailingCommandEchoSettlesCompletedAfterHydrate(t *testing.T) {
 	if echoStatus != "completed" {
 		t.Fatalf("尾部 /model 回显 turn %s status=%q want completed（2026-10-11 回归，评审 MAJOR-1）", echo, echoStatus)
 	}
-	if proj.Execution.Phase == "failed" || strings.Contains(proj.Execution.Phase, "fail") {
-		t.Fatalf("会话执行态被标失败: %+v", proj.Execution)
+	// N3（复核）：「会话被标失败」的真实载体是 session registry 的 lastOutcome
+	//（markSettled(failed)，列表徽标读取源）——不是 Execution.Phase（其字面量只有
+	// idle/running/requires_action/none，永不为 failed）。断言回显 turn 不产生
+	// failed 结局（修复前 dead coverage 合成 turn_aborted(process_death) → failed）。
+	if outcome, _ := h.sessions.lastOutcomeFor(sessionID); outcome == "failed" {
+		t.Fatalf("会话 lastOutcome=failed——命令回显 turn 不得产生失败结局（评审 MAJOR-1）")
 	}
 }
