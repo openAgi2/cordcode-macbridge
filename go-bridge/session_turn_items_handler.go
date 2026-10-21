@@ -68,10 +68,15 @@ func (h *Handlers) handleSessionTurnItems(conn Connection, msg WireMessage, agen
 			"session_turn_items requires the turn_detail_lazy_v1 capability", false)
 		return
 	}
-	if msg.BackendID != "codex-remote" && msg.BackendID != "claude" && msg.BackendID != "claudecode" {
-		// §11.7 v1: codex-remote；S-3 v2（2026-10-19 冻结）扩展 claude producer。
+	if msg.BackendID != "codex-remote" {
+		// §11.7 v1: codex-remote。claude 曾随 S-3 v2（2026-10-19）扩展 producer 并声明
+		// turn_detail_chunks_v1，2026-10-21 评审 R1 BLOCKER-2 已撤回（v2 批量引擎要求
+		// TurnItemsPager，仅 codex-remote 实现；chunks 连接上 claude 必定 failed 并把
+		// 失败态写进共享投影）。服务端门同步收回：claude 返回 unsupported_capability，
+		// 不触发任何上游拉取，不写投影（休眠契约的服务端兜底，对齐协议 pack
+		// unified-bridge-protocol.md §11.7 撤回注）。
 		sendErr("unsupported_capability",
-			fmt.Sprintf("session_turn_items supports codex-remote and claude, not %s", msg.BackendID), false)
+			fmt.Sprintf("session_turn_items supports codex-remote, not %s", msg.BackendID), false)
 		return
 	}
 
