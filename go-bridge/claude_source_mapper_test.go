@@ -1,6 +1,7 @@
 package gobridge
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -166,5 +167,53 @@ func TestClaudeSourceMapperPrefixExtensionDoesNotReapplyOldBlock(t *testing.T) {
 	}
 	if toolResultCount != 1 {
 		t.Fatalf("old tool result was reapplied or lost: count=%d projection=%+v", toolResultCount, projection)
+	}
+}
+
+// T5②（v2.1 §7 守护）：assistant isApiErrorMessage 行（无文本块，S6 真实形态）
+// 的 turn_error 文本取自字符串 error，在 RC-B 修复（Error → json.RawMessage +
+// claudeRelayErrorText）前后必须一致。mapper 语义是 text 块优先、error 兜底，
+// 故守护形态用空 content 数组。
+func TestMapperStringAPIErrorTurnErrorTextUnchanged(t *testing.T) {
+	entry := claudeTranscriptRelayEntry{
+		Type: "assistant", UUID: "as-str", ParentUUID: "u-1",
+		IsAPIErrorMessage: true, APIErrorStatus: 429, RequestID: "req_x",
+		Error: json.RawMessage(`"429 rate_limit_error 占位"`),
+		Message: &struct {
+			ID         string          `json:"id"`
+			Role       string          `json:"role"`
+			StopReason string          `json:"stop_reason"`
+			Content    json.RawMessage `json:"content"`
+		}{ID: "msg-1", Role: "assistant", Content: json.RawMessage(`[]`)},
+	}
+	turnID := "u-1"
+	events := claudeEntryToProjectionEvents(entry, &turnID, nil, nil)
+	if len(events) != 1 || events[0].Event != "turn_error" {
+		t.Fatalf("events = %+v", events)
+	}
+	message, _ := events[0].Data["message"].(string)
+	if message != "429 rate_limit_error 占位" {
+		t.Fatalf("turn_error message = %q（字符串 error 必须原样，T5② 守护）", message)
+	}
+}
+
+// T5③（v2.1 §7，随实现加）：claudeRelayErrorText 形态——字符串原样；对象取
+// message；缺 message / 数组 / 数值 / null → 空串（内部策略，不宣称外部契约）。
+func TestClaudeRelayErrorTextShapes(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want string
+	}{
+		{`"plain error text"`, "plain error text"},
+		{`{"message":"obj message","type":"rate_limit_error"}`, "obj message"},
+		{`{"type":"no_message"}`, ""},
+		{`["array"]`, ""},
+		{`42`, ""},
+		{`null`, ""},
+	}
+	for _, c := range cases {
+		if got := claudeRelayErrorText(json.RawMessage(c.raw)); got != c.want {
+			t.Fatalf("claudeRelayErrorText(%s) = %q, want %q", c.raw, got, c.want)
+		}
 	}
 }

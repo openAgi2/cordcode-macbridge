@@ -265,6 +265,126 @@
           "byteEnd": 1467
         }
       ]
+    },
+    {
+      "file": "blank-display-blocks.jsonl",
+      "category": "RC-A proven-no-display whitelist: blank thinking/text assistant rows (stop=tool_use / null)",
+      "provenance": "observed-derived-real-shape",
+      "corpusProvenance": "Fix plan v2.1 §3.2 K1/K2 (4 blank shapes, 3515 rows audited 0 invariant violations). Source samples (record SHA-256 excludes trailing LF; byte ranges include LF): blank thinking stop=tool_use <= file 495a03b5… line 29 [127094,143231) record a8555b241ce495f728a191b53b47c069635c058ab9a2b9d6324b70749331f899 (CLI 2.1.299, signature present); blank thinking stop=null <= file 88a7884a… line 10 [217070,220135) record 3b25ecb4… (CLI 2.1.299, signature absent); blank text stop=tool_use <= file 1d01e522… line 8254 [27897650,27898877) record a67e7323… (CLI 2.1.301, single whitespace char); blank text stop=null <= file ec073d6d… line 373 [1692257,1693179) record 41609fa8… (CLI 2.1.295). Bodies replaced with placeholders; signature presence per source preserved. Trailing tool_use row exercises T1 continuity.",
+      "sha256": "c29759f3de202aa118927ee93d8f1abdee9955a70b79c1ebd3e4e481893c10a7",
+      "bytes": 1601,
+      "recordCount": 7,
+      "records": [
+        {
+          "byteStart": 0,
+          "byteEnd": 138
+        },
+        {
+          "byteStart": 138,
+          "byteEnd": 397
+        },
+        {
+          "byteStart": 397,
+          "byteEnd": 689
+        },
+        {
+          "byteStart": 689,
+          "byteEnd": 907
+        },
+        {
+          "byteStart": 907,
+          "byteEnd": 1139
+        },
+        {
+          "byteStart": 1139,
+          "byteEnd": 1376
+        },
+        {
+          "byteStart": 1376,
+          "byteEnd": 1601
+        }
+      ]
+    },
+    {
+      "file": "blank-display-terminal.jsonl",
+      "category": "RC-A guard T3: terminal blank row (stop=end_turn) must stay projectable (turn_completed)",
+      "provenance": "observed-derived-real-shape",
+      "corpusProvenance": "Fix plan v2.1 §3.2/§7 T3; derived from K1 shape (CLI 2.1.299) with stop_reason=end_turn; bodies/signature placeholder.",
+      "sha256": "a895e5118274dfd43e68df60b93e8bb1fd1efc289fe7845577318a06e93f585a",
+      "bytes": 387,
+      "recordCount": 2,
+      "records": [
+        {
+          "byteStart": 0,
+          "byteEnd": 138
+        },
+        {
+          "byteStart": 138,
+          "byteEnd": 387
+        }
+      ]
+    },
+    {
+      "file": "unsupported-zero-event.jsonl",
+      "category": "RC-A negative T2: non-empty assistant tool_result / unknown block / empty content stay rejected (cursor unmoved)",
+      "provenance": "observed-derived-real-shape",
+      "corpusProvenance": "Fix plan v2.1 §3.2 U1/U2 (CLI 2.1.197 sample file e470595b… line 492 [1454628,1459037) record 91d80863…; and CLI 2.1.258 file 648aeb50… line 39 [309268,425756) record 7ed84379…; record SHA-256 excludes LF) + review R1 S4; redacted_thinking unknown-block shape per §5.1 default branch (unobserved in corpus). Bodies replaced with placeholders.",
+      "sha256": "eb709c5026fb551cf5050ea6f4ad5e0486ce69e81497ffeccc6306ea8ce2149a",
+      "bytes": 825,
+      "recordCount": 4,
+      "records": [
+        {
+          "byteStart": 0,
+          "byteEnd": 138
+        },
+        {
+          "byteStart": 138,
+          "byteEnd": 409
+        },
+        {
+          "byteStart": 409,
+          "byteEnd": 639
+        },
+        {
+          "byteStart": 639,
+          "byteEnd": 825
+        }
+      ]
+    },
+    {
+      "file": "api-error-shapes.jsonl",
+      "category": "RC-B error decode shapes: object / object-missing-message / array / number / null / assistant string-error",
+      "provenance": "observed-derived-real-shape",
+      "corpusProvenance": "Fix plan v2.1 §3.2 + review R1 S5/S6 (CLI 2.1.x real system/api_error object rows and assistant isApiErrorMessage string rows; record SHA-256 excludes LF). Bodies/messages replaced with placeholders. String-error row guards T5② turn_error text.",
+      "sha256": "ffd68df69e10a6d22ac68195b16c1b6b39555facb8ce8d436982f0faba857ef4",
+      "bytes": 1170,
+      "recordCount": 6,
+      "records": [
+        {
+          "byteStart": 0,
+          "byteEnd": 211
+        },
+        {
+          "byteStart": 211,
+          "byteEnd": 396
+        },
+        {
+          "byteStart": 396,
+          "byteEnd": 561
+        },
+        {
+          "byteStart": 561,
+          "byteEnd": 712
+        },
+        {
+          "byteStart": 712,
+          "byteEnd": 865
+        },
+        {
+          "byteStart": 865,
+          "byteEnd": 1170
+        }
+      ]
     }
   ]
 }

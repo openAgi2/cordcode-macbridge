@@ -939,6 +939,9 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 	// per turn identity, so a replacement process dying on a LATER turn still synthesizes while
 	// the same turn is never double-aborted.
 	lastSynthesizedAbortTurnID := ""
+	// RC-A（v2.1 §5.2）：每代 relay 第一次按白名单提交 source-only 时打一条限流
+	// INFO——部署后的运行态特征（§8）。
+	sourceOnlyInfoLogged := false
 
 	if !live {
 		// No discoverable process: stay idle and watch for future transcript growth.
@@ -1230,7 +1233,7 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 					})
 					continue
 				}
-				h.applyClaudeLiveSourceRecord(scanned, backendID, sessionID, traceCorrelation, &currentTurnID, &runningObserved, cachedPID, &heldTerminals, &turnText)
+				h.applyClaudeLiveSourceRecord(scanned, backendID, sessionID, traceCorrelation, &currentTurnID, &runningObserved, cachedPID, &heldTerminals, &turnText, &sourceOnlyInfoLogged)
 				continue
 			}
 			// Admitted non-content rows (compaction-boundary system_message, etc.) keep legacy
@@ -1340,6 +1343,7 @@ func (h *Handlers) applyClaudeLiveSourceRecord(
 	cachedPID int,
 	held *[]claudeHeldTerminalEvent,
 	accum *claudeTurnTextAccumulator,
+	sourceOnlyInfoLogged *bool,
 ) {
 	ingestDomain := "live"
 	hydrating := h.projectionKernel.Status(backendID, sessionID).Phase == ProjectionHydrateHydrating
@@ -1417,6 +1421,13 @@ func (h *Handlers) applyClaudeLiveSourceRecord(
 		return
 	}
 	delivered := 0
+	if result.Status == ClaudeSourceBatchAcceptedSourceOnly && batch.RowClass == claudeRowContentProvenNoDisplay && sourceOnlyInfoLogged != nil && !*sourceOnlyInfoLogged {
+		// RC-A 部署特征（v2.1 §5.2/§8）：每代 relay 首次白名单 source-only 提交。
+		*sourceOnlyInfoLogged = true
+		slog.Info("go-bridge: Claude source-only row accepted (proven-no-display whitelist)",
+			"backendID", backendID, "sessionPrefix", projectionSessionLogPrefix(sessionID),
+			"rowDiagnostic", batch.RowDiagnostic, "bytes", batch.Record.RawByteEnd-batch.Record.RawByteStart)
+	}
 	if result.Status == ClaudeSourceBatchAcceptedProjection {
 		// turn_completed 与 hydrating 分支同构挂起：batch 事务已把 raw frames
 		// 双发（deliver-only），web push 意图由 tick 顶 flush 在正文预览齐备后
@@ -1660,7 +1671,12 @@ type claudeTranscriptRelayEntry struct {
 	IsVisibleInTranscriptOnly bool                        `json:"isVisibleInTranscriptOnly"`
 	IsAPIErrorMessage         bool                        `json:"isApiErrorMessage"`
 	APIErrorStatus            int                         `json:"apiErrorStatus"`
-	Error                     string                      `json:"error"`
+	// RC-B（v2.1 §5.3，2026-10-21）：error 字段按原始 JSON 解码——真实形态既有
+	// 字符串（assistant isApiErrorMessage 兜底文本）也有对象（system/api_error 的
+	// {message,type,...}）。原 string 类型让对象行 Unmarshal 失败 → 完整记录扫描器
+	// poison → 之后的实时内容全部冻结（135ba20a 引入）。取文本统一走
+	// claudeRelayErrorText；JSON 语法错误仍 poison（失败关闭不放宽）。
+	Error                     json.RawMessage             `json:"error"`
 	RequestID                 string                      `json:"requestId"`
 	CompactMetadata           *claudeRelayCompactMetadata `json:"compactMetadata"`
 	// Claude Desktop persists the complete AskUserQuestion resolution on the user row in
@@ -1686,6 +1702,28 @@ type claudeRelayCompactMetadata struct {
 
 func isClaudeCompactionBoundaryRelayEntry(entry claudeTranscriptRelayEntry) bool {
 	return entry.Type == "system" && entry.Subtype == "compact_boundary"
+}
+
+// claudeRelayErrorText 从原始 JSON error 字段提取文本（RC-B，v2.1 §5.3）：
+// 字符串原样返回；对象取 message；缺 message、数组、数值、null 返回空串。
+// 唯一读取点是 assistant isApiErrorMessage 行的消息兜底；本函数不产生错误——
+// 「行能否解码」由扫描器管（JSON 语法错误仍 poison）。
+func claudeRelayErrorText(raw json.RawMessage) string {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return ""
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return text
+	}
+	var object struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(raw, &object); err == nil {
+		return object.Message
+	}
+	return ""
 }
 
 func isClaudeInternalCompactRelayEntry(entry claudeTranscriptRelayEntry) bool {
@@ -2371,7 +2409,9 @@ func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *
 	if e.IsAPIErrorMessage {
 		message := strings.TrimSpace(claudeConcatTextBlocks(blocks))
 		if message == "" {
-			message = strings.TrimSpace(e.Error)
+			// RC-B：字符串原样；对象取 message；其余（缺 message/数组/数值/null）
+			// 返回空串且不 poison（内部策略，不宣称外部契约——v2.1 §5.3）。
+			message = strings.TrimSpace(claudeRelayErrorText(e.Error))
 		}
 		data := map[string]interface{}{
 			"turnId":  turnID,
@@ -2393,11 +2433,12 @@ func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
-			if strings.TrimSpace(b.Text) != "" {
+			// v2.1 同源约束：空白判断与分类器共用 claudeBlockIsBlankDisplay。
+			if !claudeBlockIsBlankDisplay(b) {
 				out = append(out, projectionHydrateEvent{Event: "text_delta", Data: map[string]interface{}{"itemId": turnID, "delta": b.Text}})
 			}
 		case "thinking":
-			if strings.TrimSpace(b.Thinking) != "" {
+			if !claudeBlockIsBlankDisplay(b) {
 				out = append(out, projectionHydrateEvent{Event: "reasoning_delta", Data: map[string]interface{}{"itemId": turnID, "delta": b.Thinking}})
 			}
 		case "tool_use", "server_tool_use":

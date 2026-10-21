@@ -1,7 +1,6 @@
 package gobridge
 
 import (
-	"errors"
 	"fmt"
 )
 
@@ -20,6 +19,10 @@ type ClaudeSourceRecordBatch struct {
 	BridgeEpoch string
 	Record      ClaudeSourceRecordTransition
 	Events      []projectionHydrateEvent
+	// RC-A（修复方案 v2.1 §5.1，2026-10-21）：mapper 边三分类结果与行形态诊断。
+	// 分类是纯判定；「已证明无展示」走 source-only 的决定在本事务内（唯一 writer）。
+	RowClass      claudeSourceRowContentClass
+	RowDiagnostic string
 }
 
 type ClaudeSourceBatchResult struct {
@@ -131,7 +134,24 @@ func (k *ProjectionKernel) ApplyClaudeSourceRecordBatch(
 		return result, nil
 	}
 	if len(batch.Events) == 0 {
-		return rejected, errors.New("Claude projection transition has no projection subevents")
+		// RC-A（v2.1 §5.1）：白名单「已证明无展示」行（仅空白 thinking/text、stop
+		// 非终态、非 API error）不产生任何展示事件——按 source-only 提交：游标
+		// 前进，LogicalRecords/GraphNodes 照常记录（proposal 已含），reducer 不变、
+		// 不投递。此前整行拒收 → 级联 source batch gap → 失败冷却（生产 107+ 次）。
+		if batch.RowClass == claudeRowContentProvenNoDisplay {
+			if err := CommitClaudeSourceTransition(session.claudeSourceState, proposal); err != nil {
+				return rejected, err
+			}
+			result.Status = ClaudeSourceBatchAcceptedSourceOnly
+			result.LogicalRecordsChanged = 1
+			emitClaudeKernelSourceTransition(batch, result)
+			return result, nil
+		}
+		// 「不支持」（默认分支）照旧拒收（失败关闭、游标不动）；「可投影」但 0
+		// 事件属分类器与 mapper 不一致，同样拒收。错误自带行形态诊断（v2.1
+		// §5.2：type/块类型及空白/stop/rowClass，不含正文）。
+		return rejected, fmt.Errorf(
+			"Claude projection transition has no projection subevents: %s", batch.RowDiagnostic)
 	}
 	events := batch.Events
 	if newCount := len(proposal.NewBlockOccurrenceIDs); newCount < len(batch.Record.ContentBlocks) {

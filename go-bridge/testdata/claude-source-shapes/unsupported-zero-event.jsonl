@@ -1,0 +1,4 @@
+{"type":"user","uuid":"uz-user-1","message":{"id":"turn-uz-1","role":"user","content":"占位提问"},"timestamp":"2026-10-21T00:00:00Z"}
+{"type":"assistant","uuid":"uz-toolresult-nonempty","parentUuid":"uz-user-1","message":{"id":"msg-uz-1","role":"assistant","content":[{"type":"tool_result","tool_use_id":"uz-tool-1","content":"占位结果"}],"stop_reason":"tool_use"},"timestamp":"2026-10-21T00:00:01Z"}
+{"type":"assistant","uuid":"uz-unknown-block","parentUuid":"uz-user-1","message":{"id":"msg-uz-2","role":"assistant","content":[{"type":"redacted_thinking","data":"占位"}],"stop_reason":null},"timestamp":"2026-10-21T00:00:02Z"}
+{"type":"assistant","uuid":"uz-empty-content","parentUuid":"uz-user-1","message":{"id":"msg-uz-3","role":"assistant","content":[],"stop_reason":null},"timestamp":"2026-10-21T00:00:03Z"}

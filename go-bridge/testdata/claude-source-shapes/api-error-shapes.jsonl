@@ -1,0 +1,6 @@
+{"parentUuid":"ae-obj-parent","isSidechain":false,"type":"system","subtype":"api_error","level":"error","error":{"message":"429 占位限流文案","type":"rate_limit_error"},"timestamp":"2026-10-21T00:00:01Z"}
+{"parentUuid":"ae-obj-parent","isSidechain":false,"type":"system","subtype":"api_error","level":"error","error":{"type":"占位类型，无message"},"timestamp":"2026-10-21T00:00:02Z"}
+{"parentUuid":"ae-obj-parent","isSidechain":false,"type":"system","subtype":"api_error","level":"error","error":["占位数组"],"timestamp":"2026-10-21T00:00:03Z"}
+{"parentUuid":"ae-obj-parent","isSidechain":false,"type":"system","subtype":"api_error","level":"error","error":42,"timestamp":"2026-10-21T00:00:04Z"}
+{"parentUuid":"ae-obj-parent","isSidechain":false,"type":"system","subtype":"api_error","level":"error","error":null,"timestamp":"2026-10-21T00:00:05Z"}
+{"type":"assistant","uuid":"ae-str-error","parentUuid":"ae-obj-parent","isApiErrorMessage":true,"apiErrorStatus":429,"requestId":"req_占位","message":{"id":"msg-ae-1","role":"assistant","content":[{"type":"text","text":"占位 API 错误文本"}],"stop_reason":null},"timestamp":"2026-10-21T00:00:06Z"}

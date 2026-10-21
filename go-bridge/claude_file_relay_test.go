@@ -858,3 +858,118 @@ func TestClaudeFileRelayOwnedWarmStartDoesNotArmRunning(t *testing.T) {
 		t.Fatal("relay exited; must keep watching")
 	}
 }
+
+// TestClaudeFileRelayBlankThinkingAndApiErrorKeepProjecting（修复方案 v2.1 §7 T4 + T5①）：
+// 外部回合真实行序（2.1.301 / 2.1.304 形态派生）——空白 thinking 行夹在 tool_use/
+// tool_result 之间、对象 error 的 system/api_error 行夹在回复前。修复前：空白行映射
+// 0 事件被整行拒收 → 级联 gap，工具卡/结果/说明/回复全部丢失；对象 error 行毒化
+// 完整记录扫描器 → 之后的实时内容冻结。修复后应看到全部部件 + 回合完成 + 0 失败
+// 事件（api_error 行只 ack，不产生 turn_error）。
+func TestClaudeFileRelayBlankThinkingAndApiErrorKeepProjecting(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	withFastClaudeFileRelay(t)
+	const sessionID = "blank-thinking-relay"
+	user := `{"type":"user","uuid":"u-a","message":{"id":"turn-a","role":"user","content":"问题A"}}`
+	assistant := `{"type":"assistant","uuid":"as-a","message":{"id":"msg-a","role":"assistant","content":[{"type":"text","text":"回复A"}],"stop_reason":"end_turn"}}`
+	path := writeClaudeFileRelayTranscript(t, home, sessionID, user, assistant)
+
+	handlers := newTestHandlers(t)
+	agent := &fakeAgent{
+		name: "claudecode",
+		liveProcesses: map[string]core.LiveSessionProcess{
+			sessionID: {SessionID: sessionID, PID: 5556, Live: true},
+		},
+		alivePIDs: map[int]bool{5556: true},
+	}
+	handlers.RegisterAgent("claude", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "claude", SessionID: sessionID})
+	handlers.startClaudeSessionFileRelayAt(sessionID, serverConn, "claude", nil)
+	client := &websocketClient{conn: clientConn}
+
+	// 初始 idle（初始扫描事件）。
+	_ = client.readEvents(t, 1)
+
+	// 2.1.301 形态：空白 thinking 夹 tool_use 与 tool_result 之间；对象 error 的
+	// system/api_error 行夹在最终回复前（T5① 场景合并）。
+	appendClaudeFileRelayTranscript(t, path,
+		`{"type":"user","uuid":"u-b","message":{"id":"turn-b","role":"user","content":"问题B"}}`,
+		`{"type":"assistant","uuid":"as-b1","parentUuid":"u-b","message":{"id":"msg-b1","role":"assistant","content":[{"type":"thinking","thinking":" ","signature":"占位sig"}],"stop_reason":"tool_use"}}`,
+		`{"type":"assistant","uuid":"as-b2","parentUuid":"as-b1","message":{"id":"msg-b2","role":"assistant","content":[{"type":"tool_use","id":"tool-b1","name":"Read","input":{"file_path":"/占位/path.txt"}}],"stop_reason":"tool_use"}}`,
+		`{"type":"user","uuid":"u-b3","parentUuid":"as-b2","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-b1","content":"占位工具结果"}]}}`,
+		`{"type":"assistant","uuid":"as-b4","parentUuid":"u-b3","message":{"id":"msg-b4","role":"assistant","content":[{"type":"thinking","thinking":""}],"stop_reason":"tool_use"}}`,
+		`{"type":"assistant","uuid":"as-b5","parentUuid":"as-b4","message":{"id":"msg-b5","role":"assistant","content":[{"type":"text","text":"中间说明占位"}],"stop_reason":null}}`,
+		`{"parentUuid":"as-b5","isSidechain":false,"type":"system","subtype":"api_error","level":"error","error":{"message":"429 占位限流","type":"rate_limit_error"}}`,
+		`{"type":"assistant","uuid":"as-b6","parentUuid":"as-b5","message":{"id":"msg-b6","role":"assistant","content":[{"type":"text","text":"最终回复占位"}],"stop_reason":"end_turn"}}`,
+	)
+
+	// 2.1.304 形态：tool_use 与 tool_result 之间夹控制行。
+	appendClaudeFileRelayTranscript(t, path,
+		`{"type":"user","uuid":"u-c","message":{"id":"turn-c","role":"user","content":"问题C"}}`,
+		`{"type":"assistant","uuid":"as-c1","parentUuid":"u-c","message":{"id":"msg-c1","role":"assistant","content":[{"type":"thinking","thinking":"  ","signature":"占位sig"}],"stop_reason":"tool_use"}}`,
+		`{"type":"assistant","uuid":"as-c2","parentUuid":"as-c1","message":{"id":"msg-c2","role":"assistant","content":[{"type":"tool_use","id":"tool-c1","name":"Bash","input":{"command":"echo 占位"}}],"stop_reason":"tool_use"}}`,
+		`{"type":"queue-operation"}`,
+		`{"type":"user","uuid":"u-cav","parentUuid":"as-c2","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"<local-command-caveat>Caveat: noise</local-command-caveat>"}]}}`,
+		`{"type":"user","uuid":"u-c3","parentUuid":"u-cav","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-c1","content":"占位结果C"}]}}`,
+		`{"type":"assistant","uuid":"as-c3","parentUuid":"u-c3","message":{"id":"msg-c3","role":"assistant","content":[{"type":"text","text":"回复C占位"}],"stop_reason":"end_turn"}}`,
+	)
+
+	sawToolCard, sawToolFinished, sawNote, sawReply, sawCompletedC := false, false, false, false, false
+	sawTurnError, sawBlankDelta := false, false
+	var names []string
+	deadline := time.Now().Add(6 * time.Second)
+	for time.Now().Before(deadline) && !(sawCompletedC && sawToolCard && sawToolFinished && sawNote && sawReply) {
+		_ = client.conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		var ev map[string]any
+		if err := client.conn.ReadJSON(&ev); err != nil {
+			continue
+		}
+		event, _ := ev["event"].(string)
+		data, _ := ev["data"].(map[string]any)
+		names = append(names, event)
+		switch event {
+		case "tool_started":
+			if toolName, _ := data["toolName"].(string); toolName == "Read" {
+				sawToolCard = true
+			}
+		case "tool_finished":
+			if id, _ := data["itemId"].(string); id == "tool-b1" {
+				sawToolFinished = true
+			}
+		case "text_delta":
+			delta, _ := data["delta"].(string)
+			switch delta {
+			case "中间说明占位":
+				sawNote = true
+			case "最终回复占位":
+				sawReply = true
+			case " ", "", "\n", "  ":
+				sawBlankDelta = true
+			}
+		case "turn_completed":
+			if id, _ := data["turnId"].(string); id == "turn-c" || id == "u-c" {
+				sawCompletedC = true
+			}
+			if id, _ := data["turnId"].(string); id == "turn-b" || id == "u-b" {
+				sawCompletedC = true
+			}
+		case "turn_error":
+			sawTurnError = true
+		}
+	}
+	if !sawToolCard || !sawToolFinished || !sawNote || !sawReply {
+		t.Fatalf("部件缺失（RC-A/RC-B 未修复）：toolCard=%v toolFinished=%v note=%v reply=%v events=%v",
+			sawToolCard, sawToolFinished, sawNote, sawReply, names)
+	}
+	if !sawCompletedC {
+		t.Fatalf("2.1.304 形态回合未完成（completedC=%v）events=%v", sawCompletedC, names)
+	}
+	if sawTurnError {
+		t.Fatalf("api_error 行不得产生 turn_error（应只 ack）")
+	}
+	if sawBlankDelta {
+		t.Fatalf("空白内容不得投递为 text_delta")
+	}
+}

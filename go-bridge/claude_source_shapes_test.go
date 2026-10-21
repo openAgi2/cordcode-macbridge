@@ -198,7 +198,7 @@ func TestClaudeSourceShapeCorpusOracleFixedFixtureCrossCheck(t *testing.T) {
 		"python3",
 		filepath.Join(claudeSourceShapesDir, "recompute_corpus_stats.py"),
 		"--root", claudeSourceShapesDir,
-		"--expect-h4", "12,1",
+		"--expect-h4", "21,1", // v2.1 corpus 扩充（4 个新 fixture）后机械更新
 	)
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -207,7 +207,7 @@ func TestClaudeSourceShapeCorpusOracleFixedFixtureCrossCheck(t *testing.T) {
 	text := string(output)
 	for _, required := range []string{
 		"H3 logicalRecordReuseGroups: 3; physicalOccurrencesInGroups: 6",
-		"H4 resolvableAssistantRows: 12; fileOrderOwnerMismatchRows: 1",
+		"H4 resolvableAssistantRows: 21; fileOrderOwnerMismatchRows: 1",
 		"crossCheck: streaming==indexed",
 	} {
 		if !strings.Contains(text, required) {
@@ -367,5 +367,15 @@ func TestClaudeSourceShapeFixture_SystemSubtypes(t *testing.T) {
 	}
 	if systemMessages != 1 {
 		t.Fatalf("system subtypes: expected exactly 1 system_message (from compact_boundary only); got %d", systemMessages)
+	}
+}
+
+// T5④（v2.1 §7 守护）：JSON 语法错误行仍然 poison（RC-B 只放宽 error 字段的
+// 类型容错，不放宽语法校验——失败关闭不回退）。
+func TestScannerSyntaxErrorStillPoisons(t *testing.T) {
+	bad := "not json {{{\n"
+	scan, err := scanCompleteClaudeRelayEntriesFromReader(strings.NewReader(bad), 0, &claudeRelayScanState{})
+	if err == nil && scan.Poison == nil {
+		t.Fatalf("语法错误行必须 poison（got consumed=%d records=%d err=%v）", scan.ConsumedBytes, len(scan.Records), err)
 	}
 }
