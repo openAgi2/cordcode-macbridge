@@ -136,12 +136,16 @@ func (h *Handlers) startClaudeSessionFileRelayAt(
 		// (agent continues via agentRelayRunning). Without this, local send that
 		// started agent first never attached file-relay → no mid-turn projection_patch.
 		h.relayRunningKind[sessionID] = relayKindClaudeFile
+		// RC-1：loop 完成注册前先登记启动信号，冷事务 requestCoverage 有界等待
+		// 而不是立刻 fail-closed。
+		h.claudeRelayCoverage.markRelayStarting(sessionID)
 		h.mu.Unlock()
 		go h.claudeSessionFileRelayLoop(sessionID, conn, backendID, initialOffset)
 		return
 	case !running:
 		h.relayRunning[sessionID] = true
 		h.relayRunningKind[sessionID] = relayKindClaudeFile
+		h.claudeRelayCoverage.markRelayStarting(sessionID)
 		h.mu.Unlock()
 		go h.claudeSessionFileRelayLoop(sessionID, conn, backendID, initialOffset)
 		return
@@ -816,8 +820,12 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 	// admissionCut}。退出（含 superseded）恰好注销一次；命令队列关闭即唤醒等待方。
 	// 注册在 offset 确定后进行，admissionCut = 本 loop 的起始 cut（继承 hydrate
 	// admission cut 或 complete-record cut）。
+	// RC-1：defer finishStarting 覆盖全部早退路径——注册完成前放弃时唤醒等待中的
+	// 冷事务（其重查注册表后按 fail-closed 处理）；register 后的显式 finish 提前
+	// 唤醒，此 defer 变为幂等 no-op。
 	var coverageGen uint64
 	defer func() {
+		h.claudeRelayCoverage.finishStarting(sessionID)
 		if coverageGen != 0 {
 			h.claudeRelayCoverage.unregister(sessionID, coverageGen)
 		}
@@ -855,6 +863,7 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 		offset = *initialOffset
 	}
 	coverageGen = h.claudeRelayCoverage.register(sessionID, sessionID, offset)
+	h.claudeRelayCoverage.finishStarting(sessionID) // RC-1：注册完成，唤醒等待中的冷事务
 	coverageCommands := h.claudeRelayCoverage.commands(sessionID, coverageGen)
 	initialInfo, err := os.Stat(sessPath)
 	if err != nil {
