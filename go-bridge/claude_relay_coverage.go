@@ -33,6 +33,14 @@ import (
 // failed(retryable) 处理，拒绝 commit（§4.3.1）。
 const claudeRelayCoverageTimeout = 3 * time.Second
 
+// claudeRelayCoverageStartWait 是冷事务等待「relay loop 已启动但尚未完成注册」的
+// 上限（评审 R1 复核 RC-1，2026-10-21）。beforeHydrate 异步 `go loop` 后，loop 要先
+// 完成 findClaudeSessionFile / 完整记录 cut 计算才 register；hydrate 侧小 transcript
+// 解析可能先到达 requestCoverage——此前直接 errClaudeCoverageNoRelay fail-closed，
+// 运行中会话的冷开因此竞态失败。有界等待启动信号、醒来重查注册表；超时维持
+// fail-closed（不合成、不授权 commit），只是把「注册窗口」从竞态变成可等待。
+const claudeRelayCoverageStartWait = 2 * time.Second
+
 // claudeRelayCoverageOutcome 是 coverCurrentProcess 命令的结果。
 type claudeRelayCoverageOutcome int
 
@@ -89,13 +97,18 @@ type claudeRelayCoverageRegistry struct {
 	nextGen uint64
 	entries map[string]*claudeRelayCoverageEntry
 	leases  map[string]*claudeRelayCoverageLease
+	// starting（RC-1）：sessionID → 注册完成/放弃信号。第一个真正启动 relay loop
+	// 的 startAt 创建；loop register 后或任何早退路径（defer finishStarting）close
+	// 并移除。幂等：仅 map 中现存条目会被 close 一次。
+	starting map[string]chan struct{}
 }
 
 func newClaudeRelayCoverageRegistry() *claudeRelayCoverageRegistry {
 	return &claudeRelayCoverageRegistry{
-		nextGen: 0,
-		entries: make(map[string]*claudeRelayCoverageEntry),
-		leases:  make(map[string]*claudeRelayCoverageLease),
+		nextGen:  0,
+		entries:  make(map[string]*claudeRelayCoverageEntry),
+		leases:   make(map[string]*claudeRelayCoverageLease),
+		starting: make(map[string]chan struct{}),
 	}
 }
 
@@ -104,7 +117,34 @@ var (
 	errClaudeCoverageGeneration   = errors.New("claude relay coverage: generation mismatch")
 	errClaudeCoverageSource       = errors.New("claude relay coverage: source identity/cut mismatch")
 	errClaudeCoverageLeaseInvalid = errors.New("claude relay coverage: lease invalid or superseded")
+	errClaudeCoverageStartTimeout = errors.New("claude relay coverage: relay start wait timeout")
 )
+
+// markRelayStarting（RC-1）：startAt 在 `go loop` 之前同步调用——把「一个 relay loop
+// 正在启动」登记进 registry，返回完成信号。若已有等价信号存在（并发 startAt），复用
+// 不重置（第一个到达的 loop 完成注册即 close；后启动的 loop register 时会生成新
+// generation，不影响正确性）。
+func (r *claudeRelayCoverageRegistry) markRelayStarting(sessionID string) <-chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if ch, ok := r.starting[sessionID]; ok {
+		return ch
+	}
+	ch := make(chan struct{})
+	r.starting[sessionID] = ch
+	return ch
+}
+
+// finishStarting（RC-1）：relay loop 完成 register、或早退放弃时，close 并移除启动
+// 信号（等待者醒来重查注册表——命中则继续，未命中按超时语义 fail closed）。幂等。
+func (r *claudeRelayCoverageRegistry) finishStarting(sessionID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if ch, ok := r.starting[sessionID]; ok {
+		close(ch)
+		delete(r.starting, sessionID)
+	}
+}
 
 // register 启动一个 relay loop 时登记；返回新 generation。旧 entry（若有）的命令
 // 队列被关闭，等待中的冷事务收到 failed（旧 generation 不得授权任何 commit）。
@@ -173,8 +213,27 @@ func (r *claudeRelayCoverageRegistry) requestCoverage(
 	r.mu.Lock()
 	entry, ok := r.entries[sessionID]
 	if !ok {
+		// RC-1（2026-10-21 复核）：beforeHydrate 已异步启动 relay loop 但注册尚未
+		// 完成时，有界等待启动信号后重查；无信号（没人启动）或等待超时维持
+		// errClaudeCoverageNoRelay fail-closed 语义不变。
+		starting, hasStarting := r.starting[sessionID]
 		r.mu.Unlock()
-		return claudeRelayCoverageResult{outcome: claudeCoverageFailed, err: errClaudeCoverageNoRelay}, errClaudeCoverageNoRelay
+		if !hasStarting {
+			return claudeRelayCoverageResult{outcome: claudeCoverageFailed, err: errClaudeCoverageNoRelay}, errClaudeCoverageNoRelay
+		}
+		select {
+		case <-starting:
+		case <-ctx.Done():
+			return claudeRelayCoverageResult{outcome: claudeCoverageFailed, err: ctx.Err()}, ctx.Err()
+		case <-time.After(claudeRelayCoverageStartWait):
+			return claudeRelayCoverageResult{outcome: claudeCoverageFailed, err: errClaudeCoverageStartTimeout}, errClaudeCoverageStartTimeout
+		}
+		r.mu.Lock()
+		entry, ok = r.entries[sessionID]
+		if !ok {
+			r.mu.Unlock()
+			return claudeRelayCoverageResult{outcome: claudeCoverageFailed, err: errClaudeCoverageNoRelay}, errClaudeCoverageNoRelay
+		}
 	}
 	if entry.sourceIdentity != sourceIdentity {
 		r.mu.Unlock()
@@ -266,24 +325,31 @@ func (r *claudeRelayCoverageRegistry) invalidateLease(sessionID string) {
 
 // ── 冷事务侧（设计 v6 §4.3.2/§4.3.3）──────────────────────────────────────────
 
-// claudeTrailingUnansweredAskTurnIDs 扫描 hydrate 快照，找出「非终态 turn 上仍
-// pending 的 user_input part」所属 turn（尾部未答 Ask）。冷折叠内早于尾部的 turn
-// 都会带 stop_reason 终态，非终态 turn 只可能是尾部在飞/未答的 turn。
-func claudeTrailingUnansweredAskTurnIDs(snap SessionProjection) []string {
+// claudeTrailingCoverageNeededTurnIDs 扫描 hydrate 快照，找出**需要 coverage 裁决**
+// 的尾部非终态 turn（2026-10-20 扩语义，原 claudeTrailingUnansweredAskTurnIDs 只认
+// 未答 Ask——真机事故：尾部悬挂 tool_use（进程被 kill、tool_result 永不落盘）不匹配
+// Ask 形态 → coverage 不触发 → commit gate（WaitHydrateCommitReady）死等 15s 预算
+// ×N 轮，owner 白等 5 分钟）。冷折叠内早于尾部的 turn 都带 stop_reason 终态；非终态
+// turn 只可能是尾部在飞/未答/悬挂的 turn——dead 进程下全部只能靠合成 turn_aborted
+// 终态化（与既有 coverClaudeTrailingUnansweredAsk 的 dead 分支同一机制），live 进程
+// 由 sourceIsLive/coverage liveBound 语义放行。
+func claudeTrailingCoverageNeededTurnIDs(snap SessionProjection) []string {
 	var ids []string
 	for _, turn := range snap.Turns {
 		if turn.Status == "completed" || turn.Status == "aborted" || turn.Status == "error" {
 			continue
 		}
-		if turn.Assistant == nil {
+		// 2026-10-21 评审 MAJOR-1：CLI 本地命令回显 turn（User 为 /cmd 文本、
+		// Assistant 无——CLI 不回应本地命令）不进 coverage。d78100ee 扩语义把它
+		// 计入后，dead 进程下被合成 turn_aborted → 会话被标失败（2026-10-11
+		// /model 修复的回归）。这类 turn 由 commit 收尾的
+		// settleUnansweredCommandEchoTurns 结算 completed（transcript 的
+		// local-command-stdout 回显即执行完毕证据）。悬挂 tool_use / 未答 Ask
+		// 等真正非终态 turn 仍在 coverage 内（2026-10-20 卡死修复语义保留）。
+		if turn.Assistant == nil && turn.User != nil && claudeUserTextIsCommandEcho(turn.User) {
 			continue
 		}
-		for _, part := range turn.Assistant.Parts {
-			if part.Type == "user_input" && part.UserInputStatus == "pending" {
-				ids = append(ids, turn.TurnID)
-				break
-			}
-		}
+		ids = append(ids, turn.TurnID)
 	}
 	return ids
 }
@@ -304,7 +370,7 @@ func (h *Handlers) coverClaudeTrailingUnansweredAsk(
 	if !ok {
 		return false, nil
 	}
-	pendingTurnIDs := claudeTrailingUnansweredAskTurnIDs(snap)
+	pendingTurnIDs := claudeTrailingCoverageNeededTurnIDs(snap)
 	if len(pendingTurnIDs) == 0 {
 		return false, nil
 	}

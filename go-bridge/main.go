@@ -712,7 +712,9 @@ func Main() {
 		if ack.Recovery != nil {
 			server.emitRecoveryFrames(conn, ack.Recovery, replay)
 		}
-		slog.Info("relay-bridge-client: hello_ack sent via relay", "ok", ack.Ok, "device", hello.Client.DeviceID, "catalog_cursor_epoch_v2", catalogV2)
+		// §7.3 协商可观测性（2026-10-19 补齐 relay 路径，与 direct hello_ack 同字段）：
+		// E-④ relay 双路径 anchor-newer/scalar/gzip echo 实测依据。
+		slog.Info("relay-bridge-client: hello_ack sent via relay", "ok", ack.Ok, "device", hello.Client.DeviceID, "catalog_cursor_epoch_v2", catalogV2, "echoedCapabilities", sortedCapabilityKeys(ack.Capabilities))
 	})
 
 	http.Handle("/pairing", http.HandlerFunc(handlePairingWebSocket))

@@ -12,6 +12,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/gorilla/websocket v1.5.3
 	github.com/klauspost/compress v1.18.0
+	go.etcd.io/bbolt v1.4.3
 	golang.org/x/crypto v0.48.0
 )
 

@@ -20,6 +20,10 @@ type HelloMessage struct {
 	// 当前不强制约束——配对设备默认拥有全部 scope；此字段为未来受限配对/客户端
 	// 声明意图预留，服务端据 device.GrantedScopes 决定实际授予集。
 	RequestedScopes []string `json:"requestedScopes,omitempty"`
+
+	// S-7（§Anchor-Newer 超限恢复语义 / F-53）：客户端请求的投影传输上限（字节）。
+	// ack 回显授予值 = min(请求, 提升档上限 256MiB)；缺省 = 默认 50MiB。
+	ProjectionMaxBytes *int64 `json:"projectionMaxBytes,omitempty"`
 }
 
 // HelloClient 描述客户端应用信息。
@@ -55,6 +59,9 @@ type HelloAckMessage struct {
 	// 仅当客户端声明 capability 且 store 接线/健康时下发；misconfigured 时只带
 	// schemaVersion+status，不带公钥。未声明 capability 的旧客户端收不到该字段。
 	WebPush *WebPushHelloProfile `json:"webPush,omitempty"`
+	// S-7：授予的 projection_max_bytes（min(客户端请求, 256MiB 档)；缺省 50MiB）。
+	// direct 逻辑消息上限与 relay 解压上限同值生效。
+	ProjectionMaxBytes *int64 `json:"projectionMaxBytes,omitempty"`
 }
 
 // helloAckWithoutBackends preserves the original omission behavior for error/recovery

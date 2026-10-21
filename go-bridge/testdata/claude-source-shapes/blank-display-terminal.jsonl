@@ -1,0 +1,2 @@
+{"type":"user","uuid":"bt-user-1","message":{"id":"turn-bt-1","role":"user","content":"占位提问"},"timestamp":"2026-10-21T00:00:00Z"}
+{"type":"assistant","uuid":"bt-blank-final","parentUuid":"bt-user-1","message":{"id":"msg-bt-1","role":"assistant","content":[{"type":"thinking","thinking":"  ","signature":"占位sig"}],"stop_reason":"end_turn"},"timestamp":"2026-10-21T00:00:01Z"}

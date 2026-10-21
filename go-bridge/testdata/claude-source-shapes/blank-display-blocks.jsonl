@@ -1,0 +1,7 @@
+{"type":"user","uuid":"bd-user-1","message":{"id":"turn-bd-1","role":"user","content":"占位提问"},"timestamp":"2026-10-21T00:00:00Z"}
+{"type":"assistant","uuid":"bd-blank-thinking-tooluse","parentUuid":"bd-user-1","message":{"id":"msg-bd-1","role":"assistant","content":[{"type":"thinking","thinking":" ","signature":"占位sig"}],"stop_reason":"tool_use"},"timestamp":"2026-10-21T00:00:01Z"}
+{"type":"assistant","uuid":"bd-tool-use-1","parentUuid":"bd-blank-thinking-tooluse","message":{"id":"msg-bd-5","role":"assistant","content":[{"type":"tool_use","id":"bd-tool-1","name":"Read","input":{"file_path":"/占位/path"}}],"stop_reason":"tool_use"},"timestamp":"2026-10-21T00:00:02Z"}
+{"type":"user","uuid":"bd-tool-result-1","parentUuid":"bd-tool-use-1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"bd-tool-1","content":"占位结果"}]},"timestamp":"2026-10-21T00:00:03Z"}
+{"type":"assistant","uuid":"bd-blank-thinking-null","parentUuid":"bd-tool-result-1","message":{"id":"msg-bd-2","role":"assistant","content":[{"type":"thinking","thinking":""}],"stop_reason":null},"timestamp":"2026-10-21T00:00:04Z"}
+{"type":"assistant","uuid":"bd-blank-text-tooluse","parentUuid":"bd-blank-thinking-null","message":{"id":"msg-bd-3","role":"assistant","content":[{"type":"text","text":"\n"}],"stop_reason":"tool_use"},"timestamp":"2026-10-21T00:00:05Z"}
+{"type":"assistant","uuid":"bd-blank-text-null","parentUuid":"bd-blank-text-tooluse","message":{"id":"msg-bd-4","role":"assistant","content":[{"type":"text","text":""}],"stop_reason":null},"timestamp":"2026-10-21T00:00:06Z"}

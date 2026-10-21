@@ -797,7 +797,13 @@ func (h *Handlers) SetDataDir(dir string) {
 	defer h.mu.Unlock()
 	h.dataDir = dir
 	if h.projectionKernel != nil {
-		h.projectionKernel.SetCheckpointStore(NewProjectionCheckpointStore(dir))
+		if materializationProductionEnabled {
+			// S-2（§3.2）：bbolt 物化存储为持久层——重启恢复走四态来源分类 + suffix
+			// 折叠；旧 checkpoints/*.json 保留不读不删（OD-5；rollback = 关发布门）。
+			h.projectionKernel.SetCheckpointStore(NewProjectionMaterializationStore(dir))
+		} else {
+			h.projectionKernel.SetCheckpointStore(NewProjectionCheckpointStore(dir))
+		}
 	}
 }
 
@@ -1853,6 +1859,10 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleGetSessionProjection(conn, msg, agent)
 	case "get_session_projection_window":
 		h.handleGetSessionProjectionWindow(conn, msg, agent)
+	case "get_session_projection_window_v2":
+		h.handleGetSessionProjectionWindowV2(conn, msg, agent)
+	case "get_session_projection_anchor_newer":
+		h.handleGetSessionProjectionAnchorNewer(conn, msg, agent)
 	case "session_turn_items":
 		h.handleSessionTurnItems(conn, msg, agent)
 	case "turn_output_chunk":
@@ -4305,7 +4315,11 @@ func scanClaudeSessionMetadata(path string, fallbackTime time.Time) claudeSessio
 	var reader io.Reader = f
 	if info, statErr := f.Stat(); statErr == nil && info.Size() > claudeSessionSummaryReadLimit {
 		reader = io.LimitReader(f, claudeSessionSummaryReadLimit)
-		updatedAt = fallbackTime
+		// 2026-10-20 owner 定案「仅真实消息活动才排序前移」：大文件 updatedAt 不再
+		// 直接用 mtime——open-spawn 启动的 CLI 会写无 timestamp 的元数据行刷新
+		// mtime，「仅打开」不该构成活动。尾部反扫取最后对话行 timestamp（窗口内
+		// 无对话行时保守退回 mtime）。
+		updatedAt = claudeSessionLastActivityFromTail(path, fallbackTime)
 	}
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)

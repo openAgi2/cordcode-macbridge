@@ -335,24 +335,46 @@ func loadClaudeContinuationHistoryAtSegments(
 	ctx context.Context,
 	segments []core.TranscriptSourceSegment,
 ) ([]core.RichHistoryEntry, int64, error) {
+	return loadClaudeContinuationHistoryAtSegmentsFrom(ctx, segments, nil)
+}
+
+// loadClaudeContinuationHistoryAtSegmentsFrom is the S-2 suffix read: per segment
+// parse [fromOffsets[i], segments[i].Cursor) instead of the full prefix. fromOffsets
+// nil/short = 0（全前缀，既有行为）。Continuation dedup-replace 语义在 suffix 子集上
+// 原样保留——基线（已恢复的投影）承接重叠头，reducer upsert 幂等。
+func loadClaudeContinuationHistoryAtSegmentsFrom(
+	ctx context.Context,
+	segments []core.TranscriptSourceSegment,
+	fromOffsets []int64,
+) ([]core.RichHistoryEntry, int64, error) {
 	merged := make([]core.RichHistoryEntry, 0)
 	positions := make(map[string]int)
 	var totalBytes int64
-	for _, segment := range segments {
+	for index, segment := range segments {
 		if err := ctx.Err(); err != nil {
 			return nil, totalBytes, err
 		}
 		if segment.Cursor < 0 {
 			return nil, totalBytes, io.ErrUnexpectedEOF
 		}
+		var from int64
+		if index < len(fromOffsets) {
+			from = fromOffsets[index]
+		}
+		if from < 0 || from > segment.Cursor {
+			return nil, totalBytes, io.ErrUnexpectedEOF
+		}
 		file, err := os.Open(segment.Path)
 		if err != nil {
 			return nil, totalBytes, err
 		}
-		entries, parseErr := LoadClaudeRichHistoryFromReader(
-			io.LimitReader(file, segment.Cursor),
-			segment.Path,
-		)
+		// N1（评审 R1 复核，2026-10-21）：语义 = 读 [from, cursor)。原实现先
+		// LimitReader(file, cursor) 后 Seek(from)，LimitReader 的 N 从 seek 后位置
+		// 起算，实际读到 [from, from+cursor) ——cursor 之后的行被多读（S-2 折叠
+		// 损坏的放大面之一；组合源严格门后生产不可达，但 API 语义仍错）。改为
+		// SectionReader 精确表达 [from, cursor)。
+		reader := io.NewSectionReader(file, from, segment.Cursor-from)
+		entries, parseErr := LoadClaudeRichHistoryFromReader(reader, segment.Path)
 		closeErr := file.Close()
 		if parseErr != nil {
 			return nil, totalBytes, parseErr
@@ -360,7 +382,7 @@ func loadClaudeContinuationHistoryAtSegments(
 		if closeErr != nil {
 			return nil, totalBytes, closeErr
 		}
-		totalBytes += segment.Cursor
+		totalBytes += segment.Cursor - from
 		for _, entry := range entries {
 			key := claudeHistoryDedupKey(entry)
 			if index, exists := positions[key]; exists {

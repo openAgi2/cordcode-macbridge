@@ -250,6 +250,117 @@ func (p *EventPublisher) ConnProjectionWindowV1(conn Connection) bool {
 	return p.projectionWindowV1[conn]
 }
 
+// SetConnProjectionWindowV2 records the authenticated hello negotiation for
+// projection_window_v2 (S-3 v2 summary). Only marked connections may call
+// get_session_projection_window_v2; everyone else answers protocol.capability_required.
+// UnregisterConnection clears the mark (same lifecycle as V1).
+func (p *EventPublisher) SetConnProjectionWindowV2(conn Connection, enabled bool) {
+	if p == nil || conn == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if enabled {
+		p.projectionWindowV2[conn] = true
+	} else {
+		delete(p.projectionWindowV2, conn)
+	}
+}
+
+func (p *EventPublisher) ConnProjectionWindowV2(conn Connection) bool {
+	if p == nil || conn == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.projectionWindowV2[conn]
+}
+
+// SetConnAnchorNewerV1 records the authenticated hello negotiation for
+// projection_window_anchor_newer_v1 (S-7). Only marked connections may call
+// get_session_projection_anchor_newer; everyone else answers
+// protocol.capability_required. UnregisterConnection clears the mark.
+func (p *EventPublisher) SetConnAnchorNewerV1(conn Connection, enabled bool) {
+	if p == nil || conn == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if enabled {
+		p.projectionAnchorNewerV1[conn] = true
+	} else {
+		delete(p.projectionAnchorNewerV1, conn)
+	}
+}
+
+func (p *EventPublisher) ConnAnchorNewerV1(conn Connection) bool {
+	if p == nil || conn == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.projectionAnchorNewerV1[conn]
+}
+
+// SetConnProjectionWindowScalarV1 records the projection_window_scalar_v1
+// negotiation (OD-6 W1 条件 2). Marked connections keep Execution on decide=true
+// fence frames that hold none of the patch's turns (the fence scalar branch);
+// per-turn clearing rules are unchanged. UnregisterConnection clears the mark.
+func (p *EventPublisher) SetConnProjectionWindowScalarV1(conn Connection, enabled bool) {
+	if p == nil || conn == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if enabled {
+		p.projectionWindowScalarV1[conn] = true
+	} else {
+		delete(p.projectionWindowScalarV1, conn)
+	}
+}
+
+func (p *EventPublisher) ConnProjectionWindowScalarV1(conn Connection) bool {
+	if p == nil || conn == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.projectionWindowScalarV1[conn]
+}
+
+// SetConnProjectionMaxBytes 记录该连接协商获得的 projection_max_bytes
+// （frozen §Anchor-Newer 超限恢复语义；full.oversized 判定读它）。
+func (p *EventPublisher) SetConnProjectionMaxBytes(conn Connection, granted int64) {
+	if p == nil || conn == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.projectionMaxBytes[conn] = granted
+}
+
+// ProjectionMaxBytes 返回该连接的投影传输上限；未协商 = 默认 50MiB。
+func (p *EventPublisher) ProjectionMaxBytes(conn Connection) int64 {
+	if p == nil || conn == nil {
+		return projectionMaxBytesDefault
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if v, ok := p.projectionMaxBytes[conn]; ok && v > 0 {
+		return v
+	}
+	return projectionMaxBytesDefault
+}
+
+// connProjectionWindowScalarLocked 是 ConnProjectionWindowScalarV1 的持锁变体
+// （调用方已持 p.mu——fence 完成事务的清理循环）。
+func (p *EventPublisher) connProjectionWindowScalarLocked(conn Connection) bool {
+	if p == nil || conn == nil {
+		return false
+	}
+	return p.projectionWindowScalarV1[conn]
+}
+
 // SetConnTurnDetailV1 records the authenticated hello negotiation for the
 // turn_detail_lazy_v1 capability (§11.7). Only connections marked here may
 // call session_turn_items; the handler answers everyone else with

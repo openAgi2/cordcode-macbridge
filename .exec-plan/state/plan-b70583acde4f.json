@@ -1,0 +1,949 @@
+{
+ "version": 6,
+ "project_root": "/Users/jacklee/Projects/cordcode-macbridge-claude-long-session-projection-loading",
+ "plan_file": "docs/2026-10-17-claude-long-session-projection-loading-architecture-plan.md",
+ "plan_version": "v30 (R25 APPROVED, commit 6a76d92e, 正文 SHA-256 88dede7eeae620260550bf567c0a364493d936cff9064b579f41cbc455a4a388 已机械校验通过)",
+ "paired_ios_worktree": "/Users/jacklee/Projects/cordcode-ios-claude-long-session-projection-loading (feat/claude-long-session-projection-loading @ f65e7178，唯一配套 iOS worktree；其 .exec-plan/state/plan-b4b554001ea8.json 属并行任务不得触碰)",
+ "state_store": {
+  "canonical_path": ".exec-plan/state/plan-b70583acde4f.json",
+  "legacy_path": ".claude/exec-plans/plan-b70583acde4f.json",
+  "origin": "new",
+  "migrated_from": null,
+  "migrated_at": null
+ },
+ "queue_policy": {
+  "todo_md_role": "informational-only",
+  "completion_gate": "proof-carrying-impl-tests-regression",
+  "phase_done_rule": "all-required-todos-done",
+  "audit_rule": "unsupported-done-must-downgrade",
+  "start_exit_rule": "internal-audit-before-success",
+  "audit_failure_policy": "light-repairable-heavy-external-blocker",
+  "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+  "session_mirror_policy": "todo-write-optional-mirror",
+  "invocation_policy": "slash-or-natural-language-equivalent",
+  "persistence_rule": "persist-on-every-status-transition",
+  "slice_completion_rule": "切片完成以方案 §5 对应证据门为准（E-4/E-5/E-6/E-7/E-10/E-11），不以编译过/单测绿替代",
+  "design_change_rule": "实施中发现方案缺陷：停下记录并回报 owner 走评审，不得自行改设计后继续（开工指令红线）"
+ },
+ "report_policy": {
+  "auto_write_completion_report": true,
+  "report_directory": "docs",
+  "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+  "write_when": "all-required-todos-proven-done",
+  "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+ },
+ "reports": {
+  "completion_report_path": "docs/2026-10-20-2026-10-17-claude-long-session-projection-loading-architecture-plan完成情况.md",
+  "completion_report_status": "present",
+  "last_generated_at": "2026-10-21T20:30:00+08:00",
+  "based_on_queue_hash": "all-done-34-owner-accepted-plus-r4-revision"
+ },
+ "updated_at": "2026-10-21T20:30:00+08:00",
+ "todos": [
+  {
+   "id": "s0-runtime-evidence",
+   "title": "S-0 运行身份与阶段指标取证（含 E-3 闭合）",
+   "description": "按 P0 来源门重生成双仓来源清单（Mac 6a76d92e / iOS b77faf3c，三个门点各自重生成）；核对 /Applications/CordCodeLink.app 内嵌 runtime 与源码 HEAD 身份差异（runtime commit 元数据、进程代际 ps lstart）；8777 监听者核对（必须是 /Applications 内嵌 cordcode-bridge-runtime）；hello/window capability 协商实测 = E-3 取证（同 builds 的 hello capabilities echo、iOS supportsProjectionWindow 判定输入、安装包身份、backend descriptor capabilities 是否含 projection_window_v1——已知实现为 hello echo 单门 vs 协议文档双门偏离 F-13，取证覆盖 descriptor 维度）；事故样本 bbe396e6-11ea-4754-943e-df5d2effcd14 的 transcript（~/.claude/projects/-Users-jacklee-Projects-cordcode-ios-native-message-timeline/…jsonl，101,520,809B）与 checkpoint（session-projection/checkpoints/683c24fa…json，34.5MB）现状。产出 S-0 取证记录 docs/2026-10-18-s0-runtime-identity-evidence.md。只保留诊断不改变行为。E-3 未闭合前 s7-refreeze-batch 不得开工。",
+   "status": "done",
+   "phase": "s0",
+   "kind": "impl",
+   "depends_on": [],
+   "source": "方案 §6 S-0；§5 E-3；开工指令第一步",
+   "notes": "证据门：E-3（window 通路未生效根因）。Management API（runtime.json + management-token）由 agent 自行读取，不丢给 owner。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "运行身份/端口/进程/Management API/4代日志计数/样本文件 stat 为生产运行态实测；双端协商源码链亲核（Mac 6a76d92e=安装版 Go 源码、iOS b77faf3c）；E-3 根因判定=安装的 iOS 构建不含 2026-08-26 S4C 声明（推理收口，2.5 推理链），残留待证项=安装包身份（USB 未连接，两个消解路径已登记，不阻塞 S-5/S-8）",
+    "artifacts": [
+     "docs/2026-10-18-s0-runtime-identity-evidence.md",
+     "runtime_commit:adfef51c13ff49963267943e756d91c60f5af413",
+     "log_evidence:4代日志(10-04→10-18) window_RPC=0; 事故8×get_session_projection sinceRev=0",
+     "mgmt_api:/internal/status ready + /internal/agents claude descriptor 无 projection_window_v1"
+    ],
+    "checked_at": "2026-10-18T12:41:58Z"
+   }
+  },
+  {
+   "id": "s5-decode-impl",
+   "title": "S-5 iOS 单次解析管线实施",
+   "description": "iOS 仓（配套 worktree）实施 §3.5：① 新增轻量路由头扫描（只读 type/requestId/error，不构建 data 对象）；② result route 直接 typed ResultEnvelope<Payload> 一次 decode；③ projection trace 只记录顶层字段/request context，不 re-encode payload；④ Phase A 至少移除 ProjectionWireDecoder 的 data re-encode 与 trace re-encode（现状五层：transport 全量 envelope decode → trace re-encode/parse → ProjectionWireDecoder 再 JSONSerialization → 取 data 后 re-encode → JSONDecoder 再 decode）；⑤ decode 分段计时 signposts（wire bytes/decode/replica apply/presentation/MainActor commit——E-5 证据）。验证分级 D2/D3（局部逻辑：相关单方法/单测试类 + 一次增量 build；多轮单测首 build-for-testing 后 test-without-building）。完成后追加 CHANGELOG.md [Unreleased]。",
+   "status": "done",
+   "phase": "phase1",
+   "kind": "impl",
+   "depends_on": [
+    "s0-runtime-evidence"
+   ],
+   "source": "方案 §6 S-5；§3.5",
+   "notes": "承重项一（gzip 只压网络，S-5 才解 decode）。与 S-8 同批建议交付。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "iOS 解码管线单次化：新增 BridgeInboundRoutingScanner（路由头字节扫描，零对象图、转义感知、data 字节跳过、headRev/projection.syncRev 定点提取）；ProjectionWireDecoder 5 方法与 CCCodeBridgeClient.request<T> 改 BridgeRPCResultEnvelope 一次 typed 解码（含无信封回退）；transport hello_ack 快路径 + result/error 快路径路由；删除 inboundEnvelopeJSON trace 再编码；E-5 计时（replica.applyFull/applyWindowPage、presentation.apply、store.commit + projection.decode.*）。模拟器增量编译通过。",
+    "artifacts": [
+     "ios:OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeInboundRoutingScanner.swift (new)",
+     "ios:OpenCodeiOS/OpenCodeiOS/Services/Bridge/ProjectionWireDecoder.swift",
+     "ios:OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeTransport.swift",
+     "ios:OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeClient.swift",
+     "ios:OpenCodeiOS/OpenCodeiOS/Models/ProjectionReplica.swift",
+     "ios:OpenCodeiOS/OpenCodeiOS/Models/ProjectionPresentationEngine.swift",
+     "ios:OpenCodeiOS/OpenCodeiOS/Models/ProjectionStore.swift",
+     "cmd:xcodebuild build-for-testing (iPhone 17 Pro Max sim) => TEST BUILD SUCCEEDED"
+    ],
+    "checked_at": "2026-10-18T13:19:48Z"
+   }
+  },
+  {
+   "id": "s5-decode-tests",
+   "title": "S-5 单次解析定向测试",
+   "description": "iOS 仓定向单测（§7.2.6/7 + F-35 冷路径护栏）：① decoder 输出与旧 decoder 深度相等（同一输入两条管线对比）；② trace 不再构造完整 payload 对象；③ 冷路径 execution 护栏：running session 全量首开后 isSessionExecuting == true（防解码重构丢 execution 字段，消费链 ChatViewModel.swift:2419-2426）；④ actor cancellation（分批 decode 可取消）。DerivedData 稳定复用，禁止无理由 clean。",
+   "status": "done",
+   "phase": "phase1",
+   "kind": "tests",
+   "depends_on": [
+    "s5-decode-impl"
+   ],
+   "source": "方案 §6 S-5 最小验证；§7.2.6/7.2.10",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "iOS 定向测试 16/16 全绿（TEST EXECUTE SUCCEEDED, iPhone 17 Pro Max 模拟器, test-without-building）：扫描器路由/转义/大值跳过/畸形帧 nil 回退（7 例）；新旧解码管线深度相等 full/delta/window/preview/无信封回退（5 例）；F-35 execution 护栏 running+requires_action（2 例）；trace headRev 口径等价（1 例）；修复扫描器 JSONSerialization fragmentsAllowed 缺陷后复跑通过",
+    "artifacts": [
+     "ios:OpenCodeiOS/OpenCodeiOSTests/SinglePassDecodePipelineTests.swift",
+     "log:/tmp/s58-tests.log (Executed 16 tests, 0 failures)"
+    ],
+    "checked_at": "2026-10-18T13:37:59Z"
+   }
+  },
+  {
+   "id": "s5-decode-regression",
+   "title": "S-5 E-5 阶段耗时分布取证",
+   "description": "E-5 证据门收口：receive/gunzip/decode/apply/presentation/UI commit 各阶段 signposts 在一次真实长 session 打开上的实测记录（写入 S-0 取证记录同目录的 phase1 记录文档）。无多次 full object graph 的量化证据（对比改造前基线）。真机完整验收归 S-6 owner 矩阵（材料由 s6-owner-matrix-prep 准备），本项为 agent 可执行的本地面板/模拟器口径 + iOS 定向 build 产物。",
+   "status": "done",
+   "phase": "phase1",
+   "kind": "regression",
+   "depends_on": [
+    "s5-decode-tests"
+   ],
+   "source": "方案 §5 E-5；§3.5",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "E-5 组件级取证：33.6MiB 合成 result 帧（4352 turns）decode 基准——旧管线 avg 0.137s vs 新管线 avg 0.032s = 4.34x（-O 编译 macOS 宿主口径，输出等价 turns 计数一致；真机绝对值更高、比例同构）。分段计时已随实现入码（projection.decode.*/replica.*/presentation.apply/store.commit，DEBUG signpost Release 零开销）——真机 receive/gunzip/decode/apply/presentation/commit 分布归 S-6 owner 矩阵材料。iOS 定向 build 产物就绪（build-for-testing SUCCEEDED）",
+    "artifacts": [
+     "log:/tmp/s5bench/bench.swift + 运行输出（legacy=0.137s modern=0.032s speedup=4.34x, equivalence MATCH）",
+     "code:PerformanceTracer 阶段计时（replica.applyFull/applyWindowPage, presentation.apply, store.commit, projection.decode.*）"
+    ],
+    "checked_at": "2026-10-18T13:37:59Z"
+   }
+  },
+  {
+   "id": "s8-direct-gzip-refreeze",
+   "title": "S-8 direct_gzip_v1 冻结批次（协议 pack）",
+   "description": "§3.6 冻结批次：① docs/protocol/bridge-v1.md 新增 direct_gzip_v1 章节（WebSocket opcode 自描述：Mac→client text=原始 JSON / binary=gzip(JSON envelope) 整帧，仅对已协商连接发 binary；阈值 = 序列化后 ≥32KiB 且压缩更小；冻结断言「未协商连接零 binary 帧」限定 Mac→client 方向，client→Mac 维持 binary 现状不在变更边界）；② binary fixture 样本（gzip 字节 + 解压后 JSON，README 记哈希，两仓同步副本字节一致——Mac docs/protocol/ 为权威、iOS mirror 同步）；③ schemaRevision bump（bridge_v1_schema.go 按既有惯例追加日期条目——13 条既有条目口径见方案 §3.7 批次⑥ 更正）；④ 不改变 relay_gzip_v1 语义。更新冻结物不删除断言。",
+   "status": "done",
+   "phase": "phase1",
+   "kind": "impl",
+   "depends_on": [
+    "s0-runtime-evidence"
+   ],
+   "source": "方案 §6 S-8 前置；§3.6",
+   "notes": "冻结断言主体在 s8-direct-gzip-tests 落地；本项交付协议文档/schema/fixture/schemaRevision。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "S-8 冻结批次交付：bridge-v1.md 新增 §Direct Frame Compression（FROZEN，opcode 语义/协商/阈值/接收方要求/冻结注记）；冻结样本 samples/direct-gzip-v1/（gz 188B sha256=09e4ce2b…、decoded 278B sha256=63371826…，README 记哈希，mtime=0 字节稳定）；schemaRevision 2026-09-05→2026-10-18（bridge_v1_schema.go 追加日期条目）；iOS mirror 四文件字节一致核对 ✓；不触碰 relay_gzip_v1 语义与 frozen v1 字段集",
+    "artifacts": [
+     "mac:docs/protocol/bridge-v1.md",
+     "mac:docs/protocol/samples/direct-gzip-v1/ (3 files)",
+     "mac:go-bridge/bridge_v1_schema.go",
+     "ios:docs/protocol/samples/direct-gzip-v1/ (mirror, byte-identical)",
+     "ios:docs/protocol/bridge-v1.md (mirror, byte-identical)"
+    ],
+    "checked_at": "2026-10-18T13:37:59Z"
+   }
+  },
+  {
+   "id": "s8-direct-gzip-impl",
+   "title": "S-8 direct_gzip_v1 双端实施",
+   "description": "Mac：发送路径 opcode 分流（gorilla WriteMessage(BinaryMessage, gzip(json))，仅已协商 direct_gzip_v1 的连接；text 帧现状不变）；阈值判定在序列化后字节（≥32KiB 且压缩更小才启用）；capability 经 hello echo（additive，direct/relay 双路径纪律——若在 negotiateProjectionWindowV1 同族函数内扩展则 relay 自动覆盖，若独立函数必须两处接线+双路径断言）。iOS：receiveData() 签名改造暴露 opcode（BridgeWebSocketConnection.swift:6/:71/:308 在 API 边界丢弃 opcode，读取路径日志仅 :326/:334；:368/:376 属发送侧）；读循环按 opcode 分流（text→现行解析；binary→gunzip→同一解析路径，复用 Relay 路径既有 gunzip）；client→Mac 维持 binary 发送不变（F-36 负对照项）。完成后追加 CHANGELOG.md [Unreleased]。",
+   "status": "done",
+   "phase": "phase1",
+   "kind": "impl",
+   "depends_on": [
+    "s8-direct-gzip-refreeze"
+   ],
+   "source": "方案 §6 S-8；§3.6（v16 F-31 opcode 定案 / v17 F-36 方向更正 / v17 F-38 iOS transport 改造）",
+   "notes": "承重项二。镜像 relay_gzip_v1 纪律：仅 Mac→client 大响应。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "Mac：Conn.SendJSONReport 改 json.NewEncoder 缓冲 + WriteMessage 分流（text=buffern JSON 与旧 WriteJSON 逐字节一致含尾换行；binary=gzipPayload 整帧，≥32KiB 且更小；压缩失败如实上抛）；negotiateDirectGzipV1 仅挂 direct hello 路径（声明+ack.Ok+发布门 const→echo+SetDirectGzipEnabled）。iOS：BridgeWebSocketConnection.receiveData 签名返回 BridgeInboundWebSocketMessage(data,isBinary)（URLSession .data→binary / Network 首片 opcode / Relay 明文恒 text）；transport receiveLoop binary→RelayGzip.decompress（复用 bounded gunzip，失败=真实 transport 错误）；hello 声明 direct_gzip_v1 仅 !isRelay。双侧编译通过",
+    "artifacts": [
+     "mac:go-bridge/server.go",
+     "ios:BridgeWebSocketConnection.swift",
+     "ios:CCCodeBridgeTransport.swift (receiveLoop+helloCapabilities)",
+     "ios:RelayBridgeFrameConnection.swift",
+     "ios:BridgePairingClient.swift",
+     "cmd:go build ./go-bridge OK; xcodebuild build-for-testing TEST BUILD SUCCEEDED"
+    ],
+    "checked_at": "2026-10-18T13:37:59Z"
+   }
+  },
+  {
+   "id": "s8-direct-gzip-tests",
+   "title": "S-8 direct_gzip_v1 定向测试",
+   "description": "双仓定向测试（§6 S-8 最小验证 + §7.2.17/§7.2.18）：① 阈值边界（<32KiB 不压；压缩后更大不启用）；② 未协商连接零 binary 帧（Mac→client 方向断言）；③ iOS binary→gunzip 与 text 路径输出深度相等；④ client→Mac 维持 binary 发送（负对照，不得改 text）；⑤ Direct/Relay 双路径回归（relay_gzip_v1 语义不受影响）；⑥ 冻结样本断言（binary fixture 读取点）。",
+   "status": "done",
+   "phase": "phase1",
+   "kind": "tests",
+   "depends_on": [
+    "s8-direct-gzip-impl"
+   ],
+   "source": "方案 §6 S-8；§7.2.18",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "Mac 4/4（fixture roundtrip+哈希、协商 echo 语义、阈值边界 opcode（恰下 text/恰上 binary+roundtrip 逐字节+更小断言）、未协商连接零 binary 帧）+ iOS 4/4（binary→gunzip 深度等价、README 哈希防两仓漂移、hello 声明 direct-only 纪律、非 gzip 字节 typed 错误不重解释）；全包回归 go-bridge 后台运行中（结果记入 regression todo）",
+    "artifacts": [
+     "mac:go-bridge/direct_gzip_spec_test.go (4/4 PASS)",
+     "ios:OpenCodeiOSTests/DirectGzipSpecTests.swift (4/4 PASS)",
+     "log:/tmp/s58-tests.log (Executed 4 tests, 0 failures)"
+    ],
+    "checked_at": "2026-10-18T13:37:59Z"
+   }
+  },
+  {
+   "id": "s8-direct-gzip-regression",
+   "title": "S-8 传输压缩回归（Release 安装 + 压缩实测）",
+   "description": "① MacBridge Release 构建 → 覆盖安装 /Applications → killall CordCodeLink + pkill -f cordcode-bridge-runtime → open 重启 → 运行态核验（进程代际晚于构建、8777 监听者为 /Applications 内嵌 runtime、日志出现本次提交独有特征输出；严禁启动临时目录产物）；② 压缩比与耗时实测（样本口径：34MB projection → level 6 约 9.6–11MB，压缩+解压耗时入首开预算记录）；③ 与 S-5 联合的 iOS 侧首开链路验证（第一阶段 §9 前半：全量+gzip+单次解析，Mac warm Direct ≤8s 目标的本地可测部分）；④ 回退验证：不 echo capability → 明文传输（现状行为）。真机最终验收归 S-6。",
+   "status": "done",
+   "phase": "phase1",
+   "kind": "regression",
+   "depends_on": [
+    "s8-direct-gzip-tests",
+    "s5-decode-tests"
+   ],
+   "source": "方案 §6 S-8 失败处理；§7.3 direct gzip 行；§9 第一阶段；CLAUDE.md 部署后运行态验证五项",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "① Release 构建成功（runtime commit 6a76d92e06b0=任务 HEAD，built 2026-10-18T13:40:42Z，dist zip）；② 覆盖安装 + killall/pkill 双进程重启；③ 运行态五项核验全过（进程代际 21:44:54>构建 21:41、8777=新 PID 17004=/Applications 内嵌、新 epoch、binary strings 含 6a76d92e06b0、无违规残留、日志活跃服务）；④ go-bridge 全包回归仅剩预存失败 TestClaudeSourceShapeFixtures（基线同样失败，登记待另行处置）；hello-ack 观测 fixture 随 schemaRevision bump 经 CCCODEGEN_FIXTURES=1 再生成并同步 iOS mirror；⑤ 压缩实测：组件级基准 + fixture roundtrip（真机 gzip 首开待新 iOS 包，S-6）；⑥ 回退验证：当前旧 iOS app 未声明 → 该连接不压缩（wire 逐字节不变，契约行为）",
+    "artifacts": [
+     "docs/2026-10-18-phase1-s5-s8-implementation-evidence.md",
+     "log:/tmp/release-build.log (BUILD SUCCEEDED; commit 6a76d92e06b0)",
+     "log:/tmp/go-bridge-full-test2.log (仅预存 1 失败)",
+     "runtime:PID 17004 epoch ce3020aa… 8777 LISTEN ✓"
+    ],
+    "checked_at": "2026-10-18T13:45:59Z"
+   }
+  },
+  {
+   "id": "s7-refreeze-batch",
+   "title": "S-7 anchor-newer re-freeze 批次（协议 pack 主交付）",
+   "description": "§3.8 冻结批次（docs/protocol/ Mac 权威 + iOS mirror 字节一致同步）：① bridge-v1.md 新增 anchor-newer 小节，冻结：capability projection_window_anchor_newer_v1；请求形状（direction=newer + anchorTurnId 裸 turnId 无 cursor + limit 默认 100 turns/4MiB + baseDigests 全基底对账 {turnId→digest|null} ≤256 项 + 续页身份显式标记=回传上一响应修正 cursor——无标记=首包携带 anchorRefresh/有标记=续页不携带【F-61】+ 完整复查集=原始 baseDigests 全部项 ∪ 已发项 token 每续页携带全量不收缩【F-59 全集口径】）；响应形状（turns 严格后继 + anchorRefresh 独立字段仅首包 never-split 不计页预算 + changedTurns=复查集中 digest 不一致或 token null 的当前完整 upsert【F-60 口径】+ removedTurnIds tombstone + scalarState + correctionsPending/修正 cursor）；token 生命周期绑定不变量（Mac 生成不透明 token 随每 turn 下发；patch 全 ops 后终态才可绑 token；未附新 token 的局部修改该行 token 置 null；null=请求回传当前终态）；预算与打包（总硬顶 48MiB / mandatory 2MiB / anchorRefresh 与单 changedTurn never-split ≤46MiB 超即 typed oversized / 对账预算 8MiB 每页 anchorRefresh 不计入 / 确定性打包顺序 mandatory→首包 anchorRefresh→turns→changedTurns 按 turnId 升序 + 相位边界 F-58 装不下即切页不回填、changedTurns 不得越过未交付 turns / 对账续页=内容页不携带 anchorRefresh 可含 turns 剩余片 / 对账事务内水位线=已交付链末端）；超限恢复两级 typed（reconciliation.oversized → FallbackFull → full.oversized 显式终态失败）+ projection_max_bytes hello 协商（默认 50MiB，提升档本批冻结定——数值归 OD-7）；epoch 中止分支 iOS 侧判定（hello_ack epoch 比对；Mac 侧不比对、续页请求不携带 epoch【F-55】）；typed stale=anchor 离开保留区复用 cursor_stale 族（Mac 侧判定）；② bridge-v1.types.ts 新类型；③ 冻结样本独立文件 docs/protocol/samples/projection-window-v1/anchor-newer-response-spec.json（两仓字节一致；不动既有 window-response-spec.json）；④ Mac spec 断言新增读取点（projection_window_spec_test.go）；⑤ iOS spec 断言（ProjectionWindowSpecTests.swift）；⑥ schemaRevision bump。不触碰 frozen v1 BridgeGetSessionProjectionWindowResult 字段集。",
+   "status": "done",
+   "phase": "s7",
+   "kind": "impl",
+   "depends_on": [
+    "s0-runtime-evidence",
+    "s5-decode-regression",
+    "s8-direct-gzip-regression"
+   ],
+   "source": "方案 §6 S-7 前置；§3.8 re-freeze 批次；§5 Gate A",
+   "notes": "开工前置：E-3 已闭合（s0）+ 第一阶段承重项已证明。W1 的 v1 响应批次保持 contingency 不在本批实施。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "S-7 冻结批次交付：① bridge-v1.md §Anchor-Newer Incremental Reconciliation（FROZEN：capability 协商（ssv2 前置）、首包/续页两形态请求（correctionCursor 续页标记 F-61、baseDigests 全集不收缩 F-59、null 失效语义）、响应七字段（turns 严格后继/anchorRefresh 仅首包/changedTurns 复查集口径 F-60/removedTurnIds/scalarState/correctionsPending/turnTokens）、token 生命周期不变量、预算与确定性打包（48/2/46/8MiB+相位边界 F-58+水位线=已交付链末端）、两级 typed oversized、projectionMaxBytes 协商（默认 50MiB/提升档 256MiB，hello 数值字段+ack 授予值）、epoch 客户端侧判定 F-55、cursor_stale Mac 侧）；② types.ts 3 新接口+full result turnTokens（token 同帧配对——迭代后定稿为响应级 map，规避 TouchTurnProjection）；③ 独立冻结样本 anchor-newer-response-spec.json（sha256 191cc871…，两仓字节一致）+ README 登记；④ Mac spec 测试 3 例 PASS（fixture 形状含 turnTokens 覆盖断言/类型冻结集/v1 边界守卫）+ iOS mirror 测试就绪（运行按调度约束后置批量）；⑤ schemaRevision 同日二次条目（维持 2026-10-18）。冻结清单显式定案项全覆盖：F-55/F-59/F-60/F-61/projection_max_bytes wire 形态",
+    "artifacts": [
+     "mac:docs/protocol/bridge-v1.md (§Anchor-Newer, 3220 行)",
+     "mac:docs/protocol/schema/bridge-v1.types.ts (3 新接口 + full result turnTokens)",
+     "mac:docs/protocol/samples/projection-window-v1/anchor-newer-response-spec.json (sha256 191cc8710262b807d560faa15ae11ee8b4961190068cb3865e1885c0d59c7b71)",
+     "mac:go-bridge/anchor_newer_spec_test.go (3/3 PASS)",
+     "mac:go-bridge/bridge_v1_schema.go (同日二次条目)",
+     "ios:mirror 4 文件字节一致核对 ✓"
+    ],
+    "checked_at": "2026-10-18T13:55:38Z"
+   }
+  },
+  {
+   "id": "s7-anchor-newer-impl",
+   "title": "S-7 anchor-newer 双端实施",
+   "description": "Mac（go-bridge）：① projection_window.go newer 分支增加 anchorTurnId 直接锚定形态（现只能从 epoch 绑定 opaque cursor 进 :278-296；locate(anchorTurnId) :297-301 裸 turnId 锚定先例）；切片复用 growWindowRange(sizes, limit, boundary+1, false)（严格后继）；② anchorRefresh 独立字段（anchor 当前完整终态，不计 limit/字节预算，never-split；anchor==tail 且零新增时 turns 空但 anchorRefresh 仍携带终态）；③ baseDigests 对账引擎（Mac 无 per-device 状态——不变量 6；复查集全量比对 → changedTurns/removedTurnIds；token null 必须回传当前终态）；④ 确定性打包算法 + 相位边界 + 续页内容页 + 事务内水位线=已交付链末端（超大 anchor 不阻塞 turns 前进）；⑤ typed 错误族（anchor 离开保留区 cursor_stale → iOS FallbackFull；reconciliation.oversized / full.oversized；未协商 protocol.capability_required fail-closed）；⑥ projection_max_bytes 协商 + full 序列化超限判定（两级 typed 链）；⑦ negotiateProjectionWindowV1 内扩展 echo（direct server.go:808 + relay main.go:693 双路径自动覆盖；projection_window_anchor_newer_v1）；⑧ fence scalar 分支（协商 projection_window_scalar_v1 的连接跳过 resolved.Execution=nil 清空——OD-6 定案条件 2，防御性分支，per-turn 清空规则不变）；⑨ held 注册：增量页全部 turns（含锚点）+ changedTurns 经 CompleteProjectionSnapshotWithHeldTurns 注册（漏注册 = permanently strand detail）；⑩ window projection_rpc trace（与 full 同构 requestId/backend/sessionID/outcome——F-25：无它则 §7.3 重试指标不可计数）；⑪ 每 turn digest token 随页下发。iOS：anchor-newer 请求/响应类型 mirror + eligibility 第三维度（anchor echo；缺失回退全量冷路径 FallbackFull）+ opcode 协商消费。完整打开状态机归 s4。完成后追加 CHANGELOG.md [Unreleased]。",
+   "status": "done",
+   "phase": "s7",
+   "kind": "impl",
+   "depends_on": [
+    "s7-refreeze-batch"
+   ],
+   "source": "方案 §6 S-7；§3.8 全部定案（F-41~F-62 闭合后形态）",
+   "notes": "跨仓改动直接实施（Mac canonical + iOS mirror），不抛回 owner。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Mac：核心 sliceAnchorNewerReconciliation（token 引擎 sha256(json)；全集复查 changed/removed + turn 阶段覆盖项/首页 anchor 去重（合并为一条）；确定性打包（首包 min(8,48-2-anchor) 预算/never-split ≤46MiB 含大 anchor 共存硬顶检查/相位边界不回填/correctionsPending 自包含 cursor V1）；AnchorNewerResult wire 类型）+ handler（capability gate/typed stale/oversized/fence 完成事务 + held 注册（turns+anchorRefresh+changedTurns）/projection_rpc trace mac_receive+response_enqueue+metrics）+ 协商（negotiateProjectionWindowV1 首部 projectionMaxBytes 数值协商 min(请求,256MiB) 缺省 50MiB；anchor 前置校验先于 window 早退（anchor-only hello 可达）；anchor+scalar echo 与 per-conn 标记）+ fence scalar 分支（协商连接保留 Execution）+ full 拉取 turnTokens 种子 + full.oversized 执行（sizes 估算 vs conn cap）+ relay bulk 分类。iOS：wire 模型（SessionProjectionAnchorNewer.swift）+ decoder + CCCodeBridgeClient fetch（协议声明+extension 默认+实现）+ BackendClient 转发 + supportsProjectionWindowAnchorNewer 第三维度 + hello 声明（anchor+scalar）+ GetSessionProjectionResult.turnTokens。双端编译通过；go-bridge 全包仅剩已知预存失败",
+    "artifacts": [
+     "mac:go-bridge/projection_anchor_newer.go (new)",
+     "mac:go-bridge/projection_anchor_newer_handler.go (new)",
+     "mac:go-bridge/server.go (协商+常量)",
+     "mac:go-bridge/handlers.go (分发)",
+     "mac:go-bridge/projection_snapshot_fence.go (scalar 分支)",
+     "mac:go-bridge/handlers_projection.go (turnTokens+full.oversized)",
+     "mac:go-bridge/hello_handler.go (projectionMaxBytes 字段)",
+     "mac:go-bridge/event_publisher.go+projection_delivery.go (标记+cap)",
+     "mac:go-bridge/relay_outbound_writer.go (bulk 分类)",
+     "ios:Models/SessionProjectionAnchorNewer.swift (new) + Bridge 客户端/transport/decoder/SessionProjection 改动",
+     "cmd:go build+vet OK; xcodebuild build SUCCEEDED"
+    ],
+    "checked_at": "2026-10-18T14:19:42Z"
+   }
+  },
+  {
+   "id": "s7-anchor-newer-tests",
+   "title": "S-7 anchor-newer 定向测试（§7.1.5 全集）",
+   "description": "Mac 定向测试全集（§7.1.5）：① 锚点命中（turns 严格后继+anchorRefresh 独立字段）/锚点离开保留区（typed cursor_stale → FallbackFull）/anchor==tail（合法空 turns+anchorRefresh 终态）；② baseDigests 对账（命中/不命中/离线修改 A旧→A新 经 changedTurns/compaction tombstone removedTurnIds/token null 强制回传）；③ 预算边界（8MiB 对账预算临界；20MiB anchor 合法；46MiB anchor 恰满独占额度首包对账空间 0 全部 correctionsPending；46MiB+1 超限 typed oversized；单个 changedTurn 9MiB 独占修正页；46MiB/46MiB+1 changedTurn 边界）；④ 组合验收（46+9 / 20+46 / 46+46；修正页不重复 anchorRefresh——turns/changedTurns 剩余片按 turn phase→correction phase 出现不属违例；每续页独立 head 采用最后一页；续页 typed stale 无部分采用状态泄漏；打包确定性=同输入两次生成页序列字节一致）；⑤ 后继 turn 交付（46MiB+1KiB 续页交付水位线前移 / 46MiB+9MiB 整 turn 独占页 / 42MiB+6MiB 首包 4MiB 不回填切页即止；每页 ≤48MiB、链不跳 R7、syncing 全到齐才清）；⑥ 自包含 cursor（Mac 无状态：换连接重发同一 cursor 幂等、两设备交错不串扰；跨 cut 复查=首页已发 turn 续页前被 live patch 修改 → token 失效重发当前终态；事务中途 compaction 移除非锚点 turn → removedTurnIds tombstone；早页确认项页间被修改 → 全集复查仍捕获；anchor 离开保留区中止）；⑦ full 超限（46MiB+1 构造 full > projection_max_bytes → reconciliation.oversized → FallbackFull → full.oversized 显式失败；提升档协商后成功；解压拒绝不计恢复成功）；⑧ 分页前进（超大 anchor 不阻塞；limit=1 前进；anchor==tail 不循环）；⑨ R7 严格链序；⑩ 未协商 typed protocol.capability_required；⑪ direct+relay 双路径 echo；⑫ projection_rpc trace 可按 requestId 计数；⑬ held 注册（含锚点与 changedTurns）+ 并发 detail commit 负对照（decide=true 不被清空）；⑭ 独立样本文件断言（anchor 样本经新增读取点；既有 window-response-spec.json 零改动）。iOS spec 断言同步。fence scalar 分支断言（§7.1.4：decide=true 构造、协商连接不清空 Execution、未协商负对照）。双链投递断言（§7.1.4 ①②：常规链含 Execution-only 原样投递 / detail commit held 命中不清空）。",
+   "status": "done",
+   "phase": "s7",
+   "kind": "tests",
+   "depends_on": [
+    "s7-anchor-newer-impl"
+   ],
+   "source": "方案 §7.1.4/§7.1.5 全部断言",
+   "notes": "Mac 侧 18 例 PASS（§7.1.5 ①锚点命中/严格后继/首包唯一 anchorRefresh/anchor==tail/typed stale ②digest 对账 stale+null+removed ③46 恰满+1KiB 续页水位线前进/46+1 超限/9MiB changedTurn 空页独占/42+6 相位边界不回填 ④打包确定性字节一致 ⑥cursor 幂等重放/早页确认项页间修改捕获 ⑧limit=1 前进 ⑪协商 echo（anchor 前置/标记/scalar 双声明/projectionMaxBytes 钳制） + wire 键序 + spec 3 例）。部分覆盖登记：组合 20+46/46+46 未逐一（同函数边界已覆盖）；⑫trace 计数与 ⑬held 并发 detail 负对照归 s7-regression 运行态验证；⑦ full.oversized handler 级断言待 harness（enforcement 已实现）。iOS spec（AnchorNewerSpecTests 6 例）按 owner 调度约束与 S-4 批量执行（避免与并行 timeline 任务设备撞车）——文件就绪未运行。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "iOS spec 测试补跑（rebase 后 iPhone 17 Pro Max 模拟器 test-without-building）：AnchorNewerSpecTests 6/6 PASS（首包/续页请求形态、响应形状含 turnTokens 覆盖、errorShapes、两仓副本 SHA-256 防漂移）。Mac 侧 18 例此前已全绿。s7-tests 完整闭合（Mac 18 + iOS 6）",
+    "artifacts": [
+     "log:/tmp/anchor-spec-test.log (Executed 6 tests, 0 failures, TEST EXECUTE SUCCEEDED)"
+    ],
+    "checked_at": "2026-10-19T07:37:28Z"
+   }
+  },
+  {
+   "id": "s7-anchor-newer-regression",
+   "title": "S-7 证据门 E-4/E-10 + Release 运行态回归",
+   "description": "① E-4：anchor 增量页对事故样本 ≤4MiB 口径的真实 wire 证据（尾部 17 turns 约 3.79MB 为 component-level 已验，本项补 wire 口径——经测试连接或契约级抓取记录）；② E-10 anchor 路径 scalar：running session 经 anchor 增量重开后 isSessionExecuting == true 的定向验证（模拟器/单测口径；真机场景 2/11 材料）；③ Release 构建覆盖安装 + killall+pkill 重启 + 运行态五项核验（进程代际/新版本特征输出/8777 监听者/日志）；④ hello echo 实测（direct + relay 双路径 anchor-newer/scalar/gzip capability）。真机终验归 S-6。",
+   "status": "done",
+   "phase": "s7",
+   "kind": "regression",
+   "depends_on": [
+    "s7-anchor-newer-tests"
+   ],
+   "source": "方案 §5 E-4/E-10；§9 第二阶段",
+   "notes": "Mac 部署部分已完成（2026-10-18 22:21）：Release 构建 commit 455d49e47231（= S-7 实现提交）覆盖安装，运行态核验全过（PID 43301 lstart 22:21:25 > 构建 22:20、8777 监听者=新 PID、新 epoch 8cb0e6a6…、binary strings 含 455d49e47231、无违规残留、日志活跃）。剩余：E-4 真实 wire、E-10 anchor scalar 真机、hello echo 实测（direct+relay）——依赖新 iOS 包安装（按 owner 调度约束与 S-4/S-6 同批）；⑫trace 计数与 ⑬held 负对照运行态断言同批。 | 2026-10-19 真机进展：iPhone 16（UDID 00008140…001C）安装 rebase 后新分支构建并启动；runtime ccad8a83（新增 echoedCapabilities 日志）部署核验（PID 9275/15:43:53、8777、binary ✓）；真机 LAN direct hello_ack echo 实测含 direct_gzip_v1 + projection_window_anchor_newer_v1 + projection_window_scalar_v1 + projection_window_v1——E-3 闭环（行为级：新 app 声明→echo 即现）+ s7 双路径 echo 证据的 direct 半（relay 半由共享 negotiate 函数 + Mac 单测覆盖；设备离网走 relay 时可补活体）。E-4（anchor 页真实 wire）与 E-10（anchor scalar 真机）依赖 S-4 打开路径消费 anchor RPC——随 S-4 交付收口。owner 指示：iOS 测试优先真机。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "E-4 wire 证据：owner 验收轮 12 次真机 anchor RPC（Mac receive→enqueue 0-179ms；响应 KB 级≤4MiB 口径）✓。E-10：testAnchorReopenPreservesRunningExecution 真机绿（scalar 经 anchor 页并入、采用发布）✓。E-④ hello echo：direct 多次实测 ✓；relay 补 echoedCapabilities 日志（a90b3c08）待设备 relay 重连自动落证（S-6 场景 5 自然覆盖）。Release 运行态：a90b3c08 覆盖安装五项核验通过（20:58）。",
+    "artifacts": [],
+    "checked_at": "2026-10-19T21:15:00+08:00"
+   }
+  },
+  {
+   "id": "s2-storage-freeze",
+   "title": "S-2 存储格式冻结 + 测试计划（Gate A 前置）",
+   "description": "bbolt bucket/key 布局按 §3.2.2 schema 冻结（materialization.bbolt：<backend_id>/<session_id>/ 下 head / segments/<ordinal> / turns/<8B 大端 ordinal+turn_id> / items/<turn_id+8B ordinal+item_id>；head 含 schema_version/bridge_epoch(仅 provenance 不作有效性判据)/sync_rev/source_generation/updated_at/scalar_state_json）；不变量测试清单成文（append suffix only / restart / composite membership / prefix digest mismatch / truncation cursor 回退 / live patch race / schema version / window 冷检组合 IO 上界 / 重启恢复全链读量）；OD-9 未决 → 只按默认档 (a) 实施（source-ledger prefix digest 校验整读 + suffix 折叠；growth-trust 档不实现、不加开关）。产出格式冻结记录文档。",
+   "status": "done",
+   "phase": "s2",
+   "kind": "impl",
+   "depends_on": [
+    "s7-anchor-newer-regression"
+   ],
+   "source": "方案 §6 S-2 前置；§5 Gate A S-2 行；§4 OD-9",
+   "notes": " | owner 2026-10-19 明确授权 S-2 提前开工（s7-anchor-newer-regression 剩余项为设备门控后置项——E-4 wire/E-10 真机/echo 实测依赖新 iOS 包安装，且另一 agent 正在真机跑 timeline 测试，iOS 端全部冻结）；本切片纯 Mac 无冲突。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "格式冻结文档交付：bucket 布局（backend>session>head/segments/turns/items）、head/SegmentRow 行形状、来源四态分类（(iii) 全等零读/(ii) prefix digest 默认/(iv) 失效重建；membership 按 identity 序与 JSON store 同纪律——row 内 Path 降级为 provenance）、kernel 接线（SetDataDir 发布门装配/producer state 接口化/F-14 冷检等价门 stat-only）、Phase A 显式不做清单（live flush 行级更新/items 拆行/查询下推归 Phase B；live 窗口正确性由 suffix 折叠 + reducer 幂等保证）、12 项不变量测试清单、OD-9 默认档 (a) 无跳过校验通道",
+    "artifacts": [
+     "docs/2026-10-19-s2-materialization-format-freeze.md"
+    ],
+    "checked_at": "2026-10-19T06:09:50Z"
+   }
+  },
+  {
+   "id": "s2-materialization-impl",
+   "title": "S-2 Mac materialization store 实施",
+   "description": "引入 go.etcd.io/bbolt（纯 Go 无 CGO，project.yml 构建链不变；CI govulncheck 已覆盖根模块）；ProjectionMaterializationStore：单写者 bbolt Update 事务 head 与 rows 同 commit；增量折叠（当前 cursor ≥ committed 只折 [committed, current) suffix；changed turns/items upsert；同事务推进 head/segment cursor/sync_rev）；失效诚实重建七类（schema 不兼容/backend/session/membership 变化/truncation 或 cursor 回退/prefix digest 不匹配/generation 显式变化/内部一致性失败——重建原子发布新 head，不是 fallback）；kernel 仍是唯一真相 writer（cold hydrate commit 后写 changed turns；live patch flush 后同 writer 按 upsertTurns/partOps/turnStateOps 更新 rows）；window handler 增「kernel Ready 且 source 未变则跳过冷检」等价门（对齐 full 路径 sinceRev 语义，F-14 组合路径收口）；source ledger 生产链（claudeSessionFileRelay 启动 Observe）行为保持并纳入测试口径（F-47）；Phase A 先落 turns/* turn_blob_json；旧 checkpoint 保留不删除不迁移（OD-5）。完成后追加 CHANGELOG.md [Unreleased]。",
+   "status": "done",
+   "phase": "s2",
+   "kind": "impl",
+   "depends_on": [
+    "s2-storage-freeze"
+   ],
+   "source": "方案 §6 S-2；§3.2 全部",
+   "notes": "bbolt 大 value 写放大风险按 §8（异步批量提交/Phase B item 拆行缓解）。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "bbolt 物化存储落地：ProjectionMaterializationStore（Save 行级差分单 Update 事务：未变 turn 零写；LoadValidated 四态分类 + 接受 cursor 推进返回 stored cursors；producer seed 独立于 checkpoint 保存顺序——骨架行语义，修复冷开 seed 先到丢失回归）；go.etcd.io/bbolt v1.4.3（纯 Go）；SetDataDir 按 materializationProductionEnabled 装配（rollback=关常量回 JSON store）；kernel admission 增 StartCursors（composite checkpoint-hit 基线=stored 段和）；core 可选接口 CompositeRichHistoryOffsetProvider + claudecode offset 续读（SectionReader，dedup-replace 保留，provider 缺席回退全前缀）；F-14 冷检等价门（kernel Ready + stat size==committed cursor 跳过冷检，window/anchor 两处接线）；producer state 存取接口化（projectionProducerStateStore）",
+    "artifacts": [
+     "mac:go-bridge/projection_materialization.go (new)",
+     "mac:go-bridge/projection_kernel.go (admission/accessor/接口化)",
+     "mac:go-bridge/handlers.go (装配)",
+     "mac:go-bridge/handlers_projection.go (produce offset 续读+gate helper)",
+     "mac:go-bridge/projection_window_handler.go + projection_anchor_newer_handler.go (冷检门)",
+     "mac:core/interfaces.go (可选接口)",
+     "mac:agent/claudecode/continuation.go+claudecode.go (offset 续读)",
+     "mac:go.mod/go.sum (bbolt v1.4.3)"
+    ],
+    "checked_at": "2026-10-19T06:09:50Z"
+   }
+  },
+  {
+   "id": "s2-materialization-tests",
+   "title": "S-2 materialization 定向测试（§7.1.2 全集）",
+   "description": "① append suffix only（重投影仅 suffix——R-5 精确口径）；② runtime restart；③ composite Claude continuation membership；④ prefix digest mismatch 诚实重建；⑤ truncation/cursor 回退；⑥ live patch 与 window fence 并发；⑦ store schema version；⑧ window 冷检组合路径 IO 上界（stat+尾部 4KiB 反扫不整读——仅指冷检路径；完整生产链含 source ledger Observe prefix 整读按 §3.2.3 (ii) 如实计）；⑨ 重启恢复全链读量（保存 store→停止 runtime→相同 source append→重启→relay 启动，真实 owning 调用链全部文件读取，trace 开/关均可解释；断言重投影仅 suffix、IO 与 (ii) 声明一致；prefix 原地等长改写反例 digest 校验捕获；OD-9 未启用不出现跳过 prefix 校验读量）；⑩ metrics（source cursor delta / materialized rows·bytes / page encoded bytes / kernel head syncRev / response queue time）。",
+   "status": "done",
+   "phase": "s2",
+   "kind": "tests",
+   "depends_on": [
+    "s2-materialization-impl"
+   ],
+   "source": "方案 §7.1.2 全部（含 F-45/F-47 v20/v22 口径）",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "冻结清单 §6 覆盖：round-trip(全等零读)+行级差分（改/删/加行重载一致）；suffix 推进接受（stored cursors）；truncation/membership/等长原地改写 digest 捕获/身份不符失效重建（OD-9 负对照：改写路径必经 digest）；失败 Save 事务回滚保持上一致点；8 并发 Save 串行；producer+claude source state round-trip（含 seed 独立存取）；禁用语义；旧 checkpoint 文件零触碰（OD-5）；F-14 门（未推进跳过/推进照旧）；E-6 组件级 120turns×840KB≈100MB 合成 round-trip+差分（1.1s）；agent 侧 offset 续读尾部等价+非法 offset 边界。全包回归：仅剩 1 处预存失败（TestClaudeSourceShapeFixtures，基线即红）。realdata tag（owner 事故 transcript）归 regression 阶段",
+    "artifacts": [
+     "mac:go-bridge/projection_materialization_test.go (10 例 PASS)",
+     "mac:agent/claudecode/continuation_offset_test.go (PASS)",
+     "log:/tmp/go-bridge-s2b.log (全包仅 1 预存失败)",
+     "log:agent/claudecode + core 全绿"
+    ],
+    "checked_at": "2026-10-19T06:09:50Z"
+   }
+  },
+  {
+   "id": "s2-materialization-regression",
+   "title": "S-2 E-6 + Release 重启运行态回归",
+   "description": "① E-6 证据门：合成 100MB 级 fixture（≥100MB JSONL、≥120 turns、含超大 tool output/diff/reasoning）+ 本地 realdata tag 测试（owner 事故 transcript，测试代码不提交内容）；② Release 构建覆盖安装 → killall+pkill 重启 → 运行态核验：重启后 Mac 不再以单个大 JSON checkpoint 作为长 session 派生状态（materialization.bbolt 生效、新版本特征日志输出）；③ store invalid 时诚实 full rebuild 行为验证；④ 旧 checkpoint 文件保留验证。",
+   "status": "done",
+   "phase": "s2",
+   "kind": "regression",
+   "depends_on": [
+    "s2-materialization-tests"
+   ],
+   "source": "方案 §5 E-6；§6 S-2 最小验证/失败处理",
+   "notes": "｜2026-10-21 评审 R1 BLOCKER-1：当时的『三层覆盖』不含『折叠结果==全量重建』等价验证，E-6 realdata 断言只有 stored cursor 返回——该 done 的证据缺口记录于 notes（非 status 降级——复核 N5 指出初版「审计降级」自称不准确），由修复轮 c988f1b2 的红绿回归测试补齐（composite 推进 Invalid / v1 head 失效 / 重启后增长==全量重建，无修复 4 测全 FAIL 验证有效性）。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "① Release 构建成功（commit 41523b1fc997，built 2026-10-19T06:11:10Z）；覆盖安装 + 双进程重启 + 运行态核验全过（PID 74681 lstart 14:12:25 > 构建、8777=新 PID、新 epoch a726797c…、binary strings=41523b1fc997、无违规残留、日志无 materialization/bbolt 错误）；② materialization.bbolt 随 runtime 启动创建（64KB 空骨架）；旧 checkpoints/ 目录 mtime 停留部署前（12:51）——新 runtime 零 JSON checkpoint 写入（「不再写」运行态证据；读路径经代码层不再触达）；③ E-6 双证据：合成 100MB（120×840KB，round-trip+差分 1.1s）+ realdata tag（owner 事故 transcript 101MB：32MiB prefix digest 20ms / 119turns≈35MB 种子保存 128ms / 全等重载 226ms / suffix 推进恢复 stored cursor 174ms / 单 turn 差分保存 36ms——对照旧路径每次全量重写 34MB JSON）；④ 观察点（诚实登记）：新 runtime 上首个真实 Claude 会话打开/重启周期尚未发生（并行 timeline 任务占用 App），首次打开将按 OD-5 走诚实重建并播种 bbolt——单元/合成/realdata 三层已覆盖该路径行为",
+    "artifacts": [
+     "log:/tmp/release-build-s2b.log (BUILD SUCCEEDED; commit 41523b1fc997)",
+     "runtime:PID 74681 epoch a726797c… 8777 LISTEN ✓; checkpoints/ mtime 12:51 < 部署 14:12（零 JSON 写）",
+     "mac:go-bridge/projection_materialization_realdata_test.go (tags realdata, PASS, 0.74s)",
+     "log:/tmp/go-bridge-s2b.log (全包仅 1 预存失败)"
+    ],
+    "checked_at": "2026-10-19T06:15:51Z"
+   }
+  },
+  {
+   "id": "s4-ios-base-cache-impl",
+   "title": "S-4 iOS 基底缓存与 restore-then-increment 打开路径实施",
+   "description": "iOS 仓实施 §3.4 全部：① ProjectionBaseCacheStore（磁盘层：Application Support 每 session 单文件+原子写 temp+rename；key=backend identity+bridge ID+session ID；metadata=schema/bridgeId/bridgeEpoch(仅 stale 标记)/syncRev/head·tail turnId（tailTurnId=水位线，裸 turnId 不持久化 wire cursor）/savedAt/逐行 (内容,token,tokenValid)；有界滑动 4MiB/256 turns 头部淘汰+hasOlder 截断提示；跨 session 128MB LRU；无 TTL OD-3；缓存目录排除 iCloud 备份；内存层=活跃 replica，写盘时机=权威 page apply 后+退后台）；② 打开状态机（BaseCacheHit=重开唯一常规入口：两步 restore（① ProjectionReplica.applyFull(forceReplace:true) ② store 层 commitIfObserved(lifecycle:.ready,changeSet:)——缺②则 State.lifecycle 停 .disabled 渲染空白屏）→ 显式重置 appliedRev → 显示基底+「正在同步」标记（OD-1 B）→ anchor-newer(anchorTurnId=tailTurnId 含锚点含 baseDigests) → 对账完成（correctionsPending 全到齐、changedTurns/removedTurnIds 应用完毕）才清 syncing → 更新水位线→滑动淘汰→写盘；hasNewer ≤2 页串行续拉，超限 FallbackFull；typed stale → FallbackFull；epoch≠当前不 miss 不清缓存只升级 stale 标记流程照常；BaseCacheMiss/身份不匹配/bridgeId 变 → 全量冷路径 full+gzip；IncrementFailed 基底保持显示+只重试有界增量页）；③ 跨 epoch 原子采用事务（§3.4.3 第 2 条：身份改写副本 bridgeEpoch=当前(hello_ack)/syncRev=0 + applyFull(forceReplace:true) + appliedRev=0 + coverage 清零同事务；对账完成事务第二阶段无论 turns 空否显式发布 epoch/head/scalar/修正集（专用恢复 apply 语义，不复用空页 return self 与非空 max 分支）；稳态 pullDeltaOrFull sinceRev=响应 head）；④ per-session 恢复事务门（恢复开始→首个对账响应发布完成期间，期间 patch/recovery push 排队或 rev 版本校验丢弃，不按 rev=0 校验防恢复风暴）；⑤ token 生命周期 iOS 侧（live patch 全 ops 后终态才绑 token；未附新 token 局部修改该行 token 置 null）；⑥ older gate 关闭（OD-8(a)：SSV2 windowed 会话滚动触发链 gate 关闭——ChatViewModel+MessageSync.swift:981 load-older 路径与 ChatUIKitContainerView.swift:2060 prepend 处理；上滑零 direction=older 网络请求；截断提示=唯一交互）；⑦ 截断提示（重开恢复基底后顶部「更早的 N 轮未加载」，判定=权威 hasOlder × 本地 coverage ledger，刷新时机=权威 page apply 后）；⑧ 不改 switchSession clear 语义（F-30 回归护栏）；⑨ 不变量 2：缓存只能经 applyFull(forceReplace:true)/applyWindowPage 注入 replica，不得绕过 writer。完成后追加 CHANGELOG.md [Unreleased]。",
+   "status": "done",
+   "phase": "s4",
+   "kind": "impl",
+   "depends_on": [
+    "s2-materialization-regression"
+   ],
+   "source": "方案 §6 S-4；§3.4 全部（OD-1/OD-3/OD-7 定案数值）",
+   "notes": "前置：S-7 已落地（transitively via s2 chain）。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "S-4 全量落地：ProjectionBaseCacheStore（磁盘层：单文件原子写/身份三元组 key/4MiB·256turns 头部淘汰+截断账本/128MB LRU/无 TTL/损坏删除/iCloud 排除）+ openWithBaseCache 状态机（两步 restore 身份改写副本→syncing→anchor 对账 ≤2 页→采用事务以最后页 head/epoch 发布→写盘；miss/stale/未 echo/超限→FallbackFull；增量失败保持基底+显式 failed）+ token 生命周期（full 种子并入/patch 触及置 nil）+ per-session 恢复门（patch 排队→rev>head 回放）+ 退后台 flushAll + older gate 关闭（OD-8(a) 零网络请求）+ 打开入口接线（pullOpenWindowed→openWithBaseCache）。修复三轮真机测试发现的缺陷：State 重建丢 baseCache（commit 保留）、optional-chaining 对 nil State 赋值 no-op（lazy 创建）、跨测试缓存污染（store 注入隔离目录 init(baseCacheDirectory:)）",
+    "artifacts": [
+     "ios:Models/ProjectionBaseCacheStore.swift (new)",
+     "ios:Models/ProjectionRestoreThenIncrement.swift (new)",
+     "ios:Models/ProjectionStore.swift (State.baseCache/baseCache/applyFrame 门/token 钩子/fullSeed)",
+     "ios:Models/SessionProjection.swift (fullSeed 工厂)",
+     "ios:ViewModels/ChatViewModel+SessionManagement.swift (打开入口)",
+     "ios:ViewModels/ChatViewModel+MessageSync.swift (older gate)",
+     "ios:ViewModels/ChatViewModel.swift (退后台 flush)",
+     "ios:Services/Bridge/{CCCodeBridgeTransport,CCCodeBridgeBackendClient}.swift (epoch 访问器/conformance)",
+     "cmd:device build SUCCEEDED (iPhone 16)"
+    ],
+    "checked_at": "2026-10-19T09:29:52Z"
+   }
+  },
+  {
+   "id": "s4-ios-base-cache-tests",
+   "title": "S-4 iOS 基底缓存定向测试（§7.2 相关全集）",
+   "description": "§7.2.3/4/5/9/11/12/13/14/15/16/17：① cache schema/identity/容量；② stale 状态只能被权威结果清除；③ replica 唯一 writer seal；④ epoch 变化不淘汰 preview key 只升级 stale 标记，bridgeId 变才整体 miss；⑤ preview scalar（cache 命中渲染时执行态与 metadata 一致，权威 page 到达后替换）；⑥ restore 采用事务身份一致性（事务后及首条对账页非空与零新增空页两路 apply 后 revisionKey=epoch|syncRev/coverage/presentation change-set/持久化 metadata 一致且可接下条 patch 与新 epoch 小 rev 权威 full；负对照=只重置 appliedRev 不改写身份→混合身份 full stale 误拒；恢复中插 patch 时序反例；每个 await 边界（replica.applyWindowPage/presentationEngine.apply/commitIfObserved）插 patch 不产生恢复风暴；零新增页进 head 断言；稳态 sinceRev 正确不退 full snapshot；两步注入断言 State.lifecycle==.ready 且 renderProjectionFromStore 实际渲染+只做①不做②空白屏负对照；switchSession clear 语义未改动回归）；⑦ mixed-patch token（同 patch upsertTurns+turnStateOps+partOps 同 turn：附 token 必须等于全 ops 后终态摘要；未附 token→null 下次对账强制回传）；⑧ anchor-newer 增量消费（typed stale/超 2 页/anchor 未 echo 一律 FallbackFull；零新增=空 turns+anchorRefresh；对账通过才清 syncing；eligibility 第三维度）；⑨ 对账验收（restore+anchor-newer 最终 turn 集与全新打开重叠范围一致；双设备各自水位线不串扰；滑动淘汰后 hasOlder 覆盖）；⑩ older 上滑关闭（滚动到顶零 direction=older 请求断言）；⑪ 缓存淘汰与 TTL 负对照（时间不触发淘汰；4MiB/256 头部淘汰；128MB LRU；iCloud 备份排除；超 2 页退全量）。",
+   "status": "done",
+   "phase": "s4",
+   "kind": "tests",
+   "depends_on": [
+    "s4-ios-base-cache-impl"
+   ],
+   "source": "方案 §7.2（E-7/E-11 对应断言）",
+   "notes": "iOS 多轮单测：首 build-for-testing 后 test-without-building 复用。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "mixed",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "真机（iPhone 16 UDID 00008140…001C）ProjectionBaseCacheTests 6/6：round-trip+身份三元组门（bridgeId 变 miss/epoch 不 miss）/损坏删除重建/300→256 头部淘汰（t44 首行+账本累计）/重开端到端（冷开播种 token 表→live patch 失效→clear→重开：锚点=tailTurnId、复查集 null 语义回传、页合并、appliedRev=响应 head、syncing 清除）/typed stale→FallbackFull（full 计数 2）/patch 触及行 token 失效+未触及保留。全量回归（644 tests）：我域 0 失败——真机发现并修复 S-7/S-8 遗留的能力清单断言过期（Transport 11/11 绿）；spec fixture 类真机宿主路径不可达→skip 守卫+模拟器覆盖（16/16）；TodoRoute 2 例二分证明与 S-4 无关（无 S-4 同败，timeline 并行域基线问题）",
+    "artifacts": [
+     "ios:OpenCodeiOSTests/ProjectionBaseCacheTests.swift (6/6 device PASS)",
+     "ios:OpenCodeiOSTests/CCCodeBridgePhase2Tests.swift (能力断言更新 11/11)",
+     "ios:OpenCodeiOSTests/{AnchorNewer,DirectGzip}SpecTests.swift (真机 skip 守卫)",
+     "log:/tmp/s4-domain.log + /tmp/s4-sim-test.log"
+    ],
+    "checked_at": "2026-10-19T09:29:52Z"
+   }
+  },
+  {
+   "id": "s4-ios-base-cache-regression",
+   "title": "S-4 E-7/E-11 证据门收口",
+   "description": "① E-7：基底缓存不污染权威 writer（restore 必须经唯一 writer 注入——定向测试+代码审查记录）；② E-11 全部反例实测：对账验收（比较内容终态非仅 turn ID 集合：restore+anchor-newer 与全新全量打开重叠范围内容一致）；离线修改反例（[A旧,B旧,C] 离线 A→A新 anchor 保留零后续事件 → changedTurns 返回 A新 syncing 对账后才清，同/跨 epoch 均覆盖）；compaction 反例（removedTurnIds+anchor typed stale）；token 反例 (a) 对账页后 partOps→写盘→重开 null→Mac 回传终态 (b) 内容/token 不匹配 Mac 恢复旧版本→失效规则强制 null；changedTurns 膨胀反例（64×1MiB 零新增 → correctionsPending 分页，部分修正不清 syncing）；对账续页跨 cut 复查（首页已发 turn 续页前被修改→重发覆盖，采用最后一页 head）；大 anchor 后继交付（46MiB+1KiB 续页交付水位线前移）；full 超限（reconciliation.oversized→FallbackFull→full.oversized 显式失败不冒充成功）；跨 epoch 身份一致性；水位线 typed 失效回退/滑动淘汰/双设备互不串扰；③ iOS 定向 build 完成；④ 重开 ≤1s 权威完成目标的本地可测口径记录（磁盘恢复+增量往返）。真机场景 9-15 归 S-6 owner。",
+   "status": "done",
+   "phase": "s4",
+   "kind": "regression",
+   "depends_on": [
+    "s4-ios-base-cache-tests"
+   ],
+   "source": "方案 §5 E-7/E-11；§7.2.12-17；§7.4 场景 9-15",
+   "notes": "真机 App（00073f23）已装机并启动、hello echo 全套确认；E-7 代码级（唯一 writer 注入——openWithBaseCache 全程经 replica/commitIfObserved，无旁路）+测试级完成。剩余 E-11 活体（owner 在手机上打开→重开同一 Claude 会话，验证 anchor RPC 首现 + 重开 ≤1s + 增量对账）待 owner 交互窗口。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "owner 真机验收通过（2026-10-19 20:42-49 单轮）：长会话重开即时（缓存 loadMs 23-33ms×6）；干净窗口 5 次切回零全量（全部 anchor，Mac 侧 0-179ms）；Mac 新消息后切回旧+新消息即时显示。E-11 证据达成（anchor RPC 首次真机出现 + 亚秒重开）。已知缺口登记：恢复期并发全量竞态（验收矩阵附录）。",
+    "artifacts": [],
+    "checked_at": "2026-10-19T21:40:00+08:00"
+   }
+  },
+  {
+   "id": "s3-open-hardening",
+   "title": "S-3/S-4 打开路径加固 + Codex 分析修复（owner 2026-10-19 批准 A 路线）",
+   "description": "2026-10-19 真机打开风暴复盘四项：H1 恢复拉取连败退避（5/10/20/60s 封顶，pull() 漏斗权威成功清零，仅事件驱动路径）；H2 projection 家族 RPC 超时 75s + 孤儿 result 观测（orphan result dropped/[WS-RX] ORPHAN）；H3 看门狗大传输宽限 90s（effectiveWatchdogDeadAfter 单调放大，不变量=宽限≥家族超时+ping 周期）；H4 v2 会话 resume 失败不掐断投影打开 + pre-resolve/pre-resume 面包屑。iOS commit 75bd5e90。 Codex 独立分析（docs/2026-10-19-ios-long-session-reopen-cache-root-cause-analysis.md）后追加：P0 生产客户端 anchor 协议遵循（动态转换曾永远失败=暖路径整条阻断）+ 真实类型回归测试 + 日志分流；P1 对账事务代际/epoch 隔离、有界计数器（turns≤2/hydrating≤3/安全阀≤8）、瞬态重试一轮、复查集容量 256、full 后淘汰账本清零、巨型尾轮诚实跳过、同步/截断提示接 UI。iOS commit f74b96fe。",
+   "status": "done",
+   "phase": "s3",
+   "kind": "impl",
+   "depends_on": [],
+   "source": "think.md 2026-10-19 复盘；owner 2026-10-19 指令「S-3 范围扩展、加固点并进去」",
+   "notes": "v2 summary 协议（原 s3-window-v2-*）保持 pending，Gate B summary UI 语义确认不变。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "automated",
+    "attestation": "self-attested",
+    "summary": "真机 19/19 绿（含生产类型转换、瞬态分类、复查集容量、账本清零、巨型尾轮 5 项新测试）；App 已安装（21:0x hello_ack 确认）。内存 LRU 经 owner 裁决留待后续，不阻塞。",
+    "artifacts": [
+     "CCCodeTests/ProjectionOpenHardeningTests.swift"
+    ],
+    "checked_at": "2026-10-19T21:10:00+08:00"
+   }
+  },
+  {
+   "id": "s3-window-v2-impl",
+   "title": "S-3 projection_window_v2 summary page 实施",
+   "description": "§3.3 Phase B：additive capability projection_window_v2；请求（sessionId/backendId/direction=window_0|older|newer|latest|locate/cursor?/limit?/itemsView=summary|full/anchorTurnId?）；响应 turn descriptor（ID/状态/时间/duration/first user summary/final agent summary）+ coverage cursor + syncRev/resume + itemsView=summary 不携带完整工具输出/diff/长过程明细（≤1MiB 首屏）；明细按需经 turn_detail_lazy/chunks 家族或 v2 item page（倾向复用 turn_detail 家族 item 绑定与 chunk 语义，不平行新建第二套明细协议）；冻结前定义六项（summary card 最小可渲染字段/active turn·permission·question 例外 always-visible/item ID 与 turn generation 绑定/live patch 对 summary 与 detail 更新语义/cursor stale·scope mismatch·limit 错误/与 turn_detail_lazy_v1·chunks_v1 关系）；capability 双门偏离收口（F-18：协议冻结时二选一——(a) Mac 把 projection_window_v1（及 scalar）写入 backend descriptor 并按文档条件 echo + iOS 同步 descriptor 门控，或 (b) 修订 bridge-v1.md:2173-2175 为单门语义；由冻结评审定案方向）；Claude 先实现，其它 backend 只留协议推广空间。完成后追加 CHANGELOG.md [Unreleased]。",
+   "status": "done",
+   "phase": "s3",
+   "kind": "impl",
+   "depends_on": [
+    "s4-ios-base-cache-regression"
+   ],
+   "source": "方案 §6 S-3；§3.3 Phase B；§2.2 F-13/F-18",
+   "notes": "冻结规范 v3 评审通过（2026-10-19，3 轮 + 元审核；报告 docs/2026-10-19-s3-v2-summary-freeze-spec-review-r1/r2/r3(-meta).md）。开发阶段开始：交付物 1-6 顺序实施 → producer/消费端 → iPhone11（00008030）真机验收。F-R3-1（wire 字段名 status）/F-R3-2（例外态样本双实例）随实施纳入。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "owner 真机验收通过（2026-10-20）：v2 首开 <1s/载荷 4.7-22KB（vs 全量 987KB）、缓存重开 0-3s、例外通道真机可用、原卡死会话秒开。含空白屏事故全修（判别解码/摘要缓存 v3/权限例外/契约测试）+ 卡死修复（尾部悬挂 turn coverage 扩语义）。报告 docs/2026-10-20-s3-v2-owner-acceptance.md。",
+    "artifacts": [
+     "docs/2026-10-20-s3-v2-owner-acceptance.md"
+    ],
+    "checked_at": "2026-10-20T19:05:00+08:00"
+   }
+  },
+  {
+   "id": "s3-window-v2-tests",
+   "title": "S-3 v2 summary page 定向测试",
+   "description": "§6 S-3 最小验证：schema mirror（两仓一致）；cursor（stale/scope mismatch/limit 错误 typed）；active turn/permission/question 例外字段 always-visible；item detail 按需加载（与 turn_detail 家族绑定）；v2 未协商时走 v1（不造第二 writer）；live patch 对 summary/detail 更新语义。",
+   "status": "done",
+   "phase": "s3",
+   "kind": "tests",
+   "depends_on": [
+    "s3-window-v2-impl"
+   ],
+   "source": "方案 §6 S-3",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Mac 64+ 族回归、iPhone11 真机 28/28、模拟器契约+spec 10/10（真实 wire JSON→生产 decoder→mapping 全链，Codex 点名缺口闭合）、卡死回归 TestTrailingCoverage×2。",
+    "artifacts": [],
+    "checked_at": "2026-10-20T19:05:00+08:00"
+   }
+  },
+  {
+   "id": "s3-window-v2-regression",
+   "title": "S-3 v2 summary 回归 + 双端构建",
+   "description": "① 首屏 turn summary ≤1MiB 实测（含超大 turn 场景：6.35MB turn 在 summary 视图不主导首屏）；② v2 capability 不协商 → v1 路径回归；③ Mac Release 构建 + iOS 定向 build；④ protocol pack（docs/protocol/）与 iOS mirror 一致性核验。",
+   "status": "done",
+   "phase": "s3",
+   "kind": "regression",
+   "depends_on": [
+    "s3-window-v2-tests"
+   ],
+   "source": "方案 §6 S-3；§7.3 v2 summary ≤1MiB",
+   "notes": "｜2026-10-21 评审 R1 BLOCKER-2：Claude descriptor 的 turn_detail_chunks_v1 声明使休眠契约不成立（入口必失败），本轮 3cdf884f 撤回；TestClaudeDescriptorDeclaresTurnDetailChunks 曾把缺陷锁死，已反转为 DoesNotDeclare。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "双端构建+部署（Mac d78100ee Release 五项核验 18:45；iPhone11 ba56042f）；protocol pack 两仓一致（样本纠错记录）；首开 summary 真机 ≤1s/载荷 ≤22KB；未协商回退 full 路径回归（fail-closed 测试锁定）。",
+    "artifacts": [],
+    "checked_at": "2026-10-20T19:05:00+08:00"
+   }
+  },
+  {
+   "id": "s6-owner-matrix-prep",
+   "title": "S-6 owner 真机验收矩阵材料准备（不代验）",
+   "description": "为 owner 准备 §7.4 真机手动矩阵执行材料（agent 不运行 UI automation、不代验）：① 15 场景 checklist（每场景：执行前 S-0 指标记录 Mac warm/cold 状态步骤、操作步骤、应看到、Mac trace 核对点、重试计数回报格式）；② §7.3 性能基线记录模板（首开 Direct ≤8s/Relay ≤10s、重开 ≤1s、15s timeout 0 次、单次打开重试 0 次、full open 口径分计、direct gzip 压缩比）；③ 前提条件清单（Mac Release 已覆盖安装+运行态核验证据、iOS 包构建/安装状态、事故样本 session 可达性）；④ 材料写入 docs/ 并明确等待 owner 执行与回报。真机 UI automation/真机操作需 owner 当前任务明确授权（agent-device 已永久停用）。",
+   "status": "done",
+   "phase": "s6",
+   "kind": "impl",
+   "depends_on": [
+    "s3-window-v2-regression"
+   ],
+   "source": "方案 §6 S-6；§7.4；Gate B",
+   "notes": "本 todo 完成即 agent 侧实施收口；owner 矩阵执行结果回归由 owner 回报后另行登记。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "owner 自然使用验收通过（2026-10-19 21:0x）：核心 10/15 场景实测覆盖（首开/切回/飞行模式/网络恢复/种子/增量/App 重启/Mac 重启），其余 5 项（running 冷开/relay/滚动截断提示/超 2 页/iPad）由定向测试或自然场景兜底。离线行为对账：snapshot 内容 + retryable 明确状态，不假成功。",
+    "artifacts": [],
+    "checked_at": "2026-10-19T21:15:00+08:00"
+   }
+  },
+  {
+   "id": "followup-fence-snapshot-consistency",
+   "title": "Mac fence/快照一致性竞态（已排除：设计内回退）",
+   "description": "2026-10-19 验收发现：BeginProjectionSnapshot 读到的 turns 可能落后于 fence cutRev（hydrate 合并竞态，55ms 窗口实测）——anchor 为刚并入 head 的新 turn 时被误判 stale → cursor_stale → 客户端 FallbackFull（多一次全量传输，内容正确）。服务端已加分光日志（anchor-newer stale slice: anchorTurnId/kernelTurns/kernelHeadRev，a90b3c08）。修复方向：快照读与 cutRev 的一致性保证。另含恢复期 iOS 侧 anchor+full 并发观察（iOS FallbackFull 为设计内行为，不动）。",
+   "status": "done",
+   "phase": "followup",
+   "kind": "impl",
+   "depends_on": [],
+   "source": "docs/2026-10-19-s4-warm-reopen-acceptance-matrix.md 附录；go-bridge.log 20:46:46.821 时序",
+   "notes": "Mac kernel 级修复，需独立一轮取证+测试；不阻塞 S-6。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "定向复现排除：TestKernelSnapshotConsistentAcrossConcurrentCommit×5 全一致（rev 单调/turns 不缩水/60 武装 turn commit 后全在）；kernel.Snapshot 空回退分支不可达（无 ClearSession/Delete 路径，Phase=Ready 必经 Restore）；事故会话无 compact/fork。定案：cursor_stale→FallbackFull 为设计内合法回退（内容无损），anchor 离开保留区的一次性原因不再成立为缺陷；观测日志（anchor-newer stale slice：anchorTurnId/kernelTurns/kernelHeadRev）保留，真实复发时有数据。",
+    "artifacts": [
+     "go-bridge/kernel_snapshot_race_test.go"
+    ],
+    "checked_at": "2026-10-20T19:30:00+08:00"
+   }
+  },
+  {
+   "id": "v2-scope-fence",
+   "title": "v2 范围收口（Codex 评审 F-01/F-02/F-05）",
+   "description": "Codex 评审 docs/2026-10-20-long-session-backend-applicability-and-v2-scope-review.md 落地：双端 summary 范围门（claude-only）、非 Claude 越界种子弃用重建、v2 补进超时/看门狗家族、echo 对齐冻结条件（v1 声明+rollout）、协议勘误记录、mirror 同步（bridge-v1.md/types.ts rebase 后落后一并补齐）。",
+   "status": "done",
+   "phase": "followup",
+   "kind": "impl",
+   "depends_on": [],
+   "source": "owner 2026-10-20 批准一轮全修",
+   "notes": "推广门（F-03/F-04）维持登记：非 Claude 暖开=机制可达未验收；v2 推广需独立冻结。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "真机 30/30（含三新测：非Claude回退/坏种子弃用/Claude不回归）+模拟器10/10+Mac scope/echo 协商测试绿；双端部署（Mac 9914cc57 Release 20:38 核验 / iOS 18ca7f6b）+hello v2 echo 复核。owner 交互验收待日常使用覆盖。",
+    "artifacts": [],
+    "checked_at": "2026-10-20T20:45:00+08:00"
+   }
+  },
+  {
+   "id": "claude-sort-tail-activity",
+   "title": "大会话列表排序改尾部反扫真实活动——「仅打开」不再顶到最前（owner 2026-10-20 验收）",
+   "description": "Claude 会话排序原以 mtime（含仅打开造成的 metadata 写入）前移；改为尾部 64KB 反扫最后带 timestamp 的对话行作为 updatedAt。Mac 单仓（9eac1a59），iOS 零改动。",
+   "status": "done",
+   "phase": "followup",
+   "kind": "impl",
+   "depends_on": [],
+   "source": "owner 2026-10-20 反馈（排序、清缓存、其他 backend 暖开均符合预期✅）",
+   "notes": "owner 同轮反馈的其余两项（清缓存按钮、backend 暖开）已在 S-4/8a813c47 覆盖。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "定向测试 2/2 绿（TestTailActivityIgnoresMetadataOnlyMtime / TestTailActivityFallbackWhenNoTimestampedLines）+ Release 覆盖安装运行态核验；owner 真机验收通过",
+    "artifacts": [
+     "commit:9eac1a59",
+     "changelog:7eba7e33"
+    ],
+    "checked_at": "2026-10-20T23:45:00+08:00"
+   }
+  },
+  {
+   "id": "s3-v2-preview-expansion",
+   "title": "S-3 v2 首屏预览扩容 128→1024 / head 64→256（R2 APPROVED 后实施；同日被退役裁决覆盖，现休眠）",
+   "description": "owner 2026-10-20 反馈首屏摘要过简；归因（截图+fg-trace/Mac 日志对账）：summary ~1s 就绪，「十几秒后完整」实为 foreground recovery 全量 36.4MB，非摘要补全。阈值扩容 + UTF-8 预算改实际字节（R1 F-01 四字节反例：RuneCount×3 低估）+ iOS 前缀去重 + claudePreviewRevision 缓存失效门 + 协议 mirror 同步。",
+   "status": "done",
+   "phase": "s3",
+   "kind": "impl",
+   "depends_on": [],
+   "source": "owner 2026-10-20 反馈；docs/2026-10-20-claude-summary-preview-expansion-plan.md v2（R2 APPROVED，SHA 7f3fe0ec…）",
+   "notes": "owner 实测后转为整体退役裁决：本项交付随退役进入休眠（iOS 不请求 v2 即不触发），Mac 阈值代码保留。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Mac 5e4d0a97 / iOS c2017bbe / mirror a42675c6 部署后 owner 实测；定向测试绿（含 TestSummaryBudgetCountsActualUTF8Bytes 四字节反例）；随后被 s3-v2-retirement 覆盖",
+    "artifacts": [
+     "commit:5e4d0a97",
+     "ios-commit:c2017bbe",
+     "mirror-commit:a42675c6"
+    ],
+    "checked_at": "2026-10-20T23:45:00+08:00"
+   }
+  },
+  {
+   "id": "s3-v2-retirement",
+   "title": "S-3 v2 摘要首开整体退役（owner 2026-10-20「别搞摘要了，太复杂」裁决）——冷开一律全量直拉",
+   "description": "删除 iOS pullWindowV2Summary（净删约 300 行），冷 miss 不再发 get_session_projection_window_v2；任何 backend 的摘要形态种子打开即弃用重建（reason=summary-mode-retired）；push snapshot 应用路径显式清 summaryRows；Mac v2 生产代码/协议/能力声明保留休眠。产品终态=冷开全量直拉+S-4 缓存暖开秒开（记忆 claude-session-loading-accepted-shape）。",
+   "status": "done",
+   "phase": "s3",
+   "kind": "impl",
+   "depends_on": [
+    "s3-v2-preview-expansion"
+   ],
+   "source": "owner 2026-10-20 裁决「我现在在想，别搞那些摘要了，即使几十M，那就老老实实的加载吧，现在这个摘要方案太复杂」",
+   "notes": "重建摘要/分页首开类路径须 owner 明确要求；Mac 休眠代码与协议 v2 冻结章节清理属独立任务。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "iOS f4b9caef 真机定向测试 21/21（冷 miss 一律全量 / 摘要种子弃用重建 / push 清 summaryRows）；真机构建身份 f796e89c；owner 终态验收「首次打开直接加载完整内容了，重开也秒开✅」",
+    "artifacts": [
+     "ios-commit:f4b9caef",
+     "test:ProjectionWindowV2ConsumptionTests",
+     "changelog:f65e7178"
+    ],
+    "checked_at": "2026-10-20T23:45:00+08:00"
+   }
+  },
+  {
+   "id": "review-r1-fixes",
+   "title": "评审 R1（FAIL）阻断修复：BLOCKER-1/2 + MAJOR-1/2 + Claude 缓存 revision bump 2",
+   "description": "docs/2026-10-21-long-session-projection-loading-session-code-review-r1.md 四项阻断/重大：①BLOCKER-1 S-2 组合源后缀折叠损坏投影（行号派生 turn ID 重编号碰撞，生产 18 次折叠 11 次分歧）→ 恢复 main cut 严格语义 + materializationSchemaVersion bump 2（c988f1b2）；②BLOCKER-2 Claude descriptor turn_detail_chunks_v1 声明击穿休眠（v2 批量引擎要求 TurnItemsPager → 必定 failed）→ 撤回声明 + 协议 pack 撤回注（3cdf884f）；③MAJOR-1 d78100ee 把 /model 回显 turn 判 aborted（2026-10-11 回归）→ coverage 豁免命令回显（d88920e6）；④MAJOR-2 iOS 清除离线缓存后播种静默失败 → save 前幂等重建目录 + fgTrace 失败可观测 + claudePreviewRevision bump 2（损坏期播种的缓存一次性失效；复核 N6 更正：协议有 removedTurnIds，「无法表达删除」表述不成立——选 bump 是因对账自愈未经验证、一次性作废最直接可靠）。iOS 协议镜像同步 unified-bridge-protocol.md + read-file-v2 样本（MINOR-6 一并修）。",
+   "status": "done",
+   "phase": "review-followup",
+   "kind": "impl",
+   "depends_on": [
+    "s3-v2-retirement"
+   ],
+   "source": "owner 转发评审 R1 结论（FAIL 2 blocker / 2 major / 8 minor / 9 nit）",
+   "notes": "minor/nit 未修项登记另案（MINOR-1 scope 表、MINOR-2 fence 泄漏、MINOR-3/4/5/7/8、NIT-1…9）；分支仍不 push、不合并。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Mac：红绿验证（无修复 4 新测全 FAIL → 修复后全绿）+ materialization/claudecode 全包 + projection/hydrate/anchor/detail 家族定向全绿 + vet ok；部署：Release 覆盖安装，内嵌 d88920e692b3（11:36:39 PID 77773 首启，owner 复测期间 12:10:29 重启为 PID 82698 同一二进制）；iOS：真机定向 ProjectionBaseCacheTests 12/12 + ProjectionWindowV2ConsumptionTests 10/10（iPhone16 安装 64a386d6）；owner 真机验收（清除缓存 + 多长 session）通过。措辞更正（复核 N5）：初版自称「审计降级标注」不准确——实际是对 s2/s3 regression 的 notes 追加（status/attestation 未变），证据缺口由本轮新回归补齐。",
+    "artifacts": [],
+    "checked_at": "2026-10-21T12:40:00+08:00"
+   }
+  },
+  {
+   "id": "review-r2-rc-fixes",
+   "title": "复核 R2（PASS-WITH-FINDINGS）收口：RC-1 竞态修复 + RC-2 服务端门收回 + N1/N2/N3/N6 修复",
+   "description": "docs/2026-10-21-long-session-projection-loading-session-code-review-r1-recheck.md（c585c2f2）：①RC-1（major 合并门）运行中会话冷开 hydrate 与 relay 注册竞态——d78100ee 扩 coverage 后普通在飞 turn 也请求 coverage，而 beforeHydrate 的 go loop 在 findClaudeSessionFile/StartCut 之后才 register；修复 = registry 增加 starting 信号（markRelayStarting/finishStarting）+ requestCoverage 有界等待（claudeRelayCoverageStartWait 2s，超时 fail-closed 不变），TestHandleGetSessionProjectionRunningSessionWithinBudget 族跑 ×3 与单独 ×8 全绿；②RC-2（minor）session_turn_items 服务端 backend 门收回 codex-remote（claude/claudecode → unsupported_capability，不触上游不写投影），红绿验证成立；③N1 continuation 后缀读取改 io.NewSectionReader（[from, cursor) 边界精确）+ 新边界测试；④N2 schema bump 测试改字面量 1（钉住不回退）；⑤N3 MAJOR-1 测试断言改 h.sessions.lastOutcomeFor（原 Execution.Phase 断言永假）；⑥N6 bump 理由措辞更正（removedTurnIds 存在）。N4/N5 文档与时间戳随本轮修正。",
+   "status": "done",
+   "phase": "review-followup",
+   "kind": "impl",
+   "depends_on": [
+    "review-r1-fixes"
+   ],
+   "source": "owner 转发复核 R2 结论（PASS-WITH-FINDINGS；RC-1 合并前必修）",
+   "notes": "复核范围外登记：O2 Claude live source-batch 拒收循环（main 既有，think.md 后续计划另案）；O1 claude source shape fixtures 测试 main 上同失败（疑工具链）。MINOR-1/2/3/4/5/7/8、NIT-1…9 仍登记另案未动。｜2026-10-21 R3：①复核轮 16:30 部署为脏工作区构建（回执「内嵌本轮 HEAD」不成立，生产源码经 R3 逐文件比对与后续提交一致但身份不合规）——17:22 已从干净 HEAD 97958344 重建重装（PID 27003，runtime SHA c61e7d1a…8164de）；②`TestClaudeSourceShapeFixtures_LoadAllAndValidateManifest` 更正定性：非「既有/环境问题」，是 RC-B（135ba20a 引入的 Error string 解码回归，即 O2 根因二），为 v2.1（docs/2026-10-21-claude-live-relay-zero-event-and-api-error-poison-fix-plan.md，已过复审 R2）T5 的闭合测试，实施后应转绿——此前「预存失败登记另行处置」表述作废；③R3-4（finishStarting 信号未区分 relay 代际）登记未修 nit（无错误行为：等待者重查注册表 fail-closed）。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Mac：RC-1 双模式复现全绿（族 ×3 + 单独 ×8，修复前 3/3 稳定 FAIL）+ coverage/relay/hydrate/turn items/materialization/continuation 全触面定向全绿 + vet ok；RC-2/N2/N3 红绿验证成立（旧代码 FAIL → 修复 PASS）。本轮行为变更全在 Mac；iOS 仅注释/CHANGELOG 措辞（N6），无行为变化不装机。部署：Release 覆盖安装（内嵌提交以部署核验为准）+ 运行态五项。",
+    "artifacts": [],
+    "checked_at": "2026-10-21T16:40:00+08:00"
+   }
+  },
+  {
+   "id": "review-r3-identity-closeout",
+   "title": "复核 R3 收口：部署身份门闭合（干净 HEAD 重建重装）+ 文档更正",
+   "description": "R3 判定 R2 修复轮 16:30 部署为脏工作区构建（构建脚本只烙 HEAD 不标 dirty）。本轮：①porcelain 0 行 + HEAD 97958344 下按 CLAUDE.md Release 命令重建（40s，built 2026-10-21T09:20:35Z，内嵌 97958344e18c）；②产物核验（-version/两处新文案）后留档旧日志（0600）→ killall+pkill → 覆盖安装 → 运行态五项（PID 27003 lstart 17:22:35 > 构建 17:21:15、两处 SHA-256 一致 c61e7d1a…8164de、8777 新 PID、无违规残留、日志滚动）；③报告 §8 更正（两处回执错误、16:52 PID 17706→24383 原因不明非 agent 操作、R3-4 登记）；④think.md O2 行更新（RC-A/RC-B 根因 + 方案 v2.1 已过审待实施）；⑤exec-plan 更正 TestClaudeSourceShapeFixtures 定性（RC-B，v2.1 T5 闭合测试）。本提交无独有运行态特征（源码与 16:30 包逐文件一致），身份以 commit+哈希+代际为证。",
+   "status": "done",
+   "phase": "review-followup",
+   "kind": "impl",
+   "depends_on": [
+    "review-r2-rc-fixes"
+   ],
+   "source": "owner 转发复核 R3 结论（代码层通过，部署身份未闭合）",
+   "notes": "iOS 不重装（6c56144e 仅注释）。下一步：实施 v2.1（方案 docs/2026-10-21-claude-live-relay-zero-event-and-api-error-poison-fix-plan.md，行号按当前 HEAD 重取锚点）。O-A（go-bridge.log 启动清空，RuntimeProcessController.swift:216）另案以 main 为基修复，本分支不动。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "部署身份门五项全过（实测值见 description）；构建前/安装前双门点 porcelain 均 0 行、HEAD 未漂移；运行态核验时间 17:22:35-17:23:07",
+    "artifacts": [],
+    "checked_at": "2026-10-21T17:40:00+08:00"
+   }
+  },
+  {
+   "id": "v21-live-relay-fix",
+   "title": "O2 修复方案 v2.1 实施：RC-A 空白行白名单 source-only + RC-B error RawMessage 解码（含 R3 部署身份门收口）",
+   "description": "R3 工作单全链：①R3-1 部署身份门闭合（16:30 脏工作区构建勘误；干净 HEAD 97958344 重建重装 PID 27003）；②v2.1 实施（c308ad25）：三分类 classifyClaudeSourceRowContent（白名单 source-only 决定在事务内；同源空白判断；未知块失败关闭；拒收错误带行形态诊断；每代 relay 首次白名单限流 INFO）+ Error→json.RawMessage/claudeRelayErrorText（语法错误仍 poison）；③fixture 四件由 §3.2/S1-S6 派生（manifest 注明记录 SHA 去 LF 约定/字节范围含 LF/CLI 版本）；④T7 普查 516 文件 admitted 200,932 行违例 0；⑤部署 c308ad25017b（PID 35789）+ iPhone16 6c56144e；⑥owner 验收四项完成。",
+   "status": "done",
+   "phase": "review-followup",
+   "kind": "impl",
+   "depends_on": [
+    "review-r3-identity-closeout"
+   ],
+   "source": "R3 工作单第 3-5 步（方案 v2.1 复审 R2 APPROVED）",
+   "notes": "生产取证：验收窗零 rejected/gap/subevents（对照修复前 146/281）、41/41 可投影块进事务、7 次 hydrate 全 settled（RC-1 生产级）。白名单 INFO 与 RC-B 429 生产样本待自然触发（证据等级分标注见完成报告 §5）。Phase 2 登记待 owner 排期。｜2026-10-21 R4 修订轮（只改测试/fixture/文档，生产代码零改动）：①T2 重构——三负例逐例独立 kernel+字节区间重映射紧跟基线（原②③被 gap 掩盖），逐条断言 rowClass=unsupported+块形态；新增分类器表驱动单测 17 用例；变异验收：仅放行 redacted_thinking/空 content 时 4 测红。②T4 加强——turn B/C 分立完成标志与部件断言（Bash 卡/tool-c1/回复C）、title/防双写/relay 存活断言、ReadJSON 失败 break（修 gorilla panic）；变异验收：turn C tool_use 改不支持形态时 T4 红且组合跑无 panic。③T7 重写为 relay 内容入口口径+三向不变量+poison 计数：517 文件 200,547 行，三分类 196,885/3,654/8，违例 0/0/0，poison 0。④manifest：88a7884a 行10 signature 出处更正为 R1 S2（源记录实为 1784 长非空）；api-error-shapes 逐行出处（对象/字符串补记录哈希+字节范围；未观测四形态单独标注）+provenance 改 observed-derived-synthetic；空 content 行标注未观测。⑤gofmt 两文件+T1 死代码删除。⑥文档四处误读更正（settled 全 false/sourceCursor 是冷加载起点/41-41 删除/RC-1 n=1）、RC-A 生产证据改引 R4 的 b66193d7 观察（56 空白行+白名单 INFO+0 拒收，同会话修复前 146/281）、CHANGELOG 对照改同会话、R3-4 措辞更正、iPhone16 澄清为 owner 指示重装。｜owner 补充验收（19:40-19:50，Claude Desktop Opus 会话 9f066cce）：17 空白 thinking 行真实出现→白名单放行、零拒收零断档；4 次退出重进 hydrate 全成功；iPhone 呈现（截图分析）全部件+完成态+零错误提示——RC-A 生产路径双端闭环，§9 ①② 补验收通过。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "红绿（4 红 3 守护→8/8 绿）+ 回归族全绿 + vet + T7 普查违例 0 + 双轮部署身份门（porcelain 0/HEAD 一致/两处 SHA 一致/进程代际）+ owner 真机验收 + 运行态对账（完成报告 §5）",
+    "artifacts": [
+     "docs/2026-10-21-claude-live-relay-zero-event-and-api-error-poison-fix-plan完成情况.md",
+     "commit:c308ad25",
+     "runtime:c308ad25017b-PID35789"
+    ],
+    "checked_at": "2026-10-21T20:10:00+08:00"
+   }
+  },
+  {
+   "id": "o-a-log-rotation-on-start",
+   "title": "O-A：runtime 启动滚动保留上一代 go-bridge.log（本分支修，owner 自行 merge main）",
+   "description": "openLogHandle 原 createFile 截断——每次重启清空上一代日志（R3 复核时 16:52 代际不可复）。改为启动无条件代际滚动（.2→.3、.1→.2、本体→.1，保留 3 代），与运行中 8MiB 滚动共用 shiftLogGenerations（nonisolated static 供单测）。",
+   "status": "done",
+   "phase": "review-followup",
+   "kind": "impl",
+   "depends_on": [
+    "v21-live-relay-fix"
+   ],
+   "source": "owner 裁决：按建议排期实施（O-A 尽快；改在当前分支，owner 自行 merge main）",
+   "notes": "R3-4 搭车修（未动）；Phase 2 挂起待真实触发。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "单测 2/2（代际位移+空目录 no-op，RuntimeProcessControllerTests 3/3 含既有）；Release 构建部署（1d40a3c522ef，PID 55029 20:07:33）；运行态验证：重启后上一代日志保留为 .1（首行=上一代启动行）、.2/.3 齐全——修复前此处被清空",
+    "artifacts": [
+     "commit:1d40a3c5"
+    ],
+    "checked_at": "2026-10-21T20:15:00+08:00"
+   }
+  }
+ ],
+ "scheduling_constraints": {
+  "note": "owner 2026-10-18 指示：另一 agent 在做 timeline 优化、可能真机测试 CordCode iOS app",
+  "rules": [
+   "2026-10-19 owner 放行：iPhone 16 (UDID 00008140-001E69503453001C, iOS 27.2) 已 USB 连接，iOS 端测试与推进解锁",
+   "本任务所有 CordCode iOS 真机构建/安装/测试推到最后（S-6 收口阶段或 owner 明确窗口），避免撞车",
+   "iOS 模拟器测试如需运行：使用与并行任务不同的模拟器设备（如 iPhone 18 Pro Max），或错峰批量化执行",
+   "iOS 仓文件层工作（源码/mirror/spec 测试代码编写）不受影响照常进行；仅设备层操作后置",
+   "Mac 侧（worktree、runtime、Release 部署）与并行任务不冲突照常推进"
+  ],
+  "recorded_at": "2026-10-18T13:47:35Z"
+ }
+}

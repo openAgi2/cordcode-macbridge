@@ -212,17 +212,22 @@ actor RuntimeProcessController {
            attributes[.type] as? FileAttributeType == .typeSymbolicLink {
             try manager.removeItem(atPath: path)
         }
-        rotateLogIfNeeded(path)
+        // O-A（2026-10-21 评审 R3 范围外发现）：runtime 每次启动时无条件滚动保留
+        // 上一代日志（.1/.2/.3），替代原先 createFile 直接截断——此前每次重启
+        // （120 分钟定时重启/自愈/手动）都会清空现场，上一代日志永久丢失，
+        // 排障无法取证（R3 复核时 16:52 代际日志即因此不可复）。
+        Self.shiftLogGenerations(path)
         manager.createFile(atPath: path, contents: nil, attributes: [.posixPermissions: 0o600])
         let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
         try handle.seekToEnd()
         return handle
     }
 
-    private func rotateLogIfNeeded(_ path: String) {
+    /// 日志代际滚动（保留 3 代）：.2→.3、.1→.2、本体→.1。启动滚动（openLogHandle）
+    /// 与运行中按大小滚动（rotateLogIfNeeded）共用本序列。纯文件操作，无 actor
+    /// 状态依赖，nonisolated static 以便单测直调。
+    nonisolated static func shiftLogGenerations(_ path: String) {
         let manager = FileManager.default
-        guard let size = (try? manager.attributesOfItem(atPath: path)[.size]) as? Int64,
-              size >= 8 * 1024 * 1024 else { return }
         try? manager.removeItem(atPath: "\(path).3")
         for generation in stride(from: 2, through: 1, by: -1) {
             let source = "\(path).\(generation)"
@@ -230,7 +235,16 @@ actor RuntimeProcessController {
                 try? manager.moveItem(atPath: source, toPath: "\(path).\(generation + 1)")
             }
         }
-        try? manager.moveItem(atPath: path, toPath: "\(path).1")
+        if manager.fileExists(atPath: path) {
+            try? manager.moveItem(atPath: path, toPath: "\(path).1")
+        }
+    }
+
+    private func rotateLogIfNeeded(_ path: String) {
+        let manager = FileManager.default
+        guard let size = (try? manager.attributesOfItem(atPath: path)[.size]) as? Int64,
+              size >= 8 * 1024 * 1024 else { return }
+        Self.shiftLogGenerations(path)
     }
 
     private func closeOwnedResources() {

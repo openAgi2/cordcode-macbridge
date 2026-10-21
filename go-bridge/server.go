@@ -1,11 +1,13 @@
 package gobridge
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,6 +33,33 @@ const (
 // 不能短于真实可写完时间。详见 go-bridge.log: too many write errors + socket_send_ms。
 var bridgeWriteTimeout = 60 * time.Second
 
+// directGzipThreshold mirrors relay_gzip_v1 sender policy（§Direct Frame Compression：
+// 阈值与「压缩更小才发送」是 sender policy，不是额外 wire 要求）。
+const directGzipThreshold = 32 * 1024
+
+// projectionMaxBytes 协商档位（frozen §Anchor-Newer）：默认 50MiB（现状维持）；
+// 提升档上限 256MiB（服务端永不授予更高值）；防呆下限 1MiB。
+const (
+	projectionMaxBytesDefault  = 50 << 20
+	projectionMaxBytesTierCap  = 256 << 20
+	projectionMaxBytesFloor    = 1 << 20
+)
+
+// anchorNewerProductionEnabled 是 projection_window_anchor_newer_v1 的发布门
+// （S-7）。Rollback = 置 false（echo 撤回 → 未协商连接收 typed
+// protocol.capability_required，客户端 fail-closed 回全量冷路径；无数据迁移）。
+const anchorNewerProductionEnabled = true
+
+// projectionWindowV2ProductionEnabled 是 projection_window_v2 的发布门（S-3 v2，
+// 冻结 2026-10-19）。Rollback = 置 false（echo 撤回 → 客户端 fail-closed 回
+// full 首开现状路径；无数据迁移——冻结规范 §9 回退条款）。
+const projectionWindowV2ProductionEnabled = true
+
+// directGzipProductionEnabled 是 direct_gzip_v1 的发布门（镜像 PERF-S4D 纪律）。
+// Rollback = 置 false（echo 撤回 → 未协商连接永远收不到 binary 帧，逐字节回到
+// 不压缩现状；无数据迁移）。
+const directGzipProductionEnabled = true
+
 // Conn wraps a WebSocket connection with thread-safe writes.
 type Conn struct {
 	mu                     sync.Mutex
@@ -42,6 +71,9 @@ type Conn struct {
 	authedDevice           *TrustedDeviceRecord
 	revoked                bool
 	consecutiveWriteErrors int
+	// directGzip：该连接已协商 direct_gzip_v1（hello echo 成功后置位；SendJSONReport
+	// 持 c.mu 读它，序列化后 ≥32KiB 且 gzip 更小时以 binary 帧整帧压缩发送）。
+	directGzip bool
 }
 
 type ActiveConnRegistry struct {
@@ -109,19 +141,48 @@ func (c *Conn) SendJSON(v interface{}) {
 	_ = c.SendJSONReport(v)
 }
 
+// SetDirectGzipEnabled 标记该连接已协商 direct_gzip_v1（仅在 direct hello 协商成功
+// 后调用；c.mu 保护，与 SendJSONReport 的读并发安全）。
+func (c *Conn) SetDirectGzipEnabled(enabled bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.directGzip = enabled
+}
+
 // SendJSONReport is the error-returning write used by K4 projection probes so
 // write_post can distinguish closed-conn / WriteJSON failure from real wire success.
 // Plain SendJSON swallows both (historical contract for broadcaster callers).
+//
+// direct_gzip_v1（§Direct Frame Compression）：已协商连接的大帧按 binary 帧整帧
+// gzip（≥32KiB 且压缩更小才启用；sender policy）。序列化统一走
+// json.NewEncoder(...).Encode——与既有 WriteJSON 输出逐字节一致（含尾随换行），
+// 未压缩帧以 text 帧发送，压缩对旧 peer 不可见。
 func (c *Conn) SendJSONReport(v interface{}) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
 		return fmt.Errorf("connection closed")
 	}
-	// 写 deadline 必须在持 c.mu 的情况下紧贴 WriteJSON 调用（gorilla 不允许同 conn 并发写），
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(v); err != nil {
+		return err
+	}
+	raw := buf.Bytes()
+	messageType := websocket.TextMessage
+	payload := raw
+	if c.directGzip && len(raw) >= directGzipThreshold {
+		if compressed, err := gzipPayload(raw); err == nil && len(compressed) < len(raw) {
+			messageType = websocket.BinaryMessage
+			payload = compressed
+		} else if err != nil {
+			// 压缩失败按真实失败上抛，不静默降级为明文重发（避免大帧行为漂移不可观测）。
+			return err
+		}
+	}
+	// 写 deadline 必须在持 c.mu 的情况下紧贴写调用（gorilla 不允许同 conn 并发写），
 	// 避免另一个写者在 deadline 与实际写之间插入。详见根治 spec 坑 1。
 	_ = c.conn.SetWriteDeadline(time.Now().Add(bridgeWriteTimeout))
-	if err := c.conn.WriteJSON(v); err != nil {
+	if err := c.conn.WriteMessage(messageType, payload); err != nil {
 		c.consecutiveWriteErrors++
 		slog.Debug("go-bridge: write error", "error", err, "consecutive", c.consecutiveWriteErrors)
 		if c.consecutiveWriteErrors >= 5 {
@@ -359,6 +420,29 @@ func (s *Server) negotiateTurnDetailLazyV1(ack *HelloAckMessage, hello *HelloMes
 	return true
 }
 
+// helloSupportsDirectGzipV1 returns true when the client advertised
+// direct_gzip_v1 in hello.
+func helloSupportsDirectGzipV1(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "direct_gzip_v1" {
+			return true
+		}
+	}
+	return false
+}
+
+// negotiateDirectGzipV1 applies the frozen hello rules for direct_gzip_v1 on the
+// DIRECT hello path ONLY（§Direct Frame Compression）。Relay 连接不经此协商——Relay
+// 压缩保持 relay_gzip_v1（envelope contentEncoding），语义互不触碰。Echo 即开启该
+// 连接的整帧 gzip 发送（≥32KiB 且更小才压缩；未声明客户端永远收不到 binary 帧）。
+func (s *Server) negotiateDirectGzipV1(ack *HelloAckMessage, hello *HelloMessage, conn *Conn) {
+	if !helloSupportsDirectGzipV1(hello) || !directGzipProductionEnabled || !ack.Ok {
+		return
+	}
+	ack.Capabilities["direct_gzip_v1"] = true
+	conn.SetDirectGzipEnabled(true)
+}
+
 // helloSupportsProjectionWindowV1 returns true when the client advertised
 // projection_window_v1 in hello.
 func helloSupportsProjectionWindowV1(hello *HelloMessage) bool {
@@ -375,7 +459,46 @@ func helloSupportsProjectionWindowV1(hello *HelloMessage) bool {
 // capability REQUIRES session_sync_v2 (windows are a projection-surface feature), and a
 // declaration without it is protocol.invalid_capabilities.
 func (s *Server) negotiateProjectionWindowV1(ack *HelloAckMessage, hello *HelloMessage, conn Connection) bool {
+	// S-7（§Anchor-Newer 超限恢复语义 / F-53）：projectionMaxBytes 数值协商。
+	// 授予值 = min(客户端请求, 提升档上限 256MiB)；缺省（未请求/未回显）= 50MiB。
+	// 该协商在 direct 与 relay 两条 hello 路径均经本函数（F-26 纪律同源）。
+	if req := hello.ProjectionMaxBytes; req != nil && *req > 0 && ack.Ok {
+		granted := *req
+		if granted > projectionMaxBytesTierCap {
+			granted = projectionMaxBytesTierCap
+		}
+		if granted < projectionMaxBytesFloor {
+			granted = projectionMaxBytesFloor
+		}
+		ack.ProjectionMaxBytes = &granted
+		s.eventPublisher.SetConnProjectionMaxBytes(conn, granted)
+	}
+	// S-7（§3.8）：anchor-newer 前置校验先于 window 早退——anchor 不要求
+	// projection_window_v1，anchor-only hello 也要走到 echo；缺 ssv2 前置 = hello
+	// 失败（同族纪律）。F-26：在 negotiateProjectionWindowV1 内扩展 → relay 路径
+	// 自动覆盖。
+	if helloSupportsProjectionWindowV2(hello) && !helloSupportsSessionSyncV2(hello) {
+		retryable := false
+		ack.Ok = false
+		ack.Error = &WireError{
+			Code:      "protocol.invalid_capabilities",
+			Message:   "projection_window_v2 requires session_sync_v2",
+			Retryable: &retryable,
+		}
+		return false
+	}
+	if helloSupportsAnchorNewerV1(hello) && !helloSupportsSessionSyncV2(hello) {
+		retryable := false
+		ack.Ok = false
+		ack.Error = &WireError{
+			Code:      "protocol.invalid_capabilities",
+			Message:   "projection_window_anchor_newer_v1 requires session_sync_v2",
+			Retryable: &retryable,
+		}
+		return false
+	}
 	if !helloSupportsProjectionWindowV1(hello) {
+		s.echoAnchorNewerAndScalar(ack, hello, conn)
 		return true
 	}
 	if !helloSupportsSessionSyncV2(hello) {
@@ -392,7 +515,80 @@ func (s *Server) negotiateProjectionWindowV1(ack *HelloAckMessage, hello *HelloM
 		ack.Capabilities["projection_window_v1"] = true
 		s.eventPublisher.SetConnProjectionWindowV1(conn, true)
 	}
+	s.echoAnchorNewerAndScalar(ack, hello, conn)
 	return true
+}
+
+// echoAnchorNewerAndScalar 处理 S-7 的两个 echo（anchor-newer 与 fence scalar）。
+// OD-6 W1 条件 2（fence scalar 分支的协商面）：scalar echo 条件 = 客户端声明
+// projection_window_v1 + projection_window_scalar_v1 + ack.Ok（镜像 §3.7 W1）。
+// Marked 连接的 decide=true fence 帧保留 Execution（per-turn 清空规则不变）。
+func (s *Server) echoAnchorNewerAndScalar(ack *HelloAckMessage, hello *HelloMessage, conn Connection) {
+	if helloSupportsAnchorNewerV1(hello) && anchorNewerProductionEnabled && ack.Ok {
+		ack.Capabilities["projection_window_anchor_newer_v1"] = true
+		s.eventPublisher.SetConnAnchorNewerV1(conn, true)
+	}
+	// S-3 v2（冻结 2026-10-19）：echo 条件 = 修订后 v1 单门条件集（v1 声明 +
+	// 服务端 rollout flag；ssv2 前置已在 negotiateProjectionWindowV1 入口校验）
+	// + v2 生产门。F-05 修复（2026-10-20 Codex 评审 §7）：此前漏 v1 声明与运行
+	// 时 rollout 检查——「关 v1 rollout 停 v2」不成立。producer 范围门在 handler
+	// 层（claude-only，F-01）；echo 保持连接级布尔语义（评审 §3.3）。
+	if helloSupportsProjectionWindowV2(hello) &&
+		helloSupportsProjectionWindowV1(hello) &&
+		projectionWindowV2ProductionEnabled &&
+		s.projectionWindowEnabled &&
+		ack.Ok {
+		ack.Capabilities["projection_window_v2"] = true
+		s.eventPublisher.SetConnProjectionWindowV2(conn, true)
+	}
+	if helloSupportsProjectionWindowScalarV1(hello) && helloSupportsProjectionWindowV1(hello) && ack.Ok {
+		ack.Capabilities["projection_window_scalar_v1"] = true
+		s.eventPublisher.SetConnProjectionWindowScalarV1(conn, true)
+	}
+}
+
+// sortedCapabilityKeys 返回 ack echo 的 capability 键（排序、逗号连接）——
+// hello 协商可观测性（§7.3：window/gzip/anchor 生效与否可从日志判定，E-3 类
+// 取证不再依赖设备侧日志）。
+func sortedCapabilityKeys(caps map[string]bool) string {
+	if len(caps) == 0 {
+		return "-"
+	}
+	keys := make([]string, 0, len(caps))
+	for key, on := range caps {
+		if on {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ",")
+}
+
+func helloSupportsProjectionWindowV2(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "projection_window_v2" {
+			return true
+		}
+	}
+	return false
+}
+
+func helloSupportsAnchorNewerV1(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "projection_window_anchor_newer_v1" {
+			return true
+		}
+	}
+	return false
+}
+
+func helloSupportsProjectionWindowScalarV1(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "projection_window_scalar_v1" {
+			return true
+		}
+	}
+	return false
 }
 
 // helloSupportsSessionSyncV2 returns true when the client advertised the
@@ -803,6 +999,9 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 		ack.Capabilities["session_state_events_v1"] = true
 		s.eventPublisher.SetConnSessionStateEvents(connection, true)
 	}
+	// direct_gzip_v1（§Direct Frame Compression，S-8）：仅 direct 路径协商——echo 后
+	// 该连接的大响应以 binary 帧整帧 gzip 发送；未协商连接 wire 逐字节不变。
+	s.negotiateDirectGzipV1(ack, &hello, conn)
 	// projection_window_v1 (frozen §Projection Window): prerequisite validation may fail
 	// hello; echo + per-conn mark only when the rollout flag is enabled.
 	if !s.negotiateProjectionWindowV1(ack, &hello, connection) {
@@ -838,7 +1037,7 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 		s.emitRecoveryFrames(connection, ack.Recovery, replay)
 	}
 
-	slog.Info("go-bridge: hello_ack sent", "ok", ack.Ok, "device", hello.Client.DeviceID, "catalog_cursor_epoch_v2", catalogV2)
+	slog.Info("go-bridge: hello_ack sent", "ok", ack.Ok, "device", hello.Client.DeviceID, "catalog_cursor_epoch_v2", catalogV2, "echoedCapabilities", sortedCapabilityKeys(ack.Capabilities))
 }
 
 func helloSupportsRecovery(hello *HelloMessage) bool {

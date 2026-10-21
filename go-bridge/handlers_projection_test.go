@@ -86,6 +86,7 @@ func TestPrepareClaudeProjectionSourceFreezesEveryCompositeSegment(t *testing.T)
 		source,
 		0,
 		source.Cursor,
+		nil,
 		SessionProjection{},
 		func(event projectionHydrateEvent) bool {
 			emitted = append(emitted, event)

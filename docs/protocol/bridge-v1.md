@@ -2168,11 +2168,14 @@ A CLIENT opt-in capability, mirrored as a backend-scoped server promise, followi
 `session_sync_v2` declaration pattern:
 
 - The client declares `capabilities: ["projection_window_v1"]` in `hello`. MacBridge echoes
-  `capabilities["projection_window_v1"] = true` in `hello_ack` only when BOTH (a) the
-  server-side rollout flag is enabled and (b) the selected backend descriptor's projection
-  kernel supports window admission. Per-backend support is additionally reported on the
-  backend descriptor's `capabilities` list; clients MUST gate window RPCs on the descriptor
-  list, not the global echo.
+  `capabilities["projection_window_v1"] = true` in `hello_ack` when the server-side rollout
+  flag is enabled (hello echo is the single gate). **[F-18 收口，2026-10-19 更正记录]**
+  本节原为双门语义（echo 条件 (b)「backend descriptor's projection kernel supports
+  window admission」+ 客户端「MUST gate window RPCs on the descriptor list, not the
+  global echo」）——descriptor 侧第二门自 F-13 登记以来从未实现（两端均为 hello echo
+  单门），随 `projection_window_v2` 冻结（§Projection Window v2 Summary）正式更正为
+  单门语义，与实现一致；per-backend 差异仍可经 backend descriptor capabilities 列表
+  观测（informational，非门控）。
 - **Prerequisite**: `session_sync_v2` MUST also be declared. A connection declaring
   `projection_window_v1` without `session_sync_v2` is a protocol violation: `hello` fails
   with `code = "protocol.invalid_capabilities"` (`retryable = false`). Windows are a
@@ -2374,7 +2377,9 @@ replaces the synthetic fixture under the same README discipline as
 ### Capability: `turn_detail_lazy_v1` (on-demand turn detail; frozen 2026-08-30, lazy-history §3.2.0)
 
 `turn_detail_lazy_v1` adds a backend-scoped lazy-detail surface for backends whose history is
-paginated upstream (v1: ONLY `codex-remote`, kind `codex-remote`). The first screen ships turn
+paginated upstream (v1: ONLY `codex-remote`, kind `codex-remote`; **v2 producer 扩展 =
+`claude`（kind `claude`），2026-10-19 随 `projection_window_v2` 冻结——per-session 资源门
+与 codex-remote 的 historyMode 维度不同，见 unified-bridge-protocol.md §11.7 修订**). The first screen ships turn
 summaries; per-turn detail (reasoning summaries, tool calls and outputs) is fetched on demand,
 committed to the projection Kernel, and delivered through the EXISTING
 `projection_snapshot`/`projection_patch` pipes — there is no second content channel.
@@ -2970,3 +2975,366 @@ credentials, directories, message bodies, or endpoints.
   `user_input_requested` (sample-gated) → Agent 正在等待回复/点击打开 CordCode 回答;
   `turn_error` (sample-gated) → 任务异常中断/点击打开 CordCode 查看详情. Kinds without
   archived real samples stay disabled and MUST NOT be enabled via analogous fixtures.
+
+## Direct Frame Compression (`direct_gzip_v1`) — FROZEN SPEC
+
+`direct_gzip_v1` is an optional `cordcode-bridge` v1 capability for compressing large
+MacBridge-to-client frames on DIRECT bridge WebSocket connections (LAN `ws://8777` and
+Tailscale `wss://8778`). It mirrors the `relay_gzip_v1` discipline
+(`relay-frame-compression.md`) as an application-layer, per-frame transform. It does not
+change client-to-Mac traffic, and it does not apply to Relay connections — Relay
+compression remains `relay_gzip_v1`, unchanged.
+
+### Negotiation
+
+The client advertises the capability in the authenticated `hello`:
+
+```json
+{"type":"hello","protocol":{"name":"cordcode-bridge","version":1},"capabilities":["direct_gzip_v1"]}
+```
+
+MacBridge compresses outbound frames only when ALL of these hold:
+
+- the active connection is a DIRECT bridge WebSocket (not a Relay frame connection);
+- the client declared `direct_gzip_v1`;
+- the Bridge accepted the `hello`.
+
+The successful `hello_ack.capabilities` map contains `"direct_gzip_v1": true`. Clients
+that omit the capability never receive compressed frames; for them the wire is
+byte-identical to before this capability existed. Rollback = stop echoing the
+capability (no data migration).
+
+### Frame self-description: WebSocket opcode
+
+The direct `WireMessage` envelope has no `contentEncoding` field, and the direct send
+path writes UTF-8 JSON text frames — a compressed frame is no longer readable JSON, so
+an in-band marker is self-contradictory (reading it would require decompressing or
+parsing first). The frame type is therefore described by the native WebSocket opcode:
+
+- `text` frame (opcode `0x1`): the original UTF-8 Bridge JSON envelope (unchanged);
+- `binary` frame (opcode `0x2`): `gzip(JSON envelope)` — the ENTIRE envelope compressed
+  as one gzip stream, written only to connections that negotiated this capability.
+
+This constraint applies to the **Mac→client direction only**. Client→Mac traffic keeps
+its existing shape (CordCode iOS already sends binary JSON frames) and MUST NOT be
+changed to text as part of this capability. Rejected alternatives: `permessage-deflate`
+(two-way, context-carrying, transport-global behavior — worse controllability and
+testability than a per-frame application layer); an in-band `contentEncoding` envelope
+field (self-referential — the field lives inside the compressed bytes); gzip magic
+sniffing (heuristic, violates the no-guessing discipline for future non-gzip binary
+frames).
+
+### Sender policy (Mac→client)
+
+Evaluated per frame after serialization: compress only when the serialized payload is
+≥ 32 KiB AND the gzip output is strictly smaller than the original. Small or
+incompressible frames remain text frames. Threshold and size check are sender policy,
+not wire requirements (mirroring `relay_gzip_v1`).
+
+Mixed traffic on one connection is normal: text and binary frames interleave, each
+self-describing by opcode.
+
+### Receiver requirements
+
+A client that negotiated the capability MUST dispatch on the WebSocket opcode:
+
+- `text` → the existing JSON parse path (unchanged);
+- `binary` → gunzip → the SAME parse path.
+
+Decompression failure is a real transport failure and MUST NOT be reinterpreted as
+uncompressed JSON or silently dropped. A client that did NOT negotiate can rely on
+never receiving a binary frame from the Bridge.
+
+### Freeze notes
+
+- The frozen assertion "un-negotiated connections carry zero binary frames" is scoped
+  to the **Mac→client** direction (client→Mac binary frames are pre-existing behavior
+  and out of scope).
+- Frozen fixture: `samples/direct-gzip-v1/` — gzip bytes plus the decoded JSON
+  envelope, SHA-256 recorded in its README; the iOS repository keeps a byte-identical
+  copy, and both sides' spec tests consume their in-repo copy.
+- This capability changes no JSON envelope fields and no `relay_gzip_v1` semantics.
+
+## Anchor-Newer Incremental Reconciliation (`projection_window_anchor_newer_v1`) — FROZEN SPEC
+
+Restore-then-increment 的服务端半边：客户端重开时以本地基底缓存的水位线（裸
+`tailTurnId`）拉取「严格后继增量 + 锚点终态刷新 + 全基底对账修正」。Bridge 对客户端
+进度**完全无状态**（同一 session 的多设备各水位线各请求，天然不串扰；任何一端重启都
+不需要另一端配合）——全部判定输入随请求携带。anchor 定位复用 §Projection Window 的
+裸 turnId 锚定语义（locate 先例 R8），切片复用同族 grow 语义（严格后继、never-split）。
+
+### Negotiation
+
+Capability `projection_window_anchor_newer_v1`：客户端在 hello `capabilities` 声明；
+声明必须同时声明 `session_sync_v2`（对账增量是 projection-surface 特性——缺前置时
+hello 失败 `protocol.invalid_capabilities`，与 `projection_window_v1` 同族纪律）。
+Bridge echo 条件 = 服务端实现落地 + `hello` 被接受。未 echo 时客户端 fail-closed 回退
+全量冷路径（`get_session_projection` + `direct_gzip_v1`；**不回 `window_0`**——其无
+默认 scalar 补齐）。Rollback = 停止 echo（无数据迁移）。
+
+### Request — `get_session_projection_anchor_newer`
+
+首包（全新对账事务；**无续页标记**）：
+
+```json
+{
+  "sessionId": "…",
+  "backendId": "claude",
+  "anchorTurnId": "<裸 turnId = 客户端水位线>",
+  "limit": 100,
+  "baseDigests": { "<turnId>": "<token>", "<turnId2>": null }
+}
+```
+
+续页（`correctionsPending` 未拉完时；**回传上一响应的 correction cursor = 续页身份
+显式标记**）：
+
+```json
+{
+  "sessionId": "…",
+  "backendId": "claude",
+  "anchorTurnId": "<同首包，不变>",
+  "baseDigests": { "<完整复查集>" },
+  "correctionCursor": "<上一响应 correctionsPending.cursor>"
+}
+```
+
+冻结字段语义：
+
+- `anchorTurnId`（必填，首包与续页同值）：裸 turnId 水位线。**不得持久化 wire
+  cursor**（R1 冻结条款）；请求时由 turnId 现场构造锚定。
+- `itemsView`（**additive 可选，2026-10-19 随 `projection_window_v2` 冻结**）：取值
+  `"summary"`；仅当客户端 v2 echo 且基底为 summary 种子时携带（首包与续页同值）。
+  携带时 `turns` / `anchorRefresh` / `changedTurns` 行以 §Projection Window v2 Summary
+  的 `BridgeTurnSummaryDescriptor` 形态返回（响应回显 `itemsView: "summary"`），不携带
+  完整明细——防「下次更新退回全量」。token 基准不变 = 底层完整 committed 内容；summary
+  规则演进不引发假 mismatch。legacy full 种子基底不携带（两类基底形态不混用）；未实现
+  v2 的 Mac 按 additive 惯例忽略。always-visible 例外态行（liveState / permission 族 /
+  user_input pending）仍完整内嵌，不因 `itemsView:"summary"` 收窄。
+- `baseDigests`（必填）：`{turnId → token | null}` 映射，**完整复查集 = 原始
+  baseDigests 全部项 ∪ 已发项 token**（含首包 anchorRefresh turn 与本事务已交付
+  turns）——**复查集不随页收缩，每续页携带全量**（受缓存上限约束 ≤256 项）。token
+  为 Bridge 生成的不透明摘要，随历史下发（full 种子 / anchor-newer 页逐 turn 附带，
+  见 token 生命周期）；`null` = 该行 token 失效（本地 live patch 局部修改后未获新
+  token），语义 =「请返回该 turn 当前终态」。
+- `correctionCursor`（可选；仅续页存在）：**无标记 = 首包（响应携带 anchorRefresh）；
+  有标记 = 续页（响应不携带 anchorRefresh）**。Bridge 以该标记区分两种请求形态，
+  不保存任何 per-device 状态——同一 cursor 重放结果幂等（upsert 覆盖）。
+- `limit`（可选）：turns 上限，协议默认 100 turns / 4MiB。
+
+### Response — 对账增量页（`get_session_projection_anchor_newer` result）
+
+```json
+{
+  "turns": [ /* 严格位于 anchor 之后的 turns（链序，不跳过）*/ ],
+  "anchorRefresh": { /* anchor turn 当前完整终态；仅首包 */ },
+  "changedTurns": [ /* 复查集中 token 不一致或为 null 的当前完整 upsert */ ],
+  "removedTurnIds": [ /* 复查项已不在 kernel 当前投影的 tombstone */ },
+  "scalarState": { "execution": { "phase": "…", "activeTurnId": "…" } },
+  "correctionsPending": { "cursor": "…", "remaining": 3 },
+  "syncRev": 531
+}
+```
+
+- `turns`：**严格后继**（复用 grow 语义：边界排他、R7 严格链序不跳过未加载 turn）。
+- `anchorRefresh`：anchor turn 的**当前完整终态**，独立字段——**不计入页 limit 与
+  字节预算**，never-split（超大锚可超 4MiB，单独计量）。anchor == tail 且零新增时
+  `turns` 为空但 `anchorRefresh` 仍携带终态（缓存保存时仍在流式中的末 turn 离线完成
+  的最常见场景）。**仅首包携带；续页不重复**（anchor 开销只付一次）。
+- `changedTurns`：**复查集中**（全集口径）与当前内容 digest 不一致、或 token 为
+  `null`（失效必须回传）的 turns 的**当前完整 upsert**——覆盖离线期间对缓存范围内
+  旧 turn 的修改（live patch 只覆盖订阅后事件；对账是唯一修正载体）。受对账预算约
+  束、按整 turn 粒度分页（见预算）。
+- `removedTurnIds`：复查集中已不在 kernel 当前投影的 turnId（compaction/截断的
+  tombstone；**复查集中任何项被移除——无论已发/未发/早页确认——都经本字段返回，
+  不重发内容**），客户端从基底移除。
+- `scalarState`：会话级标量（`execution` 必选：phase/activeTurnId 覆盖 running /
+  requires_action；`planMode`/`sessionMode`/`collaborationMode`/`goal` 可选，nil = 该
+  backend 无此投影——语义镜像 `SessionProjection` additive scalar 字段）。
+- `correctionsPending`：剩余修正未拉完时携带（cursor + remaining 估计）；**部分修正
+  未完成不得清 syncing / 判已对账**。续页请求回传该 cursor。
+- `syncRev`：本页切片时的 committed head。**每续页独立取当前 head；客户端采用事务
+  以最后一页 head 为准**（单调覆盖，不要求与首包一致）。
+- 同 turnId 出现于 anchorRefresh/turns/changedTurns 多处 → 合并为一条（后到覆盖）。
+
+### token 生命周期绑定不变量
+
+每一缓存行的 `(内容, token)` 必须来自同一权威交付：
+
+1. **full 种子 / anchor-newer 页**：turn 内容与 token 同帧到达（每 turn 附带其
+   token），客户端原样配对存储。
+2. **live patch**：token 只能绑定该 patch 全部 ops 应用后的最终 turn 状态（upsert
+   基底 → stateOps/partOps 就地修改 → 以最终结果计算 token）；**未附带新 token 的
+   局部修改 → 该行 token 立即置 `null`**（对账请求中 null = 必须回传当前终态）。
+   绝不允许「新内容配旧 token」或「终态配中间态 token」。
+3. **写盘**：逐行保存 `(内容, token, tokenValid)`；缺失 token 的行一律按 null 处理。
+
+### 预算与确定性打包（同一输入只允许一个合法页序列）
+
+- 响应总硬顶 **48MiB**（全字段序列化合计；< transport 50MiB 解压上限留 header 余量）。
+- **mandatory 预留 2MiB**（envelope + scalar/metadata + removedTurnIds + 分页元数据；
+  任何页先扣除，保证 mandatory 字段永远可发）。
+- **anchorRefresh 与单个 changedTurn 均 never-split，独占额度 ≤46MiB**：超 46MiB →
+  typed `reconciliation.oversized` → 客户端 FallbackFull。
+- **对账预算（turns + changedTurns + scalar/metadata）≤ 8MiB / 每页**；anchorRefresh
+  不计入对账预算（另按独占额度与总硬顶计量）。首包对账空间被大 anchor 挤压时可少于
+  8MiB 甚至为 0（剩余全部 correctionsPending）。
+- **确定性打包顺序**：扣除 mandatory → 首包 anchorRefresh（唯一一次）→ turns（严格
+  后继，受 limit/4MiB）→ changedTurns（按 turnId 升序）。**相位边界**：turn phase 内
+  某 turn 装不下当前页剩余对账空间时本页 turn phase 即终止（该 turn 溢出至后续页；
+  never-split 独占或续页普通片），**当前页剩余空间不回填**——changedTurns 不得越过
+  未交付的 turns 提前装页；turns 全部交付完毕后 changedTurns 才按序进入（可与末个
+  turns 同页；同页内 turns 先于 changedTurns）。
+- **续页 = 内容页**：不携带 anchorRefresh，**可携带 turns 剩余片**（turn phase）与
+  changedTurns 剩余片（correction phase）；removedTurnIds/scalar/head/correction
+  cursor 随页携带。**对账事务内 turns 总页数计入「超 2 页退全量」判定**（首包即能
+  判定时首包 typed FallbackFull 提示；事务中途 live 新增致超限时中止事务 →
+  FallbackFull）。
+- **对账事务内水位线 = 已交付 turn 链的末端**（首包只交付 anchorRefresh 时 =
+  anchor 自身；续页交付 turns 后 = 其最后一个 turn）——46MiB anchor + 任意后继
+  turn 由续页交付后水位线前移，不阻塞前进。
+
+### 超限恢复语义（两级 typed 链）
+
+1. anchorRefresh 或单个 changedTurn 超 46MiB 独占额度 → typed
+   `reconciliation.oversized` → 客户端 FallbackFull（全量冷路径）。
+2. FallbackFull 后 full 序列化超当前协商 `projectionMaxBytes` → typed
+   `full.oversized` 显式终态失败（客户端明确错误态，不假成功、不部分渲染）。
+   **contingency `window_0` 不是恢复路径**（同受传输上限）。
+
+### `projectionMaxBytes` 协商（hello 可选数值字段）
+
+- hello 可选字段 `projectionMaxBytes: number`（客户端请求上限）；`hello_ack` 回显
+  `projectionMaxBytes: number`（**授予值** = min(客户端请求, 服务端档位上限)；未请求
+  或未回显 = 默认 50MiB）。direct 逻辑消息上限与 relay 解压上限同值生效。
+- 冻结档位：默认 **50MiB**（52428800），提升档上限 **256MiB**（268435456）。服务端
+  永不授予高于档位上限的值。内存峰值随上限走（解压 + 解析），由客户端单次解析管线
+  承接。
+
+### typed 错误族与 epoch 语义
+
+- `cursor_stale`：anchor 不在 kernel 保留区（水位线失效，如 compaction）→ 客户端
+  fail-closed FallbackFull，不假成功。**判定主体 = Bridge 侧**（判定输入
+  anchorTurnId 随请求携带）。
+- **epoch 中止 = 客户端侧判定**（bridgeEpoch 是 runtime 启动身份，epoch 变化必伴随
+  连接断开——客户端重连后经 hello_ack 取得当前 epoch，与对账事务开始时记录值不一致
+  → 主动整组放弃、FallbackFull）。**续页请求不携带 epoch 身份；Bridge 侧不比对
+  epoch**。客户端判定遗漏时由「复查集自包含幂等 + 采用事务取最后一页 head」收敛兜底
+  （不产生部分采用错误状态）。
+- 未协商连接调用本 RPC → typed `protocol.capability_required`（fail-closed）。
+
+### 与既有冻结面的关系
+
+- 不触碰 frozen v1 `BridgeGetSessionProjectionWindowParams` /
+  `BridgeGetSessionProjectionWindowResult` 字段集与 `window-response-spec.json`。
+- 冻结样本：`samples/projection-window-v1/anchor-newer-response-spec.json`（独立文件，
+  两仓字节一致副本；spec 测试新增独立读取点）。
+- `session_sync_v2` 是前置（hello 声明纪律）；`direct_gzip_v1` 与本能力正交组合
+  （大对账页同样经 opcode 分流压缩传输）。
+
+## Projection Window v2 Summary (`projection_window_v2`) — FROZEN SPEC
+
+冻结依据：`docs/2026-10-19-s3-v2-summary-freeze-spec.md`（v3，评审通过 2026-10-19；
+owner 裁决路线 A + 显示方式 ③ 正文优先）。additive 新 RPC；不触碰 frozen v1 window
+类型与字段集。schema 见 `schema/bridge-v1.types.ts`（`BridgeGetSessionProjectionWindowV2*`）。
+
+### Capability: `projection_window_v2`
+
+- 客户端 `hello` 声明 `projection_window_v2`；MacBridge echo 条件 = 上文
+  `projection_window_v1` 修订后单门条件集（客户端声明 `projection_window_v1` +
+  `session_sync_v2` 前置 + 服务端 rollout flag）+ v2 producer 落地（`claude`）。
+- **【2026-10-20 勘误记录（scope review F-01/F-05）】** echo 是**连接级**布尔（同一
+  连接可服务多 backend），表达「本连接可讲该 RPC」，不表达 per-backend 生产范围。
+  本交付的 producer 集合 = `claude` / `claudecode`；**其他 backend 的
+  `get_session_projection_window_v2` 与 anchor-newer `itemsView:"summary"` 由
+  服务端拒绝（typed `invalid_params`，retryable=false，frozen 错误集既有码）**，
+  客户端也应按 backend 资格分流。普通 full 形态 anchor 对全部 backend 不受影响。
+  未来扩展 producer 集合 = 独立协议冻结（真实样本 + 契约测试），不得改本布尔语义。
+- `itemsView` 是**请求内字段**而非独立 capability；echo `projection_window_v2` 即承诺
+  `summary` / `full` 两种取值。协商沿用 `negotiateProjectionWindowV1` 内扩展纪律
+  （direct + relay 双路径自动覆盖）。
+- 未协商 v2 的客户端：行为不变（full 首开，现状路径）。回退 = Mac 不 echo → iOS
+  自动回 full 首开，无数据迁移。
+
+### RPC: `get_session_projection_window_v2`
+
+请求字段继承 v1（`sessionId` / `directory?` / `backendId` / `direction` / `cursor?` /
+`limit?` / `anchorTurnId?`；组合规则不变——`cursor` 仅 older/newer 续拉、`anchorTurnId`
+仅 locate 必填，两者均为裸 turnId 锚定语义），新增必填 `itemsView: "summary" | "full"`。
+
+响应（`itemsView` 为判别字段）：
+
+- `itemsView: "summary"`：`window`（完整继承 v1 `BridgeProjectionWindow` 字段集）+
+  `turns: BridgeTurnSummaryDescriptor[]` + `scalarState`（必选，W1 语义镜像——v2 从
+  形状上消除 F-11）+ `syncRev` + `resume?` + `summaryBudget`（必选，可观测账本：
+  `payloadBytes` / `foldedTurnIds` / `exceptions`）。
+- `itemsView: "full"`：v1 行为 + `scalarState` 必选。
+
+### TurnSummaryDescriptor（冻结定义 1+2）
+
+- `turnId` / `status` / `startedAt?` / `completedAt?` / `durationMs?`。
+- `userBrief` / `agentBrief`（`{ text, truncated }`）：正文 brief；≤1024 chars 完整，
+  超长截断至 1024 + `truncated: true`；`agentBrief` 取末段（结论优先），
+  `agentBriefHead` 取开头 256 chars（③ 正文优先双端锚定）。
+  （2026-10-20 预览扩容勘误：原冻结值 128/64 扩至 1024/256——owner 真机反馈首屏
+  正文过简；私有策略阈值变更，wire 字段集与判别形态不变，冻结样本仍字节有效。）
+- `folded` / `foldReason`（`long_body | tool_process | both | budget`）：③ 折叠形态
+  依据；`budget` = 预算降级整 turn 折叠（仅 turnId + folded + foldReason，无 brief；
+  渲染形态同 `long_body`，独立枚举供观测断言）。
+- `toolProcessCount?` / `toolProcessBytes?`：工具过程占位摘要。
+- `liveState?`：**always-visible 例外通道**——正在执行的轮次、权限确认卡（permission
+  族 part）、待回答问题（`user_input` 族 pending part，wire 字段名 `status ==
+  "pending"`）的完整 turn **原样**内嵌（frozen `BridgeTurnProjection`，never-split）。
+  **不新增 wire 字段**：iOS 按既有 part 类型识别。例外不受预算约束。
+- `turnGeneration?`：与 turn_detail 家族身份绑定（absent => 0）。
+
+**预算语义（定案）**：≤1MiB 是 brief 与工具占位合计的**软**预算；超限 → 老 turns 按
+`foldReason: "budget"` 降级（不截断已交付 brief）；`liveState` 例外与 `scalarState`
+不计入预算。**禁止以截断权限卡/待答问题凑预算**——例外永远完整。
+（2026-10-20 预览扩容勘误：预算计量改为 brief 三段的**实际 UTF-8 字节**合计——原
+`RuneCount×3` 近似对四字节码点低估，151 turns × 2304 码点全四字节时账本 1,043,712B
+而正文 1,391,616B，不触发降级；见评审 F-01。）
+
+### 明细按需加载（冻结定义 6）与 Claude 资格门（四层）
+
+- 展开折叠 turn / 工具过程 → 既有 `session_turn_items`（v1）/ `turn_detail_chunk`
+  （v2 overlay）；chunks 家族语义（replay/seq/generation）原样复用，不新建第二套明细
+  协议。Claude producer 的资格门四层定案见 `unified-bridge-protocol.md` §11.7 修订：
+  连接级 = `turn_detail_lazy_v1` echo（不变）；backend 门 = `{codex-remote, claude}`；
+  per-session 门（Claude 无 historyMode 维度）= 「turn 在 committed projection 且
+  status=completed」；descriptor 门 = Claude descriptor 声明 `turn_detail_chunks_v1`。
+- 明细一旦经 chunks 交付并入本地投影，后续 live patch / anchorRefresh 以增量 partOps
+  更新，不回退为完整明细重发（定义 4 一致性约束）。
+
+### live patch / 缓存 / 对账一致性（冻结定义 4）
+
+- summary 视图下 folded turn 的 patch 只更新折叠元数据（工具字节数等），不展开内容；
+  已展开（本地有明细）的 turn 按常规完整 patch。
+- 首开 summary 成功 → 基底缓存播种 summary 形态（缓存 schema v3：rows 带 brief +
+  folded 元数据）；legacy full 种子基底（缓存 schema ≤v2）继续以 full 形态对账（请求
+  省略 `itemsView`），两类基底形态不混用。
+- 重开对账 wire 机制 = 上文 anchor-newer 章节的 `itemsView` additive 字段。已下载明细
+  行的合并规则（token 比对 → 保留/标记 stale 下次展开重拉）与 token 簿记不变量见
+  冻结规范 §5；token 基准 = 底层完整 committed 内容。
+
+### Errors（冻结定义 5）
+
+错误集 = frozen v1 window 全集 + 新增 `summary.oversized`（重试=false）：
+
+| code | retryable | direction 适用 |
+| --- | --- | --- |
+| `cursor_stale` | true | older/newer（cursor 解码失败 / epoch 失效） |
+| `projection_window.cursor_scope_mismatch` | false | cursor 跨 `(backendId, bridgeEpoch, sessionId)` scope |
+| `projection_window.limit_exceeded` | false | `limit > maxWindowTurns(256)` |
+| `projection_window.locate_out_of_window` | false | locate：`anchorTurnId` 未知或超出保留区（诚实回 full） |
+| `invalid_params` | false | 全 direction |
+| `protocol.capability_required` | false | 全 direction（连接未协商 v2） |
+| `projection.hydrating` | true | 全 direction |
+| `summary.oversized`（新增） | false | `itemsView:"summary"`：单 turn 例外通道自身超 `projectionMaxBytes` → fail-closed |
+
+### 非目标（冻结边界）
+
+older 方向网络加载（OD-8 维持 (a) 关闭；`older` 仅作游标形状预留）；非 Claude backend
+producer；离线查看未下载明细（owner 接受）。样本：
+`samples/projection-window-v2/window-summary-spec.json` +
+`samples/projection-window-v2/anchor-newer-summary-response-spec.json`（两仓字节一致）。

@@ -8,6 +8,124 @@
 
 ## [Unreleased]
 
+### 2026-10-21 — MacBridge 重启不再清空 runtime 日志
+
+- 修复 runtime 每次重启（含 2 小时定时重启、异常自愈）都把上一代 go-bridge.log
+  清空的问题：现在启动时自动滚动保留最近三代（.1/.2/.3），排障时重启前的
+  现场不再丢失。
+
+### 2026-10-21 — 旁观外部 Claude 会话实时更新中断修复（v2.1）
+
+- 修复 iPhone 旁观 Mac 端正在执行的 Claude 会话时，工具调用、工具结果、中间
+  说明大量缺失、会话被反复标为失败的问题：开着思考的模型会写入「只有空白
+  思考/正文」的过渡行，此前这类行被整行拒收，导致后续内容连锁丢失。现在
+  这类行只推进内部账本、不再中断投影流；不认识的行形态仍然失败关闭并附
+  带可诊断日志。
+- 修复回合中出现一次 API 错误（如 429）后实时更新完全冻结的问题：错误行里
+  对象形态的 error 字段此前会让扫描器中断，之后的实时内容全部丢失。现在
+  正常解码，错误之后的内容照常实时出现（错误行本身仍只是诊断记录）。
+- 同一会话修复前后对照：修复前 73 分钟内 146 次丢事件、281 次断档；修复后
+  同会话继续旁观 20 分钟，56 个空白思考行全部正常放行、零拒收零断档。
+
+### 2026-10-21 — 复核 R2 修复：运行中会话冷开竞态 + 明细入口服务端兜底
+
+- **修复打开正在运行的 Claude 会话时偶发「加载投影失败」的竞态**（复核 RC-1）：
+  会话有在飞的普通回合时，冷开需要 relay 确认执行状态，但 relay 的注册与
+  冷开解析是并行的——小会话解析先完成时注册尚未就绪，冷开直接失败并重试。
+  现在冷开会短暂等待注册完成（上限 2 秒，超时仍诚实失败可重试）；既有
+  回归测试恢复稳定通过。
+- Claude 的「加载详细过程」请求在服务端彻底关闸（复核 RC-2）：即使旧客户端
+  或异常客户端发出该请求，也直接返回不支持——不再触发注定失败的上游拉取、
+  不再把失败态写进共享投影（客户端入口已在前一轮隐藏，此为服务端兜底）。
+- 后缀读取 API 边界精确化（复核 N1）：续读区间严格落在已提交截点内，消除
+  未来重新放开增量折叠时复发的隐患（当前生产不可达，防御性修复）。
+
+### 2026-10-21 — 评审 R1 阻断修复：投影数据损坏止血 + 休眠契约修复 + 两项回归修复
+
+- **修复 Claude 会话投影数据损坏**（评审 BLOCKER-1，生产已发生）：会话在上次
+  保存后又增长（Mac 终端聊过、runtime 重启等）时再次打开，增量折叠会因 turn
+  编号从续读位置重新计数而与既有轮次相撞——新的提问覆盖最早的几轮、新轮次
+  凭空消失或虚构，且损坏会存档累积。现恢复「来源截点不一致即完整重建」的
+  诚实语义并升级存储版本：已损坏的存档自动作废，下次打开重新完整加载（iOS
+  端 Claude 缓存同步作废重拉）。
+- **撤回 Claude「加载详细过程」入口**（评审 BLOCKER-2）：该入口点击必定失败
+  并把失败态写进共享投影（底层批量引擎此路径仅支持 codex-remote）。撤回后
+  iOS 不再显示该入口；相关代码保留休眠，待支持就绪后恢复。
+- **修复尾部本地命令（如 /model）回显轮被误标「已中止」**（评审 MAJOR-1，
+  2026-10-11 修复的回归）：历史会话最后一个动作是 CLI 本地斜杠命令时，冷加载
+  后该轮与整个会话不再被错误标记为失败。
+- 以上均附真实形态 transcript 回归测试（修复前失败、修复后通过的双向验证）。
+
+### 2026-10-20 — 摘要首开停用（owner 裁决）：Claude 冷开回归直接全量加载
+
+- owner 真机验收后裁决「别搞摘要了，太复杂」：iOS 冷开不再请求 summary 窗口，
+  直接全量拉取（几十 MB 属预期等待）；重开仍走本地缓存秒开（不变）。
+- Mac 端 v2 摘要生产代码保留休眠（iOS 不再请求即不触发；wire 能力仍声明，
+  后续清理另议）；旧摘要缓存（截短内容）打开时自动作废重建。
+- 上方「首屏正文预览扩容」条目对应的用户可见行为随本条停用而不再出现
+  （服务端阈值仍是 1024/256，供休眠路径与协议文档保持一致）。
+
+### 2026-10-20 — Claude 首屏正文预览扩容（128→1024 / 开头 64→256）
+
+- Claude 会话首次打开的摘要首屏，提问与回答正文预览从 128 字扩到 1024 字、回答
+  开头从 64 字扩到 256 字——绝大多数普通回复一打开即可读全，不再句中截断；超长
+  正文与工具/思考过程仍折叠、点击展开查看完整内容。
+- 摘要预算计量改为按实际 UTF-8 字节（原按字符数×3 估算对 emoji 等四字节字符
+  低估，扩容后可能超出 1MiB 软预算上限而不触发折叠降级——评审反例已补回归）。
+
+### 2026-10-20 — Claude 会话排序：仅真实消息活动才前移
+
+- 修复大会话（>512KB）在「仅打开」后被顶到项目分组最前的问题：open-spawn 启动的
+  Claude CLI 会写无 timestamp 的元数据行（last-prompt/cost-state）刷新 transcript
+  mtime，而大文件 updatedAt 原先直接用 mtime。现改为尾部 64KB 反扫取最后带
+  timestamp 的对话行作为活动时间，打开动作本身不再改变排序；真实消息（用户/助手
+  turn）仍正常前移。
+
+### 2026-10-20 — v2 摘要范围收口（仅 Claude）+ 越界缓存清理 + 协商条件对齐
+
+- 「先摘要后全文」此前会误用于 Codex/Grok/DeepSeek/OpenCode 会话（内容截短、
+  部分记录不可见且无法展开）；现在双端各守一层门（客户端按后端分流 + 服务端
+  两入口拒绝），误存的截短缓存自动作废并走完整内容重建。
+- v2 请求补进慢网络保护名单（75 秒耐心窗口/心跳宽限）；v2 开关补齐冻结规范
+  的启用条件（此前关闭 window 总开关不能停 v2）。
+- 协议勘误记录：能力协商保持连接级语义；摘要生产范围 = Claude，其他后端
+  未来开放需独立协议评审。
+
+### 2026-10-20 — v2 summary 首开（S-3）+ 尾部悬挂 turn 卡死修复
+
+- **长会话首次打开进入摘要模式**：首屏只拉每轮对话摘要（实测 4.7-22KB，约为
+  全量的 1/45-1/200），普通正文直接显示、工具过程折叠可展开、正在执行/权限卡/
+  待答问题完整显示；新协议 projection_window_v2 + anchor 对账 itemsView 增量。
+- **修复 Mac 内核卡死**（owner 曾白等 5 分钟）：尾部悬挂工具调用（进程被杀、
+  结果永不落盘）不触发收口裁决 → 等待预算反复耗尽。现在一切尾部未完成轮次
+  都进入裁决：进程死 → 合成中断终态；进程活 → 照常等待。
+- 修复 iOS 空白屏（解码字段错位）与摘要缓存/权限例外分类（经独立评审发现）。
+
+### 2026-10-19 — anchor 对账观测增强（S-7 证据门收口配套）
+
+- anchor stale/cursor 判定服务端此前零日志——补 anchorTurnId/kernelTurns/kernelHeadRev
+  分光（验收发现的 fence/快照不一致竞态由此可诊断，竞态本身登记 follow-up）。
+- relay hello_ack 补 echoedCapabilities 字段（与 direct 同口径，relay 双路径 echo
+  实测依据）。
+
+### 2026-10-19 — 投影物化存储（bbolt）与增量重启恢复（S-2）
+
+- 投影持久层从「每会话单个大 JSON checkpoint（长会话约 34MB，保存/读取/克隆全树）」换为 bbolt 行级物化存储 `session-projection/materialization.bbolt`：head/segments/turns 同事务原子提交，保存按行差分（未变 turn 零写），重启恢复不再序列化整棵 JSON。旧 checkpoints/*.json 保留不读不删；回滚 = 关发布门常量即回到旧路径。
+- 重启/重开支持增量折叠：接受「committed cursor ≤ 当前文件长度」的推进（恢复基线携带 stored cursors），仅折叠 append 的 suffix——单源走既有字节区间遍历；Claude composite 续链段新增 per-segment offset 续读（core 可选接口 `CompositeRichHistoryOffsetProvider`，provider 不支持时回退全前缀，行为不劣于现状）。截断/原地改写/段成员变化仍诚实失效重建（prefix digest 校验，OD-9 默认档：无跳过校验通道）。
+- window/anchor 请求的强制冷源检查增加等价门（F-14）：kernel Ready 且 committed 源 stat 未推进（size==cursor）时跳过冷检，对齐 full 路径 sinceRev 门语义。
+- 新依赖 go.etcd.io/bbolt（纯 Go 无 CGO）；codex-remote 懒历史 producer seed 并入 head 行（存取面接口化）。
+
+### 2026-10-18 — anchor-newer 对账增量 RPC 与 projectionMaxBytes 协商（S-7）
+
+- 新增 `get_session_projection_anchor_newer`（capability `projection_window_anchor_newer_v1`，session_sync_v2 前置）：客户端以裸 turnId 水位线请求「严格后继 turns + 锚点终态刷新（仅首包、never-split）+ 全基底对账修正」；`baseDigests` 全集复查（token 不一致/失效→changedTurns、移除→removedTurnIds），逐 turn token 与内容同帧下发（full 全量响应对协商连接也附带 `turnTokens` 种子）。预算按冻结规则执行：总硬顶 48MiB、mandatory 2MiB、never-split 独占 46MiB、每页对账预算 8MiB、确定性打包（相位边界不回填）、`correctionsPending` 自包含续页游标（Mac 零客户端状态，重放幂等）。
+- typed 错误链：anchor 离开保留区 `cursor_stale`；超 46MiB `reconciliation.oversized`；full 序列化超协商上限 `full.oversized` 显式失败。hello 新增数值协商 `projectionMaxBytes`（授予 = min(请求, 256MiB)，缺省 50MiB）。
+- fence scalar 分支（OD-6 W1 条件 2）：协商 `projection_window_scalar_v1` 的连接，decide=true fence 帧不再清空 Execution（per-turn 清空规则不变）。anchor 页（含 changedTurns）在同一完成事务注册 held turns；RPC 走与 full 同构的 projection_rpc trace。
+
+### 2026-10-18 — 直连传输逐帧压缩 `direct_gzip_v1`（S-8）
+
+- 新增直连（LAN `ws://` / Tailscale `wss://`）Mac→client 大响应的 gzip 逐帧压缩：客户端在 hello 声明 `direct_gzip_v1` 且 Bridge echo 后，序列化后 ≥32KiB 且压缩更小的响应帧以 WebSocket binary 帧整帧压缩发送（gzip(JSON envelope)），小帧与不可压帧维持 text 帧不变。此前事故样本约 34MB 的全量投影在直连路径无任何压缩（Relay 已有 `relay_gzip_v1` 但直连不适用）；按本地估算 level-1 压缩后约 11.2MB，长会话首开网络传输体积显著下降。
+- 协议冻结：`docs/protocol/bridge-v1.md` 新增 §Direct Frame Compression（FROZEN SPEC），冻结样本 `samples/direct-gzip-v1/`（gzip 字节 + 解压后 JSON，两仓字节一致副本）；`schemaRevision` 2026-09-05 → 2026-10-18。客户端→Mac 方向维持现状不在变更边界；未协商连接永远收不到 binary 帧（wire 逐字节不变），回滚 = 停止 echo 该 capability。
+
 ### 2026-10-16 — 工作站 Agent 接入开关正式生效
 
 - MacBridge 启动现在以 `agent-selection.json` 的显式选择作为唯一 Agent 集合：新装默认全关，已保存选择按 revision 恢复，不再隐式启动全部 Agent；文件损坏时阻止 runtime 启动并显示错误，不回落到默认全集或伪造空选择。

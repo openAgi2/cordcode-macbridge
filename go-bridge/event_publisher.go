@@ -246,6 +246,10 @@ type EventPublisher struct {
 	readFileV2               map[Connection]bool
 	catalogCursorEpochV2     map[Connection]bool
 	projectionWindowV1       map[Connection]bool
+	projectionWindowV2       map[Connection]bool
+	projectionAnchorNewerV1  map[Connection]bool
+	projectionWindowScalarV1 map[Connection]bool
+	projectionMaxBytes       map[Connection]int64
 	nextConnectionGeneration uint64
 	connectionGenerations    map[Connection]uint64
 	nextProjectionFenceID    uint64
@@ -315,6 +319,10 @@ func NewEventPublisher(bridgeEpoch string, broadcaster ...*Broadcaster) *EventPu
 		readFileV2:              make(map[Connection]bool),
 		catalogCursorEpochV2:    make(map[Connection]bool),
 		projectionWindowV1:      make(map[Connection]bool),
+		projectionWindowV2:      make(map[Connection]bool),
+		projectionAnchorNewerV1: make(map[Connection]bool),
+		projectionWindowScalarV1: make(map[Connection]bool),
+		projectionMaxBytes:       make(map[Connection]int64),
 		connectionGenerations:   make(map[Connection]uint64),
 		projectionFences:        make(map[projectionFenceKey]*projectionSnapshotFence),
 		projectionSnapshotCuts:  make(map[projectionFenceKey]int),
@@ -484,6 +492,10 @@ func (p *EventPublisher) UnregisterConnection(conn Connection) {
 	delete(p.readFileV2, conn)
 	delete(p.catalogCursorEpochV2, conn)
 	delete(p.projectionWindowV1, conn)
+	delete(p.projectionWindowV2, conn)
+	delete(p.projectionAnchorNewerV1, conn)
+	delete(p.projectionWindowScalarV1, conn)
+	delete(p.projectionMaxBytes, conn)
 	delete(p.connectionGenerations, conn)
 	delete(p.projectionDeliveryModes, conn)
 	delete(p.projectionHeldTurns, conn)

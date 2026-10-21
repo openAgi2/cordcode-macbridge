@@ -442,6 +442,20 @@ type CompositeRichHistoryProvider interface {
 	) ([]RichHistoryEntry, error)
 }
 
+// CompositeRichHistoryOffsetProvider is the S-2 suffix-read contract for composite
+// providers: resume rich-history parsing from per-segment byte offsets
+// [fromOffsets[i], segments[i].Cursor). Providers that only support full-prefix
+// reads keep implementing CompositeRichHistoryProvider alone — the bridge falls
+// back to the full walk (behavior identical to the pre-S-2 baseline).
+type CompositeRichHistoryOffsetProvider interface {
+	GetRichSessionHistoryAtSegmentsFrom(
+		ctx context.Context,
+		sessionID string,
+		segments []TranscriptSourceSegment,
+		fromOffsets []int64,
+	) ([]RichHistoryEntry, error)
+}
+
 // TranscriptLocator is an optional interface for file-backed agents that can
 // resolve the on-disk JSONL transcript path for a session. The bridge uses it to
 // build a boundary-safe transcript page index (design §6.3) and to replay byte

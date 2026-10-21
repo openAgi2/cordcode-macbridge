@@ -265,6 +265,126 @@
           "byteEnd": 1467
         }
       ]
+    },
+    {
+      "file": "blank-display-blocks.jsonl",
+      "category": "RC-A proven-no-display whitelist: blank thinking/text assistant rows (stop=tool_use / null)",
+      "provenance": "observed-derived-real-shape",
+      "corpusProvenance": "Fix plan v2.1 §3.2 K1/K2 (4 blank shapes, 3515 rows audited 0 invariant violations). Source samples (record SHA-256 excludes trailing LF; byte ranges include LF): blank thinking stop=tool_use <= file 495a03b5… line 29 [127094,143231) record a8555b241ce495f728a191b53b47c069635c058ab9a2b9d6324b70749331f899 (CLI 2.1.299, signature present); blank thinking stop=null: derived from review R1 sample S2 (signature explicit empty string; fixture represents it via field omission). R4-6 correction: the earlier citation of file 88a7884a… line 10 record 3b25ecb4… was wrong — that source record carries a 1784-char signature, not empty; blank text stop=tool_use <= file 1d01e522… line 8254 [27897650,27898877) record a67e7323… (CLI 2.1.301, single whitespace char); blank text stop=null <= file ec073d6d… line 373 [1692257,1693179) record 41609fa8… (CLI 2.1.295). Bodies replaced with placeholders; signature presence per source preserved. Trailing tool_use row exercises T1 continuity.",
+      "sha256": "c29759f3de202aa118927ee93d8f1abdee9955a70b79c1ebd3e4e481893c10a7",
+      "bytes": 1601,
+      "recordCount": 7,
+      "records": [
+        {
+          "byteStart": 0,
+          "byteEnd": 138
+        },
+        {
+          "byteStart": 138,
+          "byteEnd": 397
+        },
+        {
+          "byteStart": 397,
+          "byteEnd": 689
+        },
+        {
+          "byteStart": 689,
+          "byteEnd": 907
+        },
+        {
+          "byteStart": 907,
+          "byteEnd": 1139
+        },
+        {
+          "byteStart": 1139,
+          "byteEnd": 1376
+        },
+        {
+          "byteStart": 1376,
+          "byteEnd": 1601
+        }
+      ]
+    },
+    {
+      "file": "blank-display-terminal.jsonl",
+      "category": "RC-A guard T3: terminal blank row (stop=end_turn) must stay projectable (turn_completed)",
+      "provenance": "observed-derived-real-shape",
+      "corpusProvenance": "Fix plan v2.1 §3.2/§7 T3; derived from K1 shape (CLI 2.1.299) with stop_reason=end_turn; bodies/signature placeholder.",
+      "sha256": "a895e5118274dfd43e68df60b93e8bb1fd1efc289fe7845577318a06e93f585a",
+      "bytes": 387,
+      "recordCount": 2,
+      "records": [
+        {
+          "byteStart": 0,
+          "byteEnd": 138
+        },
+        {
+          "byteStart": 138,
+          "byteEnd": 387
+        }
+      ]
+    },
+    {
+      "file": "unsupported-zero-event.jsonl",
+      "category": "RC-A negative T2: non-empty assistant tool_result / unknown block / empty content stay rejected (cursor unmoved)",
+      "provenance": "observed-derived-real-shape",
+      "corpusProvenance": "Fix plan v2.1 §3.2 U1/U2 (CLI 2.1.197 sample file e470595b… line 492 [1454628,1459037) record 91d80863…; and CLI 2.1.258 file 648aeb50… line 39 [309268,425756) record 7ed84379…; record SHA-256 excludes LF) + review R1 S4; redacted_thinking unknown-block shape per §5.1 default branch (unobserved in corpus). Bodies replaced with placeholders. Empty-content row (uz-empty-content) is an UNOBSERVED construction (R4-6); no such row found in the 517-file census.",
+      "sha256": "eb709c5026fb551cf5050ea6f4ad5e0486ce69e81497ffeccc6306ea8ce2149a",
+      "bytes": 825,
+      "recordCount": 4,
+      "records": [
+        {
+          "byteStart": 0,
+          "byteEnd": 138
+        },
+        {
+          "byteStart": 138,
+          "byteEnd": 409
+        },
+        {
+          "byteStart": 409,
+          "byteEnd": 639
+        },
+        {
+          "byteStart": 639,
+          "byteEnd": 825
+        }
+      ]
+    },
+    {
+      "file": "api-error-shapes.jsonl",
+      "category": "RC-B error decode shapes: object / object-missing-message / array / number / null / assistant string-error",
+      "provenance": "observed-derived-synthetic",
+      "corpusProvenance": "Fix plan v2.1 §5.3 + review R1 S5/S6. Row 1 (object error) derived from real record: file 472f4b66 (file SHA-256 prefix 285edb2f6965) bytes [72601,73281) record SHA-256 (LF excluded) 1c4ac7e952e2771ab54395904ac6c461d91d4347763f138094bcff0669ac3670. Row 6 (assistant isApiErrorMessage string error) derived from real record: file 9f5eb20d (file SHA-256 prefix 4f02399bbab2) bytes [16022,17112) record SHA-256 (LF excluded) fe974f2dd753cc672d92a0a506b5aa57bc85dee9a2d9323255d1f53a89674393. Transcript rows carry no CLI version field; both files are 2.1.x-era (mtime Oct 2026). Rows 2-5 (object missing message / array / number / null) are UNOBSERVED internal-policy constructions per plan §5.3 (not external-contract evidence); bodies replaced with placeholders.",
+      "sha256": "ffd68df69e10a6d22ac68195b16c1b6b39555facb8ce8d436982f0faba857ef4",
+      "bytes": 1170,
+      "recordCount": 6,
+      "records": [
+        {
+          "byteStart": 0,
+          "byteEnd": 211
+        },
+        {
+          "byteStart": 211,
+          "byteEnd": 396
+        },
+        {
+          "byteStart": 396,
+          "byteEnd": 561
+        },
+        {
+          "byteStart": 561,
+          "byteEnd": 712
+        },
+        {
+          "byteStart": 712,
+          "byteEnd": 865
+        },
+        {
+          "byteStart": 865,
+          "byteEnd": 1170
+        }
+      ]
     }
   ]
 }

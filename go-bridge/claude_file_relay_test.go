@@ -858,3 +858,167 @@ func TestClaudeFileRelayOwnedWarmStartDoesNotArmRunning(t *testing.T) {
 		t.Fatal("relay exited; must keep watching")
 	}
 }
+
+// TestClaudeFileRelayBlankThinkingAndApiErrorKeepProjecting（修复方案 v2.1 §7 T4 + T5①）：
+// 外部回合真实行序（2.1.301 / 2.1.304 形态派生）——空白 thinking 行夹在 tool_use/
+// tool_result 之间、对象 error 的 system/api_error 行夹在回复前。修复前：空白行映射
+// 0 事件被整行拒收 → 级联 gap，工具卡/结果/说明/回复全部丢失；对象 error 行毒化
+// 完整记录扫描器 → 之后的实时内容冻结。修复后应看到全部部件 + 回合完成 + 0 失败
+// 事件（api_error 行只 ack，不产生 turn_error）。
+func TestClaudeFileRelayBlankThinkingAndApiErrorKeepProjecting(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	withFastClaudeFileRelay(t)
+	const sessionID = "blank-thinking-relay"
+	user := `{"type":"user","uuid":"u-a","message":{"id":"turn-a","role":"user","content":"问题A"}}`
+	assistant := `{"type":"assistant","uuid":"as-a","message":{"id":"msg-a","role":"assistant","content":[{"type":"text","text":"回复A"}],"stop_reason":"end_turn"}}`
+	path := writeClaudeFileRelayTranscript(t, home, sessionID, user, assistant)
+
+	handlers := newTestHandlers(t)
+	agent := &fakeAgent{
+		name: "claudecode",
+		liveProcesses: map[string]core.LiveSessionProcess{
+			sessionID: {SessionID: sessionID, PID: 5556, Live: true},
+		},
+		alivePIDs: map[int]bool{5556: true},
+	}
+	handlers.RegisterAgent("claude", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "claude", SessionID: sessionID})
+	handlers.startClaudeSessionFileRelayAt(sessionID, serverConn, "claude", nil)
+	client := &websocketClient{conn: clientConn}
+
+	// 初始 idle（初始扫描事件）。
+	_ = client.readEvents(t, 1)
+
+	// 2.1.301 形态：空白 thinking 夹 tool_use 与 tool_result 之间；对象 error 的
+	// system/api_error 行夹在最终回复前（T5① 场景合并）。
+	appendClaudeFileRelayTranscript(t, path,
+		`{"type":"user","uuid":"u-b","message":{"id":"turn-b","role":"user","content":"问题B"}}`,
+		`{"type":"assistant","uuid":"as-b1","parentUuid":"u-b","message":{"id":"msg-b1","role":"assistant","content":[{"type":"thinking","thinking":" ","signature":"占位sig"}],"stop_reason":"tool_use"}}`,
+		`{"type":"assistant","uuid":"as-b2","parentUuid":"as-b1","message":{"id":"msg-b2","role":"assistant","content":[{"type":"tool_use","id":"tool-b1","name":"Read","input":{"file_path":"/占位/path.txt"}}],"stop_reason":"tool_use"}}`,
+		`{"type":"user","uuid":"u-b3","parentUuid":"as-b2","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-b1","content":"占位工具结果"}]}}`,
+		`{"type":"assistant","uuid":"as-b4","parentUuid":"u-b3","message":{"id":"msg-b4","role":"assistant","content":[{"type":"thinking","thinking":""}],"stop_reason":"tool_use"}}`,
+		`{"type":"assistant","uuid":"as-b5","parentUuid":"as-b4","message":{"id":"msg-b5","role":"assistant","content":[{"type":"text","text":"中间说明占位"}],"stop_reason":null}}`,
+		`{"parentUuid":"as-b5","isSidechain":false,"type":"system","subtype":"api_error","level":"error","error":{"message":"429 占位限流","type":"rate_limit_error"}}`,
+		`{"type":"assistant","uuid":"as-b6","parentUuid":"as-b5","message":{"id":"msg-b6","role":"assistant","content":[{"type":"text","text":"最终回复占位"}],"stop_reason":"end_turn"}}`,
+	)
+
+	// 2.1.304 形态：tool_use 与 tool_result 之间夹控制行。
+	appendClaudeFileRelayTranscript(t, path,
+		`{"type":"user","uuid":"u-c","message":{"id":"turn-c","role":"user","content":"问题C"}}`,
+		`{"type":"assistant","uuid":"as-c1","parentUuid":"u-c","message":{"id":"msg-c1","role":"assistant","content":[{"type":"thinking","thinking":"  ","signature":"占位sig"}],"stop_reason":"tool_use"}}`,
+		`{"type":"assistant","uuid":"as-c2","parentUuid":"as-c1","message":{"id":"msg-c2","role":"assistant","content":[{"type":"tool_use","id":"tool-c1","name":"Bash","input":{"command":"echo 占位"}}],"stop_reason":"tool_use"}}`,
+		`{"type":"queue-operation"}`,
+		`{"type":"user","uuid":"u-cav","parentUuid":"as-c2","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"<local-command-caveat>Caveat: noise</local-command-caveat>"}]}}`,
+		`{"type":"user","uuid":"u-c3","parentUuid":"u-cav","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-c1","content":"占位结果C"}]}}`,
+		`{"type":"assistant","uuid":"as-c3","parentUuid":"u-c3","message":{"id":"msg-c3","role":"assistant","content":[{"type":"text","text":"回复C占位"}],"stop_reason":"end_turn"}}`,
+	)
+
+	// R4-3 重构：turn B 与 turn C 各设完成标志与部件断言（原版共享 sawCompletedC，
+	// turn B 完成即退出，2.1.304 段从未被检查）；R4-7：ReadJSON 失败即 break
+	// （gorilla 读超时后连接已失效，continue 会 panic 拖垮整个测试包）。
+	completedB, completedC := false, false
+	cardB, cardC, finishedB, finishedC, noteB, replyB, replyC := false, false, false, false, false, false, false
+	sawTurnError, sawBlankDelta := false, false
+	toolStarts := map[string]int{}
+	keyDeltas := map[string]int{}
+	untitledTools := 0
+	var names []string
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) && !(completedB && completedC) {
+		_ = client.conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		var ev map[string]any
+		if err := client.conn.ReadJSON(&ev); err != nil {
+			break
+		}
+		event, _ := ev["event"].(string)
+		data, _ := ev["data"].(map[string]any)
+		names = append(names, event)
+		switch event {
+		case "tool_started":
+			id, _ := data["itemId"].(string)
+			toolStarts[id]++
+			toolName, _ := data["toolName"].(string)
+			if title, _ := data["title"].(string); strings.TrimSpace(title) == "" {
+				untitledTools++
+			}
+			if toolName == "Read" && id == "tool-b1" {
+				cardB = true
+			}
+			if toolName == "Bash" && id == "tool-c1" {
+				cardC = true
+			}
+		case "tool_finished":
+			id, _ := data["itemId"].(string)
+			if id == "tool-b1" {
+				finishedB = true
+			}
+			if id == "tool-c1" {
+				finishedC = true
+			}
+		case "text_delta":
+			delta, _ := data["delta"].(string)
+			switch delta {
+			case "中间说明占位":
+				noteB = true
+				keyDeltas[delta]++
+			case "最终回复占位":
+				replyB = true
+				keyDeltas[delta]++
+			case "回复C占位":
+				replyC = true
+				keyDeltas[delta]++
+			case " ", "", "  ", "\t":
+				sawBlankDelta = true
+			}
+		case "turn_completed":
+			id, _ := data["turnId"].(string)
+			if id == "turn-b" || id == "u-b" {
+				completedB = true
+			}
+			if id == "turn-c" || id == "u-c" {
+				completedC = true
+			}
+		case "turn_error":
+			sawTurnError = true
+		}
+	}
+	if !cardB || !finishedB || !noteB || !replyB || !completedB {
+		t.Fatalf("turn B（2.1.301 段）部件缺失：card=%v finished=%v note=%v reply=%v completed=%v events=%v",
+			cardB, finishedB, noteB, replyB, completedB, names)
+	}
+	if !cardC || !finishedC || !replyC || !completedC {
+		t.Fatalf("turn C（2.1.304 段，R4-3 补断言）部件缺失：card=%v finished=%v reply=%v completed=%v events=%v",
+			cardC, finishedC, replyC, completedC, names)
+	}
+	if sawTurnError {
+		t.Fatalf("api_error 行不得产生 turn_error（应只 ack）")
+	}
+	if sawBlankDelta {
+		t.Fatalf("空白内容不得投递为 text_delta")
+	}
+	if untitledTools != 0 {
+		t.Fatalf("工具卡缺 title（方案 §7）：%d 个无标题", untitledTools)
+	}
+	for id, count := range toolStarts {
+		if count != 1 {
+			t.Fatalf("工具卡重复（方案 §7 防双写）：itemId=%s 出现 %d 次", id, count)
+		}
+	}
+	for delta, count := range keyDeltas {
+		if count != 1 {
+			t.Fatalf("正文重复（防双写）：%q 出现 %d 次", delta, count)
+		}
+	}
+	// Kernel 不进入 failed（方案 §7 T4「保持 Ready」——本场景无冷开，session
+	// 状态 absent 属正常；被拒收的行会 markHydrateFailed → failed，因此断言
+	// 非 failed 即等价于「零拒收」的内核侧证据）。
+	if phase := handlers.projectionKernel.Status("claude", sessionID).Phase; phase == ProjectionHydrateFailed {
+		t.Fatalf("kernel phase = %v（出现拒收/失败）", phase)
+	}
+	if !handlers.relayKindIs(sessionID, relayKindClaudeFile) {
+		t.Fatal("relay exited; must keep watching")
+	}
+}

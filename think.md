@@ -1,3 +1,126 @@
+## 2026-10-21：评审 R1 FAIL 复盘——增量折叠缺等价性测试、休眠契约漏查能力声明、扩语义扫掉既有豁免
+
+独立代码评审（docs/2026-10-21-long-session-projection-loading-session-code-review-r1.md，FAIL：
+2 blocker / 2 major）在「全部测试绿 + owner 验收通过」的分支上抓出四个真实缺陷，全部当轮修复
+（c988f1b2 / 3cdf884f / d88920e6 + iOS MAJOR-2）。可复用教训：
+
+1. **「接受增量折叠」类存储优化必须把「增量结果 == 全量重建」当作被测不变量**。S-2 的后缀
+   折叠没有任何等价性测试（三层测试只断言 stored cursor 返回），结果生产 18 次折叠 11 次分歧、
+   损坏存档持续叠加。产物门的对账思想（N/N' 对账）同样适用于存储层：恢复路径的正确性标准
+   是「与诚实重建逐 turn 等价」，且要有「重启后增长」的 handler 级 e2e 锁定。
+2. **行号派生 ID × 偏移续读 = 确定性碰撞**。Claude 冷解析的 user turn ID 是 `user-line-N`（行号
+   从本次 reader 起点计数），续读偏移后编号从 1 重来 → 新 prompt 覆盖最早 turn。增量消费的实体
+   ID 必须与读取偏移无关（行级 uuid）；同一实体 live 路径与冷路径两套 ID 本身就是隐患信号。
+3. **休眠契约要审「能力声明面」，不只审「请求路径」**。摘要退役审查删了 iOS 请求路径，漏了
+   Claude descriptor 的 `turn_detail_chunks_v1` 声明——声明解锁 iOS 入口，而 v2 批量引擎要求
+   TurnItemsPager（Claude 未实现）→ 点一下必失败还污染共享投影。退役/收缩清单必须包含：
+   descriptor 声明、协议 pack、能力 echo、**以及断言「声明存在」的测试**（后者会把缺陷锁死，
+   TestClaudeDescriptorDeclaresTurnDetailChunks 即是）。
+4. **扩语义修复必须枚举旧语义豁免的每个形态**（与 2026-09-12 codex「扩大作用域要枚举重置点」
+   同构）：d78100ee 为修尾部悬挂 tool_use 卡死把 coverage 扩到「全部非终态」，无声扫掉了
+   「命令回显豁免」→ 2026-10-11 /model 回归。改谓词前先列出旧实现排除的每一类，逐类裁决
+   「扩语义后它去哪了」。
+5. **完成情况报告的数字/文件名要机械提取，不要凭会话记忆转写**：本次 6 处失实（21/21 计数
+   无法归属、两处文件归属写错）全部源于记忆转写。报告生成规则：计数用 `grep -c`/`jq` 现场
+   算，文件归属用 `git show --stat <commit>` 现场取。
+6. **红绿验证是「测试有效性」的廉价证明**：新回归测试先在无修复代码上跑一遍确认 FAIL
+   （本轮 4 测全红），再恢复修复确认绿——评审 H 项（测试锁死缺陷/空断言）的系统性解法。
+7. **构建身份门（R3 教训）**：构建脚本只烙 HEAD 不标 dirty——用脏工作区构建会把未提交代码
+   冒充成 HEAD 身份（R3-1）。构建前 `git status --porcelain` 必须为 0；产物 -version 必须等于
+   当时 HEAD；「内容一致」不能替代「身份闭合」。
+8. **验收要匹配触发面（R4 教训）**：用 glm 网关会话验收「空白 thinking 行」修复是空转——
+   该模型不产生这种形态。验收矩阵的前提条件（如「会产生空白思考的模型」）是测试用例的
+   一部分，不是背景说明；证据表述同理：settled/sourceCursor 等日志字段要回读定义再引用，
+   「0 拒收」只有在触发输入真实出现时才是修复有效的证据。
+
+## 2026-10-19：长 session 真机打开风暴 = WiFi rx 劣化 × 全量 22.8MB 冷拉 × 30s RPC 超时 × 无退避重试（S-4 实测复盘）
+
+owner 真机（iPhone16, PID 35979/36024）打开 7f389d08（48 turns / 22.8MB / syncRev 5505）持续
+「加载投影失败」，多轮重连循环。取证路径（可复用配方）：`devicectl device copy from
+--domain-type appDataContainer` 拉 `Documents/fg-trace.log(.1)`（8MB 滚动，含 [WS-RAW]/[ProjPull]/
+[Apply] 全链，时间戳 UTC=本地-8h）；配合 Mac `projection_rpc` 三段日志（mac_receive/hydrate_ready/
+response_enqueue）对齐。**NSLog 经 pymobiledevice3 syslog 捕不到（projLog 全灭），SensitiveLog
+（os.Logger + privacy:.public）能捕**——真机排障别依赖 NSLog 通道。
+
+对账数字（产物门）：18:01 成功周期 = 入队后 **18s** 传输（15s 硬帽先报错 late=1 但 <30s RPC 超时，
+结果仍采纳渲染）；18:30 失败周期 = 入队后 **40s** 传输 → 30s RPC 超时删表项 → 大帧迟到被静默丢弃
+（[WS-RAW] 22.8MB 有、[WS-RX] 无、无消费者）→ 立即重试**再拉一次全量**；18:46 周期 = 2-3MB gzip 帧
+彻底没到（pong 也断，30s 双路老化 → 看门狗拆连接）。wifid LQA 实锤：**rx-rate 0-3/5、rx-lat 5/5
+（最差）、tx-rate 5/5 持续非对称劣化**（18:28 起全程；信号强度 5/5 但 chq=2 → 同信道干扰，重试风暴
+自身占用空口形成正反馈）。关键排除：**解码/应用/渲染不是瓶颈**——两次成功周期（10:01:44、10:31:17）
+大帧到达 → 同秒 [ProjRPC] ok + [ProjPull] FULL ok + Render ready（S-5/S-8 管线按设计工作）；Mac 侧
+S-2 物化命中 600ms 内 enqueue。18:31:17 曾成功渲染 74 条消息（owner 9 秒后切走）。
+
+缺陷定位（按层）：
+1. **设计缺口（S-3 未实施）**：冷开 = 全量 22.8MB（gzip ~2-3MB），任何 <1Mbps 的链路都活不过 30s。
+   S-4 暖开路径（anchor KB 级）从未被触达——冷开不成功 → 缓存永远不播种（patch 触发路径的 pull 成功
+   不写缓存；app 被 kill 也不触发 didEnterBackground flush）。
+2. **重试风暴（H1）**：patch no-state → pull 15s 硬帽失败 → 无退避立即全量重试，自 DDoS 空口。
+3. **迟到帧静默丢弃（H2）**：30s 超时删表项后，在途大帧照常传完再丢，重试又叠加第二路传输。
+4. **看门狗与大传输互斥（H3）**：传输 40s > deadAfter 30s（lastInbound 只在完整帧后更新）→ 传输
+   中途被拆，全部作废，重连后从头再来。
+5. **open 路径停滞（H4，18:46 案例）**：[ProjOpen] pull BEFORE 完全缺席，唯一 pull 来自 patch 事件
+   （[Apply] no-state → pull）；open 任务在 startEventStream 与 loadMessagesTask 之间停滞，S-3 重构
+   打开路径时必须排查。
+教训：**「修复无效」先分层——本例 Mac 服务/解码/渲染全绿，死因在传输层时长与超时族的乘积**；
+对账要跨「Mac 入队时刻 ↔ 手机 WS-RAW 时刻」对齐才看得见 18s/40s 的在途时长；软故障（劣化而非断链）
+比硬故障更会伪装成代码 bug。
+
+### 2026-10-19 补记（Codex 独立分析 + S-4 完成交付）
+
+上条的「暖路径未触达」根因闭环：**生产客户端 CCCodeBridgeBackendClient 缺
+SessionProjectionAnchorNewerFetching 协议遵循声明**——成员早已实现但 Swift 无形状隐式
+遵循，`fetcher as?` 动态转换永远失败，且日志把「协议转换失败」误写成 anchor-echo-off。
+教训：**协议多态入口必须有真实生产类型的 metatype 转换回归测试**（fake 声明了遵循即
+绕过生产接线，19 项测试全绿也测不到）。另两处措辞纠错（Codex 基准）：22.9MB 编码/写盘
+是 ~76ms/~45ms 量级（Mac 组件实测；先前「写盘要几秒」错误），第二次打开的等待主体是
+全量传输（Mac 入队→手机完整帧 ~27s）；旧预算漏算主因是 tool 结构（7.7MB）与递归
+subagent（13.1MB）而非 reasoning（reasoning 走 text 本来被计入）。完整分析：
+docs/2026-10-19-ios-long-session-reopen-cache-root-cause-analysis.md；修复与验收矩阵：
+docs/2026-10-19-s4-warm-reopen-acceptance-matrix.md（iOS f74b96fe，19/19 真机绿）。
+
+### 2026-10-20 补记（S-3 v2 空白屏事故 + 尾部悬挂 turn 卡死）
+
+**空白屏事故**：v2 摘要首开 Mac 侧把摘要行放 wire `turns` 字段（与冻结 schema 一致），
+iOS 模型却自创 `summaryRows` 字段 + turns 按 full turn 解码——摘要字段全被丢弃，
+17 turn 应用成功、lifecycle ready、mapped=0，11 项测试全绿没拦住（spec 测的是 Mac 侧
+样本字典、消费测的 fake 直接构造结果对象——**没有任何测试穿过「真实 wire JSON →
+生产 decoder」**）。教训：① 冻结判别联合的消费端必须从冻结字段解码，自创字段 =
+违反冻结消费契约；② 契约测试必须用冻结样本 JSON 喂生产 decoder（新增
+ProjectionWindowV2WireContractTests 闭合）；③ 「applied + ready」不证明有可读内容。
+另经 Codex 独立评审抓出三项连带缺口（摘要缓存未实现/displayTurn 丢 generation/
+权限例外用错 part 形态——正式权限是 type=tool+requiresPermissionConfirmation 标记，
+raw permission_request 不是 SoT），一轮全修。
+**尾部悬挂 turn 卡死**（owner 白等 5 分钟）：eed413da 尾部悬挂 tool_use（进程被
+kill、tool_result 永不落盘）不属于「未答 Ask」→ coverage 裁决不触发 →
+WaitHydrateCommitReady 死等 15s×8。修复 = claudeTrailingCoverageNeededTurnIDs
+扩至一切尾部非终态 turn（dead → 合成 turn_aborted）。教训：**收口/超时类机制的
+形态匹配清单要覆盖「进程死亡的所有残留形态」，不只业务上认识到的那些**。
+档案：docs/2026-10-20-s3-v2-owner-acceptance.md（含实测数字）。
+
+### 2026-10-20 补记二（预览扩容 → 摘要首开整体退役，owner 同日裁决）
+
+S-3 v2 摘要首开当日走完「验收通过 → owner 反馈首屏太简 → 预览扩容方案
+（128→1024/head 64→256，独立评审两轮，F-01 修 UTF-8 预算低估）→ owner 裁决
+**别搞摘要了，太复杂**」全链，最终**退役**：iOS 冷开回归全量直拉，重开仍走 S-4
+缓存秒开；owner 真机验收「首开直接完整、重开秒开」通过。要点与教训：
+
+1. **「十几秒后才见工具/思考」不是摘要路径的自动补全**：fg-trace 证实是
+   foreground recovery transaction（ChatViewModel:1809/1915）发起的 get_session_projection
+   全量（36.4MB 传输 ~10s）；摘要就绪即 ready，无定时 full 预取。归因前先对齐
+   触发入口，别把恢复事务当成首开策略的一部分。
+2. **复杂度预算是产品决策**：摘要体系（判别联合 wire、双形态缓存种子、
+   claudePreviewRevision 本地失效门、前缀去重、UTF-8 预算、anchor summary 对账）
+   换来的只是「首开快几秒」，owner 一句「太复杂」整体退役。后续任何 session
+   加载优化先按「全量直拉 + 缓存暖开」这个已验收形态做基线，重建摘要类路径
+   必须有 owner 明确要求。
+3. **退役形态**：Mac 生产代码/协议/能力声明保留休眠（iOS 不请求即不触发），
+   iOS 摘要种子（任何 backend）打开即弃用重建（截短内容不得恢复）；pullWindowV2Summary
+   已删（净 -300 行）。两端 docs/protocol 的 v2 冻结章节与样本仍有效——是休眠
+   协议的契约，不是活跃行为描述；后续清理属独立任务。
+4. 评审反例沉淀：预算计量必须按实际字节（RuneCount×3 对四字节码点低估
+   343KB/1.4MB 量级）——任何「字符数×常数」估算都要过一遍四字节反例。
+
 ## 2026-10-18：10-04 LAN 广播刷新误写 timeline-parity 工作树——未提交残留挂两周（已授权清理）
 
 2026-10-04 长跑 Codex 会话（cwd=iOS native-message-timeline）实现「DHCP 换 IP 后运行期刷新
@@ -654,6 +777,10 @@ openai/codex#45071（09-13 已附脱敏 capture 提交，当时缺因果定位�
 disabled 未自启，relay 502 至人工介入；iPhone 走 LAN 直连不受影响。修复需
 `systemctl enable --now cordcode-relay`（owner 授权后执行）。
 # 后续计划索引（待办另案总账）
+
+| 待办 | 来源 | 状态 |
+| --- | --- | --- |
+| Claude live relay Phase 2（失败后的恢复语义） | O2 修复方案 §5.4：live-ingest 失败的冷却语义、重开时账本重装到新 cut、relay 读位置重绑、并发 append 与旧代事件处置（修复 v2.1 已于 2026-10-21 实施交付，docs/2026-10-21-claude-live-relay-zero-event-and-api-error-poison-fix-plan完成情况.md） | 待 owner 排期 |
 
 ## 2026-09-12 codex goal 四轮连环：改生命周期要枚举重置点、「最后一词定终身」与 iOS 真机取证三件套
 

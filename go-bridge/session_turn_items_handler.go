@@ -69,9 +69,14 @@ func (h *Handlers) handleSessionTurnItems(conn Connection, msg WireMessage, agen
 		return
 	}
 	if msg.BackendID != "codex-remote" {
-		// §11.7 v1: only codex-remote declares turn_detail_lazy_v1.
+		// §11.7 v1: codex-remote。claude 曾随 S-3 v2（2026-10-19）扩展 producer 并声明
+		// turn_detail_chunks_v1，2026-10-21 评审 R1 BLOCKER-2 已撤回（v2 批量引擎要求
+		// TurnItemsPager，仅 codex-remote 实现；chunks 连接上 claude 必定 failed 并把
+		// 失败态写进共享投影）。服务端门同步收回：claude 返回 unsupported_capability，
+		// 不触发任何上游拉取，不写投影（休眠契约的服务端兜底，对齐协议 pack
+		// unified-bridge-protocol.md §11.7 撤回注）。
 		sendErr("unsupported_capability",
-			fmt.Sprintf("session_turn_items v1 is codex-remote only, not %s", msg.BackendID), false)
+			fmt.Sprintf("session_turn_items supports codex-remote, not %s", msg.BackendID), false)
 		return
 	}
 
@@ -127,10 +132,17 @@ func (h *Handlers) handleSessionTurnItems(conn Connection, msg WireMessage, agen
 	// Per-session legacy gate: the producer fact records the thread's declared
 	// historyMode at cold open. Legacy (or unknown-mode) sessions never expose
 	// session_turn_items (§11.7 method gating).
-	if state := h.loadProducerState(msg.BackendID, params.SessionID); state == nil || state.HistoryMode != "paginated" {
-		sendErr("unsupported_capability",
-			"session_turn_items requires a paginated-history session", false)
-		return
+	isClaudeBackend := msg.BackendID == "claude" || msg.BackendID == "claudecode"
+	if !isClaudeBackend {
+		// Per-session legacy gate（codex-remote producer fact：冷开时声明的
+		// historyMode）。Claude 无该维度（JSONL producer 全量构建）——等价资源门
+		// = 既有「turn 在 committed projection 且 status=completed」判定（S-3 v2
+		// 冻结规范 §4 四层资格门定案，不引入 HistoryMode 要求）。
+		if state := h.loadProducerState(msg.BackendID, params.SessionID); state == nil || state.HistoryMode != "paginated" {
+			sendErr("unsupported_capability",
+				"session_turn_items requires a paginated-history session", false)
+			return
+		}
 	}
 
 	// v2 dispatch (§11.8): a turn_detail_chunks_v1 connection takes the F4
@@ -289,6 +301,30 @@ func (h *Handlers) runTurnDetailFetch(requester Connection, backendID, sessionID
 		return failTerminal("stale_turn")
 	} else {
 		return sessionTurnItemsAck(DetailStateFailed, proj.SyncRev, "upstream_error")
+	}
+
+	// S-3 v2 Claude producer：明细已在 committed turn 内（hydrate 全量构建，
+	// summary 只是响应层形态）——直接取 kernel parts 走同一 merge 路径，
+	// 无 JSONL 重读、无 agent reader 依赖。
+	if backendID == "claude" || backendID == "claudecode" {
+		if turn.Assistant == nil || len(turn.Assistant.Parts) == 0 {
+			return failTerminal("unsupported_item_type")
+		}
+		_, mergePatches, mergeErr := h.projectionKernel.MergeHistoricalTurnDetail(
+			backendID, sessionID, turnID, generation, turn.Assistant.Parts,
+		)
+		if mergeErr != nil {
+			switch {
+			case errors.Is(mergeErr, ErrTurnStateStale),
+				errors.Is(mergeErr, ErrDetailTargetRunning),
+				errors.Is(mergeErr, ErrDetailTargetMissing):
+				return failTerminal("stale_turn")
+			default:
+				return failTerminal("upstream_error")
+			}
+		}
+		h.eventPublisher.PublishProjectionDetail(backendID, sessionID, mergePatches, requester)
+		return sessionTurnItemsAck(DetailStateLoaded, mergePatches[len(mergePatches)-1].SyncRev, "")
 	}
 
 	// 2. Bounded fetch through the agent's detail surface.

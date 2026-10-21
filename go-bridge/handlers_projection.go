@@ -252,10 +252,43 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 			fullReason = "journal_gap"
 		}
 	}
+	// S-7（§Anchor-Newer 超限恢复语义 / F-53）：full 序列化超协商上限 → typed
+	// full.oversized 显式终态失败（两级 typed 链第二级；不假成功、不部分渲染）。
+	// 估算 = turns 序列化合计 + 1MiB scalar/envelope 余量（防重编 34MB 级 payload）。
+	capBytes := h.eventPublisher.ProjectionMaxBytes(conn)
+	if sizes, sizeErr := turnEncodedSizes(proj.Turns); sizeErr == nil {
+		total := int64(1 << 20)
+		for _, size := range sizes {
+			total += int64(size)
+		}
+		if total > capBytes {
+			retryableFalse := false
+			wireErr := &WireError{
+				Code:      "full.oversized",
+				Message:   fmt.Sprintf("full projection serialization exceeds the negotiated projectionMaxBytes (%d bytes)", capBytes),
+				Retryable: &retryableFalse,
+			}
+			logProjectionRPCTrace("response_enqueue", msg, params.SessionID, params.SinceRev, proj.SyncRev, "full.oversized", &admission)
+			if err := h.eventPublisher.CompleteProjectionSnapshotError(conn, admission, msg.RequestID, wireErr); err != nil {
+				slog.Warn("go-bridge: full.oversized fence release failed", "requestId", msg.RequestID, "error", err)
+			}
+			return
+		}
+	}
 	logProjectionRPCTrace("response_enqueue", msg, params.SessionID, params.SinceRev, proj.SyncRev, "snapshot", &admission)
 	response := map[string]interface{}{
 		"projection": proj,
 		"resume":     projectionResumeFull(fullReason, params.SinceRev),
+	}
+	// S-7 token 生命周期 #1（full 种子同帧配对）：已协商 anchor-newer 的连接在全量
+	// 响应附带 {turnId → token}，客户端缓存逐行配对存储；未协商连接零开销（旧 peer
+	// wire 逐字节不变——map 缺省即不序列化）。
+	if h.eventPublisher.ConnAnchorNewerV1(conn) {
+		if tokens, tokenErr := BuildAnchorNewerTurnTokens(proj.Turns); tokenErr == nil {
+			response["turnTokens"] = tokens
+		} else {
+			slog.Warn("go-bridge: anchor-newer seed tokens unavailable", "requestId", msg.RequestID, "error", tokenErr)
+		}
 	}
 	logProjectionResponseMetrics(
 		msg, params.SessionID, params.SinceRev, proj.SyncRev, "snapshot", response,
@@ -1047,6 +1080,7 @@ func (h *Handlers) runProjectionHydrateTransaction(
 		source,
 		admission.StartCursor,
 		admission.StartCut,
+		admission.StartCursors,
 		base,
 		func(event projectionHydrateEvent) bool {
 			h.projectionKernel.ApplyHydrateEvent(
@@ -1230,6 +1264,7 @@ func (h *Handlers) produceProjectionHydrateSource(
 	backendID, sessionID string,
 	source ProjectionSourceDescriptor,
 	startOffset, endOffset int64,
+	segmentStartCursors []int64,
 	base SessionProjection,
 	emit func(projectionHydrateEvent) bool,
 ) error {
@@ -1271,13 +1306,49 @@ func (h *Handlers) produceProjectionHydrateSource(
 			Cursor:   segment.Cursor,
 		})
 	}
-	entries, err := provider.GetRichSessionHistoryAtSegments(ctx, sessionID, segments)
+	var entries []core.RichHistoryEntry
+	var err error
+	if len(segmentStartCursors) == len(segments) {
+		// S-2 suffix 折叠：per-segment committed cursor 起，只解析 [stored_i, current_i)。
+		// provider 不支持 offset 时回退全前缀遍历（行为不劣于 S-2 前）。
+		if offsetProvider, ok := provider.(core.CompositeRichHistoryOffsetProvider); ok {
+			entries, err = offsetProvider.GetRichSessionHistoryAtSegmentsFrom(ctx, sessionID, segments, segmentStartCursors)
+		} else {
+			entries, err = provider.GetRichSessionHistoryAtSegments(ctx, sessionID, segments)
+		}
+	} else {
+		entries, err = provider.GetRichSessionHistoryAtSegments(ctx, sessionID, segments)
+	}
 	if err != nil {
 		return err
 	}
 	// Claude segment replay has no activity probe; the commit gate keeps
 	// waiting rather than settling turns it cannot prove dead.
 	return streamRichHistoryProjectionEntries(ctx, entries, false, emit)
+}
+
+// projectionSourceUnchangedSinceCommit（S-2/F-14 冷检等价门）：committed 源每段
+// stat(path).Size() == committed cursor → append-only 语义下未推进，跳过冷源检查
+//（对齐 full 路径的 sinceRev 门）。size < cursor（截断）或任何 stat 失败都返回
+// false——冷检照旧，由四态分类的失效重建兜底。stat-only，不读文件内容。
+func projectionSourceUnchangedSinceCommit(kernel *ProjectionKernel, backendID, sessionID string) bool {
+	if kernel == nil {
+		return false
+	}
+	segments, ok := kernel.CommittedSourceSegments(backendID, sessionID)
+	if !ok || len(segments) == 0 {
+		return false
+	}
+	for _, segment := range segments {
+		if segment.Path == "" {
+			return false // pathless 家族无冷检门语义
+		}
+		info, err := os.Stat(segment.Path)
+		if err != nil || info.Size() != segment.Cursor {
+			return false
+		}
+	}
+	return true
 }
 
 func projectionSessionLogPrefix(sessionID string) string {
