@@ -164,7 +164,7 @@ func buildClaudeSourceRecordBatch(
 		BackendID: backendID, SessionID: sessionID, BridgeEpoch: bridgeEpoch,
 		// RC-A（v2.1 §5.1）：分类由 mapper 边的纯函数判定；source-only 的
 		// 决定仍落在 ApplyClaudeSourceRecordBatch 事务内（唯一 writer）。
-		RowClass:     rowClass,
+		RowClass:      rowClass,
 		RowDiagnostic: claudeSourceRowShapeSummary(entry, rowClass),
 		Record: ClaudeSourceRecordTransition{
 			LogicalRecordUUID: entry.UUID,

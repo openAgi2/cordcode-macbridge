@@ -13,6 +13,7 @@ package gobridge
 // ApplyClaudeSourceRecordBatch 生产入口断言结果，不依赖新符号）。
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,9 +47,6 @@ func TestBlankDisplayWhitelistAcceptsSourceOnlyAndKeepsContinuity(t *testing.T) 
 		if i == 2 || i == 3 {
 			continue
 		}
-		if i == 0 {
-			continue
-		}
 		if results[i].Status != ClaudeSourceBatchAcceptedSourceOnly {
 			t.Fatalf("blank row %d status = %q, want accepted_source_only（RC-A 白名单）", i, results[i].Status)
 		}
@@ -76,86 +74,138 @@ func TestBlankDisplayWhitelistAcceptsSourceOnlyAndKeepsContinuity(t *testing.T) 
 	}
 }
 
-// T2（负例，守护）：非空 assistant/tool_result、未知块、空 content 数组 → 分类
-// 「不支持」，照旧拒收且游标不动（不许因分类器存在而推进账本）。
-// 诊断断言（v2.1 §5.2）：拒收错误必须自带行形态（rowClass / 块类型及空白 /
-// stop / type）——relay 的拒收 warn 打印该错误，即附行形态且不含正文。
-// 先红：现状错误只有 "no projection subevents"，无形态。
+// T2（R4-2 重构）：三类不支持形态（非空 assistant/tool_result、未知块、空
+// content）**逐例独立**到达分类器——每个子例用全新 kernel 先接受 user 基线行，
+// 再单独提交负例行（R4 指出原版三个负例连排，第②③个被 gap 拒收掩盖，没测到
+// 分类判定）。逐条断言：rejected、错误自带 rowClass=unsupported 与对应块形态、
+// 游标停在基线行尾（不许因分类器存在而推进账本）。
 func TestUnsupportedZeroEventRowsStayRejectedCursorUnmoved(t *testing.T) {
 	data := readFileOrFatal(t, "unsupported-zero-event.jsonl")
 	correlation := claudeSourceCorrelation{
 		SegmentStableKey: "fixture-segment", SegmentGeneration: "fixture-generation",
 	}
-	state := ClaudeSourceState{
-		SchemaVersion: ClaudeSourceStateSchemaVersion, SourceGeneration: "fixture-source-generation",
-		CursorVector: []ClaudeSourceCursor{{
-			SegmentStableKey: correlation.SegmentStableKey, SegmentGeneration: correlation.SegmentGeneration,
-			MembershipDigest: "fixture-membership",
-		}},
-		GraphNodes: map[string][]ClaudeGraphOccurrence{}, LogicalRecords: map[string]ClaudeLogicalRecord{},
+	negatives := []struct {
+		name      string
+		recordIdx int // fixture 扫描记录序（0=user 基线，1..3=负例）
+		wantShape string
+	}{
+		{"assistant-nonblank-tool-result", 1, "blocks=[tool_result]"},
+		{"unknown-block-redacted-thinking", 2, "blocks=[redacted_thinking]"},
+		{"empty-content-array", 3, "blocks=[]"},
 	}
-	kernel := NewProjectionKernel(NewProjectionReducer(), nil)
-	if err := kernel.InstallClaudeSourceState("claude", "unsupported", state); err != nil {
-		t.Fatal(err)
-	}
-	scan, err := scanCompleteClaudeRelayEntriesFromReader(strings.NewReader(data), 0, &claudeRelayScanState{})
-	if err != nil || scan.Poison != nil {
-		t.Fatalf("scan: poison=%+v err=%v", scan.Poison, err)
-	}
-	rejected := 0
-	var rejectErrs []string
-	var cursorAfterFirst int64
-	for index, record := range scan.Records {
-		if !record.Admitted {
-			continue
-		}
-		if index == 0 {
-			// user row 先被接受，建立可投影基线与游标
+	for _, neg := range negatives {
+		t.Run(neg.name, func(t *testing.T) {
+			state := ClaudeSourceState{
+				SchemaVersion: ClaudeSourceStateSchemaVersion, SourceGeneration: "fixture-source-generation",
+				CursorVector: []ClaudeSourceCursor{{
+					SegmentStableKey: correlation.SegmentStableKey, SegmentGeneration: correlation.SegmentGeneration,
+					MembershipDigest: "fixture-membership",
+				}},
+				GraphNodes: map[string][]ClaudeGraphOccurrence{}, LogicalRecords: map[string]ClaudeLogicalRecord{},
+			}
+			kernel := NewProjectionKernel(NewProjectionReducer(), nil)
+			if err := kernel.InstallClaudeSourceState("claude", "unsupported", state); err != nil {
+				t.Fatal(err)
+			}
+			scan, err := scanCompleteClaudeRelayEntriesFromReader(strings.NewReader(data), 0, &claudeRelayScanState{})
+			if err != nil || scan.Poison != nil {
+				t.Fatalf("scan: poison=%+v err=%v", scan.Poison, err)
+			}
+			// 基线：接受 user 行（记录 0），游标推进到其 ByteEnd。
 			current, _ := kernel.ClaudeSourceStateSnapshot("claude", "unsupported")
-			batch, err := buildClaudeSourceRecordBatch(current, record, "claude", "unsupported", "epoch", correlation, "", nil)
+			baseline, err := buildClaudeSourceRecordBatch(current, scan.Records[0], "claude", "unsupported", "epoch", correlation, "", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := kernel.ApplyClaudeSourceRecordBatch(batch); err != nil {
+			if _, err := kernel.ApplyClaudeSourceRecordBatch(baseline); err != nil {
 				t.Fatal(err)
 			}
 			snapshot, _ := kernel.ClaudeSourceStateSnapshot("claude", "unsupported")
-			cursorAfterFirst = snapshot.CursorVector[0].RawByteEnd
-			continue
-		}
-		current, _ := kernel.ClaudeSourceStateSnapshot("claude", "unsupported")
-		batch, err := buildClaudeSourceRecordBatch(current, record, "claude", "unsupported", "epoch", correlation, "", nil)
-		if err != nil {
-			// build 失败（如空 content）也算「不支持」拒收形态，不推进
-			rejected++
-			rejectErrs = append(rejectErrs, err.Error())
-			continue
-		}
-		result, err := kernel.ApplyClaudeSourceRecordBatch(batch)
-		if err != nil || result.Status == ClaudeSourceBatchRejected {
-			rejected++
-			if err != nil {
-				rejectErrs = append(rejectErrs, err.Error())
+			cursorAfterBaseline := snapshot.CursorVector[0].RawByteEnd
+			// 负例行：重映射字节区间为紧跟基线行尾（R4：fixture 里第②③个负例
+			// 的原始字节起点在基线行尾之后，会先撞 gap 拒收、走不到分类器——
+			// 平移到连续位置使每个负例真正到达分类判定）。state 用 Apply 后的
+			// 最新快照（GraphNodes 已含基线行，parent 链可解析）。
+			negativeRecord := scan.Records[neg.recordIdx]
+			negativeRecord.ByteStart = cursorAfterBaseline
+			negativeRecord.ByteEnd = cursorAfterBaseline + (scan.Records[neg.recordIdx].ByteEnd - scan.Records[neg.recordIdx].ByteStart)
+			currentAfter, _ := kernel.ClaudeSourceStateSnapshot("claude", "unsupported")
+			negative, err := buildClaudeSourceRecordBatch(currentAfter, negativeRecord, "claude", "unsupported", "epoch", correlation, "", nil)
+			if err == nil {
+				result, applyErr := kernel.ApplyClaudeSourceRecordBatch(negative)
+				if applyErr == nil && result.Status != ClaudeSourceBatchRejected {
+					t.Fatalf("不支持形态不得被接受：result=%+v", result)
+				}
+				if applyErr == nil {
+					t.Fatal("拒收必须返回错误")
+				}
+				errText := applyErr.Error()
+				if !strings.Contains(errText, "rowClass=unsupported") {
+					t.Fatalf("拒收错误缺 rowClass=unsupported：%s", errText)
+				}
+				if !strings.Contains(errText, neg.wantShape) {
+					t.Fatalf("拒收错误缺块形态 %s：%s", neg.wantShape, errText)
+				}
+				if strings.Contains(errText, "占位") {
+					t.Fatalf("诊断不得记录正文：%s", errText)
+				}
+			} else {
+				// build 阶段失败（如结构性缺失）也要带形态。
+				if !strings.Contains(err.Error(), "rowClass=unsupported") {
+					t.Fatalf("build 失败错误缺形态：%v", err)
+				}
 			}
-			continue
+			snapshot, _ = kernel.ClaudeSourceStateSnapshot("claude", "unsupported")
+			if snapshot.CursorVector[0].RawByteEnd != cursorAfterBaseline {
+				t.Fatalf("拒收后游标移动：%d → %d（不允许推进）", cursorAfterBaseline, snapshot.CursorVector[0].RawByteEnd)
+			}
+		})
+	}
+}
+
+// R4-2：分类器表驱动单测——四种白名单形态、未知块、空 content、混合块、终态
+// 空行、API error 行、user 行全覆盖。变异验收：把未知块/空 content 改判白名单
+// 时本表必须变红。
+func TestClassifyClaudeSourceRowContent(t *testing.T) {
+	line := func(t *testing.T, raw string) claudeTranscriptRelayEntry {
+		t.Helper()
+		var entry claudeTranscriptRelayEntry
+		if err := json.Unmarshal([]byte(raw), &entry); err != nil {
+			t.Fatal(err)
 		}
-		t.Fatalf("不支持形态（record %d）不得被接受：result=%+v err=%v", index, result, err)
+		return entry
 	}
-	if rejected != 3 {
-		t.Fatalf("拒收数 = %d, want 3（非空 tool_result / 未知块 / 空 content 三个不支持形态）", rejected)
+	cases := []struct {
+		name string
+		raw  string
+		want claudeSourceRowContentClass
+	}{
+		// 白名单四形态（K1/K2）
+		{"k1-blank-thinking-stop-tooluse", `{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":" ","signature":"sig占位"}],"stop_reason":"tool_use"}}`, claudeRowContentProvenNoDisplay},
+		{"k2-blank-thinking-stop-null-nosig", `{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":""}],"stop_reason":null}}`, claudeRowContentProvenNoDisplay},
+		{"k1-blank-text-stop-tooluse", `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":" "}],"stop_reason":"tool_use"}}`, claudeRowContentProvenNoDisplay},
+		{"k2-blank-text-stop-null", `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":""}],"stop_reason":null}}`, claudeRowContentProvenNoDisplay},
+		// 可投影
+		{"nonblank-thinking", `{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"有内容"}],"stop_reason":null}}`, claudeRowContentProjectable},
+		{"nonblank-text", `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"回复"}],"stop_reason":null}}`, claudeRowContentProjectable},
+		{"tool-use", `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{}}],"stop_reason":"tool_use"}}`, claudeRowContentProjectable},
+		{"mixed-blank-text-plus-tool-use", `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":""},{"type":"tool_use","id":"t1","name":"Read","input":{}}],"stop_reason":"tool_use"}}`, claudeRowContentProjectable},
+		{"terminal-blank-thinking", `{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":" "}],"stop_reason":"end_turn"}}`, claudeRowContentProjectable},
+		{"api-error-row", `{"type":"assistant","isApiErrorMessage":true,"message":{"role":"assistant","content":[],"stop_reason":null}}`, claudeRowContentProjectable},
+		{"user-tool-result", `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"结果"}]}}`, claudeRowContentProjectable},
+		{"user-text", `{"type":"user","message":{"role":"user","content":"提问"}}`, claudeRowContentProjectable},
+		// 不支持
+		{"unknown-block-redacted-thinking", `{"type":"assistant","message":{"role":"assistant","content":[{"type":"redacted_thinking","data":"占位"}],"stop_reason":null}}`, claudeRowContentUnsupported},
+		{"empty-content-array", `{"type":"assistant","message":{"role":"assistant","content":[],"stop_reason":null}}`, claudeRowContentUnsupported},
+		{"assistant-nonblank-tool-result", `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_result","tool_use_id":"t1","content":"结果"}],"stop_reason":"tool_use"}}`, claudeRowContentUnsupported},
+		{"user-zero-event-blank-text", `{"type":"user","message":{"role":"user","content":[{"type":"text","text":""}]}}`, claudeRowContentUnsupported},
 	}
-	snapshot, _ := kernel.ClaudeSourceStateSnapshot("claude", "unsupported")
-	if snapshot.CursorVector[0].RawByteEnd != cursorAfterFirst {
-		t.Fatalf("拒收后游标移动：%d → %d（不允许推进）", cursorAfterFirst, snapshot.CursorVector[0].RawByteEnd)
-	}
-	// 诊断断言：至少一条拒收错误自带行形态（rowClass 与块形态；relay warn 打印
-	// 该错误即携带形态），且不含正文。
-	joined := strings.Join(rejectErrs, "\n")
-	if !strings.Contains(joined, "rowClass") {
-		t.Fatalf("拒收错误缺行形态诊断（rowClass）：%s", joined)
-	}
-	if strings.Contains(joined, "占位结果") {
-		t.Fatalf("诊断不得记录正文：%s", joined)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := classifyClaudeSourceRowContent(line(t, c.raw)); got != c.want {
+				t.Fatalf("classify = %s, want %s", got, c.want)
+			}
+		})
 	}
 }
 

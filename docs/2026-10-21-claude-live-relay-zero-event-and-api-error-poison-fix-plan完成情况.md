@@ -18,7 +18,7 @@
 
 ## 1. 总结论
 
-RC-A / RC-B 已实施、测试（先红后绿）、部署并经 owner 真机验收（方案 §9 四项完成）。生产运行态取证：验收时段 `Claude source batch rejected` = **0**、`no projection subevents` = **0**、`source batch gap` = **0**（对照修复前 b66193d7 单会话 73 分钟 146/281，方案 §3.1）。白名单 source-only 路径在本窗口未自然触发（40 个新增 assistant 行 0 空白形态——当前 CLI/网关组合不产生空白 thinking 行；证据等级见 §5）。
+RC-A / RC-B 已实施、测试（先红后绿）、部署并经 owner 真机验收（方案 §9 四项完成；验收用 glm-5.3 会话，不产生空白思考行，未覆盖 RC-A 触发面——R4-1）。**RC-A 的 Mac 生产证据由复核 R4 以 b66193d7（claude-opus-5-5，会产生空白 thinking 行）补上**：同 runtime 代际 18:48–19:09 新写 56 个空白 thinking 行，白名单放行限流 INFO 出现（`rowClass=proven_no_display type=assistant blocks=[thinking:blank] stop=tool_use`），全窗 `rejected`/`gap`/`subevents`/`hydrate failed`/`quarantined` 全 0；**同会话同模型修复前对照**：14:46–15:59 共 146 次丢事件 / 281 次断档（方案 §3.1）。开发者验收窗（ce5ca3c8，glm-5.3）的 0 拒收不构成修复效果证据——该输入修复前同样 0 拒收（R4-1：不是同强度对照）。
 
 ## 2. 实施（提交 `c308ad25`，13 文件 +773/−15）
 
@@ -37,7 +37,7 @@ RC-A / RC-B 已实施、测试（先红后绿）、部署并经 owner 真机验�
 | T5 `TestClaudeSourceShapeFixtures_LoadAllAndValidateManifest` | **FAIL**（RC-B 现成红：对象 error poison） | PASS |
 | T5② 字符串 error 文本 / T5④ 语法错误 poison | PASS（守护） | PASS |
 | T5③ `TestClaudeRelayErrorTextShapes` | 随实现加 | PASS |
-| T7 realdata 普查（516 文件） | — | PASS：admitted 200,932 行，「可投影 ⇔ 事件数>0」**违例 0**（三分类 196,632/3,595/705；口径=扫描器 admitted 行，方案 §3.2 为内容行口径，量级一致） |
+| T7 realdata 普查（R4-5 重写后：517 文件，**relay 内容入口口径**） | — | PASS：内容入口行 200,547，三分类 196,885/3,654/**8**，三向不变量违例 0/0/0；poison 文件 **0**（修复前 64 个文件在 api_error 行截断）。**残余拒收仅 8 行**，全是 assistant [tool_result]（U1/U2），CLI 2.1.181–2.1.258 旧格式，近 14 天新写入 0——与方案 §5.4「当前版本无『不支持』输入」一致（v1 的「705 与方案量级一致」表述作废：705 含 401 行 compact_boundary 系统行与 296 行 echo-only，均不进事务） |
 
 回归族（D3）：`claude_file_relay*`、`claude_content_relay*`、`claude_source*`、`projection_source_transaction*`、`TestHandleGetSessionProjection*` 全绿 + `go vet` ok。
 
@@ -52,18 +52,18 @@ RC-A / RC-B 已实施、测试（先红后绿）、部署并经 owner 真机验�
 
 ## 5. 运行态取证与对账（18:29:24–18:38 窗口，runtime `c308ad25017b`）
 
-owner 验收（方案 §9 四项，含 RC-1 生产级证据②执行中重开）完成。被旁观回合：ce5ca3c8（30 新 assistant 行）+ d1ac0bdd（10 行）。
+owner 验收（方案 §9 四项）完成。被旁观回合：ce5ca3c8（30 新 assistant 行）+ d1ac0bdd（10 行）。**R4-4 勘误：本节 v1 有四处误读日志，以下为更正后的表述。**
 
-- **transcript 侧（ce5ca3c8 18:29 后）**：tool_use=14、tool_result=14、非空 text=13（合计 41 个可投影块，40 个 admitted 新行）。
-- **投影侧（来源=Mac 生产日志）**：`Claude source batch rejected`=**0**、`no projection subevents`=**0**、`source batch gap`=**0** → **41/41 可投影块全部进事务（n/N）**；账本 `sourceCursor` 连续推进至 17,259,893 ≈ 文件 17,283,793（余 23.9KB 为 checkpoint 周期后在飞行，非丢失）；headRev 5111→5142 持续前进；K4Patch 26 次 flush、2 次 drop 均 `fence_stale_or_invalidated invalidated=false`（hydrate 边界旧 fence 残余，非内容丢失）。per-part 级投影数字未从生产提取（Management API 无投影端点）——组件级 T4 已证生产入口等价，生产侧以「零拒收+账本连续+headRev 前进」为等价证据链。
-- **修复前对照**：方案 §3.1——b66193d7 单会话 73 分钟 subevents=146 / gap=281。
-- **RC-1 单列**：ce5ca3c8 验收窗 7 次 hydrate（含执行中重开）全部 `settled=true`，无 `no registered relay loop` / `coverage_failed`——生产路径已证。
+- **transcript 侧（ce5ca3c8 18:29 后）**：tool_use=14、tool_result=14、非空 text=13（41 个可投影块）。**投影侧未取得逐 part 计数**（Management API 无投影端点）；生产侧可观测的是 0 拒收（`rejected`/`subevents`/`gap` 全 0）——但该窗口模型为 glm-5.3、无空白行输入，**修复前同样会 0 拒收，不构成修复效果证据**（R4-1）。
+- ~~账本 sourceCursor 连续推进至 17,259,893~~ **勘误**：日志 `checkpoint_stage` 的 `sourceCursor` 是每次冷 hydrate 的起始 cut（`admission.StartCut`），不是 live 账本游标，证明不了 live ingest 连续；「余 23.9KB 在飞」的解释不成立。K4Patch 26 次 flush、2 次 drop 为 hydrate 边界旧 fence 残余（`syncRev==cutRev`，patch 已含于快照，分支既有 fence 逻辑，非 v2.1 范围）。
+- ~~7 次 hydrate 全部 settled=true~~ **勘误**：7 条 `checkpoint_stage` 全部 `settled=false`——`settled` 定义为 `Execution.Phase != "running"`，运行中会话本来就是 false，非故障；v1 把值写反。
+- **RC-1 单列（R4-4 更正：n=1）**：该会话 relay 仅于 18:31:48.522 启动一次；只有**首次打开**处于竞态窗内——18:31:48.521 收到请求 → relay 启动 → 18:31:49.141 coverage liveBound → 18:31:49.146 hydrate 提交（执行态 running）——修复前此场景会撞 `no registered relay loop`。其余 6 次打开时 relay 已在运行，不构成竞态样本。结论成立但样本量 n=1。
 
 **证据等级（分开标注，不混写）**：
 
 | 项 | 等级 | 依据 |
 | --- | --- | --- |
-| RC-A 拒收消除 | **生产路径** | 验收窗零拒收/零 gap/零 subevents + 账本连续 |
+| RC-A 拒收消除（白名单放行） | **生产路径（Mac 侧，复核 R4 观察）** | b66193d7（Opus）18:48–19:09：56 空白 thinking 行、白名单放行 INFO 出现、全窗 0 拒收；同会话修复前 146/281。iPhone 端实时显示未观测（该时段无客户端在看）。开发者验收窗（glm-5.3）无触发输入，不构成证据 |
 | RC-A 白名单 source-only（含限流 INFO） | **组件级**（生产未触发） | T1/T4 + 普查 3,595 存量空白行分类正确、违例 0；本窗口 40 新行 0 空白形态（当前 CLI/网关组合不产生空白 thinking 行），限流 INFO 未自然出现 |
 | RC-B 对象 error 不再冻结 | **组件级** | T5（fixture 转绿）+ 普查 516 文件；生产 429 未自然出现，待自然样本佐证 |
 | RC-1 运行中会话冷开 | **生产路径** | 验收②执行中重开 7 次 hydrate 全 settled |
@@ -72,5 +72,5 @@ owner 验收（方案 §9 四项，含 RC-1 生产级证据②执行中重开）
 
 1. 白名单限流 INFO 与 RC-B 生产 429 样本：等自然触发（已登记观测点）。
 2. **Phase 2**（方案 §5.4：live-ingest 失败后的冷却语义/账本重装/relay 重绑）：待 owner 排期。
-3. R3-4（`finishStarting` 信号未区分 relay 代际，无错误行为）nit 登记；O-A（`go-bridge.log` 启动清空，`RuntimeProcessController.swift:216`）另案以 main 为基修复。
+3. R3-4 措辞更正（R4-9）：不是「无错误行为」——新旧 relay loop 生命周期罕见重叠时，旧 loop 的启动信号会提前唤醒等待者，等待者重查注册表未命中即回到**修复前的 fail-closed（冷开失败，可重试）**——不是假成功，但也不是无错误。nit 登记。`claudeSourceRowShapeSummary` 的块循环对 `entry.Message` 存在潜在 nil 解引用（当前唯一调用方保证非空，R4-9 登记，改属生产代码本轮不动）。iPhone16 `6c56144e` 为**本轮经 owner 指示重新安装**（工作单第 4 步原判定无需重装——该提交仅注释；owner 要求安装最新版）。O-A（`go-bridge.log` 启动清空）另案以 main 为基修复。
 4. 耗时（工作单要求）：编辑（测试+实现+fixture）约 50 分钟；编译 Release 两轮 40s+53s；定向测试 v2.1 套件 0.5s / 回归族 5.2s / 普查 14.7s / 红绿各轮秒级；安装两轮各约 1 分钟。

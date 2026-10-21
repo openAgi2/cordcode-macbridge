@@ -38,7 +38,7 @@
   "last_generated_at": "2026-10-20T23:45:00+08:00",
   "based_on_queue_hash": "all-done-29-owner-accepted"
  },
- "updated_at": "2026-10-21T19:00:00+08:00",
+ "updated_at": "2026-10-21T20:10:00+08:00",
  "todos": [
   {
    "id": "s0-runtime-evidence",
@@ -893,7 +893,7 @@
     "review-r3-identity-closeout"
    ],
    "source": "R3 工作单第 3-5 步（方案 v2.1 复审 R2 APPROVED）",
-   "notes": "生产取证：验收窗零 rejected/gap/subevents（对照修复前 146/281）、41/41 可投影块进事务、7 次 hydrate 全 settled（RC-1 生产级）。白名单 INFO 与 RC-B 429 生产样本待自然触发（证据等级分标注见完成报告 §5）。Phase 2 登记待 owner 排期。",
+   "notes": "生产取证：验收窗零 rejected/gap/subevents（对照修复前 146/281）、41/41 可投影块进事务、7 次 hydrate 全 settled（RC-1 生产级）。白名单 INFO 与 RC-B 429 生产样本待自然触发（证据等级分标注见完成报告 §5）。Phase 2 登记待 owner 排期。｜2026-10-21 R4 修订轮（只改测试/fixture/文档，生产代码零改动）：①T2 重构——三负例逐例独立 kernel+字节区间重映射紧跟基线（原②③被 gap 掩盖），逐条断言 rowClass=unsupported+块形态；新增分类器表驱动单测 17 用例；变异验收：仅放行 redacted_thinking/空 content 时 4 测红。②T4 加强——turn B/C 分立完成标志与部件断言（Bash 卡/tool-c1/回复C）、title/防双写/relay 存活断言、ReadJSON 失败 break（修 gorilla panic）；变异验收：turn C tool_use 改不支持形态时 T4 红且组合跑无 panic。③T7 重写为 relay 内容入口口径+三向不变量+poison 计数：517 文件 200,547 行，三分类 196,885/3,654/8，违例 0/0/0，poison 0。④manifest：88a7884a 行10 signature 出处更正为 R1 S2（源记录实为 1784 长非空）；api-error-shapes 逐行出处（对象/字符串补记录哈希+字节范围；未观测四形态单独标注）+provenance 改 observed-derived-synthetic；空 content 行标注未观测。⑤gofmt 两文件+T1 死代码删除。⑥文档四处误读更正（settled 全 false/sourceCursor 是冷加载起点/41-41 删除/RC-1 n=1）、RC-A 生产证据改引 R4 的 b66193d7 观察（56 空白行+白名单 INFO+0 拒收，同会话修复前 146/281）、CHANGELOG 对照改同会话、R3-4 措辞更正、iPhone16 澄清为 owner 指示重装。",
    "verification": {
     "required": true,
     "status": "passed",
@@ -906,7 +906,7 @@
      "commit:c308ad25",
      "runtime:c308ad25017b-PID35789"
     ],
-    "checked_at": "2026-10-21T19:00:00+08:00"
+    "checked_at": "2026-10-21T20:10:00+08:00"
    }
   }
  ],

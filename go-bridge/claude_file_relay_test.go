@@ -916,60 +916,109 @@ func TestClaudeFileRelayBlankThinkingAndApiErrorKeepProjecting(t *testing.T) {
 		`{"type":"assistant","uuid":"as-c3","parentUuid":"u-c3","message":{"id":"msg-c3","role":"assistant","content":[{"type":"text","text":"回复C占位"}],"stop_reason":"end_turn"}}`,
 	)
 
-	sawToolCard, sawToolFinished, sawNote, sawReply, sawCompletedC := false, false, false, false, false
+	// R4-3 重构：turn B 与 turn C 各设完成标志与部件断言（原版共享 sawCompletedC，
+	// turn B 完成即退出，2.1.304 段从未被检查）；R4-7：ReadJSON 失败即 break
+	// （gorilla 读超时后连接已失效，continue 会 panic 拖垮整个测试包）。
+	completedB, completedC := false, false
+	cardB, cardC, finishedB, finishedC, noteB, replyB, replyC := false, false, false, false, false, false, false
 	sawTurnError, sawBlankDelta := false, false
+	toolStarts := map[string]int{}
+	keyDeltas := map[string]int{}
+	untitledTools := 0
 	var names []string
-	deadline := time.Now().Add(6 * time.Second)
-	for time.Now().Before(deadline) && !(sawCompletedC && sawToolCard && sawToolFinished && sawNote && sawReply) {
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) && !(completedB && completedC) {
 		_ = client.conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 		var ev map[string]any
 		if err := client.conn.ReadJSON(&ev); err != nil {
-			continue
+			break
 		}
 		event, _ := ev["event"].(string)
 		data, _ := ev["data"].(map[string]any)
 		names = append(names, event)
 		switch event {
 		case "tool_started":
-			if toolName, _ := data["toolName"].(string); toolName == "Read" {
-				sawToolCard = true
+			id, _ := data["itemId"].(string)
+			toolStarts[id]++
+			toolName, _ := data["toolName"].(string)
+			if title, _ := data["title"].(string); strings.TrimSpace(title) == "" {
+				untitledTools++
+			}
+			if toolName == "Read" && id == "tool-b1" {
+				cardB = true
+			}
+			if toolName == "Bash" && id == "tool-c1" {
+				cardC = true
 			}
 		case "tool_finished":
-			if id, _ := data["itemId"].(string); id == "tool-b1" {
-				sawToolFinished = true
+			id, _ := data["itemId"].(string)
+			if id == "tool-b1" {
+				finishedB = true
+			}
+			if id == "tool-c1" {
+				finishedC = true
 			}
 		case "text_delta":
 			delta, _ := data["delta"].(string)
 			switch delta {
 			case "中间说明占位":
-				sawNote = true
+				noteB = true
+				keyDeltas[delta]++
 			case "最终回复占位":
-				sawReply = true
-			case " ", "", "\n", "  ":
+				replyB = true
+				keyDeltas[delta]++
+			case "回复C占位":
+				replyC = true
+				keyDeltas[delta]++
+			case " ", "", "  ", "\t":
 				sawBlankDelta = true
 			}
 		case "turn_completed":
-			if id, _ := data["turnId"].(string); id == "turn-c" || id == "u-c" {
-				sawCompletedC = true
+			id, _ := data["turnId"].(string)
+			if id == "turn-b" || id == "u-b" {
+				completedB = true
 			}
-			if id, _ := data["turnId"].(string); id == "turn-b" || id == "u-b" {
-				sawCompletedC = true
+			if id == "turn-c" || id == "u-c" {
+				completedC = true
 			}
 		case "turn_error":
 			sawTurnError = true
 		}
 	}
-	if !sawToolCard || !sawToolFinished || !sawNote || !sawReply {
-		t.Fatalf("部件缺失（RC-A/RC-B 未修复）：toolCard=%v toolFinished=%v note=%v reply=%v events=%v",
-			sawToolCard, sawToolFinished, sawNote, sawReply, names)
+	if !cardB || !finishedB || !noteB || !replyB || !completedB {
+		t.Fatalf("turn B（2.1.301 段）部件缺失：card=%v finished=%v note=%v reply=%v completed=%v events=%v",
+			cardB, finishedB, noteB, replyB, completedB, names)
 	}
-	if !sawCompletedC {
-		t.Fatalf("2.1.304 形态回合未完成（completedC=%v）events=%v", sawCompletedC, names)
+	if !cardC || !finishedC || !replyC || !completedC {
+		t.Fatalf("turn C（2.1.304 段，R4-3 补断言）部件缺失：card=%v finished=%v reply=%v completed=%v events=%v",
+			cardC, finishedC, replyC, completedC, names)
 	}
 	if sawTurnError {
 		t.Fatalf("api_error 行不得产生 turn_error（应只 ack）")
 	}
 	if sawBlankDelta {
 		t.Fatalf("空白内容不得投递为 text_delta")
+	}
+	if untitledTools != 0 {
+		t.Fatalf("工具卡缺 title（方案 §7）：%d 个无标题", untitledTools)
+	}
+	for id, count := range toolStarts {
+		if count != 1 {
+			t.Fatalf("工具卡重复（方案 §7 防双写）：itemId=%s 出现 %d 次", id, count)
+		}
+	}
+	for delta, count := range keyDeltas {
+		if count != 1 {
+			t.Fatalf("正文重复（防双写）：%q 出现 %d 次", delta, count)
+		}
+	}
+	// Kernel 不进入 failed（方案 §7 T4「保持 Ready」——本场景无冷开，session
+	// 状态 absent 属正常；被拒收的行会 markHydrateFailed → failed，因此断言
+	// 非 failed 即等价于「零拒收」的内核侧证据）。
+	if phase := handlers.projectionKernel.Status("claude", sessionID).Phase; phase == ProjectionHydrateFailed {
+		t.Fatalf("kernel phase = %v（出现拒收/失败）", phase)
+	}
+	if !handlers.relayKindIs(sessionID, relayKindClaudeFile) {
+		t.Fatal("relay exited; must keep watching")
 	}
 }

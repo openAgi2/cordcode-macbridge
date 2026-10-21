@@ -2,17 +2,20 @@
 
 package gobridge
 
-// T7（修复方案 v2.1 §7，realdata tag）：本机真实 transcript 普查——生产扫描器 +
-// 生产分类器 + 生产 mapper 过全部内容行，守护两条不变量：
-//   1. 「可投影 ⇔ 事件数 > 0」违例 = 0（分类器与 mapper 不漂移）；
-//   2. 输出三分类计数，供人工比对方案 §3.2 的普查数字（A≈140,974/3,515/5，
-//      活跃文件持续增长，量级一致即可）。
+// T7（修复方案 v2.1 §7，realdata tag；R4-5 重写口径）：本机真实 transcript 按
+// **relay 内容入口**统计（admitted、非 interrupt、UUID+Message 齐备、user/assistant、
+// 非 echo-only——即 handlers_relay.go 中进入 applyClaudeLiveSourceRecord 的行），
+// 三向不变量守护：
+//   1. 可投影 ∧ mapper 事件 = 0 → 违例（分类器与 mapper 漂移）
+//   2. 白名单 ∧ mapper 事件 > 0 → 违例（白名单把有展示的行放过了）
+//   3. 不支持 ∧ mapper 事件 > 0 → 违例（不支持却实际产出事件）
+// 并输出 poison 计数（RC-B 修复后对象 error 不再 poison；语法错误仍会）。
 //
 // 运行（默认构建不编译）：
 //
 //	GOTOOLCHAIN=local go test ./go-bridge -tags realdata -count=1 -run TestClaudeSourceRowClassificationRealdataCensus -v
 //
-// 只输出计数与哈希，不打印正文/路径。
+// 只输出计数，不打印正文/路径。
 
 import (
 	"os"
@@ -20,8 +23,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 func TestClaudeSourceRowClassificationRealdataCensus(t *testing.T) {
@@ -40,9 +41,12 @@ func TestClaudeSourceRowClassificationRealdataCensus(t *testing.T) {
 	if len(files) == 0 {
 		t.Skip("no recent transcripts on this machine")
 	}
-	counts := map[claudeSourceRowContentClass]int{claudeRowContentProjectable: 0, claudeRowContentProvenNoDisplay: 0, claudeRowContentUnsupported: 0}
-	violations := 0
-	scanned := 0
+	counts := map[claudeSourceRowContentClass]int{
+		claudeRowContentProjectable: 0, claudeRowContentProvenNoDisplay: 0, claudeRowContentUnsupported: 0,
+	}
+	poisonFiles := 0
+	contentRows := 0
+	violations := [3]int{}
 	for _, path := range files {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -50,34 +54,41 @@ func TestClaudeSourceRowClassificationRealdataCensus(t *testing.T) {
 		}
 		scan, err := scanCompleteClaudeRelayEntriesFromReader(strings.NewReader(string(data)), 0, &claudeRelayScanState{})
 		if err != nil || scan.Poison != nil {
-			continue // RC-B 修复后不应 poison；普查对 poison 文件跳过并计数见下
+			poisonFiles++
+			continue
 		}
 		for _, record := range scan.Records {
 			if !record.Admitted {
 				continue
 			}
-			scanned++
-			class := classifyClaudeSourceRowContent(record.Entry)
+			e := record.Entry
+			// relay 内容入口谓词（handlers_relay.go apply 分支同源）。
+			if e.UUID == "" || e.Message == nil || (e.Type != "user" && e.Type != "assistant") {
+				continue
+			}
+			if isClaudeUserInterruptRelayEntry(e) || isClaudeEchoOnlyUserRow(e) {
+				continue
+			}
+			contentRows++
+			class := classifyClaudeSourceRowContent(e)
 			counts[class]++
-			if class == claudeRowContentProjectable {
-				turnID := "census"
-				events := claudeEntryToProjectionEvents(record.Entry, &turnID, nil, nil)
-				if len(events) == 0 {
-					violations++
-				}
-			} else {
-				turnID := "census"
-				events := claudeEntryToProjectionEvents(record.Entry, &turnID, nil, nil)
-				if len(events) > 0 && class == claudeRowContentProvenNoDisplay {
-					violations++
-				}
+			turnID := "census"
+			events := claudeEntryToProjectionEvents(e, &turnID, nil, nil)
+			switch {
+			case class == claudeRowContentProjectable && len(events) == 0:
+				violations[0]++
+			case class == claudeRowContentProvenNoDisplay && len(events) > 0:
+				violations[1]++
+			case class == claudeRowContentUnsupported && len(events) > 0:
+				violations[2]++
 			}
 		}
 	}
-	t.Logf("census: files=%d scanned admitted rows=%d projectable=%d proven_no_display=%d unsupported=%d",
-		len(files), scanned, counts[claudeRowContentProjectable], counts[claudeRowContentProvenNoDisplay], counts[claudeRowContentUnsupported])
-	if violations != 0 {
-		t.Fatalf("「可投影 ⇔ 事件数 > 0」违例 = %d（分类器与 mapper 漂移）", violations)
+	t.Logf("census(content-entry): files=%d poisonFiles=%d contentRows=%d projectable=%d proven_no_display=%d unsupported=%d violations(projectable0ev/provenDisplay/unsupportedDisplay)=%d/%d/%d",
+		len(files), poisonFiles, contentRows,
+		counts[claudeRowContentProjectable], counts[claudeRowContentProvenNoDisplay], counts[claudeRowContentUnsupported],
+		violations[0], violations[1], violations[2])
+	if violations[0] != 0 || violations[1] != 0 || violations[2] != 0 {
+		t.Fatalf("三向不变量违例：%+v（分类器与 mapper 漂移）", violations)
 	}
-	_ = core.LiveSessionProcess{} // keep import stable if future assertions need it
 }

@@ -1661,24 +1661,24 @@ func (h *Handlers) deliverClaudeLiveControlPlane(
 }
 
 type claudeTranscriptRelayEntry struct {
-	Type                      string                      `json:"type"`
-	Subtype                   string                      `json:"subtype"`
-	UUID                      string                      `json:"uuid"`
-	ParentUUID                string                      `json:"parentUuid"`
-	Timestamp                 string                      `json:"timestamp"`
-	IsMeta                    bool                        `json:"isMeta"`
-	IsCompactSummary          bool                        `json:"isCompactSummary"`
-	IsVisibleInTranscriptOnly bool                        `json:"isVisibleInTranscriptOnly"`
-	IsAPIErrorMessage         bool                        `json:"isApiErrorMessage"`
-	APIErrorStatus            int                         `json:"apiErrorStatus"`
+	Type                      string `json:"type"`
+	Subtype                   string `json:"subtype"`
+	UUID                      string `json:"uuid"`
+	ParentUUID                string `json:"parentUuid"`
+	Timestamp                 string `json:"timestamp"`
+	IsMeta                    bool   `json:"isMeta"`
+	IsCompactSummary          bool   `json:"isCompactSummary"`
+	IsVisibleInTranscriptOnly bool   `json:"isVisibleInTranscriptOnly"`
+	IsAPIErrorMessage         bool   `json:"isApiErrorMessage"`
+	APIErrorStatus            int    `json:"apiErrorStatus"`
 	// RC-B（v2.1 §5.3，2026-10-21）：error 字段按原始 JSON 解码——真实形态既有
 	// 字符串（assistant isApiErrorMessage 兜底文本）也有对象（system/api_error 的
 	// {message,type,...}）。原 string 类型让对象行 Unmarshal 失败 → 完整记录扫描器
 	// poison → 之后的实时内容全部冻结（135ba20a 引入）。取文本统一走
 	// claudeRelayErrorText；JSON 语法错误仍 poison（失败关闭不放宽）。
-	Error                     json.RawMessage             `json:"error"`
-	RequestID                 string                      `json:"requestId"`
-	CompactMetadata           *claudeRelayCompactMetadata `json:"compactMetadata"`
+	Error           json.RawMessage             `json:"error"`
+	RequestID       string                      `json:"requestId"`
+	CompactMetadata *claudeRelayCompactMetadata `json:"compactMetadata"`
 	// Claude Desktop persists the complete AskUserQuestion resolution on the user row in
 	// toolUseResult, alongside message.content.tool_result. The relay needs presence and
 	// shape only; answers are never copied into the projection event.
