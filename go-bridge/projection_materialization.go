@@ -27,7 +27,11 @@ import (
 )
 
 const (
-	materializationSchemaVersion = 1
+	// 2026-10-21 评审 BLOCKER-1 bump 1→2：v1 期间组合源后缀折叠写入的 checkpoint
+	// 可能已损坏（行号派生 turn ID 重编号碰撞 → 早期 turn 被覆盖/尾部虚构，
+	// docs/2026-10-21-long-session-projection-loading-session-code-review-r1.md）。
+	// bump 使全部 v1 存档失效 → 冷开诚实全量重建。
+	materializationSchemaVersion = 2
 	// materializationFilename 冻结于格式文档 §1。
 	materializationFilename = "materialization.bbolt"
 
@@ -326,6 +330,19 @@ func (s *ProjectionMaterializationStore) LoadValidated(
 		stored := head.Sources[index]
 		if stored.Identity != segment.Identity {
 			return ProjectionCheckpoint{}, fmt.Errorf("%w: source membership mismatch at %d", ErrProjectionCheckpointInvalid, index)
+		}
+		// 2026-10-21 评审 BLOCKER-1 止血：恢复 main（f868af18）的组合源 cut 严格
+		// 语义。组合源段级 cursor 推进时，后缀折叠依赖行号派生 turn ID 从续读
+		// 起点重新编号（continuation.go），与存量 turn 确定性碰撞 → 早期 turn
+		// 被新 prompt 覆盖、尾部 turn 虚构；损坏会写回本存储并持续叠加（生产
+		// 18 次折叠 11 次分歧）。单源维持 main 语义不变：前缀 digest 校验 +
+		// 接受 cursor 前进（transcript 纯追加，无重编号面）。组合源任何段
+		// cursor 不等即 Invalid → 诚实全量重建。
+		if len(source.Segments) > 0 && stored.Cursor != segment.Cursor {
+			return ProjectionCheckpoint{}, fmt.Errorf(
+				"%w: composite source cut mismatch at %d (stored=%d current=%d)",
+				ErrProjectionCheckpointInvalid, index, stored.Cursor, segment.Cursor,
+			)
 		}
 		validated, err := validateMaterializationSegment(segment.Path, stored)
 		if err != nil {

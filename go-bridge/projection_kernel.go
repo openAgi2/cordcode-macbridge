@@ -1163,9 +1163,13 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 				tx.reducer.Restore(backendID, sessionID, restored)
 			}
 			if len(source.Segments) > 0 {
-				// S-2：composite 接受 cursor 推进——基线 = stored cursors（其和为
-				// startCursor，与单源 checkpoint.Source.Cursor 同构）；produce 以
-				// StartCursors 做 per-segment offset 续读，折叠 [stored_i, current_i)。
+				// S-2 composite 分支。2026-10-21 评审 BLOCKER-1 起 LoadValidated
+				// 恢复 main 严格语义：组合源任一段 cursor 推进即 Invalid（诚实
+				// 重建），到达此处的 checkpoint 必然 stored_i == current_i——
+				// 折叠区间恒空，本分支只把 stored cursors 汇总为 startCursor
+				// （与单源 checkpoint.Source.Cursor 同构）。不再有「接受推进 +
+				// 后缀折叠」路径：段级续读的行号派生 turn ID 会重新编号并与
+				// 存量碰撞（评审 R1 生产复现 11/13 分歧）。
 				segmentStartCursors = make([]int64, 0, len(checkpoint.Sources))
 				for _, stored := range checkpoint.Sources {
 					segmentStartCursors = append(segmentStartCursors, stored.Cursor)
