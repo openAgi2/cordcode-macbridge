@@ -46,3 +46,34 @@ func TestTrailingCoverageIgnoresTerminalAndEmpty(t *testing.T) {
 		t.Fatalf("空快照不得触发 coverage")
 	}
 }
+
+// 2026-10-21 评审 MAJOR-1：CLI 本地命令回显 turn（User 为 /cmd 文本、Assistant
+// 无）必须从 coverage 豁免——d78100ee 扩语义把它计入后，dead 进程下被合成
+// turn_aborted，会话被标失败（2026-10-11 /model 修复回归）。真正非终态 turn
+//（悬挂 tool_use、未答 Ask）仍在 coverage 内（上两测锁定）。
+func TestTrailingCoverageExemptsCommandEchoTurn(t *testing.T) {
+	snap := SessionProjection{Turns: []TurnProjection{
+		{TurnID: "t-done", Status: "completed"},
+		{TurnID: "t-echo", Status: "running", User: &MessageProjection{Parts: []ProjectionPart{
+			{Type: "text", Text: "/model haiku"},
+		}}},
+		{TurnID: "t-dangling-tool", Status: "running", Assistant: &MessageProjection{Parts: []ProjectionPart{
+			{Type: "tool", ItemID: "tool-1", ToolStatus: "pending"},
+		}}},
+	}}
+	ids := claudeTrailingCoverageNeededTurnIDs(snap)
+	for _, id := range ids {
+		if id == "t-echo" {
+			t.Fatalf("命令回显 turn 不得进入 coverage（2026-10-11 回归，评审 MAJOR-1）: %v", ids)
+		}
+	}
+	foundDangling := false
+	for _, id := range ids {
+		if id == "t-dangling-tool" {
+			foundDangling = true
+		}
+	}
+	if !foundDangling {
+		t.Fatalf("悬挂 tool_use turn 必须保留在 coverage（2026-10-20 卡死修复语义）: %v", ids)
+	}
+}

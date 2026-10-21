@@ -280,6 +280,16 @@ func claudeTrailingCoverageNeededTurnIDs(snap SessionProjection) []string {
 		if turn.Status == "completed" || turn.Status == "aborted" || turn.Status == "error" {
 			continue
 		}
+		// 2026-10-21 评审 MAJOR-1：CLI 本地命令回显 turn（User 为 /cmd 文本、
+		// Assistant 无——CLI 不回应本地命令）不进 coverage。d78100ee 扩语义把它
+		// 计入后，dead 进程下被合成 turn_aborted → 会话被标失败（2026-10-11
+		// /model 修复的回归）。这类 turn 由 commit 收尾的
+		// settleUnansweredCommandEchoTurns 结算 completed（transcript 的
+		// local-command-stdout 回显即执行完毕证据）。悬挂 tool_use / 未答 Ask
+		// 等真正非终态 turn 仍在 coverage 内（2026-10-20 卡死修复语义保留）。
+		if turn.Assistant == nil && turn.User != nil && claudeUserTextIsCommandEcho(turn.User) {
+			continue
+		}
 		ids = append(ids, turn.TurnID)
 	}
 	return ids
