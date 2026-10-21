@@ -38,7 +38,7 @@
   "last_generated_at": "2026-10-20T23:45:00+08:00",
   "based_on_queue_hash": "all-done-29-owner-accepted"
  },
- "updated_at": "2026-10-21T19:55:00+08:00",
+ "updated_at": "2026-10-21T20:15:00+08:00",
  "todos": [
   {
    "id": "s0-runtime-evidence",
@@ -907,6 +907,31 @@
      "runtime:c308ad25017b-PID35789"
     ],
     "checked_at": "2026-10-21T20:10:00+08:00"
+   }
+  },
+  {
+   "id": "o-a-log-rotation-on-start",
+   "title": "O-A：runtime 启动滚动保留上一代 go-bridge.log（本分支修，owner 自行 merge main）",
+   "description": "openLogHandle 原 createFile 截断——每次重启清空上一代日志（R3 复核时 16:52 代际不可复）。改为启动无条件代际滚动（.2→.3、.1→.2、本体→.1，保留 3 代），与运行中 8MiB 滚动共用 shiftLogGenerations（nonisolated static 供单测）。",
+   "status": "done",
+   "phase": "review-followup",
+   "kind": "impl",
+   "depends_on": [
+    "v21-live-relay-fix"
+   ],
+   "source": "owner 裁决：按建议排期实施（O-A 尽快；改在当前分支，owner 自行 merge main）",
+   "notes": "R3-4 搭车修（未动）；Phase 2 挂起待真实触发。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "单测 2/2（代际位移+空目录 no-op，RuntimeProcessControllerTests 3/3 含既有）；Release 构建部署（1d40a3c522ef，PID 55029 20:07:33）；运行态验证：重启后上一代日志保留为 .1（首行=上一代启动行）、.2/.3 齐全——修复前此处被清空",
+    "artifacts": [
+     "commit:1d40a3c5"
+    ],
+    "checked_at": "2026-10-21T20:15:00+08:00"
    }
   }
  ],
