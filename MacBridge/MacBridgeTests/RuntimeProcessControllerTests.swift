@@ -68,3 +68,44 @@ final class RuntimeProcessControllerTests: XCTestCase {
         XCTAssertNil(consumed)
     }
 }
+
+    /// O-A（2026-10-21 评审 R3）：runtime 每次启动保留上一代日志——shiftLogGenerations
+    /// 无条件滚动 .2→.3、.1→.2、本体→.1（此前 openLogHandle 直接 createFile 截断，
+    /// 每次重启清空上一代现场）。
+    func testShiftLogGenerationsPreservesPreviousGenerations() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oa-log-shift-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("go-bridge.log").path
+
+        try "gen-current".write(toFile: path, atomically: true, encoding: .utf8)
+        try "gen-1".write(toFile: "\(path).1", atomically: true, encoding: .utf8)
+        try "gen-2".write(toFile: "\(path).2", atomically: true, encoding: .utf8)
+        try "gen-3".write(toFile: "\(path).3", atomically: true, encoding: .utf8)
+
+        RuntimeProcessController.shiftLogGenerations(path)
+
+        func content(_ suffix: String) -> String {
+            (try? String(contentsOfFile: path + suffix, encoding: .utf8)) ?? "<missing>"
+        }
+        XCTAssertEqual(content(".1"), "gen-current", "上一代本体必须保留为 .1")
+        XCTAssertEqual(content(".2"), "gen-1")
+        XCTAssertEqual(content(".3"), "gen-2", "最老一代（gen-3）被挤出保留窗口")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: path), "本体由 openLogHandle 重建，shift 后应不存在")
+    }
+
+    /// 空目录/无既有日志时启动滚动应为 no-op（不抛错、不产生幽灵文件）。
+    func testShiftLogGenerationsNoopWhenAbsent() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oa-log-shift-empty-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("go-bridge.log").path
+
+        RuntimeProcessController.shiftLogGenerations(path)
+
+        for suffix in ["", ".1", ".2", ".3"] {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: path + suffix), "无日志时不得产生文件：\(suffix)")
+        }
+    }
