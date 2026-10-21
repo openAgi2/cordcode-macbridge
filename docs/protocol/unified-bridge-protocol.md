@@ -267,7 +267,7 @@ code，capability 字符串为 extensible addition，无 major version bump。
 | `read_memory_file` | `backendId`, `fileId` | (Phase 2b+) |
 | `update_memory_file` | `backendId`, `fileId`, `content`, `expectedVersion`, `dryRun?` | (Phase 5D) |
 | `run_diagnostics` | `backendId` | (Phase 2b+) |
-| `session_turn_items` | `backendId`, `sessionId`, `turnId` | `turn_detail_lazy_v1`（§11.7，deprecated）或 `turn_detail_chunks_v1`（§11.8 终案）；descriptor 声明：codex-remote（§11.7）与 claude（v2 producer，2026-10-19，经 `turn_detail_chunks_v1` 声明） |
+| `session_turn_items` | `backendId`, `sessionId`, `turnId` | `turn_detail_lazy_v1`（§11.7，deprecated）或 `turn_detail_chunks_v1`（§11.8 终案）；descriptor 声明：仅 codex-remote（§11.7）。claude 曾于 2026-10-19 以 `turn_detail_chunks_v1` 声明（v2 producer），**2026-10-21 已撤回**（评审 R1 BLOCKER-2：v2 批量引擎要求 TurnItemsPager，claude 未实现 → 入口必失败；见 §11.7 撤回注） |
 | `turn_output_chunk` | `backendId`, `sessionId`, `turnId`, `itemId`, `chunkIndex` | `turn_detail_chunks_v1`（§11.8；blob 二级懒加载） |
 
 ### 4.3 方法参数详细 Schema
@@ -990,10 +990,13 @@ type DiagnosticCheck = {
 ### 11.7 Session Turn Detail 按需加载（`session_turn_items`，2026-08-30 冻结）
 
 适用 backend：**v1 仅 `codex-remote`**（BackendKind `codex-remote`，上游历史为 paginated
-`historyMode`）；**v2 producer 扩展 = `claude`**（2026-10-19 随 `projection_window_v2`
-冻结，§11.7 修订——Claude 无 `historyMode` 维度（JSONL producer 全量构建），等价资源门 =
-「turn 在 committed projection 且 `status=completed`」，hydrate / `turn_not_found` /
-未完成 turn 判定照旧；不引入 HistoryMode 要求）。目标：首屏只载 Summary；回合明细（reasoning 摘要、工具调用与执行步骤）按需
+`historyMode`）。**v2 producer 扩展 = `claude` 的声明已于 2026-10-21 撤回**（原 2026-10-19 随
+`projection_window_v2` 冻结：Claude 无 `historyMode` 维度（JSONL producer 全量构建），等价资源门 =
+「turn 在 committed projection 且 `status=completed`」；撤回原因见评审 R1 BLOCKER-2——
+`turn_detail_chunks_v1` 声明解锁 iOS 明细入口后，chunks 连接上 `session_turn_items` 走 v2 批量引擎，
+该引擎要求 `TurnItemsPager`（仅 codex-remote 实现）→ Claude 必定 `failed(upstream_error)` 并把失败态
+写进共享投影。Mac 侧 v1 producer 代码保留休眠，待 Claude 实现 `TurnItemsPager` 或显式产品决策后
+按新冻结恢复声明）。目标：首屏只载 Summary；回合明细（reasoning 摘要、工具调用与执行步骤）按需
 拉取、经投影 Kernel 原子提交、由既有 `projection_snapshot`/`projection_patch` 管道交付——
 **不新增第二条内容管道**。投影侧 wire 形状（`turnStateOps` patch op、turn 级
 `detailLoadState`/`detailReasonCode`/`generation`、apply 顺序、per-connection 交付规则）冻结于
@@ -1002,9 +1005,8 @@ type DiagnosticCheck = {
 #### 方法归属与门控
 
 - `session_turn_items` 仅在 backend descriptor `capabilities` 含 `turn_detail_lazy_v1` 时可
-  （**v2 扩展，2026-10-19**：Claude descriptor 以 `turn_detail_chunks_v1`（§11.8 终案权威声明）
-  解锁入口；连接级门保持 `turn_detail_lazy_v1` echo 不变——backend 门扩为
-  `{codex-remote, claude}`，见 §11.7 四层资格门定案与 bridge-v1.md v2 章节）
+  （**claude 的 `turn_detail_chunks_v1` 声明已于 2026-10-21 撤回**——backend 门回到
+  `{codex-remote}`；撤回原因与恢复条件见本节开头的撤回注）
   调用（v1 只有 codex-remote 的 paginated historyMode 声明）；客户端以 descriptor 列表门控，
   不以全局 echo 门控（与 `projection_window_v1` 同规）。
 - 其他 backend、或未声明该 capability 的 codex-remote（如 legacy historyMode）调用 →

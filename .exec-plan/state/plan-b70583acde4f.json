@@ -38,7 +38,7 @@
   "last_generated_at": "2026-10-20T23:45:00+08:00",
   "based_on_queue_hash": "all-done-29-owner-accepted"
  },
- "updated_at": "2026-10-20T23:45:00+08:00",
+ "updated_at": "2026-10-21T06:30:00+08:00",
  "todos": [
   {
    "id": "s0-runtime-evidence",
@@ -476,7 +476,7 @@
     "s2-materialization-tests"
    ],
    "source": "方案 §5 E-6；§6 S-2 最小验证/失败处理",
-   "notes": "",
+   "notes": "｜2026-10-21 评审 R1 BLOCKER-1：当时的『三层覆盖』不含『折叠结果==全量重建』等价验证，E-6 realdata 断言只有 stored cursor 返回——该 done 的证据不足部分由修复轮 c988f1b2 的红绿回归测试补齐（composite 推进 Invalid / v1 head 失效 / 重启后增长==全量重建，无修复 4 测全 FAIL 验证有效性）。",
    "verification": {
     "required": true,
     "status": "present",
@@ -658,7 +658,7 @@
     "s3-window-v2-tests"
    ],
    "source": "方案 §6 S-3；§7.3 v2 summary ≤1MiB",
-   "notes": "",
+   "notes": "｜2026-10-21 评审 R1 BLOCKER-2：Claude descriptor 的 turn_detail_chunks_v1 声明使休眠契约不成立（入口必失败），本轮 3cdf884f 撤回；TestClaudeDescriptorDeclaresTurnDetailChunks 曾把缺陷锁死，已反转为 DoesNotDeclare。",
    "verification": {
     "required": true,
     "status": "passed",
@@ -811,6 +811,29 @@
      "changelog:f65e7178"
     ],
     "checked_at": "2026-10-20T23:45:00+08:00"
+   }
+  },
+  {
+   "id": "review-r1-fixes",
+   "title": "评审 R1（FAIL）阻断修复：BLOCKER-1/2 + MAJOR-1/2 + Claude 缓存 revision bump 2",
+   "description": "docs/2026-10-21-long-session-projection-loading-session-code-review-r1.md 四项阻断/重大：①BLOCKER-1 S-2 组合源后缀折叠损坏投影（行号派生 turn ID 重编号碰撞，生产 18 次折叠 11 次分歧）→ 恢复 main cut 严格语义 + materializationSchemaVersion bump 2（c988f1b2）；②BLOCKER-2 Claude descriptor turn_detail_chunks_v1 声明击穿休眠（v2 批量引擎要求 TurnItemsPager → 必定 failed）→ 撤回声明 + 协议 pack 撤回注（3cdf884f）；③MAJOR-1 d78100ee 把 /model 回显 turn 判 aborted（2026-10-11 回归）→ coverage 豁免命令回显（d88920e6）；④MAJOR-2 iOS 清除离线缓存后播种静默失败 → save 前幂等重建目录 + fgTrace 失败可观测 + claudePreviewRevision bump 2（损坏期播种的缓存一次性失效，anchor-newer 无法表达删除虚构 turn）。iOS 协议镜像同步 unified-bridge-protocol.md + read-file-v2 样本（MINOR-6 一并修）。",
+   "status": "done",
+   "phase": "review-followup",
+   "kind": "impl",
+   "depends_on": [
+    "s3-v2-retirement"
+   ],
+   "source": "owner 转发评审 R1 结论（FAIL 2 blocker / 2 major / 8 minor / 9 nit）",
+   "notes": "minor/nit 未修项登记另案（MINOR-1 scope 表、MINOR-2 fence 泄漏、MINOR-3/4/5/7/8、NIT-1…9）；分支仍不 push、不合并。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Mac：红绿验证（无修复 4 新测全 FAIL → 修复后全绿）+ materialization/claudecode 全包 + projection/hydrate/anchor/detail 家族定向全绿 + vet ok；iOS：真机定向 ProjectionBaseCacheTests（含清除→播种→命中新用例）+ ProjectionWindowV2ConsumptionTests；Release 覆盖安装与运行态核验见完成情况报告 §8",
+    "artifacts": [],
+    "checked_at": "2026-10-21T06:30:00+08:00"
    }
   }
  ],
