@@ -197,7 +197,7 @@
 
 ## §5 范围外观察（不计入结论）
 
-- **O1**：`TestClaudeSourceShapeFixtures_LoadAllAndValidateManifest` 在 main（`f868af18`）上用本机 go1.26.6 同样失败（`system-subtypes.jsonl scanner/manifest mismatch`），是既有问题，可能与工具链有关。
+- **O1**：`TestClaudeSourceShapeFixtures_LoadAllAndValidateManifest` 在 main（`f868af18`）上用本机 go1.26.6 同样失败（`system-subtypes.jsonl scanner/manifest mismatch`），是既有问题，可能与工具链有关。**勘误（2026-10-21 后续排查）**：工具链的推测不成立。真正原因是 135ba20a 把 `claudeTranscriptRelayEntry.Error` 声明为字符串，而 `system/api_error` 行的 `error` 是对象，导致 live 扫描器把这类行判为 poison、实时更新冻结。详见 `docs/2026-10-21-claude-live-relay-zero-event-and-api-error-poison-fix-plan.md` 的 RC-B。
 - **O2 Claude live source-batch 拒收循环（既有）**：
   - 当前日志中，本评审所在会话 `b66193d7` 正被 `dev_c5ad…` 以 full_stream 观察。自 14:46:29 起，`Claude projection transition has no projection subevents` 之后接连出现 `Claude source batch gap`，并伴随 `projection hydrate failed code=projection.source_batch_rejected retryable=true`。截至 14:56 统计，同类失败已累计 107 次。
   - `.log.1` 中有 47 次、`.log.3`（10-13/14，本分支之前）中有 47 次同类记录，说明这是既有问题，并非本分支或修复轮引入。
