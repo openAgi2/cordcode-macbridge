@@ -30,11 +30,13 @@ func (a *Agent) WireDescriptor() *core.WireDescriptor {
 			"content_chunking",
 			"question_reply",
 			"external_turn_streaming",
-			// S-3 v2（2026-10-19 冻结）：turn_detail 明细加载入口声明（§11.8
-			// 终案权威声明；不加 deprecated 的 turn_detail_lazy_v1）。iOS
-			// supportsTurnDetailLazy 已同时接受 chunks 声明 → descriptor 变更
-			// 即解锁 Claude 会话入口。
-			"turn_detail_chunks_v1",
+			// turn_detail_chunks_v1 已于 2026-10-21 撤回（评审 BLOCKER-2）：chunks
+			// 声明会解锁 iOS「加载详细过程」入口，但生产连接协商 chunks 后
+			// session_turn_items 走 v2 批量引擎，该引擎要求 core.TurnItemsPager
+			//（仅 codex-remote 实现）→ Claude 必定 failed(upstream_error) 并把失败
+			// 态写进共享投影。S-3 v2 退役休眠契约下 Claude 不声明 chunks；v1
+			// producer（session_turn_items_handler runTurnDetailFetch）代码保留
+			// 休眠，待实现 TurnItemsPager 或显式产品决策再恢复声明。
 		},
 	}
 }

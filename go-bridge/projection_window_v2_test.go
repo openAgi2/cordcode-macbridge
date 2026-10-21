@@ -276,16 +276,15 @@ func TestV2HelloNegotiationEchoes(t *testing.T) {
 	}
 }
 
-func TestClaudeDescriptorDeclaresTurnDetailChunks(t *testing.T) {
-	// 四层资格门第 4 层（descriptor）：Claude 声明 turn_detail_chunks_v1。
+func TestClaudeDescriptorDoesNotDeclareTurnDetailChunks(t *testing.T) {
+	// 2026-10-21 评审 BLOCKER-2：Claude 不得声明 turn_detail_chunks_v1。chunks
+	// 声明会解锁 iOS「加载详细过程」入口，而 v2 批量引擎要求 TurnItemsPager
+	//（Claude 未实现）→ 点击必定 failed(upstream_error) 并污染共享投影。休眠
+	// 契约（iOS 不请求即不触发）要求 descriptor 不做该声明。
 	desc := (&claudecode.Agent{}).WireDescriptor()
-	found := false
 	for _, capability := range desc.StaticCapabilities {
 		if capability == "turn_detail_chunks_v1" {
-			found = true
+			t.Fatalf("Claude descriptor 仍声明 turn_detail_chunks_v1（评审 BLOCKER-2 已撤回）: %v", desc.StaticCapabilities)
 		}
-	}
-	if !found {
-		t.Fatalf("Claude descriptor 缺 turn_detail_chunks_v1 声明: %v", desc.StaticCapabilities)
 	}
 }
