@@ -35,10 +35,10 @@
  "reports": {
   "completion_report_path": "docs/2026-10-20-2026-10-17-claude-long-session-projection-loading-architecture-plan完成情况.md",
   "completion_report_status": "present",
-  "last_generated_at": "2026-10-20T23:45:00+08:00",
-  "based_on_queue_hash": "all-done-29-owner-accepted"
+  "last_generated_at": "2026-10-21T20:30:00+08:00",
+  "based_on_queue_hash": "all-done-34-owner-accepted-plus-r4-revision"
  },
- "updated_at": "2026-10-21T20:15:00+08:00",
+ "updated_at": "2026-10-21T20:30:00+08:00",
  "todos": [
   {
    "id": "s0-runtime-evidence",
