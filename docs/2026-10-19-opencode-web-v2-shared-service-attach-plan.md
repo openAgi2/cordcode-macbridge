@@ -1,23 +1,27 @@
 # OpenCode v2 独立接入与共享服务设计方案
 
-- 版本：v1.8（r6 通过后建议收编版）
-- 日期：2026-10-19
-- 状态：**r6 完整复审通过（APPROVED，0 阻塞/2 建议级）**。评审对象为 v1.7，SHA-256
-  `37ddbaf09e1d4510fd9535232f845e844808f545168bfbd2bc2bf11ad0c7bd47`，报告
-  `docs/2026-10-19-opencode-web-v2-shared-service-attach-plan-review-r6.md`；通过
-  覆盖 v1.4→v1.7 全部累积改动（§3.0/§3.11/E-11a/b/c、手动启动链、桶隔离），且
-  「通过≠授权」。本版 v1.8 仅收编该两条建议级意见并回写评审状态，不改变任何设计
-  命题、门控或验收标准；按 r6 闭合标准（与 F-4/F-15 同级处置）无需再轮评审。仍未
-  授权实施。
+- 版本：v1.10（定向复检 F-26~F-29 收编版）
+- 日期：2026-10-21
+- 状态：**定向复核 #1（2026-10-21，终审员续审）对 v1.9 判定 REVISION_REQUIRED
+  （1 阻塞 F-26／3 建议 F-27~F-29）**，报告
+  `docs/2026-10-19-opencode-web-v2-shared-service-attach-plan-review-final-recheck.md`；
+  复检确认 F-19/20/21/23/25 完全闭合、F-22/24 正文闭合（残留即 F-28/F-29）、
+  F-18 主体闭合、S-0 搜索根覆盖完整。本版 v1.10 全量收编 F-26~F-29（处置见 A.19，
+  无部分不采纳项），四处均为单元格/单句级；按复检闭合路径，终审员核对这几个单元格、
+  F-26 落实且未改出范围即判定通过，作为实施冻结基线。仍不构成实施授权。
 - 版本史：v1.0 初版 → v1.1（r1/F-1~F-9，A.8）→ v1.2（r2-meta，A.9）→
   v1.3（r3/F-14，A.10）→ v1.4（r4/F-15，A.11；r5通过）→ v1.5（手动启动与目录
   隔离，A.12/A.13）→ v1.6（owner指定`agent/opencode-v2/`、ID=`opencode`，A.14/A.15）→
   v1.7（禁止新包及其公共依赖反向依赖旧包，A.16；r6完整复审通过）→
-  v1.8（收编r6 F-16/F-17并回写评审状态，A.17）。
-- 本轮改动范围：①头部/Gate C/阻塞清单回写 r6 完整复审通过结论；②F-17：§5 S-1
-  依赖列「选择/身份按S-7」改为「选择/身份按E-11a（S-0冻结契约）」；③F-16 按本任务
-  HEAD 亲核结果处置并在 §3.11 补精确子锚点（A.17）。R/OD/§3 设计命题、E/S 门控与
-  验收矩阵零改动；除收编两条建议外不做其他设计变更，避免超出 r6 通过面。
+  v1.8（收编r6 F-16/F-17并回写评审状态，A.17）→
+  v1.9（收编终审F-18~F-25，A.18）→
+  v1.10（收编定向复检F-26~F-29，A.19；待终审员核对修订单元格后判定）。
+- 本轮改动范围：①F-26（阻塞）：§3.11 第 5 行 Desktop 写入器处置收窄为「删除
+  `configureOpenCodeDesktopServerIfNeeded()` 及 `:582` 调用」，作废「只对显式旧来源
+  生效」选项；E-11b 断言列补 Desktop 负例；U9 补「v1 显式来源启动不新增 Desktop
+  写入」；②F-27：§3.11 iOS 行撤回「Server.swift 严格 kind 解码」指令，保留旧记录
+  兼容解码；③F-28：remote-web 非放行硬前置同步到 S-7 行与 §5 执行序说明；④F-29：
+  新增 OD-9 并挂 Gate B，S-0 枚举「需产品决定」项限定 S-7 开工前决定。其余零改动。
 - 文档文件名为既有交接入口而保留；标题与正文身份以本版为准。
 
 ---
@@ -91,10 +95,10 @@ MacBridge 的 opencode-web 仍指向自管的 v1 `opencode serve`（4096）。�
 
 | 仓库 | 绝对路径 | 分支/状态 | 提交 | 未提交状态 | 任务预期来源 |
 | --- | --- | --- | --- | --- | --- |
-| cordcode-macbridge（本工作树） | `/Users/jacklee/Projects/cordcode-macbridge-claude-long-session-projection-loading` | `feat/claude-long-session-projection-loading` | `1fe9c65d734949981d032de5f57e9ffb43f6bde9` | 跟踪文件干净；7个未跟踪文档逐项见附录C；v1.6于11:20分析门/11:22首改门重新核实（附录D） | 本任务唯一写入工作树；业务源码锚归本提交；目标新增`agent/opencode-v2`/`opencode`官方v2与跨端身份隔离 |
+| cordcode-macbridge（本工作树） | `/Users/jacklee/Projects/cordcode-macbridge-claude-long-session-projection-loading` | `feat/claude-long-session-projection-loading` | `bd240b80ec6eceb61a99f23120086c388ebeed2b`（2026-10-21 终审/v1.9 修订亲核；v1.8 落盘于 `cbd0a109`，其后 65 个提交触及锚点文件，漂移见 §3.11/A.18，F-19） | 跟踪文件干净；未跟踪仅终审报告 review-final.md；附录C/D 为历史门记录 | 本任务唯一写入工作树；业务源码锚以实施 HEAD fresh 重建为准（S-0 交付物）；目标新增`agent/opencode-v2`/`opencode`官方v2与跨端身份隔离 |
 | opencode（v2 上游，专用 checkout） | `/Users/jacklee/Projects/opencode-v2` | detached，tag `v2.0.32` | `843a6c514e606b436a7fe713422ace0a93ad3d61`（2026-10-16） | 干净（2026-10-19 纠错轮亲核：porcelain 空） | v2 官方实现唯一锚点 |
 | opencode（旧 checkout，仅备注） | `/Users/jacklee/Projects/opencode` | `dev`（2026-10-19 复核：HEAD→dev，非 main） | `22e771f5893e255ea78fc10557ed3fb98d3a1072` | 干净（2026-10-19 纠错轮亲核：porcelain 空） | **不作为本方案锚点**，避免来源混淆 |
-| cordcode-ios（任务配套，实现期修改对象） | `/Users/jacklee/Projects/cordcode-ios-claude-long-session-projection-loading` | `feat/claude-long-session-projection-loading` | `89f0a3693c7ba2ee45cd9191a08cbc5f765aee52` | 干净，11:20/11:22两门亲核 | 唯一同分支族且与已有任务来源一致，配套为本表Mac行；目标新opencode识别/Provider/target/cache/pin/SSV2与remote-web同步，本轮只读源码、只改Mac方案文档 |
+| cordcode-ios（任务配套，实现期修改对象） | `/Users/jacklee/Projects/cordcode-ios-claude-long-session-projection-loading` | `feat/claude-long-session-projection-loading` | `04fc269bdb8a297b1578ac4b9f0d4b82a98c7997`（2026-10-21 终审亲核；**分支历史在方案落盘后被改写**：2026-10-20 rebase、2026-10-21 合入 `feat/ios-native-message-timeline`，旧登记 `89f0a369…` 已非当前 HEAD 祖先，F-19） | 干净（终审两次门一致） | 唯一同分支族配套（终审 fresh worktree 枚举复核）；目标新opencode识别/Provider/target/cache/pin/SSV2与remote-web同步，本轮只读源码、只改Mac方案文档 |
 | cordcode-macbridge（owner指定旧接入规则文档，仅只读参考） | `/Users/jacklee/Projects/cordcode-macbridge` | `main` | `ea0627e30f061c86e2a75711e70778884de7c48c` | 干净，11:20/11:22元数据复核 | 只读取`docs/2026-08-20-opencode-web-source-first-convergence-plan.md`的源码优先/版本化规则；不作为本任务业务源码或构建来源，不沿用main的iOS配套 |
 | cordcode-macbridge（owner 指定的只读状态机文档来源） | `/Users/jacklee/Projects/cordcode-macbridge-native-message-timeline` | `feat/ios-native-message-timeline` | `f868af18bbbbff6e7f47994c11fb76b49406b33e` | 既有 20 项文档修改/未跟踪，逐项见附录 C；被引用文档不在 dirty 集合 | **仅参考文档，不是本任务实现/配套来源**；读取 owner 指定 `docs/2026-10-15-agent-management-topology-and-state-machines.md` v3 的 §4.1/§5.2/§6.2/§7.3；不引用该工作树业务源码，也不沿用其 iOS 来源组合 |
 
@@ -104,7 +108,9 @@ MacBridge 的 opencode-web 仍指向自管的 v1 `opencode serve`（4096）。�
 desktop app 2.0.32（Electron）。以上是前轮取证时间窗，不冒充本轮运行态。
 旧上游checkout不作为v2语义依据；其历史身份保留在表内。v1.6的fresh来源门见附录D，
 任务配对为表内M/I（Mac与iOS的claude-long-session-projection-loading工作树）；
-上游、main旧规则文档与native-timeline状态机文档均不作为该产品配套。引用的状态机文档实际 SHA-256 为
+上游、main旧规则文档与native-timeline状态机文档均不作为该产品配套。2026-10-21 终审与
+v1.9 修订把 M/I 登记刷新为当时 HEAD；两仓仍持续前进，实施开工时必须 fresh 重建本表并
+重核 §2.3/§3.11 锚点（F-19，S-0 交付物）。引用的状态机文档实际 SHA-256 为
 `e49e2d5d00e6216bd70d0127c02949351be96474aef1c8b6cd0b14f91d74121a`，其 v3 方案
 提供状态轴与交互参考，不把“待独立评审”文档当本任务已经实现的 API。
 
@@ -138,7 +144,7 @@ desktop app 2.0.32（Electron）。以上是前轮取证时间窗，不冒充本
 | 旧包v2 SSE已删除、v2被quarantine | `agent/opencode-web/events.go:142-145`；`opencodeweb.go:328-336` | 保持旧包拒绝v2；S-2b只放行新opencode产品，不解除此隔离 |
 | Swift 已预留 `service_discovery_future` source 槽位 | `MacBridge/MacBridge/Services/OpenCodeEndpointResolver.swift:25-27`；`go-bridge/main.go:110`（flag 枚举已含该值） | OD-1 推荐激活该槽位为 v2 attach |
 | managed v1 生命周期（spawn/adopt/stop）与 URL 解析所有权在 Swift | `RuntimeManager.swift:1157-1161`（resolve guard）、`:1264`（startOpenCodeManagedServer）；`OpenCodeManagedServer.swift:238-296`（ensureRunningOnQueue spawn）、`:385-388`（adopt） | attach 判定放 Swift（OD-1）；v2 分支隔离 v1 ensure/stop/sync，旧实现仅供显式旧来源使用 |
-| Swift 会把 managed URL 同步进 desktop 配置 | `RuntimeManager.swift:1198`（syncDesktopConfig 调用）、`OpenCodeManagedServer.swift:318-344` | attach 模式必须跳过（2026-10-19 实证：该同步曾把 4096 写进 desktop、参与崩溃链，附录 A） |
+| Swift 会把 managed URL 同步进 desktop 配置 | `RuntimeManager.swift:1198`（syncDesktopConfig 调用）、`OpenCodeManagedServer.swift:318-344`；**另一写入器 `configureOpenCodeDesktopServerIfNeeded()`（`:1134-1153`，`launchBridgeProcess :582` 每次调用）以 `drivers.contains("opencode")` 为门，v1.8 前方案漏列（终审 F-18a）** | attach 模式必须跳过（2026-10-19 实证：该同步曾把 4096 写进 desktop、参与崩溃链，附录 A）；新 v2 复用 `opencode` ID 后**两个写入器**都必须对新代际不可达，处置与负例见 §3.11 |
 | **Swift 侧监控/重启机制现状（r1 补充，F-2 依据）**：监控循环 3s 一轮（`RuntimeManager.swift:708-721`，pollManagementAPI + evaluateAutoRestart）；现有重启触发只有 crash 重试（`:687-690`）、120 分钟兜底（`:745-766`）、显式 `restart()`（`:458`）、`fileReadHealth.restartRecommended`（`:1015-1017`）；`resolveManagedOpenCodeIfNeeded()` 仅 start/apply 路径调用（`:536`/`:581`）；management `/internal/agents` 对 opencode-web 已做结构化就绪 live 重读（`management_api.go:692-733`，状态面 not_configured/service_not_running/available，`agent_descriptor.go:243-249`），Swift 每轮 status 后 detached 刷新 agents（`RuntimeManager.swift:1019` 一带） | 如左 | **backend 探活失败当前不触发任何重启路径**——attach 模式断裂后最长滞留 120 分钟；§3.2 的触发机制正是挂在这套既有循环上（不新增轮询器） |
 | 旧凭据已用env设施（不常驻argv） | `go-bridge/main.go:104-106`的`OPENCODE_WEB_*` | 仅复用env清理/secret隔离设施；新v2新增独立`OPENCODE_V2_*`槽，不把旧opencode/opencode-web凭据当新服务身份 |
 | OpenCode 行已具备专用动作，但目前是 v1 | `WorkspaceView.swift:1158-1198,1639-1685`；`RuntimeManager.swift:1209-1310` | 扩展为 v2 状态输入与显式启动；不能把旧 v1 `cliFound`/installer 当 v2 安装证据；原 URL-only 更新改为完整身份比较 |
@@ -417,6 +423,10 @@ Swift 等候用同一个只读 discover；子进程退出 0 可能只是让位 i
   stdin/stdout 忽略、stderr 持续排空只留 8KiB 脱敏尾部；不持有无人读取的 pipe。候选退出
   唯一 wait/reap，真正 winner 从注册和探活确认，不认自己 spawn 的 pid 必然获胜。
   Swift 平台 spawn seam 在 E-9 证明 detached 语义；Foundation Process 的存在不是该证据。
+  spawn 前只读镜像官方 contender 的 PTY 交接环境（`effect/service.ts:63`、
+  `pty-handoff.ts:68-78`：存在未过期的 `<service.json>.pty-handoff` 时注入其生成的
+  `OPENCODE_PTY_HANDOFF`，缺失/过期则不注入），避免官方替换流程竞态下丢失持久终端
+  （终审 F-23；E-9 用例）。
 
 动作拥有唯一等待/取消属主。接入关闭、source 改变、App 退出或 operation generation 过期
 时，取消本次观察与未提交配置，晚结果不得写回；若官方共享 daemon 已启动则只断开本方
@@ -445,7 +455,11 @@ Swift 等候用同一个只读 discover；子进程退出 0 可能只是让位 i
   不会清该 60s 时间戳；不能把旧 maxStuckRestarts 当速率保证（吸收 F-10）。不动原其它
   runtime 重启原因的护栏。
 - 关闭/退出只解绑本客户端：v2 无 `OpenCodeManagedServer.stop()` ownership；安装复制与
-  启动动作不能触发 `syncDesktopConfig`。普通退出 Desktop 可能留 daemon 活着，状态只能由
+  启动动作不能触发 `syncDesktopConfig`。**尤其不得激活
+  `configureOpenCodeDesktopServerIfNeeded()`（`RuntimeManager.swift:1134-1153`，
+  `launchBridgeProcess :582` 每次调用）：该写入器以 `drivers.contains("opencode")` 为门，
+  新 v2 复用该 ID 后若不改造即会把 v1 地址/密码写进 OpenCode Desktop 配置——终审 F-18a
+  阻塞项，处置与负例见 §3.11 专行与 S-1。** 普通退出 Desktop 可能留 daemon 活着，状态只能由
   注册与官方探活证明，不能从 GUI 进程存在/退出推断。
 
 ### 3.3 新driver的身份探测与产品放行（S-2a / S-2b）
@@ -474,7 +488,9 @@ Swift 等候用同一个只读 discover；子进程退出 0 可能只是让位 i
   `recoverPendingAfterReconnect` 的arm/idle假设；旧watchdog/backoff仅可作为事故/测试
   场景参考，任何复用机制须有v2依据。
 - **volatile契约恢复**：官方明示断线丢事件；按官方v2恢复链冷读session/message/
-  execution及pending交互，用同一个Kernel事务/fence收敛，不用静默时间猜完成。
+  execution及pending交互——执行态冷读入口为 `GET /api/session/active`（`session.ts:275-285`，
+  结果中缺席的会话即 inactive）与 `session.inbox.list`（`:607`），终审 F-20 补锚——
+  用同一个Kernel事务/fence收敛，不用静默时间猜完成；断线缺口经 session.active 对账（S-3 验证列）。
   CordCode目录发现可复用共享 `go-bridge/session_discovery.go:403-433` 的控制面指纹/
   失效通知，但目录指纹本身不证明timeline/turn已修复；E-2需覆盖断线中产生的增量、
   终态与重连重复事件。慢消费者/输出积压的处理逐项镜像官方边界并由新包定向测试证明。
@@ -504,7 +520,10 @@ Swift 等候用同一个只读 discover；子进程退出 0 可能只是让位 i
   上下文，不能充当列表过滤证据。
 - **分页（cursor）**：会话列表与消息列表都是 cursor 分页（`SessionsQuery.cursor`
   `session.ts:173`；消息端点活体实测默认 50 条/页，`cursor.next` 游走取全量，
-  2026-10-19 复测 4 页/132 条）。读路径实现按本仓分页纪律（stable ID、不跳页）
+  2026-10-19 复测 4 页/132 条）。消息分页 `SessionMessagesQuery`（`message.ts:8-40`）
+  官方约束（终审 F-20 补锚）：limit 1..200；`order` 只作用于首页且与 cursor 不可同用；
+  cursor 为不透明 previous/next——E-4 断言须覆盖方向语义与 desc 游走，不只
+  `cursor.next` 单向。读路径实现按本仓分页纪律（stable ID、不跳页）
   游走；「列表分页」断言进入 S-4/S-6 验证列。
 - 会话列表/详情：v2 Session schema → `core.AgentSessionInfo`（字段映射表随
   E-2/E-4 样本落 testdata 后在实施中固化；标题/时间/模型/cost/tokens 已在
@@ -621,14 +640,20 @@ owner 2026-10-19 明确裁决“不要搞 fail-all”。本节替代旧 directiv
 | OD-6 | v2 todos | 不在官方契约外自建todo，按官方UI/实现/样本底表决定广告；如找到官方实现须补证据修订，不照搬旧包能力 | 方案范围决定，非owner逐字裁决；旧v1独立能力保持 | S-7 | 能力广告与独立实现/真实样本对齐 |
 | OD-7 | 新v2包与backend ID | **`agent/opencode-v2/`，ID/kind=`opencode`**；不恢复最老实现，不作为旧包子目录或alias | **decided，owner本轮明确指定** | S-0/S-2a/S-7 | 注册唯一、独立import、hello/RPC/SSV2/客户端识别均指向v2；旧ID数据隔离 |
 | OD-8 | 旧opencode-web退役 | 新v2稳定门通过且owner确认后退役旧包/挂载；旧程序/历史/外部服务不卸载不删除 | 延续本轮讨论目标；具体稳定/执行门见§3.12，不是当前删除授权 | S-8/S-9 | 稳定证据完整后才改产品lineup/import；先验收、后退役 |
+| OD-9 | 切换时 CordCode 自托管 managed 4096 是否随旧席位取消而停止 | 按既有行为定稿：**停止**（`RuntimeManager.swift:1158-1162`，F-22/F-29）；外部/共享服务（Desktop 49374、用户自起 4096）一律不动 | 工程决定延续＋终审建议，**pending：owner 实施启动时确认**（Gate B） | S-1/S-7 | U10；S-0 枚举「需产品决定」项须在依赖它的 S-7 子项开工前逐一决定 |
 
 ---
 
 ### 3.11 `opencode` 重用身份的接线与数据兼容门（S-0/S-7）
 
-backend ID按owner裁决保持`opencode`。字符串空闲不代表所有代码/磁盘数据已清除：
-本任务配套来源M=`1fe9c65d…`/I=`89f0a369…`亲核仍有旧分流，以下必须作为一次coherent
-跨仓变更完成。只改注册名、目录名或显示名均不算新身份接入。
+backend ID按owner裁决保持`opencode`。字符串空闲不代表所有代码/磁盘数据已清除。终审
+（2026-10-21，A.18）机械化扫描证明本表在 v1.8 及之前**不是穷尽清单**：M go-bridge 生产
+`"opencode"` 39 行、MacBridge Swift 9 行、I `.openCode` 约 61 处、remote-web 28 个文件，
+原表仅锚定其中一小部分，且漏项含可复现附录 A.6 类回归的 Desktop 写入门（下表第 5 行）。
+因此本表定位为**非穷尽基线**：只列终审已证实且有语义后果的必处理项，完整清单以 S-0
+机械化全量枚举交付物为准（每处四分类处置＋对账计数），实施对账以枚举结果为准，不以
+本表快照为穷尽证据；锚点行号登记于各自来源提交，实施 HEAD 上须按 S-0 重建（F-19）。
+以下必须作为一次coherent跨仓变更完成；只改注册名、目录名或显示名均不算新身份接入。
 
 | 边界／已有锚点（均为§2.1任务配套，不是main） | 本版必须实施的接线 |
 | --- | --- |
@@ -638,6 +663,10 @@ backend ID按owner裁决保持`opencode`。字符串空闲不代表所有代码/
 | `agent_descriptor.go:116,216`旧opencode轮询/health（`detectAgentStatus`内`case "opencode":`@:216、health探活调用@:229，A.17亲核）；`handlers_projection.go:664,1386`、`handlers.go:2697`的hydrate/create白名单 | 新driver提供结构化readiness/WireDescriptor/官方live订阅与rich history/create；更新真实拥有该语义的分流，保证新ID冷/热只进入同一Kernel，禁止开旧轮询或旧history旁路 |
 | Swift `ProductAgentCatalog.swift:17`/`AgentSelectionStore.swift:12,62`，`RuntimeManager.swift:1157,1778,1817` | 新产品ID、白名单、独立配置/env、安装recipe与workspace snapshot同时适配；新旧选择互斥；不把新ID传给旧双送URL/凭据逻辑 |
 | I `BackendModels.swift:69-76`把opencode解为旧`.openCode`；`BridgeProvider.swift:985`按kind缓存；`ServerViewModel.swift:885`只比较bridge+kind | 新增明确的`.openCodeV2`内部身份（wire仍opencode），只在协商的新v2标记与descriptor一致时识别；旧`.openCode`仅历史Codable兼容/不可用，不原地复活为v2。Provider、target匹配、初连/重连/发送与remote-web都按新身份建立 |
+| **Swift Desktop 配置写入器（终审 F-18a 阻塞，原表漏列）**：`RuntimeManager.swift:1134-1153` `configureOpenCodeDesktopServerIfNeeded()` 以 `drivers.contains("opencode")`＋旧URL/凭据非空为门，把 v1 地址与密码写入 `~/Library/Application Support/ai.opencode.desktop/`（`opencode.global.dat` server 列表＋`opencode.settings`）；调用点 `launchBridgeProcess()` `:582`；`applyAgentSelection` `:528-546` 直写 drivers；`resolveManagedOpenCodeIfNeeded()` guard 失败分支 `:1158-1162` 只 stop managed、不清空旧URL/凭据（作者已亲核） | 新 v2 永不写 Desktop 配置：**唯一处置＝删除 `configureOpenCodeDesktopServerIfNeeded()` 及 `launchBridgeProcess :582` 调用**（终审复检 F-26 定稿：该函数自旧 `opencode` driver 退役后即不可达——guard 要求 drivers 含 `opencode` 而 `ProductAgentCatalog` 无此 ID、全仓唯一调用点、无测试引用，删除不改变任何现有用户行为；「改为只对显式旧 opencode-web 来源生效」选项**作废**——那会重新激活死代码，使 v1 external/legacy 用户每次启动把 v1 地址/密码写进 Desktop v2 配置）；静态函数 `configureOpenCodeDesktopSettings`（`:1345`）保留，只供 v1 managed `syncDesktopConfig` 既有路径与既有测试使用，**不得**改为对 opencode-web 任何来源生效。S-1/E-11b 负例：选择/启动/接入新 opencode 或自 v1 切换后，`ai.opencode.desktop/` 文件（含 mtime/内容）不被 CordCode 改写；U4/U9/U10「应看到」同步。这是附录 A.6 崩溃链同类前提，也违反非目标「不改 Desktop 状态」 |
+| **Go 侧终审补列消费点（F-18b）**：`main.go:1271-1279` passive 订阅门对 `"opencode"` 要求旧 `-opencode-url` 非空（新driver走`OPENCODE_V2_*`不经旧flag→SSE 永不启动，作者已亲核）；`backend_capabilities.go:156-162` 把 `id=="opencode"` 排除在 ToolAuthorizer→`permission_resolve` 推断外（作者已亲核）；`handlers.go:1797-1804` 按请求 `switchDir` 改共享驱动工作目录（与 E-3 逐请求 location 三态冲突）；`server.go:650-671` 按旧 ID/kind 附加 `session_sync_v2` 归属能力；`handlers.go:588-593` relay 重订阅名单；`handlers_session_pin.go:307-315` pin overlay 按原始 `opencode` 查 store；pathless 同族名单 `handlers_projection.go:122-127/477-479/635-636/785-791/886/1368-1372`、`projection_kernel.go:1004-1011`、`projection_window_handler.go:109-114`、`projection_window_v2_handler.go:117-121`（v1.8 后新增）、`projection_anchor_newer_handler.go:93-98`；旧 flat-convention 折叠（终审 HEAD `handlers_projection.go:1424` 起）按名字解析驱动；`handlers_opencode.go:32` 方法表面仍在增长 | 逐点接新代际：订阅启动按新driver自身 readiness/EventSubscriber 判定（E-11b 组件负例：SSE 不因旧flag为空永不启动）；新driver实现结构化 `SessionPermissionResponder`（或更新该排除），权限能力不被屏蔽；新ID不进 switchDir 分流（v2 用逐请求 location）；SSV2 归属能力按 E-11b 放行门校验；重订阅/pin overlay 按 generation namespace；同族名单与 flat 折叠由 S-0 枚举逐点四分类处置，flat 折叠不得套用到新 driver 会话；锚点以实施 HEAD 枚举为准 |
+| I 生产 Swift `.openCode` 共约 61 处、方案原仅锚 4 处（终审 F-18c 扫描）；不受编译器穷尽约束的 `==` 特性门如 `ChatViewModel+CodexStreaming.swift:2139`、`ChatViewModel+Generation.swift:1580/2533/2547/3207`、`SidebarView.swift:170/736/753/771`、`SessionsView.swift` 8 处、`ChatViewModel+SessionManagement.swift:1275/1281`、`BridgeDiscoveryService.swift:62/78`、`Models/Server.swift:113`（缺 kind 默认解为 `.openCode`） | `.openCodeV2` 不得被静默排除：S-0 枚举覆盖 I `OpenCodeiOS` 全部 `.openCode`/kind 比较点，逐点给出产品处置（纳入新门/保留旧语义/需产品决定）；`Models/Server.swift:113` 缺 kind 的历史记录**继续解为旧 `.openCode`**（历史兼容/不可用/可诊断）——`ServerStorage.loadServers()` 对整组 `[Server]` 用 `try?` 解码、任一条失败即返回 `[]` 并在下次保存时清空全部已保存服务器，改严格匹配不可行（终审复检 F-27）；**不得**解为 `.openCodeV2`，也**不得**改为严格解码，如确需迁移按单条容错 |
+| remote-web：28 个文件含 opencode 字样，方案原锚 0 处（终审 F-18c）；如 `core/backend/backend-client.ts:52-53`、`adapter/moreMenuItems.ts:50-51,63`、`adapter/backendLogos.ts:25`、`core/protocol/bridge-v1.ts:73` | S-0 枚举覆盖 `remote-web/src`；识别/拒绝能力与 iOS 同批交付（marker）；未支持前对新 backend 显示需要升级/不可用、不投递新内容（前置澄清见下方协商节，F-24） |
 
 #### 身份协商与旧客户端
 
@@ -646,14 +675,19 @@ backend ID按owner裁决保持`opencode`。字符串空闲不代表所有代码/
   协商成功；新driver descriptor提供同名capability。wire `id/kind`仍均为`opencode`。
 - 缺该声明的旧客户端不得看到可用的新`opencode` descriptor/运行session，也不得接收
   其内容推送、离线重放/mailbox或通过指定backendId绕过；逐连接握手、RPC、subscribe/
-  observe/replay在direct和Relay共同门控。对未协商连接可回原status集合中的
+  observe/replay以及**不经连接的投递通道（web push 完成通知/回复预览——
+  `web_push_dispatcher.go:236-253` 现只按设备授权 fan-out，终审 F-18b 补列）**在
+  direct和Relay共同门控。对未协商连接可回原status集合中的
   `version_unsupported` descriptor与“需要升级客户端”原因，不能把实际存在的新产品
   隐成空backends后假报noAgents。全局Management状态可显示新产品，不能用
   “客户端应该忽略未知capability”代替服务端硬门。
 - 新客户端识别到`kind=opencode`但新标记缺失时，标为旧代不支持/需要升级，不把它当
   `.openCodeV2`；新旧双方不匹配不伪造noAgents成功。该可选协商是版本化识别扩展，旧
   `opencode`语义不在无协商连接上改变；canonical pack明确同名ID再利用与兼容矩阵。
-- 新iOS/remote-web需先具备上述识别/拒绝能力，Mac再开放新driver。只有新标记+当前
+- 新iOS需先具备上述识别/拒绝能力（E-11b 组件门）；remote-web 的 marker 支持是
+  「在 remote-web 上提供 v2」的前置，**不是 Mac 放行的硬前置**（终审 F-24 澄清）——
+  Mac 放行硬前置仍是 E-11b；remote-web 未支持前对新 backend 显示需要升级/不可用、
+  不投递新内容。只有新标记+当前
   descriptor+per-backend SSV2能力成立才启用新timeline writer；沿用Kernel唯一writer、
   事务fence/revision/readiness和旧connection generation拒绝规则。
 
@@ -687,8 +721,11 @@ backend ID按owner裁决保持`opencode`。字符串空闲不代表所有代码/
    现有OpenCode服务和历史会保留”；用户确认切换。无额外端口/密码输入，服务未起的
    “启动”仍是§3.2的另一个明确动作，不把切换接入当启动服务。
 3. SelectionStore一次保存互斥集合与revision；RuntimeManager经admission安全应用，
-   旧driver停止订阅/扫描/接入（本次切换不得停止旧外部服务，也不得把旧managed child
-   当迁移清理目标），新driver只发现/连接官方v2。忙碌显示等待，不先假装切换完成。
+   旧driver停止订阅/扫描/接入；CordCode 自托管的 managed 子进程随其旧席位取消而停止
+   （既有行为 `RuntimeManager.swift:1158-1162`；终审 F-22 按此定稿，owner 实施启动时
+   确认），外部/共享服务（Desktop 起的 49374、用户自起的 4096）一律不动，也不把旧
+   managed child 当迁移清理目标；切换全程不写 Desktop 配置（F-18a）。新driver只发现/
+   连接官方v2。忙碌显示等待，不先假装切换完成。
 4. 新PID/epoch、已应用revision、注册集合与descriptor确认后显示新行连接状态。iPhone/
    remote-web重连后显式选择“OpenCode（v2）”的独立target/列表；按官方v2冷读，不承接
    旧`.openCode`缓存。失败留在新选择/真实原因，用户可显式切回旧行；不自动fallback。
@@ -733,17 +770,17 @@ Git历史。它们需要各自明确授权，不能由“opencode-web已稳定�
 | ID | 命题 | 类别/来源 | 样本与索引 | 断言与负例 | 获取方式 | 状态 | 未满足时阻塞 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | E-1 | `/api/info` 是 v2 身份/探活契约：no-auth 401、Basic 200、`{version,pid,urls,paths,capabilities}`，pid 与 service.json 一致 | 〔源码〕`server.ts:43-51,5-19`、`service-probe.ts:49-90`；〔活体〕本机 49374 | 活体响应已存本方案附录 A.3（脱敏：仅去 password，字段结构保留） | 断言如左；负例：pid 不符→视为不可用（官方语义） | 已完成（2026-10-19 curl；r1 评审轮+修订者各自独立复测，A.8.4） | **verified** | — |
-| E-2 | `/api/event` SSE 帧形状与附录 B 映射表逐条吻合（turn 生命周期/流式/reasoning/permission/form/fs） | 〔源码〕`event.ts:44-52`、`event-manifest.ts:41-72`、`session-event.ts`；〔活体〕待捕 | 计划路径 `agent/opencode-v2/testdata/official-2.0.32/event-stream-*.sse`（尚不存在） | 每个映射类型≥1 正例；负例：未知 `rpc.*`/未知 type 不崩、计数丢弃 | 实施期在 49374 订阅并截取（desktop 发起真实 turn），脱敏后归档 | pending | S-3新映射与S-2b新产品放行 |
-| E-3 | prompt 请求/响应形状（含 `id` caller-messageID、attachments parts、delivery）+ **scoped 写目录上下文矩阵**（`location[directory]` query / `x-opencode-directory` header / 不带，三态各一例，确定最小必带形式） | 〔源码〕`session.ts:396-407`；〔活体〕待捕 | 计划路径 `agent/opencode-v2/testdata/official-2.0.32/prompt-*.json` | 正例：文本+图片+文件各 1，含目录三态矩阵；负例：坏 sessionID→SessionNotFoundError 透传 | 实施期真实 POST（interrupt/permission reply 一并按目录三态采样） | pending | S-5 写路径 |
-| E-4 | 消息历史 parts schema（id 必填、type 集合、role 映射）+ cursor 分页游走（`cursor.next` 至耗尽，条数与库表对账） | 〔源码〕`message.ts:68` 与 schema 组；〔活体〕部分已证（附录 A.2：v2 读 200，4 页/132 条复测） | 计划路径 `agent/opencode-v2/testdata/official-2.0.32/messages-*.json` | 正例含 reasoning/tool/text；负例：未知 part type fail-closed 计数 | 实施期真实 GET | pending | S-4 映射固化 |
-| E-5 | 新包permission/form完整生命周期：官方list/get/reply/reload与resolution；**form应答走session作用域路由**（`session.ts:796-870`），不以旧preview分支为依据 | 〔源码〕`permission.ts:23-124`、`form.ts:12`（全局列表）、`session.ts:796-870`（session 作用域 form：list/reply `:842`/cancel `:858`）；〔活体〕待捕 | 计划路径 `agent/opencode-v2/testdata/official-2.0.32/permission-*.json`、`agent/opencode-v2/testdata/official-2.0.32/form-*.json` | 正例：permission 一次 ask 流 + form 完整流（`form.created → reply → form.replied`）；负例：过期 requestID/formID 应答→错误透传 | 实施期触发一次 ask 与一次 form | pending | S-5 permission/question |
-| E-6 | 共享服务真正停止/外部重现/注册轮换；只读重附与安全应用，不自动 spawn/fallback | 〔源码〕`service-registration.ts:40-71`；本仓 `RuntimeManager.swift:462-523,709-723`；〔活体〕待确认 | 实施报告记录 endpoint/action/runtime generation 与脱敏身份 | 无服务保持“未启动”；相同身份掉线不重启 bridge；经校验的新 id/pid/password 才应用；自动应用至少隔 60s，ready 清 stuck 计数不破坏速率界 | 受控 fixture 先验；owner 已明确授权的实施验收窗再停/起真实共享服务，不能为采样擅自终止用户当前服务；退出 Desktop 不作为停服务证据 | pending | S-1 的验收标准 4/5，不阻塞文档，不构成当前服务操作授权 |
+| E-2 | `/api/event` SSE 帧形状与附录 B 映射表逐条吻合（turn 生命周期/流式/reasoning/permission/form/fs） | 〔源码〕`event.ts:44-52`、`event-manifest.ts:41-72`、`session-event.ts`；〔活体〕待捕 | 计划路径 `agent/opencode-v2/testdata/official-2.0.32/event-stream-*.sse`（尚不存在） | 每个映射类型≥1 正例；**与 E-4 同一时间窗、同一批 turn 采集，附身份对照表（event id ↔ message/part id ↔ execution/inbox），据此冻结 v2 turn 身份约定**；断线缺口经 `GET /api/session/active` 对账（F-20）；负例：未知 `rpc.*`/未知 type 不崩、计数丢弃 | 实施期在 49374 订阅并截取（desktop 发起真实 turn；只读 GET 不扰动服务，写类样本另按 S-0 隔离取证环境，F-21），脱敏后归档 | pending | S-3新映射与S-2b新产品放行 |
+| E-3 | prompt 请求/响应形状（含 `id` caller-messageID、attachments parts、delivery）+ **scoped 写目录上下文矩阵**（`location[directory]` query / `x-opencode-directory` header / 不带，三态各一例，确定最小必带形式） | 〔源码〕`session.ts:396-407`；〔活体〕待捕 | 计划路径 `agent/opencode-v2/testdata/official-2.0.32/prompt-*.json` | 正例：文本+图片+文件各 1，含目录三态矩阵；负例：坏 sessionID→SessionNotFoundError 透传 | 实施期在 S-0 隔离取证环境（F-21）真实 POST（interrupt/permission reply 一并按目录三态采样） | pending | S-5 写路径 |
+| E-4 | 消息历史 parts schema（id 必填、type 集合、role 映射）+ cursor 分页游走（`cursor.next` 至耗尽，条数与库表对账）；`SessionMessagesQuery`（`message.ts:8-40`）约束：limit 1..200、`order` 仅作用于首页且与 cursor 不可同用、cursor 不透明（F-20） | 〔源码〕`message.ts:8-40,68` 与 schema 组；〔活体〕部分已证（附录 A.2：v2 读 200，4 页/132 条复测） | 计划路径 `agent/opencode-v2/testdata/official-2.0.32/messages-*.json` | 正例含 reasoning/tool/text；分页断言覆盖方向语义（previous/next/desc 游走）；与 E-2 同窗身份对账（F-20）；负例：未知 part type fail-closed 计数 | 实施期真实 GET | pending | S-4 映射固化 |
+| E-5 | 新包permission/form完整生命周期：官方list/get/reply/reload与resolution；**form应答走session作用域路由**（`session.ts:796-870`），不以旧preview分支为依据 | 〔源码〕`permission.ts:23-124`、`form.ts:12`（全局列表）、`session.ts:796-870`（session 作用域 form：list/reply `:842`/cancel `:858`）；〔活体〕待捕 | 计划路径 `agent/opencode-v2/testdata/official-2.0.32/permission-*.json`、`agent/opencode-v2/testdata/official-2.0.32/form-*.json` | 正例：permission 一次 ask 流 + form 完整流（`form.created → reply → form.replied`）；负例：过期 requestID/formID 应答→错误透传 | 实施期在 S-0 隔离取证环境（F-21）触发一次 ask 与一次 form | pending | S-5 permission/question |
+| E-6 | 共享服务真正停止/外部重现/注册轮换；只读重附与安全应用，不自动 spawn/fallback | 〔源码〕`service-registration.ts:40-71`；本仓 `RuntimeManager.swift:462-523,709-723`；〔活体〕待确认 | 实施报告记录 endpoint/action/runtime generation 与脱敏身份 | 无服务保持“未启动”；相同身份掉线不重启 bridge；经校验的新 id/pid/password 才应用；自动应用至少隔 60s，ready 清 stuck 计数不破坏速率界 | 在 S-0 隔离取证环境（F-21：临时 XDG_*＋显式非默认端口＋测试 seam 注册文件）受控 fixture 先验；owner 已明确授权的实施验收窗再停/起真实共享服务，不能为采样擅自终止用户当前服务；退出 Desktop 不作为停服务证据 | pending | S-1 的验收标准 4/5，不阻塞文档，不构成当前服务操作授权 |
 | E-7 | 目录隔离：TCC/单桶错误不阻断成功桶，全部失败与真实空分开；列表/指纹/告警同源 | 〔活体〕更正后的 `GET /api/session?directory=<TCC>` 200 n=1（A.8）只证明那次可达；〔拟议〕S-6 独立桶行为 | 实施报告对账 `N=A+K`、成功目录官方分页 ID 集合与 bridge 集合；失败目录不计作 0 | EPERM/超时/某页 schema 错误只丢该桶；成功空桶算成功；全失败报错；恢复自动清告警且 fingerprint/fence 更新，active 历史不被删除 | 单桶故障注入验证内部隔离；官方 v2 真实 GET 归档证明形状，不能用 fake server 反证外部契约；owner 授权的不同启动环境矩阵 | pending | S-6 完成门，OD-5 已决定，不再有分支选择门 |
 | E-8 | 插件断代导致启动窗口 `/api/model` 503（awaitPlugins 5s 门）对 attach 探活/首读的影响边界 | 〔源码〕`location.ts:36-47`（5s 超时→ServiceUnavailableError）；〔活体〕已观测 4×503（附录 A.5） | 现象已录 | 边界：探活不得用 `/api/model`；首读 503 需限速重试而非判死 | 实施期重放 | pending | S-2a 的重试策略验收 |
-| E-9 | 用户手动启动、v2 定位/安装指引、detached 生存期及冲突门 | 〔源码〕§2.2 启动/安装/发现四行；官方 `service.test.ts:381,637`、`service-lifecycle.test.ts:19,59`、`updater-install.test.ts:140,206`；〔磁盘〕bundle/staged 2.0.32 及 v1 1.19.3 的前轮静态旁证；〔活体〕手动动作未执行 | 实施期归档只读 version/help、固定包 metadata、argv/去敏 stderr/注册与 pid 时间线，不写密码；平台 detached seam 的测试归 owning Mac 类 | 无服务只在点击后 spawn；v1-only 给 v2 命令；注册不明/活 pid/非 loopback/remote 确认；并发让位、退出0未ready、超时不杀/不清注册、关接入后不回写、原 v1 不受改动 | 源码已核；固定包可用性先只读查询；动作/安装执行须未来实施授权与不影响现有服务的受控环境，不用当前用户真实服务试错 | pending | S-1 启动/安装交付门；不能以“实现时再定”省略主路径 |
+| E-9 | 用户手动启动、v2 定位/安装指引、detached 生存期及冲突门 | 〔源码〕§2.2 启动/安装/发现四行；官方 `service.test.ts:381,637`、`service-lifecycle.test.ts:19,59`、`updater-install.test.ts:140,206`；〔磁盘〕bundle/staged 2.0.32 及 v1 1.19.3 的前轮静态旁证；〔活体〕手动动作未执行 | 实施期归档只读 version/help、固定包 metadata、argv/去敏 stderr/注册与 pid 时间线，不写密码；平台 detached seam 的测试归 owning Mac 类 | 无服务只在点击后 spawn；v1-only 给 v2 命令；注册不明/活 pid/非 loopback/remote 确认；并发让位、退出0未ready、超时不杀/不清注册、关接入后不回写、原 v1 不受改动；spawn 注入未过期 `<service.json>.pty-handoff` 生成的 `OPENCODE_PTY_HANDOFF`、缺失/过期不注入（F-23） | 源码已核；固定包可用性先只读查询；动作/安装执行在 S-0 隔离取证环境（F-21），须未来实施授权且不影响现有服务，不用当前用户真实服务试错 | pending | S-1 启动/安装交付门；不能以“实现时再定”省略主路径 |
 | E-10 | 新opencode的本机catalogObservation/Swift告警codec | 〔源码〕既有workspace snapshot；〔拟议〕§3.7 | owning Go/Swift fixture/未来Management快照 | partial不改readiness为失败，旧结果拒绝；本机告警本身不增跨端timeline消息 | 内部契约单测＋owner矩阵 | pending | S-6完成门 |
 | E-11a | 身份/路由/namespace契约冻结 | 〔源码〕§3.11双仓锚点；〔拟议〕marker与generation规则 | S-0的canonical+mirror字段/迁移/拒绝矩阵与完整来源 | 明确新包/唯一注册、opencode_v2_backend_v1协商、旧proxy零调用、旧target/checkpoint/pins不继承、选择互斥 | S-0冻结；不依赖S-7实现或S-8运行 | pending | S-7及各跨端实现的前置输入 |
-| E-11b | 放行前的身份/跨端/依赖组件证明 | E-11a契约＋S-7实现 | direct/Relay握手与RPC/observe/replay负例、codec、新旧target/checkpoint/pins结果；新包/公共包生产与测试依赖闭包及fixture路径检查 | 唯一注册；新包/中立公共包对旧包/子包无直接或传递依赖；旧client无marker不接新内容；旧数据0误读/0误删，不双挂 | **S-7产出组件证据**；不要求S-8生产路径；bridge过渡装配双import不混入新包根闭包 | pending | **S-7组件完成与S-2b放行**；无环依赖 |
+| E-11b | 放行前的身份/跨端/依赖组件证明 | E-11a契约＋S-7实现 | direct/Relay握手与RPC/observe/replay负例、codec、新旧target/checkpoint/pins结果；新包/公共包生产与测试依赖闭包及fixture路径检查 | 唯一注册；新包/中立公共包对旧包/子包无直接或传递依赖（机械命令：`GOFLAGS=-mod=readonly GOPROXY=off go list -deps -test`，根=新包＋中立公共包＋core/pinstore 等（按 S-0 依赖图），对 `agent/opencode-web`/`deprecated/opencode` 命中必须为 0；S-9 演练视为旧包测试资源的 go-bridge 测试文件：`agent_descriptor_test.go`、`audit008_capability_restore_test.go`、`audit008_fullpath_test.go`、`management_api_test.go`、`projection_webperf_fixture_gen_test.go`（终审静态核对，实施 HEAD 复核）——F-25）；旧client无marker不接新内容**且不收新 backend web push 通知/预览（F-18b）**；新 driver SSE 订阅启动/permission 能力推导/目录 location 处理组件负例（F-18b）；选择/启动/接入新 opencode 或自 v1 切换后 `ai.opencode.desktop/` 不被 CordCode 改写（Desktop 负例，F-18a/F-26 补列）；旧数据0误读/0误删，不双挂 | **S-7产出组件证据**；不要求S-8生产路径；bridge过渡装配双import不混入新包根闭包 | pending | **S-7组件完成与S-2b放行**；无环依赖 |
 | E-11c | 放行后的真实身份/兼容验收 | E-11b＋S-2b已完成，进入S-8 | 新Mac/iOS/web真实部署身份、受控direct/Relay日志/进程与owner矩阵 | 新ID真实走v2、旧proxy无调用、旧客户端拒绝、旧数据不污染、退役旧选择不使全文件失效；组件与运行证据分开 | **S-8产出运行态证据**，当前未授权执行 | pending | **S-8交付完成与S-9稳定/退役门**，不作为S-2b或S-7前置 |
 
 Gate 映射：
@@ -754,9 +791,11 @@ Gate 映射：
   受控证据采集/组件测试不等同于开放产品。
 - Gate B（产品决定）：OD-2/OD-5/OD-7已明确；无自动ensure/fail-all备选。OD-8退役
   必须等§3.12全部稳定证据与owner明确执行指令，S-9不得提前；不授权卸载/停4096。
-- Gate C（阶段/授权）：v1.7 已由 r6 完整复审通过（APPROVED，0 阻塞/2 建议级，A.17）；
-  v1.8 仅收编 F-16/F-17 并回写评审状态，设计命题零改动，按 r6 闭合标准无需再轮评审。
-  当前仍只文档，“暂时不写代码”有效；E-2~E-11不授权当前POST/安装/服务操作；实施启动仍须 owner 另行授权。
+  OD-9（managed 4096 随旧席位停止的既有行为定稿）pending，owner 实施启动时确认；
+  S-0 枚举产出的「需产品决定」项登记为 OD，并在依赖它的 S-7 子项开工前决定（F-29）。
+- Gate C（阶段/授权）：定向复核 #1（2026-10-21）判定 v1.9 需修订（F-26 阻塞＋
+  F-27~F-29 建议，A.19）；v1.10 已全量收编，待终审员核对修订单元格后判定，通过即为
+  实施冻结基线。当前仍只文档，“暂时不写代码”有效；E-2~E-11不授权当前POST/安装/服务操作；实施启动仍须 owner 另行授权。
 
 ---
 
@@ -764,20 +803,21 @@ Gate 映射：
 
 | 切片 | 需求/可见结果 | 组件与复用方式 | 依赖/前置 | 最小验证/完成证据 | 失败处理 |
 | --- | --- | --- | --- | --- | --- |
-| S-0 | 独立driver/身份与官方语义冻结 | 新包边界、§3.0公共设施依赖方向/必要helper归属清单、§3.11路由/数据清单；官方逐行为证据链；Kernel/fence唯一owning层 | 本版评审通过及实施授权；来源门fresh；OD-7 | 新包与公共helper依赖图、注册/分流/marker/namespace契约；所需helper先中立化，不建立过渡旧包API依赖 | 官方链/样本不明不编码，不靠旧包补 |
-| S-1 | 新OpenCode行：只读发现/手动启动/准确命令/重附，无4096 fallback | 扩展现有Swift动作与通用inventory设施，独立v2配置/env；官方serve--service单例，旧v1设置保持 | S-0；OD-1/2/3；E-1/E-6/E-9；选择/身份按E-11a（S-0冻结契约） | v1-only/检测失败/XDG/完整身份/单飞/detached/超时不杀/60s应用速率界/新旧选择互斥 | 不自动spawn或切旧服务，真实失败 |
+| S-0 | 独立driver/身份与官方语义冻结 | 新包边界、§3.0公共设施依赖方向/必要helper归属清单、§3.11路由/数据清单；官方逐行为证据链；Kernel/fence唯一owning层 | 本版评审通过及实施授权；来源门fresh；OD-7；F-18/F-19/F-21 归 S-0 吸收（A.18） | 新包与公共helper依赖图、注册/分流/marker/namespace契约；所需helper先中立化，不建立过渡旧包API依赖；**机械化全量消费者枚举**（F-18：搜索根 M `go-bridge/`+`core/`+`agent/`+`MacBridge/`、I `OpenCodeiOS/`、`remote-web/src/`；模式 `"opencode"`/kind 比较/`.openCode`（含 `==`）；每处四分类处置（改接新代际/同族成员保留附证据/因旧proxy不存在而失效/需产品决定）＋对账计数；终审已知点为必处理项；「需产品决定」项登记为 OD 并在依赖它的 S-7 子项开工前决定（F-29））；**实施 HEAD 锚点重建＋漂移表**（F-19）；**隔离取证环境配方**（F-21：临时 XDG_STATE/DATA/CONFIG/CACHE、隔离配置显式非默认端口（默认 0xC0DE 会与现网 49374 冲突）、resolver 测试 seam 指向隔离注册文件、清理确认、只读/隔离 E 分类） | 官方链/样本不明不编码，不靠旧包补 |
+| S-1 | 新OpenCode行：只读发现/手动启动/准确命令/重附，无4096 fallback | 扩展现有Swift动作与通用inventory设施，独立v2配置/env；官方serve--service单例，旧v1设置保持 | S-0；OD-1/2/3；E-1/E-6/E-9；选择/身份按E-11a（S-0冻结契约） | v1-only/检测失败/XDG/完整身份/单飞/detached/超时不杀/60s应用速率界/新旧选择互斥；选择/启动/接入/自v1切换后 `~/Library/Application Support/ai.opencode.desktop/` 不被 CordCode 改写（F-18a 负例） | 不自动spawn或切旧服务，真实失败 |
 | S-2a | 新包注册与官方/info探测，产品未放行 | 新`agent/opencode-v2/{agent,client,probe}.go`（拟议）；`opencode`唯一注册、独立WireDescriptor/readiness | S-0/S-1；E-1/E-8；无旧import/proxy | pinned2.0.32支持/其它版本拒绝；缺endpoint/认证失败；旧包继续拒绝v2 | unverified/unsupported诊断，不fallback |
 | S-2b | 新opencode产品条件放行 | 新driver与双端协商门；**不修改旧包v2quarantine来接v2** | **E-2/E-3/E-4/E-5齐备＋S-3~S-6映射/读取就位＋E-11b组件身份门通过** | 放行前后注册/descriptor与连接能力快照；S-7跨端组件完成后产品活体验证 | 未满足不得广告available或放行旧客户端 |
-| S-3 | v2官方/event流与断线恢复，单Kernel写入 | 新`opencode-v2/events.go`，按官方consumer/样本实现；复用公共EventPublisher/Kernel，不复制旧heal/dedupe/watchdog状态机 | S-2a/E-2；产品验证在S-2b后 | typed事件/顺序/重复/断线中终态/permission恢复；writer/fence测试；真实对账 | 未知/未证事件诊断，不本地猜完成 |
+| S-3 | v2官方/event流与断线恢复，单Kernel写入 | 新`opencode-v2/events.go`，按官方consumer/样本实现；复用公共EventPublisher/Kernel，不复制旧heal/dedupe/watchdog状态机 | S-2a/E-2；产品验证在S-2b后 | typed事件/顺序/重复/断线中终态/permission恢复；断线缺口经 `/api/session/active` 对账（F-20）；writer/fence测试；真实对账 | 未知/未证事件诊断，不本地猜完成 |
 | S-4 | v2 sessions/messages/models/providers读路径 | 新包typed decoder/官方分页/cold hydrate；新ID路由与cache namespace | **S-2a/E-4与E-11a冻结契约**；组件结果汇入E-11b；真实验证在S-2b后归E-11c | 真实三类响应/多页cursor、role/parts、冷历史计数与官方源对账、旧cache0读取 | 错误可见，未知shape不递归解析 |
 | S-5 | v2 prompt/interrupt/permission/form/附件/稳定correlation | 新包session/permissions/forms，官方UI字段与调用顺序；core接口与Kernel复用 | S-2a/E-3/E-5；产品验证在S-2b后 | 实际请求/事件/reload/error链、首回合、双向发送与权限表单、中断/错误 | 不copy旧parser/send/recovery，不伪成功 |
 | S-6 | 新包registry目录隔离、Mac告警/重试 | 新projects/sessions聚合；本机snapshot/Swiftcodec；共用catalog失效设施但新generation隔离；旧包仅有界OD-5修正 | E-7/E-10；组件S-2a，产品S-2b后 | `N=A+K`/成功ID对账；一桶错/全失败/空/恢复；同源指纹/fence与active历史不删 | partial明确告警，无fail-all |
-| S-7 | 跨端opencode新身份/选择/存储隔离与protocol同步 | §3.11所列Mac dispatcher/proxy/catalog/descriptor/Kernel/pins、Swiftcatalog/selection/env、iOS `.openCodeV2`/Provider/cache、remote-web marker；canonical+mirror | **S-0与E-11a冻结契约**；与S-1~S-6并行，组件完成早于S-2b；不依赖S-8 | 新旧hello/RPC/observe/replay组件矩阵、旧ID数据0误读、raw writer0、选择互斥；**新包/公共包直接与传递依赖旧包为0（含测试/fixture）**，产出E-11b与两端定向build；生产核验留S-8/E-11c | 不识别就拒绝，不把旧opencode当v2 |
+| S-7 | 跨端opencode新身份/选择/存储隔离与protocol同步 | §3.11所列Mac dispatcher/proxy/catalog/descriptor/Kernel/pins、Swiftcatalog/selection/env、iOS `.openCodeV2`/Provider/cache；canonical+mirror；remote-web marker 为并行交付项，**不阻断 S-2b**（随 remote-web 自身交付，未支持前对新 backend 显示需要升级/不可用，F-24/F-28） | **S-0与E-11a冻结契约**；与S-1~S-6并行，组件完成早于S-2b；不依赖S-8 | 新旧hello/RPC/observe/replay组件矩阵、旧ID数据0误读、raw writer0、选择互斥；**新包/公共包直接与传递依赖旧包为0（含测试/fixture）**，产出E-11b与两端定向build；生产核验留S-8/E-11c | 不识别就拒绝，不把旧opencode当v2 |
 | S-8 | 新v2统一验证/交付与稳定验收 | Mac正式Release、iOS一次增量安装、受影响web交付、进程/日志、owner合并矩阵、活文档 | S-0~S-7组件完成、S-2b放行、E-11b；E-1~E-10按完成门 | 本片产出**E-11c真实身份/兼容证据**和§6真实场景/对账；组件/生产/owner分级 | 保留真实失败，旧包保留 |
-| S-9 | 稳定后退役旧opencode-web | 移除旧产品装配/import/专用接入；旧selection保留可诊断，文档更新 | **§3.12稳定门全部满足＋owner明确执行退役** | 受控排除旧包/测试资源后，新v2及公共包零源码/import/调用修改即可构建/同组定向测试；保存target不损坏；旧程序/DB/历史未清理 | 仍需改v2引用则先解耦，不允许靠退役大改v2；未过门不删除 |
+| S-9 | 稳定后退役旧opencode-web | 移除旧产品装配/import/专用接入；旧selection保留可诊断，文档更新 | **§3.12稳定门全部满足＋owner明确执行退役** | 受控排除旧包/测试资源后，新v2及公共包零源码/import/调用修改即可构建/同组定向测试（含 E-11b 固化的 go list 依赖命令与旧包测试资源清单，F-25）；保存target不损坏；旧程序/DB/历史未清理 | 仍需改v2引用则先解耦，不允许靠退役大改v2；未过门不删除 |
 
 新旧接入按用户明确选择切换（§3.11），不静默迁移旧ID的配置/数据；不写上游DB、
-不改Desktop状态、不卸载旧CLI。切片表是依赖图，S-2b在S-3~S-7组件完成后执行，
+不改Desktop状态、不卸载旧CLI。切片表是依赖图，S-2b在S-3~S-6与S-7的Mac/iOS部分组件完成后执行（S-7 的
+remote-web marker 部分不阻断 S-2b，随 remote-web 自身交付，F-24/F-28），
 不是按表行号先放行再补代码。S-1状态/手动启动、S-6告警、S-7跨端身份都是同一期必交；
 S-9只在稳定门后执行。本轮没有实施任何切片。
 
@@ -828,15 +868,15 @@ S-9只在稳定门后执行。本轮没有实施任何切片。
 | U1 | MacBridge已运行、OpenCode接入开启；无共享服务、有已验证v2 CLI | 进入OpenCode（v2）行，先等待一轮检测，再点“启动” | 点击前“未启动”＋“启动”，无自动服务；点击后启动中→正在接入→连接正常，无额外4096 |
 | U2 | 没有v2服务；仅v1安装或完全未安装 | 查看并复制安装命令，用户执行后回到行“重新检测” | 显示“OpenCode v2未安装”与`@opencode/cli@2.0.32`独立prefix命令；复制不自动安装；v1保留；装后仍需明确“启动” |
 | U3 | 一个v2候选存在但版本读取失败，或注册文件不明 | 重新检测 | 显示具体检测/权限/注册失败，不能显示“未安装”或强启已有进程 |
-| U4 | Desktop/CLI已启动健康共享服务 | 开启OpenCode接入；随后关闭接入 | 开启只附着已有服务，关闭仅断开CordCode；Desktop原会话继续可用，无共享服务停止 |
+| U4 | Desktop/CLI已启动健康共享服务 | 开启OpenCode接入；随后关闭接入 | 开启只附着已有服务，关闭仅断开CordCode；Desktop原会话继续可用，无共享服务停止；`ai.opencode.desktop` 配置不被 CordCode 改写（F-18a） |
 | U5 | 已接入，owner允许受控停/起或官方升级；其它bridge任务可观察 | 停止真正的共享服务，再从官方工具启动；或官方升级轮换 | 服务消失后未启动/错误可见，无自动spawn/4096；外部恢复后只读回附；忙碌显示等待；无重启风暴 |
-| U6 | 健康共享服务，至少1目录失败且至少1目录成功 | 刷新全局列表、展开Mac行告警；恢复目录后点“重试” | 成功目录可见且刷新正常；告警给失败数/原因；恢复后自动清告警；不删除既有会话历史 |
+| U6 | 健康共享服务，至少1目录失败且至少1目录成功 | 刷新全局列表、展开Mac行告警；恢复目录后点“重试” | 成功目录可见且刷新正常；告警给失败数/原因；恢复后自动清告警；不删除既有会话历史；iOS 列表可能变短且无目录提示（本期告警仅 Mac 行，终审 A5 补注） |
 | U7 | 分别为全部目录失败、真实空registry两个场景 | 刷新列表 | 前者真实加载失败，后者空列表；不会把全失败显示成没有会话 |
 | U8 | iPhone通过direct/Relay连同一v2，已有session A | Desktop发一条；iPhone打开同会话，再发送/中断/应答permission和form | 流式、冷历史和双向写路径按R-1~R-3正常；两种网络分别记录结果 |
-| U9 | 旧opencode-web显式external/legacy来源，或新OpenCode接入关闭 | 进入工作站/重新检测/重启bridge | 不被shared发现劫持，不因安装自动启用/启动；旧来源保留 |
-| U10 | 旧v1接入开启、新v2未开启；有活跃或空闲任务两态 | 在新OpenCode行开启并确认切换 | 一次selection原子互斥，忙碌等待；不关闭旧外部服务；新ID为opencode、显示v2，失败不自动切回 |
+| U9 | 旧opencode-web显式external/legacy来源，或新OpenCode接入关闭 | 进入工作站/重新检测/重启bridge | 不被shared发现劫持，不因安装自动启用/启动；旧来源保留；external/legacy 来源启动时不新增对 `ai.opencode.desktop/` 的写入（与现状一致，F-26） |
+| U10 | 旧v1接入开启、新v2未开启；有活跃或空闲任务两态 | 在新OpenCode行开启并确认切换 | 一次selection原子互斥，忙碌等待；不关闭外部/共享服务（CordCode 自托管 managed 4096 随旧席位取消而停止，既有行为，F-22 定稿、owner 实施启动时确认）；切换全程不写 Desktop 配置（F-18a）；新ID为opencode、显示v2，失败不自动切回 |
 | U11 | 升级客户端留有最老opencode/旧opencode-web target、snapshot与pin | 连接新Mac并选择OpenCode（v2） | 新target/列表独立冷读；旧历史保留但不混入新timeline/pins；同session名不作为迁移证据 |
-| U12 | 旧客户端未声明v2识别能力；direct/Relay各一次 | 连接开启新opencode的Mac | 明确需要升级/不可用，无新内容投递，无RPC误入v1；不报已连接无Agent假空态 |
+| U12 | 旧客户端未声明v2识别能力；direct/Relay各一次 | 连接开启新opencode的Mac | 明确需要升级/不可用，无新内容投递（含 web push 通知/回复预览，F-18b），无RPC误入v1；不报已连接无Agent假空态 |
 | U13 | §3.12稳定证据齐全且owner已明确退役 | 执行退役后重启/重连 | 只下线旧CordCode适配入口；旧设置显示退役可诊断，新v2正常；v1程序/配置/历史未删 |
 
 ### 主要风险与应对
@@ -852,12 +892,15 @@ S-9只在稳定门后执行。本轮没有实施任何切片。
 | 插件启动窗口503 | 首读503 | 探活用/api/info；首读限速重试并保留原因（E-8） |
 | 单目录失败造成部分列表 | catalogObservation partial | 成功桶继续，Mac行明确告警/重试；不删历史、不报全量；全失败报错 |
 | 事件映射漏类型 | 未知type计数上涨 | fail-closed计数+采样日志；附录B随真实样本补 |
+| Desktop 自动升级离开 2.0.32 pin | 行显示「版本不支持」 | 升版流程（F-24）：owner 触发升版裁决→更新 pin/launcher 校验→最小证据包（E-1 探活＋受影响 E 重跑）→用户可见文案随行更新；不自动升级/降级 |
+| remote-web 支持节奏被误读为 Mac 放行前置 | 排期误判 | remote-web marker 支持仅为「在 remote-web 上提供 v2」的前置；Mac 放行硬前置=E-11b（含 iOS 识别），remote-web 面随后续交付（F-24，§3.11 协商节） |
 
 ### 阻塞清单与下一阶段入口
 
 - OD-2/OD-5 已决定；不再要求 owner 选择 ensure-start 或 fail-all。
-- r6 已对 v1.7 完整复审通过（独立包/身份/跨端隔离、公共依赖边界与退役门在内，A.17）；
-  v1.8 为建议收编版。E-2~E-11按Gate阻塞相应实施/完成。
+- 终审及定向复核 #1 先后判定 v1.8/v1.9 需修订；v1.10 已收编全部意见（A.18/A.19），
+  待终审员核对 F-26~F-29 修订单元格后判定，作为实施冻结基线。
+  E-2~E-11按Gate阻塞相应实施/完成。
   **S-2b仅在E-2/E-3/E-4/E-5齐备＋S-3~S-6映射/读取就位＋E-11b跨端组件门通过后执行**。
   S-9还需§3.12稳定验收与owner明确执行退役；不把先前的命名裁决当删除/卸载授权。
 - 本轮交付仅修订文档与静态检查，业务代码、测试、构建/安装、OpenCode服务操作均不执行。
@@ -1145,6 +1188,93 @@ A.17 v1.8 r6 建议收编与评审状态回写（2026-10-19）：
   `/Users/jacklee/Projects/opencode-v2` detached tag `v2.0.32` /
   `843a6c514e606b436a7fe713422ace0a93ad3d61`，干净。本轮 D0：仅编辑本方案与文档
   静态检查；无业务代码、build/test/install、服务操作、commit 或分支集成。
+
+A.18 v1.9 终审 F-18~F-25 收编（2026-10-21）：
+
+- 终审（final review，独立新评审员：机械化消费者扫描＋锚点抽查＋v1.7→v1.8 diff）：
+  verdict=REVISION_REQUIRED，1 阻塞（F-18）+7 建议（F-19~F-25），对象 v1.8
+  SHA-256=`34bd16fe62b360b39ca9262d58bbcda16f0a5436f3e268f86b41134a90da0e45`；报告
+  `docs/2026-10-19-opencode-web-v2-shared-service-attach-plan-review-final.md`。
+  终审同时确认：设计主体成立、E/S DAG 无环、F-16 处置正确（r6 行号更正本身有误，
+  F-16/F-17 闭合）、v1.8 增量诚实。
+- 作者亲核（HEAD `bd240b80…`）：F-18a 全链路属实——`RuntimeManager.swift:1134-1153`
+  guard `drivers.contains("opencode")`＋旧URL/凭据非空→写 `ai.opencode.desktop/`；
+  调用点 `launchBridgeProcess :582`；`applyAgentSelection :528-546` 直写 drivers；
+  `resolveManagedOpenCodeIfNeeded` guard 失败分支 `:1158-1162` 不清空旧URL/凭据。
+  F-18b 两点亲核：`main.go:1271-1279` passive 订阅门对 `"opencode"` 要求旧
+  `-opencode-url` 非空（新driver走 `OPENCODE_V2_*` 不经旧flag→SSE 不启动）；
+  `backend_capabilities.go:156-162` 把 `id=="opencode"` 排除在 ToolAuthorizer→
+  permission_resolve 推断外。其余终审锚点按报告亲核结果引用（报告含逐处摘录）。
+- 意见处置（全部采纳，无部分不采纳项）：
+  - F-18（阻塞）：§3.11 重构为非穷尽基线；补 Desktop 写入门（§2.3/§3.2.4 交叉引用）、
+    Go/iOS/remote-web 必处理项；S-0 增机械化全量枚举交付物；web push 纳入旧客户端
+    硬门；E-11b/S-1/U4/U10/U12 补负例与「应看到」。
+  - F-19（采纳，S-0 吸收＋本版刷新 §2.1）：M/I 登记刷新至 `bd240b80…`/`04fc269b…`，
+    注明 iOS 分支历史已改写（rebase＋合入 native-timeline）；S-0 交付锚点重建＋漂移表。
+  - F-20（采纳）：E-2/E-4 同窗同批身份对账＋turn 身份约定；锚定 session.active
+    （`session.ts:275-285`）/inbox（`:607`）；`SessionMessagesQuery`（`message.ts:8-40`）
+    limit/order/cursor 约束进 E-4 与 §3.5；S-3 验证列补 session.active 对账。
+  - F-21（采纳，S-0 吸收）：隔离取证环境配方（临时 XDG_*、显式非默认端口、测试 seam、
+    清理确认、只读/隔离分类）；E-3/E-5/E-6/E-9 获取方式引用。
+  - F-22（采纳终审推荐并标注 owner 确认）：CordCode 自托管 managed 子进程随旧席位
+    取消而停止（既有行为 `:1158-1162`）；外部/共享服务一律不动；§3.11 切换第 3 步与
+    U10 同步定稿；涉及停止 v1 服务语义，owner 实施启动时确认。
+  - F-23（采纳）：spawn 前只读镜像官方 PtyHandoff 环境（`effect/service.ts:63`、
+    `pty-handoff.ts:68-78`），缺失/过期不注入；E-9 增用例。
+  - F-24（采纳）：§6 风险表补升版流程与 remote-web 前置澄清（remote-web marker≠Mac
+    放行硬前置）；§3.11 协商节同步。
+  - F-25（采纳）：E-11b/S-9 固化 `go list -deps -test` 命令（旧包命中必须为 0）与
+    S-9 旧包测试资源五文件清单。
+  - 另按终审 A5 建议补 U6「iOS 列表可能变短且无提示」一句（非编号意见，防验收误判）。
+- 终审对 r6 的更正被本会话接受：r6「§3.11 无漏列」不成立；r6 摘录行号存在系统性
+  小偏差（终审 §6 历轮声明抽查）。本方案锚点以各来源提交亲核为准。
+- 本轮来源门：分析门 20:51、首改门 20:56（Asia/Shanghai）身份一致：M=
+  `bd240b80ec6eceb61a99f23120086c388ebeed2b`（tracked clean；未跟踪仅终审报告）、
+  I=`04fc269bdb8a297b1578ac4b9f0d4b82a98c7997`（干净，分支历史已改写）、上游
+  `843a6c51…`（不变）。本轮 D0：仅编辑本方案与文档静态检查；无业务代码、
+  build/test/install、服务操作、commit 或分支集成；49374/4096 未触碰。
+- 修订前 v1.8 SHA-256=
+  `34bd16fe62b360b39ca9262d58bbcda16f0a5436f3e268f86b41134a90da0e45`。下一步：按
+  终审闭合路径做定向复核（§3.11、§3.2.4、S-0/S-1/S-7、E-11a/E-11b、U4/U10/U12、
+  枚举交付物定义）；复核通过后作为实施冻结基线。
+
+A.19 v1.10 定向复检 F-26~F-29 收编（2026-10-21）：
+
+- 定向复核 #1（终审员续审，逐行读 v1.8→v1.9 diff＋对修订新增指令性文本重核语义与
+  源码）：verdict=REVISION_REQUIRED，1 阻塞（F-26，修订引入，属 F-18 同根因残留）+
+  3 建议（F-27~F-29，其中 F-27 亦为修订引入）；对象 v1.9 SHA-256=
+  `4492c9ce70c09d235b6c47e1ebc3055f6803bdded80e64ebc9976d744269d471`；报告
+  `docs/2026-10-19-opencode-web-v2-shared-service-attach-plan-review-final-recheck.md`。
+  复检确认：F-19/20/21/23/25 完全闭合；F-22/24 正文闭合；F-18 主体闭合；S-0 搜索根
+  覆盖完整（生产 `"opencode"` 字面量只在 go-bridge/MacBridge）。评审员并自我更正：
+  终审 pathless 名单「7 处」计数有误（实为 5 文件 10 位置），v1.9 未沿用该数字。
+- 作者亲核（21:20，三仓身份同 A.18 未变）：`configureOpenCodeDesktopServerIfNeeded`
+  全仓唯一调用点 `:582`、无测试引用；静态函数 `configureOpenCodeDesktopSettings`
+  （`:1345`）另有调用者 `OpenCodeManagedServer.swift:324`（v1 managed syncDesktopConfig）
+  与 `MacBridgeBehaviorTests.swift:573/617/674/714`——「删除休眠写入器、保留静态
+  函数」处置安全。I `Server.swift:113` 现状即 `decodeIfPresent ?? .openCode`、
+  `ServerStorage.swift:96-101` 整组 `try?` 失败返回 `[]`——F-27 风险属实。
+- 意见处置（全部采纳，无部分不采纳项）：
+  - F-26（阻塞）：§3.11 第 5 行处置收窄为唯一选项「删除函数及 `:582` 调用」，
+    「只对显式旧来源生效」作废（会把今天不可达的死代码激活到 v1 external/legacy
+    用户身上，A.6 类危险换对象）；`configureOpenCodeDesktopSettings` 保留仅供 v1
+    managed 既有路径与既有测试；E-11b 断言列补 Desktop 负例；U9 补「external/legacy
+    启动不新增 Desktop 写入（与现状一致）」。
+  - F-27（采纳）：撤回 v1.9 的「Server.swift 默认解码改为显式 kind 匹配」指令；
+    定稿为缺 kind 历史记录继续解为旧 `.openCode`（兼容/不可用/可诊断），不得解为
+    `.openCodeV2`、不得改严格解码，如确需迁移按单条容错。
+  - F-28（采纳）：S-7 行 remote-web marker 标为并行交付项不阻断 S-2b；§5 表后
+    执行序改为「S-2b 在 S-3~S-6 与 S-7 的 Mac/iOS 部分组件完成后执行」。
+  - F-29（采纳）：新增 OD-9（pending，owner 实施启动时确认）并挂 Gate B；S-0 枚举
+    「需产品决定」项登记为 OD、在依赖它的 S-7 子项开工前决定。
+- 本轮来源门：21:20 一次复核（M=`bd240b80…`，dirty 仅本方案＋两份评审报告未跟踪；
+  I=`04fc269b…`、上游 `843a6c51…` 均未变；方案 hash 与复检对象一致后开始编辑）。
+  本轮 D0：仅编辑本方案与文档静态检查；无业务代码、build/test/install、服务操作、
+  commit；49374/4096 未触碰。
+- 修订前 v1.9 SHA-256=
+  `4492c9ce70c09d235b6c47e1ebc3055f6803bdded80e64ebc9976d744269d471`。下一步：终审员
+  核对本版修订单元格（§3.11 第 5/7 行、E-11b、U9、S-7、§5 尾段、OD-9/Gate B/S-0）；
+  F-26 落实且未改出范围即判定通过，作为实施冻结基线。
 
 ## 附录 B：v2→bridge 事件映射初表（源码声明版；实施期以 E-2 样本逐条校正）
 
