@@ -15,10 +15,10 @@ Source identity at completion（P0 来源门，本报告生成时点重新核对
 
 | 仓库 / 产物 | 身份 |
 | --- | --- |
-| MacBridge worktree | `/Users/jacklee/Projects/cordcode-macbridge-claude-long-session-projection-loading`，branch `feat/claude-long-session-projection-loading`，commit `66a6de16cc79dc19c5983f30d6cebeac54dc0c17`，clean |
-| 配套 iOS worktree | `/Users/jacklee/Projects/cordcode-ios-claude-long-session-projection-loading`，branch `feat/claude-long-session-projection-loading`，commit `f65e71784e2ebe06490ac3775cb568f2baea7dcd`，clean；**两仓均未 push（owner 指示暂缓）** |
-| 正式安装 runtime | `/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime`，PID 40490，`lstart Tue Oct 20 22:14:33 2026`，8777 监听者，内嵌 commit `5e4d0a97b9c2`；无 `/tmp`、DerivedData、`build/` 违规残留进程 |
-| iPhone16 安装 | bundle 构建身份 `f796e89c`（CordCodeSourceCommit；`f65e7178` 为其后的纯文档提交，不改变安装产物） |
+| MacBridge worktree | `/Users/jacklee/Projects/cordcode-macbridge-claude-long-session-projection-loading`，branch `feat/claude-long-session-projection-loading`，commit 以本文件所在 HEAD 为准（v1 生成时 `66a6de16`；评审 R1 复核时 `cedf0528`；见 §8 各轮记录），clean |
+| 配套 iOS worktree | `/Users/jacklee/Projects/cordcode-ios-claude-long-session-projection-loading`，branch `feat/claude-long-session-projection-loading`，commit 以 iOS 仓 HEAD 为准（v1 生成时 `f65e7178`；R1 修复轮 `64a386d6`），clean；**两仓均未 push（owner 指示暂缓）** |
+| 正式安装 runtime | `/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime`，内嵌 commit 以 §8 各轮部署记录为准（退役收口轮 `5e4d0a97b9c2`；R1 修复轮 `d88920e692b3`——进程代际随 owner 重启更替，磁盘上仅保留最新代日志，历史 PID 值不作运行态证据）；8777 监听者恒为 `/Applications` 内嵌 runtime；无 `/tmp`、DerivedData、`build/` 违规残留进程 |
+| iPhone16 安装 | bundle 构建身份以 `CordCodeSourceCommit` 实测为准（退役收口轮 `f796e89c`；R1 修复轮 `64a386d6`） |
 
 ## 1. Overall Verdict (总体结论)
 
@@ -31,7 +31,7 @@ Mac 端 v2 摘要生产代码（`projection_window_v2*.go`、capability、协议
 | 阶段 | Verdict | Evidence（attestation 摘要；详见 state file todos） |
 | --- | --- | --- |
 | S-0 运行身份取证（E-3 闭合） | complete | 生产运行态实测 + 双端协商源码亲核（`docs/2026-10-18-s0-runtime-identity-evidence.md`） |
-| S-2 Mac 物化存储 | complete **→ 评审 R1 判定折叠损坏 → 已修复** | bbolt 物化 + 增量重启恢复；E-6 realdata 证据测试（`41523b1f`/`edab8660`）。**勘误**：初版另称「Release 重启运行态回归」过实——真实重启周期未发生；评审 R1 BLOCKER-1 证实组合源后缀折叠损坏投影（生产 18 次折叠 11 次分歧），修复 `c988f1b2` 恢复 main 严格语义 + schema bump 2 |
+| S-2 Mac 物化存储 | complete **→ 评审 R1 判定折叠损坏 → 已修复（语义变更）** | bbolt 物化 + 重启恢复；E-6 realdata 证据测试（`41523b1f`/`edab8660`）。**勘误**：初版另称「Release 重启运行态回归」过实——真实重启周期未发生；评审 R1 BLOCKER-1 证实组合源后缀折叠损坏投影（生产 18 次折叠 11 次分歧），修复 `c988f1b2` 恢复 main 严格语义 + schema bump 2。**修复后语义**：Claude 组合源仅「段级 cut 全等」可从物化恢复；任何增长（外部 turn/重启窗口）都走诚实全量重建 |
 | S-4 iOS 基底缓存 | complete | restore-then-increment 打开路径 + P0 协议遵循修复（生产 metatype 转换回归）；E-7/E-11 真机收口（`b1952252`/`061d8d05`） |
 | S-5 单次解析管线 | complete | iOS 长会话解码单次化；E-5 阶段耗时分布取证（iOS `8393f0f1`） |
 | S-7 anchor-newer 对账 | complete | re-freeze 协议批次 + 双端实施；E-4/E-10 证据门（`380c6939`/`455d49e4`/iOS `ce464295`） |
@@ -112,13 +112,16 @@ iOS（共 26 提交）：
 
 | 评审发现 | 修复 | 提交 | 回归测试 |
 | --- | --- | --- | --- |
-| BLOCKER-1：S-2 组合源后缀折叠损坏投影（行号派生 turn ID 续读重编号 → 确定性碰撞；生产 18 次折叠 11 次分歧，损坏存档持续叠加） | 恢复 main「cut 不等即诚实重建」语义 + `materializationSchemaVersion` 1→2（存量存档一次性失效）+ iOS `claudePreviewRevision` 1→2（损坏期播种的 Claude 缓存作废重拉——anchor-newer 无法表达删除虚构 turn） | Mac `c988f1b2` + iOS 修复轮 | `TestCompositeSuffixAdvanceInvalidatesCheckpoint` / `TestMaterializationV1HeadInvalidatedBySchemaBump` / `TestClaudeRestartAfterGrowthMatchesFullRebuild`（handler 级：重启后增长 == 全量重建逐 turn 等价） |
+| BLOCKER-1：S-2 组合源后缀折叠损坏投影（行号派生 turn ID 续读重编号 → 确定性碰撞；生产 18 次折叠 11 次分歧，损坏存档持续叠加） | 恢复 main「cut 不等即诚实重建」语义 + `materializationSchemaVersion` 1→2（存量存档一次性失效）+ iOS `claudePreviewRevision` 1→2（损坏期播种的 Claude 缓存作废重拉。措辞更正（复核 N6）：anchor-newer 协议本身有 `removedTurnIds`/tombstone，「无法表达删除」原表述不成立；选 bump 的理由是损坏形态为同 ID 内容覆盖、经对账自愈未经验证，一次性作废最直接可靠） | Mac `c988f1b2` + iOS 修复轮 | `TestCompositeSuffixAdvanceInvalidatesCheckpoint` / `TestMaterializationV1HeadInvalidatedBySchemaBump` / `TestClaudeRestartAfterGrowthMatchesFullRebuild`（handler 级：重启后增长 == 全量重建逐 turn 等价） |
 | BLOCKER-2：Claude descriptor 仍声明 `turn_detail_chunks_v1`，iOS 明细入口可见且点击必失败（v2 批量引擎要求 TurnItemsPager，仅 codex-remote 实现），失败态写入共享投影——休眠契约被能力声明击穿 | 撤回声明（v1 producer 代码保留休眠）；协议 pack `unified-bridge-protocol.md` 三处撤回注 | Mac `3cdf884f` | `TestClaudeDescriptorDoesNotDeclareTurnDetailChunks`（原 `…Declares…` 测试把缺陷锁死，已反转） |
 | MAJOR-1：d78100ee 扩 coverage 把 CLI 命令回显 turn（/model 等）计入 → dead 进程下合成 `turn_aborted`，会话被标失败（2026-10-11 修复回归） | coverage 豁免命令回显 turn（由 commit 收尾结算 completed）；悬挂 tool_use 卡死修复语义保留 | Mac `d88920e6` | `TestTrailingCoverageExemptsCommandEchoTurn`（含悬挂 tool_use 仍进 coverage 反断言）/ `TestTrailingCommandEchoSettlesCompletedAfterHydrate`（handler 级真实 transcript） |
 | MAJOR-2：iOS 清除离线缓存删目录后，长生命周期 actor 的写盘静默失败——重启前暖开一直不可用、无信号 | `save` 前幂等重建缓存目录 + 失败 fgTrace 可观测 | iOS 修复轮 | `testCacheStoreSaveRecreatesDeletedDirectory`（清除 → 播种 → 命中） |
 
 - Mac 定向测试（修复后）：materialization / claudecode 全包 + projection/hydrate/anchor/detail
   家族 + `go vet` 全绿。
+- 修复轮部署身份：Mac Release 覆盖安装，内嵌 commit `d88920e692b3`（PID 77773 @
+  11:36:39 首启；owner 复测期间 12:10:29 重启为 PID 82698，同一二进制）；iPhone16
+  `64a386d6`。owner 真机验收（清除缓存 + 多个长 session）在 12:10 后代际上完成。
 - iOS 真机定向（iPhone16，`/tmp/s3v2-dd`）：`CCCodeTests/ProjectionBaseCacheTests`（12/12，含
   `testCacheStoreSaveRecreatesDeletedDirectory` 新用例）+ `CCCodeTests/ProjectionWindowV2ConsumptionTests`
   （10/10）= **22/22 通过**（修复轮实测；顺带核实退役轮该类为 10 用例，证实评审对「21/21」计数

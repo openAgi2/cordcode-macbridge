@@ -38,7 +38,7 @@
   "last_generated_at": "2026-10-20T23:45:00+08:00",
   "based_on_queue_hash": "all-done-29-owner-accepted"
  },
- "updated_at": "2026-10-21T06:30:00+08:00",
+ "updated_at": "2026-10-21T16:40:00+08:00",
  "todos": [
   {
    "id": "s0-runtime-evidence",
@@ -476,7 +476,7 @@
     "s2-materialization-tests"
    ],
    "source": "方案 §5 E-6；§6 S-2 最小验证/失败处理",
-   "notes": "｜2026-10-21 评审 R1 BLOCKER-1：当时的『三层覆盖』不含『折叠结果==全量重建』等价验证，E-6 realdata 断言只有 stored cursor 返回——该 done 的证据不足部分由修复轮 c988f1b2 的红绿回归测试补齐（composite 推进 Invalid / v1 head 失效 / 重启后增长==全量重建，无修复 4 测全 FAIL 验证有效性）。",
+   "notes": "｜2026-10-21 评审 R1 BLOCKER-1：当时的『三层覆盖』不含『折叠结果==全量重建』等价验证，E-6 realdata 断言只有 stored cursor 返回——该 done 的证据缺口记录于 notes（非 status 降级——复核 N5 指出初版「审计降级」自称不准确），由修复轮 c988f1b2 的红绿回归测试补齐（composite 推进 Invalid / v1 head 失效 / 重启后增长==全量重建，无修复 4 测全 FAIL 验证有效性）。",
    "verification": {
     "required": true,
     "status": "present",
@@ -816,7 +816,7 @@
   {
    "id": "review-r1-fixes",
    "title": "评审 R1（FAIL）阻断修复：BLOCKER-1/2 + MAJOR-1/2 + Claude 缓存 revision bump 2",
-   "description": "docs/2026-10-21-long-session-projection-loading-session-code-review-r1.md 四项阻断/重大：①BLOCKER-1 S-2 组合源后缀折叠损坏投影（行号派生 turn ID 重编号碰撞，生产 18 次折叠 11 次分歧）→ 恢复 main cut 严格语义 + materializationSchemaVersion bump 2（c988f1b2）；②BLOCKER-2 Claude descriptor turn_detail_chunks_v1 声明击穿休眠（v2 批量引擎要求 TurnItemsPager → 必定 failed）→ 撤回声明 + 协议 pack 撤回注（3cdf884f）；③MAJOR-1 d78100ee 把 /model 回显 turn 判 aborted（2026-10-11 回归）→ coverage 豁免命令回显（d88920e6）；④MAJOR-2 iOS 清除离线缓存后播种静默失败 → save 前幂等重建目录 + fgTrace 失败可观测 + claudePreviewRevision bump 2（损坏期播种的缓存一次性失效，anchor-newer 无法表达删除虚构 turn）。iOS 协议镜像同步 unified-bridge-protocol.md + read-file-v2 样本（MINOR-6 一并修）。",
+   "description": "docs/2026-10-21-long-session-projection-loading-session-code-review-r1.md 四项阻断/重大：①BLOCKER-1 S-2 组合源后缀折叠损坏投影（行号派生 turn ID 重编号碰撞，生产 18 次折叠 11 次分歧）→ 恢复 main cut 严格语义 + materializationSchemaVersion bump 2（c988f1b2）；②BLOCKER-2 Claude descriptor turn_detail_chunks_v1 声明击穿休眠（v2 批量引擎要求 TurnItemsPager → 必定 failed）→ 撤回声明 + 协议 pack 撤回注（3cdf884f）；③MAJOR-1 d78100ee 把 /model 回显 turn 判 aborted（2026-10-11 回归）→ coverage 豁免命令回显（d88920e6）；④MAJOR-2 iOS 清除离线缓存后播种静默失败 → save 前幂等重建目录 + fgTrace 失败可观测 + claudePreviewRevision bump 2（损坏期播种的缓存一次性失效；复核 N6 更正：协议有 removedTurnIds，「无法表达删除」表述不成立——选 bump 是因对账自愈未经验证、一次性作废最直接可靠）。iOS 协议镜像同步 unified-bridge-protocol.md + read-file-v2 样本（MINOR-6 一并修）。",
    "status": "done",
    "phase": "review-followup",
    "kind": "impl",
@@ -831,9 +831,32 @@
     "method": "mixed",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "Mac：红绿验证（无修复 4 新测全 FAIL → 修复后全绿）+ materialization/claudecode 全包 + projection/hydrate/anchor/detail 家族定向全绿 + vet ok；iOS：真机定向 ProjectionBaseCacheTests（含清除→播种→命中新用例）+ ProjectionWindowV2ConsumptionTests；Release 覆盖安装与运行态核验见完成情况报告 §8",
+    "summary": "Mac：红绿验证（无修复 4 新测全 FAIL → 修复后全绿）+ materialization/claudecode 全包 + projection/hydrate/anchor/detail 家族定向全绿 + vet ok；部署：Release 覆盖安装，内嵌 d88920e692b3（11:36:39 PID 77773 首启，owner 复测期间 12:10:29 重启为 PID 82698 同一二进制）；iOS：真机定向 ProjectionBaseCacheTests 12/12 + ProjectionWindowV2ConsumptionTests 10/10（iPhone16 安装 64a386d6）；owner 真机验收（清除缓存 + 多长 session）通过。措辞更正（复核 N5）：初版自称「审计降级标注」不准确——实际是对 s2/s3 regression 的 notes 追加（status/attestation 未变），证据缺口由本轮新回归补齐。",
     "artifacts": [],
-    "checked_at": "2026-10-21T06:30:00+08:00"
+    "checked_at": "2026-10-21T12:40:00+08:00"
+   }
+  },
+  {
+   "id": "review-r2-rc-fixes",
+   "title": "复核 R2（PASS-WITH-FINDINGS）收口：RC-1 竞态修复 + RC-2 服务端门收回 + N1/N2/N3/N6 修复",
+   "description": "docs/2026-10-21-long-session-projection-loading-session-code-review-r1-recheck.md（c585c2f2）：①RC-1（major 合并门）运行中会话冷开 hydrate 与 relay 注册竞态——d78100ee 扩 coverage 后普通在飞 turn 也请求 coverage，而 beforeHydrate 的 go loop 在 findClaudeSessionFile/StartCut 之后才 register；修复 = registry 增加 starting 信号（markRelayStarting/finishStarting）+ requestCoverage 有界等待（claudeRelayCoverageStartWait 2s，超时 fail-closed 不变），TestHandleGetSessionProjectionRunningSessionWithinBudget 族跑 ×3 与单独 ×8 全绿；②RC-2（minor）session_turn_items 服务端 backend 门收回 codex-remote（claude/claudecode → unsupported_capability，不触上游不写投影），红绿验证成立；③N1 continuation 后缀读取改 io.NewSectionReader（[from, cursor) 边界精确）+ 新边界测试；④N2 schema bump 测试改字面量 1（钉住不回退）；⑤N3 MAJOR-1 测试断言改 h.sessions.lastOutcomeFor（原 Execution.Phase 断言永假）；⑥N6 bump 理由措辞更正（removedTurnIds 存在）。N4/N5 文档与时间戳随本轮修正。",
+   "status": "done",
+   "phase": "review-followup",
+   "kind": "impl",
+   "depends_on": [
+    "review-r1-fixes"
+   ],
+   "source": "owner 转发复核 R2 结论（PASS-WITH-FINDINGS；RC-1 合并前必修）",
+   "notes": "复核范围外登记：O2 Claude live source-batch 拒收循环（main 既有，think.md 后续计划另案）；O1 claude source shape fixtures 测试 main 上同失败（疑工具链）。MINOR-1/2/3/4/5/7/8、NIT-1…9 仍登记另案未动。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Mac：RC-1 双模式复现全绿（族 ×3 + 单独 ×8，修复前 3/3 稳定 FAIL）+ coverage/relay/hydrate/turn items/materialization/continuation 全触面定向全绿 + vet ok；RC-2/N2/N3 红绿验证成立（旧代码 FAIL → 修复 PASS）。本轮行为变更全在 Mac；iOS 仅注释/CHANGELOG 措辞（N6），无行为变化不装机。部署：Release 覆盖安装（内嵌提交以部署核验为准）+ 运行态五项。",
+    "artifacts": [],
+    "checked_at": "2026-10-21T16:40:00+08:00"
    }
   }
  ],

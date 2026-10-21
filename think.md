@@ -745,6 +745,10 @@ disabled 未自启，relay 502 至人工介入；iPhone 走 LAN 直连不受影�
 `systemctl enable --now cordcode-relay`（owner 授权后执行）。
 # 后续计划索引（待办另案总账）
 
+| 待办 | 来源 | 状态 |
+| --- | --- | --- |
+| Claude live source-batch 拒收循环 | 评审 R2 复核 O2（2026-10-21）：iPhone 旁观外部 Claude 会话时 live 更新批次持续被拒（`projection.source_batch_rejected` retryable，10-21 单日志 107 次）；main 既有（10-13/.log.3 已有 47 次），非本分支引入。是否排查待 owner 裁决 | pending |
+
 ## 2026-09-12 codex goal 四轮连环：改生命周期要枚举重置点、「最后一词定终身」与 iOS 真机取证三件套
 
 四轮真机修复（双卡→伪中断→重连冻结→/goal 卡错位→思考卡对齐），可复用经验：
