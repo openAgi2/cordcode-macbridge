@@ -38,7 +38,7 @@
   "last_generated_at": "2026-10-20T23:45:00+08:00",
   "based_on_queue_hash": "all-done-29-owner-accepted"
  },
- "updated_at": "2026-10-21T16:40:00+08:00",
+ "updated_at": "2026-10-21T17:40:00+08:00",
  "todos": [
   {
    "id": "s0-runtime-evidence",
@@ -847,7 +847,7 @@
     "review-r1-fixes"
    ],
    "source": "owner 转发复核 R2 结论（PASS-WITH-FINDINGS；RC-1 合并前必修）",
-   "notes": "复核范围外登记：O2 Claude live source-batch 拒收循环（main 既有，think.md 后续计划另案）；O1 claude source shape fixtures 测试 main 上同失败（疑工具链）。MINOR-1/2/3/4/5/7/8、NIT-1…9 仍登记另案未动。",
+   "notes": "复核范围外登记：O2 Claude live source-batch 拒收循环（main 既有，think.md 后续计划另案）；O1 claude source shape fixtures 测试 main 上同失败（疑工具链）。MINOR-1/2/3/4/5/7/8、NIT-1…9 仍登记另案未动。｜2026-10-21 R3：①复核轮 16:30 部署为脏工作区构建（回执「内嵌本轮 HEAD」不成立，生产源码经 R3 逐文件比对与后续提交一致但身份不合规）——17:22 已从干净 HEAD 97958344 重建重装（PID 27003，runtime SHA c61e7d1a…8164de）；②`TestClaudeSourceShapeFixtures_LoadAllAndValidateManifest` 更正定性：非「既有/环境问题」，是 RC-B（135ba20a 引入的 Error string 解码回归，即 O2 根因二），为 v2.1（docs/2026-10-21-claude-live-relay-zero-event-and-api-error-poison-fix-plan.md，已过复审 R2）T5 的闭合测试，实施后应转绿——此前「预存失败登记另行处置」表述作废；③R3-4（finishStarting 信号未区分 relay 代际）登记未修 nit（无错误行为：等待者重查注册表 fail-closed）。",
    "verification": {
     "required": true,
     "status": "passed",
@@ -857,6 +857,29 @@
     "summary": "Mac：RC-1 双模式复现全绿（族 ×3 + 单独 ×8，修复前 3/3 稳定 FAIL）+ coverage/relay/hydrate/turn items/materialization/continuation 全触面定向全绿 + vet ok；RC-2/N2/N3 红绿验证成立（旧代码 FAIL → 修复 PASS）。本轮行为变更全在 Mac；iOS 仅注释/CHANGELOG 措辞（N6），无行为变化不装机。部署：Release 覆盖安装（内嵌提交以部署核验为准）+ 运行态五项。",
     "artifacts": [],
     "checked_at": "2026-10-21T16:40:00+08:00"
+   }
+  },
+  {
+   "id": "review-r3-identity-closeout",
+   "title": "复核 R3 收口：部署身份门闭合（干净 HEAD 重建重装）+ 文档更正",
+   "description": "R3 判定 R2 修复轮 16:30 部署为脏工作区构建（构建脚本只烙 HEAD 不标 dirty）。本轮：①porcelain 0 行 + HEAD 97958344 下按 CLAUDE.md Release 命令重建（40s，built 2026-10-21T09:20:35Z，内嵌 97958344e18c）；②产物核验（-version/两处新文案）后留档旧日志（0600）→ killall+pkill → 覆盖安装 → 运行态五项（PID 27003 lstart 17:22:35 > 构建 17:21:15、两处 SHA-256 一致 c61e7d1a…8164de、8777 新 PID、无违规残留、日志滚动）；③报告 §8 更正（两处回执错误、16:52 PID 17706→24383 原因不明非 agent 操作、R3-4 登记）；④think.md O2 行更新（RC-A/RC-B 根因 + 方案 v2.1 已过审待实施）；⑤exec-plan 更正 TestClaudeSourceShapeFixtures 定性（RC-B，v2.1 T5 闭合测试）。本提交无独有运行态特征（源码与 16:30 包逐文件一致），身份以 commit+哈希+代际为证。",
+   "status": "done",
+   "phase": "review-followup",
+   "kind": "impl",
+   "depends_on": [
+    "review-r2-rc-fixes"
+   ],
+   "source": "owner 转发复核 R3 结论（代码层通过，部署身份未闭合）",
+   "notes": "iOS 不重装（6c56144e 仅注释）。下一步：实施 v2.1（方案 docs/2026-10-21-claude-live-relay-zero-event-and-api-error-poison-fix-plan.md，行号按当前 HEAD 重取锚点）。O-A（go-bridge.log 启动清空，RuntimeProcessController.swift:216）另案以 main 为基修复，本分支不动。",
+   "verification": {
+    "required": true,
+    "status": "passed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "部署身份门五项全过（实测值见 description）；构建前/安装前双门点 porcelain 均 0 行、HEAD 未漂移；运行态核验时间 17:22:35-17:23:07",
+    "artifacts": [],
+    "checked_at": "2026-10-21T17:40:00+08:00"
    }
   }
  ],

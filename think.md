@@ -747,7 +747,7 @@ disabled 未自启，relay 502 至人工介入；iPhone 走 LAN 直连不受影�
 
 | 待办 | 来源 | 状态 |
 | --- | --- | --- |
-| Claude live source-batch 拒收循环 | 评审 R2 复核 O2（2026-10-21）：iPhone 旁观外部 Claude 会话时 live 更新批次持续被拒（`projection.source_batch_rejected` retryable，10-21 单日志 107 次）；main 既有（10-13/.log.3 已有 47 次），非本分支引入。是否排查待 owner 裁决 | pending |
+| Claude live source-batch 拒收循环 | 评审 R2 复核 O2（2026-10-21）：iPhone 旁观外部 Claude 会话时 live 更新批次持续被拒（`projection.source_batch_rejected` retryable，10-21 单日志 107 次）；main 既有，非本分支引入。**已排查**（R3 委托）：根因一 RC-A——只含空白 thinking/text 的 assistant 行映射出 0 个事件，被整行拒收后级联 source batch gap 并武装失败冷却；根因二 RC-B——`system/api_error` 行里对象型 `error` 毒化完整记录扫描器，此后实时更新全部冻结（`TestClaudeSourceShapeFixtures_LoadAllAndValidateManifest` 失败即 RC-B，是 `135ba20a` 引入的 `Error string` 解码回归，非环境问题）。修复方案 v2.1（`docs/2026-10-21-claude-live-relay-zero-event-and-api-error-poison-fix-plan.md`，8490a797，SHA-256 bb5e308ab498…4187）已通过复审 R2 | 方案已通过，待实施 |
 
 ## 2026-09-12 codex goal 四轮连环：改生命周期要枚举重置点、「最后一词定终身」与 iOS 真机取证三件套
 

@@ -119,7 +119,26 @@ iOS（共 26 提交）：
 
 - Mac 定向测试（修复后）：materialization / claudecode 全包 + projection/hydrate/anchor/detail
   家族 + `go vet` 全绿。
-- 修复轮部署身份：Mac Release 覆盖安装，内嵌 commit `d88920e692b3`（PID 77773 @
+- **复核 R2 修复轮部署勘误（R3-1，P0 身份门）**：复核轮（RC-1/RC-2/N1-N3）曾于 16:30:06
+  用**脏工作区**构建安装（修复代码当时未提交，构建脚本只烙 HEAD `8490a797`）——回执中
+  「内嵌本轮 HEAD」**不成立**，该包身份证据无效（生产源码与后续提交逐文件一致，复核 R3
+  已证，但身份不闭合即不合规）。该轮提交为 **3 代码 + 1 文档**（`1052128f`、`628bab96`
+  @16:32:20；`741535e0`、`6cea855b` @16:32:51）。16:52:18 runtime 从 PID 17706 变为
+  24383（二进制未变）——**非执行 agent 操作，原因不明**（统一日志/崩溃报告无线索，上一代
+  日志已被截断）。R3-4（`finishStarting` 信号未区分 relay 代际——同 session 换代时旧启动
+  信号可能提前唤醒等待者，等待者重查注册表按 fail-closed 处理，无错误行为）登记为未修 nit。
+- **复核 R2 修复轮重装（干净 HEAD 重建，实测值）**：HEAD
+  `97958344e18cb535cb05a2d1b00e394659450005`（porcelain 0 行），`GOTOOLCHAIN=local
+  ./scripts/build-unsigned-release.sh` 构建起止 17:20:35–17:21:15（40s，built
+  `2026-10-21T09:20:35Z`），内嵌 commit `97958344e18c`；产物与 `/Applications` 两处
+  runtime SHA-256 一致 `c61e7d1a8c64a9f22fdf9e76f167bb889d2103e524d27b52c5806d1c9f8164de`
+  （dist zip `56be024d…ba6275`）；PID 27003（lstart 2026-10-21 17:22:35，ppid 26970），
+  8777 监听，无临时产物残留，新一代日志滚动。二进制含复核轮新文案 `claude relay coverage:
+  relay start wait timeout` / `session_turn_items supports codex-remote, not %s`。
+  **本次提交无独有运行态特征**——生产源码与 16:30 脏包逐文件一致，无区分新旧行为的日志；
+  身份以内嵌 commit、两处哈希、进程代际为证。RC-1 的生产级行为证据留待 v2.1 部署后的 owner
+  验收矩阵第 ② 项（运行中会话冷开）。
+- 修复轮部署身份（R1 轮，历史记录）：Mac Release 覆盖安装，内嵌 commit `d88920e692b3`（PID 77773 @
   11:36:39 首启；owner 复测期间 12:10:29 重启为 PID 82698，同一二进制）；iPhone16
   `64a386d6`。owner 真机验收（清除缓存 + 多个长 session）在 12:10 后代际上完成。
 - iOS 真机定向（iPhone16，`/tmp/s3v2-dd`）：`CCCodeTests/ProjectionBaseCacheTests`（12/12，含
